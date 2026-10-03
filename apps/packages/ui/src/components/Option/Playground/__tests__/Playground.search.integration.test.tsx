@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { useHistorySelection, useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { resolveHistorySelection } from "@/utils/history-selection"
 import { Playground } from "../Playground"
 import {
   decodeSidepanelChatWebUiHandoff,
@@ -10,6 +14,25 @@ import {
   SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM,
   SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE
 } from "@/services/tldw/sidepanel-chat-webui-handoff"
+
+const h1 = vi.hoisted(() => ({ enabled: false, legacyNative: false, controller: null as HistorySelectionController | null, bookmarks: new Map<string, any>(), confirm: vi.fn(), historyInfo: vi.fn() }))
+const timelineReveal = vi.hoisted(() => ({ current: null as null | (() => Promise<boolean>) }))
+const h1Key = (scope: any, owner: any) => JSON.stringify([scope.profile_id, scope.client_session_id, owner.owner_key, owner.conversation_id])
+
+const forkPresentation = vi.hoisted(() => ({controller: null as HistorySelectionController | null, mode: null as "ordinary" | "pending" | "fork" | null, settings: null as {authorNote: string} | null, blockAutomaticLoad: false, storedReferenceInvalid: false, opened: [] as unknown[]}))
+vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
+  return {...actual, useHistorySelectionContext: () => {
+    const controller = actual.useHistorySelectionContext()
+    if (forkPresentation.blockAutomaticLoad) return {
+      ...controller,
+      canAutomaticallyLoad: () => false,
+      ...(forkPresentation.storedReferenceInvalid ? {getStoredReference: () => { throw new Error("invalid_history_reference") }} : {}),
+      open: (...args: Parameters<typeof controller.open>) => { forkPresentation.opened.push(args[0]); return controller.open(...args) },
+    }
+    return forkPresentation.controller ?? (forkPresentation.mode ? {...controller, settingsMode: () => forkPresentation.mode!, forkSettings: forkPresentation.settings} : controller)
+  }}
+})
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -48,6 +71,16 @@ const messageOptionState = vi.hoisted(() => ({
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
     streaming: false,
+    effectiveAssistantState: {
+      mode: "plain",
+      kind: null,
+      id: null,
+      displayName: null,
+      avatarUrl: null,
+      systemPromptSnapshot: null,
+      source: "none"
+    },
+    selectedAssistant: null,
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
     compareMode: false,
@@ -72,7 +105,8 @@ const smartScrollState = vi.hoisted(() => ({
   value: {
     containerRef: { current: null } as React.MutableRefObject<HTMLDivElement | null>,
     isAutoScrollToBottom: true,
-    autoScrollToBottom: vi.fn()
+    autoScrollToBottom: vi.fn(),
+    pauseAutoScroll: vi.fn()
   }
 }))
 
@@ -118,6 +152,7 @@ const tldwClientState = vi.hoisted(() => ({
 }))
 
 const routerState = vi.hoisted(() => ({
+  hashRouter: false,
   navigate: vi.fn()
 }))
 
@@ -161,14 +196,19 @@ vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
   PlaygroundChat: React.forwardRef(function MockPlaygroundChat(
     props: {
+      navigationRef?: React.MutableRefObject<any>
       searchQuery?: string
       matchedMessageIndices?: Set<number>
       activeSearchMessageIndex?: number | null
     },
     _ref
   ) {
+    React.useEffect(() => { if (props.navigationRef && timelineReveal.current) props.navigationRef.current = { reveal: timelineReveal.current } }, [props.navigationRef])
+    const selection = useHistorySelectionContext()
+    if (h1.enabled) h1.controller = selection
     return (
       <div
+        data-selected-history={h1.enabled ? selection?.capture?.status === "captured" ? selection.capture.selected_content.map(row => row.message).join(" / ") : selection?.status : ""}
         data-testid="playground-chat"
         data-search-query={props.searchQuery || ""}
         data-search-count={props.matchedMessageIndices?.size || 0}
@@ -185,17 +225,26 @@ vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
 }))
 
 vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => messageOptionState.value
+  useMessageOption: () => {
+    const store = useStoreMessageOption()
+    return h1.enabled ? { ...messageOptionState.value, ...store } : messageOptionState.value
+  }
 }))
 
-vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
-  usePlaygroundSessionPersistence: () => ({
-    restoreSession: vi.fn(async () => false),
-    sessionScopeReady: true,
-    hasPersistedSession: false,
-    persistedHistoryId: null,
-    persistedServerChatId: null
-  })
+vi.mock("@/hooks/usePlaygroundSessionPersistence", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/usePlaygroundSessionPersistence")>()
+  return { usePlaygroundSessionPersistence: () => h1.enabled ? actual.usePlaygroundSessionPersistence() : ({
+    restoreSession: vi.fn(async () => false), sessionScopeReady: true, hasPersistedSession: false, persistedHistoryId: null, persistedServerChatId: null
+  }) }
+})
+
+vi.mock("@/hooks/useSelectedAssistant", () => ({
+  useSelectedAssistant: () => [null, async () => undefined, {
+    isLoading: false,
+    readSelection: async () => null,
+    isCurrent: () => true,
+    setRenderValue: () => undefined
+  }]
 }))
 
 vi.mock("@/hooks/playground-session-restore", () => ({
@@ -207,6 +256,9 @@ vi.mock("@/services/app", () => ({
 }))
 
 vi.mock("@/db/dexie/helpers", () => ({
+  getFullChatData: vi.fn(async (id: string) => ({ historyInfo: { id }, messages: [] })),
+  getSessionFiles: vi.fn(async () => []),
+  formatSelectedHistory: (capture: any) => ({ history: capture.selected_content.map((row: any) => ({ role: "assistant", content: row.message })), messages: capture.selected_content.map((row: any) => ({ id: row.id, message: row.message, isBot: true, name: "Assistant", sources: [] })) }),
   formatToChatHistory: vi.fn(),
   formatToMessage: vi.fn(),
   getPromptById: vi.fn(async () => null),
@@ -242,11 +294,11 @@ vi.mock("../Knowledge/utils/unsupported-types", () => ({
   otherUnsupportedTypes: []
 }))
 
-vi.mock("@/store/option", () => {
-  const useStoreMessageOption = (
-    selector: (state: typeof storeOptionState.value) => unknown
-  ) => selector(storeOptionState.value)
-  useStoreMessageOption.getState = () => storeOptionState.value
+vi.mock("@/store/option", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/store/option")>()
+  const useStoreMessageOption = (selector: any = (state: any) => state) => h1.enabled ? actual.useStoreMessageOption(selector) : selector(storeOptionState.value)
+  useStoreMessageOption.getState = () => h1.enabled ? actual.useStoreMessageOption.getState() : storeOptionState.value
+  useStoreMessageOption.setState = actual.useStoreMessageOption.setState
   return { useStoreMessageOption }
 })
 
@@ -288,7 +340,8 @@ vi.mock("@/services/chat-settings", () => ({
 }))
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
-  useLoadLocalConversation: () => loadLocalConversationMock
+  useLoadLocalConversation: () => loadLocalConversationMock,
+  restoreReadableLocalComparison: vi.fn(async () => false)
 }))
 
 vi.mock("../playground-shortcuts", () => ({
@@ -306,7 +359,7 @@ vi.mock("react-router-dom", async () => {
   return {
     ...actual,
     useNavigate: () => routerState.navigate,
-    useLocation: () => ({
+    useLocation: () => routerState.hashRouter && window.location.hash.startsWith("#/") ? { ...(() => { const route = new URL(window.location.hash.slice(1), window.location.origin); return { pathname: route.pathname, search: route.search, hash: route.hash } })(), state: null, key: "hash-location" } : ({
       pathname: window.location.pathname || "/chat",
       search: window.location.search || "",
       hash: window.location.hash || "",
@@ -319,6 +372,15 @@ vi.mock("react-router-dom", async () => {
 describe("Playground thread search integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    h1.confirm.mockClear()
+    h1.enabled = false
+    forkPresentation.controller = null
+    timelineReveal.current = null
+    h1.legacyNative = false
+    forkPresentation.mode = null
+    forkPresentation.settings = null
+    forkPresentation.blockAutomaticLoad = false
+    routerState.hashRouter = false
     storageState.value.clear()
     mobileViewportState.value = false
     desktopViewportState.value = true
@@ -350,6 +412,117 @@ describe("Playground thread search integration", () => {
     })
     tldwClientState.getDocumentUploadDraft.mockResolvedValue({ payload: {} })
     window.history.replaceState(null, "", "/chat")
+  })
+
+  it("does not import ambient attachment settings while a copied child is pending or verified", async () => {
+    forkPresentation.mode = "pending"
+    messageOptionState.value.serverChatId = "child"
+    const mounted = render(<Playground />)
+    await act(async () => {})
+    expect(chatSettingsState.syncChatSettingsForServerChat).not.toHaveBeenCalled()
+    expect(chatSettingsState.applyChatSettingsPatch).not.toHaveBeenCalled()
+    forkPresentation.mode = "fork"
+    forkPresentation.settings = {authorNote: "server"}
+    mounted.rerender(<Playground />)
+    await act(async () => {})
+    expect(chatSettingsState.syncChatSettingsForServerChat).not.toHaveBeenCalled()
+    expect(chatSettingsState.applyChatSettingsPatch).not.toHaveBeenCalled()
+    forkPresentation.mode = "ordinary"
+    forkPresentation.settings = null
+    mounted.rerender(<Playground />)
+    await waitFor(() => expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalled())
+  })
+
+  it("restores ordinary attachments through a real owner-qualified legacy controller without accepting ancestry", async () => {
+    h1.legacyNative = true
+    const actual = renderHook(() => useHistorySelection())
+    await act(async () => {await actual.result.current.open({kind: "native", owner_key: "local-owner", conversation_id: "chat-1", validate_lease: () => true} as any)})
+    forkPresentation.controller = actual.result.current
+    render(<Playground />)
+    await waitFor(() => expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalledWith({historyId: "history-1", serverChatId: "chat-1"}))
+    expect(actual.result.current.status).toBe("legacy_review_required")
+    expect(h1.confirm).not.toHaveBeenCalled()
+  })
+
+  it("does not scroll or edit after a held reveal outlives the initiating owner", async () => {
+    const actual = renderHook(() => useHistorySelection())
+    forkPresentation.controller = actual.result.current
+    let release!: (value: boolean) => void
+    const reveal = vi.fn(() => new Promise<boolean>(resolve => { release = resolve }))
+    timelineReveal.current = reveal
+    const edit = vi.fn()
+    window.addEventListener("tldw:edit-message", edit)
+    const target = document.createElement("div")
+    target.dataset.messageId = "m-2"
+    const scroll = vi.fn()
+    target.scrollIntoView = scroll
+    const page = render(<Playground />)
+    smartScrollState.value.containerRef.current!.append(target)
+    act(() => window.dispatchEvent(new CustomEvent("tldw:timeline-action", { detail: {
+      action: "edit", historyId: "history-1", messageId: "m-2"
+    } })))
+    await waitFor(() => expect(reveal).toHaveBeenCalledWith(1))
+    expect(smartScrollState.value.pauseAutoScroll).toHaveBeenCalled()
+    expect(smartScrollState.value.pauseAutoScroll.mock.invocationCallOrder.at(-1)).toBeLessThan(reveal.mock.invocationCallOrder[0])
+    act(() => actual.result.current.reset())
+    await act(async () => { release(true); await Promise.resolve() })
+    expect(scroll).not.toHaveBeenCalled()
+    expect(edit).not.toHaveBeenCalled()
+    window.removeEventListener("tldw:edit-message", edit)
+    page.unmount()
+  })
+
+  it("does not scroll an indexed search result after a held reveal outlives its owner", async () => {
+    const actual = renderHook(() => useHistorySelection())
+    forkPresentation.controller = actual.result.current
+    let release!: (value: boolean) => void
+    const reveal = vi.fn(() => new Promise<boolean>(resolve => { release = resolve }))
+    timelineReveal.current = reveal
+    const target = document.createElement("div")
+    target.dataset.testid = "chat-message"
+    target.dataset.index = "1"
+    const scroll = vi.fn()
+    target.scrollIntoView = scroll
+    const page = render(<Playground />)
+    smartScrollState.value.containerRef.current!.append(target)
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true })
+    fireEvent.change(screen.getByPlaceholderText("Search messages in this conversation"), { target: { value: "beta" } })
+    await waitFor(() => expect(reveal).toHaveBeenCalledWith(1))
+    expect(smartScrollState.value.pauseAutoScroll).toHaveBeenCalled()
+    expect(smartScrollState.value.pauseAutoScroll.mock.invocationCallOrder.at(-1)).toBeLessThan(reveal.mock.invocationCallOrder[0])
+    act(() => actual.result.current.reset())
+    await act(async () => { release(true); await Promise.resolve() })
+    expect(scroll).not.toHaveBeenCalled()
+    page.unmount()
+  })
+
+  it.each([2, 101])("uses settled indexed navigation for %i messages", async (count) => {
+    const previous = messageOptionState.value.messages
+    messageOptionState.value.messages = [...previous, ...Array.from({length: count - previous.length}, (_, index) => ({id: `extra-${index}`, message: "Other row", isBot: false, role: "user"}))]
+    timelineReveal.current = vi.fn(async () => true)
+    const target = document.createElement("div")
+    target.dataset.testid = "chat-message"
+    target.dataset.index = "1"
+    const scroll = vi.fn()
+    target.scrollIntoView = scroll
+    const page = render(<Playground />)
+    try {
+      smartScrollState.value.containerRef.current!.append(target)
+      fireEvent.keyDown(window, { key: "f", ctrlKey: true })
+      fireEvent.change(screen.getByPlaceholderText("Search messages in this conversation"), {target: {value: "beta"}})
+      await waitFor(() => expect(scroll).toHaveBeenCalledWith({block: "center", behavior: count > 100 ? "auto" : "smooth"}))
+    } finally {
+      page.unmount()
+      messageOptionState.value.messages = previous
+    }
+  })
+
+  it("forks timeline messages using stable IDs rather than rendered positions", async () => {
+    render(<Playground />)
+    act(() => window.dispatchEvent(new CustomEvent("tldw:timeline-action", {detail: {
+      action: "branch", historyId: "history-1", messageId: "m-2"
+    }})))
+    await waitFor(() => expect(messageOptionState.value.createChatBranch).toHaveBeenCalledWith("m-2"))
   })
 
   it("opens in-thread search on Cmd/Ctrl+F and forwards query to PlaygroundChat", async () => {
@@ -642,5 +815,295 @@ describe("Playground thread search integration", () => {
       "document-draft-1"
     )
     expect(messageOptionState.value.setRagMediaIds).not.toHaveBeenCalled()
+  })
+})
+
+vi.mock("@/db/dexie/history-selection", () => ({
+  ensureLocalProfileId: async () => "profile",
+  getLocalHistoryOwner: async (id: string) => ({
+    kind: "local",
+    profile_id: "profile",
+    owner_key: "local-owner",
+    conversation_id: id
+  }),
+  loadHistoryBookmark: async (scope: any, owner: any) =>
+    h1.bookmarks.get(h1Key(scope, owner)) || null,
+  saveHistoryBookmark: async (scope: any, view: any) =>
+    h1.bookmarks.set(h1Key(scope, view), { ...scope, view })
+}))
+vi.mock("@/db/dexie/fork-operations", () => ({findForkCandidate: async () => null, loadForkOperations: async () => []}))
+vi.mock("@/db/dexie/chat", () => ({
+  PageAssistDatabase: class {
+    getHistoryInfo = h1.historyInfo
+  }
+}))
+vi.mock("@/services/chat-history-selection", () => ({
+  confirmLegacyHistoryProjection: (...args: any[]) => h1.confirm(...args),
+  captureHistorySnapshot: async (owner: any, view: any) => {
+    const bound = { ...view, owner_key: "local-owner" }
+    const snapshot: any = {
+      version: 1,
+      owner_key: "local-owner",
+      conversation_id: owner.conversation_id,
+      source_digest: "source",
+      storage_context_digest: "storage",
+      fences: {},
+      interpretation_status: { kind: "parent_graph_v1" },
+      nodes: ["A", "B"].map((id) => ({
+        id,
+        revision: "1",
+        role: "assistant",
+        parent_id: null,
+        settled: true,
+        preview: owner.conversation_id + " answer " + id
+      }))
+    }
+    if (h1.legacyNative) return {status: "legacy_review_required", code: "legacy_review_required", snapshot, view: bound}
+    const result = resolveHistorySelection(snapshot, bound, "send", "")
+    if (result.status !== "ready") return { ...result, snapshot, view: bound }
+    return {
+      status: "captured",
+      snapshot,
+      view: bound,
+      rows: result.rows,
+      selected_content: result.rows.map((row) => ({
+        id: row.id,
+        revision: row.revision,
+        message: row.preview,
+        images: []
+      })),
+      storage_context_digest: "storage",
+      purpose: "send"
+    }
+  }
+}))
+
+describe("Playground H1 URL initialization with the mounted session/controller", () => {
+  beforeEach(() => {
+    routerState.hashRouter = false
+    h1.enabled = true
+    forkPresentation.controller = null
+    h1.legacyNative = false
+    forkPresentation.mode = null
+    forkPresentation.settings = null
+    h1.controller = null
+    h1.bookmarks.clear()
+    h1.confirm.mockClear()
+    h1.historyInfo.mockReset().mockImplementation(async (id: string) =>
+      ["chat-one", "chat-two"].includes(id)
+        ? { id, title: id, createdAt: 1, is_rag: false, message_source: "branch", local_owner_key: "local-owner" }
+        : null
+    )
+    localStorage.clear()
+    sessionStorage.clear()
+    storageState.value.clear()
+    window.history.replaceState(null, "", "/chat")
+    usePlaygroundSessionStore.getState().clearSession()
+    useStoreMessageOption.setState({
+      historyId: null,
+      serverChatId: null,
+      history: [],
+      messages: [],
+      temporaryChat: false,
+      queuedMessages: [],
+      compareMode: false,
+      compareSelectedModels: [],
+      contextFiles: [],
+      serverChatAssistantId: null,
+      serverChatAssistantKind: null,
+      serverChatCharacterId: null,
+      serverChatMetaLoaded: false
+    })
+  })
+  function seed(pending = false) {
+    const reference = {
+      profile_id: "profile",
+      client_session_id: "frozen-source",
+      owner_key: "local-owner",
+      conversation_id: "chat-one",
+      owner_kind: "local"
+    }
+    const view = {
+      owner_key: reference.owner_key,
+      conversation_id: reference.conversation_id,
+      view_session_id: "source-view",
+      selection_revision: 3,
+      interpretation: { kind: "parent_graph_v1" },
+      cursor: { kind: "after_message", message_id: "A" }
+    }
+    const record: any = { ...reference, view }
+    if (pending)
+      Object.assign(record, {
+        pending_confirmation: {
+          version: 1,
+          projection_id: "pending-original",
+          selection_revision: 3,
+          ordered_path_ids: ["A"],
+          cursor: view.cursor
+        },
+        pending_view_session_id: "source-view",
+        pending_dispatch_started: true
+      })
+    h1.bookmarks.set(h1Key(reference, view), record)
+    return reference
+  }
+  it("TASK-13390: a blocked automatic restore stays silent even when the stored reference is malformed", async () => {
+    // Without a link, a blocked restore must return quietly. Reading the stored
+    // reference before the gate turned a malformed stored value into a visible
+    // "unavailable" state after every account change.
+    forkPresentation.blockAutomaticLoad = true
+    forkPresentation.storedReferenceInvalid = true
+    forkPresentation.opened = []
+    try {
+      window.history.replaceState({}, "", "/chat")
+      const page = render(<Playground />)
+      await waitFor(() => expect(screen.getByTestId("playground-chat")).toBeInTheDocument())
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)) })
+      expect(forkPresentation.opened).not.toContainEqual(expect.objectContaining({ code: "invalid_history_reference" }))
+      page.unmount()
+    } finally {
+      forkPresentation.blockAutomaticLoad = false
+      forkPresentation.storedReferenceInvalid = false
+      forkPresentation.opened = []
+    }
+  })
+
+  it("TASK-13390: an explicit history link still opens after an account change invalidates automatic loading", async () => {
+    // After an account/config change the native-history lease is invalid, so
+    // canAutomaticallyLoad() is false. That must stop AUTOMATIC restores only; a
+    // historySelection link the user followed is deliberate, as the loader already
+    // treats deliberate selections. initializePlayground runs once, so an early
+    // return here drops the link for as long as the page stays mounted.
+    forkPresentation.blockAutomaticLoad = true
+    try {
+      const reference = seed()
+      window.history.replaceState({}, "", "/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference)))
+      const page = render(<Playground />)
+      await waitFor(() =>
+        expect(screen.getByTestId("playground-chat")).toHaveAttribute("data-selected-history", "chat-one answer A")
+      )
+      page.unmount()
+    } finally {
+      // This describe's beforeEach does not reset the flag, so reset it here.
+      forkPresentation.blockAutomaticLoad = false
+    }
+  })
+
+  it.each([
+    { name: "missing history", details: null, code: "owner_conversation_mismatch" },
+    { name: "unowned history", details: { id: "chat-one", message_source: "branch" }, code: "owner_conversation_mismatch" },
+    { name: "unbound server mirror", details: { id: "chat-one", message_source: "server", server_chat_id: "foreign-chat" }, code: "unbound_server_mirror" }
+  ])("rejects a bookmarked $name without publishing selected rows", async ({ details, code }) => {
+    const reference = seed()
+    h1.historyInfo.mockResolvedValue(details)
+    window.history.replaceState(null, "", "/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference)))
+    const page = render(<Playground />)
+    await waitFor(() => expect(h1.controller?.error).toBe(code))
+    expect(h1.controller?.capture).toBeNull()
+    expect(h1.controller?.view).toBeNull()
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(h1.bookmarks.size).toBe(1)
+    expect(window.location.search).toContain("historySelection")
+    page.unmount()
+  })
+  it.each(["query", "hash", "hash-router"])(
+    "consumes a %s handoff once and restores destination choice, conversation switch and empty reset",
+    async (route) => {
+      routerState.hashRouter = route === "hash-router"
+      const reference = seed()
+      const query =
+        "keep=value&historySelection=" +
+        encodeURIComponent(JSON.stringify(reference))
+      window.history.replaceState(
+        { preserved: true },
+        "",
+        route === "query"
+          ? "/chat?" + query + "#anchor"
+          : "/options.html?outer=value#/chat?" + query + "#anchor"
+      )
+      let page = render(<Playground />)
+      await waitFor(() =>
+        expect(screen.getByTestId("playground-chat")).toHaveAttribute(
+          "data-selected-history",
+          "chat-one answer A"
+        )
+      )
+      await act(async () => {
+        await h1.controller!.choose({ kind: "after_message", message_id: "B" })
+      })
+      page.unmount()
+      page = render(<Playground />)
+      await waitFor(() =>
+        expect(screen.getByTestId("playground-chat")).toHaveAttribute(
+          "data-selected-history",
+          "chat-one answer B"
+        )
+      )
+      expect(window.location.href).not.toContain("historySelection")
+      expect(window.location.href).toContain("keep=value")
+      if (route === "query") expect(window.location.hash).toBe("#anchor")
+      else {
+        expect(window.location.search).toBe("?outer=value")
+        expect(window.location.hash).toContain("#anchor")
+      }
+      expect(window.history.state).toEqual({ preserved: true })
+      await act(async () => {
+        await h1.controller!.loadConversation({ historyId: "chat-two" }, null)
+      })
+      page.unmount()
+      page = render(<Playground />)
+      await waitFor(() =>
+        expect(h1.controller?.view?.conversation_id).toBe("chat-two")
+      )
+      await act(async () => {
+        h1.controller!.reset()
+        usePlaygroundSessionStore.getState().clearSession()
+        useStoreMessageOption.setState({
+          historyId: null,
+          serverChatId: null,
+          messages: [],
+          history: []
+        })
+      })
+      page.unmount()
+      page = render(<Playground />)
+      await waitFor(() => expect(h1.controller?.status).toBe("idle"))
+      expect(useStoreMessageOption.getState().messages).toEqual([])
+      page.unmount()
+      // A different destination URL still represents a new initialization.
+      window.history.replaceState(null, "", "/chat?" + query)
+      page = render(<Playground />)
+      await waitFor(() =>
+        expect(h1.controller?.view?.conversation_id).toBe("chat-one")
+      )
+      page.unmount()
+    }
+  )
+  it("retains the exact pending origin after consuming its URL and reloading", async () => {
+    const reference = seed(true)
+    window.history.replaceState(
+      null,
+      "",
+      "/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference))
+    )
+    let page = render(<Playground />)
+    await waitFor(() => expect(h1.controller?.status).toBe("pending_unknown"))
+    page.unmount()
+    page = render(<Playground />)
+    await waitFor(() =>
+      expect(h1.controller?.pending?.intent.projection_id).toBe(
+        "pending-original"
+      )
+    )
+    expect(window.location.search).toBe("")
+    expect(h1.controller?.pending?.scope.client_session_id).toBe(
+      "frozen-source"
+    )
+    expect(h1.controller?.pending?.view.view_session_id).toBe("source-view")
+    expect(
+      h1.bookmarks.get(h1Key(reference, reference)).pending_dispatch_started
+    ).toBe(true)
+    expect(h1.confirm).not.toHaveBeenCalled()
+    page.unmount()
   })
 })

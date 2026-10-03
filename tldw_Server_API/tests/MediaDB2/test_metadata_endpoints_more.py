@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
 
 # Stub heavy modules before importing the full app
@@ -77,7 +78,7 @@ _MISSING_OVERRIDE = object()
 
 def _metadata_search_db_dependency_calls(app: Any) -> set[Callable[..., object]]:
     calls: set[Callable[..., object]] = set()
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         if getattr(route, "path", None) != "/api/v1/media/metadata-search":
             continue
         dependant = getattr(route, "dependant", None)

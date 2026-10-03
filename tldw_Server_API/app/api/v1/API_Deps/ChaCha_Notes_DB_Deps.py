@@ -24,7 +24,10 @@ from tldw_Server_API.app.core.DB_Management import sqlite_policy
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.chacha.health import probe_chacha_connection
-from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
+    chacha_operation,
+    current_operation_holds_connection,
+)
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
     ChaChaRuntimeManager,
     ChaChaRuntimeUnavailableError,
@@ -347,8 +350,10 @@ if not SERVER_CLIENT_ID:
 # as each user gets their DB under their own USER_DB_BASE_DIR/user_id/
 
 # +++ Default Character Configuration +++
-DEFAULT_CHARACTER_NAME = "Helpful AI Assistant"
-DEFAULT_CHARACTER_DESCRIPTION = "A default, friendly assistant created automatically by the system."
+from tldw_Server_API.app.core.Character_Chat.constants import (  # noqa: E402 - re-exported
+    DEFAULT_CHARACTER_DESCRIPTION,
+    DEFAULT_CHARACTER_NAME,
+)
 
 # --- Global Cache for ChaChaNotes DB Instances ---
 MAX_CACHED_CHACHA_DB_INSTANCES = int(settings.get("MAX_CACHED_CHACHA_DB_INSTANCES", "20"))
@@ -470,7 +475,9 @@ def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
     except ChaChaDatabaseCorruptionError:
         logger.error("ChaChaNotes DB corruption preflight failed for user {} ({})", user_id, affected_db)
         raise
-    db_instance = CharactersRAGDB(db_path=str(db_path), client_id=str(client_id))
+    db_instance = CharactersRAGDB(
+        db_path=str(db_path), client_id=str(client_id), owner_user_id=str(user_id),
+    )
     _apply_sqlite_tuning(db_instance)
     from tldw_Server_API.app.core.Visual_Identities.builtin_pixel_migu import ensure_pixel_migu_character
 
@@ -630,7 +637,11 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
     with _chacha_db_lock:
         db_instance = _chacha_db_instances.get(cache_key)
     if db_instance:
-        if await _is_instance_healthy(db_instance):
+        # A connection this operation already holds proves the instance usable.
+        # Re-probing could evict it mid-request (the probe has a 1s deadline)
+        # and hand a nested accessor a different instance, splitting one request
+        # across two connections that cannot see each other's pending writes.
+        if current_operation_holds_connection(db_instance) or await _is_instance_healthy(db_instance):
             return db_instance
         logger.warning(f"ChaChaNotes cached instance unhealthy for user {user_id}; evicting and rebuilding.")
         with _chacha_db_lock:
@@ -919,7 +930,21 @@ def close_all_chacha_db_instances():
         init_event.set()
 
 
+def _on_closed_loop(awaitable: asyncio.Future) -> bool:
+    """True when the task/future's event loop is closed, so it can never finish.
+
+    Waiting on one only burns the full drain timeout (and cancelling a task on a
+    closed loop raises), on every shutdown for the rest of the process.
+    """
+    try:
+        return awaitable.get_loop().is_closed()
+    except (AttributeError, RuntimeError):
+        return False
+
+
 async def _drain_default_character_tasks(timeout: float = 5.0) -> None:
+    stale = [task for task in list(_chacha_default_char_tasks) if _on_closed_loop(task)]
+    _chacha_default_char_tasks.difference_update(stale)
     tasks = [task for task in list(_chacha_default_char_tasks) if not task.done()]
     if not tasks:
         return
@@ -938,6 +963,8 @@ async def _drain_default_character_tasks(timeout: float = 5.0) -> None:
 
 async def _drain_default_character_futures(timeout: float = 5.0) -> None:
     with _chacha_default_char_futures_lock:
+        stale = [future for future in list(_chacha_default_char_futures) if _on_closed_loop(future)]
+        _chacha_default_char_futures.difference_update(stale)
         futures = [future for future in list(_chacha_default_char_futures) if not future.done()]
     if not futures:
         return

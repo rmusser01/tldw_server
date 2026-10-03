@@ -518,6 +518,23 @@ def build_core_chat_rls_sql() -> list[str]:
     return stmts
 
 
+def build_workspace_chat_startup_rls_sql() -> list[str]:
+    """Keep orphan receipts owner-visible while denying absent or foreign scope."""
+    return ["""
+        DO $workspace_chat_startup_rls$
+        BEGIN
+          IF to_regclass('workspace_chat_startup_receipts') IS NULL THEN RETURN; END IF;
+          ALTER TABLE workspace_chat_startup_receipts ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE workspace_chat_startup_receipts FORCE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS workspace_chat_startup_owner ON workspace_chat_startup_receipts;
+          CREATE POLICY workspace_chat_startup_owner ON workspace_chat_startup_receipts
+            USING (owner_user_id = current_setting('app.current_user_id', true))
+            WITH CHECK (owner_user_id = current_setting('app.current_user_id', true));
+        END
+        $workspace_chat_startup_rls$;
+    """]
+
+
 def build_chacha_rls_sql() -> list[str]:
     """RLS for ChaChaNotes (notes, character_cards) using client_id scoping."""
     stmts: list[str] = []
@@ -924,6 +941,137 @@ def build_chacha_rls_sql() -> list[str]:
     stmts.extend(build_source_review_rls_sql())
     stmts.extend(build_workspace_source_saved_view_rls_sql())
     stmts.extend(build_shared_workspace_chat_rls_sql())
+    stmts.extend(build_workspace_chat_startup_rls_sql())
+    # Native fork tables. Written out per table rather than looped over
+    # NATIVE_CHAT_TABLES: the RLS coverage ratchet scans source text and cannot
+    # see DDL assembled from a loop variable. Keep this list in step with
+    # chacha/native_fork_schema.py (test_pg_rls_policies_contract checks it).
+    add("""
+        DO $native_chat_rls$
+        BEGIN
+          IF to_regclass('native_chat_operations') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE native_chat_operations ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE native_chat_operations FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS native_chat_operations_owner ON native_chat_operations';
+          EXECUTE $policy$
+            CREATE POLICY native_chat_operations_owner ON native_chat_operations
+            USING (client_id = current_setting('app.current_user_id', true))
+            WITH CHECK (client_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $native_chat_rls$;
+    """)
+    add("""
+        DO $native_chat_rls$
+        BEGIN
+          IF to_regclass('native_chat_asset_candidates') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE native_chat_asset_candidates ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE native_chat_asset_candidates FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS native_chat_asset_candidates_owner ON native_chat_asset_candidates';
+          EXECUTE $policy$
+            CREATE POLICY native_chat_asset_candidates_owner ON native_chat_asset_candidates
+            USING (client_id = current_setting('app.current_user_id', true))
+            WITH CHECK (client_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $native_chat_rls$;
+    """)
+    add("""
+        DO $native_chat_rls$
+        BEGIN
+          IF to_regclass('native_chat_asset_claims') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE native_chat_asset_claims ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE native_chat_asset_claims FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS native_chat_asset_claims_owner ON native_chat_asset_claims';
+          EXECUTE $policy$
+            CREATE POLICY native_chat_asset_claims_owner ON native_chat_asset_claims
+            USING (client_id = current_setting('app.current_user_id', true))
+            WITH CHECK (client_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $native_chat_rls$;
+    """)
+    add("""
+        DO $native_chat_rls$
+        BEGIN
+          IF to_regclass('native_chat_asset_references') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE native_chat_asset_references ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE native_chat_asset_references FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS native_chat_asset_references_owner ON native_chat_asset_references';
+          EXECUTE $policy$
+            CREATE POLICY native_chat_asset_references_owner ON native_chat_asset_references
+            USING (client_id = current_setting('app.current_user_id', true))
+            WITH CHECK (client_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $native_chat_rls$;
+    """)
+    add("""
+        DO $native_chat_rls$
+        BEGIN
+          IF to_regclass('native_chat_quota_intents') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE native_chat_quota_intents ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE native_chat_quota_intents FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS native_chat_quota_intents_owner ON native_chat_quota_intents';
+          EXECUTE $policy$
+            CREATE POLICY native_chat_quota_intents_owner ON native_chat_quota_intents
+            USING (client_id = current_setting('app.current_user_id', true))
+            WITH CHECK (client_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $native_chat_rls$;
+    """)
+    add("""
+        DO $persona_companion_rls$
+        BEGIN
+          IF to_regclass('persona_buddy_preferences') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE persona_buddy_preferences ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE persona_buddy_preferences FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS persona_buddy_preferences_owner ON persona_buddy_preferences';
+          EXECUTE $policy$
+            CREATE POLICY persona_buddy_preferences_owner ON persona_buddy_preferences
+            USING (user_id = current_setting('app.current_user_id', true))
+            WITH CHECK (user_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $persona_companion_rls$;
+    """)
+    add("""
+        DO $persona_companion_rls$
+        BEGIN
+          IF to_regclass('persona_visual_pack_reviews') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE persona_visual_pack_reviews ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE persona_visual_pack_reviews FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS persona_visual_pack_reviews_owner ON persona_visual_pack_reviews';
+          EXECUTE $policy$
+            CREATE POLICY persona_visual_pack_reviews_owner ON persona_visual_pack_reviews
+            USING (user_id = current_setting('app.current_user_id', true))
+            WITH CHECK (user_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $persona_companion_rls$;
+    """)
+    add("""
+        DO $history_projection_rls$
+        BEGIN
+          IF to_regclass('conversation_history_projections') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE conversation_history_projections ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE conversation_history_projections FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS history_projection_owner ON conversation_history_projections';
+          EXECUTE $policy$
+            CREATE POLICY history_projection_owner ON conversation_history_projections
+            USING (client_id = current_setting('app.current_user_id', true)
+              AND EXISTS (SELECT 1 FROM conversations c
+                WHERE c.id = conversation_history_projections.conversation_id
+                AND c.client_id = current_setting('app.current_user_id', true) AND c.deleted = FALSE))
+            WITH CHECK (client_id = current_setting('app.current_user_id', true)
+              AND EXISTS (SELECT 1 FROM conversations c
+                WHERE c.id = conversation_history_projections.conversation_id
+                AND c.client_id = current_setting('app.current_user_id', true) AND c.deleted = FALSE))
+          $policy$;
+        END
+        $history_projection_rls$;
+    """)
     stmts.extend(build_core_chat_rls_sql())
     return stmts
 

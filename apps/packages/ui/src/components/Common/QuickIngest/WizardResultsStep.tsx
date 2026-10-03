@@ -22,7 +22,7 @@ import {
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import { useIngestWizard } from "./IngestWizardContext"
-import { classifyError } from "./ErrorClassification"
+import { classifyError, extractionFailureSources } from "./ErrorClassification"
 import type { ErrorCategory } from "./ErrorClassification"
 import {
   canOpenMedia,
@@ -255,9 +255,13 @@ type ErrorRowProps = {
   onRemove?: (id: string) => void
 }
 
+const MAX_LISTED_FAILED_SOURCES = 5
+
 const ErrorRow: React.FC<ErrorRowProps> = React.memo(
   ({ item, category, qi, onRetry, onRemove }) => {
     const label = item.title || item.fileName || item.url || item.id
+    const failedSources = extractionFailureSources(item.data)
+    const hiddenSourceCount = failedSources.length - MAX_LISTED_FAILED_SOURCES
 
     const handleRetry = useCallback(() => onRetry?.(item), [item, onRetry])
     const handleRemove = useCallback(() => onRemove?.(item.id), [item.id, onRemove])
@@ -275,6 +279,15 @@ const ErrorRow: React.FC<ErrorRowProps> = React.memo(
             <p className="mt-1 text-xs text-text-subtle">
               {category.userMessage} {category.suggestion}
             </p>
+            {failedSources.length > 0 && (
+              <p className="mt-1 break-all text-xs text-text-subtle">
+                {qi("wizard.results.failedSources", "Failed: {{sources}}", {
+                  sources: failedSources.slice(0, MAX_LISTED_FAILED_SOURCES).join(", "),
+                })}
+                {hiddenSourceCount > 0 &&
+                  ` ${qi("wizard.results.failedSourcesMore", "(+{{count}} more)", { count: hiddenSourceCount })}`}
+              </p>
+            )}
           </div>
         </div>
 

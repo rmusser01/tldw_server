@@ -24,12 +24,22 @@ from tldw_Server_API.app.core.VN_Assets.jobs import (
     vn_asset_generation_jobs_queue,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def chacha_db() -> Generator[CharactersRAGDB, None, None]:
     database = CharactersRAGDB(":memory:", client_id="vn-assets-test-client")
     yield database
     database.close_connection()
+
+
+@pytest.fixture
+def sqlite_timestamp(chacha_db: CharactersRAGDB) -> dict[str, str]:
+    """Control native CURRENT_TIMESTAMP on this test's owning SQLite connection."""
+    clock = {"now": "2000-01-01 00:00:00"}
+    chacha_db.get_connection().create_function("current_timestamp", 0, lambda: clock["now"])
+    return clock
 
 
 @pytest.fixture
@@ -166,6 +176,154 @@ def test_integrity_failure_reconciles_interrupted_cancellation_without_recountin
     assert repo.get_variant_outcome(batch_id, state["slots"][0]["id"], 3)["outcome_status"] == "cancelled"
     assert repo.get_slot(state["slots"][0]["id"])["status"] == "generating"
     assert repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_count_mismatch") == cancelled
+
+
+def _integrity_provenance_state(
+    chacha_db: CharactersRAGDB, *, authored: bool = True,
+) -> dict[str, Any]:
+    """Start B after A failed, retaining A's ID but clearing its older error."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Integrity Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Integrity Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    recipe = {"slots": [{"slot_id": slot["id"], "variant_count": 1}]}
+    previous = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        recipe=recipe if authored else None,
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "previous"}}],
+    )
+    repo.fail_variant(batch_id=previous["id"], slot_id=slot["id"], variant_index=0, error="previous failure")
+    current = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        recipe=recipe if authored else None, execution_recipe={"backend": "pinned"},
+        source_batch_id=previous["id"],
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "current"}}],
+    )
+    identity = {"batch_id": current["id"], "slot_id": slot["id"], "variant_index": 0}
+    attempt_token = f"integrity-inline-{current['id']}"
+    item = repo.claim_variant(
+        **identity, lease_id="inline", attempt_token=attempt_token, item_fields={"pack_id": pack["id"]},
+    )
+    repo.start_variant_generation(**identity, attempt_token=attempt_token)
+    return {"repo": repo, "pack": pack, "slot": slot, "previous": previous,
+            "current": current, "identity": identity, "attempt_token": attempt_token, "item": item}
+
+
+@pytest.mark.parametrize("authored", [True, False], ids=["latest-authored-owner", "unowned-legacy"])
+def test_integrity_provenance_replaces_previous_failed_source(
+    chacha_db: CharactersRAGDB, sqlite_timestamp: dict[str, str], authored: bool,
+) -> None:
+    """Catch integrity failure retaining A as Retry source after B starts."""
+    state = _integrity_provenance_state(chacha_db, authored=authored)
+    repo, current, slot_id = state["repo"], state["current"], state["slot"]["id"]
+    before = repo.get_slot(slot_id)
+    assert (before["status"], before["last_failed_batch_id"], before["last_error"]) == (
+        "generating", state["previous"]["id"], None,
+    )
+
+    failed = repo.fail_batch_integrity(current["id"], error="vn_asset_recipe_count_mismatch")
+
+    stored = repo.get_slot(slot_id)
+    assert (stored["status"], stored["last_failed_batch_id"], stored["last_error"],
+            stored["latest_generation_batch_id"]) == (
+        "failed", current["id"], "vn_asset_recipe_count_mismatch", current["id"] if authored else None,
+    )
+    assert (failed["status"], failed["completed_count"], failed["failed_count"], failed["cancelled_count"]) == (
+        "failed", 0, 1, 0,
+    )
+    for field in ("recipe_json", "execution_recipe_json", "source_batch_id"):
+        assert failed[field] == current[field]
+    assert repo.get_variant_outcome(**state["identity"])["outcome_status"] == "failed"
+    sqlite_timestamp["now"] = "2000-01-01 00:00:01"
+    assert repo.fail_batch_integrity(current["id"], error="different replay error") == failed
+    assert repo.get_slot(slot_id) == stored
+    with pytest.raises(VNAssetGenerationError, match="vn_asset_batch_terminal"):
+        repo.start_variant_generation(**state["identity"], attempt_token=state["attempt_token"])
+
+
+def test_integrity_provenance_does_not_overwrite_newer_failed_owner(chacha_db: CharactersRAGDB) -> None:
+    """Catch older B publishing provenance over the latest authored owner C."""
+    state = _integrity_provenance_state(chacha_db)
+    repo, slot_id = state["repo"], state["slot"]["id"]
+    newer = repo.create_batch(
+        pack_id=state["pack"]["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        recipe={"slots": [{"slot_id": slot_id, "variant_count": 1}]},
+        recipes=[{"slot_id": slot_id, "variant_index": 0, "recipe": {"prompt": "newer"}}],
+    )
+    repo.fail_batch_enqueue(newer["id"], "newer failure")
+    slot_before, newer_before = repo.get_slot(slot_id), repo.get_batch(newer["id"])
+
+    failed = repo.fail_batch_integrity(state["current"]["id"], error="older integrity failure")
+
+    assert (failed["status"], failed["failed_count"]) == ("failed", 1)
+    assert repo.get_slot(slot_id) == slot_before
+    assert repo.get_batch(newer["id"]) == newer_before
+
+
+def test_integrity_provenance_preserves_interrupted_cancellation(chacha_db: CharactersRAGDB) -> None:
+    """Catch cancelled B replacing cancellation or publishing failure provenance."""
+    state = _integrity_provenance_state(chacha_db)
+    repo, batch_id, slot_id = state["repo"], state["current"]["id"], state["slot"]["id"]
+    repo.update_batch(batch_id, {"status": "cancelled", "enqueue_error": "cancelled before reconciliation"})
+
+    cancelled = repo.fail_batch_integrity(batch_id, error="must not replace cancellation")
+
+    assert (cancelled["status"], cancelled["failed_count"], cancelled["cancelled_count"], cancelled["enqueue_error"]) == (
+        "cancelled", 0, 1, "cancelled before reconciliation",
+    )
+    stored = repo.get_slot(slot_id)
+    assert (stored["last_failed_batch_id"], stored["last_error"], stored["latest_generation_batch_id"]) == (
+        state["previous"]["id"], None, batch_id,
+    )
+    assert repo.get_variant_outcome(**state["identity"])["outcome_status"] == "cancelled"
+    assert repo.fail_batch_integrity(batch_id, error="another failure") == cancelled
+
+
+def test_integrity_provenance_only_marks_newly_failed_slots(chacha_db: CharactersRAGDB) -> None:
+    """Catch stamping terminal-only slots or hiding published/deleted outcomes."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Integrity Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Integrity Pack")
+    slots = [repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key=name)
+             for name in ("partial", "approved", "deleted")]
+    entries = [{"slot_id": slot["id"], "variant_index": index, "recipe": {}}
+               for slot, count in zip(slots, (2, 1, 1), strict=True) for index in range(count)]
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=4,
+        recipe={"slots": [{"slot_id": slot["id"], "variant_count": count}
+                          for slot, count in zip(slots, (2, 1, 1), strict=True)]},
+        recipes=entries,
+    )
+    terminal_outcomes = []
+    for slot, index in zip(slots, (1, 0, 0), strict=True):
+        identity = {"batch_id": batch["id"], "slot_id": slot["id"], "variant_index": index}
+        item = repo.reserve_variant_item(
+            **identity, item_fields={"pack_id": pack["id"], "generated_file_id": 17 + slot["id"]},
+        )
+        repo.complete_variant(**identity, item_id=item["id"])
+        if slot == slots[1]:
+            repo.update_item_review(item["id"], review_status="approved", preferred=False)
+        elif slot == slots[2]:
+            repo.delete_item(item["id"])
+        terminal_outcomes.append(repo.get_variant_outcome(**identity))
+    items_before = repo.list_items(pack["id"])
+    terminal_slots_before = [repo.get_slot(slot["id"]) for slot in slots[1:]]
+
+    failed = repo.fail_batch_integrity(batch["id"], error="unfinished recipe corrupt")
+
+    partial = repo.get_slot(slots[0]["id"])
+    assert (partial["status"], partial["last_failed_batch_id"], partial["last_error"]) == (
+        "reviewing", batch["id"], "unfinished recipe corrupt",
+    )
+    assert (failed["completed_count"], failed["failed_count"], failed["cancelled_count"]) == (3, 1, 0)
+    assert repo.list_items(pack["id"]) == items_before
+    for slot, before, status in zip(slots[1:], terminal_slots_before, ("approved", "planned"), strict=True):
+        stored = repo.get_slot(slot["id"])
+        assert (stored["status"], stored["last_failed_batch_id"], stored["last_error"]) == (
+            status, before["last_failed_batch_id"], before["last_error"],
+        )
+    for slot, index, outcome in zip(slots, (1, 0, 0), terminal_outcomes, strict=True):
+        assert repo.get_variant_outcome(batch["id"], slot["id"], index) == outcome
 
 
 def _file_integrity_repository(state: dict[str, Any], tmp_path: Path) -> VNAssetPacksRepository:
@@ -826,6 +984,91 @@ def test_cancel_batch_preserves_completed_and_failed_outcomes(
     assert [repo.get_variant_outcome(batch["id"], slot["id"], index)["outcome_status"] for index in range(3)] == ["completed", "failed", "cancelled"]
 
 
+def test_cancelled_v1_replay_preserves_exact_batch_row_across_timestamp_change(
+    chacha_db: CharactersRAGDB, sqlite_timestamp: dict[str, str],
+) -> None:
+    """Catch replay stamping an already reconciled cancelled V1 batch."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Cancellation Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Cancellation Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, total_variants=1,
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "frozen"}}],
+    )
+    original = repo.cancel_batch(batch["id"])
+    outcome = repo.get_variant_outcome(batch["id"], slot["id"], 0)
+    assert original["updated_at"] == "2000-01-01 00:00:00"
+    sqlite_timestamp["now"] = "2000-01-01 00:00:01"
+
+    assert repo.cancel_batch(batch["id"]) == original
+    assert repo.cancel_batch(batch["id"]) == original
+    assert repo.get_variant_outcome(batch["id"], slot["id"], 0) == outcome
+
+
+def test_cancelled_v1_replay_reconciles_unfinished_recipes_once(
+    chacha_db: CharactersRAGDB, sqlite_timestamp: dict[str, str],
+) -> None:
+    """Catch an early replay return skipping an interrupted cancellation's work."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Cancellation Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Cancellation Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, total_variants=1,
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "frozen"}}],
+    )
+    repo.update_batch(batch["id"], {"status": "cancelled", "cancelled_count": 1})
+    sqlite_timestamp["now"] = "2000-01-01 00:00:01"
+
+    reconciled = repo.cancel_batch(batch["id"])
+
+    assert reconciled["updated_at"] == "2000-01-01 00:00:01"
+    assert reconciled["cancelled_count"] == 1
+    assert repo.get_variant_outcome(batch["id"], slot["id"], 0)["outcome_status"] == "cancelled"
+    assert repo.get_slot(slot["id"])["status"] == "cancelled"
+    sqlite_timestamp["now"] = "2000-01-01 00:00:02"
+    assert repo.cancel_batch(batch["id"]) == reconciled
+
+
+def test_cancelled_v1_replay_repairs_unreconciled_cancelled_count(
+    chacha_db: CharactersRAGDB, sqlite_timestamp: dict[str, str],
+) -> None:
+    """Catch skipping a stale counter when all surviving recipes are cancelled."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Cancellation Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Cancellation Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, total_variants=1,
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "frozen"}}],
+    )
+    repo.cancel_batch(batch["id"])
+    original = repo.update_batch(batch["id"], {"cancelled_count": 0})
+    outcome = repo.get_variant_outcome(batch["id"], slot["id"], 0)
+    sqlite_timestamp["now"] = "2000-01-01 00:00:01"
+
+    reconciled = repo.cancel_batch(batch["id"])
+
+    assert reconciled == {**original, "cancelled_count": 1, "updated_at": "2000-01-01 00:00:01"}
+    assert repo.get_variant_outcome(batch["id"], slot["id"], 0) == outcome
+
+
+def test_legacy_cancel_replay_retains_unconditional_timestamp_update(
+    chacha_db: CharactersRAGDB, sqlite_timestamp: dict[str, str],
+) -> None:
+    """Catch applying immutable V1 replay semantics to unconditional V0 cancellation."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Cancellation Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Cancellation Pack")
+    batch = repo.create_batch(pack_id=pack["id"], requested_by_user_id=1, status="completed")
+    original = repo.cancel_batch(batch["id"])
+    assert original["updated_at"] == "2000-01-01 00:00:00"
+    sqlite_timestamp["now"] = "2000-01-01 00:00:01"
+
+    assert repo.cancel_batch(batch["id"]) == {**original, "updated_at": "2000-01-01 00:00:01"}
+
+
 @pytest.mark.integration
 def test_stale_observation_cannot_replace_newer_variant_claim(chacha_db: CharactersRAGDB) -> None:
     character_id = chacha_db.add_character_card({"name": "VN Primary"})
@@ -982,6 +1225,789 @@ def test_partial_variant_failure_keeps_completed_slot_reviewable(
     assert repo.get_slot(slot["id"])["status"] == "reviewing"
     assert repo.get_batch(batch["id"])["completed_count"] == 1
     assert repo.get_batch(batch["id"])["failed_count"] == 1
+
+
+def test_batch_recipe_columns_migrate_and_execution_recipe_is_first_writer_wins(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Recipe Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Recipe Pack")
+    recipe = {"version": 1, "slots": [{"slot_id": 7, "prompt": "original"}]}
+
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, recipe=recipe, source_batch_id=13,
+    )
+    first = repo.set_execution_recipe_if_absent(batch["id"], {"version": 1, "slots": [{"slot_id": 7, "backend": "a"}]})
+    second = repo.set_execution_recipe_if_absent(batch["id"], {"version": 1, "slots": [{"slot_id": 7, "backend": "b"}]})
+
+    assert json.loads(batch["recipe_json"]) == recipe
+    assert batch["source_batch_id"] == 13
+    assert json.loads(first["execution_recipe_json"])["slots"][0]["backend"] == "a"
+    assert second["execution_recipe_json"] == first["execution_recipe_json"]
+
+
+def test_existing_batch_table_receives_nullable_recipe_columns(chacha_db: CharactersRAGDB) -> None:
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            "CREATE TABLE vn_asset_batches (id INTEGER PRIMARY KEY, pack_id INTEGER, "
+            "job_batch_id TEXT, options_json TEXT)"
+        )
+        conn.execute("INSERT INTO vn_asset_batches (id, options_json) VALUES (1, '{}')")
+
+    ensure_vn_asset_tables(chacha_db)
+
+    row = chacha_db.execute_query(
+        "SELECT recipe_json, execution_recipe_json, source_batch_id FROM vn_asset_batches WHERE id = 1"
+    ).fetchone()
+    assert tuple(row) == (None, None, None)
+
+
+def test_existing_slot_table_receives_failure_batch_column(chacha_db: CharactersRAGDB) -> None:
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            "CREATE TABLE vn_asset_slots (id INTEGER PRIMARY KEY, pack_id INTEGER, "
+            "depends_on_slot_id INTEGER)"
+        )
+        conn.execute("INSERT INTO vn_asset_slots (id, pack_id) VALUES (1, 2)")
+
+    ensure_vn_asset_tables(chacha_db)
+
+    row = chacha_db.execute_query(
+        "SELECT last_failed_batch_id, latest_generation_batch_id FROM vn_asset_slots WHERE id = 1"
+    ).fetchone()
+    assert tuple(row) == (None, None)
+
+
+def test_union_batch_preserves_independent_snapshots_receipt_and_slot_ownership(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    """Catch dropping either recipe form, receipt linkage, or queued-slot ownership."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Union Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Union Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    skipped = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="skipped")
+    authored = {"version": 1, "slots": [
+        {"slot_id": slot["id"], "variant_count": 1, "prompt": "authored"},
+        {"slot_id": skipped["id"], "variant_count": 0, "prompt": "not requested"},
+    ]}
+    execution = {"version": 1, "slots": [{"slot_id": slot["id"], "backend": "pinned"}]}
+    frozen = {"prompt": "variant-specific", "seed": 42, "backend": "pinned"}
+    receipt = {"scope": "vn_asset_generate", "resource_id": f"pack:{pack['id']}",
+               "idempotency_key": "union", "payload_hash": "original"}
+    repo.claim_idempotency_record(owner_user_id=1, **receipt)
+
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_slots=1,
+        total_variants=1, recipe=authored, execution_recipe=execution, source_batch_id=13,
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": frozen}],
+        idempotency_receipt=receipt,
+    )
+    authored["slots"][0]["prompt"] = "edited later"
+    frozen["prompt"] = "edited later"
+    stored = repo.set_execution_recipe_if_absent(batch["id"], {"slots": []})
+    response = {"batch_id": batch["id"], "status": "queued"}
+    original = repo.complete_idempotency_record(owner_user_id=1, **receipt, response=response)
+    replayed = repo.complete_idempotency_record(
+        owner_user_id=1, **receipt, response={"batch_id": batch["id"], "status": "completed"},
+    )
+
+    assert json.loads(stored["recipe_json"])["slots"][0]["prompt"] == "authored"
+    assert json.loads(stored["execution_recipe_json"]) == execution
+    assert stored["source_batch_id"] == 13 and stored["recipe_version"] == 1
+    assert repo.get_batch_recipe(batch["id"], slot["id"], 0) == {
+        "prompt": "variant-specific", "seed": 42, "backend": "pinned",
+    }
+    assert repo.get_slot(slot["id"])["latest_generation_batch_id"] == batch["id"]
+    assert repo.get_slot(skipped["id"])["latest_generation_batch_id"] is None
+    assert replayed == original
+    assert original["batch_id"] == batch["id"]
+    assert json.loads(original["response_json"]) == response
+
+
+def test_union_batch_recipe_failure_rolls_back_receipt_and_preserves_slot_owner(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    """Catch committing union metadata or a receipt when ledger insertion fails."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Union Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Union Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    authored = {"slots": [{"slot_id": slot["id"], "variant_count": 1}]}
+    older = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", recipe=authored,
+    )
+    repo.mark_slot_generation_failed(slot["id"], older["id"], "original failure")
+    before = repo.get_slot(slot["id"])
+    receipt = {"scope": "vn_asset_generate", "resource_id": f"pack:{pack['id']}",
+               "idempotency_key": "rollback", "payload_hash": "same-payload"}
+    claimed, _ = repo.claim_idempotency_record(owner_user_id=1, **receipt)
+    entry = {"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "frozen"}}
+
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.create_batch(
+            pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=2,
+            recipes=[entry, entry], idempotency_receipt=receipt, recipe=authored,
+            execution_recipe={"slots": []}, source_batch_id=older["id"],
+        )
+
+    assert repo.list_batches(pack["id"]) == [older]
+    assert repo.get_slot(slot["id"]) == before
+    assert repo.get_idempotency_record(
+        owner_user_id=1, **{key: value for key, value in receipt.items() if key != "payload_hash"},
+    ) == claimed
+
+
+@pytest.mark.parametrize("history", ["parent", "dev"])
+def test_union_migrations_preserve_existing_history_values(
+    chacha_db: CharactersRAGDB, history: str,
+) -> None:
+    """Catch additive migration rewriting snapshots, counters, fences or receipts."""
+    with chacha_db.transaction() as conn:
+        if history == "parent":
+            conn.execute(
+                "CREATE TABLE vn_asset_batches (id INTEGER PRIMARY KEY, pack_id INTEGER, "
+                "job_batch_id TEXT, recipe_version INTEGER, completed_count INTEGER, "
+                "failed_count INTEGER, cancelled_count INTEGER)"
+            )
+            conn.execute("INSERT INTO vn_asset_batches VALUES (1, 2, 'job', 1, 3, 4, 5)")
+            conn.execute(
+                "CREATE TABLE vn_asset_generation_recipes (batch_id INTEGER, slot_id INTEGER, "
+                "variant_index INTEGER, recipe_json TEXT, outcome_status TEXT, item_id INTEGER, "
+                "deleted_item_json TEXT, claim_lease_id TEXT, claim_token TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO vn_asset_generation_recipes VALUES "
+                "(1, 7, 0, '{\"prompt\":\"frozen\"}', 'completed', NULL, "
+                "'{\"id\":9}', 'original-lease', 'original-token')"
+            )
+            conn.execute(
+                "CREATE TABLE vn_asset_slots (id INTEGER PRIMARY KEY, pack_id INTEGER, "
+                "depends_on_slot_id INTEGER, status TEXT, last_error TEXT)"
+            )
+            conn.execute("INSERT INTO vn_asset_slots VALUES (7, 2, NULL, 'failed', 'original error')")
+        else:
+            conn.execute(
+                "CREATE TABLE vn_asset_batches (id INTEGER PRIMARY KEY, pack_id INTEGER, "
+                "job_batch_id TEXT, recipe_json TEXT, execution_recipe_json TEXT, "
+                "source_batch_id INTEGER, completed_count INTEGER, failed_count INTEGER, "
+                "cancelled_count INTEGER)"
+            )
+            conn.execute(
+                "INSERT INTO vn_asset_batches VALUES (1, 2, 'job', '{\"slots\":[]}', "
+                "'{\"backend\":\"pinned\"}', 13, 3, 4, 5)"
+            )
+            conn.execute(
+                "CREATE TABLE vn_asset_slots (id INTEGER PRIMARY KEY, pack_id INTEGER, "
+                "depends_on_slot_id INTEGER, status TEXT, last_error TEXT, "
+                "last_failed_batch_id INTEGER, latest_generation_batch_id INTEGER)"
+            )
+            conn.execute(
+                "INSERT INTO vn_asset_slots VALUES (7, 2, NULL, 'failed', 'original error', 1, 1)"
+            )
+        conn.execute(
+            "CREATE TABLE vn_asset_idempotency_records (id INTEGER PRIMARY KEY, "
+            "owner_user_id INTEGER, scope TEXT, resource_id TEXT, idempotency_key TEXT, "
+            "payload_hash TEXT, status TEXT, response_json TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO vn_asset_idempotency_records VALUES "
+            "(1, 1, 'vn_asset_generate', 'pack:2', 'original', 'hash', 'completed', "
+            "'{\"batch_id\":1,\"status\":\"queued\"}')"
+        )
+        if history == "parent":
+            conn.execute("ALTER TABLE vn_asset_idempotency_records ADD COLUMN batch_id INTEGER")
+            conn.execute("UPDATE vn_asset_idempotency_records SET batch_id = 1")
+        batches_before = dict(conn.execute("SELECT * FROM vn_asset_batches").fetchone())
+        slots_before = dict(conn.execute("SELECT * FROM vn_asset_slots").fetchone())
+        receipt_before = dict(conn.execute("SELECT * FROM vn_asset_idempotency_records").fetchone())
+        outcome_before = (
+            dict(conn.execute("SELECT * FROM vn_asset_generation_recipes").fetchone())
+            if history == "parent" else None
+        )
+
+    ensure_vn_asset_tables(chacha_db)
+    ensure_vn_asset_tables(chacha_db)
+
+    batch = dict(chacha_db.execute_query("SELECT * FROM vn_asset_batches").fetchone())
+    slot = dict(chacha_db.execute_query("SELECT * FROM vn_asset_slots").fetchone())
+    receipt = dict(chacha_db.execute_query("SELECT * FROM vn_asset_idempotency_records").fetchone())
+    assert {key: batch[key] for key in batches_before} == batches_before
+    assert {key: slot[key] for key in slots_before} == slots_before
+    assert {key: receipt[key] for key in receipt_before} == receipt_before
+    if history == "parent":
+        assert (batch["recipe_json"], batch["execution_recipe_json"], batch["source_batch_id"]) == (None, None, None)
+        assert (slot["last_failed_batch_id"], slot["latest_generation_batch_id"]) == (None, None)
+        assert dict(chacha_db.execute_query("SELECT * FROM vn_asset_generation_recipes").fetchone()) == outcome_before
+    else:
+        assert batch["recipe_version"] == 0
+        assert receipt["batch_id"] is None
+        assert chacha_db.execute_query("SELECT * FROM vn_asset_generation_recipes").fetchall() == []
+
+
+@pytest.mark.parametrize("transition", ["start", "complete", "fail"])
+def test_union_stale_variant_transition_preserves_newer_failed_slot_owner(
+    chacha_db: CharactersRAGDB, transition: str,
+) -> None:
+    """Catch an older V1 outcome replacing the latest authored batch's failure."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Union Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Union Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    authored = {"slots": [{"slot_id": slot["id"], "variant_count": 1}]}
+    older = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        recipe=authored,
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "older"}}],
+    )
+    identity = {"batch_id": older["id"], "slot_id": slot["id"], "variant_index": 0}
+    attempt_token = f"older-inline-{older['id']}"
+    item = repo.claim_variant(
+        **identity, lease_id="inline", attempt_token=attempt_token,
+        item_fields={"pack_id": pack["id"], "generated_file_id": 17},
+    )
+    newer = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        recipe=authored,
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "newer"}}],
+    )
+    repo.fail_batch_enqueue(newer["id"], "latest enqueue rejected")
+    before = repo.get_slot(slot["id"])
+
+    if transition == "start":
+        repo.start_variant_generation(**identity, attempt_token=attempt_token)
+    elif transition == "complete":
+        repo.complete_variant(**identity, item_id=item["id"], attempt_token=attempt_token)
+    else:
+        repo.fail_variant(**identity, error="older provider failure", attempt_token=attempt_token)
+
+    stored = repo.get_slot(slot["id"])
+    assert {key: stored[key] for key in ("status", "last_error", "last_failed_batch_id", "latest_generation_batch_id")} == {
+        key: before[key] for key in ("status", "last_error", "last_failed_batch_id", "latest_generation_batch_id")
+    }
+    assert repo.get_variant_outcome(older["id"], slot["id"], 0)["outcome_status"] == (
+        {"start": "planned", "complete": "completed", "fail": "failed"}[transition]
+    )
+
+
+def test_union_partial_failure_retains_provenance_and_completed_candidate(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    """Catch clearing a sibling failure or hiding a durable completed variant."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Union Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Union Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=2,
+        recipe={"slots": [{"slot_id": slot["id"], "variant_count": 2}]},
+        recipes=[{"slot_id": slot["id"], "variant_index": index, "recipe": {}} for index in range(2)],
+    )
+    success_token, failure_token = "successful-inline", "failed-inline"
+    item = repo.claim_variant(
+        batch_id=batch["id"], slot_id=slot["id"], variant_index=0,
+        lease_id="inline", attempt_token=success_token,
+        item_fields={"pack_id": pack["id"], "generated_file_id": 17},
+    )
+    repo.claim_variant(
+        batch_id=batch["id"], slot_id=slot["id"], variant_index=1,
+        lease_id="inline", attempt_token=failure_token, item_fields={"pack_id": pack["id"]},
+    )
+    repo.fail_variant(
+        batch_id=batch["id"], slot_id=slot["id"], variant_index=1,
+        error="sibling failed", attempt_token=failure_token,
+    )
+    assert repo.get_batch(batch["id"])["status"] == "processing"
+    repo.start_variant_generation(
+        batch_id=batch["id"], slot_id=slot["id"], variant_index=0, attempt_token=success_token,
+    )
+    assert repo.get_slot(slot["id"])["last_error"] == "sibling failed"
+    repo.complete_variant(
+        batch_id=batch["id"], slot_id=slot["id"], variant_index=0,
+        item_id=item["id"], attempt_token=success_token,
+    )
+
+    stored = repo.get_slot(slot["id"])
+    assert (stored["status"], stored["last_error"], stored["last_failed_batch_id"]) == (
+        "reviewing", "sibling failed", batch["id"],
+    )
+    assert [candidate["id"] for candidate in repo.list_items(pack["id"])] == [item["id"]]
+    assert (repo.get_batch(batch["id"])["completed_count"], repo.get_batch(batch["id"])["failed_count"]) == (1, 1)
+
+
+def _legacy_provenance_state(chacha_db: CharactersRAGDB, *, authored: bool) -> dict[str, Any]:
+    """Create real published V1 history and a later legacy batch on the same slot."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Legacy Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Legacy Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary", variant_count=2)
+    history = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, total_variants=1,
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "published history"}}],
+    )
+    item = repo.reserve_variant_item(
+        batch_id=history["id"], slot_id=slot["id"], variant_index=0,
+        item_fields={"pack_id": pack["id"], "generated_file_id": 17},
+    )
+    repo.complete_variant(batch_id=history["id"], slot_id=slot["id"], variant_index=0, item_id=item["id"])
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=2,
+        options={"slot_ids": [slot["id"]], "variant_count": 2},
+        recipe={"slots": [{"slot_id": slot["id"], "variant_count": 2}]} if authored else None,
+    )
+    assert batch["recipe_version"] == 0
+    assert repo.list_batch_recipes(batch["id"]) == []
+    return {"repo": repo, "pack": pack, "slot": slot, "batch": batch, "history": history}
+
+
+@pytest.mark.parametrize("authored", [True, False], ids=["authored-owner", "null-legacy-owner"])
+@pytest.mark.parametrize("failure", ["fanout", "variant"])
+def test_legacy_provenance_remaining_success_preserves_failure(
+    chacha_db: CharactersRAGDB, authored: bool, failure: str,
+) -> None:
+    """Catch NULL fanout omission and mixed display erasing a real V0 failure."""
+    state = _legacy_provenance_state(chacha_db, authored=authored)
+    repo, batch_id, slot_id = state["repo"], state["batch"]["id"], state["slot"]["id"]
+    repo.begin_inline_legacy_display(batch_id, slot_id)
+    repo.mark_slot_generation_started(slot_id, batch_id)
+    error = "legacy exhausted failure"
+    if failure == "fanout":
+        repo.fail_batch_fanout_if_active(
+            batch_id, error=error, planned_count=2, enqueued_count=1, failed_slot_ids=[slot_id],
+        )
+    else:
+        repo.record_batch_variant_failure(batch_id, slot_id=slot_id, error=error)
+    failure_before = repo.get_slot(slot_id)
+    assert (failure_before["status"], failure_before["last_error"], failure_before["last_failed_batch_id"]) == (
+        "failed", error, batch_id,
+    )
+
+    repo.mark_slot_generation_started(slot_id, batch_id)
+    item = repo.create_item(
+        pack_id=state["pack"]["id"], slot_id=slot_id, variant_index=0, generated_file_id=18,
+        source_context_snapshot={"batch_id": batch_id, "variant_index": 0},
+    )
+    assert repo.get_slot(slot_id)["status"] == "failed"
+    repo.mark_slot_generation_succeeded(slot_id, batch_id)
+    assert repo.get_slot(slot_id)["status"] == "failed"
+    repo.record_batch_variant_success(batch_id)
+    repo.finish_legacy_display(batch_id, slot_id, inline=True, fallback_status="reviewing")
+
+    stored = repo.get_slot(slot_id)
+    assert (stored["status"], stored["last_error"], stored["last_failed_batch_id"],
+            stored["latest_generation_batch_id"]) == (
+        "failed", error, batch_id, batch_id if authored else None,
+    )
+    batch = repo.get_batch(batch_id)
+    assert (batch["status"], batch["completed_count"], batch["failed_count"]) == (
+        "failed", 1, 0 if failure == "fanout" else 1,
+    )
+    assert item["id"] in [candidate["id"] for candidate in repo.list_items(state["pack"]["id"])]
+    assert repo.get_variant_outcome(state["history"]["id"], slot_id, 0)["outcome_status"] == "completed"
+
+
+def test_legacy_provenance_older_success_preserves_newer_failed_owner(chacha_db: CharactersRAGDB) -> None:
+    """Catch NULL legacy completion publishing over a newer real authored failure."""
+    state = _legacy_provenance_state(chacha_db, authored=False)
+    repo, batch_id, slot_id = state["repo"], state["batch"]["id"], state["slot"]["id"]
+    newer = repo.create_batch(
+        pack_id=state["pack"]["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        recipe={"slots": [{"slot_id": slot_id, "variant_count": 1}]},
+    )
+    repo.record_batch_variant_failure(newer["id"], slot_id=slot_id, error="newer actual failure")
+    slot_before, newer_before = repo.get_slot(slot_id), repo.get_batch(newer["id"])
+
+    repo.fail_batch_fanout_if_active(
+        batch_id, error="older fanout failure", planned_count=2, enqueued_count=1, failed_slot_ids=[slot_id],
+    )
+    repo.mark_slot_generation_started(slot_id, batch_id)
+    repo.create_item(
+        pack_id=state["pack"]["id"], slot_id=slot_id, generated_file_id=18,
+        source_context_snapshot={"batch_id": batch_id, "variant_index": 0},
+    )
+    repo.mark_slot_generation_succeeded(slot_id, batch_id)
+    repo.record_batch_variant_success(batch_id)
+    repo.finish_legacy_display(batch_id, slot_id, inline=False, fallback_status="reviewing")
+
+    assert repo.get_slot(slot_id) == slot_before
+    assert repo.get_batch(newer["id"]) == newer_before
+
+
+def test_legacy_provenance_null_guard_retains_v1_review_precedence(chacha_db: CharactersRAGDB) -> None:
+    """Catch applying the NULL V0 display guard to a real V1 failure/candidate."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "V1 Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="V1 Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    failed = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, total_variants=1,
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "real V1 failure"}}],
+    )
+    repo.fail_variant(batch_id=failed["id"], slot_id=slot["id"], variant_index=0, error="V1 failure")
+    assert repo.get_slot(slot["id"])["status"] == "failed"
+    legacy = repo.create_batch(pack_id=pack["id"], requested_by_user_id=1, total_variants=1)
+    item = repo.create_item(
+        pack_id=pack["id"], slot_id=slot["id"], generated_file_id=17,
+        source_context_snapshot={"batch_id": legacy["id"], "variant_index": 0},
+    )
+
+    repo.finish_legacy_display(legacy["id"], slot["id"], inline=False, fallback_status="reviewing")
+
+    stored = repo.get_slot(slot["id"])
+    assert (stored["status"], stored["last_failed_batch_id"], stored["last_error"],
+            stored["latest_generation_batch_id"]) == ("reviewing", failed["id"], "V1 failure", None)
+    assert repo.list_items(pack["id"])[0]["id"] == item["id"]
+    assert repo.get_variant_outcome(failed["id"], slot["id"], 0)["outcome_status"] == "failed"
+
+
+@pytest.fixture
+def display_outage_state(chacha_db: CharactersRAGDB) -> dict[str, Any]:
+    """Create a recipe-free legacy delivery rejected by a real authored owner."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Display Outage Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Display Outage Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    legacy = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        options={"slot_ids": [slot["id"]], "variant_count": 1},
+    )
+    owner = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        recipe={"slots": [{"slot_id": slot["id"], "variant_count": 1}]},
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "frozen owner"}}],
+    )
+    repo.cancel_batch(owner["id"])
+    repo.update_slot(slot["id"], {"last_error": "retain authored diagnostics"})
+    reads = {"count": 0}
+
+    def unavailable_reader(
+        _pack_id: int, _slot_id: int, _user_id: int, _batches: Mapping[int, str],
+        _settled: set[tuple[int, int, str]], _finishing_delivery: tuple[int, str] | None,
+    ) -> tuple[bool, bool]:
+        """Fail only the observational reader, without changing native Jobs state."""
+        reads["count"] += 1
+        raise OSError("legacy display unavailable")
+
+    repo.legacy_activity_reader = unavailable_reader
+    return {"repo": repo, "slot_id": slot["id"], "legacy_id": legacy["id"], "owner_id": owner["id"], "reads": reads}
+
+
+@pytest.mark.parametrize("verified_inline", [False, True], ids=["unverified-jobs", "verified-inline"])
+def test_db_display_outage_start_retains_only_verified_activity(
+    display_outage_state: dict[str, Any], verified_inline: bool,
+) -> None:
+    """An advisory Jobs outage cannot block a legacy start or invent liveness."""
+    state = display_outage_state
+    repo, slot_id, legacy_id = state["repo"], state["slot_id"], state["legacy_id"]
+    before = repo.get_slot(slot_id)
+    batches_before = [repo.get_batch(batch_id) for batch_id in (legacy_id, state["owner_id"])]
+    outcome_before = repo.get_variant_outcome(state["owner_id"], slot_id, 0)
+    if verified_inline:
+        repo.begin_inline_legacy_display(legacy_id, slot_id)
+    try:
+        assert repo.mark_slot_generation_started(slot_id, legacy_id) is None
+        stored = repo.get_slot(slot_id)
+        if verified_inline:
+            assert stored["status"] == "generating"
+            assert {key: stored[key] for key in ("last_error", "last_failed_batch_id", "latest_generation_batch_id")} == {
+                key: before[key] for key in ("last_error", "last_failed_batch_id", "latest_generation_batch_id")
+            }
+        else:
+            assert stored == before
+        assert state["reads"]["count"] == 1
+        assert [repo.get_batch(batch_id) for batch_id in (legacy_id, state["owner_id"])] == batches_before
+        assert repo.get_variant_outcome(state["owner_id"], slot_id, 0) == outcome_before
+    finally:
+        repo.legacy_activity_reader = None
+        if verified_inline:
+            repo.finish_legacy_display(legacy_id, slot_id, inline=True, fallback_status=None)
+
+
+def test_db_display_outage_start_does_not_mask_native_display_write_failure(
+    display_outage_state: dict[str, Any], chacha_db: CharactersRAGDB,
+) -> None:
+    """A native SQLite mutation error still propagates after an advisory outage."""
+    state = display_outage_state
+    repo, slot_id, legacy_id = state["repo"], state["slot_id"], state["legacy_id"]
+    before = repo.get_slot(slot_id)
+    repo.begin_inline_legacy_display(legacy_id, slot_id)
+    denied: list[str | None] = []
+
+    def deny_display_write(
+        action: int, table: str | None, column: str | None, _database: str | None, _source: str | None,
+    ) -> int:
+        """Reject the real derived UPDATE only after the reader has failed."""
+        if action == sqlite3.SQLITE_UPDATE and table == "vn_asset_slots" and state["reads"]["count"]:
+            denied.append(column)
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    connection = chacha_db.get_connection()
+    connection.set_authorizer(deny_display_write)
+    try:
+        with pytest.raises(sqlite3.DatabaseError):
+            repo.mark_slot_generation_started(slot_id, legacy_id)
+        assert denied == ["status"]
+        assert repo.get_slot(slot_id) == before
+    finally:
+        connection.set_authorizer(None)
+        repo.legacy_activity_reader = None
+        repo.finish_legacy_display(legacy_id, slot_id, inline=True, fallback_status=None)
+
+
+@pytest.mark.parametrize("checkpoint", ["queued", "generating", "reviewing"])
+@pytest.mark.parametrize("newer_failed_owner", [False, True], ids=["null-owner", "newer-failed-owner"])
+def test_db_d1_flat_v1_progress_after_null_owned_v0_failure(
+    chacha_db: CharactersRAGDB, checkpoint: str, newer_failed_owner: bool,
+) -> None:
+    """Reconcile actual later flat V1 work without fabricating authored ownership."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "D1 Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="D1 Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary", variant_count=2)
+    legacy = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=2,
+        options={"slot_ids": [slot["id"]], "variant_count": 2},
+    )
+    repo.fail_batch_fanout_if_active(
+        legacy["id"], error="old exhausted fanout", planned_count=2, enqueued_count=1,
+        failed_slot_ids=[slot["id"]],
+    )
+    legacy_before = repo.get_batch(legacy["id"])
+    failed_slot = repo.get_slot(slot["id"])
+    assert (failed_slot["status"], failed_slot["last_failed_batch_id"],
+            failed_slot["latest_generation_batch_id"]) == ("failed", legacy["id"], None)
+    assert legacy_before["recipe_json"] is None and repo.list_batch_recipes(legacy["id"]) == []
+    entries = [{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "frozen flat V1"}}]
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        recipe=None, recipes=entries,
+    )
+    identity = {"batch_id": batch["id"], "slot_id": slot["id"], "variant_index": 0}
+    attempt_token = f"d1-inline-{batch['id']}"
+    item = repo.claim_variant(
+        **identity, lease_id="inline", attempt_token=attempt_token,
+        item_fields={"pack_id": pack["id"], "generated_file_id": 17},
+    )
+    newer_before = slot_before = None
+    if newer_failed_owner:
+        newer = repo.create_batch(
+            pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1,
+            recipe={"slots": [{"slot_id": slot["id"], "variant_count": 1}]}, recipes=entries,
+        )
+        repo.fail_batch_enqueue(newer["id"], "newer enqueue rejected")
+        newer_before, slot_before = repo.get_batch(newer["id"]), repo.get_slot(slot["id"])
+        assert (slot_before["status"], slot_before["last_failed_batch_id"],
+                slot_before["latest_generation_batch_id"]) == ("failed", newer["id"], newer["id"])
+
+    if checkpoint == "queued":
+        repo.release_variant_claim(**identity, attempt_token=attempt_token)
+    else:
+        repo.start_variant_generation(**identity, attempt_token=attempt_token)
+    if checkpoint == "reviewing":
+        repo.complete_variant(**identity, item_id=item["id"], attempt_token=attempt_token)
+
+    stored = repo.get_slot(slot["id"])
+    if newer_failed_owner:
+        assert stored == slot_before
+        assert repo.get_batch(newer_before["id"]) == newer_before
+    else:
+        assert (stored["status"], stored["last_error"], stored["last_failed_batch_id"],
+                stored["latest_generation_batch_id"]) == (
+            checkpoint, "old exhausted fanout" if checkpoint == "queued" else None,
+            None if checkpoint == "reviewing" else legacy["id"], None,
+        )
+    outcome = repo.get_variant_outcome(**identity)
+    completed = checkpoint == "reviewing"
+    assert (outcome["outcome_status"], outcome["claim_token"], outcome["claim_lease_id"], outcome["item_id"]) == (
+        "completed" if completed else "planned", None if checkpoint == "queued" else attempt_token,
+        None if checkpoint == "queued" else "inline", item["id"],
+    )
+    stored_batch = repo.get_batch(batch["id"])
+    assert (stored_batch["recipe_version"], stored_batch["recipe_json"],
+            stored_batch["execution_recipe_json"], stored_batch["source_batch_id"]) == (1, None, None, None)
+    assert (stored_batch["status"], stored_batch["completed_count"], stored_batch["failed_count"],
+            stored_batch["cancelled_count"]) == ("completed" if completed else "queued", int(completed), 0, 0)
+    assert repo.get_batch_recipe(**identity) == entries[0]["recipe"]
+    assert [candidate["id"] for candidate in repo.list_items(pack["id"])] == ([item["id"]] if completed else [])
+    assert repo.get_batch(legacy["id"]) == legacy_before
+
+
+@pytest.mark.parametrize("approved", [False, True])
+@pytest.mark.parametrize("jobs_delivery", [False, True], ids=["inline", "real-jobs"])
+def test_active_legacy_cancel_preserves_verified_progress_and_history(
+    chacha_db: CharactersRAGDB, tmp_path: Path, approved: bool, jobs_delivery: bool,
+) -> None:
+    """Catch latest-owner provenance fencing hiding real recipe-free activity."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Active Legacy Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Active Legacy Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    approved_item = None
+    if approved:
+        path = tmp_path / "approved-history.png"
+        path.write_bytes(b"approved history")
+        approved_item = repo.create_item(
+            pack_id=pack["id"], slot_id=slot["id"], review_status="approved",
+            generated_file_id=17, storage_ref=str(path), bytes=16,
+        )
+    v1 = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        recipe={"slots": [{"slot_id": slot["id"], "variant_count": 1}]},
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "frozen V1"}}],
+    )
+    legacy = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        options={"slot_ids": [slot["id"]], "variant_count": 1},
+    )
+    repo.update_slot(slot["id"], {"last_error": "retain authored diagnostics"})
+    assert legacy["recipe_json"] is None and repo.list_batch_recipes(legacy["id"]) == []
+    jobs = JobManager(db_path=tmp_path / "active-legacy-jobs.db")
+    repo.legacy_activity_reader = build_legacy_activity_reader(jobs)
+    job = None
+    if jobs_delivery:
+        create_generate_variant_job(
+            jobs, pack_id=pack["id"], slot_id=slot["id"], batch_id=legacy["id"], variant_index=0, user_id=1,
+        )
+        job = jobs.acquire_next_job(
+            domain="vn_assets", queue=vn_asset_generation_jobs_queue(), worker_id="active-legacy", lease_seconds=120,
+        )
+        assert job is not None
+    else:
+        repo.begin_inline_legacy_display(legacy["id"], slot["id"])
+    try:
+        repo.mark_slot_generation_started(slot["id"], legacy["id"])
+        stored = repo.get_slot(slot["id"])
+        assert (stored["status"], stored["last_error"], stored["last_failed_batch_id"],
+                stored["latest_generation_batch_id"]) == (
+            "generating", "retain authored diagnostics", None, v1["id"],
+        )
+        cancelled = repo.cancel_batch(v1["id"])
+        assert (cancelled["status"], cancelled["cancelled_count"]) == ("cancelled", 1)
+        assert repo.get_slot(slot["id"])["status"] == "generating"
+        assert repo.get_batch(legacy["id"]) == legacy
+        if approved_item is not None:
+            assert repo.get_item(approved_item["id"]) == approved_item
+            assert Path(approved_item["storage_ref"]).read_bytes() == b"approved history"
+        repo.create_item(
+            pack_id=pack["id"], slot_id=slot["id"], generated_file_id=18,
+            source_context_snapshot={"batch_id": legacy["id"], "variant_index": 0},
+        )
+        repo.mark_slot_generation_succeeded(slot["id"], legacy["id"])
+        repo.record_batch_variant_success(legacy["id"])
+    finally:
+        if job is not None:
+            assert jobs.complete_job(job["id"], result={}, worker_id="active-legacy", lease_id=job["lease_id"])
+        repo.finish_legacy_display(legacy["id"], slot["id"], inline=not jobs_delivery, fallback_status="reviewing")
+    stored = repo.get_slot(slot["id"])
+    assert (stored["status"], stored["last_error"], stored["latest_generation_batch_id"]) == (
+        "reviewing", "retain authored diagnostics", v1["id"],
+    )
+    assert repo.get_batch(legacy["id"])["completed_count"] == 1
+    if approved_item is not None:
+        assert repo.get_item(approved_item["id"]) == approved_item
+
+
+@pytest.mark.parametrize("failed_owner", [False, True], ids=["unverified-marker", "newer-failed-owner"])
+def test_active_legacy_cancel_start_preserves_unverified_or_failed_owner(
+    chacha_db: CharactersRAGDB, failed_owner: bool,
+) -> None:
+    """Catch stale markers clearing provenance or inventing liveness from counts."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Guarded Legacy Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Guarded Legacy Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    v1 = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        recipe={"slots": [{"slot_id": slot["id"], "variant_count": 1}]},
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {}}],
+    )
+    legacy = repo.create_batch(pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1)
+    if failed_owner:
+        repo.fail_variant(batch_id=v1["id"], slot_id=slot["id"], variant_index=0, error="newer actual failure")
+        repo.begin_inline_legacy_display(legacy["id"], slot["id"])
+    before = repo.get_slot(slot["id"])
+    try:
+        repo.mark_slot_generation_started(slot["id"], legacy["id"])
+        assert repo.get_slot(slot["id"]) == before
+    finally:
+        if failed_owner:
+            repo.finish_legacy_display(legacy["id"], slot["id"], inline=True, fallback_status=None)
+
+
+@pytest.mark.parametrize("ledger_version", [0, 1])
+def test_union_partial_fanout_error_preserves_v1_outcomes_and_v0_failure_ownership(
+    chacha_db: CharactersRAGDB, ledger_version: int,
+) -> None:
+    """Catch using legacy terminal fanout failure for an unfinished V1 ledger."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Union Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Union Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=2,
+        recipe={"slots": [{"slot_id": slot["id"], "variant_count": 2}]},
+        recipes=[{"slot_id": slot["id"], "variant_index": index, "recipe": {}} for index in range(2)]
+        if ledger_version else None,
+    )
+    if ledger_version:
+        repo.fail_variant(batch_id=batch["id"], slot_id=slot["id"], variant_index=0, error="first variant failed")
+    before_batch = repo.get_batch(batch["id"])
+    before_slot = repo.get_slot(slot["id"])
+    before_outcome = repo.get_variant_outcome(batch["id"], slot["id"], 1)
+
+    failed = repo.fail_batch_fanout_if_active(
+        batch["id"], error="partial enqueue", planned_count=2, enqueued_count=1,
+        failed_slot_ids=[slot["id"]],
+    )
+
+    assert failed["status"] == ("processing" if ledger_version else "failed")
+    assert failed["enqueue_error"] == "partial enqueue"
+    assert (failed["planned_count"], failed["enqueued_count"]) == (2, 1)
+    assert (failed["completed_count"], failed["failed_count"]) == (
+        before_batch["completed_count"], before_batch["failed_count"],
+    )
+    assert repo.get_variant_outcome(batch["id"], slot["id"], 1) == before_outcome
+    if ledger_version:
+        assert repo.get_slot(slot["id"]) == before_slot
+        resumed = repo.complete_batch_fanout(batch["id"], planned_count=2, enqueued_count=2, total_slots=1)
+        assert (resumed["status"], resumed["enqueue_error"], resumed["failed_count"]) == ("processing", None, 1)
+    else:
+        assert (repo.get_slot(slot["id"])["last_failed_batch_id"], repo.get_slot(slot["id"])["last_error"]) == (
+            batch["id"], "partial enqueue",
+        )
+
+
+@pytest.mark.parametrize("ledger_version", [0, 1])
+def test_union_fanout_completion_recovers_legacy_error_without_reopening_terminal_v1(
+    chacha_db: CharactersRAGDB, ledger_version: int,
+) -> None:
+    """Catch reopening a terminal V1 batch under V0 fanout-recovery rules."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Union Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Union Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, status="queued", total_variants=1,
+        recipe={"slots": [{"slot_id": slot["id"], "variant_count": 1}]},
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {}}] if ledger_version else None,
+    )
+    repo.update_batch(batch["id"], {"status": "failed", "enqueue_error": "original failure"})
+    repo.mark_slot_generation_failed(slot["id"], batch["id"], "original failure")
+    before_slot = repo.get_slot(slot["id"])
+    before_outcome = repo.get_variant_outcome(batch["id"], slot["id"], 0)
+
+    resumed = repo.complete_batch_fanout(batch["id"], planned_count=1, enqueued_count=1, total_slots=1)
+
+    assert resumed["status"] == ("failed" if ledger_version else "enqueued")
+    assert repo.get_variant_outcome(batch["id"], slot["id"], 0) == before_outcome
+    if ledger_version:
+        assert repo.get_slot(slot["id"]) == before_slot
+    else:
+        assert (repo.get_slot(slot["id"])["status"], repo.get_slot(slot["id"])["last_failed_batch_id"]) == (
+            "generating", None,
+        )
 
 
 def test_ensure_vn_asset_tables_rejects_non_sqlite_before_transaction() -> None:

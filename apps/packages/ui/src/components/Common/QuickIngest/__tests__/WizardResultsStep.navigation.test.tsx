@@ -245,6 +245,32 @@ describe("WizardResultsStep navigation buttons", () => {
     }
   })
 
+  it("names the sources whose extraction failed", () => {
+    wizardHarness.results = [{
+      id: "crawl", type: "web", status: "error", outcome: "failed",
+      url: "https://example.com/docs", error: "Failed to extract article",
+      data: { extraction_failures: [
+        { code: "empty_extraction", source: "example.com/docs/a" },
+        { code: "empty_extraction", source: "example.com/…ong-path-tail" },
+      ] },
+    }]
+    render(<WizardResultsStep onClose={vi.fn()} />)
+    expect(screen.getByText(/example\.com\/docs\/a, example\.com\/…ong-path-tail/)).toBeTruthy()
+  })
+
+  it("caps the listed failed sources and counts the rest", () => {
+    wizardHarness.results = [{
+      id: "crawl", type: "web", status: "error", outcome: "failed",
+      url: "https://example.com/docs", error: "Failed to extract article",
+      data: { extraction_failures: Array.from({ length: 7 }, (_, index) => (
+        { code: "empty_extraction", source: `example.com/p${index}` }
+      )) },
+    }]
+    render(<WizardResultsStep onClose={vi.fn()} />)
+    expect(screen.getByText(/example\.com\/p4 \(\+2 more\)/)).toBeTruthy()
+    expect(screen.queryByText(/example\.com\/p5/)).toBeNull()
+  })
+
   it("describes local skipped duplicates as already queued", () => {
     wizardHarness.results = [
       {

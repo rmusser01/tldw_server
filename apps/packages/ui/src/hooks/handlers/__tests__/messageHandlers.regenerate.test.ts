@@ -29,6 +29,71 @@ const buildHistory = (): ChatHistory => [
 ]
 
 describe("createRegenerateLastMessage", () => {
+  it("rejects before truncation when selection exists but has no captured path", async () => {
+    const setHistory = vi.fn()
+    const setMessages = vi.fn()
+    const onSubmit = vi.fn()
+    const regenerate = createRegenerateLastMessage({
+      allowOrdinaryRetry: true,
+      historySelection: { getCurrent: () => ({ status: "idle", capture: null }) } as any,
+      validateBeforeSubmitFn: () => true,
+      history: buildHistory(),
+      messages: buildMessages(),
+      setHistory,
+      setMessages,
+      onSubmit
+    })
+
+    await expect(regenerate()).rejects.toThrow("unsupported_history_regeneration")
+    expect(setHistory).not.toHaveBeenCalled()
+    expect(setMessages).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("captures the selected assistant boundary and never invokes the old copy/resubmit callback", async () => {
+    const setHistory = vi.fn()
+    const setMessages = vi.fn()
+    const onSubmit = vi.fn()
+    const beforeSubmit = vi.fn()
+    const regenerate = createRegenerateLastMessage({
+      validateBeforeSubmitFn: () => true,
+      history: [
+        { role: "user", content: "Hello" },
+        { role: "assistant", content: "Hi" }
+      ],
+      messages: [
+        {
+          id: "user",
+          isBot: false,
+          name: "You",
+          message: "Hello",
+          sources: []
+        },
+        {
+          id: "selected-assistant",
+          parentMessageId: "user",
+          isBot: true,
+          name: "Assistant",
+          message: "Hi",
+          sources: []
+        }
+      ],
+      setHistory,
+      setMessages,
+      onSubmit,
+      beforeSubmit,
+      historySelection: { getCurrent: () => ({ status: "ready", capture: { status: "captured" } }) } as any
+    })
+    await expect(regenerate()).rejects.toMatchObject({
+      message: "unsupported_history_regeneration",
+      boundary: { kind: "before_message", message_id: "selected-assistant" }
+    })
+    expect(beforeSubmit).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+    expect(setMessages).not.toHaveBeenCalled()
+  })
+
   it("removes the latest assistant turn and resubmits the previous user turn", async () => {
     const history = buildHistory()
     const messages = buildMessages()
@@ -36,7 +101,7 @@ describe("createRegenerateLastMessage", () => {
     const setMessages = vi.fn()
     const onSubmit = vi.fn().mockResolvedValue(undefined)
 
-    const regenerate = createRegenerateLastMessage({
+    const regenerate = createRegenerateLastMessage({ allowOrdinaryRetry: true,
       validateBeforeSubmitFn: () => true,
       history,
       messages,
@@ -72,7 +137,7 @@ describe("createRegenerateLastMessage", () => {
     const messages = buildMessages()
     messages[0] = { ...messages[0], message: content, images: image ? [image] : [] }
     const onSubmit = vi.fn().mockResolvedValue(undefined)
-    await createRegenerateLastMessage({ validateBeforeSubmitFn: () => true,
+    await createRegenerateLastMessage({ allowOrdinaryRetry: true, validateBeforeSubmitFn: () => true,
       history: [{ role: "user", content, image }], messages,
       setHistory: vi.fn(), setMessages: vi.fn(), onSubmit })()
     if (expected) expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ message: content, image }))
@@ -85,7 +150,7 @@ describe("createRegenerateLastMessage", () => {
     const user: Message = { id: "local-user", isBot: false, name: "You", message: "New source question", sources: [], images: [], generationInfo }
     const assistant: Message = { id: "local-diagnostic", isBot: true, name: "Assistant", message: "Retrieval failed", sources: [], parentMessageId: user.id, generationInfo }
     const onSubmit = vi.fn()
-    await createRegenerateLastMessage({ validateBeforeSubmitFn: () => true, history,
+    await createRegenerateLastMessage({ allowOrdinaryRetry: true, validateBeforeSubmitFn: () => true, history,
       messages: [...buildMessages(), user, assistant], setHistory: vi.fn(), setMessages: vi.fn(), onSubmit })()
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ message: user.message, image: "", messageType: undefined, memory: history }))
   })
@@ -97,7 +162,7 @@ describe("createRegenerateLastMessage", () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const setMessages = vi.fn()
 
-    const regenerate = createRegenerateLastMessage({
+    const regenerate = createRegenerateLastMessage({ allowOrdinaryRetry: true,
       validateBeforeSubmitFn: () => true,
       history: buildHistory(),
       messages: buildMessages(),
@@ -132,7 +197,7 @@ describe("createRegenerateLastMessage", () => {
       }
     })
 
-    const regenerate = createRegenerateLastMessage({
+    const regenerate = createRegenerateLastMessage({ allowOrdinaryRetry: true,
       validateBeforeSubmitFn: () => true,
       history,
       messages,

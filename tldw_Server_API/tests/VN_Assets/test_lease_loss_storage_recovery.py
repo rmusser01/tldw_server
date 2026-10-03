@@ -211,13 +211,13 @@ async def characterize_takeover(
             batch = service.start_generation(
                 pack.id, user_id=owner, request=VNAssetGenerationRequest(slot_ids=[slot.id]),
             )
-            worker_type(repo=repo, jobs_manager=jobs).handle_enqueue_batch({
+            image = ImageBoundary()
+            worker_type(repo=repo, jobs_manager=jobs, image_registry=image).handle_enqueue_batch({
                 "user_id": owner, "pack_id": pack.id, "batch_id": batch.batch_id,
             })
             old_job = acquire("old-worker")
             payload = old_job["payload"]
             recipe_before = repo.get_batch_recipe(batch.batch_id, slot.id, 0)
-            image = ImageBoundary()
             saved: list[dict[str, Any]] = []
             deliveries: list[dict[str, Any]] = []
 

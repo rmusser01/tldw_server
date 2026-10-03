@@ -24,10 +24,15 @@ baseline.  The list may shrink, never grow.
 from __future__ import annotations
 
 import argparse
+import atexit
+import configparser
 import os
+import shutil
 import sys
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).resolve().parent / "route_auth_baseline.txt"
@@ -35,6 +40,15 @@ BASELINE_PATH = Path(__file__).resolve().parent / "route_auth_baseline.txt"
 # Route families are gated by policy, so a default import hides whole modules --
 # including ``connectors``, which carried the original defect.  Force them on so
 # the gate sees every route the codebase can serve.
+#
+# These env vars alone do nothing here: ``config.py::_route_toggle_policy``
+# only reads ``ROUTES_ENABLE``/``ROUTES_STABLE_ONLY`` from the environment
+# under explicit pytest or server test-mode runtime, and ``load_app()`` below
+# deliberately clears those markers so it measures production wiring. The
+# ``ROUTES_ENABLE`` list here is the single source of truth for which route
+# keys to force on; ``_ratchet_config_file()`` reuses it to build a config.txt
+# with the same keys in ``[API-Routes] enable``, which *is* read
+# unconditionally.
 ROUTE_POLICY_ENV = {
     "ROUTES_STABLE_ONLY": "false",
     "ROUTES_ENABLE": ",".join(
@@ -131,12 +145,60 @@ class RatchetError(RuntimeError):
     """Raised when the route inventory cannot be built or read."""
 
 
-def _load_app() -> Any:
+def _ratchet_config_file() -> Path:
+    """Copy the config.txt the app would actually read, with ``enable`` forced.
+
+    ``config_paths._resolve_env_root()`` and ``resolve_config_file()`` both
+    check ``TLDW_CONFIG_FILE`` before ``TLDW_CONFIG_PATH`` before
+    ``TLDW_CONFIG_DIR``. A version of this function that only set
+    ``TLDW_CONFIG_DIR`` went blind the moment a caller environment already
+    set one of the higher-priority vars: the app kept reading the *original*
+    config.txt and the ``enable`` line below never took effect. Resolve the
+    file the same way the app does -- respecting whatever the caller already
+    set -- copy *that* file, and always set ``TLDW_CONFIG_FILE`` to the copy:
+    it is the variable both resolvers check first, so it wins no matter what
+    else is set.
+
+    ``config.py::_route_toggle_policy`` reads ``config.txt``'s ``[API-Routes]``
+    section unconditionally in every runtime; only the ``ROUTES_ENABLE`` /
+    ``ROUTES_STABLE_ONLY`` *env var* overrides above are gated to explicit
+    pytest or server test-mode runtime, which this module turns off so it
+    measures production wiring. So the env vars are inert here -- force the
+    same route keys on the way an operator already can in production: via
+    ``config.txt``.
+    """
+    from tldw_Server_API.app.core.config_paths import resolve_config_file
+
+    real_config_path = resolve_config_file()
+    tmp_dir = Path(tempfile.mkdtemp(prefix="route_auth_ratchet_config_"))
+    atexit.register(shutil.rmtree, tmp_dir, ignore_errors=True)
+    tmp_config_path = tmp_dir / "config.txt"
+
+    parser = configparser.ConfigParser()
+    if real_config_path.exists():
+        parser.read(real_config_path)
+    if not parser.has_section("API-Routes"):
+        parser.add_section("API-Routes")
+    existing_enable = {
+        p.strip().lower()
+        for p in parser.get("API-Routes", "enable", fallback="").split(",")
+        if p.strip()
+    }
+    forced = {
+        k.strip().lower() for k in ROUTE_POLICY_ENV["ROUTES_ENABLE"].split(",") if k.strip()
+    }
+    parser.set("API-Routes", "enable", ",".join(sorted(existing_enable | forced)))
+    with tmp_config_path.open("w", encoding="utf-8") as fh:
+        parser.write(fh)
+    return tmp_config_path
+
+
+def load_app() -> Any:
     """Build the FastAPI app with every route family enabled.
 
-    Mutates ``os.environ`` (route policy, ``AUTH_MODE``, ``TEST_MODE``) and
-    prepends the repository root to ``sys.path``, so it must run in a process
-    that has not already imported the app.
+    Mutates ``os.environ`` (route policy, config file, ``AUTH_MODE``,
+    ``TEST_MODE``) and prepends the repository root to ``sys.path``, so it
+    must run in a process that has not already imported the app.
 
     Returns the ``FastAPI`` instance.
     Raises ``RatchetError`` if the app cannot be constructed.
@@ -146,16 +208,23 @@ def _load_app() -> Any:
     # reproducible. Measure the production wiring, always.
     for marker in ("MINIMAL_TEST_APP", "PYTEST_CURRENT_TEST", "TEST_MODE", "TLDW_TEST_MODE"):
         os.environ.pop(marker, None)
+    # Inert in this process (see _ratchet_config_file's docstring) once the
+    # markers above are cleared; kept as a harmless statement of intent and a
+    # fallback for any code path that still reads them directly.
     for key, value in ROUTE_POLICY_ENV.items():
         os.environ[key] = value
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    # Always overwrite (not setdefault): TLDW_CONFIG_FILE is the variable the
+    # resolver checks first, so this must win over whatever TLDW_CONFIG_FILE,
+    # TLDW_CONFIG_PATH or TLDW_CONFIG_DIR a caller environment already set.
+    os.environ["TLDW_CONFIG_FILE"] = str(_ratchet_config_file())
     os.environ.setdefault("AUTH_MODE", "single_user")
     # Config validation refuses to build without one. The app is inspected, never
     # served, so this value authenticates nothing.
     os.environ.setdefault(
         "SINGLE_USER_API_KEY", "route-auth-ratchet-inspection-only-0000000000000000"
     )
-    if str(REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT))
     try:
         from tldw_Server_API.app.main import app
     except Exception as exc:  # noqa: BLE001 - surfaced, never swallowed
@@ -163,58 +232,24 @@ def _load_app() -> Any:
     return app
 
 
-def _route_facts(obj: Any) -> tuple[str | None, list[str], Any]:
-    """Return ``(path, methods, dependant)`` for a route or an effective context.
-
-    Falls back to ``original_route`` for contexts that do not carry the fields
-    directly.  ``path`` is ``None`` when it cannot be determined.
-    """
-    path = getattr(obj, "path", None)
-    dependant = getattr(obj, "dependant", None)
-    methods = sorted(getattr(obj, "methods", None) or [])
-    if path is None:
-        original = getattr(obj, "original_route", None)
-        if original is not None:
-            path = getattr(original, "path", None)
-            methods = methods or sorted(getattr(original, "methods", None) or [])
-            dependant = dependant or getattr(original, "dependant", None)
-    return path, methods, dependant
+_load_app = load_app
 
 
 def iter_routes(app: Any) -> Iterator[tuple[str | None, list[str], Any]]:
-    """Yield ``(path, methods, dependant)`` for every route the app can serve.
+    """Yield ``(path, methods, dependant)`` for every API route the app serves.
 
-    Raises ``RatchetError`` if an included router refuses to resolve, rather
-    than silently under-reporting the route inventory.
+    Walks served routes, so routes behind nested ``include_router`` calls are seen
+    at their full path with their include-time dependencies merged in. Reading
+    ``app.routes`` directly misses them on FastAPI >= 0.137, where a nested include
+    is an opaque ``_IncludedRouter`` branch rather than a route.
     """
-    from fastapi.routing import APIRoute, _IncludedRouter
+    from fastapi.routing import APIRoute
 
-    for route in app.routes:
-        if isinstance(route, APIRoute):
-            yield _route_facts(route)
-            continue
-        if not isinstance(route, _IncludedRouter):
-            continue
-        # FastAPI defers inclusion, so the real routes (carrying the merged
-        # parent-router dependencies) only exist inside the included router.
-        seen: set[tuple] = set()
-        for getter in ("effective_candidates", "effective_low_priority_routes"):
-            resolve = getattr(route, getter, None)
-            if resolve is None:
-                continue
-            try:
-                contexts = resolve() or []
-            except Exception as exc:  # noqa: BLE001
-                raise RatchetError(
-                    f"could not resolve {getter} for an included router: {exc}"
-                ) from exc
-            for context in contexts:
-                facts = _route_facts(context)
-                key = (facts[0], tuple(facts[1]))
-                if not facts[0] or key in seen:
-                    continue
-                seen.add(key)
-                yield facts
+    from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
+    for route in iter_served_routes(app.routes):
+        if isinstance(route.route, APIRoute):
+            yield route.path, sorted(route.methods), route.dependant
 
 
 def _walk(dependant: Any, seen: set[int] | None = None) -> Iterator[Any]:
@@ -308,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    app = _load_app()
+    app = load_app()
     current = unauthenticated_routes(app)
 
     if args.write_baseline:

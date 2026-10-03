@@ -366,15 +366,6 @@ export const NOTES_STUDIO_HANDWRITING_OPTIONS: Array<{
   { value: 'off', labelKey: 'option:notesSearch.notesStudioHandwritingOff', defaultLabel: 'Off' },
 ]
 
-export const shouldIgnoreGlobalShortcut = (target: EventTarget | null): boolean => {
-  if (!(target instanceof Element)) return false
-  const element = target as HTMLElement
-  if (element.isContentEditable) return true
-  const tag = (element.tagName || '').toLowerCase()
-  if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
-  return Boolean(element.closest('input,textarea,select,[contenteditable="true"]'))
-}
-
 export const isWithinRegion = (target: EventTarget | null, regionId: string): boolean => {
   if (!(target instanceof Element)) return false
   return Boolean((target as Element).closest(`#${regionId}`))

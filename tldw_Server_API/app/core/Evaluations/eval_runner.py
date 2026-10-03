@@ -39,7 +39,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
 
 # Import existing evaluation modules
 from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
-from tldw_Server_API.app.core.Evaluations.rag_evaluator import RAGEvaluator
+from tldw_Server_API.app.core.Evaluations.rag_evaluator import _CANONICAL_METRIC_FOR_ALIAS, RAGEvaluator
 from tldw_Server_API.app.core.Evaluations.response_quality_evaluator import ResponseQualityEvaluator
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
@@ -54,6 +54,7 @@ from tldw_Server_API.app.core.Evaluations.run_state import (
     can_transition_run_status,
     normalize_run_status,
 )
+from tldw_Server_API.app.core.Evaluations.scoring import normalize_geval_metric
 from tldw_Server_API.app.core.Evaluations.webhook_security import webhook_validator
 from tldw_Server_API.app.core.RAG.rag_custom_metrics import get_custom_metrics
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
@@ -1426,8 +1427,7 @@ class EvaluationRunner:
                         raw = float(raw_val)
                     except (TypeError, ValueError):
                         continue
-                    max_score = 3.0 if metric == "fluency" else 5.0
-                    scores[metric] = raw / max_score if raw >= 1.0 else raw
+                    scores[metric] = normalize_geval_metric(metric, raw)
             else:
                 # Legacy string output fallback
                 import re
@@ -1435,8 +1435,7 @@ class EvaluationRunner:
                     pattern = f"{metric}.*?([0-9.]+)"
                     match = re.search(pattern, str(result), re.IGNORECASE)
                     if match:
-                        max_score = 3.0 if metric == "fluency" else 5.0
-                        scores[metric] = float(match.group(1)) / max_score  # Normalize to 0-1
+                        scores[metric] = normalize_geval_metric(metric, float(match.group(1)))
 
             # Calculate pass/fail
             avg_score = statistics.mean(scores.values()) if scores else 0
@@ -1502,8 +1501,14 @@ class EvaluationRunner:
                 except (TypeError, ValueError):
                     scores[metric_name] = 0.0
 
-            # Calculate pass/fail
-            avg_score = statistics.mean(scores.values()) if scores else 0
+            # Calculate pass/fail. Alias keys (answer_relevance, ...) mirror their
+            # canonical metric; averaging both would count that metric twice.
+            scored = [
+                value
+                for name, value in scores.items()
+                if _CANONICAL_METRIC_FOR_ALIAS.get(name) not in scores
+            ]
+            avg_score = statistics.mean(scored) if scored else 0
             passed = self._evaluate_passed(scores, avg_score, eval_spec, default_threshold=0.7)
 
             return {
@@ -1595,9 +1600,12 @@ class EvaluationRunner:
                 expected = expected_field
             expected = expected if expected is not None else ""
 
-            # Normalize strings
-            output = str(output).strip().lower()
-            expected = str(expected).strip().lower()
+            # Preserve the historical whitespace normalization in both modes.
+            output = str(output).strip()
+            expected = str(expected).strip()
+            if not eval_spec.get("case_sensitive", False):
+                output = output.lower()
+                expected = expected.lower()
 
             passed = output == expected
             score = 1.0 if passed else 0.0
@@ -1634,10 +1642,13 @@ class EvaluationRunner:
             if isinstance(expected_items, str) or not isinstance(expected_items, list):
                 expected_items = [expected_items]
 
-            # Check each expected item
+            case_sensitive = eval_spec.get("case_sensitive", False)
+            if not case_sensitive:
+                output = output.lower()
             found_count = 0
             for item in expected_items:
-                if str(item).lower() in output.lower():
+                expected = str(item) if case_sensitive else str(item).lower()
+                if expected in output:
                     found_count += 1
 
             score = found_count / len(expected_items) if expected_items else 0

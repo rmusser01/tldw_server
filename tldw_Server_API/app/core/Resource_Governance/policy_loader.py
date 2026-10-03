@@ -115,6 +115,11 @@ class PolicyLoader:
             mtime = self._path.stat().st_mtime
             with self._path.open("r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
+            _consumed = {"version", "policies", "tenant", "route_map", "templates", "schema_version"}
+            for key in sorted(set(data) - _consumed):
+                logger.warning("RG policy file key {!r} is ignored by the loader", key)
+            for key in sorted(set(dict(data.get("route_map") or {})) - {"by_path", "by_tag"}):
+                logger.warning("RG route_map key {!r} is ignored by the loader", key)
             version = int(data.get("version") or 1)
             policies = dict(data.get("policies") or {})
             tenant = dict(data.get("tenant") or {})

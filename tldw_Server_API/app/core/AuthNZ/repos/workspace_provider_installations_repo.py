@@ -8,6 +8,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import normalize_provider_name
 
 
@@ -100,20 +101,7 @@ class WorkspaceProviderInstallationsRepo:
     def _normalize_datetime_for_postgres(dt: datetime) -> datetime:
         return dt.astimezone(timezone.utc).replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt
 
-    @staticmethod
-    def _row_to_dict(row: Any) -> dict[str, Any]:
-        if row is None:
-            return {}
-        if isinstance(row, dict):
-            return dict(row)
-        try:
-            return dict(row)
-        except Exception:
-            try:
-                keys = row.keys()
-                return {key: row[key] for key in keys}
-            except Exception:
-                return {}
+    _row_to_dict = staticmethod(row_dict)
 
     @staticmethod
     def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:

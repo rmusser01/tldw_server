@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
     META_PROMPT_VERSION,
     PROMPT_IMPROVEMENT_LIMITS,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -79,7 +80,7 @@ def _dispatch_module():
 
 
 def _prompt_route(app: FastAPI):
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         if getattr(route, "path", None) == "/api/v1/prompts/improve":
             return route
     raise AssertionError("POST /api/v1/prompts/improve is not registered")

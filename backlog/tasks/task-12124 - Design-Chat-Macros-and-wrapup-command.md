@@ -1,10 +1,15 @@
 ---
 id: TASK-12124
 title: Design Chat Macros and wrapup command
-status: In Progress
-priority: Medium
+status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-08-24 04:14'
+labels: []
+dependencies: []
 documentation:
-- Docs/superpowers/specs/2026-07-03-chat-macros-design.md
+  - Docs/superpowers/specs/2026-07-03-chat-macros-design.md
+priority: medium
 ---
 
 ## Description
@@ -22,6 +27,7 @@ Write the approved Chat Macros design spec covering a dedicated Chat_Macros modu
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Design doc written at Docs/superpowers/specs/2026-07-03-chat-macros-design.md.
 - Spec review loop completed: reviewer status Approved; no blocking issues.
@@ -29,6 +35,9 @@ Write the approved Chat Macros design spec covering a dedicated Chat_Macros modu
 - Follow-up implementation-readiness review completed after user request. The spec now resolves run DB ownership, final result persistence, idempotent post-back semantics, shell-style slash arg parsing/bounds, and staged implementation guidance.
 - Verification: documentation-only task; no code tests or Bandit run applicable. Local checks verified no TODO/TBD/FIXME placeholders in the spec.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Bookkeeping corrected on 2026-08-23 after TASK-12126 and PR #2618 were completed and merged.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

@@ -8,7 +8,6 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +31,7 @@ from tldw_Server_API.app.services.outputs_service import (
     build_items_context_from_content_items,
     render_output_template,
 )
+from tldw_Server_API.app.core.Utils.iso_datetime import utc_now_iso as _utcnow_iso
 
 _STAGE_NAMES = (
     "collect",
@@ -81,10 +81,6 @@ class _TextFlowResult:
     occurrence: Any
     items: list[dict[str, Any]]
     output_id: int | None
-
-
-def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _stage(

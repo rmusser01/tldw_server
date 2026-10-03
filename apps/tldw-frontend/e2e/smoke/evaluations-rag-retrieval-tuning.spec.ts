@@ -181,7 +181,7 @@ test.describe("RAG retrieval tuning recipe smoke", () => {
         return
       }
 
-      if (method === "GET" && pathname === "/api/v1/evaluations") {
+      if (method === "GET" && pathname === "/api/v1/evaluations/") {
         await fulfillJson(route, 200, {
           object: "list",
           data: []

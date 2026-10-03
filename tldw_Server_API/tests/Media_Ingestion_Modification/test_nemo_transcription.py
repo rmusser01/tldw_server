@@ -31,15 +31,24 @@ class TestNemoTranscription:
         return audio_data, sample_rate
 
     @pytest.fixture
-    def mock_config(self):
-        """Mock configuration for testing."""
+    def mock_config(self, monkeypatch, tmp_path):
+        """Provide flat STT settings with private cache state and paths."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Nemo as nemo_mod,
+        )
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
+
+        monkeypatch.setattr(nemo_mod, "_model_cache", {})
+        monkeypatch.setattr(onnx_mod, "_onnx_model_cache", {})
+        cache_dir = tmp_path / "nemo"
+        monkeypatch.setenv("NEMO_CACHE_DIR", str(cache_dir))
         return {
-            'STT-Settings': {
-                'default_transcriber': 'parakeet',
-                'nemo_model_variant': 'standard',
-                'nemo_device': 'cpu',
-                'nemo_cache_dir': './test_models/nemo'
-            }
+            'default_transcriber': 'parakeet',
+            'nemo_model_variant': 'standard',
+            'nemo_device': 'cpu',
+            'nemo_cache_dir': str(cache_dir),
         }
 
     def test_import_nemo_module(self):
@@ -51,7 +60,7 @@ class TestNemoTranscription:
         except ImportError:
             pytest.skip("Nemo module not available")
 
-    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.loaded_config_data')
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.get_stt_config')
     def test_cache_dir_creation(self, mock_config_data, mock_config):
         """Test that cache directory is created properly."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
@@ -82,7 +91,7 @@ class TestNemoTranscription:
         assert key3 == 'parakeet_onnx'
 
     @patch('nemo.collections.asr.models.EncDecRNNTBPEModel.from_pretrained')
-    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.loaded_config_data')
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.get_stt_config')
     def test_load_parakeet_standard(self, mock_config_data, mock_from_pretrained, mock_config):
         """Test loading standard Parakeet model."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
@@ -103,7 +112,7 @@ class TestNemoTranscription:
         assert 'parakeet_standard' in _model_cache
 
     @patch('nemo.collections.asr.models.EncDecMultiTaskModel.from_pretrained')
-    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.loaded_config_data')
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.get_stt_config')
     def test_load_canary_model(self, mock_config_data, mock_from_pretrained, mock_config):
         """Test loading Canary model."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
@@ -456,7 +465,7 @@ class TestNemoTranscription:
 
     @patch('onnxruntime.InferenceSession')
     @patch('huggingface_hub.snapshot_download')
-    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.loaded_config_data')
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.get_stt_config')
     def test_load_parakeet_onnx(self, mock_config_data, mock_download, mock_ort_session, mock_config):
         """Test loading ONNX variant of Parakeet."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
@@ -588,3 +597,51 @@ class TestNemoModelsActual:
 
         model = load_canary_model()
         assert model is not None
+
+
+def test_concurrent_canary_loads_call_factory_once(monkeypatch, tmp_path):
+    """Two threads missing the cache for the same key must load the (1-3 GB)
+    model once, not twice (check-then-act race without a lock)."""
+    import threading
+    import time
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+        Audio_Transcription_Nemo as nemo_mod,
+    )
+
+    calls = []
+
+    def _from_pretrained(name):
+        calls.append(name)
+        time.sleep(0.2)  # widen the race window
+        return MagicMock()
+
+    asr = types.ModuleType("nemo.collections.asr")
+    asr.models = types.SimpleNamespace(
+        EncDecMultiTaskModel=types.SimpleNamespace(from_pretrained=_from_pretrained)
+    )
+    collections = types.ModuleType("nemo.collections")
+    collections.asr = asr
+    nemo = types.ModuleType("nemo")
+    nemo.collections = collections
+    monkeypatch.setitem(sys.modules, "nemo", nemo)
+    monkeypatch.setitem(sys.modules, "nemo.collections", collections)
+    monkeypatch.setitem(sys.modules, "nemo.collections.asr", asr)
+    monkeypatch.setattr(nemo_mod, "_torch_cuda_available", lambda **_kw: False)
+    monkeypatch.setattr(nemo_mod, "get_stt_config", lambda: {})
+    monkeypatch.setattr(nemo_mod, "_model_cache", {})
+    monkeypatch.setattr(nemo_mod, "_get_cache_dir", lambda: tmp_path)
+    monkeypatch.setenv("NEMO_CACHE_DIR", str(tmp_path))  # restored on teardown
+
+    results = []
+    threads = [
+        threading.Thread(target=lambda: results.append(nemo_mod.load_canary_model()))
+        for _ in range(2)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(calls) == 1
+    assert results[0] is results[1]

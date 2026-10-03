@@ -1,24 +1,32 @@
+"""Persist conversation identity, local startup history, lifecycle and settings."""
+
 from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, encode_assistant_startup
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    _CHACHA_NONCRITICAL_EXCEPTIONS,
     BackendType,
     CharactersRAGDBError,
     ConflictError,
     FTSQueryTranslator,
     InputError,
-    _CHACHA_NONCRITICAL_EXCEPTIONS,
     logger,
 )
 from tldw_Server_API.app.core.exceptions import ConversationSettingsTargetMissing
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+
+class _ReceiptAdmissionChanged(ConflictError):
+    """A stale preflight may retry only after its independently owned rollback."""
 
 
 class ConversationStore:
@@ -334,6 +342,7 @@ class ConversationStore:
         assistant_id: Any,
         persona_memory_mode: Any,
     ) -> tuple[str | None, str | None, int | None, str | None]:
+        """Canonicalize the effective assistant binding, retaining Character precedence."""
         normalized_kind = self._db._normalize_nullable_text(assistant_kind)
         normalized_assistant_id = self._db._normalize_nullable_text(assistant_id)
         normalized_memory_mode = self._db._normalize_nullable_text(persona_memory_mode)
@@ -387,12 +396,34 @@ class ConversationStore:
 
         return "persona", normalized_assistant_id, None, normalized_memory_mode
 
+    def _assistant_identity_matches(
+        self,
+        current: Any,
+        binding: tuple[str | None, str | None, int | None, str | None],
+    ) -> bool:
+        """Compare normalized bindings, treating invalid prior identity as non-equivalent."""
+        try:
+            previous = self._normalize_conversation_assistant_identity(
+                character_id=current["character_id"],
+                assistant_kind=current["assistant_kind"],
+                assistant_id=current["assistant_id"],
+                persona_memory_mode=current["persona_memory_mode"],
+            )
+        except InputError:
+            return False
+        return previous == binding
+
     def add_conversation(
         self,
         conv_data: dict[str, Any],
         *,
         conn: Any | None = None,
+        assistant_startup: AssistantStartup | None = None,
     ) -> str | None:
+        """Insert identity and optional trusted local provenance in the same transaction."""
+        if {"assistant_startup", "assistant_startup_json"}.intersection(conv_data):
+            raise InputError("Conversation startup fields are reserved for internal creation.")
+        startup_json = encode_assistant_startup(assistant_startup) if assistant_startup is not None else None
         conv_id = conv_data.get("id") or self._db._generate_uuid()
         root_id = conv_data.get("root_id") or conv_id
 
@@ -426,8 +457,8 @@ class ConversationStore:
                                            character_id, assistant_kind, assistant_id, persona_memory_mode, \
                                            title, state, topic_label, cluster_id, source, external_ref, rating, \
                                            created_at, last_modified, client_id, version, deleted, \
-                                           scope_type, workspace_id) \
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+                                           scope_type, workspace_id, assistant_startup_json) \
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
                 """
         if self._db.backend_type == BackendType.POSTGRESQL:
             params = (
@@ -453,6 +484,7 @@ class ConversationStore:
                 False,
                 scope_type,
                 workspace_id,
+                startup_json,
             )
         else:
             params = (
@@ -478,6 +510,7 @@ class ConversationStore:
                 0,
                 scope_type,
                 workspace_id,
+                startup_json,
             )
         try:
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
@@ -513,6 +546,57 @@ class ConversationStore:
             logger.error(f"Database error fetching conversation ID {conversation_id}: {exc}")
             raise
 
+    def _lock_receipt_admission(
+        self, conversation_id: str, destination: tuple[str, str | None], *, conn: Any,
+    ) -> bool:
+        """Fence receipt-bound admission before any explicit or implicit chat lock."""
+        store = self._db.workspace_chat_startups
+        associated = store.has_receipt(conversation_id, conn=conn)
+        if associated and destination[0] == "workspace":
+            workspace = store.lock_receipt_workspace(destination[1], conn=conn)
+            if (
+                workspace is None or workspace["deleted"]
+                or workspace["native_chat_admission_closed"] or workspace["system_operation_state"] is not None
+            ):
+                raise ConflictError("workspace_chat_admission_unavailable", entity="workspaces", entity_id=destination[1])
+        return associated
+
+    def _run_receipt_admission(self, mutation: Callable[[Any], Any]) -> Any:
+        """Retry at most once, never rolling back or retrying a caller-owned unit."""
+        from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store import WorkspaceStartupError
+
+        owned = True
+        try:
+            self._db.workspace_chat_startups.require_outermost()
+        except WorkspaceStartupError:
+            owned = False
+        for attempt in range(2):
+            try:
+                with self._db.transaction(preserve_existing=True) as conn:
+                    result = mutation(conn)
+            except _ReceiptAdmissionChanged as error:
+                if not owned or attempt == 1:
+                    raise
+                # Managers can log a failed rollback without closing the unit.
+                try:
+                    self._db.workspace_chat_startups.require_outermost()
+                except WorkspaceStartupError:
+                    raise error from None
+            else:
+                return result
+        raise AssertionError("Receipt admission retry exhausted")
+
+    def _recheck_receipt_admission(
+        self, conversation_id: str, preflight: Any, current: Any, associated: bool, *, conn: Any,
+    ) -> None:
+        """Never discover and acquire a new Workspace lock after locking the chat."""
+        final_associated = self._db.workspace_chat_startups.has_receipt(conversation_id, conn=conn)
+        if final_associated != associated or ((associated or final_associated) and (
+            preflight is None or current is None
+            or (preflight["scope_type"], preflight["workspace_id"]) != (current["scope_type"], current["workspace_id"])
+        )):
+            raise _ReceiptAdmissionChanged("workspace_chat_admission_changed", entity="conversations", entity_id=conversation_id)
+
     def upsert_conversation_from_sync(
         self,
         *,
@@ -535,7 +619,7 @@ class ConversationStore:
         scope_type: str | None = None,
         workspace_id: str | None = None,
     ) -> bool:
-        """Create or update a conversation projection from an accepted Sync v2 envelope."""
+        """Replace Sync fields and invalidate receipts atomically on binding changes."""
 
         del object_hash
         normalized_id = str(conversation_id).strip()
@@ -567,25 +651,7 @@ class ConversationStore:
                 created_at, last_modified, client_id, version, deleted, scope_type, workspace_id
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                root_id = excluded.root_id,
-                character_id = excluded.character_id,
-                assistant_kind = excluded.assistant_kind,
-                assistant_id = excluded.assistant_id,
-                persona_memory_mode = excluded.persona_memory_mode,
-                title = excluded.title,
-                state = excluded.state,
-                topic_label = excluded.topic_label,
-                cluster_id = excluded.cluster_id,
-                source = excluded.source,
-                external_ref = excluded.external_ref,
-                rating = excluded.rating,
-                last_modified = excluded.last_modified,
-                client_id = excluded.client_id,
-                version = excluded.version,
-                deleted = excluded.deleted,
-                scope_type = excluded.scope_type,
-                workspace_id = excluded.workspace_id
+            ON CONFLICT(id) DO NOTHING
         """
         params = (
             normalized_id,
@@ -610,8 +676,56 @@ class ConversationStore:
             normalized_workspace_id,
         )
         try:
-            with self._db.transaction() as conn:
-                conn.execute(query, params)
+            def replace(conn: Any) -> None:
+                """Replace one Sync object only after destination and binding revalidation."""
+                preflight = conn.execute(
+                    "SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (normalized_id,),
+                ).fetchone()
+                associated = self._lock_receipt_admission(
+                    normalized_id, (normalized_scope_type, normalized_workspace_id), conn=conn,
+                )
+                inserted = conn.execute(query, params)
+                if inserted.rowcount == 0:
+                    current_query = "SELECT * FROM conversations WHERE id = ?"
+                    if self._db.backend_type == BackendType.POSTGRESQL:
+                        current_query += " FOR UPDATE"
+                    current = conn.execute(current_query, (normalized_id,)).fetchone()
+                    if current is None:
+                        raise ConflictError(
+                            "Conversation disappeared during Sync replacement; retry the operation.",
+                            entity="conversations", entity_id=normalized_id,
+                        )
+                    if any(current[field] is not None for field in (
+                        "required_projection_version", "native_bundle_json",
+                        "native_creation_operation_kind", "native_creation_operation_id",
+                    )):
+                        raise ConflictError(
+                            "native_conversation_sync_unsupported", entity="conversations", entity_id=normalized_id,
+                        )
+                    self._recheck_receipt_admission(normalized_id, preflight, current, associated, conn=conn)
+                    binding = (assistant_kind, assistant_id, normalized_character_id, persona_memory_mode)
+                    startup_json = (
+                        current["assistant_startup_json"]
+                        if self._assistant_identity_matches(current, binding) else None
+                    )
+                    conn.execute(
+                        """
+                        UPDATE conversations SET
+                            root_id = ?, character_id = ?, assistant_kind = ?, assistant_id = ?,
+                            persona_memory_mode = ?, title = ?, state = ?, topic_label = ?,
+                            cluster_id = ?, source = ?, external_ref = ?, rating = ?,
+                            last_modified = ?, client_id = ?, version = ?, deleted = ?,
+                            scope_type = ?, workspace_id = ?, assistant_startup_json = ?
+                        WHERE id = ?
+                        """,
+                        # Preserve created_at; replace every other existing Sync field.
+                        (*params[1:13], *params[14:], startup_json, normalized_id),
+                    )
+                    after = conn.execute("SELECT * FROM conversations WHERE id = ?", (normalized_id,)).fetchone()
+                    self._db.workspace_chat_startups.invalidate_changed_binding(
+                        normalized_id, dict(current), dict(after), conn=conn,
+                    )
+            self._run_receipt_admission(replace)
             logger.info("Upserted conversation projection from Sync v2 for ID: {}.", normalized_id)
             return True
         except sqlite3.IntegrityError as exc:
@@ -647,11 +761,25 @@ class ConversationStore:
                    version = ?,
                    client_id = ?
              WHERE id = ?
+               AND required_projection_version IS NULL
+               AND native_bundle_json IS NULL
+               AND native_creation_operation_kind IS NULL
+               AND native_creation_operation_id IS NULL
         """
         try:
             with self._db.transaction() as conn:
                 cursor = conn.execute(query, (True, now, object_revision, sync_client_id, normalized_id))
                 if cursor.rowcount == 0:
+                    protected = conn.execute(
+                        "SELECT id FROM conversations WHERE id = ? AND "
+                        "(required_projection_version IS NOT NULL OR native_bundle_json IS NOT NULL "
+                        "OR native_creation_operation_kind IS NOT NULL OR native_creation_operation_id IS NOT NULL)",
+                        (normalized_id,),
+                    ).fetchone()
+                    if protected is not None:
+                        raise ConflictError(
+                            "native_conversation_sync_unsupported", entity="conversations", entity_id=normalized_id
+                        )
                     raise ConflictError(  # noqa: TRY003
                         "Conversation not found for Sync v2 tombstone.",
                         entity="conversations",
@@ -1021,6 +1149,9 @@ class ConversationStore:
             raise
 
     def update_conversation(self, conversation_id: str, update_data: dict[str, Any], expected_version: int) -> bool | None:
+        """CAS-update a locked binding, invalidating startup only on actual identity changes."""
+        if {"assistant_startup", "assistant_startup_json"}.intersection(update_data):
+            raise InputError("Conversation startup fields cannot be updated directly.")
         logger.debug(
             "Starting update_conversation for ID {}, expected_version {} (FTS handled by DB triggers)",
             conversation_id,
@@ -1058,12 +1189,11 @@ class ConversationStore:
 
         try:
             with self._db.transaction() as conn:
+                current_query = "SELECT * FROM conversations WHERE id = ?"
+                if self._db.backend_type == BackendType.POSTGRESQL:
+                    current_query += " FOR UPDATE"
                 current_state = conn.execute(
-                    """
-                    SELECT title, version, deleted, character_id, assistant_kind, assistant_id, persona_memory_mode
-                    FROM conversations
-                    WHERE id = ?
-                    """,
+                    current_query,
                     (conversation_id,),
                 ).fetchone()
 
@@ -1086,6 +1216,20 @@ class ConversationStore:
                     field in update_data
                     for field in ("assistant_kind", "assistant_id", "character_id", "persona_memory_mode")
                 )
+                if assistant_update_requested and any(
+                    current_state[field] is not None
+                    for field in (
+                        "required_projection_version",
+                        "native_bundle_json",
+                        "native_creation_operation_kind",
+                        "native_creation_operation_id",
+                    )
+                ):
+                    raise ConflictError(
+                        "native_assistant_identity_locked",
+                        entity="conversations",
+                        entity_id=conversation_id,
+                    )
                 normalized_assistant_kind = current_state["assistant_kind"]
                 normalized_assistant_id = current_state["assistant_id"]
                 normalized_character_id = current_state["character_id"]
@@ -1109,11 +1253,8 @@ class ConversationStore:
 
                 if current_db_version != expected_version:
                     raise ConflictError(
-                        "Conversation ID {} update failed: version mismatch (db has {}, client expected {}).".format(
-                            conversation_id,
-                            current_db_version,
-                            expected_version,
-                        ),
+                        f"Conversation ID {conversation_id} update failed: version mismatch "
+                        f"(db has {current_db_version}, client expected {expected_version}).",
                         entity="conversations",
                         entity_id=conversation_id,
                     )  # noqa: TRY003
@@ -1158,6 +1299,12 @@ class ConversationStore:
                     params_for_set_clause.append(self._db._normalize_nullable_text(update_data.get("external_ref")))
 
                 if assistant_update_requested:
+                    binding = (
+                        normalized_assistant_kind, normalized_assistant_id,
+                        normalized_character_id, normalized_persona_memory_mode,
+                    )
+                    if not self._assistant_identity_matches(current_state, binding):
+                        fields_to_update_sql.append("assistant_startup_json = NULL")
                     fields_to_update_sql.extend(
                         [
                             "character_id = ?",
@@ -1191,6 +1338,12 @@ class ConversationStore:
                     )
                     main_update_params = tuple(final_set_values + [conversation_id, expected_version])
 
+                if assistant_update_requested:
+                    main_update_query += (
+                        " AND required_projection_version IS NULL AND native_bundle_json IS NULL"
+                        " AND native_creation_operation_kind IS NULL AND native_creation_operation_id IS NULL"
+                    )
+
                 cursor_main = conn.execute(main_update_query, main_update_params)
                 if cursor_main.rowcount == 0:
                     final_state = conn.execute(
@@ -1216,6 +1369,12 @@ class ConversationStore:
                             f"concurrently (expected v{expected_version} for update)."
                         )
                     raise ConflictError(msg, entity="conversations", entity_id=conversation_id)
+
+                if assistant_update_requested:
+                    after = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+                    self._db.workspace_chat_startups.invalidate_changed_binding(
+                        conversation_id, dict(current_state), dict(after), conn=conn,
+                    )
 
                 logger.info(
                     "Updated conversation ID {} from version {} to version {} (FTS handled by DB triggers). "
@@ -1259,6 +1418,7 @@ class ConversationStore:
 
         try:
             with self._db.transaction() as conn:
+                self._db.native_forks.mark_child_gone(self._db.client_id, conversation_id, conn=conn)
                 try:
                     current_db_version = self._db._get_current_db_version(
                         conn,
@@ -1318,7 +1478,10 @@ class ConversationStore:
         except CharactersRAGDBError:
             raise
 
-    def restore_conversation(self, conversation_id: str, expected_version: int) -> bool | None:
+    def restore_conversation(
+        self, conversation_id: str, expected_version: int, *, require_already_active: bool = False
+    ) -> bool | None:
+        """Restore under current native and permanent receipt-association admission."""
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
         query = (
@@ -1329,9 +1492,48 @@ class ConversationStore:
         params = (now, next_version_val, self._db.client_id, conversation_id, expected_version)
 
         try:
-            with self._db.transaction() as conn:
+            def restore(conn: Any) -> bool:
+                """Restore or acknowledge the current row under its admitted destination."""
+                restore_columns = (
+                    "deleted, version, client_id, scope_type, workspace_id, "
+                    "required_projection_version, native_bundle_json, "
+                    "native_creation_operation_kind, native_creation_operation_id"
+                )
+                preflight = conn.execute(
+                    f"SELECT {restore_columns} FROM conversations WHERE id = ?",  # nosec B608 - fixed column list.
+                    (conversation_id,),
+                ).fetchone()
+                if not preflight:
+                    raise ConflictError(
+                        f"Conversation ID {conversation_id} not found.",
+                        entity="conversations",
+                        entity_id=conversation_id,
+                    )
+                associated = self._lock_receipt_admission(
+                    conversation_id, (preflight["scope_type"], preflight["workspace_id"]), conn=conn,
+                )
+                protected_columns = (
+                    "required_projection_version", "native_bundle_json",
+                    "native_creation_operation_kind", "native_creation_operation_id",
+                )
+                protected = any(preflight[column] is not None for column in protected_columns)
+                if protected:
+                    if preflight["client_id"] != self._db.client_id:
+                        raise ConflictError("native_conversation_owner_mismatch", entity="conversations", entity_id=conversation_id)
+                    if preflight["scope_type"] == "workspace":
+                        workspace_lock = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+                        workspace = conn.execute(
+                            "SELECT id FROM workspaces WHERE id = ? AND client_id = ? AND deleted = ? "
+                            "AND system_operation_state IS NULL AND native_chat_admission_closed = ?" + workspace_lock,  # nosec B608 - fixed backend-only lock suffix.
+                            (preflight["workspace_id"], self._db.client_id, False, False),
+                        ).fetchone()
+                        if workspace is None:
+                            raise ConflictError("workspace_native_unavailable", entity="workspaces", entity_id=preflight["workspace_id"])
+                    elif preflight["scope_type"] != "global":
+                        raise ConflictError("native_conversation_scope_invalid", entity="conversations", entity_id=conversation_id)
+                conversation_lock = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
                 record_status = conn.execute(
-                    "SELECT deleted, version FROM conversations WHERE id = ?",
+                    f"SELECT {restore_columns} FROM conversations WHERE id = ?{conversation_lock}",  # nosec B608 - fixed column list and backend-only lock suffix.
                     (conversation_id,),
                 ).fetchone()
                 if not record_status:
@@ -1340,11 +1542,24 @@ class ConversationStore:
                         entity="conversations",
                         entity_id=conversation_id,
                     )
+                self._recheck_receipt_admission(conversation_id, preflight, record_status, associated, conn=conn)
+                if protected:
+                    if (
+                        record_status["client_id"] != preflight["client_id"]
+                        or record_status["scope_type"] != preflight["scope_type"]
+                        or record_status["workspace_id"] != preflight["workspace_id"]
+                        or any(record_status[column] != preflight[column] for column in protected_columns)
+                    ):
+                        raise ConflictError("native_conversation_scope_changed", entity="conversations", entity_id=conversation_id)
+                elif any(record_status[column] is not None for column in protected_columns):
+                    raise ConflictError("native_conversation_scope_changed", entity="conversations", entity_id=conversation_id)
                 if not record_status["deleted"]:
                     logger.info(
                         f"Conversation ID {conversation_id} already active. Restore successful (idempotent)."
                     )
                     return True
+                if require_already_active:
+                    raise ConflictError("chat_restore_state_changed", entity="conversations", entity_id=conversation_id)
 
                 current_db_version = record_status["version"]
                 if current_db_version != expected_version:
@@ -1384,14 +1599,19 @@ class ConversationStore:
                     f"new version {next_version_val}."
                 )
                 return True
+            return self._run_receipt_admission(restore)
         except ConflictError:
             raise
         except CharactersRAGDBError:
             raise
 
     def hard_delete_conversation(self, conversation_id: str) -> bool:
+        """Burn native and Workspace receipts in their shared lock order before deletion."""
         try:
             with self._db.transaction() as conn:
+                self._db.native_forks.mark_child_gone(self._db.client_id, conversation_id, conn=conn)
+                self._db.workspace_chat_startups.lock_conversation(conversation_id, conn=conn)
+                self._db.workspace_chat_startups.mark_hard_deleted(conversation_id, conn=conn)
                 rowcount = conn.execute(
                     "DELETE FROM conversations WHERE id = ?",
                     (conversation_id,),
@@ -1643,6 +1863,21 @@ class ConversationStore:
         )
         return clause, [like_pattern, like_pattern, like_pattern]
 
+    @staticmethod
+    def _sqlite_fts_literal_after_parse_error(query: str, exc: CharactersRAGDBError) -> str | None:
+        """Interpret rejected MATCH syntax as a literal, preserving valid FTS queries."""
+        cause = exc.__cause__
+        if not isinstance(cause, sqlite3.OperationalError):
+            return None
+        message = str(cause)
+        unknown_column = message.removeprefix("no such column: ")
+        query_column_error = message.startswith("no such column: ") and bool(unknown_column) and unknown_column in query
+        if not (
+            message.startswith("fts5: syntax error near ") or message == "unterminated string" or query_column_error
+        ):
+            return None
+        return '"' + query.replace('"', '""') + '"'
+
     def search_conversations(
         self,
         query: str | None,
@@ -1768,7 +2003,18 @@ class ConversationStore:
         if filters:
             base_query += " AND " + " AND ".join(filters)
 
-        cursor = self._db.execute_query(base_query, tuple(params))
+        try:
+            cursor = self._db.execute_query(base_query, tuple(params))
+        except CharactersRAGDBError as exc:
+            literal_query = (
+                self._sqlite_fts_literal_after_parse_error(safe_query, exc)
+                if safe_query and not use_deleted_text_search
+                else None
+            )
+            if literal_query is None:
+                raise
+            params[0] = literal_query
+            cursor = self._db.execute_query(base_query, tuple(params))
         return [dict(row) for row in cursor.fetchall()]
 
     def search_conversations_page(
@@ -1962,8 +2208,18 @@ class ConversationStore:
             count_cursor = self._db.execute_query(count_query, tuple(count_params))
             count_row = count_cursor.fetchone()
         except CharactersRAGDBError as exc:
-            logger.error("Error counting paged conversation search rows: {}", exc)
-            raise
+            literal_query = (
+                self._sqlite_fts_literal_after_parse_error(safe_query, exc)
+                if self._db.backend_type == BackendType.SQLITE and safe_query and not use_deleted_text_search
+                else None
+            )
+            if literal_query is None:
+                logger.error("Error counting paged conversation search rows: {}", exc)
+                raise
+            # Count, global rank, and page rows must all search the same literal.
+            count_params[0] = base_params[0] = literal_query
+            count_cursor = self._db.execute_query(count_query, tuple(count_params))
+            count_row = count_cursor.fetchone()
 
         if count_row is None:
             return [], 0, 0.0

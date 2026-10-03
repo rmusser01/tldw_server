@@ -2090,4 +2090,3 @@ class _InMemoryChromaClient:
         if col is not None:
             col._deleted = True
         return None
-

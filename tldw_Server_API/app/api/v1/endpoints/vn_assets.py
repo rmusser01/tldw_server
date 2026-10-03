@@ -90,6 +90,15 @@ CONFLICT_ERROR_CODES = {
     "slot_has_dependents",
     "slot_has_active_generation",
 }
+GENERATION_RECIPE_CONFLICTS = {
+    "vn_asset_recipe_unavailable": "Original generation settings are unavailable. Start generation to use current settings.",
+    "vn_asset_recipe_invalid": "Original generation settings cannot be read. Start generation to use current settings.",
+    "vn_asset_recipe_slot_mismatch": "This slot was not in the selected batch. Refresh generation status and retry the failed slot.",
+    "vn_asset_retry_source_unavailable": "No failed generation batch is available for Retry. Refresh generation status or start generation.",
+    "vn_asset_retry_source_active": "Original generation work is still queued or running. Wait for it to finish, then refresh generation status before Retry.",
+    "vn_asset_retry_override_conflict": "Retry uses the original settings. Use Regenerate or Start generation for changed settings.",
+    "vn_asset_execution_recipe_invalid": "The original backend selection cannot be read. Start generation to use current settings.",
+}
 TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
 UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
 
@@ -197,6 +206,11 @@ def _cleanup_blocker_provider(
 
 def _handle_value_error(exc: ValueError) -> HTTPException:
     detail = str(exc) or "invalid_request"
+    if detail in GENERATION_RECIPE_CONFLICTS:
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=vn_error_detail(detail, GENERATION_RECIPE_CONFLICTS[detail]),
+        )
     if "not_found" in detail:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     if detail in CONFLICT_ERROR_CODES:
@@ -1569,7 +1583,11 @@ async def cleanup_pack_import_commit(
     )
 
 
-@router.get("/starter-matrices", response_model=VNAssetStarterMatricesResponse)
+@router.get(
+    "/starter-matrices",
+    response_model=VNAssetStarterMatricesResponse,
+    dependencies=[Depends(get_request_user)],
+)
 async def list_starter_matrices() -> VNAssetStarterMatricesResponse:
     slots = expand_starter_matrix(primary_character_id=1, variant_count=1)
     return VNAssetStarterMatricesResponse(

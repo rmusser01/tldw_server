@@ -952,7 +952,11 @@ class UnifiedFeedbackSystem:
                     elif issues or user_notes:
                         resolved_type = "report"
 
-                # Record search quality
+                # Record search quality. Stars map to stars/5 (share of the top rating),
+                # so 1 star stores as 0.2 -- deliberately unlike Evaluations' min->0 judge
+                # scaling (TASK-13328). These events are unversioned, so changing the map
+                # would silently shift every stored trend; analytics only compares trends
+                # and never thresholds this value (TASK-13371).
                 if relevance_score:
                     await self.analytics.record_search_quality(
                         query_hash=query_hash,

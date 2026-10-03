@@ -308,6 +308,7 @@ async def import_memories(
 async def list_explanations(
     limit: int = Query(10, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> ExplanationListResponse:
     """Return recent personalization explanations (scaffold: returns empty)."""
     return ExplanationListResponse(

@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import (
     DatabasePool,
@@ -16,12 +15,12 @@ from tldw_Server_API.app.core.AuthNZ.database import (
     _flatten_params,
 )
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import load_json, row_dict
 
 _VALID_CREATION_SOURCES = {"prompt", "template", "existing_workspace"}
 _VALID_ACTOR_TYPES = {"owner", "internal_collaborator", "external_collaborator"}
 _VALID_PROMOTION_STATUSES = {"pending", "approved", "rejected", "promoted", "stale"}
 _VALID_PREVIEW_SCOPES = {"canonical", "session"}
-_ROW_CONVERSION_EXCEPTIONS = (AttributeError, KeyError, TypeError, ValueError)
 
 
 class InactivePrototypeSharedActorError(ValueError):
@@ -70,34 +69,6 @@ def _to_bool(value: Any) -> bool:
         return bool(value)
     text = str(value).strip().lower()
     return text in {"1", "true", "t", "yes", "y"}
-
-
-def _load_json_dict(raw: Any) -> dict[str, Any]:
-    if isinstance(raw, dict):
-        return dict(raw)
-    if not raw:
-        return {}
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return {}
-        return dict(parsed) if isinstance(parsed, dict) else {}
-    return {}
-
-
-def _load_json_list(raw: Any) -> list[Any]:
-    if isinstance(raw, list):
-        return list(raw)
-    if not raw:
-        return []
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return []
-        return list(parsed) if isinstance(parsed, list) else []
-    return []
 
 
 def _result_row_count(result: Any) -> int:
@@ -187,24 +158,7 @@ class PrototypeWorkspacesRepo:
         async with self.transaction() as repo:
             yield repo
 
-    @staticmethod
-    def _row_to_dict(row: Any) -> dict[str, Any]:
-        if row is None:
-            return {}
-        if isinstance(row, dict):
-            return dict(row)
-        if hasattr(row, "keys"):
-            try:
-                keys = row.keys()
-                return {key: row[key] for key in keys}
-            except _ROW_CONVERSION_EXCEPTIONS as exc:
-                logger.debug("Failed to convert prototype workspace row by keys: {}", exc)
-                return {}
-        try:
-            return dict(row)
-        except _ROW_CONVERSION_EXCEPTIONS as exc:
-            logger.debug("Failed to convert prototype workspace row with dict(): {}", exc)
-            return {}
+    _row_to_dict = staticmethod(row_dict)
 
     @staticmethod
     def _new_id(prefix: str) -> str:
@@ -217,10 +171,10 @@ class PrototypeWorkspacesRepo:
         out = dict(row)
         if out.get("owner_user_id") is not None:
             out["owner_user_id"] = int(out["owner_user_id"])
-        out["preview_policy"] = _load_json_dict(out.get("preview_policy_json"))
-        out["share_policy"] = _load_json_dict(out.get("share_policy_json"))
-        out["runtime_policy"] = _load_json_dict(out.get("runtime_policy_json"))
-        out["designated_promoter_ids"] = _load_json_list(out.get("designated_promoter_ids_json"))
+        out["preview_policy"] = load_json(out.get("preview_policy_json"), dict)
+        out["share_policy"] = load_json(out.get("share_policy_json"), dict)
+        out["runtime_policy"] = load_json(out.get("runtime_policy_json"), dict)
+        out["designated_promoter_ids"] = load_json(out.get("designated_promoter_ids_json"), list)
         out["is_archived"] = out.get("archived_at") is not None
         return out
 
@@ -232,8 +186,8 @@ class PrototypeWorkspacesRepo:
         if out.get("author_user_id") is not None:
             out["author_user_id"] = int(out["author_user_id"])
         out["snapshot_id"] = out.get("id")
-        out["diff_summary"] = _load_json_dict(out.get("diff_summary_json"))
-        out["preview_health"] = _load_json_dict(out.get("preview_health_json"))
+        out["diff_summary"] = load_json(out.get("diff_summary_json"), dict)
+        out["preview_health"] = load_json(out.get("preview_health_json"), dict)
         return out
 
     @staticmethod
@@ -243,7 +197,7 @@ class PrototypeWorkspacesRepo:
         out = dict(row)
         if out.get("share_link_id") is not None:
             out["share_link_id"] = int(out["share_link_id"])
-        out["quota_policy"] = _load_json_dict(out.get("quota_policy_json"))
+        out["quota_policy"] = load_json(out.get("quota_policy_json"), dict)
         out["is_revoked"] = out.get("revoked_at") is not None
         return out
 
@@ -276,7 +230,7 @@ class PrototypeWorkspacesRepo:
             return None
         out = dict(row)
         out["preview_handle"] = out.get("id")
-        out["metadata"] = _load_json_dict(out.get("metadata_json"))
+        out["metadata"] = load_json(out.get("metadata_json"), dict)
         out["is_active"] = _to_bool(out.get("is_active"))
         return out
 

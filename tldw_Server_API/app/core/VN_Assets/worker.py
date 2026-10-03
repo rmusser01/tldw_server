@@ -8,6 +8,7 @@ import uuid
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from functools import partial
+from hashlib import sha256
 from inspect import isawaitable
 from pathlib import Path
 from typing import Any
@@ -19,14 +20,11 @@ from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksR
 from tldw_Server_API.app.core.exceptions import LegacyDisplayReconciliationError, VNAssetGenerationError
 from tldw_Server_API.app.core.Image_Generation.adapter_registry import get_registry
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequest
+from tldw_Server_API.app.core.Image_Generation.config import get_image_generation_config, resolve_image_generation_model
 from tldw_Server_API.app.core.Storage.file_integrity import generated_file_bytes_match
 from tldw_Server_API.app.core.Storage.generated_file_helpers import save_and_register_vn_asset_image
 from tldw_Server_API.app.core.VN_Assets.concurrency import get_default_backend_generation_gate
-from tldw_Server_API.app.core.VN_Assets.constants import (
-    SLOT_STATUS_FAILED,
-    SLOT_STATUS_GENERATING,
-    SLOT_STATUS_REVIEWING,
-)
+from tldw_Server_API.app.core.VN_Assets.constants import SLOT_STATUS_FAILED, SLOT_STATUS_REVIEWING
 from tldw_Server_API.app.core.VN_Assets.jobs import (
     VN_ASSET_ENQUEUE_BATCH_JOB_TYPE,
     VN_ASSET_GENERATE_VARIANT_JOB_TYPE,
@@ -44,6 +42,12 @@ from tldw_Server_API.app.core.VN_Assets.portability.importer import VNPackImport
 from tldw_Server_API.app.core.VN_Assets.portability.models import VNPackExportOptions
 from tldw_Server_API.app.core.VN_Assets.portability.preview import VNPackImportPreviewer
 from tldw_Server_API.app.core.VN_Assets.prompts import build_prompt_preview
+from tldw_Server_API.app.core.VN_Assets.recipe import (
+    RECIPE_VERSION,
+    load_execution_recipe,
+    load_recipe,
+    slot_recipe,
+)
 from tldw_Server_API.app.core.VN_Assets.storage import (
     generated_file_matches_vn_asset,
     generated_file_size_bytes,
@@ -83,11 +87,16 @@ class VNAssetGenerationWorker:
         self.unregister_generated_file = unregister_generated_file
         self.preflight_storage_quota = preflight_storage_quota
 
-    def handle_enqueue_batch(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def handle_enqueue_batch(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        job: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Fan out frozen variants without resetting outcomes or Jobs authority."""
         pack_id = _payload_int(payload, "pack_id")
         batch_id = _payload_int(payload, "batch_id")
         user_id = _payload_int(payload, "user_id")
-
         batch = self.repo.get_batch(batch_id)
         if batch is None or int(batch["pack_id"]) != pack_id:
             raise VNAssetGenerationError("vn_asset_batch_not_found", batch_id=batch_id, pack_id=pack_id)
@@ -96,6 +105,39 @@ class VNAssetGenerationWorker:
         recipe_version = int(batch.get("recipe_version") or 0)
         if recipe_version not in (0, 1):
             raise VNAssetGenerationError("vn_asset_recipe_version_unsupported", batch_id=batch_id)
+        if _is_terminal_batch_status(batch["status"]) and not (
+            recipe_version == 0 and _retryable_fanout_failure(batch)
+        ):
+            return {
+                "status": str(batch["status"]), "batch_id": batch_id, "pack_id": pack_id,
+                "enqueued_count": int(batch["enqueued_count"] or 0),
+                "planned_count": int(batch["planned_count"] or 0),
+            }
+
+        authored_slots: list[dict[str, Any]] | None = None
+        if batch.get("recipe_json") is not None:
+            try:
+                authored = load_recipe(batch["recipe_json"], pack_id=pack_id, owner_user_id=user_id)
+                authored_slots = authored["slots"]
+                if batch.get("execution_recipe_json") is None:
+                    config = get_image_generation_config()
+                    batch = self.repo.set_execution_recipe_if_absent(batch_id, {
+                        "version": RECIPE_VERSION,
+                        "slots": [self._resolve_slot_execution(slot, config) for slot in authored_slots],
+                    })
+                self._execution_recipe(batch)
+            except Exception as exc:
+                if recipe_version == 1:
+                    self.repo.update_batch(batch_id, {"enqueue_error": str(exc)})
+                else:
+                    self.repo.fail_batch_fanout_if_active(
+                        batch_id, error=str(exc),
+                        failed_slot_ids=[
+                            int(slot["slot_id"]) for slot in authored_slots or []
+                            if int(slot["variant_count"]) > 0
+                        ] if not _job_has_retry_remaining(job) else (),
+                    )
+                raise
 
         if recipe_version == 1:
             recipes = self.repo.list_batch_recipes(batch_id)
@@ -103,10 +145,13 @@ class VNAssetGenerationWorker:
             if len(recipes) != planned_count:
                 self.repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_count_mismatch")
                 raise VNAssetGenerationError("vn_asset_recipe_count_mismatch", batch_id=batch_id)
+            variants = [(int(row["slot_id"]), int(row["variant_index"])) for row in recipes]
+        elif authored_slots is not None:
             variants = [
-                (int(row["slot_id"]), int(row["variant_index"]))
-                for row in recipes
+                (int(slot["slot_id"]), index)
+                for slot in authored_slots for index in range(int(slot["variant_count"]))
             ]
+            planned_count = len(variants)
         else:
             slots = self.repo.list_slots(pack_id)
             options = _loads_json(batch.get("options_json"), {})
@@ -115,56 +160,61 @@ class VNAssetGenerationWorker:
                 slots = [slot for slot in slots if int(slot["id"]) in slot_ids]
             variant_count_override = options.get("variant_count")
             variants = [
-                (int(slot["id"]), variant_index)
+                (int(slot["id"]), index)
                 for slot in slots
-                for variant_index in range(int(variant_count_override or slot["variant_count"]))
+                for index in range(int(variant_count_override or slot["variant_count"]))
             ]
             planned_count = len(variants)
-        total_slots = len({slot_id for slot_id, _ in variants})
 
+        by_slot: dict[int, list[int]] = {}
+        for slot_id, variant_index in variants:
+            by_slot.setdefault(slot_id, []).append(variant_index)
+        total_slots = len(by_slot)
         enqueued_count = 0
+        fully_enqueued_slot_ids: set[int] = set()
         try:
-            for slot_id, variant_index in variants:
-                create_generate_variant_job(
-                    self.jobs_manager,
-                    pack_id=pack_id,
-                    slot_id=slot_id,
-                    variant_index=variant_index,
-                    batch_id=batch_id,
-                    user_id=user_id,
+            for slot_id, indexes in by_slot.items():
+                for variant_index in indexes:
+                    create_generate_variant_job(
+                        self.jobs_manager, pack_id=pack_id, slot_id=slot_id,
+                        variant_index=variant_index, batch_id=batch_id, user_id=user_id,
+                    )
+                    enqueued_count += 1
+                fully_enqueued_slot_ids.add(slot_id)
+            if recipe_version == 1:
+                self.repo.mark_batch_enqueued(
+                    batch_id, planned_count=planned_count,
+                    enqueued_count=enqueued_count, total_slots=total_slots,
                 )
-                enqueued_count += 1
-            self.repo.mark_batch_enqueued(
-                batch_id,
-                planned_count=planned_count,
-                enqueued_count=enqueued_count,
-                total_slots=total_slots,
-            )
+                batch = self.repo.get_batch(batch_id) or batch
+            else:
+                batch = self.repo.complete_batch_fanout(
+                    batch_id, planned_count=planned_count,
+                    enqueued_count=enqueued_count, total_slots=total_slots,
+                )
         except Exception as exc:
-            self.repo.update_batch(
-                batch_id,
-                {
-                    **({"status": "failed"} if recipe_version == 0 else {}),
-                    "planned_count": planned_count,
-                    "enqueued_count": enqueued_count,
+            if recipe_version == 1:
+                self.repo.update_batch(batch_id, {
+                    "planned_count": planned_count, "enqueued_count": enqueued_count,
                     "enqueue_error": str(exc),
-                },
-            )
+                })
+            else:
+                self.repo.fail_batch_fanout_if_active(
+                    batch_id, planned_count=planned_count, enqueued_count=enqueued_count,
+                    error=str(exc),
+                    failed_slot_ids=[
+                        slot_id for slot_id in by_slot if slot_id not in fully_enqueued_slot_ids
+                    ] if not _job_has_retry_remaining(job) else (),
+                )
             raise
 
         logger.info(
             "VN asset batch fanout completed: batch_id={} pack_id={} slots={} variants={}",
-            batch_id,
-            pack_id,
-            total_slots,
-            enqueued_count,
+            batch_id, pack_id, total_slots, enqueued_count,
         )
         return {
-            "status": "enqueued",
-            "batch_id": batch_id,
-            "pack_id": pack_id,
-            "enqueued_count": enqueued_count,
-            "planned_count": planned_count,
+            "status": str(batch["status"]), "batch_id": batch_id, "pack_id": pack_id,
+            "enqueued_count": enqueued_count, "planned_count": planned_count,
         }
 
     async def handle_generate_variant(
@@ -200,7 +250,9 @@ class VNAssetGenerationWorker:
             )
             if replay is not None:
                 return replay
-        if _is_terminal_batch_status(batch["status"]):
+        if _is_terminal_batch_status(batch["status"]) and not (
+            recipe_version == 0 and _retryable_fanout_failure(batch)
+        ):
             if recipe_version == 1 and batch["status"] == "cancelled":
                 await self._cleanup_cancelled_variant_storage(
                     batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
@@ -232,7 +284,7 @@ class VNAssetGenerationWorker:
                     "vn_asset_recipe_not_found", batch_id=batch_id,
                     slot_id=slot_id, variant_index=variant_index,
                 )
-        else:
+        elif batch.get("recipe_json") is None:
             character = self.repo.get_character(int(pack["primary_character_id"]))
             if character is None:
                 raise ValueError("primary_character_not_found")
@@ -319,7 +371,9 @@ class VNAssetGenerationWorker:
         except Exception as exc:
             legacy_status = SLOT_STATUS_FAILED
             definitive_replay_failure = isinstance(exc, VNAssetGenerationError) and not exc.retryable
-            if (not reconciling or definitive_replay_failure) and not (
+            if (recipe_version == 1 or definitive_replay_failure or not _job_has_retry_remaining(job)) and (
+                not reconciling or definitive_replay_failure
+            ) and not (
                 isinstance(exc, VNAssetGenerationError) and exc.retryable
             ):
                 await self.repo.run_worker_replay_operation(partial(
@@ -520,7 +574,7 @@ class VNAssetGenerationWorker:
         job_type = str(job.get("job_type") or "").strip()
         payload = job.get("payload") or {}
         if job_type == VN_ASSET_ENQUEUE_BATCH_JOB_TYPE:
-            return self.handle_enqueue_batch(payload)
+            return self.handle_enqueue_batch(payload, job=job)
         if job_type == VN_ASSET_GENERATE_VARIANT_JOB_TYPE:
             raise VNAssetGenerationError("vn_asset_generate_variant_requires_async_handler")
         if job_type == VN_PACK_EXPORT_JOB_TYPE:
@@ -535,7 +589,7 @@ class VNAssetGenerationWorker:
         job_type = str(job.get("job_type") or "").strip()
         payload = job.get("payload") or {}
         if job_type == VN_ASSET_ENQUEUE_BATCH_JOB_TYPE:
-            return self.handle_enqueue_batch(payload)
+            return self.handle_enqueue_batch(payload, job=job)
         if job_type == VN_ASSET_GENERATE_VARIANT_JOB_TYPE:
             return await self.handle_generate_variant(payload, job=job)
         if job_type == VN_PACK_EXPORT_JOB_TYPE:
@@ -888,16 +942,58 @@ class VNAssetGenerationWorker:
         pack_id = int(pack["id"])
         slot_id = int(slot["id"])
         batch_id = int(batch["id"])
-        if recipe is None:
-            if character is None:
-                raise ValueError("primary_character_not_found")
-            recipe = {
-                **build_slot_recipe(self.repo, pack, slot, character),
-                "seed": variant_seed(slot, variant_index),
-            }
+        if batch.get("recipe_json") is not None:
+            authored = load_recipe(batch["recipe_json"], pack_id=pack_id, owner_user_id=user_id)
+            authored_slot = slot_recipe(authored, slot_id)
+            if variant_index < 0 or variant_index >= int(authored_slot["variant_count"]):
+                raise ValueError("vn_asset_recipe_variant_mismatch")
+            if recipe is None:
+                recipe = authored_variant_recipe(authored, authored_slot, variant_index)
+            if batch.get("execution_recipe_json") is None:
+                config = get_image_generation_config()
+                execution_recipe = {
+                    "version": RECIPE_VERSION,
+                    "slots": [self._resolve_slot_execution(entry, config) for entry in authored["slots"]],
+                }
+
+                def pin_execution_recipe() -> dict[str, Any]:
+                    """Admit the current claim and pin settings in one owning transaction."""
+                    with self.repo.db.transaction():
+                        if attempt_token is not None:
+                            self.repo.start_variant_generation(
+                                batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
+                                attempt_token=attempt_token,
+                                validate_authority=(
+                                    lambda: self._require_current_job_lease(job, user_id=user_id)
+                                ) if job else None,
+                            )
+                        return self.repo.set_execution_recipe_if_absent(batch_id, execution_recipe)
+
+                batch = await self.repo.run_worker_replay_operation(pin_execution_recipe)
+            execution = slot_recipe(self._execution_recipe(batch), slot_id)
+            backend = str(execution["backend"])
+            model = execution.get("model")
+            metadata_model = model
+            if backend == "stable_diffusion_cpp":
+                mode, configured_path = _local_model_state(get_image_generation_config())
+                if mode != execution.get("local_model_mode"):
+                    raise ValueError("vn_asset_local_model_changed")
+                if model is None:
+                    if _path_digest(configured_path) != execution.get("local_model_path_sha256"):
+                        raise ValueError("vn_asset_local_model_changed")
+                    model = configured_path
+        else:
+            if recipe is None:
+                if character is None:
+                    raise ValueError("primary_character_not_found")
+                recipe = {
+                    **build_slot_recipe(self.repo, pack, slot, character),
+                    "seed": variant_seed(slot, variant_index),
+                }
+            backend = self._resolve_backend(recipe.get("requested_backend"))
+            model = _first_text(recipe.get("model"))
+            metadata_model = model
         labels = dict(recipe["labels"])
-        backend = self._resolve_backend(recipe.get("requested_backend"))
-        model = _first_text(recipe.get("model"))
         width = _positive_int(recipe.get("width"))
         height = _positive_int(recipe.get("height"))
         image_format = str(recipe["format"])
@@ -909,7 +1005,7 @@ class VNAssetGenerationWorker:
             height=height,
             steps=_positive_int(recipe.get("steps")),
             cfg_scale=_float_or_none(recipe.get("cfg_scale")),
-            seed=_positive_int(recipe.get("seed")),
+            seed=recipe.get("seed"),
             sampler=_first_text(recipe.get("sampler")),
             model=model,
             format=image_format,
@@ -925,7 +1021,7 @@ class VNAssetGenerationWorker:
                 validate_authority=(lambda: self._require_current_job_lease(job, user_id=user_id)) if job else None,
             ))
         else:
-            self.repo.update_slot(slot_id, {"status": SLOT_STATUS_GENERATING, "last_error": None})
+            self.repo.mark_slot_generation_started(slot_id, batch_id)
         with self.backend_gate.try_acquire(backend, model=model) as lease:
             if not lease.acquired:
                 raise VNAssetGenerationError(
@@ -977,7 +1073,7 @@ class VNAssetGenerationWorker:
                 context_snapshot["legacy_delivery_fingerprint"] = fingerprint
         backend_metadata = {
             "backend": backend,
-            "model": model,
+            "model": metadata_model,
             "request_id": request.request_id,
             "content_type": image.content_type,
             "bytes_len": image.bytes_len,
@@ -1083,7 +1179,7 @@ class VNAssetGenerationWorker:
                     batch_id=batch_id, slot_id=slot_id, item_id=item_id,
                 ) from exc
         else:
-            self.repo.update_slot(slot_id, {"status": SLOT_STATUS_REVIEWING, "last_error": None})
+            self.repo.mark_slot_generation_succeeded(slot_id, batch_id)
             self._record_generation_success(batch_id=batch_id)
         logger.info(
             "VN asset variant generated: pack_id={} slot_id={} item_id={} backend={}",
@@ -1165,20 +1261,29 @@ class VNAssetGenerationWorker:
             raise VNAssetGenerationError("image_backend_unavailable", requested_backend=requested_backend)
         return str(backend)
 
+    def _resolve_slot_execution(self, slot: Mapping[str, Any], config: Any) -> dict[str, Any]:
+        """Pin the public backend/model selection without persisting local paths."""
+        backend = self._resolve_backend(slot.get("requested_backend"))
+        resolved = {
+            "slot_id": slot["slot_id"],
+            "backend": backend,
+            "model": resolve_image_generation_model(backend, slot.get("requested_model"), config),
+        }
+        if backend == "stable_diffusion_cpp":
+            mode, configured_path = _local_model_state(config)
+            resolved["local_model_mode"] = mode
+            if resolved["model"] is None:
+                resolved["local_model_path_sha256"] = _path_digest(configured_path)
+        return resolved
+
+    @staticmethod
+    def _execution_recipe(batch: Mapping[str, Any]) -> dict[str, Any]:
+        """Read the batch's pinned execution recipe or reject an invalid snapshot."""
+        return load_execution_recipe(batch["execution_recipe_json"])
+
     def _record_generation_success(self, *, batch_id: int) -> None:
-        batch = self.repo.get_batch(batch_id)
-        if batch is None:
-            return
-        completed_count = int(batch["completed_count"] or 0) + 1
-        planned_count = int(batch["planned_count"] or batch["total_variants"] or 0)
-        fields: dict[str, Any] = {"completed_count": completed_count}
-        if not _is_terminal_batch_status(batch["status"]):
-            if planned_count and completed_count >= planned_count:
-                fields["status"] = "completed"
-                fields["completed_at"] = _utc_now()
-            else:
-                fields["status"] = "processing"
-        self.repo.update_batch(batch_id, fields)
+        """Advance batch completion without reopening a terminal batch."""
+        self.repo.record_batch_variant_success(batch_id)
 
     def _record_generation_failure(
         self, *, batch_id: int, slot_id: int, variant_index: int, error: str,
@@ -1218,9 +1323,7 @@ class VNAssetGenerationWorker:
                 validate_authority=(lambda: self._require_current_job_lease(job, user_id=int(user_id))) if job else None,
             )
             return
-        self.repo.update_slot(slot_id, {"status": SLOT_STATUS_FAILED, "last_error": error})
-        failed_count = int(batch["failed_count"] or 0) + 1
-        self.repo.update_batch(batch_id, {"status": "failed", "failed_count": failed_count})
+        self.repo.record_batch_variant_failure(batch_id, slot_id=slot_id, error=error)
 
     def _cancel_terminal_batch_jobs(
         self,
@@ -1279,6 +1382,24 @@ _TERMINAL_BATCH_STATUSES = {"cancelled", "canceled", "completed", "failed"}
 
 def _is_terminal_batch_status(status: Any) -> bool:
     return str(status or "").strip().lower() in _TERMINAL_BATCH_STATUSES
+
+
+def _retryable_fanout_failure(batch: Mapping[str, Any]) -> bool:
+    return (
+        batch["status"] == "failed"
+        and batch.get("enqueue_error") is not None
+        and int(batch["failed_count"] or 0) == 0
+    )
+
+
+def _job_has_retry_remaining(job: Mapping[str, Any] | None) -> bool:
+    """Leave retryable attempts active until the Jobs retry budget is exhausted."""
+    if job is None:
+        return False
+    try:
+        return int(job.get("retry_count") or 0) < int(job.get("max_retries") or 0)
+    except (TypeError, ValueError):
+        return False
 
 
 def _loads_json(value: Any, default: Any) -> Any:
@@ -1422,6 +1543,18 @@ def _join_prompt_parts(*values: Any) -> str | None:
     return joined or None
 
 
+def _local_model_state(config: Any) -> tuple[str, str | None]:
+    diffusion_path = getattr(config, "sd_cpp_diffusion_model_path", None)
+    mode = "diffusion" if diffusion_path else "model"
+    raw_path = diffusion_path or getattr(config, "sd_cpp_model_path", None)
+    path = str(Path(raw_path).expanduser().resolve(strict=False)) if raw_path else None
+    return mode, path
+
+
+def _path_digest(path: str | None) -> str | None:
+    return sha256(path.encode("utf-8")).hexdigest() if path is not None else None
+
+
 def _generation_shape(
     pack: Mapping[str, Any], slot: Mapping[str, Any]
 ) -> tuple[int | None, int | None, str, dict[str, Any]]:
@@ -1485,6 +1618,47 @@ def build_slot_recipe(
         "asset_type": str(slot["asset_type"]),
         "slot_key": slot.get("slot_key"),
         "primary_character_id": pack.get("primary_character_id"),
+    }
+
+
+def authored_variant_recipe(
+    recipe: Mapping[str, Any], slot: Mapping[str, Any], variant_index: int,
+) -> dict[str, Any]:
+    """Project one frozen authored slot into the durable per-variant format.
+
+    Args:
+        recipe: Validated authored batch containing its original character ID.
+        slot: Frozen slot inputs from that batch, not a current database row.
+        variant_index: Recorded variant whose seed must be retained exactly.
+
+    Returns:
+        Frozen generation parameters with prompt metadata and labels preserved.
+
+    Raises:
+        ValueError: The variant is absent from the recorded slot.
+        KeyError: Required authored fields are missing.
+    """
+    if variant_index < 0 or variant_index >= int(slot["variant_count"]):
+        raise ValueError("vn_asset_recipe_variant_mismatch")
+    snapshot = slot["prompt_snapshot"]
+    extra_params = dict(slot["extra_params"])
+    return {
+        "prompt": snapshot["prompt"],
+        "negative_prompt": snapshot["negative_prompt"],
+        "token_estimates": snapshot.get("token_estimates", {}),
+        "omitted_source_counts": snapshot.get("omitted_source_counts", {}),
+        "warnings": snapshot.get("warnings", []),
+        "requested_backend": slot["requested_backend"],
+        "model": slot["requested_model"],
+        "width": slot["width"], "height": slot["height"], "format": slot["format"],
+        "steps": _positive_int(extra_params.pop("steps", None)),
+        "cfg_scale": _float_or_none(extra_params.pop("cfg_scale", None)),
+        "sampler": _first_text(extra_params.pop("sampler", None)),
+        "extra_params": extra_params,
+        "seed": slot["seeds"][variant_index],
+        "labels": dict(slot["labels"]),
+        "asset_type": slot["asset_type"], "slot_key": slot["slot_key"],
+        "primary_character_id": recipe["primary_character_id"],
     }
 
 
@@ -1571,7 +1745,3 @@ def _job_id(job: Mapping[str, Any] | None) -> str | None:
     if not job:
         return None
     return _first_text(job.get("id"), job.get("uuid"))
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

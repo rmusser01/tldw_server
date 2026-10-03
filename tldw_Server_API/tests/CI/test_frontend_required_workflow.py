@@ -101,7 +101,8 @@ def test_frontend_required_fails_closed_on_unit_shard_outcomes() -> None:
     assert "needs.admission.outputs.should_run == 'true'" in unit_job["if"]
     assert "needs.changes.result == 'success'" in unit_job["if"]
     assert "needs.changes.outputs.tldw_frontend_changed == 'true'" in unit_job["if"]
-    assert final_job["needs"] == ["changes", "admission", "frontend-unit-tests"]
+    assert "needs.await_license.outputs.license_passed == 'true'" in unit_job["if"]
+    assert final_job["needs"] == ["changes", "admission", "frontend-unit-tests", "await_license"]
 
     guard = next(step for step in final_job["steps"] if step.get("name") == "Require frontend unit shard success")
     assert guard["env"] == {

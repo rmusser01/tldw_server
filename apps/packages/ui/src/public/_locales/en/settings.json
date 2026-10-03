@@ -6568,5 +6568,89 @@
   },
   "servicePrompts_workflows_writingContinuation": {
     "message": "Writing Playground continuation"
+  },
+  "chatMacrosSettings_title": {
+    "message": "Chat macros"
+  },
+  "chatMacrosSettings_description": {
+    "message": "Author reusable chat workflows and shape how their results are returned."
+  },
+  "chatMacrosSettings_importFile": {
+    "message": "Import macro YAML file"
+  },
+  "chatMacrosSettings_new": {
+    "message": "New macro"
+  },
+  "chatMacrosSettings_importLabel": {
+    "message": "Import macro"
+  },
+  "chatMacrosSettings_import": {
+    "message": "Import"
+  },
+  "chatMacrosSettings_refresh": {
+    "message": "Refresh macros"
+  },
+  "chatMacrosSettings_tabs": {
+    "message": "Chat macro settings tabs"
+  },
+  "chatMacrosSettings_macros": {
+    "message": "Macros"
+  },
+  "chatMacrosSettings_profiles": {
+    "message": "Output profiles"
+  },
+  "chatMacrosSettings_catalog": {
+    "message": "Macro catalog"
+  },
+  "chatMacrosSettings_loadingMacros": {
+    "message": "Loading macros"
+  },
+  "chatMacrosSettings_retryCatalog": {
+    "message": "Retry macro list"
+  },
+  "chatMacrosSettings_empty": {
+    "message": "No macros found."
+  },
+  "chatMacrosSettings_cloneName": {
+    "message": "Clone macro name"
+  },
+  "chatMacrosSettings_cloning": {
+    "message": "Cloning"
+  },
+  "chatMacrosSettings_loadingProfiles": {
+    "message": "Loading output profiles"
+  },
+  "chatMacrosSettings_retrySettings": {
+    "message": "Retry settings"
+  },
+  "chatMacrosSettings_enabled": {
+    "message": "Enabled"
+  },
+  "chatMacrosSettings_disabled": {
+    "message": "Disabled"
+  },
+  "chatMacrosSettings_valid": {
+    "message": "Valid"
+  },
+  "chatMacrosSettings_invalid": {
+    "message": "Invalid"
+  },
+  "chatMacrosSettings_unknown": {
+    "message": "Unknown"
+  },
+  "chatMacrosSettings_select": {
+    "message": "Select /{{command}}"
+  },
+  "chatMacrosSettings_toggle": {
+    "message": "Toggle /{{command}}"
+  },
+  "chatMacrosSettings_clone": {
+    "message": "Clone /{{command}}"
+  },
+  "chatMacrosSettings_builtin": {
+    "message": "Built-in"
+  },
+  "chatMacrosSettings_user": {
+    "message": "User"
   }
 }

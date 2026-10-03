@@ -6,6 +6,7 @@ interface for SQLite databases, maintaining compatibility with the
 existing codebase while enabling multi-backend support.
 """
 
+import hashlib
 import re
 import sqlite3
 import threading
@@ -19,16 +20,22 @@ from typing import Any, Optional, Union
 
 from loguru import logger as _loguru_logger
 
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
+from tldw_Server_API.app.core.Utils.backoff import is_sqlite_locked_error
+
 from ..sqlite_policy import configure_sqlite_connection
 from .base import (
     BackendFeatures,
     BackendType,
     ConnectionPool,
+    ConstraintViolationError,
     DatabaseBackend,
     DatabaseConfig,
     DatabaseError,
     FTSQuery,
     QueryResult,
+    TransientContentionError,
+    UniqueConstraintError,
 )
 from .fts_translator import FTSQueryTranslator
 
@@ -163,6 +170,13 @@ class SQLiteConnectionPool(ConnectionPool):
             cache_size=-2000,
         )
 
+        def history_sha256(value: Any) -> str | None:
+            if value is None:
+                return None
+            return hashlib.sha256(value.encode("utf-8") if isinstance(value, str) else bytes(value)).hexdigest()
+
+        # Register once on the real handle before any statement can use it.
+        conn.create_function("h1_sha256", 1, history_sha256, deterministic=True)
         return conn
 
     def return_connection(self, connection: sqlite3.Connection) -> None:
@@ -174,7 +188,7 @@ class SQLiteConnectionPool(ConnectionPool):
 
         A different current handle remains cached and usable. Matching cached
         handles use ``clear_thread_local_connection()``: ordinary close failures
-        are logged with a traceback, and the handle is detached to prevent reuse
+        are logged by exception type, and the handle is detached to prevent reuse
         even if the underlying resource could not be closed.
 
         Args:
@@ -199,7 +213,7 @@ class SQLiteConnectionPool(ConnectionPool):
         """Close and detach the current thread's cached connection.
 
         Ordinary exceptions from close are logged with connection/thread context
-        and traceback. The failed handle is still detached so subsequent borrows
+        and exception type. The failed handle is still detached so subsequent borrows
         create a fresh connection; its underlying resource may remain open. This
         method does not retry or reuse that handle.
 
@@ -217,11 +231,12 @@ class SQLiteConnectionPool(ConnectionPool):
                 if conn:
                     try:
                         conn.close()
-                    except Exception:
-                        logger.exception(
+                    except Exception as exc:  # noqa: BLE001 - detach after any ordinary close failure
+                        logger.error(  # noqa: TRY400 - privacy boundary excludes exception details
                             "Failed to close rejected SQLite connection {connection_id} "
-                            "on thread {thread_id}; detaching it to prevent reuse",
+                            "on thread {thread_id}; detaching it to prevent reuse (error_type={error_type})",
                             connection_id=id(conn), thread_id=thread_id,
+                            error_type=exception_type_for_log(exc),
                         )
             finally:
                 self._connections.pop(thread_id, None)
@@ -235,19 +250,35 @@ class SQLiteConnectionPool(ConnectionPool):
         try:
             yield conn
         except Exception as e:
-            logger.exception(f"Error in connection context: {e}")
+            logger.error("SQLite connection context failed (error_type={})", exception_type_for_log(e))  # noqa: TRY400 - no exception data
             raise
 
     def close_all(self) -> None:
-        """Close all connections in the pool."""
+        """Close the pool and the connections no other live thread is using.
+
+        Connections are thread-local and opened with ``check_same_thread=False``,
+        which does not serialize them: closing one from here while its owning
+        thread is mid-statement segfaults the interpreter (CI shutdown did this
+        to a background loop). This thread's connection and those of exited
+        threads close now; another live thread's connection is released from the
+        pool and closes when that thread drops it. New checkouts are refused.
+        """
+        current_thread_id = threading.get_ident()
         with self._lock:
             self._closed = True
-            for conn in self._connections.values():
-                if conn:
-                    try:
-                        conn.close()
-                    except (OSError, RuntimeError, sqlite3.Error) as e:
-                        logger.exception(f"Error closing connection: {e}")
+            for thread_id, conn in self._connections.items():
+                if not conn:
+                    continue
+                owner_ref = self._thread_refs.get(thread_id)
+                owner = owner_ref() if owner_ref is not None else None
+                if thread_id != current_thread_id and owner is not None and owner.is_alive():
+                    continue
+                try:
+                    conn.close()
+                except (OSError, RuntimeError, sqlite3.Error) as e:
+                    logger.error(  # noqa: TRY400 - no exception data
+                        "SQLite connection close failed (error_type={})", exception_type_for_log(e)
+                    )
             self._connections.clear()
             self._thread_refs.clear()
 
@@ -412,6 +443,9 @@ class SQLiteBackend(DatabaseBackend):
         """Execute a query and return results."""
         start_time = time.time()
         redacted_failure = False
+        constraint_failure = False
+        unique_failure = False
+        contention_failure = False
 
         conn = connection or self.get_pool().get_connection()
 
@@ -445,8 +479,23 @@ class SQLiteBackend(DatabaseBackend):
                 "SQLite query execution failed"
             )
             redacted_failure = True
+            # The CLASS of failure only. sqlite3.IntegrityError covers CHECK, NOT NULL,
+            # FOREIGN KEY and UNIQUE. The raise stays outside this except block so the
+            # driver exception is never chained; the message is unchanged.
+            constraint_failure = isinstance(e, sqlite3.IntegrityError)
+            unique_failure = (
+                constraint_failure
+                and getattr(e, "sqlite_errorcode", None) == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+            )
+            contention_failure = is_sqlite_locked_error(e)
 
         if redacted_failure:
+            if unique_failure:
+                raise UniqueConstraintError("SQLite query execution failed")
+            if constraint_failure:
+                raise ConstraintViolationError("SQLite query execution failed")
+            if contention_failure:
+                raise TransientContentionError("SQLite query execution failed")
             raise DatabaseError("SQLite query execution failed")
 
     def execute_many(
@@ -488,7 +537,7 @@ class SQLiteBackend(DatabaseBackend):
             # Execute the schema as a script
             conn.executescript(schema)
         except sqlite3.Error as e:
-            logger.exception(f"Schema creation failed: {e}")
+            logger.error("SQLite schema creation failed (error_type={})", exception_type_for_log(e))  # noqa: TRY400 - privacy boundary excludes exception details
             raise DatabaseError(f"Failed to create schema: {e}") from e
 
     def table_exists(self, table_name: str, connection: Optional[sqlite3.Connection] = None) -> bool:

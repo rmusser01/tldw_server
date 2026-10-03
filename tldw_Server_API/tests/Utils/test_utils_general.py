@@ -1,5 +1,3 @@
-import builtins
-import tempfile
 import zipfile
 from pathlib import Path
 
@@ -134,28 +132,6 @@ def test_extract_text_from_segments_error_logs_shape_not_raw_text(monkeypatch):
     assert all("private transcript" not in message for message in error_messages)
 
 
-def test_save_temp_file_normalizes_and_preserves_content(monkeypatch):
-    class DummyUpload:
-        def __init__(self, name, data):
-            self.name = name
-            self._data = data
-
-        def read(self):
-            return self._data
-
-    upload = DummyUpload("../evil.txt", b"payload")
-    saved_path = Utils.save_temp_file(upload)
-
-    temp_dir = Path(tempfile.gettempdir()).resolve()
-    resolved_saved = Path(saved_path).resolve()
-
-    assert resolved_saved.parent == temp_dir
-    assert resolved_saved.exists()
-    assert b"payload" == resolved_saved.read_bytes()
-
-    resolved_saved.unlink()
-
-
 def test_safe_read_file_handles_empty_decodes(monkeypatch):
     class FakeBytes(bytes):
         def decode(self, encoding="utf-8", errors="strict"):
@@ -171,7 +147,17 @@ def test_safe_read_file_handles_empty_decodes(monkeypatch):
         def read(self):
             return FakeBytes(b"data")
 
-    monkeypatch.setattr(builtins, "open", lambda *_args, **_kwargs: DummyFile())
+    # Patch the `open` name inside the `Utils` module's own globals rather than
+    # `builtins.open`: Utils.py resolves the bare `open(...)` call via normal
+    # Python name lookup (module globals, falling back to builtins), so a
+    # module-scoped override intercepts only Utils.py's own calls. Patching
+    # `builtins.open` instead would patch it for every module in the process
+    # that doesn't define its own `open` -- including configparser's `.read()`,
+    # which another (now-global, autouse) fixture's teardown can trigger via
+    # config.py's lazy settings loader while this test is still active,
+    # raising unrelated `TypeError: 'DummyFile' object is not iterable`
+    # failures elsewhere (TASK-13400).
+    monkeypatch.setattr(Utils, "open", lambda *_args, **_kwargs: DummyFile(), raising=False)
     monkeypatch.setattr(Utils.chardet, "detect", lambda _raw: {"encoding": "ascii"})
 
     result = Utils.safe_read_file("dummy-path")

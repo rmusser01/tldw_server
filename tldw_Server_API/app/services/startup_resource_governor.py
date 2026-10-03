@@ -95,25 +95,38 @@ async def init_resource_governor(app: Any) -> None:
         app.state.rg_policy_loader = rg_loader
         app.state.rg_policy_store = _store_mode
 
-        try:
-            _backend = _rg_backend_sel()
-            if _backend == "redis":
-                await _ensure_redis_boot_health_if_required()
-                app.state.rg_governor = RedisResourceGovernor(policy_loader=rg_loader)
-                logger.info("ResourceGovernor initialized (redis backend)")
-            else:
-                app.state.rg_governor = MemoryResourceGovernor(policy_loader=rg_loader)
-                logger.info("ResourceGovernor initialized (memory backend)")
-        except _STARTUP_GUARD_EXCEPTIONS as _rg_gov_err:
-            logger.warning(f"ResourceGovernor initialization failed/skipped: {_rg_gov_err}")
+        from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
+        _governance_enabled = bool(_rg_enabled_flag(True))
+        if not _governance_enabled:
+            app.state.rg_governor = None
+            logger.info(
+                "Resource Governor disabled (RG_ENABLED / [ResourceGovernor] enabled); "
+                "policies loaded for diagnostics only"
+            )
+        else:
+            try:
+                _backend = _rg_backend_sel()
+                if _backend == "redis":
+                    await _ensure_redis_boot_health_if_required()
+                    app.state.rg_governor = RedisResourceGovernor(policy_loader=rg_loader)
+                    logger.info("ResourceGovernor initialized (redis backend)")
+                else:
+                    app.state.rg_governor = MemoryResourceGovernor(policy_loader=rg_loader)
+                    logger.info("ResourceGovernor initialized (memory backend)")
+            except _STARTUP_GUARD_EXCEPTIONS as _rg_gov_err:
+                logger.warning(f"ResourceGovernor initialization failed/skipped: {_rg_gov_err}")
 
         _update_policy_snapshot_state(app, rg_loader)
         _register_policy_snapshot_callback(app, rg_loader)
+        log_undefined_policy_references(rg_loader)
         _audit_route_map_coverage(app, rg_loader)
     except _IMPORT_EXCEPTIONS as _rg_err:
         logger.warning(f"ResourceGovernor policy loader initialization skipped: {_rg_err}")
+        _governance_enabled = True  # unknown state; let the warning below decide
 
-    _warn_if_enabled_without_governor(app)
+    if _governance_enabled:
+        _warn_if_enabled_without_governor(app)
 
 
 async def _ensure_redis_boot_health_if_required() -> None:
@@ -182,65 +195,51 @@ def _register_policy_snapshot_callback(app: Any, rg_loader: Any) -> None:
         pass
 
 
+def log_undefined_policy_references(loader: Any) -> list[str]:
+    """Log route-map targets that name no policy. They fall back to ``default`` at runtime."""
+    try:
+        snap = loader.get_snapshot()
+        route_map = dict(getattr(snap, "route_map", {}) or {})
+        policies = set((getattr(snap, "policies", {}) or {}).keys())
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning("RG policy snapshot unavailable ({!r}); undefined policy references were not checked", exc)
+        return []
+    targets = {str(v) for v in (route_map.get("by_path") or {}).values()}
+    targets |= {str(v) for v in (route_map.get("by_tag") or {}).values()}
+    missing = sorted(targets - policies)
+    for pid in missing:
+        logger.error("RG route_map names undefined policy {!r}; requests fall back to 'default'", pid)
+    return missing
+
+
 def _audit_route_map_coverage(app: Any, rg_loader: Any) -> None:
     """Best-effort audit for routes lacking ResourceGovernor route-map coverage."""
     try:
         if not _shared_is_truthy(os.getenv("RG_ROUTE_MAP_AUDIT", "true")):
             return
 
-        snap = rg_loader.get_snapshot()
-        route_map = getattr(snap, "route_map", {}) or {}
-        by_path = dict(route_map.get("by_path") or {})
-        by_tag = dict(route_map.get("by_tag") or {})
-        if not (by_path or by_tag):
-            return
+        from tldw_Server_API.app.core.Resource_Governance.policy_eval import DEFAULT_POLICY_ID
+        from tldw_Server_API.app.core.Resource_Governance.policy_resolver import get_policy_resolver
+        from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
-        skip_prefixes = ("/docs", "/openapi.json", "/redoc", "/static", "/favicon.ico")
-        missing: list[tuple[str, list[str]]] = []
+        resolver = get_policy_resolver(app)
+        if resolver is None:
+            return
+        missing: list[tuple[str, str]] = []
         seen_paths: set[str] = set()
-        for route in getattr(app, "routes", []):
-            path = getattr(route, "path", None)
-            if not path or path in seen_paths:
+        for route in iter_served_routes(getattr(app, "routes", [])):
+            path = route.path
+            if not path.startswith("/api/") or path in seen_paths or not route.methods:
                 continue
-            if path.startswith(skip_prefixes):
-                continue
-            if not (
-                path.startswith("/api/")
-                or path.startswith("/v1/")
-                or path.startswith("/health")
-                or path.startswith("/readyz")
-                or path.startswith("/metrics")
-                or path.startswith("/setup")
-            ):
-                continue
-            if _route_map_matches(path, by_path):
-                seen_paths.add(path)
-                continue
-            tags = list(getattr(route, "tags", []) or [])
-            if tags and any(tag in by_tag for tag in tags):
-                seen_paths.add(path)
-                continue
-            missing.append((path, tags))
             seen_paths.add(path)
+            policy_id = resolver.resolve(path, sorted(route.methods)[0])
+            if policy_id and policy_id != DEFAULT_POLICY_ID and not rg_loader.get_policy(policy_id):
+                missing.append((path, policy_id))
         if missing:
-            sample = ", ".join(f"{path} (tags={tags})" for path, tags in missing[:10])
-            logger.warning(
-                f"RG route_map missing coverage for {len(missing)} routes; sample: {sample}"
-            )
+            sample = ", ".join(f"{p} (policy={pid})" for p, pid in missing[:10])
+            logger.warning(f"RG route_map missing coverage for {len(missing)} routes; sample: {sample}")
     except _IMPORT_EXCEPTIONS as _rg_audit_err:
         logger.debug(f"RG route_map audit skipped: {_rg_audit_err}")
-
-
-def _route_map_matches(path: str, by_path: dict[str, Any]) -> bool:
-    """Return whether a concrete route path matches a route-map entry."""
-    for raw_pattern in by_path:
-        pattern = str(raw_pattern)
-        if pattern.endswith("*"):
-            if path.startswith(pattern[:-1]):
-                return True
-        elif path == pattern:
-            return True
-    return False
 
 
 def _warn_if_enabled_without_governor(app: Any) -> None:
@@ -259,7 +258,7 @@ def _warn_if_enabled_without_governor(app: Any) -> None:
             rg_policy_store as _rg_store_sel,
         )
 
-        if bool(_rg_enabled_flag(False)) and getattr(app.state, "rg_governor", None) is None:
+        if bool(_rg_enabled_flag(True)) and getattr(app.state, "rg_governor", None) is None:
             logger.warning(
                 "ResourceGovernor enabled but not initialized; rate limiting will fail closed. "
                 f"policy_path={_rg_policy_path()} backend={_rg_backend_sel()} "

@@ -1,3 +1,5 @@
+"""PostgreSQL policy sets are canonical, transactional and tenant-bound."""
+
 import contextlib
 from types import SimpleNamespace
 
@@ -10,6 +12,20 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
     ensure_chacha_rls,
     ensure_prompt_studio_rls,
 )
+
+
+def test_workspace_startup_rls_is_guarded_owner_only_and_forced() -> None:
+    """Deleted parents cannot hide lifetime capacity or allow another owner's replay."""
+    assert hasattr(rls_module, "build_workspace_chat_startup_rls_sql")
+    statements = rls_module.build_workspace_chat_startup_rls_sql()
+    policy = " ".join("\n".join(statements).split())
+    assert "to_regclass('workspace_chat_startup_receipts')" in policy
+    assert "workspace_chat_startup_receipts ENABLE ROW LEVEL SECURITY" in policy
+    assert "workspace_chat_startup_receipts FORCE ROW LEVEL SECURITY" in policy
+    assert "USING (owner_user_id = current_setting('app.current_user_id', true))" in policy
+    assert "WITH CHECK (owner_user_id = current_setting('app.current_user_id', true))" in policy
+    assert "EXISTS" not in policy.replace("IF EXISTS", "")
+    assert all("\n".join(build_chacha_rls_sql()).count(statement) == 1 for statement in statements)
 
 
 class _FailingCursor:
@@ -462,6 +478,18 @@ def test_chacha_note_task_graph_rls_checks_scope_and_owned_parents_for_reads_and
         assert read_state_policy.count(clause) == 2
 
 
+@pytest.mark.parametrize("table", ["persona_buddy_preferences", "persona_visual_pack_reviews"])
+def test_companion_owner_policy_protects_reads_and_writes(table: str) -> None:
+    """The canonical installer must protect both new companion ownership tables."""
+    sql = "\n".join(build_chacha_rls_sql())
+    assert f"to_regclass('{table}')" in sql
+    assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in sql
+    assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in sql
+    policy = sql.split(f"CREATE POLICY {table}_owner ON {table}", 1)[1].split("$policy$", 1)[0]
+    assert "USING (user_id = current_setting('app.current_user_id', true))" in policy
+    assert "WITH CHECK (user_id = current_setting('app.current_user_id', true))" in policy
+
+
 def test_chacha_rls_includes_source_review_read_and_write_policies():
     sql = "\n".join(build_chacha_rls_sql())
 
@@ -593,3 +621,17 @@ def test_every_core_chat_policy_has_a_with_check():
         start = sql.index(f"CREATE POLICY {table}_tenant_isolation")
         policy = sql[start : sql.index(";", start)]
         assert "WITH CHECK" in policy, f"{table} policy must constrain writes too"
+
+
+def test_every_native_chat_table_is_forced_with_an_owner_policy():
+    """The native fork DDL is spelled out per table; this keeps it in step with the schema."""
+    from tldw_Server_API.app.core.DB_Management.chacha.native_fork_schema import NATIVE_CHAT_TABLES
+
+    sql = "\n".join(build_chacha_rls_sql())
+    owner = "client_id = current_setting('app.current_user_id', true)"
+    for table in NATIVE_CHAT_TABLES:
+        assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in sql, table
+        assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in sql, table
+        policy = sql.split(f"CREATE POLICY {table}_owner ON {table}", 1)[1].split("$policy$", 1)[0]
+        assert f"USING ({owner})" in policy, table
+        assert f"WITH CHECK ({owner})" in policy, table

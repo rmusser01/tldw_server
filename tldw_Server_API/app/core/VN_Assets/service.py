@@ -49,9 +49,11 @@ from tldw_Server_API.app.core.VN_Assets.constants import (
     WARNING_DEPTH_UNAVAILABLE,
 )
 from tldw_Server_API.app.core.VN_Assets.jobs import (
+    VN_ASSETS_DOMAIN,
     build_legacy_activity_reader,
     create_enqueue_batch_job,
     recover_enqueue_batch_job,
+    vn_asset_batch_group,
 )
 from tldw_Server_API.app.core.VN_Assets.manifest import build_manifest as build_core_manifest
 from tldw_Server_API.app.core.VN_Assets.matrix import expand_starter_matrix
@@ -62,6 +64,12 @@ from tldw_Server_API.app.core.VN_Assets.models import (
     VNAssetSlot,
 )
 from tldw_Server_API.app.core.VN_Assets.prompts import PromptBudgets, build_prompt_preview
+from tldw_Server_API.app.core.VN_Assets.recipe import (
+    build_authored_recipe,
+    load_execution_recipe,
+    load_recipe,
+    slot_recipe,
+)
 from tldw_Server_API.app.core.VN_Assets.state import derive_pack_readiness, derive_slot_status
 from tldw_Server_API.app.core.VN_Assets.storage import (
     detect_image_dimensions,
@@ -71,7 +79,7 @@ from tldw_Server_API.app.core.VN_Assets.storage import (
     resolve_vn_asset_storage_path,
     unlink_vn_asset_storage_file,
 )
-from tldw_Server_API.app.core.VN_Assets.worker import build_slot_recipe, variant_seed
+from tldw_Server_API.app.core.VN_Assets.worker import authored_variant_recipe
 
 VN_ASSET_APPROVED_CLEANUP_CONFIRMATION = "DELETE APPROVED VN ASSETS"
 
@@ -713,6 +721,8 @@ class VNAssetPackService:
         idempotency_receipt: Mapping[str, str] | None = None,
     ) -> VNAssetGenerationStatusResponse:
         request = request or VNAssetGenerationRequest()
+        if request.source_batch_id is not None:
+            raise ValueError("vn_asset_retry_override_conflict")
         requested_by_user_id = self.owner_user_id if user_id is None else int(user_id)
         selected_slot_ids = set(request.slot_ids)
         with self.repo.generation_transaction():
@@ -735,19 +745,20 @@ class VNAssetPackService:
             if variant_count is not None:
                 options["variant_count"] = int(variant_count)
 
-            character = self.repo.get_character(int(pack["primary_character_id"]))
-            if character is None:
-                raise ValueError("primary_character_not_found")
-            recipes = []
-            for slot in slots:
-                slot_recipe = build_slot_recipe(self.repo, pack, slot, character, strict_world_books=True)
-                for variant_index in range(int(variant_count or slot["variant_count"])):
-                    recipes.append({
-                        "slot_id": int(slot["id"]),
-                        "variant_index": variant_index,
-                        "recipe": {**slot_recipe, "seed": variant_seed(slot, variant_index)},
-                    })
-
+            recipe = build_authored_recipe(
+                self.repo, pack, slots,
+                owner_user_id=requested_by_user_id,
+                variant_count=variant_count,
+            )
+            recipes = [
+                {
+                    "slot_id": int(entry["slot_id"]),
+                    "variant_index": index,
+                    "recipe": authored_variant_recipe(recipe, entry, index),
+                }
+                for entry in recipe["slots"]
+                for index in range(int(entry["variant_count"]))
+            ]
             batch = self.repo.create_batch(
                 pack_id=pack_id,
                 requested_by_user_id=requested_by_user_id,
@@ -756,23 +767,34 @@ class VNAssetPackService:
                 total_variants=total_variants,
                 planned_count=total_variants,
                 options=options,
-                recipes=recipes,
+                recipes=recipes or None,
+                recipe=recipe,
                 idempotency_receipt=idempotency_receipt,
             )
+        return self._enqueue_generation_batch(
+            batch, pack_id=pack_id, user_id=requested_by_user_id, jobs_manager=jobs_manager,
+        )
+
+    def _enqueue_generation_batch(
+        self,
+        batch: Mapping[str, Any],
+        *,
+        pack_id: int,
+        user_id: int,
+        jobs_manager: Any | None,
+    ) -> VNAssetGenerationStatusResponse:
         try:
             job = create_enqueue_batch_job(
                 jobs_manager or self._require_jobs_manager(),
                 pack_id=pack_id,
                 batch_id=int(batch["id"]),
-                user_id=requested_by_user_id,
+                user_id=user_id,
             )
         except Exception as exc:
-            self.repo.update_batch(
-                int(batch["id"]),
-                {
-                    "enqueue_error": str(exc),
-                },
-            )
+            if int(batch.get("recipe_version") or 0) == 1:
+                self.repo.update_batch(int(batch["id"]), {"enqueue_error": str(exc)})
+            else:
+                self.repo.fail_batch_enqueue(int(batch["id"]), str(exc))
             raise
         job_batch_id = str(job.get("id") or job.get("uuid") or "")
         if job_batch_id:
@@ -827,7 +849,7 @@ class VNAssetPackService:
                 pack_id=pack_id,
                 batch_id=batch_id,
                 user_id=self.owner_user_id,
-                fanout_complete=int(batch["enqueued_count"]) >= planned_count,
+                fanout_complete=planned_count > 0 and int(batch["enqueued_count"]) >= planned_count,
             )
             job_batch_id = str(job["id"])
             batch = self.repo.update_batch(
@@ -860,12 +882,99 @@ class VNAssetPackService:
         jobs_manager: Any | None = None,
         idempotency_receipt: Mapping[str, str] | None = None,
     ) -> VNAssetGenerationStatusResponse:
-        self._require_slot_in_pack(pack_id, slot_id)
-        request = request or VNAssetGenerationRequest()
-        request = request.model_copy(update={"slot_ids": [slot_id]})
-        return self.start_generation(
-            pack_id, request, user_id=user_id, jobs_manager=jobs_manager,
-            idempotency_receipt=idempotency_receipt,
+        with self.repo.generation_transaction():
+            slot = self._require_slot_in_pack(pack_id, slot_id)
+            request = request or VNAssetGenerationRequest()
+            owner_user_id = self.owner_user_id if user_id is None else int(user_id)
+            if request.slot_ids and request.slot_ids != [slot_id]:
+                raise ValueError("vn_asset_retry_override_conflict")
+            if request.options:
+                raise ValueError("vn_asset_retry_override_conflict")
+            recorded_failure_id = slot.get("last_failed_batch_id")
+            if request.source_batch_id is not None:
+                source = self.repo.get_batch(request.source_batch_id)
+            elif recorded_failure_id is not None:
+                source = self.repo.get_batch(int(recorded_failure_id))
+            else:
+                source = next(
+                    (
+                        batch for batch in self.repo.list_batches(pack_id)
+                        if batch["status"] == "failed"
+                        and _batch_targets_slot(batch, slot_id)
+                        and (batch["enqueue_error"] is not None or batch["recipe_json"] is None)
+                    ),
+                    None,
+                )
+            if (
+                source is None
+                or int(source["pack_id"]) != pack_id
+                or int(source["requested_by_user_id"]) != owner_user_id
+                or source["status"] != "failed"
+                or (recorded_failure_id is not None and int(source["id"]) != int(recorded_failure_id))
+                or (
+                    recorded_failure_id is None
+                    and source["recipe_json"] is not None
+                    and source["enqueue_error"] is None
+                )
+            ):
+                raise ValueError("vn_asset_retry_source_unavailable")
+            try:
+                recipe = load_recipe(source["recipe_json"], pack_id=pack_id, owner_user_id=owner_user_id)
+                authored_slot = slot_recipe(recipe, slot_id)
+            except ValueError as exc:
+                logger.warning(
+                    "VN asset Retry recipe rejected: batch_id={} pack_id={} slot_id={} owner_user_id={} code={}",
+                    source["id"], pack_id, slot_id, owner_user_id, str(exc),
+                )
+                raise
+            count = int(authored_slot["variant_count"])
+            if count == 0:
+                raise ValueError("vn_asset_retry_source_unavailable")
+            if request.variant_count is not None and request.variant_count != count:
+                raise ValueError("vn_asset_retry_override_conflict")
+            self._enforce_item_limit(self.repo.count_items_for_generation(pack_id) + count)
+            retry_recipe = {**recipe, "slots": [authored_slot]}
+            execution_recipe = None
+            if source["execution_recipe_json"] is not None:
+                execution = load_execution_recipe(source["execution_recipe_json"])
+                try:
+                    execution_slot = slot_recipe(execution, slot_id)
+                except ValueError as exc:
+                    raise ValueError("vn_asset_execution_recipe_invalid") from exc
+                execution_recipe = {**execution, "slots": [execution_slot]}
+            if source["enqueue_error"] is not None and int(source["failed_count"] or 0) == 0:
+                manager = jobs_manager or self._require_jobs_manager()
+                source_jobs = manager.list_jobs(
+                    domain=VN_ASSETS_DOMAIN,
+                    owner_user_id=str(owner_user_id),
+                    batch_group=vn_asset_batch_group(
+                        user_id=owner_user_id, pack_id=pack_id, batch_id=int(source["id"]),
+                    ),
+                    # One parent plus one idempotent job per recorded variant, across both queues.
+                    limit=1 + sum(int(entry["variant_count"]) for entry in recipe["slots"]),
+                )
+                if any(job["status"] in {"queued", "processing"} for job in source_jobs):
+                    raise ValueError("vn_asset_retry_source_active")
+            batch = self.repo.create_batch(
+                pack_id=pack_id,
+                requested_by_user_id=owner_user_id,
+                status="queued",
+                total_slots=1,
+                total_variants=count,
+                planned_count=count,
+                options={"slot_ids": [slot_id], "variant_count": count},
+                recipe=retry_recipe,
+                recipes=[
+                    {"slot_id": slot_id, "variant_index": index,
+                     "recipe": authored_variant_recipe(retry_recipe, authored_slot, index)}
+                    for index in range(count)
+                ],
+                idempotency_receipt=idempotency_receipt,
+                execution_recipe=execution_recipe,
+                source_batch_id=int(source["id"]),
+            )
+        return self._enqueue_generation_batch(
+            batch, pack_id=pack_id, user_id=owner_user_id, jobs_manager=jobs_manager,
         )
 
     def regenerate_item(
@@ -1083,7 +1192,30 @@ class VNAssetPackService:
         )
 
     def _generation_status_response(self, row: Mapping[str, Any]) -> VNAssetGenerationStatusResponse:
-        return VNAssetGenerationStatusResponse(**self._generation_status_data(row))
+        failed_slot_batch_ids = {
+            int(slot["id"]): int(slot["last_failed_batch_id"])
+            for slot in self.repo.list_slots(int(row["pack_id"]))
+            if slot.get("last_failed_batch_id") is not None
+            and (slot.get("last_error") or slot.get("status") == SLOT_STATUS_FAILED)
+        }
+        source_batches = {
+            batch_id: self.repo.get_batch(batch_id)
+            for batch_id in set(failed_slot_batch_ids.values())
+        }
+        return VNAssetGenerationStatusResponse(
+            **self._generation_status_data(row),
+            failed_slot_batch_ids=failed_slot_batch_ids,
+            failed_slot_recipe_available={
+                slot_id: bool(
+                    (source := source_batches[batch_id])
+                    and int(source["pack_id"]) == int(row["pack_id"])
+                    and source["status"] == "failed"
+                    and int(source["requested_by_user_id"]) == self.owner_user_id
+                    and source["recipe_json"] is not None
+                )
+                for slot_id, batch_id in failed_slot_batch_ids.items()
+            },
+        )
 
     def _generation_status_data(self, row: Mapping[str, Any]) -> dict[str, Any]:
         """Project the batch's stable response fields for receipt persistence."""
@@ -1099,6 +1231,9 @@ class VNAssetPackService:
             "failed_count": int(row["failed_count"] or 0),
             "cancelled_count": int(row["cancelled_count"] or 0),
             "enqueue_error": row["enqueue_error"],
+            "source_batch_id": row.get("source_batch_id"),
+            "recipe_available": row.get("recipe_json") is not None,
+            "selected_slot_ids": _batch_selected_slot_ids(row),
         }
 
     def _slot_response(self, row: Mapping[str, Any]) -> VNAssetSlotResponse:
@@ -1435,6 +1570,39 @@ def _join_prompt_parts(*values: Any) -> str | None:
     parts = [_first_text(value) for value in values]
     joined = "\n".join(part for part in parts if part)
     return joined or None
+
+
+def _batch_targets_slot(batch: Mapping[str, Any], slot_id: int) -> bool:
+    if batch.get("recipe_json") is not None:
+        try:
+            recipe = json.loads(batch["recipe_json"])
+        except (TypeError, ValueError):
+            return False
+        return isinstance(recipe, dict) and any(
+            isinstance(slot, dict) and slot.get("slot_id") == slot_id
+            for slot in recipe.get("slots", [])
+        )
+    options = _loads_json(batch.get("options_json"), {})
+    selected = options.get("slot_ids") if isinstance(options, dict) else None
+    return selected is None or slot_id in selected
+
+
+def _batch_selected_slot_ids(batch: Mapping[str, Any]) -> list[int]:
+    if batch.get("recipe_json") is not None:
+        try:
+            recipe = json.loads(batch["recipe_json"])
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(recipe, dict) or not isinstance(recipe.get("slots"), list):
+            return []
+        return [
+            int(slot["slot_id"])
+            for slot in recipe["slots"]
+            if isinstance(slot, dict) and type(slot.get("slot_id")) is int
+        ]
+    options = _loads_json(batch.get("options_json"), {})
+    selected = options.get("slot_ids") if isinstance(options, dict) else None
+    return [slot_id for slot_id in selected if type(slot_id) is int] if isinstance(selected, list) else []
 
 
 def _loads_json(value: Any, default: Any) -> Any:

@@ -7,6 +7,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
 
 
 def _normalize_status(status: str | None) -> str:
@@ -50,18 +51,7 @@ class FederatedIdentityRepo:
             logger.error(f"FederatedIdentityRepo.ensure_tables failed: {exc}")
             raise
 
-    @staticmethod
-    def _row_to_dict(row: Any) -> dict[str, Any]:
-        if isinstance(row, dict):
-            return dict(row)
-        try:
-            keys = row.keys()
-            return {key: row[key] for key in keys}
-        except Exception as row_keys_error:
-            logger.opt(exception=row_keys_error).debug(
-                "Federated identity row key materialization failed; falling back to dict(row)"
-            )
-        return dict(row)
+    _row_to_dict = staticmethod(row_dict)
 
     @staticmethod
     def _normalize_datetime_for_postgres(value: datetime | None) -> datetime | None:

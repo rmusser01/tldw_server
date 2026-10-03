@@ -1,4 +1,11 @@
 {
+  "mediaHandoff": {
+    "conflictLabel": "Conflit lors du transfert de média",
+    "conflict": "Le champ de rédaction contient déjà un brouillon. Insérez la source média, remplacez votre brouillon ou annulez l’importation.",
+    "insert": "Insérer la source média",
+    "replace": "Remplacer le brouillon actuel",
+    "cancel": "Annuler l’importation"
+  },
   "formError": {
     "noModel": "Veuillez sélectionner un modèle",
     "noEmbeddingModel": "Veuillez définir un modèle d'intégration sur la page Paramètres > RAG"

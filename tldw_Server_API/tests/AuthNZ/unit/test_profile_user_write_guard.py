@@ -7,11 +7,13 @@ from statistics import mean, quantiles
 from time import perf_counter
 
 import pytest
+from sqlglot import exp
 from sqlglot import logger as sqlglot_logger
 
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     ProfileUserWriteRejected,
     _active_capability_count,
+    _bootstrap_simple_constraint_is_canonical,
     _classification_cache_clear,
     _classification_cache_info,
     _classify_sql,
@@ -22,7 +24,33 @@ from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     _revoke_profile_user_sql,
 )
 
+# The exact statement Users_DB runs at startup, not a copy that could drift from it.
+from tldw_Server_API.app.core.DB_Management.Users_DB import (
+    _SQLITE_USERS_BOOTSTRAP_SQL as _SQLITE_USERS_BOOTSTRAP,
+)
+
 pytestmark = pytest.mark.unit
+
+
+def test_sqlite_autoincrement_does_not_depend_on_standalone_rendering(monkeypatch) -> None:
+    # sqlglot30.20 suppresses rendering outside an INTEGER PRIMARY KEY column.
+    monkeypatch.setattr(exp.AutoIncrementColumnConstraint, "sql", lambda *_args, **_kwargs: "")
+    assert _bootstrap_simple_constraint_is_canonical(  # nosec B101
+        exp.AutoIncrementColumnConstraint(), backend="sqlite"
+    )
+
+
+@pytest.mark.parametrize("arguments", [{"this": True}, {"this": False}, {"this": None}, {"unknown": "option"}])
+def test_sqlite_autoincrement_rejects_noncanonical_arguments(arguments) -> None:
+    assert not _bootstrap_simple_constraint_is_canonical(  # nosec B101
+        exp.AutoIncrementColumnConstraint(**arguments), backend="sqlite"
+    )
+
+
+def test_postgres_does_not_accept_sqlite_autoincrement() -> None:
+    assert not _bootstrap_simple_constraint_is_canonical(  # nosec B101
+        exp.AutoIncrementColumnConstraint(), backend="postgres"
+    )
 
 
 @pytest.mark.parametrize(
@@ -133,6 +161,23 @@ def test_unprotected_concrete_sql_is_returned_unchanged(
             backend=backend,
             connection_identity=object(),
             operation="execute",
+        )
+        == statement
+    )
+
+
+def test_postgres_in_clause_helper_output_passes_guard() -> None:
+    """sqlglot cannot tokenize adjacent '$1,$2'; generated SQL must stay parseable."""
+    from tldw_Server_API.app.core.AuthNZ.database import build_postgres_in_clause
+
+    placeholders, _ = build_postgres_in_clause(["a", "b", "c"], start_param=2)
+    statement = f"SELECT id FROM tool_catalogs WHERE org_id = $1 AND team_id IN ({placeholders})"  # nosec B608
+    assert (
+        _guard_sql(
+            statement,
+            backend="postgres",
+            connection_identity=object(),
+            operation="fetch",
         )
         == statement
     )
@@ -576,6 +621,119 @@ def test_profile_anchor_ddl_requires_one_shot_capability(statement: str) -> None
             backend="postgres",
             connection_identity=connection,
             operation="execute",
+        )
+
+
+def test_the_sqlite_users_bootstrap_is_canonical() -> None:
+    """The exact DDL Users_DB runs on SQLite must pass the guard.
+
+    Only the PostgreSQL bootstrap had a positive test. sqlglot 30.20.0 stopped rendering a
+    standalone AutoIncrementColumnConstraint (it now emits AUTOINCREMENT only with its
+    INTEGER PRIMARY KEY context), so the guard compared '' to 'AUTOINCREMENT', rejected the
+    canonical table, and every SQLite AuthNZ startup failed with "Failed to create users
+    table". Nothing failed here, because nothing here asserted the SQLite shape.
+    """
+    assert _is_canonical_users_bootstrap_sql(_SQLITE_USERS_BOOTSTRAP, backend="sqlite")
+
+
+def test_the_sqlite_users_bootstrap_rejects_autoincrement_off_the_id_column() -> None:
+    """Control: accepting AUTOINCREMENT by type must not accept it on any column."""
+    moved = _SQLITE_USERS_BOOTSTRAP.replace(
+        "failed_login_attempts INTEGER NOT NULL DEFAULT 0",
+        "failed_login_attempts INTEGER NOT NULL DEFAULT 0 AUTOINCREMENT",
+        1,
+    )
+    assert moved != _SQLITE_USERS_BOOTSTRAP
+    assert not _is_canonical_users_bootstrap_sql(moved, backend="sqlite")
+
+
+@pytest.fixture
+def canonical_sqlite_users_bootstrap() -> str:
+    return _SQLITE_USERS_BOOTSTRAP
+
+
+def test_sqlite_users_bootstrap_requires_exact_one_shot_capability(
+    canonical_sqlite_users_bootstrap: str,
+) -> None:
+    connection = object()
+    statement = canonical_sqlite_users_bootstrap
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            statement,
+            backend="sqlite",
+            connection_identity=connection,
+            operation="execute",
+        )
+
+    capability = _mint_profile_user_sql(
+        statement,
+        backend="sqlite",
+        connection_identity=connection,
+        operation="create",
+        columns=(),
+    )
+    try:
+        with pytest.raises(ProfileUserWriteRejected):
+            _guard_sql(
+                capability,
+                backend="sqlite",
+                connection_identity=object(),
+                operation="execute",
+            )
+        # A boundary mismatch consumes the receipt; success needs a fresh one.
+        capability = _mint_profile_user_sql(
+            statement,
+            backend="sqlite",
+            connection_identity=connection,
+            operation="create",
+            columns=(),
+        )
+        assert (
+            _guard_sql(
+                capability,
+                backend="sqlite",
+                connection_identity=connection,
+                operation="execute",
+            )
+            == statement
+        )
+        with pytest.raises(ProfileUserWriteRejected):
+            _guard_sql(
+                capability,
+                backend="sqlite",
+                connection_identity=connection,
+                operation="execute",
+            )
+    finally:
+        _revoke_profile_user_sql(capability)
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement"),
+    [
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "TEXT PRIMARY KEY AUTOINCREMENT"),
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER AUTOINCREMENT"),
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY"),
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY DESC AUTOINCREMENT"),
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY AUTOINCREMENT AUTOINCREMENT"),
+        ("username TEXT UNIQUE NOT NULL", "username TEXT UNIQUE NOT NULL AUTOINCREMENT"),
+        ("main.users", "temp.users"),
+        ("is_superuser INTEGER NOT NULL DEFAULT 0", "is_superuser INTEGER NOT NULL DEFAULT 1"),
+        ("ON DELETE SET NULL", "ON DELETE CASCADE"),
+    ],
+)
+def test_sqlite_users_bootstrap_rejects_noncanonical_contracts(
+    canonical_sqlite_users_bootstrap: str,
+    original: str,
+    replacement: str,
+) -> None:
+    with pytest.raises(ProfileUserWriteRejected):
+        _mint_profile_user_sql(
+            canonical_sqlite_users_bootstrap.replace(original, replacement, 1),
+            backend="sqlite",
+            connection_identity=object(),
+            operation="create",
+            columns=(),
         )
 
 
@@ -1040,3 +1198,30 @@ def test_profile_user_capability_cannot_be_constructed_directly() -> None:
         )
     with pytest.raises(TypeError):
         _ProfileUserSql()
+
+
+def test_sqlite_users_bootstrap_autoincrement_is_judged_structurally(monkeypatch) -> None:
+    """A bare AUTOINCREMENT constraint must stay canonical however sqlglot renders it.
+
+    sqlglot 30.20 renders a standalone AUTOINCREMENT as "" (it emits it only next to an
+    INTEGER PRIMARY KEY). The guard compared rendered SQL, so the canonical SQLite users
+    bootstrap was rejected and every users table creation failed. Simulate that renderer.
+    """
+    from sqlglot import exp
+
+    from tldw_Server_API.app.core.AuthNZ import profile_user_write_guard as guard
+
+    real_sql = exp.Expression.sql
+
+    def render_bare_autoincrement_as_empty(self, *args, **kwargs):
+        if isinstance(self, exp.AutoIncrementColumnConstraint):
+            return ""
+        return real_sql(self, *args, **kwargs)
+
+    monkeypatch.setattr(exp.Expression, "sql", render_bare_autoincrement_as_empty)
+    assert guard._bootstrap_simple_constraint_is_canonical(
+        exp.AutoIncrementColumnConstraint(), backend="sqlite"
+    )
+    assert not guard._bootstrap_simple_constraint_is_canonical(
+        exp.AutoIncrementColumnConstraint(start=exp.Literal.number(5)), backend="sqlite"
+    )

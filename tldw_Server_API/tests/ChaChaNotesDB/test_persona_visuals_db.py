@@ -5,9 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+    InputError,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-
 
 pytestmark = pytest.mark.unit
 
@@ -37,20 +41,43 @@ def test_user_persona_visuals_dir_is_created_under_user_base(
     assert visuals_dir.is_dir()
 
 
-def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path) -> None:
-    """Verify v44 migration recreates persona visual tables and indexes."""
-    seeded = CharactersRAGDB(db_path, "persona-visuals-seed")
-    seeded.close_connection()
+def _seed_historical_v44(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> CharactersRAGDB:
+    """Build v44 without current compatibility repairs or later registry tables."""
+    def initialize_historical(db: CharactersRAGDB) -> None:
+        with db.transaction() as conn:
+            db._apply_schema_v4(conn)
+            steps = db._sqlite_linear_migration_steps()
+            for version in range(4, 44):
+                steps[version](conn)
+                assert db._get_db_version(conn) == version + 1
 
-    CharactersRAGDB._prepare_sqlite_schema_drift_fixture(
-        db_path,
-        version=44,
-        drop_tables=(
-            "persona_visual_candidates",
-            "persona_visual_assets",
-            "persona_visual_packs",
-        ),
-    )
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 44)
+        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
+        seed = CharactersRAGDB(db_path, "historical-fixture")
+    assert seed._get_db_version(seed.get_connection()) == 44
+    tables = seed._sqlite_table_names(seed.get_connection())
+    assert {
+        "persona_visual_candidates", "persona_visual_assets", "persona_visual_packs", "note_attachments",
+    }.isdisjoint(tables)
+    return seed
+
+
+def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify v44 migration creates persona visual tables and indexes."""
+    seed = _seed_historical_v44(db_path, monkeypatch)
+    try:
+        with seed.transaction() as conn:
+            assert seed._get_db_version(conn) == 44
+            tables = seed._sqlite_table_names(conn)
+            assert {"persona_visual_packs", "note_attachments"}.isdisjoint(tables)
+            conn.execute(
+                "INSERT INTO persona_profiles (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)",
+                ("retained-persona", "user-1", "Historical persona", "Retained prompt"),
+            )
+            before = dict(conn.execute("SELECT * FROM persona_profiles").fetchone())
+    finally:
+        seed.close_all_connections()
 
     migrated = CharactersRAGDB(db_path, "persona-visuals-migration")
     try:
@@ -71,8 +98,10 @@ def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path) ->
         assert "idx_persona_visual_packs_one_active" in pack_indexes
         assert "idx_persona_visual_packs_persona" in pack_indexes
         assert "idx_persona_visual_assets_pack" in asset_indexes
+        after = dict(conn.execute("SELECT * FROM persona_profiles WHERE id = ?", (before["id"],)).fetchone())
+        assert all(after[key] == value for key, value in before.items())
     finally:
-        migrated.close_connection()
+        migrated.close_all_connections()
 
 
 def test_migration_v44_to_v45_creates_persona_visual_tables(
@@ -257,10 +286,22 @@ def test_sqlite_linear_migration_rejects_skipped_versions(
             db.close_connection()
 
 
-def test_migration_v44_to_latest_repairs_missing_persona_tables(db_path: Path) -> None:
+def test_migration_v44_to_latest_repairs_missing_persona_tables(
+    db_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verify drifted v44 databases repair missing persona schema artifacts."""
-    seeded = CharactersRAGDB(db_path, "persona-visuals-missing-persona-seed")
-    seeded.close_connection()
+    seed = _seed_historical_v44(db_path, monkeypatch)
+    try:
+        with seed.transaction() as conn:
+            retained_character_id = conn.execute(
+                "INSERT INTO character_cards (name, description, client_id) VALUES (?, ?, ?)",
+                ("Retained character", "Historical content", seed.client_id),
+            ).lastrowid
+            before = dict(conn.execute(
+                "SELECT * FROM character_cards WHERE id = ?", (retained_character_id,),
+            ).fetchone())
+    finally:
+        seed.close_all_connections()
 
     CharactersRAGDB._prepare_sqlite_schema_drift_fixture(
         db_path,
@@ -318,8 +359,10 @@ def test_migration_v44_to_latest_repairs_missing_persona_tables(db_path: Path) -
 
         memory_indexes = migrated._sqlite_index_names(conn, "persona_memory_entries")
         assert {"idx_persona_memory_scope", "idx_persona_memory_session"}.issubset(memory_indexes)
+        after = dict(conn.execute("SELECT * FROM character_cards WHERE id = ?", (before["id"],)).fetchone())
+        assert all(after[key] == value for key, value in before.items())
     finally:
-        migrated.close_connection()
+        migrated.close_all_connections()
 
 
 def test_postgres_v45_migration_does_not_define_candidate_provenance_column() -> None:
@@ -368,15 +411,27 @@ def test_only_one_active_pack_per_persona(db_instance: CharactersRAGDB) -> None:
         manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
     )
 
+    first_review = db_instance.create_persona_visual_pack_review(
+        pack_id=first["id"], user_id="user-1", reviewer_user_id="user-1",
+        fingerprint="e" * 64, expected_pack_version=int(first["version"]),
+    )
     db_instance.activate_persona_visual_pack(
         persona_id=persona_id,
         user_id="user-1",
         pack_id=first["id"],
+        expected_version=int(first["version"]),
+        reviewed_fingerprint=first_review["fingerprint"],
+    )
+    second_review = db_instance.create_persona_visual_pack_review(
+        pack_id=second["id"], user_id="user-1", reviewer_user_id="user-1",
+        fingerprint="f" * 64, expected_pack_version=int(second["version"]),
     )
     db_instance.activate_persona_visual_pack(
         persona_id=persona_id,
         user_id="user-1",
         pack_id=second["id"],
+        expected_version=int(second["version"]),
+        reviewed_fingerprint=second_review["fingerprint"],
     )
 
     active = db_instance.get_active_persona_visual_pack(
@@ -406,10 +461,16 @@ def test_deactivate_visual_pack_clears_active_pack(db_instance: CharactersRAGDB)
         manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
     )
 
+    review = db_instance.create_persona_visual_pack_review(
+        pack_id=pack["id"], user_id="user-1", reviewer_user_id="user-1",
+        fingerprint="g" * 64, expected_pack_version=int(pack["version"]),
+    )
     db_instance.activate_persona_visual_pack(
         persona_id=persona_id,
         user_id="user-1",
         pack_id=pack["id"],
+        expected_version=int(pack["version"]),
+        reviewed_fingerprint=review["fingerprint"],
     )
     db_instance.deactivate_persona_visual_pack(
         persona_id=persona_id,
@@ -453,50 +514,175 @@ def test_assets_are_scoped_to_pack_persona_and_user(db_instance: CharactersRAGDB
     )
 
     asset_a = db_instance.create_persona_visual_asset(
-        pack_id=pack_a["id"],
-        persona_id=persona_a,
-        user_id="user-1",
-        asset_role="frame",
-        storage_key="persona_visuals/persona-a/pack-a/asset-a.png",
-        original_filename="asset-a.png",
-        mime_type="image/png",
-        byte_size=12,
-        checksum_sha256="a" * 64,
-        width=64,
-        height=64,
+        pack_id=pack_a["id"], persona_id=persona_a, user_id="user-1", asset_role="frame",
+        storage_key="persona_visuals/persona-a/pack-a/asset-a.png", original_filename="asset-a.png",
+        mime_type="image/png", byte_size=12, checksum_sha256="a" * 64, width=64, height=64,
         provenance="uploaded",
     )
     db_instance.create_persona_visual_asset(
-        pack_id=pack_b["id"],
-        persona_id=persona_b,
-        user_id="user-2",
-        asset_role="frame",
-        storage_key="persona_visuals/persona-b/pack-b/asset-b.png",
-        original_filename="asset-b.png",
-        mime_type="image/png",
-        byte_size=12,
-        checksum_sha256="b" * 64,
-        width=64,
-        height=64,
+        pack_id=pack_b["id"], persona_id=persona_b, user_id="user-2", asset_role="frame",
+        storage_key="persona_visuals/persona-b/pack-b/asset-b.png", original_filename="asset-b.png",
+        mime_type="image/png", byte_size=12, checksum_sha256="b" * 64, width=64, height=64,
         provenance="uploaded",
     )
 
-    assert [
-        item["id"]
-        for item in db_instance.list_persona_visual_assets(
-            pack_id=pack_a["id"],
-            persona_id=persona_a,
-            user_id="user-1",
-        )
-    ] == [asset_a["id"]]
-    assert (
-        db_instance.list_persona_visual_assets(
-            pack_id=pack_a["id"],
-            persona_id=persona_a,
-            user_id="user-2",
-        )
-        == []
+    assert [item["id"] for item in db_instance.list_persona_visual_assets(
+        pack_id=pack_a["id"], persona_id=persona_a, user_id="user-1",
+    )] == [asset_a["id"]]
+    assert db_instance.list_persona_visual_assets(
+        pack_id=pack_a["id"], persona_id=persona_a, user_id="user-2",
+    ) == []
+
+
+def test_active_pack_payload_assets_and_deletion_are_immutable(db_instance: CharactersRAGDB) -> None:
+    """An active revision cannot have its payload or membership changed."""
+    persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "Immutable Pack Persona"})
+    pack = db_instance.create_persona_visual_pack(
+        persona_id=persona_id,
+        user_id="user-1",
+        title="Immutable Pack",
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
     )
+    review = db_instance.create_persona_visual_pack_review(
+        pack_id=pack["id"],
+        user_id="user-1",
+        reviewer_user_id="user-1",
+        fingerprint="a" * 64,
+        expected_pack_version=int(pack["version"]),
+    )
+    active = db_instance.activate_persona_visual_pack(
+        pack_id=pack["id"],
+        persona_id=persona_id,
+        user_id="user-1",
+        expected_version=int(pack["version"]),
+        reviewed_fingerprint=review["fingerprint"],
+    )
+
+    with pytest.raises(InputError, match="active visual pack payload is immutable"):
+        db_instance.update_persona_visual_pack_payload(
+            pack_id=active["id"],
+            user_id="user-1",
+            manifest=active["manifest"],
+            companion_behavior=None,
+            expected_version=int(active["version"]),
+        )
+    with pytest.raises(InputError, match="active visual pack assets are immutable"):
+        db_instance.create_persona_visual_asset(
+            pack_id=active["id"],
+            persona_id=persona_id,
+            user_id="user-1",
+            asset_role="frame",
+            storage_key="persona_visuals/immutable/asset.png",
+            original_filename="asset.png",
+            mime_type="image/png",
+            byte_size=1,
+            checksum_sha256="b" * 64,
+        )
+    with pytest.raises(InputError, match="active visual pack is immutable"):
+        db_instance.soft_delete_persona_visual_pack_with_assets(
+            pack_id=active["id"],
+            persona_id=persona_id,
+            user_id="user-1",
+            expected_version=int(active["version"]),
+        )
+
+
+def test_active_visual_pack_creation_cannot_bypass_review(db_instance: CharactersRAGDB) -> None:
+    """New active revisions must go through the reviewed activation transaction."""
+    persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "No Bypass Persona"})
+
+    with pytest.raises(InputError, match="activate_persona_visual_pack"):
+        db_instance.create_persona_visual_pack(
+            persona_id=persona_id,
+            user_id="user-1",
+            title="Bypass Attempt",
+            manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
+            status="active",
+        )
+
+
+def test_visual_pack_review_requires_named_reviewer_and_inactive_pack(
+    db_instance: CharactersRAGDB,
+) -> None:
+    """Reviews are only meaningful for a named reviewer on an inactive revision."""
+    persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "Review Guard Persona"})
+    pack = db_instance.create_persona_visual_pack(
+        persona_id=persona_id,
+        user_id="user-1",
+        title="Review Guard Pack",
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
+    )
+
+    with pytest.raises(InputError, match="reviewer_user_id"):
+        db_instance.create_persona_visual_pack_review(
+            pack_id=pack["id"],
+            user_id="user-1",
+            reviewer_user_id="  ",
+            fingerprint="d" * 64,
+            expected_pack_version=int(pack["version"]),
+        )
+
+    review = db_instance.create_persona_visual_pack_review(
+        pack_id=pack["id"],
+        user_id="user-1",
+        reviewer_user_id="user-1",
+        fingerprint="e" * 64,
+        expected_pack_version=int(pack["version"]),
+    )
+    active = db_instance.activate_persona_visual_pack(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=pack["id"],
+        expected_version=int(pack["version"]),
+        reviewed_fingerprint=review["fingerprint"],
+    )
+
+    with pytest.raises(InputError, match="active"):
+        db_instance.create_persona_visual_pack_review(
+            pack_id=active["id"],
+            user_id="user-1",
+            reviewer_user_id="user-1",
+            fingerprint="f" * 64,
+            expected_pack_version=int(active["version"]),
+        )
+
+
+def test_inactive_deletion_preserves_active_pack_and_activation_requires_review(
+    db_instance: CharactersRAGDB,
+) -> None:
+    """Deleting an inactive revision does not unset the active revision or bypass review."""
+    persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "Review Pack Persona"})
+    active_pack = db_instance.create_persona_visual_pack(
+        persona_id=persona_id,
+        user_id="user-1",
+        title="Active Pack",
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
+    )
+    review = db_instance.create_persona_visual_pack_review(
+        pack_id=active_pack["id"], user_id="user-1", reviewer_user_id="user-1",
+        fingerprint="c" * 64, expected_pack_version=int(active_pack["version"]),
+    )
+    db_instance.activate_persona_visual_pack(
+        pack_id=active_pack["id"], persona_id=persona_id, user_id="user-1",
+        expected_version=int(active_pack["version"]), reviewed_fingerprint=review["fingerprint"],
+    )
+    inactive = db_instance.create_persona_visual_pack(
+        persona_id=persona_id, user_id="user-1", title="Inactive Pack",
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
+    )
+
+    with pytest.raises(ConflictError, match="review"):
+        db_instance.activate_persona_visual_pack(
+            pack_id=inactive["id"], persona_id=persona_id, user_id="user-1",
+            expected_version=int(inactive["version"]), reviewed_fingerprint="d" * 64,
+        )
+    assert db_instance.soft_delete_persona_visual_pack_with_assets(
+        pack_id=inactive["id"], persona_id=persona_id, user_id="user-1",
+        expected_version=int(inactive["version"]),
+    )
+    active = db_instance.get_active_persona_visual_pack(persona_id=persona_id, user_id="user-1")
+    assert active is not None
+    assert active["id"] == active_pack["id"]
 
 
 def test_candidate_accept_reject_round_trip(db_instance: CharactersRAGDB) -> None:

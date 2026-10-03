@@ -521,3 +521,16 @@ Parent combined second-batch verification before the soak/image additions:
 The subsequent owning suites above verify the added production paths. Release
 records and package versions remain unchanged. Remote final-head CI and final
 review replies remain required.
+
+
+## Final integration
+
+Requester explicitly approved merging PR2978 and its human-summary waiver.
+Approved head b9f15b489c0104e67dddddc727f83460d868444d passed 53 checks with 28
+intentional skips and zero failures/pending/canceled checks. The transient Bun
+installation failure passed on its targeted rerun; two metadata-canceled workflows
+also passed after rerun. No code or test gate was changed for those reruns.
+No unresolved review threads remain. PR2978 merged into dev at
+`2922bd50322149598ef74f7f5b2e8f1dbcda5dc4` on 2026-09-22T03:27:38Z; the complete merged tree equals
+the approved head. The merge commit itself records the explicit waiver, without
+representing AI-authored text as a human summary. Published v0.1.43 is unchanged.

@@ -1,8 +1,10 @@
 """
-Regression tests for Character Chat services when operating against a PostgreSQL backend.
+Recording-stub tests for Character Chat service PostgreSQL branches.
 """
 
-from typing import Any, Dict, List, Optional
+from contextlib import contextmanager
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -12,13 +14,13 @@ from tldw_Server_API.app.core.Character_Chat.chat_dictionary import (
 )
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, ConflictError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, ConflictError, InputError
 
 
 class _RecordingCursor:
     """Simple cursor stub that mimics the attributes used by the services."""
 
-    def __init__(self, sql: str, row: Optional[Dict[str, Any]] = None):
+    def __init__(self, sql: str, row: dict[str, Any] | None = None):
         self.sql = sql
         self.rowcount = 0
         self.lastrowid = None
@@ -45,16 +47,26 @@ class _RecordingCursor:
 class RecordingConnection:
     """Connection stub that records executed SQL."""
 
-    def __init__(self):
-
+    def __init__(self, *, selected_row=None, fail_on=None):
         self.executed_sql = []
+        self.executed_params = []
         self.committed = False
+        self.rolled_back = False
         self._next_id = 1
+        self._selected_row = selected_row
+        self._fail_on = fail_on
+        self.transaction_depth = 0
+        self._connection = self
+        self.info = SimpleNamespace(transaction_status=SimpleNamespace(name="IDLE"))
+        self._backend = SimpleNamespace(_tx_depth=lambda conn: conn.transaction_depth)
 
     def execute(self, sql, params=None):
 
         self.executed_sql.append(sql)
-        row = None
+        self.executed_params.append(params)
+        if self._fail_on and self._fail_on in sql.lower():
+            raise CharactersRAGDBError("injected statement failure")
+        row = self._selected_row if sql.strip().lower().startswith("select") else None
         if "returning id" in sql.lower():
             row = {"id": self._next_id}
             self._next_id += 1
@@ -63,6 +75,9 @@ class RecordingConnection:
     def commit(self):
 
         self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
 
     def __enter__(self):
 
@@ -90,13 +105,42 @@ class StubDB:
     def __init__(self, connections):
 
         self.backend_type = BackendType.POSTGRESQL
+        self.client_id = "world-book-owner"
         self._connections = list(connections)
+        self._state = SimpleNamespace(tx_depth=0)
+        self.query_calls = []
 
     def get_connection(self):
 
         if not self._connections:
             raise AssertionError("No stub connections remaining for test")
         return self._connections.pop(0)
+
+    def _connection_state(self):
+        return self._state
+
+    def execute_query(self, sql, params=None, *, read_only=False):
+        self.query_calls.append((sql, params, read_only))
+        return self.get_connection().execute(sql, params)
+
+    @contextmanager
+    def transaction(self):
+        """Record the commit/rollback boundary used by service-owned writes."""
+        conn = self.get_connection()
+        self._state.tx_depth += 1
+        conn.transaction_depth += 1
+        conn.info.transaction_status.name = "INTRANS"
+        try:
+            yield conn
+        except BaseException:
+            conn.rollback()
+            raise
+        else:
+            conn.commit()
+        finally:
+            self._state.tx_depth -= 1
+            conn.transaction_depth -= 1
+            conn.info.transaction_status.name = "IDLE"
 
 
 def _gather_sql(connection: RecordingConnection) -> str:
@@ -125,6 +169,9 @@ def test_world_book_init_uses_postgres_friendly_schema():
     executed = _gather_sql(init_conn)
     assert "autoincrement" not in executed
     assert "serial" in executed
+
+    assert init_conn.committed
+    assert not init_conn.rolled_back
 
 
 @pytest.mark.unit
@@ -179,6 +226,11 @@ def test_create_world_book_uses_returning_and_row_id():
     assert "returning id" in executed
     assert insert_conn.committed
 
+    assert "client_id" in executed
+    assert insert_conn.executed_params == [("Lore Book", None, 3, 500, False, True, db.client_id)]
+    assert db.client_id not in executed
+    assert not insert_conn.rolled_back
+
 
 @pytest.mark.unit
 def test_dictionary_entry_insert_uses_returning_clause():
@@ -201,8 +253,10 @@ def test_dictionary_entry_insert_uses_returning_clause():
 def test_world_book_entry_insert_uses_returning_clause():
     init_conn = RecordingConnection()
     book_insert_conn = RecordingConnection()
+    lookup_conn = RecordingConnection(selected_row={"id": 1, "name": "Lore Book"})
     entry_conn = RecordingConnection()
-    db = StubDB([init_conn, book_insert_conn, entry_conn])
+    # The read checks transaction state, then executes on that same connection.
+    db = StubDB([init_conn, book_insert_conn, lookup_conn, lookup_conn, entry_conn])
 
     service = WorldBookService(db)
     world_book_id = service.create_world_book(name="Lore Book")
@@ -217,3 +271,43 @@ def test_world_book_entry_insert_uses_returning_clause():
     assert entry_id == 1
     executed = _gather_sql(entry_conn)
     assert "returning id" in executed
+    assert "client_id = ?" in _gather_sql(lookup_conn)
+    assert lookup_conn.executed_params == [(world_book_id, False, db.client_id)]
+    assert db.query_calls == [(lookup_conn.executed_sql[0], (world_book_id, False, db.client_id), True)]
+    assert entry_conn.executed_params == [(world_book_id, '["hero"]', "Hero lore", 10, True, False, False, True, "{}")]
+    assert entry_conn.committed
+    assert not entry_conn.rolled_back
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("operation", ["initialize", "create"])
+def test_world_book_transaction_rolls_back_failed_statement(operation):
+    failing_conn = RecordingConnection(
+        fail_on="create table" if operation == "initialize" else "insert into world_books",
+    )
+    connections = [failing_conn] if operation == "initialize" else [RecordingConnection(), failing_conn]
+    db = StubDB(connections)
+    with pytest.raises(CharactersRAGDBError, match="injected statement failure"):
+        service = WorldBookService(db)
+        if operation == "create":
+            service.create_world_book(name="Uncommitted book")
+    assert failing_conn.rolled_back
+    assert not failing_conn.committed
+    assert db._connection_state().tx_depth == 0
+
+
+@pytest.mark.unit
+def test_world_book_entry_rejects_missing_owner_before_insert():
+    lookup_conn = RecordingConnection()
+    entry_conn = RecordingConnection()
+    db = StubDB([RecordingConnection(), lookup_conn, lookup_conn, entry_conn])
+    service = WorldBookService(db)
+
+    with pytest.raises(InputError, match="World book not found"):
+        service.add_world_book_entry(99, keywords=["private"], content="Private lore")
+
+    assert "client_id = ?" in _gather_sql(lookup_conn)
+    assert lookup_conn.executed_params == [(99, False, db.client_id)]
+    assert db.query_calls == [(lookup_conn.executed_sql[0], (99, False, db.client_id), True)]
+    assert entry_conn.executed_sql == []
+    assert not entry_conn.committed

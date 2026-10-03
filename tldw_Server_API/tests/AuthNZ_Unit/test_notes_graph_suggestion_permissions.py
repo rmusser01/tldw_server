@@ -78,4 +78,7 @@ def test_migration_095_seeds_catalog_and_only_notes_writing_roles() -> None:
     }
     assert grants == expected
     assert not {role for role, _permission in grants} & {"reviewer", "viewer"}
-    assert get_authnz_migrations()[-1].version == 95
+    # Pin that v95 is registered with this seed, not that it is the newest
+    # migration (8b55ab5e56 added v96, and later versions keep landing).
+    registered = {migration.version: migration for migration in get_authnz_migrations()}
+    assert registered[95].up is migration_095_seed_notes_graph_suggestion_permissions

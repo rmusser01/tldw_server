@@ -83,6 +83,7 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
     ensure_chacha_rls,
     ensure_prompt_studio_rls,
@@ -1764,7 +1765,7 @@ _swagger_ui_params = {
 
 app = FastAPI(
     title="tldw API",
-    version="0.1.43",
+    version="0.1.46",
     description=APP_DESCRIPTION,
     terms_of_service="https://github.com/rmusser01/tldw_server",
     contact={
@@ -1790,19 +1791,21 @@ _startup_trace("FastAPI app created")
 def _iter_route_method_pairs(app: FastAPI) -> list[tuple[str, str, str]]:
     """Return explicit route method/path pairs for duplicate detection."""
     rows: list[tuple[str, str, str]] = []
-    for route in getattr(app, "routes", []):
-        if not isinstance(route, APIRoute):
+    # Served routes: under FastAPI >= 0.137 app.routes holds one _IncludedRouter per
+    # include_router, so a direct walk would check only the top-level routes.
+    for route in iter_served_routes(getattr(app, "routes", [])):
+        if not isinstance(route.route, APIRoute):
             continue
-        path = str(getattr(route, "path", "") or "")
+        path = route.path
         if not path:
             continue
-        methods = set(getattr(route, "methods", set()) or set())
+        methods = set(route.methods)
         for method in sorted(methods):
             method_upper = str(method).upper()
             # Ignore framework-generated methods to keep duplicate checks focused.
             if method_upper in {"HEAD", "OPTIONS"}:
                 continue
-            rows.append((path, method_upper, str(getattr(route, "name", "<unnamed>"))))
+            rows.append((path, method_upper, str(route.name or "<unnamed>")))
     return rows
 
 
@@ -2064,7 +2067,7 @@ try:
     from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag  # noqa: E402
 
     try:
-        _rg_global_enabled = bool(_rg_enabled_flag(False))
+        _rg_global_enabled = bool(_rg_enabled_flag(True))
     except _STARTUP_GUARD_EXCEPTIONS:
         _rg_global_enabled = False
 

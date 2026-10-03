@@ -192,6 +192,7 @@ from tldw_Server_API.app.core.Usage.usage_tracker import (
     backfill_legacy_tokens_to_ledger,
     log_llm_usage,
 )
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 # Exception buckets to replace broad Exception catches while preserving behavior.
 try:
@@ -220,7 +221,7 @@ _EMBEDDINGS_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     json.JSONDecodeError,
     *_REDIS_ERRORS,
 )
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 # ============================================================================
 # Embeddings Implementation Import (Safe/Lazy)
@@ -3848,11 +3849,8 @@ async def _reserve_embedding_rg_tokens(
 
     try:
         policy_id = str(getattr(request.state, "rg_policy_id", None) or "embeddings.default")
-        op_id = str(
-            getattr(request.state, "request_id", None)
-            or request.headers.get("X-Request-ID")
-            or uuid.uuid4().hex
-        )
+        # Never the client's X-Request-ID: a repeated op_id replays the cached reservation.
+        op_id = str(uuid.uuid4())
         entity = derive_entity_key(request)
         try:
             entity_scope, entity_value = entity.split(":", 1)
@@ -4373,11 +4371,8 @@ async def _create_embedding_legacy(
         if rg_governor is not None and rg_loader is not None:
             try:
                 policy_id = str(getattr(request.state, "rg_policy_id", None) or "embeddings.default")
-                rg_commit_op_id = str(
-                    getattr(request.state, "request_id", None)
-                    or request.headers.get("X-Request-ID")
-                    or uuid.uuid4().hex
-                )
+                # Never the client's X-Request-ID: a repeated op_id replays the cached reservation.
+                rg_commit_op_id = str(uuid.uuid4())
 
                 entity = derive_entity_key(request)
                 try:
@@ -5038,7 +5033,12 @@ async def create_embeddings_batch_endpoint(
 # Model Management Endpoints
 # ============================================================================
 
-@router.get("/embeddings/models", summary="List available embedding models")
+@router.get(
+    "/embeddings/models",
+    summary="List available embedding models",
+    # Capability disclosure: model ids and allowlist status.
+    dependencies=[Depends(get_request_user)],
+)
 async def list_embedding_models():
     """List configured/known models with allowlist status."""
     cfg = settings.get("EMBEDDING_CONFIG", {}) or {}

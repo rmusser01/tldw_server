@@ -1,4 +1,9 @@
-import { tldwClient, TldwModel, type TldwConfig } from "./TldwApiClient"
+import {
+  tldwClient,
+  TldwModel,
+  type TldwConfig,
+  isActiveCookieSessionConfig
+} from "./TldwApiClient"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { isPlaceholderApiKey } from "@/utils/api-key"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
@@ -123,6 +128,7 @@ export class TldwModelsService {
   private storageInitPromise: Promise<void> | null = null
   private storageWritePromise: Promise<void> = Promise.resolve()
   private inFlightFetch: Promise<ModelInfo[]> | null = null
+  private inFlightFreshFetch: Promise<ModelInfo[]> | null = null
   private cacheScopeKey: string | null = null
   private invalidationGeneration = 0
   private lastAppliedInvalidationToken: string | null = null
@@ -233,6 +239,7 @@ export class TldwModelsService {
     this.lastFetchTime = 0
     this.lastForcedFetchTime = 0
     this.inFlightFetch = null
+    this.inFlightFreshFetch = null
     this.cacheScopeKey = null
   }
 
@@ -319,7 +326,11 @@ export class TldwModelsService {
       return Boolean(String(config.accessToken || "").trim())
     }
 
-    return hasUsableApiKey(getRuntimeSingleUserApiKeyOverride()) || hasUsableApiKey(config.apiKey)
+    return (
+      isActiveCookieSessionConfig(config) ||
+      hasUsableApiKey(getRuntimeSingleUserApiKeyOverride()) ||
+      hasUsableApiKey(config.apiKey)
+    )
   }
 
   private buildCacheScope(config: TldwConfig | null): string {
@@ -331,7 +342,7 @@ export class TldwModelsService {
       hasUsableApiKey(config.apiKey) ||
       hasUsableApiKey(getRuntimeSingleUserApiKeyOverride())
     const orgId = config.orgId != null ? String(config.orgId) : "none"
-    return `${serverUrl}|${authMode}|${hasAccessToken ? "token" : hasApiKey ? "key" : "none"}|${orgId}`
+    return `${serverUrl}|${authMode}|${hasAccessToken ? "token" : isActiveCookieSessionConfig(config) ? "cookie" : hasApiKey ? "key" : "none"}|${orgId}`
   }
 
   /**
@@ -340,40 +351,62 @@ export class TldwModelsService {
    */
   async getModels(
     forceRefresh: boolean = false,
-    options?: { refreshOpenRouter?: boolean }
+    options?: { refreshOpenRouter?: boolean; requireFresh?: boolean }
   ): Promise<ModelInfo[]> {
+    const requireFresh = options?.requireFresh === true
     await this.ensureStorageLoaded()
     let fetchGeneration = this.invalidationGeneration
     const config = await tldwClient.getConfig().catch(() => null)
     const scopeKey = this.buildCacheScope(config)
     fetchGeneration = this.reconcileCacheScope(scopeKey, fetchGeneration)
+    const cookieSession = isActiveCookieSessionConfig(config)
 
     const now = Date.now()
 
     // Return cached models if available and not expired
-    if (!forceRefresh && this.cachedModels && (now - this.lastFetchTime) < this.CACHE_DURATION) {
+    if (!cookieSession && !requireFresh && !forceRefresh && this.cachedModels && (now - this.lastFetchTime) < this.CACHE_DURATION) {
       return this.cachedModels
     }
     if (
+      !cookieSession &&
       forceRefresh &&
+      !requireFresh &&
       this.cachedModels &&
       (now - this.lastForcedFetchTime) < this.FORCE_REFRESH_COOLDOWN
     ) {
       return this.cachedModels
     }
-    if (this.inFlightFetch) {
+    if (requireFresh && this.inFlightFreshFetch) {
+      return await this.inFlightFreshFetch
+    }
+    if (!requireFresh && this.inFlightFetch) {
       return await this.inFlightFetch
     }
 
     if (!this.isConfiguredForModels(config)) {
-      return this.cachedModels || []
+      return requireFresh ? [] : this.cachedModels || []
     }
 
+    if (requireFresh) {
+      // Capability Retry must outlive an older discovery, without discarding
+      // the last useful catalog if the new read fails.
+      fetchGeneration = ++this.invalidationGeneration
+    }
+
+    let cookieAuthenticated = false
     const fetchFromServer = async () => {
       await tldwClient.initialize()
+      // Model metadata is public; the existing profile route validates the cookie.
+      if (cookieSession) {
+        await tldwClient.getCurrentUserProfile()
+        cookieAuthenticated = true
+      }
       const models = await tldwClient.getModels({
         refreshOpenRouter: options?.refreshOpenRouter === true
       })
+      if (requireFresh && fetchGeneration !== this.invalidationGeneration) {
+        return []
+      }
 
       // Transform tldw models to our format
       const transformedModels = models.map(model => this.transformModel(model))
@@ -383,13 +416,29 @@ export class TldwModelsService {
         if (forceRefresh) {
           this.lastForcedFetchTime = this.lastFetchTime
         }
-        await this.persistCache(fetchGeneration)
+        // Cookie catalogs require live auth and never hydrate offline.
+        if (!cookieSession) await this.persistCache(fetchGeneration)
       }
 
-      return transformedModels
+      return requireFresh && fetchGeneration !== this.invalidationGeneration
+        ? []
+        : transformedModels
     }
 
-    const fetchPromise = fetchFromServer().catch(async (error) => {
+    const fetchPromise = fetchFromServer().catch((error) => {
+      if (cookieSession) {
+        const status = (error as { status?: number } | null)?.status
+        if (fetchGeneration === this.invalidationGeneration) {
+          if (status === 401 || status === 403) {
+            this.invalidateCacheState()
+          } else if (cookieAuthenticated && !requireFresh) {
+            return this.cachedModels || []
+          }
+        }
+        // A failed profile check cannot authorize fallback to a cached catalog.
+        return []
+      }
+      if (requireFresh) return []
       if (isAbortLikeModelFetchError(error)) {
         return this.cachedModels || []
       }
@@ -409,12 +458,16 @@ export class TldwModelsService {
 
     if (fetchGeneration === this.invalidationGeneration) {
       this.inFlightFetch = fetchPromise
+      if (requireFresh) this.inFlightFreshFetch = fetchPromise
     }
     try {
       return await fetchPromise
     } finally {
       if (this.inFlightFetch === fetchPromise) {
         this.inFlightFetch = null
+      }
+      if (this.inFlightFreshFetch === fetchPromise) {
+        this.inFlightFreshFetch = null
       }
     }
   }
@@ -436,6 +489,7 @@ export class TldwModelsService {
     const config = await tldwClient.getConfig().catch(() => null)
     const scopeKey = this.buildCacheScope(config)
     this.reconcileCacheScope(scopeKey, requestGeneration)
+    if (isActiveCookieSessionConfig(config)) return []
     return (this.cachedModels || []).filter((model) =>
       this.isSelectableChatModel(model)
     )

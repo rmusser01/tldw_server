@@ -1,13 +1,77 @@
 """Real PostgreSQL lock lifetime across resumable schema transactions."""
 
 
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any
+
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseConfig,
+    DatabaseError,
+    TransientContentionError,
+)
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap import postgres_schema_migration
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.parametrize("deadline", ["bootstrap", "operator-statement"])
+def test_initializer_acquisition_deadline_discards_checkout_and_allows_later_retry(
+    pg_database_config: DatabaseConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    deadline: str,
+) -> None:
+    """Both native acquisition deadlines discard failed initializer sessions."""
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    waiter_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    pool = waiter_backend.get_pool()
+    original_get_connection = pool.get_connection
+    checkouts = []
+
+    def observe_checkout(*args: object, **kwargs: object):
+        """Observe the real connection without replacing PostgreSQL behavior."""
+        connection = original_get_connection(*args, **kwargs)
+        if deadline == "operator-statement":
+            # Force the acquisition deadline only on the blocked test checkout.
+            waiter_backend.execute("SET statement_timeout = '100ms'", connection=connection)
+            connection.commit()
+        checkouts.append((connection, connection.info.backend_pid))
+        return connection
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as workers:
+            with postgres_schema_migration(owner_backend, "100ms"):
+                with monkeypatch.context() as patch:
+                    patch.setattr(pool, "get_connection", observe_checkout)
+                    waiter = workers.submit(
+                        CharactersRAGDB, tmp_path / "blocked.db", client_id="2", backend=waiter_backend,
+                    )
+                    with pytest.raises(CharactersRAGDBError) as failure:
+                        waiter.result(timeout=35 if deadline == "bootstrap" else 5)
+                cause = failure.value.__cause__
+                if deadline == "bootstrap":
+                    assert isinstance(cause, TransientContentionError)
+                else:
+                    assert type(cause) is DatabaseError
+                connection, process_id = checkouts[-1]
+                assert connection.closed
+                assert owner_backend.execute(
+                    "SELECT count(*) FROM pg_locks WHERE pid=%s AND locktype='advisory'",
+                    (process_id,),
+                ).scalar == 0
+        replacement = CharactersRAGDB(tmp_path / "retry.db", client_id="2", backend=waiter_backend)
+        try:
+            note = replacement.add_note(title="Recovered", content="Acquisition can retry")
+            assert replacement.get_note_by_id(note)["content"] == "Acquisition can retry"
+        finally:
+            replacement.close_connection()
+    finally:
+        for backend in (owner_backend, waiter_backend):
+            backend.get_pool().close_all()
 
 
 @pytest.mark.parametrize("failure", [None, "body", "unlock"])
@@ -59,3 +123,57 @@ def test_schema_lock_survives_commit_and_is_released_before_checkout_reuse(
             pass
     finally:
         backend.get_pool().close_all()
+
+
+def test_schema_lock_acquisition_deadline_invalidates_only_waiter_then_allows_reuse(
+    pg_database_config: DatabaseConfig, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A short acquisition deadline closes the waiter while preserving the lock owner."""
+    blocker_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    pool = backend.get_pool()
+    invalidated: list[tuple[Any, int]] = []
+    yielded: list[Any] = []
+    original_invalidate = pool.invalidate_connection
+
+    def record_invalidation(connection: Any) -> None:
+        invalidated.append((connection, connection.info.backend_pid))
+        original_invalidate(connection)
+
+    monkeypatch.setattr(pool, "invalidate_connection", record_invalidation)
+    try:
+        with blocker_backend.transaction() as blocker:
+            blocker_backend.execute(
+                "SELECT pg_advisory_lock(hashtext(%s), hashtext(current_schema()))",
+                ("chacha_schema_bootstrap",), connection=blocker,
+            )
+            try:
+                started = time.monotonic()
+                with pytest.raises(TransientContentionError):
+                    with postgres_schema_migration(backend, "100ms") as connection:
+                        yielded.append(connection)
+                assert time.monotonic() - started < 2
+                assert yielded == []
+                assert len(invalidated) == 1
+                failed, failed_pid = invalidated[0]
+                assert failed.closed
+                assert blocker_backend.execute(
+                    "SELECT count(*) FROM pg_locks WHERE pid=%s AND locktype='advisory' AND granted",
+                    (blocker.info.backend_pid,), connection=blocker,
+                ).scalar == 1
+                assert blocker_backend.execute("SELECT 1 AS value", connection=blocker).rows == [{"value": 1}]
+            finally:
+                blocker_backend.execute(
+                    "SELECT pg_advisory_unlock(hashtext(%s), hashtext(current_schema()))",
+                    ("chacha_schema_bootstrap",), connection=blocker,
+                )
+        with postgres_schema_migration(backend, "100ms") as fresh:
+            assert fresh is not failed
+            assert backend.execute("SELECT 1 AS value", connection=fresh).rows == [{"value": 1}]
+            assert backend.execute(
+                "SELECT count(*) FROM pg_locks WHERE pid=%s AND locktype='advisory' AND granted",
+                (failed_pid,), connection=fresh,
+            ).scalar == 0
+    finally:
+        backend.get_pool().close_all()
+        blocker_backend.get_pool().close_all()

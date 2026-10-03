@@ -9,6 +9,7 @@ are read at import time.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +29,7 @@ from Helper_Scripts.ci.route_auth_ratchet import (  # noqa: E402
     NOT_AUTHENTICATION,
     diff_against_baseline,
     is_authenticated,
+    iter_routes,
 )
 
 
@@ -42,6 +44,37 @@ def _run_ratchet() -> subprocess.CompletedProcess[str]:
     )
 
 
+def _load_app_route_paths(env_overrides: dict[str, str] | None = None) -> set[str]:
+    """Build the ratchet's app out-of-process and return every served path.
+
+    Runs in a subprocess for the same reason ``_run_ratchet`` does: ``load_app()``
+    mutates ``os.environ`` (pops the pytest/test-mode markers, sets route
+    policy and config dir), which must not leak into the rest of this test run.
+
+    ``env_overrides`` is applied to the subprocess's starting environment
+    before ``load_app()`` runs, so a test can simulate a caller environment
+    that already sets e.g. ``TLDW_CONFIG_FILE``.
+    """
+    script = (
+        f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r})\n"
+        "from Helper_Scripts.ci.route_auth_ratchet import load_app, iter_routes\n"
+        "app = load_app()\n"
+        "for path, _methods, _dependant in iter_routes(app):\n"
+        "    print(path)\n"
+    )
+    env = {**os.environ, **(env_overrides or {})}
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=900,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
 def _baseline_entries() -> list[str]:
     """Return the baseline's route entries, without comments or blank lines."""
     return [
@@ -54,9 +87,38 @@ def _baseline_entries() -> list[str]:
 class _FakeDependant:
     """Minimal stand-in for a FastAPI ``Dependant`` for traversal tests."""
 
-    def __init__(self, call: object | None, dependencies: list["_FakeDependant"] | None = None):
+    def __init__(self, call: object | None, dependencies: list[_FakeDependant] | None = None):
         self.call = call
         self.dependencies = dependencies or []
+
+
+@pytest.mark.unit
+def test_routes_behind_nested_includes_are_inspected_with_include_time_auth() -> None:
+    """A route two include_router calls deep is seen at its served path, auth included.
+
+    On FastAPI >= 0.137 a nested include is an opaque branch inside the outer one;
+    reading only the outer router's candidates hid every such route from the ratchet.
+    """
+    from fastapi import APIRouter, Depends, FastAPI
+
+    def get_request_user() -> None:  # named like the real authenticator
+        return None
+
+    inner = APIRouter()
+
+    @inner.get("/leaf")
+    def leaf() -> None:
+        return None
+
+    middle = APIRouter()
+    middle.include_router(inner, prefix="/inner")
+    app = FastAPI()
+    app.include_router(middle, prefix="/api", dependencies=[Depends(get_request_user)])
+
+    routes = {path: dependant for path, _methods, dependant in iter_routes(app)}
+
+    assert "/api/inner/leaf" in routes
+    assert is_authenticated(routes["/api/inner/leaf"])
 
 
 def _named(qualname: str):
@@ -67,6 +129,46 @@ def _named(qualname: str):
 
     _fn.__qualname__ = qualname
     return _fn
+
+
+@pytest.mark.unit
+def test_force_enabled_routers_are_mounted() -> None:
+    """benchmarks/connectors/personalization must be visible to the ratchet.
+
+    ``ROUTE_POLICY_ENV`` force-enables these route keys, but
+    ``config.py::_route_toggle_policy`` only honors the ``ROUTES_ENABLE`` env
+    var under explicit pytest or server test-mode runtime -- both of which
+    ``load_app()`` deliberately turns off so it measures production wiring.
+    If the force-enable mechanism breaks, these routers (``default_stable =
+    False``) silently drop out of the app the ratchet inspects, and an
+    unauthenticated route added to one of them would pass CI unnoticed.
+    """
+    paths = _load_app_route_paths()
+    assert any(p.startswith("/api/v1/benchmarks") for p in paths), sorted(paths)
+    assert any(p.startswith("/api/v1/connectors") for p in paths), sorted(paths)
+    assert any(p.startswith("/api/v1/personalization") for p in paths), sorted(paths)
+
+
+@pytest.mark.unit
+def test_force_enabled_routers_are_mounted_with_explicit_config_file() -> None:
+    """A caller-set ``TLDW_CONFIG_FILE`` must not shadow the force-enable.
+
+    ``config_paths._resolve_env_root()`` and ``resolve_config_file()`` both
+    check ``TLDW_CONFIG_FILE`` before ``TLDW_CONFIG_PATH`` before
+    ``TLDW_CONFIG_DIR``. A version of ``load_app()`` that only set
+    ``TLDW_CONFIG_DIR`` went blind the moment a caller environment already
+    set ``TLDW_CONFIG_FILE``: the app read the *original* config.txt --
+    whose ``[API-Routes] enable`` list does not include these route keys --
+    and the ratchet silently stopped inspecting benchmarks/connectors/
+    personalization again.
+    """
+    real_config = REPO_ROOT / "tldw_Server_API" / "Config_Files" / "config.txt"
+    assert real_config.exists(), "fixture assumption: repo config.txt exists"
+
+    paths = _load_app_route_paths(env_overrides={"TLDW_CONFIG_FILE": str(real_config)})
+    assert any(p.startswith("/api/v1/benchmarks") for p in paths), sorted(paths)
+    assert any(p.startswith("/api/v1/connectors") for p in paths), sorted(paths)
+    assert any(p.startswith("/api/v1/personalization") for p in paths), sorted(paths)
 
 
 @pytest.mark.unit

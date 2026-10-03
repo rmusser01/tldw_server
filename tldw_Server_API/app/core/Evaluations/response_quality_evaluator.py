@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     await_owned_worker,
 )
 from tldw_Server_API.app.core.Evaluations.circuit_breaker import llm_circuit_breaker
+from tldw_Server_API.app.core.Evaluations.scoring import normalize_likert
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
     analyze,
@@ -223,7 +224,7 @@ class ResponseQualityEvaluator:
                 raise_on_error=True,
             )
 
-            score = float(score_str.strip()) / 5.0
+            score = normalize_likert(float(score_str.strip()))
 
             return ("relevance", {
                 "name": "relevance",
@@ -288,7 +289,7 @@ class ResponseQualityEvaluator:
                 raise_on_error=True,
             )
 
-            score = float(score_str.strip()) / 5.0
+            score = normalize_likert(float(score_str.strip()))
 
             return ("completeness", {
                 "name": "completeness",
@@ -350,7 +351,7 @@ class ResponseQualityEvaluator:
                 raise_on_error=True,
             )
 
-            score = float(score_str.strip()) / 5.0
+            score = normalize_likert(float(score_str.strip()))
 
             return ("clarity", {
                 "name": "clarity",
@@ -415,7 +416,7 @@ class ResponseQualityEvaluator:
                 raise_on_error=True,
             )
 
-            score = float(score_str.strip()) / 5.0
+            score = normalize_likert(float(score_str.strip()))
 
             return ("accuracy", {
                 "name": "accuracy",
@@ -547,7 +548,7 @@ class ResponseQualityEvaluator:
                 raise_on_error=True,
             )
 
-            score = float(score_str.strip()) / 5.0
+            score = normalize_likert(float(score_str.strip()))
 
             return (f"custom_{criterion_name}", {
                 "name": criterion_name,

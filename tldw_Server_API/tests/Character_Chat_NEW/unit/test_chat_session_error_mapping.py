@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
@@ -18,19 +19,26 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     CharacterChatStreamPersistRequest,
     ChatSessionUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatConfigurationError,
+    ChatRateLimitError,
+)
+from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import PromptCostGuardrailConfig
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import ConversationStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import PromptCostGuardrailConfig
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
-
 
 pytestmark = pytest.mark.unit
 
@@ -69,10 +77,17 @@ def test_complete_v2_request_accepts_inference_prefix_cache_intent() -> None:
 
 
 class _BrokenChatSessionDb:
+    owner_user_id = "1"
+    _normalize_nullable_text = staticmethod(CharactersRAGDB._normalize_nullable_text)
+    _ALLOWED_CONVERSATION_ASSISTANT_KINDS = CharactersRAGDB._ALLOWED_CONVERSATION_ASSISTANT_KINDS
+    _ALLOWED_PERSONA_MEMORY_MODES = CharactersRAGDB._ALLOWED_PERSONA_MEMORY_MODES
+
     def __init__(self, exc: Exception, *, deleted: bool = False, raise_on_get: bool = False) -> None:
+        """Keep real identity normalization while injecting the tested storage failure."""
         self.exc = exc
         self.deleted = deleted
         self.raise_on_get = raise_on_get
+        self.conversation_store = ConversationStore(self)
 
     def get_conversation_by_id(self, chat_id: str, include_deleted: bool = False) -> dict[str, Any]:
         if self.raise_on_get:
@@ -96,6 +111,15 @@ class _BrokenChatSessionDb:
 
 
 class _CompletionReadyChatSessionDb:
+    owner_user_id = "1"
+    _normalize_nullable_text = staticmethod(CharactersRAGDB._normalize_nullable_text)
+    _ALLOWED_CONVERSATION_ASSISTANT_KINDS = CharactersRAGDB._ALLOWED_CONVERSATION_ASSISTANT_KINDS
+    _ALLOWED_PERSONA_MEMORY_MODES = CharactersRAGDB._ALLOWED_PERSONA_MEMORY_MODES
+
+    def __init__(self) -> None:
+        """Use the production binding grammar without opening a database."""
+        self.conversation_store = ConversationStore(self)
+
     def get_conversation_by_id(self, chat_id: str, include_deleted: bool = False) -> dict[str, Any]:
         return _conversation()
 
@@ -103,7 +127,7 @@ class _CompletionReadyChatSessionDb:
         return {}
 
     def get_messages_for_conversation(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        return [{"sender": "user", "content": "hello", "deleted": False}]
+        return [{"id": "message-1", "sender": "user", "content": "hello", "deleted": False}]
 
     def get_character_card_by_id(self, character_id: int) -> dict[str, Any]:
         return {"id": character_id, "name": "Assistant", "content": ""}
@@ -2380,6 +2404,33 @@ async def test_restore_chat_session_maps_conflict_error_to_409() -> None:
 
 
 @pytest.mark.asyncio
+async def test_already_active_restore_checks_protected_workspace_lifecycle() -> None:
+    class ActiveRestoreDb(_BrokenChatSessionDb):
+        def restore_conversation(self, *args: Any, require_already_active: bool = False, **kwargs: Any) -> None:
+            if require_already_active:
+                raise self.exc
+
+        def get_roleplay_resume_state(self, chat_id: str) -> dict[str, Any]:
+            return {}
+
+        def get_character_card_by_id(self, character_id: int) -> dict[str, Any]:
+            return {"id": character_id, "name": "Assistant"}
+
+    db = ActiveRestoreDb(ConflictError("workspace_native_unavailable"), deleted=False)
+    with pytest.raises(HTTPException) as exc_info:
+        await character_chat_sessions.restore_chat_session(
+            chat_id="chat-1",
+            expected_version=1,
+            scope_type=None,
+            workspace_id=None,
+            db=db,
+            current_user=_test_user(),
+        )
+    assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+    assert exc_info.value.detail == "workspace_native_unavailable"
+
+
+@pytest.mark.asyncio
 async def test_complete_v2_maps_db_error_to_sanitized_500() -> None:
     db = _BrokenChatSessionDb(CharactersRAGDBError("sqlite completion exploded"), raise_on_get=True)
 
@@ -2445,7 +2496,10 @@ async def test_complete_v2_maps_chat_api_server_error_to_sanitized_502(
         )
 
     assert exc_info.value.status_code == status.HTTP_502_BAD_GATEWAY
-    assert exc_info.value.detail == "Chat provider error"
+    assert exc_info.value.detail == {"error": {
+        "code": "provider_unavailable", "type": "provider_unavailable",
+        "message": "The chat service provider is currently unavailable.",
+    }}
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
 
@@ -2498,7 +2552,10 @@ async def test_complete_v2_clamps_untrusted_provider_http_status(
         )
 
     assert exc_info.value.status_code == expected_status
-    assert exc_info.value.detail == "Chat provider error"
+    assert exc_info.value.detail == {"error": {
+        "code": "provider_unavailable", "type": "provider_unavailable",
+        "message": "The chat service provider is currently unavailable.",
+    }}
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
 
@@ -2632,6 +2689,7 @@ async def test_persist_streamed_assistant_message_maps_db_error_to_sanitized_500
 
     with pytest.raises(HTTPException) as exc_info:
         await character_chat_sessions.persist_streamed_assistant_message(
+            request=SimpleNamespace(state=SimpleNamespace()),
             chat_id="chat-1",
             body=CharacterChatStreamPersistRequest(assistant_content="hello"),
             db=db,
@@ -2648,6 +2706,7 @@ async def test_persist_streamed_assistant_message_maps_conflict_error_to_409() -
 
     with pytest.raises(HTTPException) as exc_info:
         await character_chat_sessions.persist_streamed_assistant_message(
+            request=SimpleNamespace(state=SimpleNamespace()),
             chat_id="chat-1",
             body=CharacterChatStreamPersistRequest(assistant_content="hello"),
             db=db,
@@ -2656,3 +2715,101 @@ async def test_persist_streamed_assistant_message_maps_conflict_error_to_409() -
 
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT
     assert exc_info.value.detail == "chat persist conflict"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["eager", "legacy", "unified"])
+@pytest.mark.parametrize(
+    ("failure", "expected_code", "expected_message"),
+    [
+        (
+            ChatAuthenticationError("sk-private upstream https://private.invalid"),
+            "provider_authentication_failed",
+            "The selected provider credentials could not be authenticated.",
+        ),
+        (
+            ChatConfigurationError("sk-private upstream https://private.invalid"),
+            "provider_configuration_invalid",
+            "The selected provider configuration is invalid.",
+        ),
+        (
+            ChatConfigurationError("sk-private", error_code="missing_provider_credentials"),
+            "missing_provider_credentials",
+            "The selected provider credentials are not configured.",
+        ),
+        (
+            ChatBadRequestError("model_not_found sk-private"),
+            "provider_unavailable",
+            "The chat service provider is currently unavailable.",
+        ),
+        (
+            ChatRateLimitError("sk-private"),
+            "provider_unavailable",
+            "The chat service provider is currently unavailable.",
+        ),
+        (
+            ChatAPIError("provider_not_configured sk-private", status_code=503),
+            "provider_unavailable",
+            "The chat service provider is currently unavailable.",
+        ),
+    ],
+)
+async def test_complete_v2_preserves_safe_provider_failure_classification(
+    monkeypatch: pytest.MonkeyPatch,
+    transport: str,
+    failure: ChatAPIError,
+    expected_code: str,
+    expected_message: str,
+) -> None:
+    """Raised errors retain bounded recovery metadata across HTTP and both SSE paths."""
+    lifecycle: list[Any] = []
+
+    def provider_stream() -> Iterator[str]:
+        """Raise the provider failure lazily while recording upstream cleanup."""
+        try:
+            raise failure
+            yield  # pragma: no cover - make this a lazy provider iterator
+        finally:
+            lifecycle.append("upstream_close")
+
+    _install_character_completion_runtime(
+        monkeypatch, provider_response=provider_stream(), lifecycle=lifecycle,
+    )
+    monkeypatch.setenv("STREAMS_UNIFIED", "1" if transport == "unified" else "0")
+    if transport == "eager":
+        def fail_before_stream(**_kwargs: Any) -> None:
+            """Raise the provider failure before an SSE response starts."""
+            raise failure
+        monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", fail_before_stream)
+
+    call = character_chat_sessions.character_chat_completion(
+        chat_id="chat-1",
+        body=CharacterChatCompletionV2Request(
+            provider="local-llm", model="local-test", stream=True,
+            save_to_db=False, include_character_context=False,
+        ),
+        db=_CompletionReadyChatSessionDb(), current_user=_test_user(),
+        http_request=SimpleNamespace(state=SimpleNamespace()),
+    )
+    if transport == "eager":
+        with pytest.raises(HTTPException) as caught:
+            await call
+        payload = caught.value.detail
+        assert caught.value.status_code == failure.status_code
+        assert caught.value.__context__ is None
+    else:
+        response = await call
+        rendered = "".join(
+            [chunk.decode() if isinstance(chunk, bytes) else str(chunk)
+             async for chunk in response.body_iterator]
+        )
+        frames = [line[6:] for line in rendered.splitlines() if line.startswith("data: ")]
+        assert frames[-1] == "[DONE]"
+        assert len(frames) == 2
+        payload = json.loads(frames[0])
+        assert lifecycle.index("upstream_close") < lifecycle.index("runtime_close")
+
+    assert payload == {"error": {
+        "code": expected_code, "type": expected_code, "message": expected_message,
+    }}
+    assert "mark_used" not in lifecycle

@@ -4,13 +4,19 @@ import {
   act,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { CurrentChatModelSettings } from "@/components/Common/Settings/CurrentChatModelSettings";
+import { useStoreChatModelSettings } from "@/store/model";
 
 import { Playground } from "../Playground";
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
+import type { AssistantSelection } from "@/types/assistant-selection";
 import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
 import { getPromptById } from "@/db/dexie/helpers";
 import { useMcpToolsStore } from "@/store/mcp-tools";
@@ -21,6 +27,20 @@ import {
   TOGGLE_WEB_SEARCH_EVENT,
 } from "../playground-cockpit-actions";
 
+const forkSettings = vi.hoisted(() => ({controller: null as any, mode: "ordinary", current: true, update: vi.fn<(...args: any[]) => Promise<any>>(async () => ({}))}))
+vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
+  return {...actual, useHistorySelectionContext: () => {
+    const controller = actual.useHistorySelectionContext()
+    return forkSettings.controller ?? {...controller, settingsMode: () => forkSettings.mode, updateForkSettings: forkSettings.update, fence: () => () => forkSettings.current}
+  }}
+})
+
+vi.mock("@/db/dexie/history-selection", () => ({ensureLocalProfileId: async () => "profile", loadHistoryBookmark: async () => null, saveHistoryBookmark: async () => {}, loadHistoryTurnRecoveries: async () => []}))
+vi.mock("@/db/dexie/fork-operations", () => ({findForkCandidate: async () => null, loadForkOperations: async () => []}))
+vi.mock("@/services/chat-history-selection", () => ({captureHistorySnapshot: async (owner: any, view: any) => ({status: "legacy_review_required", code: "legacy_review_required", view, snapshot: {version: 1, owner_key: owner.owner_key, conversation_id: owner.conversation_id, nodes: [], source_digest: "source", storage_context_digest: "storage", fences: {}, interpretation_status: {kind: "legacy_review_required"}}})}))
+import {useHistorySelection} from "@/hooks/chat/useHistorySelection"
+
 const messageOptionState = vi.hoisted(() => ({
   value: {
     messages: [
@@ -28,6 +48,8 @@ const messageOptionState = vi.hoisted(() => ({
       { id: "message-2", role: "assistant", content: "Hi" },
     ],
     history: [],
+    uploadedFiles: [],
+    removeUploadedFile: vi.fn(),
     historyId: "history-1" as string | null,
     serverChatId: "chat-1" as string | null,
     serverChatTitle: "Research session" as string | null,
@@ -66,7 +88,7 @@ const messageOptionState = vi.hoisted(() => ({
       kind: "character",
       id: "character-1",
       name: "Mira Vale",
-    } as { kind: "character" | "persona"; id: string; name: string } | null,
+    } as AssistantSelection | null,
     serverChatPersonaMemoryMode: null as "read_only" | "read_write" | null,
     setServerChatPersonaMemoryMode: vi.fn(),
     setSelectedAssistant: vi.fn(),
@@ -105,6 +127,7 @@ const layoutShellOverrideState = vi.hoisted(() => ({
 }));
 
 const modelSettingsState = vi.hoisted(() => ({
+  useRealStore: false,
   value: {
     systemPrompt: "",
     setSystemPrompt: vi.fn(),
@@ -197,8 +220,63 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+// Keep Playground's actual scope effect and the actual settings dialog. The
+// composer surface is reduced to its open/close lifecycle for this integration.
+const SettingsDialogCaller = () => {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)}>Current Chat Model Settings</button>
+      {open && <CurrentChatModelSettings open={open} setOpen={setOpen} />}
+    </>
+  );
+};
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
-  PlaygroundForm: () => <div data-testid="playground-form" />,
+  PlaygroundForm: () =>
+    modelSettingsState.useRealStore ? (
+      <SettingsDialogCaller />
+    ) : (
+      <div data-testid="playground-form" />
+    ),
+}));
+
+vi.mock("@/services/model-settings", () => ({
+  getAllModelSettings: async () => ({ temperature: 0.7 }),
+}));
+vi.mock("@/services/ocr", () => ({ getOCRLanguage: async () => null }));
+vi.mock("@/services/actor-settings", () => ({
+  getActorSettingsForChatWithCharacterFallback: async () => null,
+  saveActorSettingsForChat: vi.fn(),
+}));
+vi.mock("@/hooks/useSelectedCharacter", () => ({
+  useSelectedCharacter: () => [null, vi.fn(), { isLoading: false }],
+}));
+vi.mock("@/hooks/useSelectedAssistant", () => ({
+  useSelectedAssistant: () => [null],
+}));
+vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
+  useChatSettingsRecord: () => ({
+    settings: null,
+    updateSettings: vi.fn(),
+    chatKey: null,
+  }),
+}));
+vi.mock("@/components/Common/Settings/tabs", async () => ({
+  ConversationTab: (
+    await import("@/components/Common/Settings/tabs/ConversationTab")
+  ).ConversationTab,
+  ModelBasicsTab: () => null,
+  ActorTab: () => null,
+  AdvancedParamsTab: () => null,
+}));
+vi.mock("@/components/Common/Settings/PromptAssemblyPreview", () => ({
+  PromptAssemblyPreview: () => null,
+}));
+vi.mock("@/components/Common/Settings/LorebookDebugPanel", () => ({
+  LorebookDebugPanel: () => null,
+}));
+vi.mock("@/components/Common/Settings/LlamaCppAdvancedControls", () => ({
+  LlamaCppAdvancedControls: () => null,
 }));
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
@@ -217,7 +295,17 @@ vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
 }));
 
 vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => messageOptionState.value,
+  useMessageOption: () => ({
+    ...messageOptionState.value,
+    effectiveAssistantState: resolveEffectiveAssistantState({
+      tracked: {
+        assistantKind: messageOptionState.value.serverChatAssistantKind,
+        assistantId: messageOptionState.value.serverChatAssistantId,
+        characterId: messageOptionState.value.serverChatCharacterId,
+      },
+      draftSelection: messageOptionState.value.selectedAssistant,
+    }),
+  }),
 }));
 
 vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
@@ -255,9 +343,17 @@ vi.mock("@/db/dexie/helpers", () => ({
   getRecentChatFromWebUI: vi.fn(async () => null),
 }));
 
-vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: () => modelSettingsState.value,
-}));
+vi.mock("@/store/model", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/store/model")>();
+  const useSettings = Object.assign(
+    (...args: Parameters<typeof actual.useStoreChatModelSettings>) =>
+      modelSettingsState.useRealStore
+        ? actual.useStoreChatModelSettings(...args)
+        : modelSettingsState.value,
+    actual.useStoreChatModelSettings,
+  );
+  return { ...actual, useStoreChatModelSettings: useSettings };
+});
 
 vi.mock("@/hooks/useSmartScroll", () => ({
   useSmartScroll: () => ({
@@ -400,6 +496,8 @@ vi.mock("react-router-dom", async () => {
 
 describe("Playground cockpit controls", () => {
   beforeEach(() => {
+    forkSettings.controller = null; forkSettings.mode = "ordinary"; forkSettings.current = true; forkSettings.update.mockReset(); forkSettings.update.mockResolvedValue({});
+    modelSettingsState.useRealStore = false;
     storageState.values.clear();
     storageState.values.set("playgroundChatContextRailVisible", true);
     storageState.values.set("playgroundChatRuntimeRailVisible", true);
@@ -456,6 +554,7 @@ describe("Playground cockpit controls", () => {
       kind: "character",
       id: "character-1",
       name: "Mira Vale",
+      metadata: { selectionMode: "tracked" },
     };
     messageOptionState.value.serverChatPersonaMemoryMode = null;
     messageOptionState.value.setServerChatPersonaMemoryMode = vi.fn();
@@ -479,6 +578,14 @@ describe("Playground cockpit controls", () => {
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
     chatSettingsState.applyChatSettingsPatch.mockClear();
     tldwServerState.fetchChatModels.mockClear();
+    tldwServerState.fetchChatModels.mockResolvedValue([
+      {
+        model: "openai:gpt-4.1-mini",
+        provider: "openai",
+        is_configured: true,
+        provider_is_configured: true,
+      },
+    ]);
     tldwClientState.initialize.mockClear();
     tldwClientState.getProvidersStatus.mockClear();
     tldwClientState.getProvidersStatus.mockResolvedValue({
@@ -506,6 +613,64 @@ describe("Playground cockpit controls", () => {
       },
     });
   });
+
+  it("keeps a freshly entered prompt through the real Playground scope effect and dialog remount without an explicit provider", async () => {
+    modelSettingsState.useRealStore = true;
+    useStoreChatModelSettings.getState().reset();
+    const selectedModel =
+      "tldw:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf";
+    messageOptionState.value.selectedModel = selectedModel;
+    messageOptionState.value.selectedCharacter = null;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.messages = [];
+    messageOptionState.value.historyId = null;
+    messageOptionState.value.serverChatId = null;
+    messageOptionState.value.streaming = false;
+    tldwServerState.fetchChatModels.mockResolvedValue([
+      { model: selectedModel, provider: "llama.cpp" },
+    ]);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <Playground />
+      </QueryClientProvider>,
+    );
+    await waitFor(() =>
+      expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe(
+        selectedModel,
+      ),
+    );
+    expect(useStoreChatModelSettings.getState().apiProvider).toBeUndefined();
+    const settingsButton = screen.getByRole("button", {
+      name: "Current Chat Model Settings",
+    });
+    fireEvent.click(settingsButton);
+    fireEvent.click(
+      await screen.findByRole("tab", { name: "Conversation" }),
+    );
+    const instruction =
+      "UAT367 NATIVE ORBIT742. Describe visible image contents accurately in one short sentence.";
+    fireEvent.change(
+      await screen.findByPlaceholderText("Enter System Prompt"),
+      { target: { value: instruction } },
+    );
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: /^save$/i }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe(instruction);
+    fireEvent.click(settingsButton);
+    fireEvent.click(
+      await screen.findByRole("tab", { name: "Conversation" }),
+    );
+    expect(
+      await screen.findByPlaceholderText("Enter System Prompt"),
+    ).toHaveValue(instruction);
+  }, 15_000);
 
   it("surfaces existing context and runtime state in cockpit rails", async () => {
     messageOptionState.value.selectedQuickPrompt = "Draft a concise summary";
@@ -927,6 +1092,7 @@ describe("Playground cockpit controls", () => {
       kind: "persona",
       id: "persona-1",
       name: "Research Persona",
+      metadata: { selectionMode: "tracked" },
     };
     messageOptionState.value.selectedCharacter = {
       id: "legacy-character",
@@ -996,6 +1162,7 @@ describe("Playground cockpit controls", () => {
       kind: "persona",
       id: "persona-1",
       name: "Research Persona",
+      metadata: { selectionMode: "tracked" },
     };
     messageOptionState.value.selectedCharacter = {
       id: "legacy-character",
@@ -1073,6 +1240,7 @@ describe("Playground cockpit controls", () => {
       kind: "persona",
       id: "persona-1",
       name: "Research Persona",
+      metadata: { selectionMode: "tracked" },
     };
     messageOptionState.value.selectedCharacter = {
       id: "legacy-character",
@@ -1220,6 +1388,50 @@ describe("Playground cockpit controls", () => {
     expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
   });
 
+  it.each(["success", "scope-change", "failed", "pending"])("clears a copied child's overlay only through its current scoped settings action: %s", async outcome => {
+    forkSettings.mode = outcome === "pending" ? "pending" : "fork";
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.historyId = null;
+    messageOptionState.value.serverChatId = "fork-child";
+    messageOptionState.value.selectedAssistant = {kind: "persona", id: "overlay", name: "Overlay", metadata: {selectionMode: "overlay"}} as any;
+    messageOptionState.value.selectedCharacter = null;
+    let finish!: () => void;
+    forkSettings.update.mockImplementation(() => new Promise((resolve, reject) => { finish = () => outcome === "failed" ? reject(new Error("lost response")) : resolve({}); }));
+    render(<Playground />);
+    const inspector = within(await screen.findByTestId("playground-cockpit-right-rail")).getByTestId("playground-runtime-inspector");
+    fireEvent.click(within(inspector).getByRole("button", {name: "Clear assistant"}));
+    if (outcome !== "pending") {
+      await waitFor(() => expect(forkSettings.update).toHaveBeenCalledWith({assistantOverlay: null}));
+      expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled();
+      if (outcome === "scope-change") forkSettings.current = false;
+      await act(async () => finish());
+    } else await act(async () => {});
+    expect(chatSettingsState.applyChatSettingsPatch).not.toHaveBeenCalled();
+    if (outcome === "success") expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null);
+    else {
+      expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled();
+      expect(messageOptionState.value.setSelectedAssistant).not.toHaveBeenCalled();
+      expect(sessionPersistenceState.value.clearPersistedSession).not.toHaveBeenCalled();
+    }
+  });
+
+  it("clears an ordinary legacy chat assistant through the real qualified controller before ancestry review", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.historyId = null;
+    messageOptionState.value.serverChatId = "legacy";
+    messageOptionState.value.selectedAssistant = {kind: "persona", id: "overlay", name: "Overlay", metadata: {selectionMode: "overlay"}} as any;
+    messageOptionState.value.selectedCharacter = null;
+    const actual = renderHook(() => useHistorySelection());
+    await act(async () => {await actual.result.current.open({kind: "native", owner_key: "owner", conversation_id: "legacy", validate_lease: () => true} as any)});
+    forkSettings.controller = actual.result.current;
+    render(<Playground />);
+    const inspector = within(await screen.findByTestId("playground-cockpit-right-rail")).getByTestId("playground-runtime-inspector");
+    fireEvent.click(within(inspector).getByRole("button", {name: "Clear assistant"}));
+    await waitFor(() => expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null));
+    expect(chatSettingsState.applyChatSettingsPatch).toHaveBeenCalledWith({historyId: null, serverChatId: "legacy", patch: {assistantOverlay: null}});
+    expect(actual.result.current.status).toBe("legacy_review_required");
+  });
+
   it("does not render cockpit control rails in focus mode", async () => {
     storageState.values.set("playgroundChatLayoutMode", "focus");
 
@@ -1288,6 +1500,32 @@ describe("Playground cockpit controls", () => {
     expect(messageOptionState.value.regenerateLastMessage).toHaveBeenCalledTimes(
       1,
     );
+  });
+
+  it("disables cockpit regenerate when a saved conversation has selected history", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.temporaryChat = false;
+    const selection = renderHook(() => useHistorySelection());
+    await act(async () => {
+      await selection.result.current.open({
+        kind: "native",
+        owner_key: "owner",
+        conversation_id: "chat-1",
+        validate_lease: () => true,
+      } as any);
+    });
+    forkSettings.controller = selection.result.current;
+
+    render(<Playground />);
+
+    const inspector = within(
+      await screen.findByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    expect(
+      within(inspector).getByRole("button", { name: "Regenerate last response" }),
+    ).toBeDisabled();
+    expect(within(inspector).getByText(/selected history/i)).toBeInTheDocument();
+    expect(messageOptionState.value.regenerateLastMessage).not.toHaveBeenCalled();
   });
 
   it("reflects degraded server readiness in the cockpit runtime rail", async () => {

@@ -48,6 +48,7 @@ import {
   useReadingProgressSaveOnClose,
   useResizablePanel,
 } from "@/hooks/document-workspace"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const DocumentPickerModal = React.lazy(() => import("./DocumentPickerModal"))
 const DocumentViewer = React.lazy(() =>
@@ -650,11 +651,7 @@ export const DocumentWorkspacePage: React.FC = () => {
   // Workspace-level keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement
-      const isInputField =
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
+      const isInputField = isEditableTarget(e.target)
 
       const mod = e.metaKey || e.ctrlKey
 

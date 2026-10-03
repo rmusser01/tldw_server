@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react"
+import { isEditableTarget } from "@/utils/editable-target"
 
 interface UseSelectionKeyboardOptions<T> {
   items: T[]
@@ -115,11 +116,9 @@ export function useSelectionKeyboard<T>({
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       const target = event.target as HTMLElement | null
-      if (target) {
-        if (target instanceof HTMLInputElement && target.type !== "checkbox") return
-        if (target instanceof HTMLTextAreaElement) return
-        if (target.isContentEditable) return
-      }
+      // Checkboxes stay live so j/k/space keep working while a row checkbox has focus.
+      const isCheckbox = target instanceof HTMLInputElement && target.type === "checkbox"
+      if (!isCheckbox && isEditableTarget(target)) return
 
       const key = event.key.toLowerCase()
       const currentFocusedIndex = focusedIndexRef.current

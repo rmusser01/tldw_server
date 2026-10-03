@@ -139,7 +139,7 @@ class SandboxModule(BaseModule):
             owner = self._svc.get_session_owner(session_id)
             if owner is None:
                 raise ValueError("session_not_found")
-            if not self._is_admin(context) and str(owner) != user_id:
+            if not self.caller_is_admin(context) and str(owner) != user_id:
                 raise PermissionError("sandbox.run session not found")
 
         files_inline = self._decode_inline_files(args.get("files") or [])
@@ -207,26 +207,6 @@ class SandboxModule(BaseModule):
             "scope_snapshot_id": status.scope_snapshot_id,
         }
 
-    def _is_admin(self, context: Any | None) -> bool:
-        try:
-            if bool(getattr(context, "is_admin", False)):
-                return True
-            metadata = getattr(context, "metadata", {}) or {}
-            roles = metadata.get("roles")
-            if isinstance(roles, str):
-                roles = [roles]
-            if isinstance(roles, list) and any(str(r).strip().lower() == "admin" for r in roles):
-                return True
-            permissions = metadata.get("permissions")
-            if isinstance(permissions, str):
-                permissions = [permissions]
-            if isinstance(permissions, list):
-                normalized = {str(permission).strip().lower() for permission in permissions if str(permission).strip()}
-                if "*" in normalized or "system.configure" in normalized:
-                    return True
-            return False
-        except Exception:
-            return False
 
     def _coerce_runtime(self, value: Any) -> SbxRuntimeType | None:
         runtime_raw = (str(value).strip().lower() if value is not None else "")

@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_pro
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager, reset_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.services.registration_service import reset_registration_service
 from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
 
@@ -51,7 +52,7 @@ async def single_user_cookie_client(tmp_path, monkeypatch):
     # The minimal test app omits this optional router; retain its real dependencies.
     from tldw_Server_API.app.api.v1.endpoints import ingestion_sources
 
-    if not any(route.path == "/api/v1/ingestion-sources/capabilities" for route in app.routes):
+    if not any(route.path == "/api/v1/ingestion-sources/capabilities" for route in iter_served_routes(app.routes)):
         app.include_router(ingestion_sources.router, prefix="/api/v1")
 
     with TestClient(app) as client:

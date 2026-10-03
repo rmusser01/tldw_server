@@ -662,6 +662,16 @@ async def test_finished_legacy_jobs_handoff_excludes_only_its_own_lease(
         lease_seconds=120,
     )
     assert child is not None
+    if outcome == "failed":
+        assert jobs.fail_job(
+            child["id"], error="prior retryable attempt", retryable=True, backoff_seconds=0,
+            worker_id=child["worker_id"], lease_id=child["lease_id"],
+        )
+        child = jobs.acquire_next_job(
+            domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+            worker_id="legacy", lease_seconds=120,
+        )
+        assert child is not None and child["retry_count"] == child["max_retries"] == 1
     if other_work == "sibling":
         service.repo.update_batch(
             legacy,
@@ -1332,6 +1342,55 @@ def test_terminal_transition_preserves_other_claimed_work(
 
     assert service.repo.get_slot(pack.slots[0].id)["status"] == "generating"
     assert service.get_readiness(pack.id).status == "generating"
+
+
+@pytest.mark.asyncio
+@pytest.mark.critical
+async def test_withdrawn_variant_claim_does_not_pin_execution_recipe(
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+    fake_jobs: FakeJobs,
+) -> None:
+    """Resolving candidate settings cannot persist them after the claim is lost."""
+    pack = pack_with_slots
+    slot_id = pack.slots[0].id
+    batch = _batch(service, pack)
+    original_batch = service.repo.get_batch(batch)
+    withdrawn_outcome: dict[str, Any] = {}
+
+    class WithdrawingRegistry(FakeImageRegistry):
+        """Withdraw the native inline claim after initial worker admission."""
+
+        def resolve_backend(self, requested: str | None) -> str | None:
+            """Retain the reservation while removing only the exact claim fence."""
+            outcome = service.repo.get_variant_outcome(batch, slot_id, 0)
+            assert outcome is not None and outcome["claim_lease_id"] == "inline"
+            service.repo.release_variant_claim(
+                batch_id=batch, slot_id=slot_id, variant_index=0,
+                attempt_token=outcome["claim_token"],
+            )
+            withdrawn_outcome.update(service.repo.get_variant_outcome(batch, slot_id, 0))
+            return super().resolve_backend(requested)
+
+    adapter = FakeImageAdapter()
+    saver = RecordingVNSaver()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs,
+        image_registry=WithdrawingRegistry(adapter), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=saver,
+    )
+    with pytest.raises(VNAssetGenerationError, match="vn_asset_variant_claim_lost") as raised:
+        await worker.handle_generate_variant({
+            "pack_id": pack.id, "slot_id": slot_id, "batch_id": batch,
+            "variant_index": 0, "user_id": 1,
+        })
+
+    assert raised.value.retryable is True
+    assert service.repo.get_batch(batch) == original_batch
+    assert service.repo.get_variant_outcome(batch, slot_id, 0) == withdrawn_outcome
+    assert service.repo.get_item(withdrawn_outcome["item_id"])["review_status"] == "hidden"
+    assert adapter.requests == []
+    assert saver.calls == []
 
 
 @pytest.mark.parametrize("kind", ["completed", "failed", "cancelled"])

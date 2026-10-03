@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.database import (
     should_enforce_sqlite_schema_strictness,
     validate_required_sqlite_api_key_schema,
 )
+from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
 
 
 def _affected_row_count(result: Any) -> int:
@@ -1218,7 +1219,7 @@ class AuthnzApiKeysRepo:
                     active_status,
                 )
                 if _affected_row_count(old_update_result) == 0:
-                    raise ValueError("API key not found or inactive")
+                    raise APIKeyRotationRejected()
                 await conn.execute(
                     "UPDATE api_keys SET rotated_from = $1 WHERE id = $2",
                     old_key_id,
@@ -1267,7 +1268,7 @@ class AuthnzApiKeysRepo:
                     ),
                 )
                 if _affected_row_count(old_update_cursor) == 0:
-                    raise ValueError("API key not found or inactive")
+                    raise APIKeyRotationRejected()
                 await conn.execute(
                     "UPDATE api_keys SET rotated_from = ? WHERE id = ?",
                     (old_key_id, new_key_id),

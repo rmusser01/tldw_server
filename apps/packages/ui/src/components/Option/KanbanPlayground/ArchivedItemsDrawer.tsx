@@ -262,7 +262,7 @@ export const ArchivedItemsDrawer = ({
       }
       open={open}
       onClose={onClose}
-      width={400}
+      size={400}
     >
       {boardsLoading || boardArchiveLoading ? (
         <div className="flex justify-center py-10">

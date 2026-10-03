@@ -69,3 +69,35 @@ def test_approval_token_is_single_use_when_nonce_store_present() -> None:
     assert second_ok is False
     assert second_error is not None
     assert "already used" in second_error
+
+
+_BINDING = {"run_id": "run_1", "seq": 7, "tool_call_id": "tc_1", "args_hash": "hash_a"}
+
+
+@pytest.mark.unit
+def test_approval_token_signed_with_another_secret_is_rejected() -> None:
+    token = mint_approval_token(**_BINDING, secret="other-secret")
+    ok, error = verify_approval_token(token=token, **_BINDING, secret="test-secret")
+    assert (ok, error) == (False, "signature mismatch")
+
+
+@pytest.mark.unit
+def test_approval_token_with_junk_appended_is_rejected() -> None:
+    """A lax decoder dropped out-of-alphabet junk and accepted the original token."""
+    token = mint_approval_token(**_BINDING, secret="test-secret")
+    ok, error = verify_approval_token(token=token + "!!!!", **_BINDING, secret="test-secret")
+    assert (ok, error) == (False, "token decode failed")
+
+
+@pytest.mark.unit
+def test_approval_token_with_non_object_payload_is_rejected_not_raised() -> None:
+    import hashlib
+    import hmac
+
+    from tldw_Server_API.app.core.Utils.base64url import encode_segment
+
+    payload = b"[1, 2]"
+    signature = hmac.new(b"test-secret", payload, hashlib.sha256).digest()
+    token = f"{encode_segment(payload)}.{encode_segment(signature)}"
+    ok, error = verify_approval_token(token=token, **_BINDING, secret="test-secret")
+    assert (ok, error) == (False, "token decode failed")

@@ -1,3 +1,5 @@
+import type { LocalHistoryOwnerV1 } from "./history-selection"
+import { ensureLocalProfileId } from "./history-selection"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import {
   type ChatHistory as ChatHistoryType,
@@ -22,6 +24,8 @@ import {
   Models
 } from "./types"
 import { PageAssistDatabase } from "./chat"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import { serverChatMirrorOwnerKey } from "./server-chat-mirror"
 import { db as chatDB } from "./schema"
 import {
   deletePromptByIdFB,
@@ -49,7 +53,8 @@ export const saveHistory = async (
   is_rag?: boolean,
   message_source?: "copilot" | "web-ui" | "branch" | "server",
   doc_id?: string,
-  server_chat_id?: string
+  server_chat_id?: string,
+  requestScope?: ServicePromptSnapshot["requestScope"]
 ) => {
   const id = generateID()
   const createdAt = Date.now()
@@ -60,10 +65,13 @@ export const saveHistory = async (
     is_rag: is_rag || false,
     message_source,
     doc_id,
-    server_chat_id
+    server_chat_id,
+    ...(requestScope ? { server_scope_key: serverChatMirrorOwnerKey({ requestScope }) } : {})
   }
   const db = new PageAssistDatabase()
-  await db.addChatHistory(history)
+  // Only this internally constructed row may retain its captured account stamp.
+  if (requestScope) await chatDB.chatHistories.add(history)
+  else await db.addChatHistory(history)
   return history
 }
 
@@ -72,9 +80,12 @@ export const getHistoryByServerChatId = async (serverChatId: string) => {
   return await db.getHistoryByServerChatId(serverChatId)
 }
 
-export const getHistoryByDocId = async (docId: string) => {
+export const getHistoryByDocId = async (docId: string, requestScope: ServicePromptSnapshot["requestScope"]) => {
   const db = new PageAssistDatabase()
-  return await db.getHistoryByDocId(docId)
+  const ownerKey = serverChatMirrorOwnerKey({ requestScope })
+  const histories = await db.getAllHistoriesByDocId(docId)
+  return histories.filter(history => history.server_scope_key === ownerKey)
+    .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null
 }
 
 export const getAllHistoriesByDocId = async (docId: string) => {
@@ -279,11 +290,25 @@ const collapseVariantMessages = (messages: MessageHistory) => {
   return { collapsed, variantsByParent }
 }
 
+/** Explicit selection is already owner-ordered; never collapse or sort it. */
+const selectedHistoryRows = (messages: MessageHistory, ids: readonly string[]) => {
+  if (new Set(ids).size !== ids.length) throw new Error("duplicate_message_id")
+  const byId = new Map(messages.map(message => [message.id, message]))
+  return ids.map(id => {
+    const row = byId.get(id)
+    if (!row) throw new Error("stale_selection")
+    return row
+  })
+}
+
 export const formatToChatHistory = (
-  messages: MessageHistory
+  messages: MessageHistory,
+  selectedIds?: readonly string[]
 ): ChatHistoryType => {
-  const { collapsed } = collapseVariantMessages(messages)
-  const eligibleIds = new Set(excludeLocalRagDiagnostics(formatToMessage(messages)).map(message => message.id))
+  const collapsed = selectedIds === undefined
+    ? collapseVariantMessages(messages).collapsed
+    : selectedHistoryRows(messages, selectedIds)
+  const eligibleIds = new Set(excludeLocalRagDiagnostics(formatToMessage(messages, selectedIds)).map(message => message.id))
   return collapsed.filter(message => eligibleIds.has(message.id)).map((message) => {
     return {
       content: message.content,
@@ -293,8 +318,16 @@ export const formatToChatHistory = (
   })
 }
 
-export const formatToMessage = (messages: MessageHistory): MessageType[] => {
-  const { collapsed, variantsByParent } = collapseVariantMessages(messages)
+export const formatToMessage = (messages: MessageHistory, selectedIds?: readonly string[]): MessageType[] => {
+  const legacy = selectedIds === undefined ? collapseVariantMessages(messages) : null
+  const collapsed = legacy ? legacy.collapsed : selectedHistoryRows(messages, selectedIds!)
+  const variantsByParent = legacy?.variantsByParent || new Map<string, Message[]>()
+  if (!legacy) for (const row of messages) {
+    if (!shouldGroupVariants(row)) continue
+    const group = variantsByParent.get(row.parent_message_id!) || []
+    group.push(row)
+    variantsByParent.set(row.parent_message_id!, group)
+  }
   return collapsed.map((message) => {
     const normalizedRole = normalizeChatRole(message.role)
     const metadataExtra =
@@ -333,18 +366,55 @@ export const formatToMessage = (messages: MessageHistory): MessageType[] => {
       if (grouped.length > 1) {
         const variants = grouped.map(buildVariantFromHistory)
         mapped.variants = variants
-        mapped.activeVariantIndex = variants.length - 1
+        mapped.activeVariantIndex = selectedIds === undefined ? variants.length - 1 : variants.findIndex(variant => variant.id === message.id)
       }
     }
     return mapped
   })
 }
 
+/** Display projection only. The original capture retains canonical provider roles/content. */
+export const formatSelectedHistory = (capture: import("@/types/history-selection").HistorySelectionCaptureV1) => {
+  const content = new Map(capture.selected_content.map(row => [row.id, row]))
+  const rows: MessageHistory = capture.rows.map(node => {
+    const selected = content.get(node.id)
+    if (!selected) throw new Error("selected_content_mismatch")
+    const metadata = selected.extra_metadata || {}
+    const local = (metadata.local_history || {}) as Partial<Message>
+    return {
+      ...local,
+      id: node.id, history_id: capture.view.conversation_id,
+      role: node.role, name: typeof metadata.sender_name === "string" ? metadata.sender_name : node.role === "user" ? "You" : "Assistant",
+      content: selected.message, images: [...selected.images], createdAt: 0,
+      parent_message_id: node.parent_id, metadataExtra: { ...metadata }
+    }
+  })
+  const ids = capture.rows.map(row => row.id)
+  const messages = formatToMessage(rows, ids)
+  const nodesById = new Map(capture.rows.map(row => [row.id, row]))
+  const alternativesByParent = new Map<string, typeof capture.snapshot.nodes[number][]>()
+  for (const node of capture.snapshot.nodes) {
+    if (node.role !== "assistant" || !node.parent_id) continue
+    const group = alternativesByParent.get(node.parent_id) || []
+    group.push(node)
+    alternativesByParent.set(node.parent_id, group)
+  }
+  for (const message of messages) {
+    const node = nodesById.get(message.id!)!
+    if (node.role !== "assistant" || !node.parent_id) continue
+    const alternatives = alternativesByParent.get(node.parent_id) || []
+    if (alternatives.length < 2) continue
+    message.variants = alternatives.map(row => ({ id: row.id,
+      message: content.get(row.id)?.message ?? row.preview ?? "",
+      images: [...(content.get(row.id)?.images || [])] }))
+    message.activeVariantIndex = alternatives.findIndex(row => row.id === node.id)
+  }
+  return { messages, history: formatToChatHistory(rows, ids) }
+}
+
 export const deleteByHistoryId = async (history_id: string) => {
   const db = new PageAssistDatabase()
-  await db.deleteMessage(history_id)
-  await db.removeChatHistory(history_id)
-  await db.deleteCompareState(history_id)
+  await db.deleteChatHistory(history_id)
   return history_id
 }
 
@@ -373,15 +443,15 @@ export const restoreChat = async (data: {
   historyInfo: HistoryInfo
   messages: Message[]
 }) => {
-  const db = new PageAssistDatabase()
-
-  // Restore the history record
-  await db.addChatHistory(data.historyInfo)
-
-  // Restore all messages
-  for (const msg of data.messages) {
-    await db.addMessage(msg)
+  // Trusted same-owner undo only; imports use the sanitizing import API.
+  const profile = await ensureLocalProfileId()
+  if (data.messages.some(message => message.history_provenance && message.history_provenance.owner_key !== `local-history-v1:${profile}`)) {
+    throw new Error("Undo history owner mismatch")
   }
+  await chatDB.transaction('rw', [chatDB.chatHistories, chatDB.messages], async () => {
+    await chatDB.chatHistories.add(data.historyInfo)
+    for (const message of data.messages) await chatDB.messages.add(message)
+  })
 
   return data.historyInfo.id
 }
@@ -443,31 +513,27 @@ export const removeMessageByIndex = async (
 // helpers above: the UI message list can contain non-persisted seed rows (e.g.
 // a character greeting at UI index 0) that are absent from Dexie, so an array
 // index does not line up with the Dexie row order. Addressing by the stable
-// message id avoids deleting/overwriting the wrong row. Rows whose id is not in
-// Dexie (like an unsaved greeting) are simply left untouched.
+// message id avoids deleting/overwriting the wrong row. Missing and cross-history
+// targets reject so the caller cannot falsely apply a successful display update.
 export const updateMessageById = async (
   history_id: string,
   message_id: string,
-  message: string
+  message: string,
+  owner?: LocalHistoryOwnerV1
 ) => {
-  try {
-    const db = new PageAssistDatabase()
-    await db.updateMessage(history_id, message_id, message)
-  } catch {
-    // temp chat will break
-  }
+  await new PageAssistDatabase().updateMessage(
+    history_id,
+    message_id,
+    message,
+    owner
+  )
 }
-
 export const removeMessageById = async (
   history_id: string,
-  message_id: string
+  message_id: string,
+  owner?: LocalHistoryOwnerV1
 ) => {
-  try {
-    const db = new PageAssistDatabase()
-    await db.removeMessage(history_id, message_id)
-  } catch {
-    // temp chat will break
-  }
+  return new PageAssistDatabase().removeMessage(history_id, message_id, owner)
 }
 
 // Delete every persisted message ordered after `message_id` (used by the edit +
@@ -839,19 +905,7 @@ export const saveWebshare = async ({
 }
 
 // User Functions
-export const getUserId = async () => {
-  const db = new PageAssistDatabase()
-  const id = await db.getUserID()
-  if (!id || id?.trim() === "") {
-    const user_id = "user_xxxx-xxxx-xxx-xxxx-xxxx".replace(/[x]/g, () => {
-      const r = Math.floor(Math.random() * 16)
-      return r.toString(16)
-    })
-    await db.setUserID(user_id)
-    return user_id
-  }
-  return id
-}
+export const getUserId = ensureLocalProfileId
 
 // Export/Import Functions
 export const exportChatHistory = async () => {
@@ -943,12 +997,13 @@ export const importOAIConfigs = async (configs: any[]) => {
 }
 
 // Utility Functions
-export const getRecentChatFromCopilot = async () => {
+export const getRecentChatFromCopilot = async (snapshot: ServicePromptSnapshot) => {
   const db = new PageAssistDatabase()
   const chatHistories = await db.getChatHistories()
   if (chatHistories.length === 0) return null
   const history = chatHistories.find(
-    (history) => history.message_source === "copilot"
+    (history) => history.message_source === "copilot" &&
+      history.server_scope_key === serverChatMirrorOwnerKey(snapshot)
   )
   if (!history) return null
 
@@ -957,12 +1012,13 @@ export const getRecentChatFromCopilot = async () => {
   return { history, messages }
 }
 
-export const getRecentChatFromWebUI = async () => {
+export const getRecentChatFromWebUI = async (snapshot: ServicePromptSnapshot) => {
   const db = new PageAssistDatabase()
   const chatHistories = await db.getChatHistories()
   if (chatHistories.length === 0) return null
   const history = chatHistories.find(
-    (history) => history.message_source === "web-ui"
+    (history) => history.message_source === "web-ui" &&
+      history.server_scope_key === serverChatMirrorOwnerKey(snapshot)
   )
   if (!history) return null
 
@@ -1036,9 +1092,7 @@ export const deleteHistoriesByDateRange = async (
 
   const deletedIds: string[] = []
   for (const history of historiesToDelete) {
-    await db.deleteMessage(history.id)
-    await db.removeChatHistory(history.id)
-    await db.deleteCompareState(history.id)
+    await db.deleteChatHistory(history.id)
     deletedIds.push(history.id)
   }
 

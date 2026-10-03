@@ -1,18 +1,14 @@
 """Reusable bounded source-preview projection for local and shared workspaces."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
+from tldw_Server_API.app.core.Utils.iso_datetime import utc_now_iso as _utc_now_iso
 
 _MAX_PREVIEW_CHARS = 12_000
 _MAX_PREVIEW_CHUNKS = 10
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _safe_get_media(media_db: Any | None, media_id: int) -> dict[str, Any] | None:

@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
     get_auth_principal,
     get_request_user,
     get_session_manager_dep,
@@ -20,6 +21,7 @@ from tldw_Server_API.app.api.v1.endpoints import (
     users,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.unit
 
@@ -28,6 +30,35 @@ READS = {
     "can_read_notifications": "/api/v1/notifications",
     "can_read_monitoring_alerts": "/api/v1/monitoring/alerts",
 }
+
+
+@pytest.mark.parametrize(
+    "permissions,roles,expected",
+    [
+        ([], ["user"], False),
+        ([], ["admin"], True),
+        (["*"], ["user"], True),
+        (["system.configure"], ["user"], False),
+    ],
+)
+def test_audio_diagnostic_capability_matches_server_admin_guard(
+    app: FastAPI, permissions: list[str], roles: list[str], expected: bool
+) -> None:
+    principal = AuthPrincipal(kind="user", user_id=7, permissions=permissions, roles=roles)
+    app.dependency_overrides[get_auth_principal] = lambda: principal
+
+    @app.get("/protected-audio-diagnostic")
+    async def protected_audio_diagnostic() -> dict[str, bool]:
+        await RequireRole("admin")(principal)
+        return {"ok": True}
+
+    with TestClient(app) as client:
+        capabilities = client.get("/api/v1/users/me/capabilities")
+        protected = client.get("/protected-audio-diagnostic")
+
+    assert capabilities.status_code == 200
+    assert capabilities.json()["can_run_audio_diagnostics"] is expected
+    assert protected.status_code == (200 if expected else 403)
 
 
 @pytest.fixture
@@ -42,7 +73,7 @@ def app(monkeypatch):
         monitoring.router,
     ):
         application.include_router(router, prefix="/api/v1")
-    for route in application.routes:
+    for route in iter_served_routes(application.routes):
         for dependency in getattr(route, "dependencies", []):
             if getattr(dependency.dependency, "_tldw_rate_limit_resource", None):
                 application.dependency_overrides[dependency.dependency] = lambda: None
@@ -74,27 +105,27 @@ def app(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "permissions,roles,admin,expected",
+    "permissions,roles,admin,expected,expected_audio",
     [
-        (["media.read", "notes.write"], ["user"], False, (False, False, False)),
-        (["tasks.read"], ["user"], False, (True, False, False)),
-        (["notifications.read"], ["custom"], False, (False, True, False)),
-        (["system.logs"], ["custom"], False, (False, False, True)),
-        (["tasks.read", "notifications.read", "system.logs"], ["user"], False, (True, True, True)),
-        ([], ["admin"], False, (True, True, True)),
-        (["*"], ["user"], False, (True, True, True)),
-        (["system.configure"], ["user"], False, (False, False, False)),
-        ([], ["user"], True, (False, False, False)),
+        (["media.read", "notes.write"], ["user"], False, (False, False, False), False),
+        (["tasks.read"], ["user"], False, (True, False, False), False),
+        (["notifications.read"], ["custom"], False, (False, True, False), False),
+        (["system.logs"], ["custom"], False, (False, False, True), False),
+        (["tasks.read", "notifications.read", "system.logs"], ["user"], False, (True, True, True), False),
+        ([], ["admin"], False, (True, True, True), True),
+        (["*"], ["user"], False, (True, True, True), True),
+        (["system.configure"], ["user"], False, (False, False, False), False),
+        ([], ["user"], True, (False, False, False), False),
     ],
 )
-def test_decisions_match_real_protected_read_routes(app, permissions, roles, admin, expected):
+def test_decisions_match_real_protected_read_routes(app, permissions, roles, admin, expected, expected_audio):
     principal = AuthPrincipal(kind="user", user_id=7, permissions=permissions, roles=roles, is_admin=admin)
     app.dependency_overrides[get_auth_principal] = lambda: principal
     with TestClient(app) as client:
         response = client.get("/api/v1/users/me/capabilities?user_id=99")
         assert response.status_code == 200
         assert response.headers["cache-control"] == "no-store"
-        assert response.json() == {"user_id": 7, **dict(zip(READS, expected))}
+        assert response.json() == {"user_id": 7, **dict(zip(READS, expected)), "can_run_audio_diagnostics": expected_audio}
         for capability, allowed in zip(READS, expected):
             protected = client.get(READS[capability])
             assert protected.status_code == (200 if allowed else 403), protected.text

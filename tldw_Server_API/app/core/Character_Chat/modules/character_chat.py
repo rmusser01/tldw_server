@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
 
 _CHAR_CHAT_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -926,6 +927,20 @@ def start_new_chat_session(
         return conversation_id_val, char_data, initial_ui_history, img
 
 
+def _public_conversation_metadata(
+    db: CharactersRAGDB, row: dict[str, Any], *,
+    workspace_visibility_cache: dict[str, bool] | None = None,
+) -> dict[str, Any]:
+    """Copy library metadata, replacing only internal origin with a safe value."""
+    result = dict(row)
+    raw = result.pop("assistant_startup_json", None)
+    result["assistant_startup"] = project_assistant_startup(
+        db, raw=raw, user_id=db.owner_user_id,
+        workspace_visibility_cache=workspace_visibility_cache,
+    ).model_dump()
+    return result
+
+
 def list_character_conversations(
     db: CharactersRAGDB,
     character_id: int,
@@ -936,12 +951,14 @@ def list_character_conversations(
     """List active conversations for a given character."""
 
     try:
-        return db.get_conversations_for_character(
+        rows = db.get_conversations_for_character(
             character_id,
             limit=limit,
             offset=offset,
             client_id=client_id,
         )
+        workspace_visibility_cache: dict[str, bool] = {}
+        return [_public_conversation_metadata(db, row, workspace_visibility_cache=workspace_visibility_cache) for row in rows]
     except CharactersRAGDBError as exc:
         logger.error(
             'Failed to list conversations for character ID {}: {}',
@@ -963,7 +980,8 @@ def get_conversation_metadata(db: CharactersRAGDB, conversation_id: str) -> Opti
     """Retrieve metadata for a specific conversation."""
 
     try:
-        return db.get_conversation_by_id(conversation_id)
+        row = db.get_conversation_by_id(conversation_id)
+        return _public_conversation_metadata(db, row) if row is not None else None
     except CharactersRAGDBError as exc:
         logger.error(
             'Failed to get metadata for conversation ID {}: {}',
@@ -1068,12 +1086,14 @@ def search_conversations_by_title_query(
     """Search conversations by title."""
 
     try:
-        return db.search_conversations_by_title(
+        rows = db.search_conversations_by_title(
             title_query,
             character_id=character_id,
             limit=limit,
             client_id=client_id,
         )
+        workspace_visibility_cache: dict[str, bool] = {}
+        return [_public_conversation_metadata(db, row, workspace_visibility_cache=workspace_visibility_cache) for row in rows]
     except CharactersRAGDBError as exc:
         logger.error(
             "Failed to search conversations with query '{}': {}",

@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import copy
+import ntpath
+import os
 import re
+import subprocess  # nosec B404
+import sys
 from pathlib import Path
 from urllib.parse import quote
 
 import pytest
 import yaml
+from loguru import logger
+
 from Helper_Scripts.Deployment.production_preflight import (
     PreflightIssue,
     load_raw_env,
@@ -23,6 +29,20 @@ PROXY_PATH = Path("Dockerfiles/Production/Caddyfile")
 _INTERPOLATION = re.compile(r"\$\{([A-Z0-9_]+):\?[^}]+\}")
 
 
+@pytest.fixture
+def preflight_log_records():
+    """Collect the CLI's Loguru records.
+
+    main() reports through Loguru since bcd91d082a. Loguru's default sink keeps the
+    stderr object from import time, so capture fixtures only see it when some earlier
+    test happened to re-add a sink; assert on the records instead.
+    """
+    records: list[dict[str, object]] = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="INFO")
+    yield records
+    logger.remove(sink_id)
+
+
 def _valid_env(tmp_path: Path) -> dict[str, str]:
     backup_dir = tmp_path / "backups"
     backup_dir.mkdir(exist_ok=True)
@@ -37,7 +57,7 @@ def _valid_env(tmp_path: Path) -> dict[str, str]:
         "POSTGRES_USER": "tldw_app",
         "POSTGRES_DB": "tldw",
         "POSTGRES_PASSWORD": postgres_password,
-        "DATABASE_URL": ("postgresql://tldw_app:" f"{quote(postgres_password, safe='')}@postgres:5432/tldw"),
+        "DATABASE_URL": (f"postgresql://tldw_app:{quote(postgres_password, safe='')}@postgres:5432/tldw"),
         "REDIS_PASSWORD": redis_password,
         "REDIS_URL": f"redis://:{quote(redis_password, safe='')}@redis:6379/0",
         "ADMIN_USERNAME": "initial-admin",
@@ -106,8 +126,13 @@ def _rendered_compose_json(tmp_path: Path) -> tuple[dict, dict[str, str]]:
         if isinstance(service.get("volumes"), list):
             rendered_volumes = []
             for declaration in service["volumes"]:
-                source, target, *options = declaration.split(":")
-                is_bind = source.startswith((".", "/"))
+                source_target, _, option = declaration.rpartition(":")
+                if option in {"ro", "rw"}:
+                    source, target = source_target.rsplit(":", 1)
+                else:
+                    source, target = declaration.rsplit(":", 1)
+                    option = ""
+                is_bind = source.startswith((".", "/")) or ntpath.isabs(source)
                 if is_bind and source.startswith("."):
                     source = str((COMPOSE_PATH.parent / source).resolve())
                 mount = {
@@ -116,7 +141,7 @@ def _rendered_compose_json(tmp_path: Path) -> tuple[dict, dict[str, str]]:
                     "target": target,
                     "bind" if is_bind else "volume": {},
                 }
-                if "ro" in options:
+                if option == "ro":
                     mount["read_only"] = True
                 rendered_volumes.append(mount)
             service["volumes"] = rendered_volumes
@@ -913,6 +938,17 @@ def test_rendered_compose_matches_concrete_environment(tmp_path: Path) -> None:
     assert validate_rendered_compose(compose, values) == ()
 
 
+def test_rendered_compose_accepts_windows_drive_backup_source(tmp_path: Path) -> None:
+    compose, values = _rendered_compose(tmp_path)
+    values["TLDW_BACKUP_DIR"] = r"C:\operator\backups"
+    compose["services"]["preflight"]["volumes"][-1] = f"{values['TLDW_BACKUP_DIR']}:/backups:ro"
+
+    assert validate_rendered_compose(compose, values) == ()
+
+    compose["services"]["preflight"]["volumes"][-1] = r"C:\operator\other:/backups:ro"
+    assert "rendered_mounts" in _codes(validate_rendered_compose(compose, values))
+
+
 def test_rendered_compose_accepts_actual_json_shapes_and_injected_secrets(tmp_path: Path) -> None:
     compose, values = _rendered_compose_json(tmp_path)
 
@@ -1155,22 +1191,29 @@ def test_run_preflight_accepts_a_complete_offline_fixture(tmp_path: Path) -> Non
 
     report = run_preflight(env_file, COMPOSE_PATH, PROXY_PATH)
 
-    assert report.ok
-    assert report.issues == ()
+    if os.name == "nt":
+        # Host preflight cannot verify POSIX owner-only permissions on Windows.
+        assert _codes(report.issues) == {"env_permissions"}
+    else:
+        assert report.ok
+        assert report.issues == ()
 
 
 def test_cli_accepts_compose_injected_environment_without_raw_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
 ) -> None:
     values = _valid_env(tmp_path)
     (tmp_path / "backups").chmod(0o500)
     for name, value in values.items():
         monkeypatch.setenv(name, value)
 
-    exit_code = main(
-        [
+    # Exercise a fresh CLI process so Loguru binds to that process's stderr.
+    result = subprocess.run(  # nosec B603
+        (
+            sys.executable,
+            "-m",
+            "Helper_Scripts.Deployment.production_preflight",
             "--from-environment",
             "--compose-file",
             str(COMPOSE_PATH),
@@ -1178,13 +1221,15 @@ def test_cli_accepts_compose_injected_environment_without_raw_file(
             str(PROXY_PATH),
             "--runtime-backup-dir",
             str(tmp_path / "backups"),
-        ]
+        ),
+        capture_output=True,
+        check=False,
+        text=True,
     )
 
-    captured = capfd.readouterr()
-    assert exit_code == 0
-    assert captured.out == ""
-    assert "Production preflight passed" in captured.err
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert "Production preflight passed" in result.stderr
 
 
 def test_host_preflight_remains_authoritative_for_env_permissions(
@@ -1222,6 +1267,7 @@ def test_host_preflight_requires_env_owner_to_match_effective_uid(
     monkeypatch.setattr(
         "Helper_Scripts.Deployment.production_preflight.os.geteuid",
         lambda: env_file.stat().st_uid + 1,
+        raising=False,
     )
 
     report = run_preflight(env_file, COMPOSE_PATH, PROXY_PATH)
@@ -1249,6 +1295,7 @@ def test_container_environment_mode_skips_raw_file_permissions(
     monkeypatch.setattr(
         "Helper_Scripts.Deployment.production_preflight.os.geteuid",
         lambda: -1,
+        raising=False,
     )
 
     issues = validate_environment(values, env_path=None)
@@ -1368,6 +1415,7 @@ def test_cli_rejects_runtime_backup_directory_with_raw_env_mode(
 def test_cli_prints_sorted_sanitized_errors_only_to_stderr(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    preflight_log_records: list[dict[str, object]],
 ) -> None:
     secret = "must-never-appear-" + "S" * 40
     values = _valid_env(tmp_path)
@@ -1388,11 +1436,14 @@ def test_cli_prints_sorted_sanitized_errors_only_to_stderr(
         ]
     )
     captured = capsys.readouterr()
-    lines = captured.err.splitlines()
+    # One ERROR record per issue, carrying code/field as extras (bcd91d082a).
+    issues = [(r["extra"]["issue_code"], r["extra"]["field"]) for r in preflight_log_records]
+    rendered = captured.err + repr(preflight_log_records)
 
     assert exit_code == 1
     assert captured.out == ""
-    assert lines == sorted(lines)
-    assert all(line.startswith("ERROR [") for line in lines)
-    assert secret not in captured.err
-    assert "postgresql://" not in captured.err
+    assert issues
+    assert issues == sorted(issues)
+    assert all(r["level"].name == "ERROR" for r in preflight_log_records)
+    assert secret not in rendered
+    assert "postgresql://" not in rendered

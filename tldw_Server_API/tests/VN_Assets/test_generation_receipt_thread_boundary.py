@@ -162,7 +162,7 @@ async def test_public_receipt_phases_hold_native_work_off_loop(
             assert response.status_code == 404
             assert response.json()["detail"] == "slot_not_found"
             assert api_case.receipt(operation) is None
-            assert api_case.service.repo.list_batches(api_case.pack_id) == []
+            assert api_case.submitted_batches() == []
         else:
             assert response.status_code == 202
             replay = await client.post(api_case.route(operation), json=PAYLOAD)
@@ -172,7 +172,7 @@ async def test_public_receipt_phases_hold_native_work_off_loop(
             assert conflict.status_code == 409
             assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
             assert api_case.receipt(operation)["status"] == "completed"
-            assert len(api_case.service.repo.list_batches(api_case.pack_id)) == 1
+            assert len(api_case.submitted_batches()) == 1
             assert len(api_case.jobs.list_jobs(domain="vn_assets", job_type="vn_asset_enqueue_batch")) == 1
     assert api_case.service.repo.get_item(api_case.item_id) == approved
 
@@ -190,11 +190,11 @@ async def test_receipt_native_error_and_once_repeated_cancel_drain_exact_phase(
         record = api_case.receipt("generate")
         if phase == "release":
             assert record is None
-            assert api_case.service.repo.list_batches(api_case.pack_id) == []
+            assert api_case.submitted_batches() == []
         elif phase == "claim":
             assert record["status"] == "in_progress"
             assert record["batch_id"] is None
-            assert api_case.service.repo.list_batches(api_case.pack_id) == []
+            assert api_case.submitted_batches() == []
             replay = await client.post(api_case.route("generate"), json=PAYLOAD)
             assert replay.status_code == 409
             assert replay.json()["detail"]["code"] == "idempotency_key_in_progress"
@@ -205,7 +205,7 @@ async def test_receipt_native_error_and_once_repeated_cancel_drain_exact_phase(
             assert replay.status_code == 202
             assert replay.json()["batch_id"] == record["batch_id"]
             assert api_case.receipt("generate")["status"] == "completed"
-            assert len(api_case.service.repo.list_batches(api_case.pack_id)) == 1
+            assert len(api_case.submitted_batches()) == 1
             assert len(api_case.jobs.list_jobs(domain="vn_assets", job_type="vn_asset_enqueue_batch")) == 1
 
 
@@ -236,7 +236,7 @@ async def test_receipt_acknowledgement_callback_failure_stays_pending_and_recove
         response = await client.post(api_case.route(operation), json=PAYLOAD)
         assert response.status_code == 202
         assert response.json()["batch_id"] == pending["batch_id"]
-        assert len(api_case.service.repo.list_batches(api_case.pack_id)) == 1
+        assert len(api_case.submitted_batches()) == 1
         assert len(api_case.jobs.list_jobs(domain="vn_assets", job_type="vn_asset_enqueue_batch")) == 1
 
 
@@ -259,7 +259,7 @@ async def test_receipt_claim_domain_failures_keep_native_http_mapping(
     assert response.status_code == expected
     detail = response.json()["detail"]
     assert (detail["code"] if isinstance(detail, dict) else detail) == message
-    assert api_case.service.repo.list_batches(api_case.pack_id) == []
+    assert api_case.submitted_batches() == []
 
 
 @pytest.mark.asyncio

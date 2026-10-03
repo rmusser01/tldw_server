@@ -463,12 +463,21 @@ def _log_lingering_threads():
         _ = None
 
 
+# Threads already reported as lingering. Python refuses to flip ``daemon`` on a
+# running thread, so without this every later test joined each of them again
+# (1s apiece, twice per test via two autouse fixtures); a few idle executor
+# workers turned that into seconds per test and pushed whole CI shards into the
+# job timeout.
+_KNOWN_LINGERING_THREADS: "weakref.WeakSet[threading.Thread]" = weakref.WeakSet()
+
+
 def _cleanup_lingering_threads(log: logging.Logger, context: str = "teardown") -> None:
     """Best-effort cleanup of lingering non-daemon threads during tests.
 
     Performs a first pass join with timeout for non-daemon threads and then logs
     any remaining threads with their stack frames before marking them as daemon
-    to avoid interpreter shutdown hangs.
+    to avoid interpreter shutdown hangs. A thread is joined and reported once;
+    later calls skip it.
     """
     try:
         import sys
@@ -476,7 +485,7 @@ def _cleanup_lingering_threads(log: logging.Logger, context: str = "teardown") -
         current = threading.current_thread()
         # First pass: try to join all non-daemon threads with a timeout
         for t in threading.enumerate():
-            if t is current or t.daemon:
+            if t is current or t.daemon or t in _KNOWN_LINGERING_THREADS:
                 continue
             try:
                 # Cancel timers so they don't keep the interpreter alive
@@ -491,8 +500,9 @@ def _cleanup_lingering_threads(log: logging.Logger, context: str = "teardown") -
 
         # Second pass: log any remaining threads and mark them daemon
         for t in threading.enumerate():
-            if t is current or t.daemon:
+            if t is current or t.daemon or t in _KNOWN_LINGERING_THREADS:
                 continue
+            _KNOWN_LINGERING_THREADS.add(t)
             try:
                 stack = sys._current_frames().get(t.ident)
             except Exception:
@@ -1092,6 +1102,19 @@ def _shutdown_executors_and_evaluations_pool():
 
 
 @pytest.fixture(autouse=True)
+def _clear_reranker_model_cache():
+    """Reranker models are cached per process; tests stub the model classes, so start clean."""
+    def _clear() -> None:
+        mod = sys.modules.get("tldw_Server_API.app.core.RAG.rag_service.advanced_reranking")
+        if mod is not None:
+            mod.clear_reranker_model_cache()
+
+    _clear()
+    yield
+    _clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_workflow_scheduler():
     """Reset WorkflowScheduler singleton state between tests to avoid stale queues/active counts."""
     try:
@@ -1185,3 +1208,24 @@ def bypass_api_limits(monkeypatch):
                 _ = None
 
     return _bypass
+
+
+_MAX_PARAM_ID_CHARS = 100
+
+
+def pytest_make_parametrize_id(config, val, argname):  # noqa: ANN001, ANN201 - pytest hook
+    """Keep huge string/bytes parameter values out of test ids.
+
+    pytest names a parametrized case after its value, so budget tests with MB
+    payloads produced MB-long test ids. --durations and failure reports print
+    the id, and a multi-megabyte log line stalled the CI runner's log processing
+    until the 60-minute job limit, discarding the log (core-security, 4 runs).
+    Long values get a short stable id; everything else keeps pytest's default.
+    """
+    if isinstance(val, (str, bytes)) and len(val) > _MAX_PARAM_ID_CHARS:
+        import hashlib
+
+        raw = val if isinstance(val, bytes) else val.encode("utf-8", "surrogatepass")
+        kind = "bytes" if isinstance(val, bytes) else "chars"
+        return f"{argname}-{len(val)}{kind}-{hashlib.sha256(raw).hexdigest()[:10]}"
+    return None

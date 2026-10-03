@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,6 +18,8 @@ DEFAULT_PROFILE_SECTIONS = [
 ]
 MAX_PROFILE_SECTIONS = 10
 MAX_SECTION_NAME_LENGTH = 64
+MAX_SECTION_TITLE_LENGTH = 128
+SECTION_TITLE_CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 VALID_PROFILE_FORMATS = {"structured_sections", "single_response"}
 
 
@@ -27,6 +30,7 @@ class MacroOutputProfile:
     name: str = "default"
     format: str = "structured_sections"
     sections: list[str] = field(default_factory=lambda: list(DEFAULT_PROFILE_SECTIONS))
+    section_titles: dict[str, str] = field(default_factory=dict)
     include_branch_outputs: bool = False
 
 
@@ -38,6 +42,7 @@ def profile_to_dict(profile: MacroOutputProfile) -> dict[str, Any]:
     return {
         "format": profile.format,
         "sections": list(profile.sections),
+        "section_titles": dict(profile.section_titles),
         "include_branch_outputs": bool(profile.include_branch_outputs),
     }
 
@@ -45,7 +50,7 @@ def profile_to_dict(profile: MacroOutputProfile) -> dict[str, Any]:
 def normalize_output_profile(name: str, raw: Mapping[str, Any] | None = None) -> MacroOutputProfile:
     """Validate profile settings and return a normalized profile."""
     raw = raw or {}
-    unknown_keys = sorted(set(raw) - {"format", "sections", "include_branch_outputs"})
+    unknown_keys = sorted(set(raw) - {"format", "sections", "section_titles", "include_branch_outputs"})
     if unknown_keys:
         raise MacroValidationError(
             f"unknown output profile keys: {', '.join(str(key) for key in unknown_keys)}"
@@ -60,10 +65,26 @@ def normalize_output_profile(name: str, raw: Mapping[str, Any] | None = None) ->
     normalized_sections = [str(section) for section in sections]
     _validate_sections(normalized_sections)
 
+    section_titles = raw.get("section_titles", {})
+    if not isinstance(section_titles, Mapping):
+        raise MacroValidationError("output profile section_titles must be a mapping")
+    normalized_titles: dict[str, str] = {}
+    for section, title in section_titles.items():
+        section_name = str(section)
+        if section_name not in normalized_sections:
+            raise MacroValidationError(f"output profile section_titles contains unknown section: {section_name}")
+        if not isinstance(title, str) or SECTION_TITLE_CONTROLS.search(title):
+            raise MacroValidationError("invalid output profile section title")
+        title = title.strip()
+        if not title or len(title) > MAX_SECTION_TITLE_LENGTH:
+            raise MacroValidationError("invalid output profile section title")
+        normalized_titles[section_name] = title
+
     return MacroOutputProfile(
         name=name,
         format=profile_format,
         sections=normalized_sections,
+        section_titles=normalized_titles,
         include_branch_outputs=bool(raw.get("include_branch_outputs", False)),
     )
 
@@ -78,6 +99,7 @@ def merge_output_profile(
             name=profile.name,
             format=profile.format,
             sections=list(profile.sections),
+            section_titles=dict(profile.section_titles),
             include_branch_outputs=profile.include_branch_outputs,
         )
     raw = profile_to_dict(profile)
@@ -113,7 +135,7 @@ def render_output_profile(
         else:
             body = str(outputs.get(section, "")).strip()
         if body:
-            blocks.append(f"## {_title(section)}\n\n{body}")
+            blocks.append(f"## {profile.section_titles.get(section) or _title(section)}\n\n{body}")
     if profile.include_branch_outputs:
         appendix = _format_branch_outputs(branch_outputs or [])
         if appendix:
@@ -122,6 +144,9 @@ def render_output_profile(
 
 
 def _validate_sections(sections: list[str]) -> None:
+    """Require a bounded nonempty selection of output sections."""
+    if not sections:
+        raise MacroValidationError("output profile requires at least one section")
     if len(sections) > MAX_PROFILE_SECTIONS:
         raise MacroValidationError("output profile has too many sections")
     for section in sections:

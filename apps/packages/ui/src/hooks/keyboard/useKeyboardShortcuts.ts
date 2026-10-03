@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useRef } from 'react'
 import { useShortcutConfig, type ShortcutConfig } from './useShortcutConfig'
 import { useRouteTransitionStore } from '@/store/route-transition'
+import { isEditableTarget } from "@/utils/editable-target"
 
 export { isMac } from '../useKeyboardShortcuts'
 
@@ -55,31 +56,6 @@ export const modeNavigationTargets: ModeNavigationTarget[] = [
   { key: "modeCharacters", path: "/characters", description: "Go to Characters" }
 ]
 
-export const isEditableShortcutTarget = (target: EventTarget | null): boolean => {
-  if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) {
-    return false
-  }
-
-  const tagName = target.tagName.toLowerCase()
-  if (tagName === "input" || tagName === "textarea" || tagName === "select") {
-    return true
-  }
-
-  if (target.isContentEditable) {
-    return true
-  }
-
-  const editableAncestor = target.closest(
-    '[contenteditable="true"], [contenteditable="plaintext-only"]'
-  )
-  if (editableAncestor) {
-    return true
-  }
-
-  const role = target.getAttribute("role")?.toLowerCase()
-  return role === "textbox" || role === "combobox" || role === "searchbox"
-}
-
 export const executeKeyboardShortcuts = (
   event: KeyboardEvent,
   shortcuts: KeyboardShortcutConfig[]
@@ -90,8 +66,8 @@ export const executeKeyboardShortcuts = (
       const activeElement =
         typeof document === "undefined" ? null : document.activeElement
       if (
-        isEditableShortcutTarget(event.target) ||
-        isEditableShortcutTarget(activeElement)
+        isEditableTarget(event.target) ||
+        isEditableTarget(activeElement)
       ) {
         return
       }

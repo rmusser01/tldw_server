@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
+    RequireRole,
     get_auth_principal,
     get_db_transaction,
     get_password_service_dep,
@@ -65,7 +66,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     StorageError,
     WeakPasswordError,
 )
-from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, fetch_password_hash
 from tldw_Server_API.app.core.AuthNZ.permissions import NOTIFICATIONS_READ, SYSTEM_LOGS, TASKS_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.profile_version import (
@@ -74,6 +75,7 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
+from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
 from tldw_Server_API.app.core.UserProfiles.contracts import (
@@ -233,28 +235,7 @@ async def _fetch_password_hash_for_user(db: Any, user_id: int) -> str | None:
     """
     Compatibility helper retained for backend-selection unit tests.
     """
-    if await is_postgres_backend():
-        value = await db.fetchval(
-            "SELECT password_hash FROM users WHERE id = $1",
-            user_id,
-        )
-        return str(value) if value else None
-
-    cursor = await db.execute(
-        "SELECT password_hash FROM users WHERE id = ?",
-        (user_id,),
-    )
-    row = await cursor.fetchone()
-    if not row:
-        return None
-    if isinstance(row, dict):
-        value = row.get("password_hash")
-        return str(value) if value else None
-    try:
-        value = row[0]
-    except (IndexError, KeyError, TypeError):
-        value = None
-    return str(value) if value else None
+    return await fetch_password_hash(db, user_id, is_postgres=await is_postgres_backend())
 
 
 def _require_active_verified_user(user_context: dict[str, Any]) -> None:
@@ -377,7 +358,7 @@ async def get_current_user_capabilities(
     response: Response,
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> UserCapabilities:
-    """Report only this authenticated caller's optional-read permission decisions."""
+    """Report this authenticated caller's effective capability decisions."""
     decisions: dict[str, bool] = {}
     for field, permission in (
         ("can_read_scheduled_tasks", TASKS_READ),
@@ -392,6 +373,14 @@ async def get_current_user_capabilities(
             decisions[field] = False
         else:
             decisions[field] = True
+    try:
+        await RequireRole("admin")(principal)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_403_FORBIDDEN:
+            raise
+        decisions["can_run_audio_diagnostics"] = False
+    else:
+        decisions["can_run_audio_diagnostics"] = True
     response.headers["Cache-Control"] = "no-store"
     return UserCapabilities(user_id=principal.user_id, **decisions)
 
@@ -734,22 +723,7 @@ async def change_password(
         new_hash = password_service.hash_password(request.new_password)
 
         # Update password in database
-        await db.execute(
-            """
-            UPDATE users
-            SET password_hash = $1,
-                password_changed_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = $2
-            """,
-            new_hash,
-            user_id,
-        )
-        await db.execute(
-            "INSERT INTO password_history (user_id, password_hash) VALUES ($1, $2)",
-            user_id,
-            new_hash,
-        )
+        await password_service.set_password(user_id, new_hash, db, is_postgres=await is_postgres_backend())
 
         logger.info(f"Password changed for user {username} (ID: {user_id})")
 
@@ -897,6 +871,8 @@ async def rotate_api_key(
             actor_kind=principal.kind,
             actor_roles=list(principal.roles or []),
         )
+    except APIKeyRotationRejected as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found") from exc
     except MandatoryAuditWriteError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

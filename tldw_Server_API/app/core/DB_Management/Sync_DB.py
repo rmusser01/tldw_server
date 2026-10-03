@@ -10430,11 +10430,11 @@ class SyncDatabase:
                    AND resolution_action = ?
                    AND (
                         resolved_by_device_id = ?
-                        OR (resolved_by_device_id IS NULL AND ? IS NULL)
+                        OR (resolved_by_device_id IS NULL AND CAST(? AS TEXT) IS NULL)
                    )
                    AND (
                         resolution_notes = ?
-                        OR (resolution_notes IS NULL AND ? IS NULL)
+                        OR (resolution_notes IS NULL AND CAST(? AS TEXT) IS NULL)
                    )
                 """,
                 (
@@ -11889,7 +11889,7 @@ class SyncDatabase:
                            AND owner_user_id = ?
                            AND (
                                 device_id = ?
-                                OR (device_id IS NULL AND ? IS NULL)
+                                OR (device_id IS NULL AND CAST(? AS TEXT) IS NULL)
                            )
                            AND idempotency_key = ?
                         """,
@@ -12010,6 +12010,83 @@ class SyncDatabase:
                 upload_id,
                 connection=conn,
             )
+
+    def expire_blob_upload_sessions(
+        self,
+        *,
+        dataset_id: str | None = None,
+        limit: int = 500,
+    ) -> list[str]:
+        """Mark timed-out upload sessions expired, releasing slot and reserved quota.
+
+        Nothing reaped these before. Sessions are capped at max_active_blob_uploads and
+        the upload_id is minted server-side and never returned to the client, so the
+        cancel endpoint could not reach an orphan: eight transient failures permanently
+        disabled attachment upload for that user with no self-service recovery.
+
+        Expiry is compared in Python because expires_at is TEXT on SQLite and TIMESTAMPTZ
+        on PostgreSQL. Rows with no expires_at are left alone -- they predate the TTL and
+        releasing them here would be a silent change of meaning, not a repair.
+
+        Returns the expired upload_ids so the caller can discard their staged chunks.
+        """
+
+        now = _parse_iso_datetime(utcnow_iso())
+        now_iso = utcnow_iso()
+        if dataset_id is None:
+            rows = self.execute(
+                """
+                SELECT upload_id, expires_at
+                  FROM sync_blob_upload_sessions
+                 WHERE status IN ('created', 'uploading')
+                """,
+            )
+        else:
+            rows = self.execute(
+                """
+                SELECT upload_id, expires_at
+                  FROM sync_blob_upload_sessions
+                 WHERE status IN ('created', 'uploading')
+                   AND dataset_id = ?
+                """,
+                (dataset_id,),
+            )
+
+        stale: list[str] = []
+        for row in rows or ():
+            raw = _timestamp_to_string(row.get("expires_at"))
+            if not raw:
+                continue
+            try:
+                if _parse_iso_datetime(raw) > now:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            stale.append(str(row["upload_id"]))
+            if len(stale) >= limit:
+                break
+
+        if not stale:
+            return []
+
+        expired: list[str] = []
+        with self.backend.transaction() as conn:
+            for upload_id in stale:
+                updated = self.execute(
+                    """
+                    UPDATE sync_blob_upload_sessions
+                       SET status = ?, updated_at = ?
+                     WHERE upload_id = ?
+                       AND status IN ('created', 'uploading')
+                    """,
+                    ("expired", now_iso, upload_id),
+                    connection=conn,
+                )
+                # A session completed or cancelled since the SELECT is not ours to
+                # discard.
+                if updated.rowcount == 1:
+                    expired.append(upload_id)
+        return expired
 
     def get_blob_chunk(
         self,
@@ -12336,11 +12413,11 @@ class SyncDatabase:
                       FROM sync_blob_objects
                      WHERE dataset_id = ?
                        AND (? = 1 OR status = 'available')
-                       AND (? IS NULL OR owner_user_id = ?)
-                       AND (? IS NULL OR blob_id = ?)
-                       AND (? IS NULL OR payload_hash = ?)
+                       AND (CAST(? AS TEXT) IS NULL OR owner_user_id = ?)
+                       AND (CAST(? AS TEXT) IS NULL OR blob_id = ?)
+                       AND (CAST(? AS TEXT) IS NULL OR payload_hash = ?)
                        AND (
-                            ? IS NULL
+                            CAST(? AS TEXT) IS NULL
                             OR attachment_id = ?
                             OR payload_hash IN (
                                 SELECT payload_hash
@@ -12429,7 +12506,7 @@ class SyncDatabase:
             SELECT *
               FROM sync_blob_objects
              WHERE dataset_id = ?
-               AND (? IS NULL OR status = ?)
+               AND (CAST(? AS TEXT) IS NULL OR status = ?)
              ORDER BY updated_at ASC, blob_id ASC
             """,
             (dataset_id, status, status),

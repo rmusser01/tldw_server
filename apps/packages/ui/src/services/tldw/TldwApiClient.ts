@@ -1,3 +1,4 @@
+import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import type { ChatScope } from "@/types/chat-scope"
 import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
 import { toChatScopeParams } from "@/types/chat-scope"
@@ -32,8 +33,9 @@ import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { createJsonResponseLike } from "@/services/tldw/json-response-like"
 import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
-import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
+import { createServicePromptScopeChangedError, servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
 import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { appendPathQuery } from "@/services/tldw/path-utils"
 import { inferUploadMediaTypeFromUrl } from "@/services/tldw/media-routing"
 import {
@@ -1033,6 +1035,7 @@ export interface ResearchRunResponse {
 }
 
 export interface ChatCompletionRequest {
+  tldw_history_selection_v1?: import("@/types/history-selection").HistorySelectionV1
   messages: ChatMessage[]
   model: string
   routing?: {
@@ -1076,6 +1079,7 @@ export type ScopedRequestOptions = {
 }
 
 export type ChatCompletionRequestOptions = {
+  scope?: ChatScope
   signal?: AbortSignal
   timeoutMs?: number
   debugMetadata?: ChatRequestDebugMetadata
@@ -1235,6 +1239,8 @@ export type ConversationState =
   | "non-viable"
 
 export interface ServerChatMessage {
+  tldw_history_admission_v1?: HistoryAdmissionV1
+  parent_message_id?: string | null
   images?: string[]
   id: string
   role: "system" | "user" | "assistant"
@@ -2376,9 +2382,14 @@ export class TldwApiClientBase {
     )
   }
 
-  async updateConfig(config: Partial<TldwConfig>): Promise<void> {
+  async updateConfig(
+    config: Partial<TldwConfig>,
+    assertCurrent?: (current: Partial<TldwConfig>) => void,
+    assertCommitted?: (current: Partial<TldwConfig>) => void
+  ): Promise<void> {
     await this.initialize()
     let currentConfig = (await this.getConfig()) || ({} as TldwConfig)
+    assertCurrent?.(currentConfig)
     const previousConfig = currentConfig
     const targetAuthMode = config.authMode || currentConfig.authMode
     const submittedApiKey = Object.prototype.hasOwnProperty.call(config, "apiKey")
@@ -2414,8 +2425,52 @@ export class TldwApiClientBase {
         ({} as TldwConfig)
     }
 
+    // The auth attempt may have expired while configuration reads were pending.
+    assertCurrent?.(currentConfig)
     const newConfig = { ...currentConfig, ...config } as TldwConfig
     const persisted = toPersistedTldwConfig(newConfig)
+    if (assertCurrent) {
+      // Observe the write as well as its verification: either await can cross
+      // an account boundary, including a switch away and back to this account.
+      let invalidated = false
+      let revision = 0
+      const unwatch = watchChatAccountChanges((changed, current) => {
+        if (current) {
+          revision += 1
+          if (!connectionAuthoritiesMatch(current, persisted)) invalidated = true
+        } else if (changed) invalidated = true
+      })
+      let committed: TldwConfig | null | undefined
+      try {
+        await this.storage.set("tldwConfig", persisted)
+        let readRevision: number
+        do {
+          readRevision = revision
+          committed = await this.storage.get<TldwConfig>("tldwConfig")
+          if (invalidated) throw createServicePromptScopeChangedError()
+          if (!committed || !connectionAuthoritiesMatch(committed, persisted)) {
+            this.config = committed || null
+            this.applyConfigState()
+            throw createServicePromptScopeChangedError()
+          }
+          // A delayed own notification may be older or newer than this read.
+          // Read again instead of treating the notification as authoritative.
+        } while (readRevision !== revision)
+        try {
+          assertCommitted?.(committed)
+        } catch (error) {
+          this.config = null
+          throw error
+        }
+        this.config = committed
+        this.applyConfigState()
+      } finally {
+        unwatch()
+      }
+      this.publishConfigUpdated(previousConfig, true)
+      this.publishConfigUpdated(committed)
+      return
+    }
     await this.storage.set("tldwConfig", persisted)
     this.config = persisted
     this.applyConfigState()
@@ -3376,7 +3431,7 @@ export class TldwApiClientBase {
   }
 
   async *streamChatCompletion(request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
-    request.stream = true
+    request = { ...request, stream: true }
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
@@ -5611,13 +5666,16 @@ export class TldwApiClientBase {
 
   async listChatsWithMeta(
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal; scope?: ChatScope }
+    options?: { signal?: AbortSignal; scope?: ChatScope; requestScope?: ServicePromptRequestScope }
   ): Promise<{ chats: ServerChatSummary[]; total: number }> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
-      abortSignal: options?.signal
+      abortSignal: options?.signal,
+      headers: scopeFields.headers,
+      ...(scopeFields.servicePromptConfig ? { servicePromptConfig: scopeFields.servicePromptConfig } : {})
     })
 
     let list: any[] = []
@@ -5696,7 +5754,10 @@ export class TldwApiClientBase {
       ...scopeFields,
       ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(`/api/v1/chats/${cid}`, query),
-      method: "GET"
+      method: "GET",
+      headers: scopeFields.headers,
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {})
     })
     return this.normalizeChatSummary(res)
   }
@@ -5749,13 +5810,17 @@ export class TldwApiClientBase {
 
   async getChatSettings(
     chat_id: string | number,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<ChatSettingsResponse> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ChatSettingsResponse>({
       path: appendPathQuery(`/api/v1/chats/${cid}/settings`, query),
       method: "GET",
+      headers: scopeFields.headers,
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {}),
       expectedStatuses: [404]
     })
   }
@@ -5763,14 +5828,17 @@ export class TldwApiClientBase {
   async updateChatSettings(
     chat_id: string | number,
     settings: Record<string, unknown>,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<ChatSettingsResponse> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ChatSettingsResponse>({
       path: appendPathQuery(`/api/v1/chats/${cid}/settings`, query),
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {}),
       body: { settings }
     })
   }
@@ -6150,34 +6218,9 @@ export class TldwApiClientBase {
   async persistCharacterCompletion(
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: {
-      scope?: ChatScope
-      signal?: AbortSignal
-      requestScope?: ServicePromptRequestScope
-    }
+    options?: { scope?: ChatScope; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
-    const cid = String(chat_id)
-    const query = this.buildQuery(toChatScopeParams(options?.scope))
-    const scopeFields = requestScopeFields(options?.requestScope)
-    try {
-      const res = await bgRequest<any>({
-        path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...scopeFields.headers },
-        body: payload,
-        abortSignal: options?.signal,
-        ...(scopeFields.servicePromptConfig
-          ? { servicePromptConfig: scopeFields.servicePromptConfig }
-          : {})
-      })
-      this.invalidateChatMessagesCache(cid)
-      return res
-    } catch (error) {
-      if (isSavedDegradedCharacterPersistError(error)) {
-        this.invalidateChatMessagesCache(cid)
-      }
-      throw error
-    }
+    return chatRagMethods.persistCharacterCompletion.call(this as any, chat_id, payload, options)
   }
 
   async *streamCharacterChatCompletion(

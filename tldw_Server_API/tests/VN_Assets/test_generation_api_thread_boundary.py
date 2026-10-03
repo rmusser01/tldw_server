@@ -24,7 +24,9 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.VN_Assets.recipe import build_authored_recipe
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
+from tldw_Server_API.app.core.VN_Assets.worker import authored_variant_recipe
 
 pytestmark = pytest.mark.integration
 OPERATIONS = ("generate", "retry", "regenerate")
@@ -40,6 +42,15 @@ class ApiCase:
     pack_id: int
     slot_id: int
     item_id: int
+    source_batch: dict[str, Any] | None = None
+
+    def submitted_batches(self) -> list[dict[str, Any]]:
+        """Read new submissions while verifying the historical Retry source is unchanged."""
+        batches = self.service.repo.list_batches(self.pack_id)
+        if self.source_batch is None:
+            return batches
+        assert self.service.repo.get_batch(int(self.source_batch["id"])) == self.source_batch
+        return [batch for batch in batches if batch["id"] != self.source_batch["id"]]
 
     def route(self, operation: str) -> str:
         """Return the public submission route for the selected operation."""
@@ -84,6 +95,20 @@ def api_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.Fi
     slot = service.create_slot(pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="pose", variant_count=1))
     item = service.repo.create_item(pack_id=pack.id, slot_id=slot.id, variant_index=0, generated_file_id=1001)
     service.review_item(item["id"], VNAssetReviewRequest(review_status="approved"))
+    source_batch = None
+    if getattr(request.node, "callspec", None) is not None and request.node.callspec.params.get("operation") == "retry":
+        frozen = build_authored_recipe(
+            service.repo, service.repo.get_pack(pack.id), [service.repo.get_slot(slot.id)],
+            owner_user_id=42, variant_count=1,
+        )
+        source = service.repo.create_batch(
+            pack_id=pack.id, requested_by_user_id=42, status="queued",
+            total_slots=1, total_variants=1, planned_count=1, recipe=frozen,
+            recipes=[{"slot_id": slot.id, "variant_index": 0,
+                      "recipe": authored_variant_recipe(frozen, frozen["slots"][0], 0)}],
+        )
+        service.repo.fail_variant(batch_id=source["id"], slot_id=slot.id, variant_index=0, error="source failure")
+        source_batch = service.repo.get_batch(source["id"])
     app = FastAPI()
     app.include_router(vn_assets.router, prefix="/api/v1/vn")
 
@@ -103,7 +128,7 @@ def api_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.Fi
     app.dependency_overrides[vn_assets._service] = current_service
     app.dependency_overrides[vn_assets._job_manager] = current_jobs
     try:
-        yield ApiCase(service, jobs, app, pack.id, slot.id, int(item["id"]))
+        yield ApiCase(service, jobs, app, pack.id, slot.id, int(item["id"]), source_batch)
     finally:
         db.close_connection()
 
@@ -156,7 +181,7 @@ def assert_owned_close(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", OPERATIONS)
-async def test_public_submission_holds_real_world_book_query_off_loop(
+async def test_public_submission_holds_real_frozen_input_query_off_loop(
     api_case: ApiCase, monkeypatch: pytest.MonkeyPatch, operation: str,
 ) -> None:
     """Held snapshot queries remain responsive, materialized and replay-identical.
@@ -189,18 +214,35 @@ async def test_public_submission_holds_real_world_book_query_off_loop(
         assert release.wait(5), "world-book observer failed to release submission"
         return entries
 
+    original_source = repo.get_batch
+
+    def held_source(batch_id: int) -> dict[str, Any] | None:
+        """Hold the actual frozen Retry source read, never rebuild its world-book inputs."""
+        batch = original_source(batch_id)
+        if batch is not None and api_case.source_batch is not None and batch_id == api_case.source_batch["id"] and not started.is_set():
+            connection = repo.db.get_connection()
+            assert connection.in_transaction
+            observed.append((threading.current_thread(), connection))
+            started.set()
+            assert release.wait(5), "source observer failed to release submission"
+        return batch
+
     async def materialized_boundary(operation: Callable[[], dict[str, Any] | None]) -> dict[str, Any] | None:
         """Observe only detached transport data leaving the established boundary."""
         def observe_result() -> dict[str, Any] | None:
             """Validate the callback result on its owning thread, before transfer."""
             result = operation()
-            assert isinstance(result, dict)
-            materialized.append(result)
+            assert result is None or isinstance(result, dict)
+            if result is not None:
+                materialized.append(result)
             return result
 
         return await original_boundary(observe_result)
 
-    monkeypatch.setattr(WorldBookService, "get_entries", held_entries)
+    if operation == "retry":
+        monkeypatch.setattr(repo, "get_batch", held_source)
+    else:
+        monkeypatch.setattr(WorldBookService, "get_entries", held_entries)
     monkeypatch.setattr(repo, "run_worker_replay_operation", materialized_boundary)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api_case.app), base_url="http://test") as client:
         task = asyncio.create_task(client.post(api_case.route(operation), json={"idempotency_key": "thread-receipt"}))
@@ -227,7 +269,7 @@ async def test_public_submission_holds_real_world_book_query_off_loop(
             )
             assert conflict.status_code == 409
             assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
-            assert len(repo.list_batches(api_case.pack_id)) == 1
+            assert len(api_case.submitted_batches()) == 1
             assert len(api_case.jobs.list_jobs(domain="vn_assets", job_type="vn_asset_enqueue_batch")) == 1
             assert api_case.receipt(operation)["status"] == "completed"
             recipe = repo.list_batch_recipes(response.json()["batch_id"])[0]["recipe"]
@@ -301,7 +343,7 @@ async def test_public_submission_drains_commit_rollback_and_cancellation(
             assert pending_at_cancel == [True] * cancel_count
             assert_owned_close(observed, owner)
             assert repo.get_item(api_case.item_id) == approved
-            batches = repo.list_batches(api_case.pack_id)
+            batches = api_case.submitted_batches()
             parents = api_case.jobs.list_jobs(domain="vn_assets", job_type="vn_asset_enqueue_batch")
             record = api_case.receipt(operation)
             if fail:
@@ -318,7 +360,7 @@ async def test_public_submission_drains_commit_rollback_and_cancellation(
                 assert replay.status_code == 202
                 assert replay.json()["batch_id"] == batches[0]["id"]
                 assert api_case.receipt(operation)["status"] == "completed"
-                assert len(repo.list_batches(api_case.pack_id)) == len(parents) == 1
+                assert len(api_case.submitted_batches()) == len(parents) == 1
         finally:
             release.set()
             observer.join(timeout=6)
@@ -370,7 +412,7 @@ async def test_postcommit_enqueue_failure_keeps_receipt_for_normal_recovery(
             assert responsive == [True]
             assert pending_at_cancel == [True] * cancel_count
             assert_owned_close(observed, owner)
-            batches = repo.list_batches(api_case.pack_id)
+            batches = api_case.submitted_batches()
             parents = api_case.jobs.list_jobs(domain="vn_assets", job_type="vn_asset_enqueue_batch")
             assert len(batches) == len(parents) == 1
             record = api_case.receipt("generate")
@@ -385,7 +427,7 @@ async def test_postcommit_enqueue_failure_keeps_receipt_for_normal_recovery(
             assert replay.json()["enqueue_error"] is None
             assert api_case.receipt("generate")["status"] == "completed"
             assert len(api_case.jobs.list_jobs(domain="vn_assets", job_type="vn_asset_enqueue_batch")) == 1
-            assert len(repo.list_batches(api_case.pack_id)) == 1
+            assert len(api_case.submitted_batches()) == 1
         finally:
             release.set()
             observer.join(timeout=6)
@@ -412,7 +454,7 @@ async def test_public_submission_preserves_missing_target_http_mapping(api_case:
         response = await client.post(route, json=payload)
         assert response.status_code == 404
         assert response.json()["detail"] == ("item_not_found" if operation == "regenerate" else "slot_not_found")
-        assert api_case.service.repo.list_batches(api_case.pack_id) == []
+        assert api_case.submitted_batches() == []
         assert api_case.jobs.list_jobs(domain="vn_assets", job_type="vn_asset_enqueue_batch") == []
         if operation == "generate":
             assert api_case.receipt(operation) is None
@@ -444,7 +486,7 @@ async def test_strict_world_book_failure_retains_existing_http400_mapping(
     assert response.status_code == 400
     assert response.json() == {"detail": "vn_asset_world_book_context_unavailable"}
     assert_owned_close(observed, owner)
-    assert repo.list_batches(api_case.pack_id) == []
+    assert api_case.submitted_batches() == []
     assert api_case.jobs.list_jobs(domain="vn_assets", job_type="vn_asset_enqueue_batch") == []
     assert api_case.receipt("generate") is None
     assert repo.get_item(api_case.item_id) == approved

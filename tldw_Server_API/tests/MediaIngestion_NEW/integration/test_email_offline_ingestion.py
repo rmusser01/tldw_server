@@ -7,10 +7,12 @@ persistence and SQLite search/detail operations execute without substitutes.
 
 import mailbox
 import socket
+import sys
 import zipfile
 from email.message import EmailMessage
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import BackgroundTasks, FastAPI
@@ -46,12 +48,25 @@ def offline_client(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.Claims_Extraction import claims_utils
     from tldw_Server_API.app.core.Embeddings.jobs_adapter import EmbeddingsJobsAdapter
     from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib
+    from tldw_Server_API.app.services import storage_quota_service
 
     calls = []
+    original_connect = socket.socket.connect
 
     def forbidden(*_args, **_kwargs):
         calls.append("model, background job, or outbound request")
         raise AssertionError("Offline email validation forbids model work and outbound requests")
+
+    def offline_connect(sock, address):
+        # Windows' socketpair fallback connects to its own IPv4 loopback listener.
+        if (
+            sock.family == socket.AF_INET
+            and isinstance(address, tuple)
+            and address[:1] == ("127.0.0.1",)
+            and sys._getframe(1).f_code is socket._fallback_socketpair.__code__
+        ):
+            return original_connect(sock, address)
+        return forbidden()
 
     monkeypatch.setattr(Summarization_General_Lib, "analyze", forbidden)
     monkeypatch.setattr(claims_utils, "extract_claims_for_chunks", forbidden)
@@ -71,16 +86,31 @@ def offline_client(tmp_path, monkeypatch):
         "stream_response",
     ):
         monkeypatch.setattr(http_client, name, forbidden)
-    monkeypatch.setattr(socket.socket, "connect", forbidden)
+    monkeypatch.setattr(socket.socket, "connect", offline_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", forbidden)
     monkeypatch.setattr(socket, "getaddrinfo", forbidden)
+
+    class _UnlimitedQuota:
+        """Quota is outside this harness; the synthetic user has no AuthNZ row."""
+
+        async def initialize(self) -> None:
+            return None
+
+        async def check_quota(self, *_args, **_kwargs):
+            return True, {}
+
+    monkeypatch.setattr(storage_quota_service, "get_storage_quota_service", _UnlimitedQuota)
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
     monkeypatch.setitem(persistence.settings, "EMAIL_NATIVE_PERSIST_ENABLED", True)
     monkeypatch.setitem(email_endpoint.settings, "EMAIL_OPERATOR_SEARCH_ENABLED", True)
     monkeypatch.setitem(email_endpoint.settings, "EMAIL_GMAIL_CONNECTOR_ENABLED", False)
+    # Quota remains outside this native parser/persistence harness.
+    quota_service = SimpleNamespace(check_quota=AsyncMock(return_value=(True, {})))
+    monkeypatch.setattr(storage_quota_service, "get_storage_quota_service", lambda: quota_service)
     db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="offline-email-test")
     app = FastAPI()
+    app.state.offline_forbidden_calls = calls
     # Register production functions without route-level auth/billing dependencies.
     app.add_api_route("/api/v1/media/add", add_media, methods=["POST"])
     app.add_api_route("/api/v1/media/process-emails", process_emails_endpoint, methods=["POST"])
@@ -99,6 +129,33 @@ def offline_client(tmp_path, monkeypatch):
     finally:
         db.close_connection()
         assert calls == [], f"Forbidden calls occurred, including any caught by application code: {calls}"
+
+
+def test_offline_client_allows_windows_socketpair_fallback_and_blocks_remote_connect(offline_client):
+    """Exercise Windows' loopback socketpair path through the active tripwire."""
+    left, right = socket._fallback_socketpair()
+    try:
+        left.sendall(b"ok")
+        assert right.recv(2) == b"ok"
+    finally:
+        left.close()
+        right.close()
+
+    with socket.socket() as listener, socket.socket() as client:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        client.setblocking(False)
+        with pytest.raises(AssertionError, match="Offline email validation forbids"):
+            client.connect(listener.getsockname())
+
+    with socket.socket() as client:
+        client.setblocking(False)
+        with pytest.raises(AssertionError, match="Offline email validation forbids"):
+            client.connect(("192.0.2.1", 9))
+        with pytest.raises(AssertionError, match="Offline email validation forbids"):
+            client.connect_ex(("192.0.2.1", 9))
+    assert len(offline_client.app.state.offline_forbidden_calls) == 3
+    offline_client.app.state.offline_forbidden_calls.clear()
 
 
 def synthetic_message(number: int, *, html_only: bool = False, same_body: bool = False) -> EmailMessage:

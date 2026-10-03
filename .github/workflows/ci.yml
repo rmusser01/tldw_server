@@ -123,8 +123,8 @@ jobs:
           ok = compileall.compile_dir('tldw_Server_API/app', force=True, quiet=1)
           sys.exit(0 if ok else 1)
           PY
-  preflight-python-311:
-    name: Governed Preflight (Python 3.11)
+  preflight-python-312:
+    name: Governed Preflight (Python 3.12)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -140,10 +140,10 @@ jobs:
         with:
           install-ffmpeg: 'false'
           install-portaudio: 'true'
-      - name: Setup Python 3.11 and dependencies
+      - name: Setup Python 3.12 and dependencies
         uses: ./.github/actions/setup-python-deps
         with:
-          python-version: '3.11'
+          python-version: '3.12'
           use-uv: 'true'
           enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           extras: dev
@@ -507,239 +507,20 @@ jobs:
           git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
           mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
           python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
-  full-suite-linux-311-smoke:
-    name: Full Suite (Ubuntu / Python 3.11 / ${{ matrix.shard.name }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    needs: [lint, syntax-check, changes]
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        shard:
-          - name: core
-            paths: >-
-              tldw_Server_API/tests/test_*.py
-              tldw_Server_API/tests/Health
-              tldw_Server_API/tests/sanity_tests
-              tldw_Server_API/tests/schemas
-              tldw_Server_API/tests/unit
-          - name: authnz-unit
-            paths: >-
-              tldw_Server_API/tests/AuthNZ_Unit
-          - name: config-core-loaders
-            paths: >-
-              tldw_Server_API/tests/Config/test_claims_env_int_parsing.py
-              tldw_Server_API/tests/Config/test_config_adapter.py
-              tldw_Server_API/tests/Config/test_config_admin_endpoint_sanitizers.py
-              tldw_Server_API/tests/Config/test_config_precedence_contract.py
-              tldw_Server_API/tests/Config/test_config_providers_endpoints.py
-              tldw_Server_API/tests/Config/test_config_sections_typed_loaders.py
-              tldw_Server_API/tests/Config/test_config_txt_inline_comment_regression.py
-              tldw_Server_API/tests/Config/test_config_utils_sanitizers.py
-              tldw_Server_API/tests/Config/test_docs_info_capabilities.py
-          - name: config-effective-api
-            paths: >-
-              tldw_Server_API/tests/Config/test_effective_config_api.py
-          - name: config-module-yaml
-            paths: >-
-              tldw_Server_API/tests/Config/test_module_yaml_integration.py
-          - name: config-runtime-env
-            paths: >-
-              tldw_Server_API/tests/Config/test_claims_verification_env.py
-              tldw_Server_API/tests/Config/test_env_absent_defaults.py
-              tldw_Server_API/tests/Config/test_env_file_selection.py
-              tldw_Server_API/tests/Config/test_feature_flags.py
-              tldw_Server_API/tests/Config/test_local_api_and_custom_openai2_config_keys.py
-              tldw_Server_API/tests/Config/test_migrate_api_keys.py
-              tldw_Server_API/tests/Config/test_pyproject_tooling_extra.py
-              tldw_Server_API/tests/Config/test_redis_config.py
-              tldw_Server_API/tests/Config/test_web_scraper_config_keys.py
-          - name: config-routes-startup
-            paths: >-
-              tldw_Server_API/tests/Config/test_openapi_config_jobs.py
-              tldw_Server_API/tests/Config/test_route_and_cors_guards.py
-              tldw_Server_API/tests/Config/test_route_toggle_evaluations_regressions.py
-              tldw_Server_API/tests/Config/test_startup_api_key_logging.py
-              tldw_Server_API/tests/Config/test_startup_validation.py
-          - name: utils-http
-            paths: >-
-              tldw_Server_API/tests/Utils
-              tldw_Server_API/tests/http_client
-    services:
-      postgres:
-        image: mirror.gcr.io/library/postgres:18-bookworm
-        env:
-          POSTGRES_USER: tldw_user
-          POSTGRES_PASSWORD: TestPassword123!
-          POSTGRES_DB: tldw_content
-        ports:
-          - 5432/tcp
-        options: >-
-          --health-cmd "pg_isready -U tldw_user -d tldw_content"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      PYTHONPATH: .
-      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
-      TEST_MODE: 'true'
-      DISABLE_HEAVY_STARTUP: '1'
-      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
-      POSTGRES_TEST_HOST: 127.0.0.1
-      POSTGRES_TEST_DB: tldw_content
-      POSTGRES_TEST_USER: tldw_user
-      POSTGRES_TEST_PASSWORD: TestPassword123!
-      TEST_DB_HOST: 127.0.0.1
-      TEST_DB_USER: tldw_user
-      TEST_DB_PASSWORD: TestPassword123!
-      TEST_DB_NAME: tldw_test
-      TLDW_TEST_POSTGRES_REQUIRED: '1'
-      WORKFLOWS_EGRESS_ALLOWLIST: "93.184.216.34,does-not-resolve.invalid,example.com"
-      RESULTS_DIR: test-results-linux-3.11-${{ matrix.shard.name }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-
-      - name: Install FFmpeg and PortAudio (Linux)
-        uses: ./.github/actions/setup-ffmpeg
-        with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing' || matrix.shard.name == 'platform-services-main-pollers') }}
-          install-portaudio: 'true'
-
-      - name: Setup Python and deps (with uv)
-        uses: ./.github/actions/setup-python-deps
-        with:
-          python-version: '3.11'
-          use-uv: 'true'
-          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
-          cache-dependency-path: |
-            pyproject.toml
-            uv.lock
-          extras: dev,multiplayer
-
-      - name: Install pg client and wait for PG
-        uses: ./.github/actions/wait-for-postgres
-        with:
-          host: 127.0.0.1
-          port: ${{ job.services.postgres.ports['5432'] }}
-          user: tldw_user
-
-      - name: Export PG env vars
-        shell: bash
-        run: |
-          PORT="${{ job.services.postgres.ports['5432'] }}"
-          DB_USER="${POSTGRES_TEST_USER:-tldw_user}"
-          DB_PASSWORD="${POSTGRES_TEST_PASSWORD:?POSTGRES_TEST_PASSWORD is required}"
-          DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
-          DB_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}"
-          echo "::add-mask::${DB_PASSWORD}"
-          echo "::add-mask::${DB_URL}"
-          {
-            echo "POSTGRES_TEST_PORT=${PORT}"
-            echo "TEST_DB_PORT=${PORT}"
-            echo "TEST_DATABASE_URL=${DB_URL}"
-            echo "DATABASE_URL=${DB_URL}"
-          } >> "$GITHUB_ENV"
-
-      - name: Ensure base DB exists
-        shell: bash
-        env:
-          PGPASSWORD: ${{ env.POSTGRES_TEST_PASSWORD }}
-        run: |
-          PORT="${{ job.services.postgres.ports['5432'] }}"
-          DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
-          DB_USER="${POSTGRES_TEST_USER:-tldw_user}"
-          psql -h 127.0.0.1 -p "$PORT" -U "$DB_USER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
-            psql -h 127.0.0.1 -p "$PORT" -U "$DB_USER" -d postgres -c "CREATE DATABASE ${DB_NAME}"
-
-      - name: Install additional deps for PG tests
-        run: |
-          python -m pip install --upgrade pip
-          pip install "psycopg[binary]>=3.1" pytest pytest-asyncio
-
-      - name: Smoke start server (single-user)
-        if: matrix.shard.name == 'core'
-        env:
-          SERVER_LABEL: smoke
-          AUTH_MODE: single_user
-          DATABASE_URL: sqlite:///./Databases/users.db
-          SINGLE_USER_API_KEY: "smoke-ci-key-12345"
-          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
-          PYTEST_CURRENT_TEST: "ci-smoke-linux-py311-single::startup"
-          TEST_MODE: 'true'
-          DISABLE_HEAVY_STARTUP: '0'
-          DEFER_HEAVY_STARTUP: '1'
-          STARTUP_TRACE: '1'
-          MCP_DEBUG: '1'
-          ULTRA_MINIMAL_APP: '1'
-          PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
-        shell: bash
-        run: |
-          python tldw_Server_API/tests/scripts/server_lifecycle.py start
-
-      - name: Smoke health check
-        if: always() && matrix.shard.name == 'core'
-        env:
-          SERVER_LABEL: smoke
-          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
-          SMOKE_STARTUP_TIMEOUT_SECONDS: '240'
-        shell: bash
-        run: |
-          python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
-
-      - name: Print smoke server log on failure
-        if: failure() && matrix.shard.name == 'core'
-        env:
-          SERVER_LABEL: smoke
-        shell: bash
-        run: |
-          python - <<'PY'
-          import os, pathlib
-          label = os.environ.get('SERVER_LABEL', 'smoke')
-          p = pathlib.Path(f'server-{label}.log')
-          if p.exists():
-              print('===== smoke server log =====')
-              print(p.read_text(encoding='utf-8'))
-          PY
-
-      - name: Smoke stop server
-        if: always() && matrix.shard.name == 'core'
-        env:
-          SERVER_LABEL: smoke
-        shell: bash
-        run: |
-          python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
-
-      - name: Run Python 3.11 compatibility smoke tests
-        shell: bash
-        run: |
-          mkdir -p "${RESULTS_DIR}"
-          export DATABASE_URL="sqlite:///./Databases/users.db"
-          unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          pytest -q --disable-warnings -p pytest_asyncio.plugin \
-            -m "not jobs and not e2e" \
-            ${{ matrix.shard.paths }} \
-            --durations=50 \
-            --junit-xml="${RESULTS_DIR}/smoke.xml"
-
-      - name: Upload test results (Linux 3.11 smoke)
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: full-suite-ubuntu-py3.11-${{ matrix.shard.name }}
-          path: ${{ env.RESULTS_DIR }}
-
   full-suite-linux-312-shards:
     name: Full Suite shard (Ubuntu / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
+    # admission is skipped outside workflow_run, and an implicit success() treats any
+    # skipped ancestor as a reason to skip -- so without always() these shards never
+    # ran on pull_request or push while the summaries reported green.
+    if: >-
+      always() && !cancelled() &&
+      needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
+      needs.changes.result == 'success' &&
+      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') ||
+       needs.changes.outputs.backend_changed == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -755,8 +536,30 @@ jobs:
               tldw_Server_API/tests/Files
               tldw_Server_API/tests/Meetings
               tldw_Server_API/tests/Notes_Tasks
-              tldw_Server_API/tests/Sync
               tldw_Server_API/tests/Translation
+          # tests/Sync outgrew one 60-minute shard: against Postgres the personal-context
+          # files run ~10-80x slower than locally (conflicts ~19 min, exchange_gate ~17 min),
+          # so gap-verified-2 was cancelled at the timeout and Sync never reported.
+          - name: sync-core
+            paths: >-
+              tldw_Server_API/tests/Sync
+              --ignore-glob=*/test_sync_v2_personal_context_*.py
+          - name: sync-pc-conflicts
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_conflicts.py
+          - name: sync-pc-exchange-gate
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_exchange_gate.py
+          - name: sync-pc-transport
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
+          # Every other personal-context file, including new ones, lands here.
+          - name: sync-pc-rest
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_*.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_conflicts.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_exchange_gate.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
           - name: gap-verified-3
             paths: >-
               tldw_Server_API/tests/DataTables
@@ -835,9 +638,30 @@ jobs:
           - name: core-audit-unified
             paths: >-
               tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          # core-security hit the job limit four runs in a row with no log kept;
+          # split so the stuck files are named by the shard that stalls.
           - name: core-security
             paths: >-
-              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Security/test_crypto.py
+              tldw_Server_API/tests/Security/test_dependency_security_floor.py
+              tldw_Server_API/tests/Security/test_pr2761_python_boundaries.py
+              tldw_Server_API/tests/Security/test_request_id_middleware.py
+              tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
+              tldw_Server_API/tests/Security/test_secret_manager.py
+              tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_setup_access_guard.py
+              tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
+              tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
+              tldw_Server_API/tests/Security/test_text2sql_rbac_and_acl.py
+              tldw_Server_API/tests/Security/test_trusted_proxy.py
+          - name: core-security-http-hop
+            paths: >-
+              tldw_Server_API/tests/Security/test_http_hop_*.py
+          - name: core-security-egress
+            paths: >-
+              tldw_Server_API/tests/Security/test_egress*.py
+              tldw_Server_API/tests/Security/test_websearch_egress_guard.py
+              tldw_Server_API/tests/Security/test_zip_safe_extract.py
           - name: core-setup-usage
             paths: >-
               tldw_Server_API/tests/Setup
@@ -1006,9 +830,23 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/test*.py
               tldw_Server_API/tests/AuthNZ/property/test*.py
-          - name: auth-core-unit-a-l
+          - name: auth-core-unit-admin-api
             paths: >-
-              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_admin*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_alerting.py
+              tldw_Server_API/tests/AuthNZ/unit/test_api*.py
+          - name: auth-core-unit-auth
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_auth_*.py
+          - name: auth-core-unit-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_authnz_*.py
+          - name: auth-core-unit-b-d
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[b-d]*.py
+          - name: auth-core-unit-e-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[e-l]*.py
           - name: auth-core-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
@@ -1025,6 +863,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+              tldw_Server_API/tests/DB_Management/test_chacha_*.py
           - name: chacha-character-conversation
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
@@ -1054,9 +893,14 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_assistant_startup_projection.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_startup.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_transport.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -1064,10 +908,23 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
+          - name: db-management-a-c
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[a-b]*.py
+              tldw_Server_API/tests/DB_Management/test_character_*.py
+              tldw_Server_API/tests/DB_Management/test_chat_*.py
+              tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_con*.py
+              tldw_Server_API/tests/DB_Management/test_core_*.py
+          - name: db-management-d-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[d-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
+              tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
@@ -1330,6 +1187,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -1384,7 +1242,9 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
@@ -1395,6 +1255,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -1433,6 +1294,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_done_spelling.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
@@ -1519,19 +1381,20 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_images.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-legacy-integration
+          - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
               tldw_Server_API/tests/Chat/integration
-          - name: chat-legacy-unit-a-l
+          - name: chat-unit-a-l
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
-          - name: chat-legacy-unit-m-z
+          - name: chat-unit-m-z
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
           - name: chat-new-integration-property
@@ -1686,6 +1549,8 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_persona_*.py
               tldw_Server_API/tests/Evaluations/test_recipe_*.py
           - name: product-evaluations-unit
+            # Non-UTC on purpose (TASK-13336): UTC hides host-offset timestamp bugs (delta 0).
+            tz: America/Los_Angeles
             paths: >-
               tldw_Server_API/tests/Evaluations/unit/test_*.py
           - name: product-flashcards
@@ -1735,6 +1600,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -1772,6 +1638,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -1816,6 +1683,19 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -1964,12 +1844,15 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-linux-3.12-${{ matrix.shard.name }}
+      TZ: ${{ matrix.shard.tz || 'UTC' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          # Only the docs shard needs complete history for strict revision dates.
+          fetch-depth: ${{ contains(matrix.shard.paths, 'tldw_Server_API/tests/Docs') && '0' || '1' }}
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -2186,13 +2069,33 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          # A step only ends once its output pipe closes. A process a test leaves
+          # running would inherit that pipe and hold the step open until the job
+          # limit, which discards the log (core-security: 3 runs). So pytest writes
+          # to a file that is printed afterwards, and any survivors are listed.
+          # timeout + SIGABRT + PYTHONFAULTHANDLER: a hang outside a single test
+          # (which pytest-timeout cannot see) dumps every thread's stack.
+          PYTEST_LOG="$RESULTS_DIR/${SHARD_NAME}-pytest.log"
+          set +e
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
-          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+          PYTHONFAULTHANDLER=1 timeout --signal=ABRT --kill-after=60s 55m \
+            pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout -o timeout_method=signal \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
-            --junit-xml="$RESULTS_DIR/${SHARD_NAME}.xml"
+            --junit-xml="$RESULTS_DIR/${SHARD_NAME}.xml" \
+            > "$PYTEST_LOG" 2>&1
+          status=$?
+          set -e
+          echo "pytest exit status ${status}; output $(wc -c < "$PYTEST_LOG") bytes"
+          # Bounded, in case a runaway test flooded the output.
+          tail -c 2000000 "$PYTEST_LOG"
+          echo "::group::Processes still running after pytest"
+          ps -eo pid,ppid,etime,args --sort=start_time | tail -n 40
+          echo "::endgroup::"
+          exit "$status"
 
       - name: Run legacy-free media checks
         if: matrix.shard.name == 'media-legacy-free'
@@ -2246,18 +2149,26 @@ jobs:
         shell: bash
         run: |
           r="${{ needs['full-suite-linux-312-shards'].result }}"
-          if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+          if [ "$r" != "success" ]; then
             echo "Python 3.12 full-suite shards finished with: $r"
             exit 1
           fi
-          echo "Python 3.12 full-suite shards passed (or skipped via path filter)."
+          echo "Python 3.12 full-suite shards passed."
 
   full-suite-linux-313-shards:
+    # ~550 extra jobs per run: main pushes, releases and manual dispatch only.
     name: Full Suite shard (Ubuntu / Python 3.13 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
+    # admission is skipped outside workflow_run, and an implicit success() treats any
+    # skipped ancestor as a reason to skip -- so without always() these shards never
+    # ran on pull_request or push while the summaries reported green.
+    if: >-
+      always() && !cancelled() &&
+      needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
+      needs.changes.result == 'success' &&
+      github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
       matrix:
@@ -2273,8 +2184,30 @@ jobs:
               tldw_Server_API/tests/Files
               tldw_Server_API/tests/Meetings
               tldw_Server_API/tests/Notes_Tasks
-              tldw_Server_API/tests/Sync
               tldw_Server_API/tests/Translation
+          # tests/Sync outgrew one 60-minute shard: against Postgres the personal-context
+          # files run ~10-80x slower than locally (conflicts ~19 min, exchange_gate ~17 min),
+          # so gap-verified-2 was cancelled at the timeout and Sync never reported.
+          - name: sync-core
+            paths: >-
+              tldw_Server_API/tests/Sync
+              --ignore-glob=*/test_sync_v2_personal_context_*.py
+          - name: sync-pc-conflicts
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_conflicts.py
+          - name: sync-pc-exchange-gate
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_exchange_gate.py
+          - name: sync-pc-transport
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
+          # Every other personal-context file, including new ones, lands here.
+          - name: sync-pc-rest
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_*.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_conflicts.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_exchange_gate.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
           - name: gap-verified-3
             paths: >-
               tldw_Server_API/tests/DataTables
@@ -2353,9 +2286,30 @@ jobs:
           - name: core-audit-unified
             paths: >-
               tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          # core-security hit the job limit four runs in a row with no log kept;
+          # split so the stuck files are named by the shard that stalls.
           - name: core-security
             paths: >-
-              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Security/test_crypto.py
+              tldw_Server_API/tests/Security/test_dependency_security_floor.py
+              tldw_Server_API/tests/Security/test_pr2761_python_boundaries.py
+              tldw_Server_API/tests/Security/test_request_id_middleware.py
+              tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
+              tldw_Server_API/tests/Security/test_secret_manager.py
+              tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_setup_access_guard.py
+              tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
+              tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
+              tldw_Server_API/tests/Security/test_text2sql_rbac_and_acl.py
+              tldw_Server_API/tests/Security/test_trusted_proxy.py
+          - name: core-security-http-hop
+            paths: >-
+              tldw_Server_API/tests/Security/test_http_hop_*.py
+          - name: core-security-egress
+            paths: >-
+              tldw_Server_API/tests/Security/test_egress*.py
+              tldw_Server_API/tests/Security/test_websearch_egress_guard.py
+              tldw_Server_API/tests/Security/test_zip_safe_extract.py
           - name: core-setup-usage
             paths: >-
               tldw_Server_API/tests/Setup
@@ -2524,9 +2478,23 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/test*.py
               tldw_Server_API/tests/AuthNZ/property/test*.py
-          - name: auth-core-unit-a-l
+          - name: auth-core-unit-admin-api
             paths: >-
-              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_admin*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_alerting.py
+              tldw_Server_API/tests/AuthNZ/unit/test_api*.py
+          - name: auth-core-unit-auth
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_auth_*.py
+          - name: auth-core-unit-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_authnz_*.py
+          - name: auth-core-unit-b-d
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[b-d]*.py
+          - name: auth-core-unit-e-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[e-l]*.py
           - name: auth-core-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
@@ -2543,6 +2511,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+              tldw_Server_API/tests/DB_Management/test_chacha_*.py
           - name: chacha-character-conversation
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
@@ -2572,9 +2541,14 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_assistant_startup_projection.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_startup.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_transport.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -2582,10 +2556,23 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
+          - name: db-management-a-c
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[a-b]*.py
+              tldw_Server_API/tests/DB_Management/test_character_*.py
+              tldw_Server_API/tests/DB_Management/test_chat_*.py
+              tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_con*.py
+              tldw_Server_API/tests/DB_Management/test_core_*.py
+          - name: db-management-d-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[d-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
+              tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
@@ -2611,9 +2598,11 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestDatabaseOperations
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateInitialization
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -2847,6 +2836,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -2901,7 +2891,9 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
@@ -2912,6 +2904,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -2950,6 +2943,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_done_spelling.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
@@ -2959,6 +2953,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -2999,6 +2994,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -3036,19 +3032,20 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_images.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-legacy-integration
+          - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
               tldw_Server_API/tests/Chat/integration
-          - name: chat-legacy-unit-a-l
+          - name: chat-unit-a-l
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
-          - name: chat-legacy-unit-m-z
+          - name: chat-unit-m-z
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
           - name: chat-new-integration-property
@@ -3252,6 +3249,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -3289,6 +3287,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -3333,6 +3332,19 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -3340,6 +3352,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
@@ -3481,6 +3494,8 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          # Only the docs shard needs complete history for strict revision dates.
+          fetch-depth: ${{ contains(matrix.shard.paths, 'tldw_Server_API/tests/Docs') && '0' || '1' }}
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -3641,13 +3656,33 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          # A step only ends once its output pipe closes. A process a test leaves
+          # running would inherit that pipe and hold the step open until the job
+          # limit, which discards the log (core-security: 3 runs). So pytest writes
+          # to a file that is printed afterwards, and any survivors are listed.
+          # timeout + SIGABRT + PYTHONFAULTHANDLER: a hang outside a single test
+          # (which pytest-timeout cannot see) dumps every thread's stack.
+          PYTEST_LOG="$RESULTS_DIR/${SHARD_NAME}-pytest.log"
+          set +e
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
-          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+          PYTHONFAULTHANDLER=1 timeout --signal=ABRT --kill-after=60s 55m \
+            pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout -o timeout_method=signal \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
-            --junit-xml="$RESULTS_DIR/${SHARD_NAME}.xml"
+            --junit-xml="$RESULTS_DIR/${SHARD_NAME}.xml" \
+            > "$PYTEST_LOG" 2>&1
+          status=$?
+          set -e
+          echo "pytest exit status ${status}; output $(wc -c < "$PYTEST_LOG") bytes"
+          # Bounded, in case a runaway test flooded the output.
+          tail -c 2000000 "$PYTEST_LOG"
+          echo "::group::Processes still running after pytest"
+          ps -eo pid,ppid,etime,args --sort=start_time | tail -n 40
+          echo "::endgroup::"
+          exit "$status"
 
       - name: Run legacy-free media checks
         if: matrix.shard.name == 'media-legacy-free'
@@ -3691,29 +3726,33 @@ jobs:
           )
         )
       ) &&
-      (
-        (github.event_name != 'pull_request' &&
-         github.event_name != 'workflow_run') ||
-        needs.changes.outputs.backend_changed == 'true'
-      )
+      (github.event_name != 'pull_request' && github.event_name != 'workflow_run')
     steps:
       - name: Check Python 3.13 shard result
         shell: bash
         run: |
           r="${{ needs['full-suite-linux-313-shards'].result }}"
-          if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+          if [ "$r" != "success" ]; then
             echo "Python 3.13 full-suite shards finished with: $r"
             exit 1
           fi
-          echo "Python 3.13 full-suite shards passed (or skipped via path filter)."
+          echo "Python 3.13 full-suite shards passed."
 
 
   full-suite-macos-312-shards:
+    # ~550 extra jobs per run: main pushes, releases and manual dispatch only.
     name: Full Suite shard (macos-latest / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: macos-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
+    # admission is skipped outside workflow_run, and an implicit success() treats any
+    # skipped ancestor as a reason to skip -- so without always() these shards never
+    # ran on pull_request or push while the summaries reported green.
+    if: >-
+      always() && !cancelled() &&
+      needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
+      needs.changes.result == 'success' &&
+      github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
       matrix:
@@ -3735,9 +3774,30 @@ jobs:
           - name: core-audit-unified
             paths: >-
               tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          # core-security hit the job limit four runs in a row with no log kept;
+          # split so the stuck files are named by the shard that stalls.
           - name: core-security
             paths: >-
-              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Security/test_crypto.py
+              tldw_Server_API/tests/Security/test_dependency_security_floor.py
+              tldw_Server_API/tests/Security/test_pr2761_python_boundaries.py
+              tldw_Server_API/tests/Security/test_request_id_middleware.py
+              tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
+              tldw_Server_API/tests/Security/test_secret_manager.py
+              tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_setup_access_guard.py
+              tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
+              tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
+              tldw_Server_API/tests/Security/test_text2sql_rbac_and_acl.py
+              tldw_Server_API/tests/Security/test_trusted_proxy.py
+          - name: core-security-http-hop
+            paths: >-
+              tldw_Server_API/tests/Security/test_http_hop_*.py
+          - name: core-security-egress
+            paths: >-
+              tldw_Server_API/tests/Security/test_egress*.py
+              tldw_Server_API/tests/Security/test_websearch_egress_guard.py
+              tldw_Server_API/tests/Security/test_zip_safe_extract.py
           - name: core-setup-usage
             paths: >-
               tldw_Server_API/tests/Setup
@@ -3906,9 +3966,23 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/test*.py
               tldw_Server_API/tests/AuthNZ/property/test*.py
-          - name: auth-core-unit-a-l
+          - name: auth-core-unit-admin-api
             paths: >-
-              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_admin*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_alerting.py
+              tldw_Server_API/tests/AuthNZ/unit/test_api*.py
+          - name: auth-core-unit-auth
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_auth_*.py
+          - name: auth-core-unit-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_authnz_*.py
+          - name: auth-core-unit-b-d
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[b-d]*.py
+          - name: auth-core-unit-e-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[e-l]*.py
           - name: auth-core-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
@@ -3925,6 +3999,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+              tldw_Server_API/tests/DB_Management/test_chacha_*.py
           - name: chacha-character-conversation
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
@@ -3954,9 +4029,14 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_assistant_startup_projection.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_startup.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_transport.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -3964,10 +4044,23 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
+          - name: db-management-a-c
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[a-b]*.py
+              tldw_Server_API/tests/DB_Management/test_character_*.py
+              tldw_Server_API/tests/DB_Management/test_chat_*.py
+              tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_con*.py
+              tldw_Server_API/tests/DB_Management/test_core_*.py
+          - name: db-management-d-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[d-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
+              tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
@@ -3995,7 +4088,9 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -4229,6 +4324,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -4283,7 +4379,9 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
@@ -4294,6 +4392,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -4332,6 +4431,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_done_spelling.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
@@ -4341,6 +4441,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -4381,6 +4482,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -4418,19 +4520,20 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_images.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-legacy-integration
+          - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
               tldw_Server_API/tests/Chat/integration
-          - name: chat-legacy-unit-a-l
+          - name: chat-unit-a-l
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
-          - name: chat-legacy-unit-m-z
+          - name: chat-unit-m-z
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
           - name: chat-new-integration-property
@@ -4634,6 +4737,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -4671,6 +4775,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -4715,6 +4820,19 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -4722,6 +4840,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
@@ -4863,6 +4982,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-asyncio
 
+      - name: Install Docker Compose CLI for monitoring render contract
+        if: matrix.shard.name == 'core-utils-tooling'
+        shell: bash
+        run: |
+          brew install docker docker-compose
+          mkdir -p "$HOME/.docker/cli-plugins"
+          ln -s "$(brew --prefix)/lib/docker/cli-plugins/docker-compose" "$HOME/.docker/cli-plugins/docker-compose"
+          docker compose version
+
       - name: Smoke start server (single-user)
         if: matrix.shard.name == 'core-server-smoke'
         env:
@@ -4950,6 +5078,7 @@ jobs:
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout -o timeout_method=signal \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
@@ -4997,28 +5126,32 @@ jobs:
           )
         )
       ) &&
-      (
-        (github.event_name != 'pull_request' &&
-         github.event_name != 'workflow_run') ||
-        needs.changes.outputs.backend_changed == 'true'
-      )
+      (github.event_name != 'pull_request' && github.event_name != 'workflow_run')
     steps:
       - name: Check macos-latest Python 3.12 shard result
         shell: bash
         run: |
           r="${{ needs['full-suite-macos-312-shards'].result }}"
-          if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+          if [ "$r" != "success" ]; then
             echo "macos-latest Python 3.12 full-suite shards finished with: $r"
             exit 1
           fi
-          echo "macos-latest Python 3.12 full-suite shards passed (or skipped via path filter)."
+          echo "macos-latest Python 3.12 full-suite shards passed."
 
   full-suite-windows-312-shards:
+    # ~550 extra jobs per run: main pushes, releases and manual dispatch only.
     name: Full Suite shard (windows-latest / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: windows-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
+    # admission is skipped outside workflow_run, and an implicit success() treats any
+    # skipped ancestor as a reason to skip -- so without always() these shards never
+    # ran on pull_request or push while the summaries reported green.
+    if: >-
+      always() && !cancelled() &&
+      needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
+      needs.changes.result == 'success' &&
+      github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
       matrix:
@@ -5040,9 +5173,30 @@ jobs:
           - name: core-audit-unified
             paths: >-
               tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          # core-security hit the job limit four runs in a row with no log kept;
+          # split so the stuck files are named by the shard that stalls.
           - name: core-security
             paths: >-
-              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Security/test_crypto.py
+              tldw_Server_API/tests/Security/test_dependency_security_floor.py
+              tldw_Server_API/tests/Security/test_pr2761_python_boundaries.py
+              tldw_Server_API/tests/Security/test_request_id_middleware.py
+              tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
+              tldw_Server_API/tests/Security/test_secret_manager.py
+              tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_setup_access_guard.py
+              tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
+              tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
+              tldw_Server_API/tests/Security/test_text2sql_rbac_and_acl.py
+              tldw_Server_API/tests/Security/test_trusted_proxy.py
+          - name: core-security-http-hop
+            paths: >-
+              tldw_Server_API/tests/Security/test_http_hop_*.py
+          - name: core-security-egress
+            paths: >-
+              tldw_Server_API/tests/Security/test_egress*.py
+              tldw_Server_API/tests/Security/test_websearch_egress_guard.py
+              tldw_Server_API/tests/Security/test_zip_safe_extract.py
           - name: core-setup-usage
             paths: >-
               tldw_Server_API/tests/Setup
@@ -5211,9 +5365,23 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/test*.py
               tldw_Server_API/tests/AuthNZ/property/test*.py
-          - name: auth-core-unit-a-l
+          - name: auth-core-unit-admin-api
             paths: >-
-              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_admin*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_alerting.py
+              tldw_Server_API/tests/AuthNZ/unit/test_api*.py
+          - name: auth-core-unit-auth
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_auth_*.py
+          - name: auth-core-unit-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_authnz_*.py
+          - name: auth-core-unit-b-d
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[b-d]*.py
+          - name: auth-core-unit-e-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[e-l]*.py
           - name: auth-core-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
@@ -5230,6 +5398,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+              tldw_Server_API/tests/DB_Management/test_chacha_*.py
           - name: chacha-character-conversation
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
@@ -5259,9 +5428,14 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_assistant_startup_projection.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_startup.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_transport.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -5269,10 +5443,23 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
+          - name: db-management-a-c
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[a-b]*.py
+              tldw_Server_API/tests/DB_Management/test_character_*.py
+              tldw_Server_API/tests/DB_Management/test_chat_*.py
+              tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_con*.py
+              tldw_Server_API/tests/DB_Management/test_core_*.py
+          - name: db-management-d-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[d-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
+              tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
@@ -5300,7 +5487,9 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -5534,6 +5723,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -5588,7 +5778,9 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
@@ -5599,6 +5791,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -5637,6 +5830,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_done_spelling.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
@@ -5646,6 +5840,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -5686,6 +5881,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -5723,19 +5919,20 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_images.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-legacy-integration
+          - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
               tldw_Server_API/tests/Chat/integration
-          - name: chat-legacy-unit-a-l
+          - name: chat-unit-a-l
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
-          - name: chat-legacy-unit-m-z
+          - name: chat-unit-m-z
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
           - name: chat-new-integration-property
@@ -5939,6 +6136,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -5976,6 +6174,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -6020,6 +6219,19 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -6027,6 +6239,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
@@ -6307,28 +6520,27 @@ jobs:
           )
         )
       ) &&
-      (
-        (github.event_name != 'pull_request' &&
-         github.event_name != 'workflow_run') ||
-        needs.changes.outputs.backend_changed == 'true'
-      )
+      (github.event_name != 'pull_request' && github.event_name != 'workflow_run')
     steps:
       - name: Check windows-latest Python 3.12 shard result
         shell: bash
         run: |
           r="${{ needs['full-suite-windows-312-shards'].result }}"
-          if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+          if [ "$r" != "success" ]; then
             echo "windows-latest Python 3.12 full-suite shards finished with: $r"
             exit 1
           fi
-          echo "windows-latest Python 3.12 full-suite shards passed (or skipped via path filter)."
+          echo "windows-latest Python 3.12 full-suite shards passed."
 
   full-suite-os-313-release-shards:
     name: Release Full Suite shard (${{ matrix.os }} / Python 3.13 / ${{ matrix.shard.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     needs: [lint, syntax-check]
-    if: github.event_name != 'pull_request' && github.event_name != 'workflow_run'
+    if: >-
+      always() && !cancelled() &&
+      needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
+      github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
       matrix:
@@ -6351,9 +6563,30 @@ jobs:
           - name: core-audit-unified
             paths: >-
               tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          # core-security hit the job limit four runs in a row with no log kept;
+          # split so the stuck files are named by the shard that stalls.
           - name: core-security
             paths: >-
-              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Security/test_crypto.py
+              tldw_Server_API/tests/Security/test_dependency_security_floor.py
+              tldw_Server_API/tests/Security/test_pr2761_python_boundaries.py
+              tldw_Server_API/tests/Security/test_request_id_middleware.py
+              tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
+              tldw_Server_API/tests/Security/test_secret_manager.py
+              tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_setup_access_guard.py
+              tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
+              tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
+              tldw_Server_API/tests/Security/test_text2sql_rbac_and_acl.py
+              tldw_Server_API/tests/Security/test_trusted_proxy.py
+          - name: core-security-http-hop
+            paths: >-
+              tldw_Server_API/tests/Security/test_http_hop_*.py
+          - name: core-security-egress
+            paths: >-
+              tldw_Server_API/tests/Security/test_egress*.py
+              tldw_Server_API/tests/Security/test_websearch_egress_guard.py
+              tldw_Server_API/tests/Security/test_zip_safe_extract.py
           - name: core-setup-usage
             paths: >-
               tldw_Server_API/tests/Setup
@@ -6522,9 +6755,23 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/test*.py
               tldw_Server_API/tests/AuthNZ/property/test*.py
-          - name: auth-core-unit-a-l
+          - name: auth-core-unit-admin-api
             paths: >-
-              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_admin*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_alerting.py
+              tldw_Server_API/tests/AuthNZ/unit/test_api*.py
+          - name: auth-core-unit-auth
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_auth_*.py
+          - name: auth-core-unit-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_authnz_*.py
+          - name: auth-core-unit-b-d
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[b-d]*.py
+          - name: auth-core-unit-e-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[e-l]*.py
           - name: auth-core-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
@@ -6541,6 +6788,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+              tldw_Server_API/tests/DB_Management/test_chacha_*.py
           - name: chacha-character-conversation
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
@@ -6570,9 +6818,14 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_assistant_startup_projection.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_startup.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_transport.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -6580,10 +6833,23 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
+          - name: db-management-a-c
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[a-b]*.py
+              tldw_Server_API/tests/DB_Management/test_character_*.py
+              tldw_Server_API/tests/DB_Management/test_chat_*.py
+              tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_con*.py
+              tldw_Server_API/tests/DB_Management/test_core_*.py
+          - name: db-management-d-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[d-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
+              tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
@@ -6611,7 +6877,9 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -6845,6 +7113,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -6899,7 +7168,9 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
@@ -6910,6 +7181,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -6948,6 +7220,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_done_spelling.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
@@ -6957,6 +7230,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -6997,6 +7271,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -7034,19 +7309,20 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_images.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-legacy-integration
+          - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
               tldw_Server_API/tests/Chat/integration
-          - name: chat-legacy-unit-a-l
+          - name: chat-unit-a-l
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
-          - name: chat-legacy-unit-m-z
+          - name: chat-unit-m-z
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
           - name: chat-new-integration-property
@@ -7250,6 +7526,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -7287,6 +7564,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -7331,6 +7609,19 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -7338,6 +7629,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
@@ -7566,6 +7858,7 @@ jobs:
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout -o timeout_method=${{ runner.os == 'Windows' && 'thread' || 'signal' }} \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
@@ -7597,8 +7890,13 @@ jobs:
     name: Character Chat Rate-Limits (TEST_MODE=0)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [full-suite-linux-312-summary, full-suite-linux-313-summary, changes]
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
+    needs: [full-suite-linux-312-summary, changes]
+    if: >-
+      always() && !cancelled() &&
+      needs.full-suite-linux-312-summary.result == 'success' &&
+      needs.changes.result == 'success' &&
+      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') ||
+       needs.changes.outputs.backend_changed == 'true')
     env:
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'

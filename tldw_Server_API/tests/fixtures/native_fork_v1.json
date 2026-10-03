@@ -1,0 +1,529 @@
+{
+  "version": 1,
+  "vectors": [
+    {
+      "name": "unicode",
+      "request": {
+        "protocol": "native_atomic_v1",
+        "projection_version": "native-fork-v1",
+        "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "owner_key": "native:alice",
+        "scope": {
+          "kind": "global"
+        },
+        "source_conversation_id": "source",
+        "input": {
+          "kind": "normal",
+          "selection": {
+            "version": 1,
+            "owner_key": "native:alice",
+            "conversation_id": "source",
+            "interpretation": {
+              "kind": "parent_graph_v1"
+            },
+            "cursor": {
+              "kind": "after_message",
+              "message_id": "m雪"
+            },
+            "selection_revision": 0,
+            "purpose": "fork",
+            "messages": [
+              {
+                "id": "m雪",
+                "revision": "retained-1"
+              }
+            ],
+            "fences": {
+              "conversation": "3",
+              "history": "2",
+              "settings": "1"
+            },
+            "storage_context_digest": "raw-h1",
+            "request_context_digest": "capture-hint",
+            "selection_digest": "h1-hint"
+          }
+        },
+        "retained_context_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "asset_manifest": [],
+        "fidelity": "strict",
+        "child_title": "枝 🌿",
+        "request_digest": "e1b11f4193e84a065c06ddfa513491fab0c9d198eea61fdaa874a654b3101324"
+      },
+      "tuple": [
+        "tldw-native-fork",
+        1,
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "native:alice",
+        [
+          "global",
+          null
+        ],
+        "source",
+        "native-fork-v1",
+        [
+          "parent_graph_v1",
+          null
+        ],
+        [
+          "after_message",
+          "m雪"
+        ],
+        [
+          [
+            "m雪",
+            "retained-1"
+          ]
+        ],
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        [],
+        "strict",
+        "枝 🌿"
+      ],
+      "canonical_json": "[\"tldw-native-fork\",1,\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"native:alice\",[\"global\",null],\"source\",\"native-fork-v1\",[\"parent_graph_v1\",null],[\"after_message\",\"m雪\"],[[\"m雪\",\"retained-1\"]],\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",[],\"strict\",\"枝 🌿\"]",
+      "digest": "e1b11f4193e84a065c06ddfa513491fab0c9d198eea61fdaa874a654b3101324"
+    },
+    {
+      "name": "empty",
+      "request": {
+        "protocol": "native_atomic_v1",
+        "projection_version": "native-fork-v1",
+        "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "owner_key": "native:alice",
+        "scope": {
+          "kind": "global"
+        },
+        "source_conversation_id": "source",
+        "input": {
+          "kind": "normal",
+          "selection": {
+            "version": 1,
+            "owner_key": "native:alice",
+            "conversation_id": "source",
+            "interpretation": {
+              "kind": "parent_graph_v1"
+            },
+            "cursor": {
+              "kind": "empty"
+            },
+            "selection_revision": 0,
+            "purpose": "fork",
+            "messages": [],
+            "fences": {
+              "conversation": "3",
+              "history": "2",
+              "settings": "1"
+            },
+            "storage_context_digest": "raw-h1",
+            "request_context_digest": "capture-hint",
+            "selection_digest": "h1-hint"
+          }
+        },
+        "retained_context_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "asset_manifest": [],
+        "fidelity": "strict",
+        "child_title": "枝 🌿",
+        "request_digest": "9afa07fd59115eb081a9c369c243fc8fa18a7a90389de6fc8c04a1f317630b80"
+      },
+      "tuple": [
+        "tldw-native-fork",
+        1,
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "native:alice",
+        [
+          "global",
+          null
+        ],
+        "source",
+        "native-fork-v1",
+        [
+          "parent_graph_v1",
+          null
+        ],
+        [
+          "empty",
+          null
+        ],
+        [],
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        [],
+        "strict",
+        "枝 🌿"
+      ],
+      "canonical_json": "[\"tldw-native-fork\",1,\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"native:alice\",[\"global\",null],\"source\",\"native-fork-v1\",[\"parent_graph_v1\",null],[\"empty\",null],[],\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",[],\"strict\",\"枝 🌿\"]",
+      "digest": "9afa07fd59115eb081a9c369c243fc8fa18a7a90389de6fc8c04a1f317630b80"
+    },
+    {
+      "name": "legacy",
+      "request": {
+        "protocol": "native_atomic_v1",
+        "projection_version": "native-fork-v1",
+        "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "owner_key": "native:alice",
+        "scope": {
+          "kind": "global"
+        },
+        "source_conversation_id": "source",
+        "input": {
+          "kind": "normal",
+          "selection": {
+            "version": 1,
+            "owner_key": "native:alice",
+            "conversation_id": "source",
+            "interpretation": {
+              "kind": "legacy_linear_v1",
+              "projection_id": "review-1"
+            },
+            "cursor": {
+              "kind": "after_message",
+              "message_id": "m雪"
+            },
+            "selection_revision": 0,
+            "purpose": "fork",
+            "messages": [
+              {
+                "id": "m雪",
+                "revision": "retained-1"
+              }
+            ],
+            "fences": {
+              "conversation": "3",
+              "history": "2",
+              "settings": "1"
+            },
+            "storage_context_digest": "raw-h1",
+            "request_context_digest": "capture-hint",
+            "selection_digest": "h1-hint"
+          }
+        },
+        "retained_context_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "asset_manifest": [],
+        "fidelity": "strict",
+        "child_title": "枝 🌿",
+        "request_digest": "667a50998789cc1a9f0c3272fa9a6dac849fd31a4a87807ac4546c70c5966d97"
+      },
+      "tuple": [
+        "tldw-native-fork",
+        1,
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "native:alice",
+        [
+          "global",
+          null
+        ],
+        "source",
+        "native-fork-v1",
+        [
+          "legacy_linear_v1",
+          "review-1"
+        ],
+        [
+          "after_message",
+          "m雪"
+        ],
+        [
+          [
+            "m雪",
+            "retained-1"
+          ]
+        ],
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        [],
+        "strict",
+        "枝 🌿"
+      ],
+      "canonical_json": "[\"tldw-native-fork\",1,\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"native:alice\",[\"global\",null],\"source\",\"native-fork-v1\",[\"legacy_linear_v1\",\"review-1\"],[\"after_message\",\"m雪\"],[[\"m雪\",\"retained-1\"]],\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",[],\"strict\",\"枝 🌿\"]",
+      "digest": "667a50998789cc1a9f0c3272fa9a6dac849fd31a4a87807ac4546c70c5966d97"
+    },
+    {
+      "name": "title",
+      "request": {
+        "protocol": "native_atomic_v1",
+        "projection_version": "native-fork-v1",
+        "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "owner_key": "native:alice",
+        "scope": {
+          "kind": "global"
+        },
+        "source_conversation_id": "source",
+        "input": {
+          "kind": "normal",
+          "selection": {
+            "version": 1,
+            "owner_key": "native:alice",
+            "conversation_id": "source",
+            "interpretation": {
+              "kind": "parent_graph_v1"
+            },
+            "cursor": {
+              "kind": "after_message",
+              "message_id": "m雪"
+            },
+            "selection_revision": 0,
+            "purpose": "fork",
+            "messages": [
+              {
+                "id": "m雪",
+                "revision": "retained-1"
+              }
+            ],
+            "fences": {
+              "conversation": "3",
+              "history": "2",
+              "settings": "1"
+            },
+            "storage_context_digest": "raw-h1",
+            "request_context_digest": "capture-hint",
+            "selection_digest": "h1-hint"
+          }
+        },
+        "retained_context_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "asset_manifest": [],
+        "fidelity": "strict",
+        "child_title": "New title",
+        "request_digest": "681c811ebb07972d643bc64977c715f7335c85fd8e991bd38938488dde8717e2"
+      },
+      "tuple": [
+        "tldw-native-fork",
+        1,
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "native:alice",
+        [
+          "global",
+          null
+        ],
+        "source",
+        "native-fork-v1",
+        [
+          "parent_graph_v1",
+          null
+        ],
+        [
+          "after_message",
+          "m雪"
+        ],
+        [
+          [
+            "m雪",
+            "retained-1"
+          ]
+        ],
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        [],
+        "strict",
+        "New title"
+      ],
+      "canonical_json": "[\"tldw-native-fork\",1,\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"native:alice\",[\"global\",null],\"source\",\"native-fork-v1\",[\"parent_graph_v1\",null],[\"after_message\",\"m雪\"],[[\"m雪\",\"retained-1\"]],\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",[],\"strict\",\"New title\"]",
+      "digest": "681c811ebb07972d643bc64977c715f7335c85fd8e991bd38938488dde8717e2"
+    },
+    {
+      "name": "text_asset",
+      "request": {
+        "protocol": "native_atomic_v1",
+        "projection_version": "native-fork-v1",
+        "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "owner_key": "native:alice",
+        "scope": {
+          "kind": "global"
+        },
+        "source_conversation_id": "source",
+        "input": {
+          "kind": "normal",
+          "selection": {
+            "version": 1,
+            "owner_key": "native:alice",
+            "conversation_id": "source",
+            "interpretation": {
+              "kind": "parent_graph_v1"
+            },
+            "cursor": {
+              "kind": "after_message",
+              "message_id": "m雪"
+            },
+            "selection_revision": 0,
+            "purpose": "fork",
+            "messages": [
+              {
+                "id": "m雪",
+                "revision": "retained-1"
+              }
+            ],
+            "fences": {
+              "conversation": "3",
+              "history": "2",
+              "settings": "1"
+            },
+            "storage_context_digest": "raw-h1",
+            "request_context_digest": "capture-hint",
+            "selection_digest": "h1-hint"
+          }
+        },
+        "retained_context_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "asset_manifest": [
+          {
+            "reference_id": "doc-1",
+            "reference_revision": "1",
+            "asset_id": "owned-1",
+            "revision": "1",
+            "representation": "document_text_v1",
+            "role": "document_context",
+            "context_enabled": true,
+            "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "fidelity_disposition": "retained"
+          }
+        ],
+        "fidelity": "strict",
+        "child_title": "枝 🌿",
+        "request_digest": "519eba411e456bc1ac11c5f36d1db5a440e8b4aa04114f3616399105b8009dfe"
+      },
+      "tuple": [
+        "tldw-native-fork",
+        1,
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "native:alice",
+        [
+          "global",
+          null
+        ],
+        "source",
+        "native-fork-v1",
+        [
+          "parent_graph_v1",
+          null
+        ],
+        [
+          "after_message",
+          "m雪"
+        ],
+        [
+          [
+            "m雪",
+            "retained-1"
+          ]
+        ],
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        [
+          [
+            "doc-1",
+            "1",
+            "owned-1",
+            "1",
+            "document_text_v1",
+            "document_context",
+            true,
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "retained"
+          ]
+        ],
+        "strict",
+        "枝 🌿"
+      ],
+      "canonical_json": "[\"tldw-native-fork\",1,\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"native:alice\",[\"global\",null],\"source\",\"native-fork-v1\",[\"parent_graph_v1\",null],[\"after_message\",\"m雪\"],[[\"m雪\",\"retained-1\"]],\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",[[\"doc-1\",\"1\",\"owned-1\",\"1\",\"document_text_v1\",\"document_context\",true,\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"retained\"]],\"strict\",\"枝 🌿\"]",
+      "digest": "519eba411e456bc1ac11c5f36d1db5a440e8b4aa04114f3616399105b8009dfe"
+    },
+    {
+      "name": "missing_marker",
+      "request": {
+        "protocol": "native_atomic_v1",
+        "projection_version": "native-fork-v1",
+        "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "owner_key": "native:alice",
+        "scope": {
+          "kind": "global"
+        },
+        "source_conversation_id": "source",
+        "input": {
+          "kind": "normal",
+          "selection": {
+            "version": 1,
+            "owner_key": "native:alice",
+            "conversation_id": "source",
+            "interpretation": {
+              "kind": "parent_graph_v1"
+            },
+            "cursor": {
+              "kind": "after_message",
+              "message_id": "m雪"
+            },
+            "selection_revision": 0,
+            "purpose": "fork",
+            "messages": [
+              {
+                "id": "m雪",
+                "revision": "retained-1"
+              }
+            ],
+            "fences": {
+              "conversation": "3",
+              "history": "2",
+              "settings": "1"
+            },
+            "storage_context_digest": "raw-h1",
+            "request_context_digest": "capture-hint",
+            "selection_digest": "h1-hint"
+          }
+        },
+        "retained_context_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "asset_manifest": [
+          {
+            "reference_id": "doc-1",
+            "reference_revision": "1",
+            "asset_id": "owned-1",
+            "revision": "1",
+            "representation": "unavailable_v1",
+            "role": "document_context",
+            "context_enabled": true,
+            "hash": null,
+            "fidelity_disposition": "unavailable"
+          }
+        ],
+        "fidelity": "allow_unavailable",
+        "child_title": "枝 🌿",
+        "request_digest": "538c5e6fe58e02c952a347c34019670669ed7b7be88da1c36112e6ba0fd989cd"
+      },
+      "tuple": [
+        "tldw-native-fork",
+        1,
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "native:alice",
+        [
+          "global",
+          null
+        ],
+        "source",
+        "native-fork-v1",
+        [
+          "parent_graph_v1",
+          null
+        ],
+        [
+          "after_message",
+          "m雪"
+        ],
+        [
+          [
+            "m雪",
+            "retained-1"
+          ]
+        ],
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        [
+          [
+            "doc-1",
+            "1",
+            "owned-1",
+            "1",
+            "unavailable_v1",
+            "document_context",
+            true,
+            null,
+            "unavailable"
+          ]
+        ],
+        "allow_unavailable",
+        "枝 🌿"
+      ],
+      "canonical_json": "[\"tldw-native-fork\",1,\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"native:alice\",[\"global\",null],\"source\",\"native-fork-v1\",[\"parent_graph_v1\",null],[\"after_message\",\"m雪\"],[[\"m雪\",\"retained-1\"]],\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",[[\"doc-1\",\"1\",\"owned-1\",\"1\",\"unavailable_v1\",\"document_context\",true,null,\"unavailable\"]],\"allow_unavailable\",\"枝 🌿\"]",
+      "digest": "538c5e6fe58e02c952a347c34019670669ed7b7be88da1c36112e6ba0fd989cd"
+    }
+  ]
+}

@@ -1,12 +1,15 @@
 import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, ClipboardList, Images, LayoutGrid, Settings } from 'lucide-react';
+import { Archive, ClipboardList, Images, LayoutGrid, Settings, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
 import { ApiError } from '@web/lib/api';
 import {
   clearPendingVNAssetGeneration,
   createVNAssetIdempotencyKey,
   readPendingVNAssetGeneration,
-  writePendingVNAssetGeneration,
+  type PendingVNAssetGeneration,
 } from '@web/lib/vnAssetIdempotency';
+import { useVNGenerationRecovery } from '@web/hooks/useVNGenerationRecovery';
+import { readVNCommands } from '@web/lib/vnGenerationRecovery';
+import { isVNGenerationRejected } from '@web/lib/api/vnGenerationErrors';
 import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
 import GenerationMonitor from '@web/components/vn-assets/GenerationMonitor';
@@ -86,9 +89,9 @@ export default function VNAssetsWorkbench() {
   const [preflightError, setPreflightError] = useState<string | null>(null);
   const [preflightRevision, setPreflightRevision] = useState(0);
   const [loadedPackId, setLoadedPackId] = useState<number | null>(null);
-  const generationCommandPending = useRef(new Set<number>());
+  const generationCommandPending = useRef(new Map<number, symbol>());
   const [pendingCommands, setPendingCommands] = useState<Record<number, { kind: 'start' | 'retry' | 'cancel'; slotId?: number }>>({});
-  const generationKeys = useRef(new Map<string, string>());
+  const legacyReceipts = useRef(new Map<string, PendingVNAssetGeneration>());
   const autoReconciledKeys = useRef(new Set<string>());
   const selectedPackIdRef = useRef<number | null>(null);
   const refreshRevision = useRef(0);
@@ -106,10 +109,32 @@ export default function VNAssetsWorkbench() {
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState('Untitled VN asset pack');
   const [primaryCharacterId, setPrimaryCharacterId] = useState('1');
+  const [discardConfirmed, setDiscardConfirmed] = useState(false);
+  const [accountRevision, setAccountRevision] = useState(0);
+  const recovery = useVNGenerationRecovery(useCallback((resetAccount: boolean) => {
+    if (resetAccount) {
+      generationCommandPending.current.clear();
+      setPendingCommands({});
+      legacyReceipts.current.clear();
+    }
+    setDiscardConfirmed(false);
+    ++refreshRevision.current;
+    if (resetAccount) {
+      selectedPackIdRef.current = null;
+      setSelectedPack(null);
+      setPacks([]);
+      setAccountRevision((value) => value + 1);
+    }
+  }, []));
+  const savedCommand = recovery.commands.find((command) => command.packId === selectedPack?.id);
 
   const starterMatrix = starterMatrices[0] ?? null;
 
-  const finishGenerationCommand = useCallback((packId: number): void => {
+  const finishGenerationCommand = useCallback((packId: number, token: symbol, notSent = false): void => {
+    if (generationCommandPending.current.get(packId) !== token) return;
+    if (notSent && selectedPackIdRef.current === packId) {
+      setError('The request was not sent because verification was interrupted. Try again.');
+    }
     generationCommandPending.current.delete(packId);
     setPendingCommands((previous) => {
       const next = { ...previous };
@@ -154,7 +179,8 @@ export default function VNAssetsWorkbench() {
         setGeneration(nextGeneration);
         setReadiness(nextReadiness.value);
         setLoadedPackId(pack.id);
-        setError((previous) => previous === 'Could not refresh generation progress. Refresh to try again.' ? null : previous);
+        setError((previous) => previous === 'Could not refresh generation progress. Refresh to try again.' ||
+          previous === 'Could not load generation status. Refresh to try again.' ? null : previous);
       } catch (loadError) {
         if (isCurrent()) throw loadError;
       }
@@ -166,39 +192,53 @@ export default function VNAssetsWorkbench() {
     return promise;
   }, []);
 
-  const reconcilePendingGeneration = useCallback(async (pack: VNAssetPack): Promise<void> => {
-    const pending = readPendingVNAssetGeneration(pack.owner_user_id, pack.id);
-    if (!pending || generationCommandPending.current.has(pack.id)) return;
-    generationCommandPending.current.add(pack.id);
+  const reconcilePendingGeneration = useCallback(async (pack: VNAssetPack): Promise<boolean> => {
+    // Key-only parent receipts remain separate from dev's complete, scoped requests.
+    const operation = `${pack.owner_user_id}:${pack.id}`;
+    const pending = readPendingVNAssetGeneration(pack.owner_user_id, pack.id) ?? legacyReceipts.current.get(operation);
+    if (!pending || !recovery.ready || recovery.commands.some((command) => command.packId === pack.id) ||
+        generationCommandPending.current.has(pack.id)) return false;
+    legacyReceipts.current.set(operation, pending);
+    const token = Symbol('legacy-generation-command');
+    generationCommandPending.current.set(pack.id, token);
     ++refreshRevision.current;
     setPendingCommands((previous) => ({
       ...previous,
-      [pack.id]: { kind: pending.kind, slotId: pending.slotId },
+      [pack.id]: { kind: pending.kind, slotId: pending.kind === 'retry' ? pending.slotId : undefined },
     }));
+    const capture = await recovery.verify();
+    if (!capture || !recovery.isCurrent(capture) || capture.scope.principal !== String(pack.owner_user_id)) {
+      finishGenerationCommand(pack.id, token, !capture);
+      return false;
+    }
+    const forget = () => {
+      clearPendingVNAssetGeneration(pack.owner_user_id, pack.id, pending.key);
+      if (legacyReceipts.current.get(operation)?.key === pending.key) legacyReceipts.current.delete(operation);
+    };
     try {
+      if (readVNCommands(capture.scope).some((command) => command.packId === pack.id)) return false;
       const request = { idempotency_key: pending.key };
       const recovered = pending.kind === 'start'
         ? await startVNAssetGeneration(pack.id, request)
         : await retryVNAssetSlot(pack.id, pending.slotId!, request);
-      clearPendingVNAssetGeneration(pack.owner_user_id, pack.id, pending.key);
-      generationKeys.current.delete(`${pack.owner_user_id ?? 'unknown'}:${pack.id}:${pending.slotId ?? 'start'}`);
+      if (!recovery.isCurrent(capture)) return false;
+      forget();
       if (selectedPackIdRef.current === pack.id) {
         setGeneration(recovered);
         setError(null);
       }
     } catch (recoveryError) {
-      if (isMissingGenerationResource(recoveryError)) {
-        clearPendingVNAssetGeneration(pack.owner_user_id, pack.id, pending.key);
-        generationKeys.current.delete(`${pack.owner_user_id ?? 'unknown'}:${pack.id}:${pending.slotId ?? 'start'}`);
-      }
+      if (!recovery.isCurrent(capture)) return false;
+      if (isMissingGenerationResource(recoveryError)) forget();
       if (selectedPackIdRef.current === pack.id) {
         setError(recoveryError instanceof Error ? recoveryError.message
           : `Could not reconcile the pending generation request (pack ${pack.id}, kind ${pending.kind}${pending.kind === 'retry' && typeof pending.slotId === 'number' && Number.isSafeInteger(pending.slotId) && pending.slotId > 0 ? `, slot ${pending.slotId}` : ''}).`);
       }
     } finally {
-      finishGenerationCommand(pack.id);
+      finishGenerationCommand(pack.id, token);
     }
-  }, [finishGenerationCommand]);
+    return true;
+  }, [finishGenerationCommand, recovery]);
 
   useEffect(() => {
     let cancelled = false;
@@ -232,7 +272,11 @@ export default function VNAssetsWorkbench() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [accountRevision]);
+
+  useEffect(() => {
+    setError(null);
+  }, [selectedPack?.id, accountRevision]);
 
   useEffect(() => {
     const key = selectedPackStorageKey(selectedPack?.owner_user_id);
@@ -250,9 +294,8 @@ export default function VNAssetsWorkbench() {
     setSlots([]);
     setItems([]);
     setReadiness(null);
-    setError(null);
     const revision = ++refreshRevision.current;
-    if (!selectedPack) {
+    if (!selectedPack || !recovery.ready) {
       return;
     }
 
@@ -271,18 +314,19 @@ export default function VNAssetsWorkbench() {
     return () => {
       cancelled = true;
     };
-  }, [selectedPack, refreshPackDetails]);
+  }, [selectedPack, refreshPackDetails, recovery.ready, recovery.verifiedRevision]);
 
   useEffect(() => {
-    if (!selectedPack || loadedPackId !== selectedPack.id) return;
+    if (!selectedPack || loadedPackId !== selectedPack.id || !recovery.ready) return;
     const pending = readPendingVNAssetGeneration(selectedPack.owner_user_id, selectedPack.id);
     if (!pending) return;
     const attempt = `${selectedPack.owner_user_id}:${selectedPack.id}:${pending.key}`;
     if (autoReconciledKeys.current.has(attempt)) return;
     autoReconciledKeys.current.add(attempt);
+    if (recovery.commands.some((command) => command.packId === selectedPack.id)) return;
     void (async () => {
-      await reconcilePendingGeneration(selectedPack);
-      if (selectedPackIdRef.current === selectedPack.id) {
+      const reconciled = await reconcilePendingGeneration(selectedPack);
+      if (reconciled && selectedPackIdRef.current === selectedPack.id) {
         try {
           await refreshPackDetails(selectedPack, true);
         } catch {
@@ -290,7 +334,7 @@ export default function VNAssetsWorkbench() {
         }
       }
     })();
-  }, [selectedPack, loadedPackId, reconcilePendingGeneration, refreshPackDetails]);
+  }, [selectedPack, loadedPackId, reconcilePendingGeneration, refreshPackDetails, recovery.ready, recovery.commands]);
 
   useEffect(() => {
     let cancelled = false;
@@ -327,14 +371,18 @@ export default function VNAssetsWorkbench() {
     setPreflightRevision((revision) => revision + 1);
     setError(null);
     try {
-      await reconcilePendingGeneration(selectedPack);
+      if (!savedCommand) {
+        const pending = readPendingVNAssetGeneration(selectedPack.owner_user_id, selectedPack.id) ??
+          legacyReceipts.current.get(`${selectedPack.owner_user_id}:${selectedPack.id}`);
+        if (pending && !await reconcilePendingGeneration(selectedPack)) return;
+      }
       await refreshPackDetails(selectedPack);
     } catch {
       if (selectedPackIdRef.current === selectedPack.id) {
         setError('Could not refresh generation progress. Refresh to try again.');
       }
     }
-  }, [selectedPack, reconcilePendingGeneration, refreshPackDetails]);
+  }, [selectedPack, reconcilePendingGeneration, refreshPackDetails, savedCommand]);
 
   const handleCreatePack = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -391,76 +439,101 @@ export default function VNAssetsWorkbench() {
     }
   }, [selectedPack, starterMatrix]);
 
-  const runGeneration = useCallback(async (slotId?: number) => {
-    if (!selectedPack || loadedPackId !== selectedPack.id || generationCommandPending.current.has(selectedPack.id)) return;
-    const stored = readPendingVNAssetGeneration(selectedPack.owner_user_id, selectedPack.id);
-    if (stored && (stored.kind !== (slotId === undefined ? 'start' : 'retry') || stored.slotId !== slotId)) {
-      setError('Finish the previous generation request with Refresh before starting another.');
+  const runGeneration = useCallback(async (slotId?: number, recover = false) => {
+    if (!selectedPack || loadedPackId !== selectedPack.id || !recovery.ready ||
+        generationCommandPending.current.has(selectedPack.id) || (savedCommand && !recover)) return;
+    const stored = readPendingVNAssetGeneration(selectedPack.owner_user_id, selectedPack.id) ??
+      legacyReceipts.current.get(`${selectedPack.owner_user_id}:${selectedPack.id}`);
+    if (stored && !recover) {
+      if (stored.kind !== (slotId === undefined ? 'start' : 'retry') ||
+          (stored.kind === 'retry' && stored.slotId !== slotId)) {
+        setError('Finish the previous generation request with Refresh before starting another.');
+      } else {
+        await reconcilePendingGeneration(selectedPack);
+      }
       return;
     }
-    generationCommandPending.current.add(selectedPack.id);
+    const token = Symbol('generation-command');
+    generationCommandPending.current.set(selectedPack.id, token);
     ++refreshRevision.current;
     const packId = selectedPack.id;
-    const operation = `${selectedPack.owner_user_id ?? 'unknown'}:${packId}:${slotId ?? 'start'}`;
-    const idempotencyKey = stored?.key ?? generationKeys.current.get(operation) ?? createVNAssetIdempotencyKey('vn-generation');
-    generationKeys.current.set(operation, idempotencyKey);
-    writePendingVNAssetGeneration(selectedPack.owner_user_id, packId, {
-      kind: slotId === undefined ? 'start' : 'retry', slotId, key: idempotencyKey,
-    });
-    setPendingCommands((previous) => ({ ...previous, [packId]: { kind: slotId === undefined ? 'start' : 'retry', slotId } }));
+    const sourceBatchId = slotId === undefined ? null : generation?.failed_slot_batch_ids?.[slotId];
+    const command = recover ? savedCommand : {
+      packId, slotId,
+      request: {
+        idempotency_key: createVNAssetIdempotencyKey('vn-generation'),
+        ...(slotId !== undefined && sourceBatchId != null ? { source_batch_id: sourceBatchId } : {}),
+      },
+    };
+    if (!command) { finishGenerationCommand(packId, token); return; }
+    setPendingCommands((previous) => ({ ...previous, [packId]: { kind: command.slotId === undefined ? 'start' : 'retry', slotId: command.slotId } }));
     setError(null);
+    const capture = await recovery.verify();
+    if (!recover && capture && recovery.isCurrent(capture) && (
+      readPendingVNAssetGeneration(selectedPack.owner_user_id, packId) ??
+      legacyReceipts.current.get(`${selectedPack.owner_user_id}:${packId}`)
+    )) {
+      if (selectedPackIdRef.current === packId) {
+        setError('Finish the previous generation request with Refresh before starting another.');
+      }
+      finishGenerationCommand(packId, token);
+      return;
+    }
+    if (!capture || !recovery.remember(capture, command)) {
+      finishGenerationCommand(packId, token, !capture);
+      return;
+    }
     try {
-      const request = { idempotency_key: idempotencyKey };
-      const nextGeneration = slotId === undefined
-        ? await startVNAssetGeneration(packId, request)
-        : await retryVNAssetSlot(packId, slotId, request);
-      generationKeys.current.delete(operation);
-      clearPendingVNAssetGeneration(selectedPack.owner_user_id, packId, idempotencyKey);
+      const nextGeneration = command.slotId === undefined
+        ? await startVNAssetGeneration(packId, command.request)
+        : await retryVNAssetSlot(packId, command.slotId, command.request);
+      if (!recovery.isCurrent(capture)) return;
+      recovery.forget(capture, command);
       if (selectedPackIdRef.current === packId) {
         setGeneration(nextGeneration);
         setActiveWorkflowStep('generation');
       }
     } catch (startError) {
-      if (isMissingGenerationResource(startError)) {
-        clearPendingVNAssetGeneration(selectedPack.owner_user_id, packId, idempotencyKey);
-        generationKeys.current.delete(operation);
-      }
+      if (!recovery.isCurrent(capture)) return;
+      if (!recover && isVNGenerationRejected(startError)) recovery.forget(capture, command);
       if (selectedPackIdRef.current === packId) {
-        setError(startError instanceof Error ? startError.message : 'Generation could not be started. Retry to check the same request.');
+        setError(startError instanceof Error ? startError.message : recover
+          ? `Could not reconcile the pending generation request (pack ${packId}, kind ${command.slotId === undefined ? 'start' : 'retry'}${command.slotId === undefined ? '' : `, slot ${command.slotId}`}).`
+          : 'Generation could not be started. Retry to check the same request.');
       }
     } finally {
-      finishGenerationCommand(packId);
+      finishGenerationCommand(packId, token);
     }
-  }, [selectedPack, loadedPackId, finishGenerationCommand]);
+  }, [selectedPack, loadedPackId, generation, finishGenerationCommand, recovery, savedCommand, reconcilePendingGeneration]);
 
   const handleCancelGeneration = useCallback(async () => {
-    if (!selectedPack || generationCommandPending.current.has(selectedPack.id)) return;
+    if (!selectedPack || !recovery.ready || savedCommand || generationCommandPending.current.has(selectedPack.id)) return;
     const packId = selectedPack.id;
     const ownerUserId = selectedPack.owner_user_id;
-    const pending = readPendingVNAssetGeneration(ownerUserId, packId);
-    const operationPrefix = `${ownerUserId ?? 'unknown'}:${packId}:`;
-    const pendingKeys: [string, string][] = pending
-      ? [[`${operationPrefix}${pending.slotId ?? 'start'}`, pending.key]]
-      : [...generationKeys.current.entries()].filter(([operation]) => operation.startsWith(operationPrefix));
-    generationCommandPending.current.add(packId);
+    const operation = `${ownerUserId}:${packId}`;
+    const pending = readPendingVNAssetGeneration(ownerUserId, packId) ?? legacyReceipts.current.get(operation);
+    const token = Symbol('cancel-command');
+    generationCommandPending.current.set(selectedPack.id, token);
     ++refreshRevision.current;
     setPendingCommands((previous) => ({ ...previous, [packId]: { kind: 'cancel' } }));
     setError(null);
+    const capture = await recovery.verify();
+    if (!capture || !recovery.isCurrent(capture)) { finishGenerationCommand(selectedPack.id, token, true); return; }
     try {
       const nextGeneration = await cancelVNAssetGeneration(packId);
+      if (!recovery.isCurrent(capture)) return;
       if (pending) clearPendingVNAssetGeneration(ownerUserId, packId, pending.key);
-      for (const [operation, key] of pendingKeys) {
-        if (generationKeys.current.get(operation) === key) generationKeys.current.delete(operation);
-      }
+      if (pending && legacyReceipts.current.get(operation)?.key === pending.key) legacyReceipts.current.delete(operation);
       if (selectedPackIdRef.current === packId) setGeneration(nextGeneration);
     } catch (cancelError) {
+      if (!recovery.isCurrent(capture)) return;
       if (selectedPackIdRef.current === packId) {
         setError(cancelError instanceof Error ? cancelError.message : 'Failed to cancel generation');
       }
     } finally {
-      finishGenerationCommand(packId);
+      finishGenerationCommand(packId, token);
     }
-  }, [selectedPack, finishGenerationCommand]);
+  }, [selectedPack, finishGenerationCommand, recovery, savedCommand]);
 
   const handleBulkReview = useCallback(async (request: VNAssetBulkReviewRequest) => {
     if (!selectedPack) return;
@@ -538,6 +611,26 @@ export default function VNAssetsWorkbench() {
             {error}
           </div>
         )}
+        {recovery.error && (
+          <div role="alert" className="flex flex-col gap-2 border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+            <p>{recovery.error}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="secondary" className="gap-2" onClick={() => void recovery.verify()}>
+                <RefreshCw aria-hidden className="h-4 w-4" /> Retry recovery check
+              </Button>
+              {recovery.unreadable && <>
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" checked={discardConfirmed} onChange={(event) => setDiscardConfirmed(event.target.checked)} />
+                  I checked server status. Discarding does not cancel accepted work and may allow duplicate generation.
+                </label>
+                <Button size="sm" variant="secondary" className="gap-2" disabled={!discardConfirmed} onClick={() => {
+                  setDiscardConfirmed(false);
+                  recovery.discardUnreadable();
+                }}><Trash2 aria-hidden className="h-4 w-4" /> Discard unreadable requests</Button>
+              </>}
+            </div>
+          </div>
+        )}
 
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
           <PackList
@@ -594,20 +687,29 @@ export default function VNAssetsWorkbench() {
                 selectedPackId={selectedPack?.id}
                 onApplyMatrix={handleApplyStarterMatrix}
               />
-              <GenerationMonitor
-                generation={generation}
-                isCancelling={isCancellingGeneration}
-                isStarting={isStartingGeneration}
-                slots={slots}
-                onCancelGeneration={handleCancelGeneration}
-                onStartGeneration={() => void runGeneration()}
-                onRetrySlot={(slotId) => void runGeneration(slotId)}
-                retryingSlotId={retryingSlotId}
-                disabled={loadedPackId !== selectedPack?.id}
-                onRefresh={selectedPack ? handleRefreshGeneration : undefined}
-                preflight={preflight}
-                preflightError={preflightError}
-              />
+              <div className="min-w-0">
+                {savedCommand && <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 border-l-2 border-warn px-3 py-2 text-sm">
+                  <p className="min-w-0 break-words">Unconfirmed {savedCommand.slotId === undefined ? 'Start' : `Retry for slot ${savedCommand.slotId}`} request.</p>
+                  <Button size="sm" variant="secondary" className="gap-2" disabled={!recovery.ready || !!selectedCommand || loadedPackId !== selectedPack?.id}
+                    onClick={() => void runGeneration(undefined, true)}>
+                    <RotateCcw aria-hidden className="h-4 w-4" /> Recover pending request
+                  </Button>
+                </div>}
+                <GenerationMonitor
+                  generation={generation}
+                  isCancelling={isCancellingGeneration}
+                  isStarting={isStartingGeneration}
+                  slots={slots}
+                  onCancelGeneration={handleCancelGeneration}
+                  onStartGeneration={() => void runGeneration()}
+                  onRetrySlot={(slotId) => void runGeneration(slotId)}
+                  retryingSlotId={retryingSlotId}
+                  disabled={loadedPackId !== selectedPack?.id || !recovery.ready || !!savedCommand}
+                  onRefresh={selectedPack ? handleRefreshGeneration : undefined}
+                  preflight={preflight}
+                  preflightError={preflightError}
+                />
+              </div>
             </section>
 
             <ReviewBoard

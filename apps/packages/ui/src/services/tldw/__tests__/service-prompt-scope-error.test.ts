@@ -13,6 +13,19 @@ import {
 
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/media/389", "PUT", true],
+    ["/api/v1/media/389/metadata", "PATCH", true],
+    ["/api/v1/media/389/reprocess", "POST", true],
+    ["/api/v1/media/389/metadata", "PUT", false],
+    ["/api/v1/media/389/reprocess", "GET", false],
+    ["/api/v1/media/389/reprocess/extra", "POST", false],
+    ["/api/v1/media/389%2fother", "PUT", false],
+    ["/api/v1/media/../settings", "PUT", false],
+  ])("bounds owned Content Review commit %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+  it.each([
     ["/api/v1/chats/owned/complete-v2", "POST", true],
     ["/api/v1/chats/owned/complete-v2?scope_type=workspace&workspace_id=w", "POST", true],
     ["/api/v1/chats/owned/complete-v2", "GET", false],
@@ -171,7 +184,12 @@ describe("Service Prompt scope policy", () => {
     expect(isServicePromptRequestPath("/api/v1/rag/search", "DELETE")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/research/websearch", "PATCH")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/chats/chat-1/messages", "GET")).toBe(true)
-    expect(isServicePromptRequestPath("/api/v1/chats/", "GET")).toBe(false)
+    expect(isServicePromptRequestPath("/api/v1/chats/", "GET")).toBe(true)
+    expect(isServicePromptRequestPath("/api/v1/chats/conversations", "GET")).toBe(true)
+    expect(isServicePromptRequestPath("/api/v1/chats", "GET")).toBe(false)
+    expect(isServicePromptRequestPath("/api/v1/chats/conversations/", "GET")).toBe(false)
+    expect(isServicePromptRequestPath("/api/v1/chats/conversations", "POST")).toBe(false)
+    expect(isServicePromptRequestPath("/api/v1/chats/conversations/nested", "GET")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/chats", "POST")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/media/add", "GET")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/auth/refresh", "GET")).toBe(false)
@@ -221,4 +239,27 @@ describe("Service Prompt scope policy", () => {
       }
     })
   })
+})
+
+describe('H1 scoped routes', () => {
+  it.each(['/api/v1/chat/conversations/chat/history/selection', '/api/v1/chat/conversations/chat/history/legacy-projection', '/api/v1/chats/chat/completions/persist'])('allows only POST %s', path => {
+    expect(isServicePromptRequestPath(path, 'POST')).toBe(true)
+    for (const method of ['GET', 'PUT', 'PATCH', 'DELETE']) expect(isServicePromptRequestPath(path, method)).toBe(false)
+  })
+  it.each(['/api/v1/chat/conversations//history/selection', '/api/v1/chat/conversations/a%2fb/history/selection', '/api/v1/chat/conversations/a/history/selection/extra', '/api/v1/chat/conversations/a/history/legacy-projection/', '/api/v1/chats/a/completions/persist/extra'])('rejects malformed %s', path => {
+    expect(isServicePromptRequestPath(path, 'POST')).toBe(false)
+  })
+})
+
+it.each([
+  ["/api/v1/chats/child", "GET", true],
+  ["/api/v1/chats/child/settings?scope_type=workspace", "GET", true],
+  ["/api/v1/chats/child/settings", "PUT", true],
+  ["/api/v1/chats/child", "PUT", true],
+  ["/api/v1/chats/child/settings", "POST", false],
+  ["/api/v1/chats/child/settings/extra", "PUT", false],
+  ["/api/v1/chats/%2e%2e/settings", "PUT", false],
+  ["/api/v1/chats/child%2fother/settings", "GET", false]
+])("scoped chat path %s %s has exact access %s", (path, method, expected) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(expected)
 })

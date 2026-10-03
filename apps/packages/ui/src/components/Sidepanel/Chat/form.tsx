@@ -75,6 +75,7 @@ import { useTabMentions, type TabInfo } from "~/hooks/useTabMentions"
 import { useDeferredComposerInput } from "@/hooks/playground"
 import { KnowledgePanel } from "@/components/Knowledge"
 import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel"
+import { ModelSelect } from "@/components/Common/ModelSelect"
 import { ConnectionStatusIndicator } from "@/components/Sidepanel/Chat/ConnectionStatusIndicator"
 import { ControlRow } from "@/components/Sidepanel/Chat/ControlRow"
 import { SidepanelComposerControlArea } from "@/components/Sidepanel/Chat/SidepanelComposerControlArea"
@@ -243,10 +244,12 @@ export const SidepanelForm = ({
     () => (imageBackendDefault || "").trim(),
     [imageBackendDefault]
   )
-  const { data: voiceChatModels } = useQuery({
-    queryKey: ["voiceChatModels"],
+  const { phase, isConnected, serverUrl } = useConnectionState()
+  const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED
+  const { data: chatModels } = useQuery({
+    queryKey: ["getAllModelsForSelect"],
     queryFn: async () => fetchChatModels({ returnEmpty: true }),
-    enabled: audioHealthEnabled
+    enabled: isConnectionReady
   })
   const voiceChatModelOptions = React.useMemo(() => {
     const options = [
@@ -255,7 +258,7 @@ export const SidepanelForm = ({
         label: t("playground:voiceChat.useChatModel", "Use chat model")
       }
     ]
-    for (const model of voiceChatModels || []) {
+    for (const model of chatModels || []) {
       const providerLabel = getProviderDisplayName(model.provider || "")
       const modelLabel = model.nickname || model.model || model.name
       const label = providerLabel
@@ -267,10 +270,10 @@ export const SidepanelForm = ({
       })
     }
     return options
-  }, [voiceChatModels, t])
+  }, [chatModels, t])
   const availableChatModelIds = React.useMemo(
-    () => buildAvailableChatModelIds(voiceChatModels as any[]),
-    [voiceChatModels]
+    () => buildAvailableChatModelIds(chatModels),
+    [chatModels]
   )
   // STT settings consolidated into a single hook
   const sttSettings = useSttSettings()
@@ -604,9 +607,7 @@ export const SidepanelForm = ({
   )
   const shouldRenderQuickIngest = ingestOpen || Boolean(quickIngestSession)
   const quickIngestBtnRef = React.useRef<HTMLButtonElement>(null)
-  const { phase, isConnected, serverUrl } = useConnectionState()
   const { uxState } = useConnectionUxState()
-  const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED
   const { capabilities, loading: capsLoading } = useServerCapabilities()
   const hasServerVoiceChat =
     isConnectionReady &&
@@ -786,8 +787,10 @@ export const SidepanelForm = ({
     clearChat,
     queuedMessages,
     setQueuedMessages,
-    serverChatId
+    serverChatId,
+    conversationMetadata
   } = useMessage()
+  const { captureQueuedDispatchGuard } = conversationMetadata
   const currentChatApiProvider = useStoreChatModelSettings(
     (state) => state.apiProvider
   )
@@ -2582,6 +2585,7 @@ export const SidepanelForm = ({
 
   const sendQueuedRequest = React.useCallback(
     async (item: QueuedRequest) => {
+      const assertQueuedDispatchCurrent = captureQueuedDispatchGuard(item.conversationId)
       const validationError = validateQueuedRequest(item)
       if (validationError) {
         form.setFieldError("message", validationError)
@@ -2603,6 +2607,7 @@ export const SidepanelForm = ({
       setUseOCR(item.snapshot.useOCR)
 
       await stopListening()
+      assertQueuedDispatchCurrent()
       stopServerDictation()
 
       const sourceContext = (item.sourceContext ??
@@ -2612,6 +2617,7 @@ export const SidepanelForm = ({
         : []
 
       await sendMessage({
+        assertQueuedDispatchCurrent,
         image: sourceContext?.isImageCommand ? "" : item.image,
         message: item.promptText,
         docs: sourceContext?.isImageCommand ? [] : documents,
@@ -2634,6 +2640,7 @@ export const SidepanelForm = ({
       })
     },
     [
+      captureQueuedDispatchGuard,
       form,
       sendMessage,
       setChatMode,
@@ -2711,11 +2718,12 @@ export const SidepanelForm = ({
       : null
 
   const queue = useComposerQueue({
-    isConnectionReady,
+    isConnectionReady: isConnectionReady && conversationMetadata.isReady,
     isStreaming: isSending,
     queuedMessages,
     setQueuedMessages,
     sendQueuedRequest,
+    canCommitDispatchResult: conversationMetadata.isQueuedCompletionCurrent,
     stopStreamingRequest,
     resolveConversationId: resolveQueueConversationId,
     buildQueuedDocuments,
@@ -2731,6 +2739,11 @@ export const SidepanelForm = ({
     queue.cancelCurrentAndRunDisabledReason
   const handleRunQueuedRequest = queue.handleRunQueuedRequest
   const handleRunNextQueuedRequest = queue.handleRunNextQueuedRequest
+  const queueMetadataStatus = conversationMetadata.isReady
+    ? null
+    : conversationMetadata.failed
+      ? t("playground:composer.queue.conversationLoadFailed", "Conversation details could not be loaded. Retry before sending queued requests.")
+      : t("playground:composer.queue.conversationLoading", "Waiting for conversation details before sending queued requests.")
 
   const queueSubmission = React.useCallback(
     ({
@@ -3011,20 +3024,10 @@ export const SidepanelForm = ({
     }
   }, [form, form.values.message, textareaRef])
 
-  // Clear error messages when user starts typing (they're taking action)
-  // Errors persist until user interaction rather than auto-dismissing
+  // A newly raised error must survive until the draft or model changes.
   React.useEffect(() => {
-    if (form.values.message && form.errors.message) {
-      form.clearFieldError("message")
-    }
-  }, [form.values.message, form.errors.message, form.clearFieldError])
-
-  // Clear "no model" error when a model is selected
-  React.useEffect(() => {
-    if (selectedModel && form.errors.message) {
-      form.clearFieldError("message")
-    }
-  }, [selectedModel, form.errors.message, form.clearFieldError])
+    form.clearFieldError("message")
+  }, [form.values.message, selectedModel, form.clearFieldError])
 
   // Debounce placeholder changes to prevent flashing on flaky connections
   React.useEffect(() => {
@@ -3152,6 +3155,17 @@ export const SidepanelForm = ({
                       )
                     )}
                     {/* Queued messages banner - shown above input area */}
+                    {queuedMessages.length > 0 && queueMetadataStatus && (
+                      <div role="status" className="px-2 py-1 text-xs text-text-subtle">
+                        {queueMetadataStatus}
+                        {conversationMetadata.failed && (
+                          <button type="button" className="ml-2 underline" disabled={!isConnectionReady}
+                            onClick={conversationMetadata.retryMetadata}>
+                            {t("playground:composer.queue.retryConversation", "Retry conversation details")}
+                          </button>
+                        )}
+                      </div>
+                    )}
                     {wrapComposerProfile(
                       "sidepanel-queued-banner",
                       <ChatQueuePanel
@@ -3166,6 +3180,7 @@ export const SidepanelForm = ({
                         onClearAll={queuedRequestActions.clear}
                         onOpenDiagnostics={openDiagnostics}
                         forceRunDisabledReason={cancelCurrentAndRunDisabledReason}
+                        dispatchDisabledReason={queueMetadataStatus}
                       />
                     )}
                     {contextChips.length > 0 && (
@@ -3294,6 +3309,10 @@ export const SidepanelForm = ({
 
                       const composerInlineMessagesNode = (
                         <>
+                          {isConnectionReady && !isProMode && (
+                            !normalizeChatModelId(selectedModel) ||
+                            findUnavailableChatModel([selectedModel], availableChatModelIds)
+                          ) && <ModelSelect iconClassName="size-4" showSelectedName />}
                           {form.errors.message && (
                             <div
                               role="alert"

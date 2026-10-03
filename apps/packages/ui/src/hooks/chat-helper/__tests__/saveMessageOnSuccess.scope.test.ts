@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   acknowledgeUser: vi.fn(async () => undefined),
   events: [] as string[],
-  generateTitle: vi.fn(async () => {
+  settle: vi.fn<(...args: any[]) => Promise<any>>(async () => ({
+    id: "assistant-1"
+  })),
+  generateTitle: vi.fn<(...args: any[]) => Promise<string>>(async () => {
     mocks.events.push("title")
     return "Generated title"
   }),
@@ -12,7 +15,10 @@ const mocks = vi.hoisted(() => ({
     mocks.events.push(`save:file:${file.id}`)
   }),
   runTransaction: vi.fn(
-    async (signal: AbortSignal | undefined, operation: () => Promise<unknown>) => {
+    async (
+      signal: AbortSignal | undefined,
+      operation: () => Promise<unknown>
+    ) => {
       if (signal?.aborted) {
         const error = new Error("Request scope changed")
         error.name = "AbortError"
@@ -73,6 +79,10 @@ vi.mock("@/utils/chat-error-message", () => ({
   buildAssistantErrorContent: vi.fn()
 }))
 
+vi.mock("@/services/chat-history-selection", () => ({
+  settleAcceptedAssistant: mocks.settle
+}))
+
 import { saveMessageOnSuccess, saveMessageOnError } from "../index"
 
 const requestScope = Object.freeze({
@@ -102,6 +112,21 @@ describe("saveMessageOnSuccess request scope", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.events.length = 0
+  })
+
+  it.each(["success", "failure"])("keeps the verified owner when creating local history after %s", async outcome => {
+    const signal = new AbortController().signal
+    if (outcome === "success") {
+      await saveMessageOnSuccess(payload({ historyId: null, requestScope, scopeSignal: signal }))
+    } else {
+      await saveMessageOnError({
+        e: new Error("Provider unavailable"), history: [], setHistory: vi.fn(),
+        historyId: null, setHistoryId: vi.fn(), image: "", userMessage: "question",
+        botMessage: "", selectedModel: "model-1", isRegenerating: false,
+        requestScope, scopeSignal: signal
+      })
+    }
+    expect(mocks.saveHistory).toHaveBeenCalledWith("Generated title", false, "web-ui", undefined, undefined, requestScope)
   })
 
   it("retains the server acknowledgement on each matching locally persisted row", async () => {
@@ -301,5 +326,86 @@ describe("saveMessageOnSuccess request scope", () => {
     expect(mocks.generateTitle).not.toHaveBeenCalled()
     expect(mocks.saveHistory).not.toHaveBeenCalled()
     expect(mocks.saveMessage).not.toHaveBeenCalled()
+  })
+})
+
+
+it("settles an accepted native parent without duplicating the user or serializing local placeholders", async () => {
+  const turn: any = {
+    owner: { kind: "native", conversation_id: "original" },
+    admission: { input_message_id: "accepted" },
+    createdAt: 123,
+    complete: vi.fn(async () => {}),
+    followResult: vi.fn(async () => {})
+  }
+  await saveMessageOnSuccess(
+    payload({
+      historyTurn: turn,
+      documents: [],
+      reasoning_time_taken: 0
+    }) as any
+  )
+  expect(mocks.settle).toHaveBeenCalledWith(turn.owner, turn.admission, {
+    id: "assistant-1",
+    history_id: "original",
+    role: "assistant",
+    name: "model-1",
+    content: "answer",
+    createdAt: 123,
+    images: [],
+    parent_message_id: "accepted"
+  })
+  expect(mocks.saveMessage).not.toHaveBeenCalled()
+  expect(turn.complete).toHaveBeenCalledOnce()
+})
+it("accepted errors never invoke the legacy duplicate-user persistence path", async () => {
+  const turn: any = {
+    owner: { kind: "native", conversation_id: "original" },
+    admission: { input_message_id: "accepted" },
+    recover: vi.fn(async () => {}),
+    createdAt: 123
+  }
+  await saveMessageOnError({
+    ...payload(),
+    history: [],
+    setHistory: vi.fn(),
+    userMessage: "question",
+    historyTurn: turn,
+    assistantMessageId: "assistant-1",
+    e: new Error("provider failed"),
+    botMessage: "partial"
+  } as any)
+  expect(mocks.saveMessage).not.toHaveBeenCalled()
+  expect(turn.recover).toHaveBeenCalledWith(
+    { content: "partial", assistantId: "assistant-1", createdAt: 123 },
+    expect.any(Error)
+  )
+})
+
+it("local tool-only settlement preserves canonical tool metadata for the next owner capture", async () => {
+  const calls = [
+    {
+      id: "call-1",
+      type: "function",
+      function: { name: "lookup", arguments: "{}" }
+    }
+  ]
+  const turn: any = {
+    owner: { kind: "local", conversation_id: "original" },
+    admission: { input_message_id: "accepted" },
+    createdAt: 123,
+    complete: vi.fn(async () => {}),
+    followResult: vi.fn(async () => {})
+  }
+  await saveMessageOnSuccess(
+    payload({
+      historyTurn: turn,
+      fullText: "",
+      generationInfo: { tool_calls: calls }
+    }) as any
+  )
+  expect(mocks.settle.mock.lastCall?.[2]).toMatchObject({
+    content: "",
+    metadataExtra: { tool_calls: calls }
   })
 })

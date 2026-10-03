@@ -1,7 +1,6 @@
 """Core receipt recovery and response persistence without endpoint callbacks."""
 
-import inspect
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +10,7 @@ from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.endpoints.vn_assets import _claim_or_replay_idempotency
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
+    VNAssetGenerationRequest,
     VNAssetGenerationStatusResponse,
     VNAssetPackCreate,
     VNAssetSlotCreate,
@@ -44,23 +44,167 @@ def pack_id(service: VNAssetPackService) -> int:
     return pack.id
 
 
-@pytest.mark.parametrize("operation", ("start", "recover", "claim"))
-def test_generation_transactions_enter_through_database_boundary(
-    service: VNAssetPackService,
-    pack_id: int,
-    monkeypatch: pytest.MonkeyPatch,
-    operation: str,
+def test_explicit_zero_override_is_rejected_before_creating_work(
+    service: VNAssetPackService, pack_id: int,
 ) -> None:
-    """Keep real generation/receipt transactions owned by the database layer.
+    """Keep the public positive-count override validation boundary.
 
     Args:
-        service: Isolated real metadata and Jobs databases.
-        pack_id: Owned pack with one variant.
-        monkeypatch: Guard transaction admission without replacing its behavior.
-        operation: Service entrypoint whose complete atomic scope is exercised.
+        service (VNAssetPackService): Real isolated VN and Jobs databases.
+        pack_id (int): Owned pack with a nonzero default slot variant count.
 
     Returns:
-        None after checking the original batch and persisted receipt outcome.
+        None: Verify invalid override validation leaves no batch or Jobs work.
+    """
+    with pytest.raises(ValidationError):
+        service.start_generation(pack_id, VNAssetGenerationRequest(variant_count=0))
+    assert service.repo.list_batches(pack_id) == []
+    assert service.jobs_manager.list_jobs(domain="vn_assets", owner_user_id="42") == []
+
+
+@pytest.mark.parametrize("reservation_status", ("active", "failed", "cancelled", "completed"))
+def test_retry_capacity_counts_active_and_completed_reservations(
+    service: VNAssetPackService, pack_id: int, reservation_status: str,
+) -> None:
+    """Retry admission counts hidden active work and releases terminal reservations.
+
+    Args:
+        service (VNAssetPackService): Real isolated VN and Jobs databases.
+        pack_id (int): Owned pack containing the failed historical source.
+        reservation_status (str): Actual public transition applied to another slot.
+
+    Returns:
+        None: Verify capacity rejection rollback or one bounded accepted retry.
+    """
+    repo = service.repo
+    source_slot = repo.list_slots(pack_id)[0]
+    source = service.start_generation(pack_id)
+    repo.fail_variant(batch_id=source.batch_id, slot_id=source_slot["id"], variant_index=0, error="source failed")
+    other_slot = service.create_slot(pack_id, VNAssetSlotCreate(asset_type="sprite", slot_key="other"))
+    other = service.start_generation(pack_id, VNAssetGenerationRequest(slot_ids=[other_slot.id]))
+    identity = {"batch_id": other.batch_id, "slot_id": other_slot.id, "variant_index": 0}
+    item = repo.claim_variant(
+        **identity, lease_id="inline", attempt_token="capacity-observation",
+        item_fields={"pack_id": pack_id},
+    )
+    if reservation_status == "failed":
+        repo.fail_variant(**identity, attempt_token="capacity-observation", error="other failed")
+    elif reservation_status == "cancelled":
+        repo.cancel_batch(other.batch_id)
+    elif reservation_status == "completed":
+        repo.update_item_storage(
+            item["id"], generated_file_id=77, storage_ref="capacity-fixture.png",
+            mime_type="image/png", width=1, height=1, bytes=1,
+            **identity, attempt_token="capacity-observation",
+        )
+        repo.complete_variant(**identity, item_id=item["id"], attempt_token="capacity-observation")
+    service.item_limit = 1
+    blocked = reservation_status in {"active", "completed"}
+    assert repo.count_items_for_generation(pack_id) == int(blocked)
+    assert len(repo.list_items(pack_id)) == int(reservation_status == "completed")
+    receipt = {
+        "scope": "vn_asset_slot_retry", "resource_id": f"pack:{pack_id}:slot:{source_slot['id']}",
+        "idempotency_key": "capacity-retry", "payload_hash": "frozen-source",
+    }
+    repo.claim_idempotency_record(owner_user_id=42, **receipt)
+    receipt_keys = {key: value for key, value in receipt.items() if key != "payload_hash"}
+    before_receipt = repo.get_idempotency_record(owner_user_id=42, **receipt_keys)
+    before_batches = repo.list_batches(pack_id)
+    before_recipes = {row["id"]: repo.list_batch_recipes(row["id"]) for row in before_batches}
+    before_jobs = service.jobs_manager.list_jobs(domain="vn_assets", owner_user_id="42")
+    request = VNAssetGenerationRequest(source_batch_id=source.batch_id)
+    if blocked:
+        with pytest.raises(ValueError, match="vn_asset_pack_item_limit_exceeded"):
+            service.retry_slot(pack_id, source_slot["id"], request, idempotency_receipt=receipt)
+        assert repo.list_batches(pack_id) == before_batches
+        assert {row["id"]: repo.list_batch_recipes(row["id"]) for row in before_batches} == before_recipes
+        assert repo.get_idempotency_record(owner_user_id=42, **receipt_keys) == before_receipt
+        assert service.jobs_manager.list_jobs(domain="vn_assets", owner_user_id="42") == before_jobs
+    else:
+        retried = service.retry_slot(pack_id, source_slot["id"], request, idempotency_receipt=receipt)
+        assert retried.source_batch_id == source.batch_id
+        assert len(repo.list_batches(pack_id)) == len(before_batches) + 1
+        assert repo.get_batch(source.batch_id) == next(row for row in before_batches if row["id"] == source.batch_id)
+        assert repo.list_batch_recipes(source.batch_id) == before_recipes[source.batch_id]
+    assert not repo.db.get_connection().in_transaction
+
+
+def test_zero_work_receipt_recovers_missing_original_parent(
+    service: VNAssetPackService, pack_id: int, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Commit/link an empty batch, interrupt enqueue, then recover its original Job.
+
+    Args:
+        service (VNAssetPackService): Real isolated VN and Jobs databases.
+        pack_id (int): Owned pack configured to accept zero-variant work.
+        monkeypatch (pytest.MonkeyPatch): Interrupt only pre-parent submission.
+
+    Returns:
+        None: Verify one batch/parent, real empty completion and first receipt replay.
+    """
+    from tldw_Server_API.app.core.VN_Assets import service as service_module
+    from tldw_Server_API.app.core.VN_Assets.jobs import vn_asset_jobs_queue
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+    from tldw_Server_API.tests.VN_Assets.test_generation_jobs import FakeImageAdapter, FakeImageRegistry
+
+    repo, jobs = service.repo, service.jobs_manager
+    repo.update_slot(repo.list_slots(pack_id)[0]["id"], {"variant_count": 0})
+    receipt = {
+        "scope": "vn_asset_generate", "resource_id": f"pack:{pack_id}",
+        "idempotency_key": "zero-work-interrupted", "payload_hash": "zero-work",
+    }
+    repo.claim_idempotency_record(owner_user_id=42, **receipt)
+
+    def interrupt_parent(*_args: Any, **_kwargs: Any) -> None:
+        """Stop after the native batch/receipt commit, before any Jobs creation."""
+        raise KeyboardInterrupt("pre-parent interruption")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service_module, "create_enqueue_batch_job", interrupt_parent)
+        with pytest.raises(KeyboardInterrupt):
+            service.start_generation(pack_id, idempotency_receipt=receipt)
+    original = repo.list_batches(pack_id)[0]
+    assert original["recipe_version"] == 0
+    assert original["status"] == "queued"
+    assert original["job_batch_id"] is None
+    assert jobs.list_jobs(domain="vn_assets", owner_user_id="42") == []
+    first = service.claim_or_replay_idempotency(owner_user_id=42, generation_pack_id=pack_id, **receipt)
+    assert first["batch_id"] == original["id"]
+    assert len(repo.list_batches(pack_id)) == 1
+    assert len(jobs.list_jobs(domain="vn_assets", owner_user_id="42")) == 1
+    parent = jobs.acquire_next_job(
+        domain="vn_assets", queue=vn_asset_jobs_queue(), owner_user_id="42",
+        worker_id="zero-work-worker", lease_seconds=120,
+    )
+    assert parent is not None
+    adapter = FakeImageAdapter()
+    result = VNAssetGenerationWorker(
+        repo=repo, jobs_manager=jobs, image_registry=FakeImageRegistry(adapter),
+    ).handle_job(parent)
+    assert result["status"] == "completed"
+    assert jobs.complete_job(parent["id"], result=result, worker_id="zero-work-worker", lease_id=parent["lease_id"])
+    assert repo.get_batch(original["id"])["status"] == "completed"
+    assert adapter.requests == []
+    assert repo.list_items(pack_id) == []
+    assert service.claim_or_replay_idempotency(owner_user_id=42, generation_pack_id=pack_id, **receipt) == first
+    assert len(jobs.list_jobs(domain="vn_assets", owner_user_id="42")) == 1
+
+
+@pytest.mark.parametrize("operation", ("start", "recover", "claim"))
+def test_generation_receipt_outcomes_reuse_original_batch_and_job(
+    service: VNAssetPackService,
+    pack_id: int,
+    operation: str,
+) -> None:
+    """Retain generation outcomes and replay without duplicating persisted work.
+
+    Args:
+        service (VNAssetPackService): Isolated real metadata and Jobs databases.
+        pack_id (int): Owned pack with one variant.
+        operation (str): Service entrypoint whose outcome is exercised.
+
+    Returns:
+        None: Checks the original batch and persisted receipt outcome.
     """
     receipt = {
         "scope": "vn_asset_generate", "resource_id": f"pack:{pack_id}",
@@ -72,28 +216,6 @@ def test_generation_transactions_enter_through_database_boundary(
         record = service.repo.get_idempotency_record(
             owner_user_id=42, **{key: value for key, value in receipt.items() if key != "payload_hash"},
         )
-    native_transaction = service.repo.db.transaction
-
-    def database_owned_transaction(*args: Any, **kwargs: Any) -> Any:
-        """Reject service-owned admission while retaining the native transaction.
-
-        Args:
-            args: Unchanged native positional transaction arguments.
-            kwargs: Unchanged native keyword transaction arguments.
-
-        Returns:
-            The real database transaction context manager.
-        """
-        frame = inspect.currentframe()
-        try:
-            assert frame.f_back.f_globals["__name__"].startswith(
-                "tldw_Server_API.app.core.DB_Management."
-            ), "Generation transaction admission must be database-owned"
-        finally:
-            del frame
-        return native_transaction(*args, **kwargs)
-
-    monkeypatch.setattr(service.repo.db, "transaction", database_owned_transaction)
     if operation == "start":
         response = service.start_generation(pack_id)
     elif operation == "recover":
@@ -110,6 +232,170 @@ def test_generation_transactions_enter_through_database_boundary(
     assert len(service.jobs_manager.list_jobs(domain="vn_assets")) == 1
     if operation != "start":
         assert response.batch_id == original.batch_id
+
+
+def test_start_generation_rolls_back_batch_recipes_and_receipt_on_failure(
+    service: VNAssetPackService,
+    pack_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Roll back a persisted batch and receipt link when submission aborts.
+
+    Args:
+        service (VNAssetPackService): Real SQLite metadata and Jobs service.
+        pack_id (int): Owned pack with one planned variant.
+        monkeypatch (pytest.MonkeyPatch): Injects failure after real batch writes.
+
+    Returns:
+        None: Checks that no partial batch, recipe or receipt link survives.
+    """
+    receipt = {
+        "scope": "vn_asset_generate", "resource_id": f"pack:{pack_id}",
+        "idempotency_key": "rollback-start", "payload_hash": "payload",
+    }
+    identity = {"owner_user_id": 42, **{key: receipt[key] for key in ("scope", "resource_id", "idempotency_key")}}
+    before, _claimed = service.repo.claim_idempotency_record(owner_user_id=42, **receipt)
+    create_batch = service.repo.create_batch
+    written_batch_ids: list[int] = []
+
+    def create_then_fail(**kwargs: Any) -> dict[str, Any]:
+        """Persist the actual batch and recipe before injecting an interruption.
+
+        Args:
+            kwargs (Any): Original repository batch creation arguments.
+
+        Returns:
+            dict[str, Any]: Never returns; raises after the real writes.
+        """
+        batch = create_batch(**kwargs)
+        written_batch_ids.append(batch["id"])
+        assert len(service.repo.list_batch_recipes(batch["id"])) == 1
+        assert service.repo.get_idempotency_record(**identity)["batch_id"] == batch["id"]
+        raise RuntimeError("batch persistence interrupted")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service.repo, "create_batch", create_then_fail)
+        with pytest.raises(RuntimeError, match="^batch persistence interrupted$"):
+            service.start_generation(pack_id, idempotency_receipt=receipt)
+    assert service.repo.list_batches(pack_id) == [], "start rollback left a persisted batch"
+    assert len(written_batch_ids) == 1
+    assert service.repo.list_batch_recipes(written_batch_ids[0]) == []
+    assert service.repo.get_idempotency_record(**identity) == before
+    assert service.jobs_manager.list_jobs(domain="vn_assets") == []
+
+
+def test_recover_generation_rolls_back_batch_update_on_failure(
+    service: VNAssetPackService,
+    pack_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the original batch retryable if recovery fails after metadata writes.
+
+    Args:
+        service (VNAssetPackService): Real SQLite metadata and Jobs service.
+        pack_id (int): Owned pack with one planned variant.
+        monkeypatch (pytest.MonkeyPatch): Injects failure after real batch update.
+
+    Returns:
+        None: Checks batch rollback without changing the durable parent Job.
+    """
+    receipt = {
+        "scope": "vn_asset_generate", "resource_id": f"pack:{pack_id}",
+        "idempotency_key": "rollback-recover", "payload_hash": "payload",
+    }
+    identity = {"owner_user_id": 42, **{key: receipt[key] for key in ("scope", "resource_id", "idempotency_key")}}
+    service.repo.claim_idempotency_record(owner_user_id=42, **receipt)
+    original = service.start_generation(pack_id, idempotency_receipt=receipt)
+    before = service.repo.update_batch(original.batch_id, {"enqueue_error": "pending recovery"})
+    record = service.repo.get_idempotency_record(**identity)
+    jobs_before = service.jobs_manager.list_jobs(domain="vn_assets")
+    update_batch = service.repo.update_batch
+
+    def update_then_fail(batch_id: int, fields: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Perform the actual recovery update before injecting an interruption.
+
+        Args:
+            batch_id (int): Original generation batch.
+            fields (Mapping[str, Any]): Unchanged recovery update fields.
+
+        Returns:
+            dict[str, Any] | None: Never returns; raises after the real update.
+        """
+        updated = update_batch(batch_id, fields)
+        assert updated["enqueue_error"] is None
+        raise RuntimeError("recovery persistence interrupted")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service.repo, "update_batch", update_then_fail)
+        with pytest.raises(RuntimeError, match="^recovery persistence interrupted$"):
+            service.recover_generation_receipt(record, pack_id=pack_id)
+    assert service.repo.get_batch(original.batch_id) == before, "recover rollback lost the original batch state"
+    assert service.repo.get_idempotency_record(**identity) == record
+    assert service.jobs_manager.list_jobs(domain="vn_assets") == jobs_before
+    recovered = service.recover_generation_receipt(record, pack_id=pack_id)
+    assert recovered.batch_id == original.batch_id
+    assert recovered.job_batch_id == original.job_batch_id
+    assert recovered.enqueue_error is None
+    assert len(service.repo.list_batches(pack_id)) == 1
+    assert service.jobs_manager.list_jobs(domain="vn_assets") == jobs_before
+
+
+def test_claim_generation_rolls_back_completed_receipt_and_batch_on_failure(
+    service: VNAssetPackService,
+    pack_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Roll back receipt completion and recovered batch writes together.
+
+    Args:
+        service (VNAssetPackService): Real SQLite metadata and Jobs service.
+        pack_id (int): Owned pack with one planned variant.
+        monkeypatch (pytest.MonkeyPatch): Injects failure after real completion.
+
+    Returns:
+        None: Checks atomic rollback and retry of the original response and Job.
+    """
+    receipt = {
+        "scope": "vn_asset_generate", "resource_id": f"pack:{pack_id}",
+        "idempotency_key": "rollback-claim", "payload_hash": "payload",
+    }
+    identity = {"owner_user_id": 42, **{key: receipt[key] for key in ("scope", "resource_id", "idempotency_key")}}
+    service.repo.claim_idempotency_record(owner_user_id=42, **receipt)
+    original = service.start_generation(pack_id, idempotency_receipt=receipt)
+    before = service.repo.update_batch(original.batch_id, {"enqueue_error": "pending recovery"})
+    record = service.repo.get_idempotency_record(**identity)
+    jobs_before = service.jobs_manager.list_jobs(domain="vn_assets")
+    complete_record = service.repo.complete_idempotency_record
+
+    def complete_then_fail(**kwargs: Any) -> dict[str, Any]:
+        """Complete the real receipt before injecting an acknowledgement failure.
+
+        Args:
+            kwargs (Any): Original repository receipt completion arguments.
+
+        Returns:
+            dict[str, Any]: Never returns; raises after the real completion.
+        """
+        completed = complete_record(**kwargs)
+        assert completed["status"] == "completed"
+        assert service.repo.get_batch(original.batch_id)["enqueue_error"] is None
+        raise RuntimeError("receipt acknowledgement interrupted")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service.repo, "complete_idempotency_record", complete_then_fail)
+        with pytest.raises(RuntimeError, match="^receipt acknowledgement interrupted$"):
+            service.claim_or_replay_idempotency(owner_user_id=42, **receipt, generation_pack_id=pack_id)
+    assert service.repo.get_idempotency_record(**identity) == record, "claim rollback left a completed receipt"
+    assert service.repo.get_batch(original.batch_id) == before
+    assert service.jobs_manager.list_jobs(domain="vn_assets") == jobs_before
+    recovered = service.claim_or_replay_idempotency(owner_user_id=42, **receipt, generation_pack_id=pack_id)
+    assert recovered["batch_id"] == original.batch_id
+    assert recovered["job_batch_id"] == original.job_batch_id
+    assert recovered["enqueue_error"] is None
+    assert service.repo.get_idempotency_record(**identity)["status"] == "completed"
+    assert service.claim_or_replay_idempotency(owner_user_id=42, **receipt, generation_pack_id=pack_id) == recovered
+    assert len(service.repo.list_batches(pack_id)) == 1
+    assert service.jobs_manager.list_jobs(domain="vn_assets") == jobs_before
 
 
 @pytest.mark.parametrize("scope", GENERATION_SCOPES)
@@ -147,6 +433,9 @@ def test_claim_recovers_original_batch_and_persists_response(
     )
     assert recovered == {
         "batch_id": original_batch["id"],
+        "source_batch_id": None,
+        "recipe_available": True,
+        "selected_slot_ids": [service.repo.list_slots(pack_id)[0]["id"]],
         "job_batch_id": "1",
         "status": "queued",
         "total_slots": 1,

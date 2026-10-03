@@ -1,3 +1,5 @@
+"""Historical conversation storage gains the indexes required by list queries."""
+
 import sqlite3
 from pathlib import Path
 
@@ -5,15 +7,20 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-
 pytestmark = pytest.mark.unit
 
 
-def test_migration_from_previous_version_adds_conversation_list_indexes(tmp_path: Path) -> None:
+def test_migration_from_previous_version_adds_conversation_list_indexes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Upgrade a real pre-receipt schema without forging its version marker."""
     db_path = tmp_path / "conversation_list_indexes.sqlite"
 
-    seed = CharactersRAGDB(db_path, "conversation-index-seed")
-    seed.close_connection()
+    with monkeypatch.context() as old_code:
+        old_code.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 73)
+        seed = CharactersRAGDB(db_path, "conversation-index-seed")
+        assert not seed.backend.table_exists("workspace_chat_startup_receipts")
+        seed.close_connection()
 
     target_names = {
         "idx_conversations_client_deleted_last_modified",
@@ -23,10 +30,6 @@ def test_migration_from_previous_version_adds_conversation_list_indexes(tmp_path
 
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute(
-            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-            (CharactersRAGDB._CURRENT_SCHEMA_VERSION - 1, CharactersRAGDB._SCHEMA_NAME),
-        )
         for index_name in target_names:
             conn.execute(f"DROP INDEX IF EXISTS {index_name}")
         conn.commit()
@@ -39,6 +42,7 @@ def test_migration_from_previous_version_adds_conversation_list_indexes(tmp_path
         (CharactersRAGDB._SCHEMA_NAME,),
     ).fetchone()["version"]
     assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+    assert migrated.backend.table_exists("workspace_chat_startup_receipts")
 
     existing_indexes = {
         row["name"] for row in conn.execute("PRAGMA index_list('conversations')").fetchall()
@@ -46,3 +50,64 @@ def test_migration_from_previous_version_adds_conversation_list_indexes(tmp_path
     assert target_names.issubset(existing_indexes)
 
     migrated.close_connection()
+
+
+def test_migration_from_v35_adds_conversation_list_indexes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "conversation_list_indexes.sqlite"
+    expected_indexes = {
+        "idx_conversations_client_deleted_last_modified": [
+            ("client_id", 0), ("deleted", 0), ("last_modified", 1),
+        ],
+        "idx_conversations_client_character_deleted_last_modified": [
+            ("client_id", 0), ("character_id", 0), ("deleted", 0), ("last_modified", 1),
+        ],
+        "idx_conversations_client_deleted_created_at": [
+            ("client_id", 0), ("deleted", 0), ("created_at", 1),
+        ],
+    }
+
+    def initialize_historical_v35(db: CharactersRAGDB) -> None:
+        with db.transaction() as conn:
+            db._apply_schema_v4(conn)
+            steps = db._sqlite_linear_migration_steps()
+            for version in range(4, 35):
+                steps[version](conn)
+                assert db._get_db_version(conn) == version + 1
+
+    # These indexes were introduced after v35, independently of later schema bumps.
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 35)
+        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical_v35)
+        seed = CharactersRAGDB(db_path, "conversation-index-seed")
+    try:
+        with seed.transaction() as conn:
+            assert seed._get_db_version(conn) == 35
+            existing_indexes = {row["name"] for row in conn.execute("PRAGMA index_list('conversations')")}
+            assert expected_indexes.keys().isdisjoint(existing_indexes)
+            conn.execute(
+                "INSERT INTO conversations (id, root_id, title, client_id) VALUES (?, ?, ?, ?)",
+                ("retained-conversation", "retained-conversation", "Retained list entry", seed.client_id),
+            )
+            before = dict(conn.execute("SELECT * FROM conversations").fetchone())
+    finally:
+        seed.close_all_connections()
+
+    migrated = CharactersRAGDB(db_path, "conversation-index-migration-check")
+    try:
+        conn = migrated.get_connection()
+        assert migrated._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        existing_indexes = {row["name"] for row in conn.execute("PRAGMA index_list('conversations')")}
+        assert expected_indexes.keys() <= existing_indexes
+        for index_name, expected_columns in expected_indexes.items():
+            columns = [
+                (row["name"], row["desc"])
+                for row in conn.execute(f"PRAGMA index_xinfo('{index_name}')")
+                if row["key"]
+            ]
+            assert columns == expected_columns
+        after = dict(conn.execute("SELECT * FROM conversations WHERE id = ?", (before["id"],)).fetchone())
+        assert all(after[key] == value for key, value in before.items())
+    finally:
+        migrated.close_all_connections()

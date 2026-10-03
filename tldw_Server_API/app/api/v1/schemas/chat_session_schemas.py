@@ -3,16 +3,28 @@
 Pydantic schemas for character chat sessions and messages.
 """
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
+    HistoryAdmissionReferenceV1,
+    HistoryAdmissionV1,
+    HistorySelectionV1,
+)
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, reject_assistant_startup_input
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
+from tldw_Server_API.app.core.Workspaces.chat_startup_schemas import (
+    ALLOWED_CONVERSATION_STATES as ALLOWED_CONVERSATION_STATES,
+)
+from tldw_Server_API.app.core.Workspaces.chat_startup_schemas import (
+    _validate_conversation_state,
+)
 
-ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
 ALLOWED_ASSISTANT_KINDS = ("character", "persona")
 ALLOWED_PERSONA_MEMORY_MODES = ("read_only", "read_write")
 MAX_ASSISTANT_OVERLAY_TEXT_CHARS = 20_000
@@ -29,18 +41,6 @@ def _default_offset_pagination_aliases(response):
 # ========================================================================
 # Chat Session Schemas
 # ========================================================================
-
-
-def _validate_conversation_state(value: Optional[str]) -> Optional[str]:
-    """Shared validator for conversation state field."""
-    if value is None:
-        return None
-    normalized = value.strip().lower()
-    if not normalized:
-        raise ValueError("state cannot be empty")
-    if normalized not in ALLOWED_CONVERSATION_STATES:
-        raise ValueError(f"Invalid state '{value}'. Allowed: {', '.join(ALLOWED_CONVERSATION_STATES)}")
-    return normalized
 
 
 def _normalize_required_overlay_text(value: Any) -> Any:
@@ -191,6 +191,16 @@ class ChatSessionCreate(BaseModel):
     def _validate_state(cls, value: Optional[str]) -> Optional[str]:
         return _validate_conversation_state(value)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_startup_input(cls, value: Any) -> Any:
+        """Reject caller-authored origin and strict selectors without closing legacy extras."""
+        if isinstance(value, Mapping) and any(field in value for field in (
+            "workspace_assistant_selection", "workspace_assistant_default_version",
+        )):
+            raise ValueError("Workspace assistant selection requires the strict startup route")
+        return reject_assistant_startup_input(value)
+
     @model_validator(mode="after")
     def _normalize_assistant_identity(self) -> "ChatSessionCreate":
         has_any_tracked_identity = any(
@@ -265,9 +275,16 @@ class ChatSessionUpdate(BaseModel):
     def _validate_state(cls, value: Optional[str]) -> Optional[str]:
         return _validate_conversation_state(value)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_startup_input(cls, value: Any) -> Any:
+        """Keep local creation provenance out of caller metadata updates."""
+        return reject_assistant_startup_input(value)
+
 
 class ChatSessionListItem(BaseModel):
     """Chat list item without authoritative resume-detail fields."""
+    assistant_startup: AssistantStartup = Field(default_factory=AssistantStartup, json_schema_extra={"readOnly": True})
     id: str = Field(..., description="UUID of the chat session")
     scope_type: Literal["global", "workspace"] = Field(
         "global",
@@ -400,6 +417,19 @@ class ChatSettingsResponse(BaseModel):
 
 class MessageCreate(BaseModel):
     """Schema for creating a new message."""
+    id: str | None = Field(None, min_length=1, max_length=255)
+    tldw_history_selection_v1: HistorySelectionV1 | None = None
+    tldw_history_admission_v1: HistoryAdmissionReferenceV1 | None = None
+
+    @model_validator(mode="after")
+    def _validate_history_fields(self) -> "MessageCreate":
+        if self.tldw_history_selection_v1 is not None and self.role != "user":
+            raise ValueError("Selection requires user role")
+        if self.tldw_history_admission_v1 is not None and self.role != "assistant":
+            raise ValueError("Admission requires assistant role")
+        if (self.tldw_history_selection_v1 is not None or self.tldw_history_admission_v1 is not None) and not self.id:
+            raise ValueError("Versioned messages require a stable id")
+        return self
     role: Literal["user", "assistant", "system"] = Field(..., description="Message sender role")
     content: Optional[str] = Field(
         None,
@@ -458,6 +488,7 @@ class MessageUpdate(BaseModel):
 
 class MessageResponse(BaseModel):
     """Schema for message responses."""
+    tldw_history_admission_v1: HistoryAdmissionV1 | None = None
     id: str = Field(..., description="UUID of the message")
     conversation_id: str = Field(..., description="ID of the parent conversation")
     parent_message_id: Optional[str] = Field(None, description="ID of parent message")
@@ -825,6 +856,14 @@ class CharacterChatStreamPersistRequest(BaseModel):
 
     Use after a streamed completion where the assistant content was not persisted.
     """
+    tldw_history_admission_v1: HistoryAdmissionReferenceV1 | None = None
+
+    @model_validator(mode="after")
+    def _require_history_assistant_id(self) -> "CharacterChatStreamPersistRequest":
+        if self.tldw_history_admission_v1 is not None and not self.assistant_message_id:
+            raise ValueError("Versioned persistence requires assistant_message_id")
+        return self
+
     assistant_content: str = Field(..., min_length=1, max_length=1_000_000, description="Assistant text to persist (max 1MB)")
     assistant_message_id: Optional[str] = Field(
         None,

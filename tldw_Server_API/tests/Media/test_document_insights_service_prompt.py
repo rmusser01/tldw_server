@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 PROMPT_ID = "media.document.insights"
@@ -142,7 +143,7 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleN
         """Provide a deterministic model while retaining real model selection."""
         return {"openai_api": {"model": "test-model"}}
 
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         for dep in getattr(getattr(route, "dependant", None), "dependencies", []):
             if getattr(dep.call, "_tldw_rate_limit_resource", None):
                 app.dependency_overrides[dep.call] = no_rate_limit

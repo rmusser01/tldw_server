@@ -2,6 +2,7 @@ import i18n from "i18next"
 import { formatErrorMessage } from "@/utils/format-error-message"
 import { parseBillingLimitError } from "@/utils/billing-error"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
+import { ChatStreamTimeoutError } from "@/services/tldw/chat-timeouts"
 
 export const TLDW_ERROR_BUBBLE_PREFIX = "__tldw_error__:"
 
@@ -93,6 +94,23 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
   // Ordinary chat wraps the direct transport error in Error.cause. Preserve
   // its model-selection guidance without changing unrelated error handling.
   const modelUnavailable = findModelUnavailableError(rawError)
+
+  if (rawError instanceof ChatStreamTimeoutError) {
+    const startup = rawError.phase === "startup"
+    return encodeChatErrorPayload({
+      summary: translateErrorText(
+        startup ? "common:error.chatStartupTimeoutSummary" : "common:error.chatIdleTimeoutSummary",
+        startup ? "The model did not start responding in time." : "The response stopped progressing."
+      ),
+      hint: translateErrorText(
+        startup ? "common:error.chatStartupTimeoutHint" : "common:error.chatIdleTimeoutHint",
+        startup
+          ? "Retry, or adjust Chat startup timeout in Settings → tldw server → Advanced timeouts."
+          : "Retry or continue from the partial response. To allow longer pauses, adjust Chat stream idle timeout in Settings."
+      ),
+      detail
+    })
+  }
 
   if (rawError instanceof ImageSupportUnconfirmedError) {
     return encodeChatErrorPayload({

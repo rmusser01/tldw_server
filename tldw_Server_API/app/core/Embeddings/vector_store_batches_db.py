@@ -146,6 +146,13 @@ def get_batch(batch_id: str, user_id: Optional[str]) -> Optional[dict[str, Any]]
         }
 
 
+def count_batches(user_id: Optional[str]) -> int:
+    _ensure_initialized(user_id)
+    with _connect(user_id) as conn:
+        row = conn.execute("SELECT COUNT(1) FROM vector_store_batches").fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+
 def list_batches(user_id: Optional[str], status: Optional[str] = None, limit: int = 50, offset: int = 0):
     _ensure_initialized(user_id)
     query = "SELECT id, store_id, user_id, status, upserted, error, meta_json, created_at, updated_at FROM vector_store_batches"

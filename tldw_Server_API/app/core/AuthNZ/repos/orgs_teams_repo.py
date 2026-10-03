@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -694,6 +695,19 @@ class AuthnzOrgsTeamsRepo:
     # -------------------------------------------------------------------------
     # Single-record getters
     # -------------------------------------------------------------------------
+
+    async def get_organization_metadata(self, org_id: int) -> dict[str, Any] | None:
+        """An organization's metadata as a dict; None if the org is missing or has none."""
+        row = await self.db_pool.fetchone("SELECT metadata FROM organizations WHERE id = ?", int(org_id))
+        if row is None:
+            return None
+        meta = row.get("metadata")
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except ValueError:
+                return None
+        return meta if isinstance(meta, dict) else None
 
     async def get_team(self, team_id: int) -> dict[str, Any] | None:
         """

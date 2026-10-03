@@ -166,15 +166,17 @@ plist before any manual cleanup. Do not add this opt-in to scheduled CI.
 
 Use this explicit, manual-only command to prepare and run the capability-mismatch,
 acknowledged-handshake readiness-timeout, guest protocol-version mismatch,
-advertised-workspace mismatch, and missing-agent startup drills.
+advertised-workspace mismatch, missing-agent startup, and initramfs boot-stall drills.
 It also runs a negative control for each drill. Production guest code, normal
 smoke behavior, and scheduled CI are unchanged.
 
 Prerequisites: Apple Silicon macOS, the project Python environment (including
 pytest-timeout), Go with this repository's agent dependencies already cached,
-an explicitly selected signed helper, and a known-good Debian arm64 bundle.
+native `cpio`, an explicitly selected signed helper, and a known-good Debian arm64 bundle.
 The bundle must use an ext4 `rootfs.img` and contain `e2fsck`, `debugfs`, `cmp`,
-`sha256sum`, `sed`, `mv`, and `/bin/sleep`. It must not be in use or modified by another process. Preparation
+`sha256sum`, `sed`, `mv`, `/bin/sleep`, and `unmkinitramfs`. The manifest must name
+a regular initrd with a simple filename, containing Debian's shell `/init` and
+its normal early-userspace utilities. It must not be in use or modified by another process. Preparation
 is offline: the command does not download Go dependencies or provision Debian.
 Use the existing build/sign instructions above for the helper.
 
@@ -190,8 +192,8 @@ python tools/macos-vz-helper/scripts/vz-failure-drill.py \
 ```
 
 The evidence directory must be new and its parent must already exist. The
-workflow builds four **test-only Go overlays** and stages one test-only shell
-launcher. A separate disposable healthy VM installs each artifact into an
+workflow builds four **test-only Go overlays** and stages a test-only shell
+launcher and initramfs wrapper. A separate disposable healthy VM prepares each artifact in an
 **offline image-store clone**, verifies the installed bytes, and checks the
 filesystem. The missing-agent installer also preserves and verifies the
 original agent under a second path. The launcher records a fresh nonce and VM
@@ -202,7 +204,7 @@ neither canonical nor prepared fault sources are booted. The command manages
 its own direct helper with a unique private socket and PID file. It never
 attaches to an existing helper, installs launchd services, or reboots the host.
 
-Exit zero requires five passing live tests, five negative controls failing at
+Exit zero requires six passing live tests, six negative controls failing at
 their specific execution assertions, no skipped tests, no cleanup errors, empty
 VM inventory, closed disposable disks, helper shutdown, and unchanged source
 boot-artifact/manifest/build-provenance hashes. This is not a full directory
@@ -218,6 +220,32 @@ separate clone of that same launcher, asks it to exec the preserved original
 agent, and requires completed real execution. Healthy recovery then runs two
 commands on one VM. This proves service startup and missing VSock connection;
 it does not prove kernel boot-hang recovery or mount isolation.
+
+The boot-stall fixture instead wraps initramfs `/init`, before mounting the rootfs
+or starting the guest agent. The preparer reads the original `/init` from the
+offline cloned initrd; the host preserves it in an appended aligned `newc`
+archive. Rootfs and kernel bytes are not modified by this preparation. Each run
+clone receives a fresh nonce and stall/continue setting. Its helper serial log
+must contain exactly one marker matching that nonce, VM ID, mode, and
+`stage=initramfs`. Missing, stale, unrelated, malformed or oversized proof fails
+acceptance; a transport timeout alone is insufficient.
+
+The positive test requires bounded `guest_transport_timeout`, no exec dispatch,
+empty reusable control state, then healthy execution and same-session reuse.
+The negative control boots the same wrapper in continue mode, executes the
+preserved original `/init`, and must complete a real command before the intended
+failure assertion. The workflow also checks VM inventory and disk handles,
+stops its helper, and verifies unchanged canonical and prepared fault-source
+hashes. Per-case initrd challenge changes are expected only in disposable run
+clones. This proves an early-userspace stall, **not** arbitrary kernel-hang or
+stalled Apple VZ start-callback recovery, host reboot recovery, or mount isolation.
+
+The rootfs installers recover any pending ext4 journal on their **offline
+disposable target** before raw `debugfs` writes. Only `e2fsck -p` status 0 (clean)
+or 1 (corrected) permits installation; other statuses fail before writes. A
+read-only filesystem check alone skips journal replay and can leave later boot
+recovery overwriting freshly installed agent data or permissions. The final
+read-only check and installed-byte verification remain mandatory.
 
 The protocol fixture changes only the guest's initial VSock handshake version
 to `999`, not the host-helper JSON protocol or guest capability metadata. A
@@ -240,10 +268,33 @@ path-escape resistance.
 Retained artifacts include `receipt.json` (including hashes of helperctl and
 the image-store materializer), per-case `result.json`, JUnit and
 guest receipts, build overlays/binaries/hashes, installation logs, helper/serial
-logs, and the image store. Treat these as private operator evidence; review them
-before sharing. **Evidence and disks are deliberately not deleted.** After review,
-remove only that run's evidence directory when its cleanup receipt confirms the
-helper and VMs are gone. A failure retains logs and returns nonzero; unavailable
+logs, and image-store manifests/provenance. Treat these as private operator evidence;
+review them before sharing. **Disposable rootfs/kernel/initrd payloads are removed
+by default**, including after failed or canceled drills. Removal happens only
+after canonical/completed prepared-source hash verification, confirmed VM/helper teardown,
+and a fresh closed-handle check. `receipt.json` records final payload hashes,
+removed filenames and any retention/cleanup failure. Bundle metadata, test
+binaries, wrappers, logs and receipts remain; canonical inputs and older evidence
+are never cleanup candidates. Partial copies are tracked before materialization.
+Setup copies that fail before becoming prepared sources have no completed-source
+baseline; their final payload hashes are retained before removal under the same
+ownership and teardown checks. Interrupted final source verification retains
+payloads, records the failure and still writes the final receipt.
+Receipt rewrites are atomic. Allocation-time filesystem identities and final
+payload size/change timestamps are rechecked before deletion. Directory handles
+anchor each atomic claim into a private staging directory; a claimed replacement
+is restored without overwriting newer names, or retained at the receipt's
+`retained_path` if restoration fails. Replacement trees are not adopted as owned
+bundles. Handled signals are deferred across claim/restore/unlink and
+its deletion record. An interruption during one bundle's cleanup records a failure and
+retains its remaining payloads while still attempting other safe allocations.
+
+Pass `--keep-bundles` only when disk inspection or reuse is deliberately needed;
+this retains all allocated boot payloads and records the override in the receipt.
+Unknown safety checks, changed source hashes, invalid paths or deletion failures
+retain affected payloads and make the run fail. Review the receipt before any
+manual deletion. No background cleanup scans or removes previous runs.
+A failure retains logs and returns nonzero; unavailable
 cleanup checks are not reported as empty. Ctrl-C/SIGTERM and command timeouts
 terminate the active build/test process group and reap its direct child before
 helper cleanup (three-second TERM grace, then KILL). Signals arriving during
@@ -252,7 +303,8 @@ child ownership is registered; later signals retain their normal behavior.
 An installation error stays primary if preparer cleanup also fails, with the
 cleanup diagnostic attached to the retained traceback.
 SIGKILL, a host crash, or power loss can bypass cleanup. In that case inspect the
-receipt's unique runtime/socket/PID paths before manual recovery. Never enable
+receipt's unique runtime/socket/PID paths and any `.payload-cleanup-*` staging
+directory in an owned bundle before manual recovery. Never enable
 these fault fixtures on a production guest or run this in scheduled CI.
 
 The standalone tests below remain useful when operating an already isolated

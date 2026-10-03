@@ -38,7 +38,10 @@ def test_realtime_policy_yaml_maps_route_key_and_compat_path() -> None:
     data = yaml.safe_load(_policy_path().read_text(encoding="utf-8"))
     route_map = data["route_map"]
 
-    assert route_map["by_route"]["audio-realtime"] == "audio.default"
+    # `by_route` was never consumed by PolicyResolver (only by_path/by_tag are) and has
+    # been dropped from the shipped YAML. The realtime routes are governed by path: the
+    # "audio-realtime" tag mapping was removed because these by_path entries always win.
+    assert "by_route" not in route_map
     assert route_map["by_path"]["/v1/realtime"] == "audio.default"
     assert route_map["by_path"]["/api/v1/audio*"] == "audio.default"
 
@@ -48,5 +51,5 @@ async def test_policy_loader_exposes_realtime_route_mapping() -> None:
     loader = PolicyLoader(str(_policy_path()), PolicyReloadConfig(enabled=False))
     snap = await loader.load_once()
 
-    assert snap.route_map["by_route"]["audio-realtime"] == "audio.default"
     assert snap.route_map["by_path"]["/v1/realtime"] == "audio.default"
+    assert snap.route_map["by_path"]["/api/v1/audio*"] == "audio.default"

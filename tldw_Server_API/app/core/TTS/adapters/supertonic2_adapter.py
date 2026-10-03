@@ -336,7 +336,6 @@ class Supertonic2OnnxAdapter(TTSAdapter):
 
         audio_bytes = await self.convert_audio_format(
             audio_array,
-            source_format=AudioFormat.PCM,
             target_format=request.format,
             sample_rate=self.sample_rate,
         )

@@ -42,6 +42,7 @@ from loguru import logger
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, TransactionError
+from tldw_Server_API.app.core.exceptions import exception_type_chain
 from tldw_Server_API.app.core.AuthNZ.postgres_profile_version_schema import (
     ensure_postgres_profile_version_on_connection,
 )
@@ -78,6 +79,39 @@ _USERS_DB_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     sqlite3.Error,
 )
+
+# The canonical SQLite users DDL. Module-level so the write-guard tests assert the exact
+# statement startup runs, not a copy that can drift from it.
+_SQLITE_USERS_BOOTSTRAP_SQL = """
+                            CREATE TABLE IF NOT EXISTS main.users (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                uuid TEXT UNIQUE NOT NULL DEFAULT (lower(hex(randomblob(16)))),
+                                username TEXT UNIQUE NOT NULL,
+                                email TEXT UNIQUE NOT NULL,
+                                password_hash TEXT NOT NULL,
+                                metadata TEXT,
+                                is_active INTEGER NOT NULL DEFAULT 1,
+                                is_superuser INTEGER NOT NULL DEFAULT 0,
+                                role TEXT NOT NULL DEFAULT 'user',
+                                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                last_login TIMESTAMP,
+                                email_verified INTEGER NOT NULL DEFAULT 0,
+                                is_verified INTEGER NOT NULL DEFAULT 0,
+                                two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+                                failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+                                locked_until TIMESTAMP,
+                                storage_quota_mb INTEGER NOT NULL DEFAULT 5120,
+                                storage_used_mb INTEGER NOT NULL DEFAULT 0,
+                                email_verified_at TIMESTAMP,
+                                two_factor_secret TEXT,
+                                totp_secret TEXT,
+                                backup_codes TEXT,
+                                created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                                password_changed_at TIMESTAMP,
+                                profile_version TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now'))
+                            )
+                        """
 
 #######################################################################################################################
 #
@@ -149,11 +183,20 @@ class UsersDB:
         return self._normalize_user_row(row, is_postgres=is_postgres)
 
     def _log_storage_failure(self, operation: str, error: BaseException) -> None:
+        backend = "postgres" if self._using_postgres_backend() else "sqlite"
+        # The type chain goes in the message text: the bound extras are not printed by
+        # the CI log format, and the callers re-raise `from None`, so this line is the
+        # only place the real cause survives (TASK-13387).
         logger.bind(
             operation=operation,
-            backend="postgres" if self._using_postgres_backend() else "sqlite",
+            backend=backend,
             exception_type=type(error).__name__,
-        ).error("UsersDB storage operation failed")
+        ).error(
+            "UsersDB storage operation failed: operation={} backend={} cause={}",
+            operation,
+            backend,
+            exception_type_chain(error),
+        )
 
     async def initialize(self, *, ensure_schema: bool = True) -> None:
         """Initialize database access and optionally ensure users tables exist."""
@@ -262,36 +305,7 @@ class UsersDB:
 
                     else:
                         # SQLite
-                        await _execute_profile_users_bootstrap(conn, """
-                            CREATE TABLE IF NOT EXISTS main.users (
-                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                uuid TEXT UNIQUE NOT NULL DEFAULT (lower(hex(randomblob(16)))),
-                                username TEXT UNIQUE NOT NULL,
-                                email TEXT UNIQUE NOT NULL,
-                                password_hash TEXT NOT NULL,
-                                metadata TEXT,
-                                is_active INTEGER NOT NULL DEFAULT 1,
-                                is_superuser INTEGER NOT NULL DEFAULT 0,
-                                role TEXT NOT NULL DEFAULT 'user',
-                                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                                last_login TIMESTAMP,
-                                email_verified INTEGER NOT NULL DEFAULT 0,
-                                is_verified INTEGER NOT NULL DEFAULT 0,
-                                two_factor_enabled INTEGER NOT NULL DEFAULT 0,
-                                failed_login_attempts INTEGER NOT NULL DEFAULT 0,
-                                locked_until TIMESTAMP,
-                                storage_quota_mb INTEGER NOT NULL DEFAULT 5120,
-                                storage_used_mb INTEGER NOT NULL DEFAULT 0,
-                                email_verified_at TIMESTAMP,
-                                two_factor_secret TEXT,
-                                totp_secret TEXT,
-                                backup_codes TEXT,
-                                created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                                password_changed_at TIMESTAMP,
-                                profile_version TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now'))
-                            )
-                        """, backend="sqlite")
+                        await _execute_profile_users_bootstrap(conn, _SQLITE_USERS_BOOTSTRAP_SQL, backend="sqlite")
 
                         # Create indexes
                         await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")

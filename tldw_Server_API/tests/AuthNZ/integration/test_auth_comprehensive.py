@@ -664,46 +664,72 @@ class TestAdminEndpoints:
 # Health Check Tests
 
 class TestHealthEndpoints:
-    """Test health monitoring endpoints"""
+    """Test health monitoring endpoints.
 
-    def test_health_check(self, isolated_test_environment):
+    b1925901c2 ("security: harden operational health surfaces") put the
+    /api/v1/health* diagnostics behind RequirePermission(SYSTEM_LOGS); the
+    public detail-free liveness probe is the root ``/health``.
+    """
 
+    @pytest.mark.parametrize(
+        "path",
+        ["/api/v1/health", "/api/v1/health/live", "/api/v1/health/ready", "/api/v1/health/metrics"],
+    )
+    def test_health_diagnostics_require_authentication(self, isolated_test_environment, path):
+        """Anonymous callers must not reach operational diagnostics."""
+        client, db_name = isolated_test_environment
+        response = client.get(path)
+        assert response.status_code == 401
+
+    def test_health_diagnostics_reject_user_without_system_logs(
+        self, isolated_test_environment, auth_headers
+    ):
+        """A regular user lacks system.logs and is forbidden."""
+        client, db_name = isolated_test_environment
+        response = client.get("/api/v1/health/metrics", headers=auth_headers)
+        assert response.status_code == 403
+
+    def test_health_check(self, isolated_test_environment, admin_headers):
         """Test main health check"""
         client, db_name = isolated_test_environment
-        response = client.get("/api/v1/health")
+        response = client.get("/api/v1/health", headers=admin_headers)
         assert response.status_code in [200, 206, 503]
         data = response.json()
         assert "status" in data
         assert "checks" in data
         assert "timestamp" in data
 
-    def test_liveness_probe(self, isolated_test_environment):
-
+    def test_liveness_probe(self, isolated_test_environment, admin_headers):
         """Test liveness probe"""
         client, db_name = isolated_test_environment
-        response = client.get("/api/v1/health/live")
+        response = client.get("/api/v1/health/live", headers=admin_headers)
         assert response.status_code == 200
         assert response.json()["status"] == "alive"
 
-    def test_readiness_probe(self, isolated_test_environment):
-
+    def test_readiness_probe(self, isolated_test_environment, admin_headers):
         """Test readiness probe"""
         client, db_name = isolated_test_environment
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/api/v1/health/ready", headers=admin_headers)
         assert response.status_code in [200, 503]
         data = response.json()
         assert "status" in data
 
-    def test_metrics_endpoint(self, isolated_test_environment):
-
+    def test_metrics_endpoint(self, isolated_test_environment, admin_headers):
         """Test metrics endpoint"""
         client, db_name = isolated_test_environment
-        response = client.get("/api/v1/health/metrics")
+        response = client.get("/api/v1/health/metrics", headers=admin_headers)
         assert response.status_code == 200
         data = response.json()
         assert "cpu" in data
         assert "memory" in data
         assert "disk" in data
+
+    def test_public_root_liveness_needs_no_auth(self, isolated_test_environment):
+        """The unauthenticated liveness surface stays at /health."""
+        client, db_name = isolated_test_environment
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
 
 
 #######################################################################################################################

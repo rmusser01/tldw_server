@@ -61,7 +61,7 @@ export const Header: React.FC<Props> = ({
   )
   const hostedMode = isHostedTldwDeployment()
   const { mode: themeMode, toggleDarkMode } = useDarkMode()
-  const { clearChat, historyId, temporaryChat, setTemporaryChat, serverChatId } =
+  const { clearChat, historyId, temporaryChat, setTemporaryChat, serverChatId, effectiveAssistantState } =
     useMessageOption()
   const [selectedCharacter, setSelectedCharacter] = useSelectedCharacter<Character | null>(
     null
@@ -384,7 +384,11 @@ export const Header: React.FC<Props> = ({
             ? startCharacterChat
             : undefined
         }
-        activeCharacterName={selectedCharacter?.name || null}
+        activeCharacterName={
+          effectiveAssistantState?.kind === "character"
+            ? effectiveAssistantState.displayName
+            : null
+        }
         showChatTitle={headerActionPolicy.showChatTitle}
         showSessionModeBadge={headerActionPolicy.showSessionModeBadge}
         shortcutsExpanded={headerShortcutsExpanded}

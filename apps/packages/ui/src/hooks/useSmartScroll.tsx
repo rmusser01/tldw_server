@@ -11,8 +11,20 @@ export const useSmartScroll = (
   options: SmartScrollOptions = {},
 ) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
+  const [isAutoScrollEnabled, setAutoScrollEnabledState] = useState(true);
+  const autoScrollPermission = useRef(true);
+  const setIsAutoScrollEnabled = useCallback((enabled: boolean) => {
+    autoScrollPermission.current = enabled;
+    setAutoScrollEnabledState(enabled);
+  }, []);
   const scrollTimeout = useRef<NodeJS.Timeout | null>(null);
+  const pauseAutoScroll = useCallback(() => {
+    setIsAutoScrollEnabled(false);
+    if (scrollTimeout.current) {
+      clearTimeout(scrollTimeout.current);
+      scrollTimeout.current = null;
+    }
+  }, [setIsAutoScrollEnabled]);
   const lastScrollTop = useRef(0);
   const lastScrollHeight = useRef(0);
   const isScrollingProgrammatically = useRef(false);
@@ -90,12 +102,12 @@ export const useSmartScroll = (
         clearTimeout(scrollTimeout.current);
       }
     };
-  }, [isAtBottom]);
+  }, [isAtBottom, setIsAutoScrollEnabled]);
 
   useEffect(() => {
     if (streaming && isAutoScrollEnabled) {
       requestAnimationFrame(() => {
-        scrollToBottom(false);
+        if (autoScrollPermission.current) scrollToBottom(false);
       });
     }
   }, [streaming, isAutoScrollEnabled, scrollToBottom]);
@@ -108,10 +120,10 @@ export const useSmartScroll = (
 
     if (isAutoScrollEnabled && !isAtBottom()) {
       requestAnimationFrame(() => {
-        scrollToBottom(!streaming);
+        if (autoScrollPermission.current) scrollToBottom(!streaming);
       });
     }
-  }, [messages, isAutoScrollEnabled, scrollToBottom, streaming, isAtBottom]);
+  }, [messages, isAutoScrollEnabled, scrollToBottom, streaming, isAtBottom, setIsAutoScrollEnabled]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -133,7 +145,7 @@ export const useSmartScroll = (
   const autoScrollToBottom = useCallback(() => {
     setIsAutoScrollEnabled(true);
     scrollToBottom(true);
-  }, [scrollToBottom]);
+  }, [scrollToBottom, setIsAutoScrollEnabled]);
 
   const isAutoScrollToBottom = useMemo(
     () => isAutoScrollEnabled && isAtBottom(),
@@ -145,5 +157,6 @@ export const useSmartScroll = (
     containerRef,
     isAutoScrollToBottom,
     autoScrollToBottom,
+    pauseAutoScroll,
   };
 };

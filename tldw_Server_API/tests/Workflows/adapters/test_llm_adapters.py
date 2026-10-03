@@ -303,6 +303,29 @@ async def test_llm_adapter_streaming(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("done_line", [b"data: [done]", b"data:[DONE]"])
+async def test_llm_adapter_streaming_stops_at_any_done_spelling(monkeypatch, done_line):
+    """Anything after the provider DONE (any spelling) is not part of the text."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    async def make_stream():
+        yield b'data: {"choices": [{"delta": {"content": "Hello"}}]}'
+        yield done_line
+        yield b'data: {"choices": [{"delta": {"content": " trailing"}}]}'
+
+    async def fake_stream_caller(**kwargs):
+        return make_stream()
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_stream_caller)
+
+    config = {"provider": "openai", "model": "gpt-4", "prompt": "Test", "stream": True}
+    result = await run_llm_adapter(config, {"user_id": "1"})
+    assert result["text"] == "Hello"
+
+
+@pytest.mark.asyncio
 async def test_llm_adapter_streaming_sanitizes_event_dispatch_errors(monkeypatch):
     """Test streaming event dispatch logs hide raw exception details."""
     monkeypatch.delenv("TEST_MODE", raising=False)

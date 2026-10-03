@@ -31,7 +31,7 @@ from fastapi.encoders import jsonable_encoder
 from loguru import logger
 from starlette.responses import StreamingResponse
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.core.Character_Chat.constants import DEFAULT_CHARACTER_NAME
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
@@ -184,6 +184,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import resolv
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line, sse_data, sse_done
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationCapabilityError,
@@ -200,6 +201,7 @@ from tldw_Server_API.app.core.Moderation.review_service import (
     is_moderation_review_capture_enabled,
 )
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
+from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
 )
@@ -836,6 +838,9 @@ async def resolve_input_moderation_chat_type(
     loop: Any,
 ) -> str:
     """Resolve chat_type for input moderation from request fields and saved conversation state."""
+    if getattr(request_data, "tldw_history_selection_v1", None) is not None:
+        conversation = await loop.run_in_executor(None, chat_db.get_conversation_by_id, request_data.conversation_id)
+        return "character" if conversation and (conversation.get("character_id") or conversation.get("assistant_kind")) else "regular"
     default_character_id = await _resolve_default_character_id(chat_db, loop)
     requested_character_id = getattr(request_data, "character_id", None)
     # Also check legacy persona_id alias so moderation scope is consistent
@@ -893,45 +898,34 @@ async def _resolve_assistant_context_for_chat(
     loop: Any,
     conversation_id: str | None,
 ) -> tuple[dict[str, Any] | None, int | None, dict[str, Any] | None, dict[str, Any]]:
-    """Resolve character or persona context for ordinary chat."""
+    """Recheck current Persona admission before resolving ordinary chat context."""
     existing_conversation: dict[str, Any] | None = None
     get_conversation_by_id = getattr(chat_db, "get_conversation_by_id", None)
     if conversation_id and callable(get_conversation_by_id):
         existing_conversation = await asyncio.to_thread(get_conversation_by_id, conversation_id)
+
+    if existing_conversation:
+        persona_profile = await asyncio.to_thread(
+            require_current_persona, chat_db,
+            owner_id=chat_db.owner_user_id, conversation=existing_conversation,
+        )
+        if persona_profile is not None:
+            assistant_context = _normalize_conversation_assistant_context(existing_conversation)
+            return (
+                _build_persona_chat_projection(
+                    persona_profile, fallback_persona_id=assistant_context["assistant_id"],
+                ),
+                None,
+                existing_conversation,
+                assistant_context,
+            )
 
     default_character_id = await _resolve_default_character_id(chat_db, loop)
     assistant_context = _normalize_conversation_assistant_context(
         existing_conversation,
         default_character_id=default_character_id,
     )
-    assistant_kind = assistant_context.get("assistant_kind")
     assistant_id = assistant_context.get("assistant_id")
-
-    if assistant_kind == "persona":
-        if not assistant_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Persona-backed conversation is missing assistant_id.",
-            )
-
-        persona_owner = str(getattr(chat_db, "client_id", "") or "").strip()
-        persona_profile = await asyncio.to_thread(partial(
-                chat_db.get_persona_profile,
-                assistant_id,
-                user_id=persona_owner,
-            ),
-        )
-        if persona_profile is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Persona profile not found for persona-backed conversation.",
-            )
-        return (
-            _build_persona_chat_projection(persona_profile, fallback_persona_id=assistant_id),
-            None,
-            existing_conversation,
-            assistant_context,
-        )
 
     character_lookup = getattr(request_data, "character_id", None)
     if character_lookup is None and existing_conversation:
@@ -2775,6 +2769,8 @@ def build_call_params_from_request(
             "prompt_template_name",
             "stream",
             "save_to_db",
+            "tldw_history_selection_v1",
+            "tldw_history_admission_v1",
             "history_message_limit",
             "history_message_order",
             "research_context",
@@ -2883,6 +2879,10 @@ def build_call_params_from_request(
         grammar_record=grammar_record,
         runtime_caps=resolve_llamacpp_runtime_caps(app_config=app_config),
     )["extra_body"]
+    for extension in ("extra_body", "extra_headers"):
+        if isinstance(call_params.get(extension), dict):
+            call_params[extension] = {key: value for key, value in call_params[extension].items()
+                if key.lower().replace("-", "_") not in {"tldw_history_selection_v1", "tldw_history_admission_v1"}}
     billing_prompt_cache_intent = getattr(request_data, "billing_prompt_cache_intent", None)
     if billing_prompt_cache_intent is not None:
         call_params["billing_prompt_cache_intent"] = billing_prompt_cache_intent
@@ -3085,7 +3085,7 @@ def _inspect_nonstream_text_output(value: str) -> tuple[bool, bool]:
     stripped = value.lstrip("\ufeff\u200b\u200c\u200d\u2060").strip()
     if not stripped:
         return False, False
-    if stripped.lower() in {"[done]", "data: [done]"}:
+    if stripped.lower() == "[done]" or is_done_line(stripped):
         return False, True
     first_line = stripped.splitlines()[0].strip().lower()
     if first_line.startswith(("data:", "event:", "id:", "retry:", ":")):
@@ -3257,13 +3257,45 @@ def _nonstream_provider_result_is_usable(result: Any) -> bool:
     return True
 
 
+def _nonstream_reasoning_exhausted_output_limit(result: Any) -> bool:
+    """Recognize valid hidden-only output stopped by the provider token limit."""
+    if not isinstance(result, dict) or provider_payload_has_structural_error(result):
+        return False
+    choices = result.get("choices")
+    if not isinstance(choices, list) or len(choices) != 1:
+        return False
+    choice = choices[0]
+    if not isinstance(choice, dict) or choice.get("finish_reason") != "length":
+        return False
+    message = choice.get("message")
+    if not isinstance(message, dict) or message.get("content") not in (None, ""):
+        return False
+    if any(
+        message.get(field) is not None
+        for field in ("tool_calls", "function_call", "refusal")
+    ):
+        return False
+    reasoning_seen = False
+    for field in _NONSTREAM_REASONING_FIELDS:
+        if field not in message:
+            continue
+        has_text, rejected = _inspect_nonstream_reasoning_output(message[field])
+        if rejected:
+            return False
+        reasoning_seen = reasoning_seen or has_text
+    return reasoning_seen
+
+
 def _require_usable_nonstream_provider_result(result: Any) -> None:
     """Raise one bounded, non-replayable error for an invalid provider result."""
 
     if not _nonstream_provider_result_is_usable(result):
-        raise_detached_error(
-            sanitized_provider_stream_exception("provider_unavailable")
+        code = (
+            "provider_output_limit"
+            if _nonstream_reasoning_exhausted_output_limit(result)
+            else "provider_unavailable"
         )
+        raise_detached_error(sanitized_provider_stream_exception(code))
 
 
 def _apply_redaction_to_content(content: Any, moderation: Any, policy: Any) -> Any:
@@ -4095,18 +4127,63 @@ async def build_context_and_messages(
             raise HTTPException(status_code=409, detail="Regeneration requires an existing saved answered turn.")
     reuse_saved_turn = explicit_failed_retry or regenerate_reply_id is not None
 
-    # Assistant context
-    (
-        character_card,
-        character_db_id,
-        existing_conversation,
-        assistant_context,
-    ) = await _resolve_assistant_context_for_chat(
-        chat_db=chat_db,
-        request_data=request_data,
-        loop=loop,
-        conversation_id=final_conversation_id,
-    )
+    history_selection = getattr(request_data, "tldw_history_selection_v1", None)
+    if history_selection is not None and reuse_saved_turn:
+        raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_legacy_retry"})
+    versioned = history_selection is not None
+    history_runtime = runtime_state or {}
+    if versioned and (not final_conversation_id or not history_runtime.get("history_owner_key")):
+        raise HTTPException(409, detail={"code": "missing_authenticated_history_binding"})
+    selected_content = ()
+    history_snapshot = None
+    admission = None
+    if versioned:
+        from tldw_Server_API.app.core.Chat.history_context import project_history_context
+        from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError, HistorySelectionSnapshotV1
+        if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
+            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_context_prompt_template"})
+        selection = history_selection.model_dump(mode="json")
+        owner = history_runtime["history_owner_key"]
+        def accept_history() -> tuple[
+            HistorySelectionSnapshotV1,
+            tuple[dict[str, Any], ...],
+            dict[str, Any],
+            dict[str, Any],
+            tuple[dict[str, Any] | None, int | None, dict[str, Any]],
+        ]:
+            with chat_db.transaction() as conn:
+                state = chat_db.get_roleplay_resume_state(final_conversation_id, conn=conn, lock_for_update=True,
+                    owner_client_id=history_runtime["history_owner_client_id"])
+                snap, content = chat_db.validate_history_selection(final_conversation_id, selection,
+                    owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
+                context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
+                for item in content:
+                    _saved_image_details(item.get("extra_metadata"), len(item["images"]))
+                accepted = chat_db.append_selected_history_inputs(final_conversation_id, selection, history_runtime["history_inputs"],
+                    owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
+                return snap, content, accepted, state["conversation"], context
+        try:
+            history_snapshot, selected_content, admission, existing_conversation, context = await asyncio.to_thread(accept_history)
+        except HistorySelectionError as exc:
+            failure = "unsupported_history_capability" if exc.code.startswith("unsupported_history_context") else "stale_selection"
+            raise HTTPException(409, detail={"status": failure, "code": exc.code}) from exc
+        character_card, character_db_id, assistant_context = context
+        for field, value in assistant_context.pop("history_sampling", {}).items():
+            if field not in request_data.model_fields_set:
+                setattr(request_data, field, value)
+    else:
+        # Assistant context
+        (
+            character_card,
+            character_db_id,
+            existing_conversation,
+            assistant_context,
+        ) = await _resolve_assistant_context_for_chat(
+            chat_db=chat_db,
+            request_data=request_data,
+            loop=loop,
+            conversation_id=final_conversation_id,
+        )
     if character_card:
         logger.debug(
             "Loaded assistant context name={} system_prompt_summary={}",
@@ -4166,7 +4243,7 @@ async def build_context_and_messages(
     )
     # Ensure a valid assistant identity is present before attempting persistence
     if should_persist and character_db_id is None and not (
-        is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation
+        is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned
     ):
         logger.warning(
             'Persistence requested but no compatible assistant identity is available; disabling persistence for conversation {}.',
@@ -4177,12 +4254,12 @@ async def build_context_and_messages(
     if regenerate_reply_id:
         if (not should_persist or not existing_conversation
                 or existing_conversation.get("client_id") != client_id_from_db
-                or not (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation
+                or not (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned
                         or existing_conversation.get("character_id") == character_db_id)):
             raise HTTPException(status_code=409, detail="Regeneration requires the existing saved assistant and conversation.")
         # This operation can only reuse its existing target; it must never fork.
     elif should_persist:
-        if (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation) and conv_id:
+        if (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned) and conv_id:
             conversation_created = False
         else:
             conv_id, conversation_created = await get_or_create_conversation(
@@ -4208,7 +4285,7 @@ async def build_context_and_messages(
     continuation_metadata: dict[str, Any] | None = None
     assistant_parent_message_id: str | None = None
     assistant_prefill: str | None = None
-    if continuation_spec:
+    if continuation_spec and not versioned:
         assistant_parent_message_id, _mode, assistant_prefill = continuation_spec
         if conversation_created:
             raise HTTPException(
@@ -4240,7 +4317,7 @@ async def build_context_and_messages(
     historical_ids: list[str | None] = []
     retry_history_content: dict[int, Any] = {}
     raw_hist: list[dict[str, Any]] = []
-    if conv_id and (not conversation_created):
+    if conv_id and (not conversation_created) and not versioned:
         if continuation_spec:
             from_message_id, mode, assistant_prefill = continuation_spec
             resolved_hist, continuation_metadata = await _resolve_tldw_continuation_history(
@@ -4399,6 +4476,7 @@ async def build_context_and_messages(
         client_message_id = None
     explicit_failed_retry = isinstance(metadata, dict) and metadata.get("tldw_retry_failed_turn") is True
     retry_user_message_id: str | None = None
+    saved_retry_system_messages: list[dict[str, Any]] = []
     legacy_regenerated_reply: dict[str, Any] | None = None
     if regenerate_reply_id:
         if not request_messages:
@@ -4425,6 +4503,13 @@ async def build_context_and_messages(
         # Read the actual tail independently of the requested context window.
         # Retry is an explicit operation; equal text on an ordinary send is new.
         tail_rows = await asyncio.to_thread(partial(chat_db.get_messages_for_conversation, conv_id, 2, 0, "DESC", strict_images=True))
+        if (any(message.get("role") == "system" for message in request_messages)
+                or any(str(row.get("sender", "")).lower() == "system" for row in tail_rows)):
+            tail_ids, saved_retry_system_messages = await asyncio.to_thread(chat_db.get_retry_message_context, conv_id)
+            tail_rows = [await asyncio.to_thread(partial(chat_db.get_message_by_id, message_id, strict_images=True))
+                         for message_id in tail_ids]
+            if any(row is None for row in tail_rows):
+                raise HTTPException(status_code=409, detail="The failed turn changed. Reload before retrying.")
         tail_metadata = {row["id"]: await asyncio.to_thread(chat_db.get_message_metadata, row["id"]) for row in tail_rows}
         requested_user = request_messages[-1]
         if requested_user.get("role") != "user":
@@ -4456,9 +4541,17 @@ async def build_context_and_messages(
                     if not (client_message_id and saved_identity_is_valid and saved_client_id != client_message_id):
                         raise HTTPException(status_code=409, detail="This turn already has an answer. Reload the conversation before retrying.")
 
+    retry_system_messages: list[dict[str, Any]] = []
+    if explicit_failed_retry and retry_user_message_id:
+        # Instructions are the requested current block, even when the client
+        # also supplies overlapping history. A matched user suffix must not
+        # trim a deliberately changed system prefix from persistence.
+        retry_system_messages = [message for message in request_messages if message.get("role") == "system"]
+        request_messages = [message for message in request_messages if message.get("role") != "system"]
+
     # If the client included history with conversation_id, trim overlaps against DB history
     overlap_cut = 0
-    if conv_id and historical_msgs and request_messages:
+    if conv_id and historical_msgs and request_messages and not versioned:
         has_non_user_role = any(
             msg.get("role") in {"assistant", "tool"} for msg in request_messages
         )
@@ -4492,6 +4585,10 @@ async def build_context_and_messages(
             )
             hist_sigs = [_msg_sig(m) for m in hist_for_overlap]
             req_sigs = [_msg_sig(m) for m in request_messages]
+            # An ordinary final user is a new turn, even when its text equals
+            # an interrupted saved user. Only explicit Retry may reuse it.
+            if request_messages[-1].get("role") == "user" and not retry_user_message_id:
+                req_sigs = req_sigs[:-1]
             max_k = min(len(hist_sigs), len(req_sigs))
             overlap_start = None
             overlap_k = 0
@@ -4504,6 +4601,18 @@ async def build_context_and_messages(
                         break
                 if overlap_k:
                     break
+            if not overlap_k:
+                # A restored client can lag behind an interrupted canonical
+                # turn. Trim only its exact historical PREFIX, including an
+                # assistant, proven within the loaded history window. Later
+                # canonical rows remain model context; do not replay them.
+                for k in range(max_k, 0, -1):
+                    if not any(message.get("role") == "assistant" for message in request_messages[:k]):
+                        continue
+                    if any(hist_sigs[i:i + k] == req_sigs[:k] for i in range(len(hist_sigs) - k + 1)):
+                        overlap_start = 0
+                        overlap_k = k
+                        break
             if overlap_k and overlap_start is not None:
                 overlap_cut = overlap_start + overlap_k
                 if overlap_cut > 0:
@@ -4538,6 +4647,38 @@ async def build_context_and_messages(
                             conv_id,
                         )
 
+    if versioned:
+        source_nodes = {row["id"]: row for row in history_snapshot.nodes}
+        for item in selected_content:
+            extra = item.get("extra_metadata") or {}
+            source_role = map_sender_to_role(source_nodes[item["id"]]["role"], character_card.get("name"))
+            role = extra.get("sender_role") or source_role
+            text = _saved_image_text({
+                "content": item["message"], "images": item["images"],
+                "sender": source_nodes[item["id"]]["role"], "version": item["_message_version"],
+            }, extra)
+            image_details = _saved_image_details(extra, len(item["images"]))
+            if text and role != "tool":
+                text = replace_placeholders(text, character_card.get("name", "Char"), "User")
+            entry = {"role": role, "content": text}
+            if item["images"]:
+                entry["content"] = ([{"type": "text", "text": text}] if text else []) + [
+                    {"type": "image_url", "image_url": {"url": image, "detail": detail}}
+                    for image, detail in zip(item["images"], image_details)]
+            if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
+                entry["content"] = None
+            if item.get("tool_calls") is not None:
+                entry["tool_calls"] = item["tool_calls"]
+            for key in ("function_call", "tool_call_id"):
+                if extra.get(key) is not None:
+                    entry[key] = extra[key]
+            if extra.get("sender_name") or extra.get("tool_name"):
+                entry["name"] = extra.get("sender_name") or extra.get("tool_name")
+            historical_msgs.append(entry)
+        assistant_parent_message_id = admission["input_message_id"]
+        runtime_state["assistant_parent_message_id"] = assistant_parent_message_id
+        runtime_state["tldw_history_admission_v1"] = admission
+
     if retry_user_message_id and any(message.get("role") == "user" for message in request_messages[overlap_cut:-1]):
         raise HTTPException(status_code=409, detail="This retry contains extra unsaved user messages. Resolve the local conversation before retrying.")
     if retry_user_message_id and client_message_id:
@@ -4558,16 +4699,48 @@ async def build_context_and_messages(
         except ConflictError as exc:
             raise HTTPException(status_code=409, detail="The saved reply changed. Reload before regenerating.") from exc
 
-    persisted_user_message_id: str | None = retry_user_message_id
-    current_turn: list[dict[str, Any]] = []
+    persisted_user_message_id: str | None = admission["input_message_id"] if versioned else retry_user_message_id
+    system_block_id = str(_uuid.uuid4())
+    if (should_persist and retry_system_messages
+            and _extract_system_messages(retry_system_messages) != _extract_system_messages(saved_retry_system_messages)):
+        import sqlite3
+
+        from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
+        from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+        publication = current_buddy_publication.get()
+
+        def persist_retry_instructions() -> None:
+            """Keep publication receipts and the complete block in one transaction."""
+            with chat_db.transaction() as conn:
+                if publication is not None:
+                    publication.repository.assert_publication(conn, publication.turn, conv_id)
+                message_ids = chat_db.add_retry_system_instruction_block(
+                    conv_id, retry_system_messages, system_block_id,
+                )
+                if publication is not None:
+                    for message_id in message_ids:
+                        publication.repository.record_message(conn, publication.turn["id"], "system", message_id)
+
+        try:
+            await asyncio.to_thread(persist_retry_instructions)
+        except (CharactersRAGDBError, sqlite3.Error, BackendDatabaseError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Unable to save updated retry instructions. Try again.",
+            ) from exc
+    current_turn: list[dict[str, Any]] = list(retry_system_messages)
     for index, msg_dict in enumerate(request_messages[overlap_cut:], start=overlap_cut):
         role = msg_dict.get("role")
         msg_for_db = msg_dict.copy()
+        if role == "system":
+            msg_for_db["system_instruction_block_id"] = system_block_id
         if role == "assistant" and character_card:
             # Persist assistant sender as sanitized character name
             msg_for_db["name"] = sanitize_sender_name(character_card.get("name", "Assistant"))
         reused_retry = retry_user_message_id is not None and index == len(request_messages) - 1
-        if should_persist and not reused_retry:
+        if should_persist and not reused_retry and not versioned:
             if role == "user" and index == len(request_messages) - 1 and client_message_id:
                 msg_for_db["client_message_id"] = client_message_id
             saved_message_id = await save_message_fn(chat_db, conv_id, msg_for_db, use_transaction=True)
@@ -4587,7 +4760,7 @@ async def build_context_and_messages(
         retry_index = historical_ids.index(retry_user_message_id)
         current_turn.append(historical_msgs.pop(retry_index))
 
-    if continuation_spec and assistant_prefill:
+    if continuation_spec and assistant_prefill and not versioned:
         prefill_payload: dict[str, Any] = {
             "role": "assistant",
             "content": assistant_prefill,
@@ -4688,7 +4861,8 @@ def apply_prompt_templating(
 
     Returns (final_system_message, templated_llm_payload)
     """
-    active_template = load_template(getattr(request_data, "prompt_template_name", None) or DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name)
+    active_template = (DEFAULT_RAW_PASSTHROUGH_TEMPLATE if getattr(request_data, "tldw_history_selection_v1", None) is not None
+        else load_template(getattr(request_data, "prompt_template_name", None) or DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name))
     template_data: dict[str, Any] = {}
     if character_card:
         template_data.update({k: v for k, v in character_card.items() if isinstance(v, (str, int, float))})
@@ -4926,6 +5100,7 @@ async def execute_streaming_call(
     continuation_metadata: dict[str, Any] | None = None,
     queue_request_id: str | None = None,
     provider_factory_timeout: float | None = None,
+    history_persistence_ack: bool = False,
 ) -> StreamingResponse:
     """Execute a streaming LLM call with queue, failover, moderation, and persistence.
 
@@ -4992,8 +5167,8 @@ async def execute_streaming_call(
         return payload
 
     async def _terminal_stream_error(payload: dict[str, Any]) -> AsyncIterator[str]:
-        yield f"data: {_json.dumps(payload)}\n\n"
-        yield "data: [DONE]\n\n"
+        yield sse_data(payload)
+        yield sse_done()
 
     try:
         try:
@@ -5250,16 +5425,16 @@ async def execute_streaming_call(
                                     stream_channel.get_nowait()
                             except asyncio.QueueEmpty:
                                 pass
-                            yield f"data: {_json.dumps(_public_stream_error_payload('provider_unavailable'))}\n\n"
+                            yield sse_data(_public_stream_error_payload('provider_unavailable'))
                             break
                         if item is None:
                             graceful_end = True
                             break
                         if isinstance(item, QueueStreamTerminalError):
                             yield (
-                                f"data: {_json.dumps(_public_stream_error_payload(item.code))}\n\n"
+                                sse_data(_public_stream_error_payload(item.code))
                             )
-                            yield "data: [DONE]\n\n"
+                            yield sse_done()
                             break
                         yield item
                 except asyncio.CancelledError:
@@ -6008,7 +6183,7 @@ async def execute_streaming_call(
                     metadata_payload["tldw_system_message_id"] = system_message_id
                 if normalized_continuation_metadata:
                     metadata_payload["tldw_continuation"] = normalized_continuation_metadata
-                yield f"data: {_json.dumps(metadata_payload)}\n\n"
+                yield sse_data(metadata_payload)
             try:
                 stream_buffer_limit = int(os.getenv("MODERATION_STREAM_BUFFER_CHARS", "1024"))
             except _CHAT_NONCRITICAL_EXCEPTIONS:
@@ -6255,6 +6430,7 @@ async def execute_streaming_call(
                     system_message_id=system_message_id,
                     user_message_id=user_message_id,
                     continuation_metadata=normalized_continuation_metadata,
+                    history_persistence_ack=history_persistence_ack or None,
                 ),
                 stream_factory=create_streaming_response_with_timeout,
             )
@@ -6294,7 +6470,7 @@ async def execute_streaming_call(
                 async for ln in streaming_generator:
                     if not ln:
                         continue
-                    if ln.strip().lower() == "data: [done]":
+                    if is_done_line(ln):
                         # Suppress provider DONE; emit unified DONE immediately and stop producing
                         if not done_seen:
                             await sse_stream.done()
@@ -7232,7 +7408,7 @@ async def _execute_non_stream_call_impl(
                                 pending_tool_messages = []
                             continuation_payload = _build_assistant_message_payload(
                                 character_card_for_context=character_card_for_context,
-                                assistant_parent_message_id=None,
+                                assistant_parent_message_id=assistant_parent_message_id,
                                 content=content_to_save,
                                 tool_calls=tool_calls_to_save,
                                 function_call=function_call_to_save,

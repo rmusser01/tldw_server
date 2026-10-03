@@ -74,6 +74,15 @@ def test_scan_finds_the_tables_and_policies_that_exist(report):
     assert "prompt_studio_projects" in report.policy_tables
 
 
+def test_workspace_startup_receipts_are_covered_without_baseline_exemption(report):
+    """Permanent retry tombstones must participate in the standard tenant ratchet."""
+    table = "workspace_chat_startup_receipts"
+    assert table in report.owned_tables
+    assert table in report.policy_tables
+    assert table not in load_baseline(BASELINE)
+    assert table not in load_exemptions(DEFAULT_EXEMPTIONS)
+
+
 def test_baseline_only_lists_tables_the_scan_still_finds():
     """A stale baseline entry hides a table that was renamed or dropped."""
     current = scan_source([APP_ROOT])
@@ -135,6 +144,7 @@ def test_a_policy_with_enabled_rls_is_coverage():
     report = scan_source([_write(
         "CREATE TABLE thing (id INT, user_id TEXT);\n"
         "ALTER TABLE thing ENABLE ROW LEVEL SECURITY;\n"
+        "ALTER TABLE thing FORCE ROW LEVEL SECURITY;\n"
         "CREATE POLICY thing_iso ON thing USING (true);\n"
     )])
 
@@ -208,3 +218,12 @@ class TestExemptions:
         )
         regressions, _ = compare(report, frozenset(), {"share_tokens": "x"})
         assert regressions == frozenset({"some_new_table"})
+
+
+def test_policy_and_enable_without_force_is_not_owner_safe_coverage():
+    report = scan_source([_write(
+        "CREATE TABLE owner_bound (id INT, user_id TEXT);\n"
+        "CREATE POLICY owner_iso ON owner_bound USING (true);\n"
+        "ALTER TABLE owner_bound ENABLE ROW LEVEL SECURITY;\n"
+    )])
+    assert "owner_bound" in report.uncovered  # nosec B101 - regression assertion

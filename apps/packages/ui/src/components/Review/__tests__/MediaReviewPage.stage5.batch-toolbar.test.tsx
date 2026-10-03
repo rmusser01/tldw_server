@@ -2,6 +2,9 @@ import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import MediaReviewPage from "../MediaReviewPage"
+import * as mediaHandoff from "@/services/tldw/media-chat-handoff"
+
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => "server:alice" }))
 
 const sourceItems = [
   {
@@ -467,6 +470,23 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
     const checkbox = within(row).getByRole('checkbox')
     fireEvent.click(checkbox, options)
   }
+
+  it("addresses every selected source to this tab without changing Chat before acceptance", async () => {
+    sessionStorage.clear()
+    mocks.navigate.mockClear()
+    mocks.setChatMode.mockClear()
+    mocks.setRagMediaIds.mockClear()
+    render(<MediaReviewPage />)
+    await screen.findByText("0 / 30 selected")
+    selectItemByCheckbox("Alpha paper")
+    selectItemByCheckbox("Beta notes")
+    fireEvent.click(screen.getByRole("button", { name: "Chat about selection (2)" }))
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1))
+    const token = new URL(mocks.navigate.mock.calls[0][0], "http://localhost").searchParams.get(mediaHandoff.MEDIA_CHAT_HANDOFF_PARAM)!
+    expect(await mediaHandoff.readMediaChatHandoff(token, "server:alice")).toEqual({ ownerScope: "server:alice", mediaId: "1", mediaIds: [1, 2], mode: "rag_media" })
+    expect(mocks.setChatMode).not.toHaveBeenCalled()
+    expect(mocks.setRagMediaIds).not.toHaveBeenCalled()
+  })
 
   it("shows batch toolbar when selection is non-empty", async () => {
     render(<MediaReviewPage />)

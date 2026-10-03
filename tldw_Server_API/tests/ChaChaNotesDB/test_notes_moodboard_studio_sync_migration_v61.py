@@ -289,7 +289,7 @@ def _relevant_catalog(db: CharactersRAGDB) -> dict[str, object]:
 
 
 def test_sqlite_schema_authority_is_v63_and_version_update_is_last() -> None:
-    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 63
+    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= 63
     source = inspect.getsource(CharactersRAGDB._migrate_from_v62_to_v63_sqlite)
     for operation in (
         "_create_notes_moodboard_studio_schema_v61_sqlite",
@@ -309,7 +309,7 @@ def test_fresh_and_v60_upgrade_have_exact_v63_catalog_parity(tmp_path: Path) -> 
     try:
         assert _relevant_catalog(upgraded) == _relevant_catalog(fresh)  # nosec B101
         with fresh.transaction() as conn:
-            assert fresh._get_db_version(conn) == 63  # nosec B101
+            assert fresh._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION  # nosec B101
             assert _table_columns(conn, "note_task_scope_authority") == EXPECTED_AUTHORITY_COLUMNS  # nosec B101
             assert _table_columns(conn, "moodboards") == EXPECTED_MOODBOARD_COLUMNS  # nosec B101
             assert _table_columns(conn, "moodboard_notes") == EXPECTED_PLACEMENT_COLUMNS  # nosec B101
@@ -1074,7 +1074,7 @@ def test_v61_copies_valid_existing_task_authority_with_explicit_graph_flags(
             (OWNER,),
         ).fetchone()
         assert tuple(row) == (DATASET_A, 1, 0, 0)  # nosec B101
-        assert _schema_version(db_path) == 63  # nosec B101
+        assert _schema_version(db_path) == CharactersRAGDB._CURRENT_SCHEMA_VERSION  # nosec B101
     finally:
         db.close_all_connections()
 

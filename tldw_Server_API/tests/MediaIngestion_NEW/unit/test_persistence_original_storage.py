@@ -1278,7 +1278,8 @@ async def test_add_media_orchestrate_records_ingestion_bytes_in_shared_ledger(mo
     assert recorded["entity_scope"] == "user"
     assert recorded["entity_value"] == "42"
     assert recorded["units"] == len(b"hello-world")
-    assert "req-abc" in recorded["op_id"]
+    # Server-generated: a client-repeatable X-Request-ID would dedupe away later charges.
+    assert "req-abc" not in recorded["op_id"]
 
 
 @pytest.mark.unit

@@ -18,6 +18,17 @@ describe("playground-session-store", () => {
     expect(usePlaygroundSessionStore.getState().isSessionValid()).toBe(true)
   })
 
+  it("keeps deliberate server selection transient and clears it with account state", () => {
+    usePlaygroundSessionStore.getState().requestServerChatSelection("chat-a")
+    const first = usePlaygroundSessionStore.getState().serverChatSelectionIntent
+    usePlaygroundSessionStore.getState().requestServerChatSelection("chat-a")
+    expect(usePlaygroundSessionStore.getState().serverChatSelectionIntent).not.toBe(first)
+    expect(JSON.parse(localStorage.getItem("tldw-playground-session")!).state)
+      .not.toHaveProperty("serverChatSelectionIntent")
+    usePlaygroundSessionStore.getState().clearSession()
+    expect(usePlaygroundSessionStore.getState().serverChatSelectionIntent).toBeNull()
+  })
+
   it("rejects persisted sessions when the expected scope key changes", () => {
     usePlaygroundSessionStore.getState().saveSession({
       scopeKey: "scope:a",
@@ -48,4 +59,12 @@ describe("playground-session-store", () => {
     expect(saved.state).not.toHaveProperty("sourceSelectionRevision")
     expect(saved.state).not.toHaveProperty("markSourceSelectionIntent")
   })
+})
+
+it("stores only an initialization address and clears it with the session", () => {
+  const reference = { profile_id: "p", client_session_id: "a", owner_key: "owner", conversation_id: "chat" }
+  usePlaygroundSessionStore.getState().saveSession({ historyId: "chat", historySelectionReference: reference })
+  expect(usePlaygroundSessionStore.getState().historySelectionReference).toEqual(reference)
+  usePlaygroundSessionStore.getState().clearSession()
+  expect(usePlaygroundSessionStore.getState().historySelectionReference).toBeNull()
 })

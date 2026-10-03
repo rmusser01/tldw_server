@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import replace
@@ -12,9 +13,20 @@ from unittest.mock import AsyncMock
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import notes
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError, FTSQuery
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
+    ClosedChaChaOperationError,
+    chacha_operation,
+    current_connection_state,
+)
+from tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap import postgres_schema_migration
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendConnectionWrapper,
+    CharactersRAGDB,
+    CharactersRAGDBError,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -195,6 +207,41 @@ def test_second_user_bootstrap_preserves_an_active_first_user_read(
             second_backend.get_pool().close_all()
 
 
+@pytest.mark.parametrize("needs_repair", [False, True], ids=["clean", "historical"])
+def test_startup_repair_preserves_distinct_schema_and_outer_operation_checkouts(pg_bootstrap, needs_repair):
+    """Repair must borrow its schema transaction without adopting the live owner."""
+    f, _ = pg_bootstrap
+    db = f.db
+    if needs_repair:
+        character = db.add_character_card({"name": "Repair source"})
+        conversation = db.add_conversation(
+            {"character_id": character, "title": "Repair"}, assistant_startup=AssistantStartup(source="explicit"),
+        )
+        origin = db.get_conversation_by_id(conversation)["assistant_startup_json"]
+        assert origin is not None
+        with db.transaction() as conn:
+            conn.execute("UPDATE conversations SET assistant_id = NULL WHERE id = ?", (conversation,))
+    with chacha_operation(independent=True):
+        outer = db.get_connection()
+        outer_state = current_connection_state(db)
+        outer_raw = outer_state.conn
+        with db.backend.transaction() as schema_raw:
+            assert schema_raw is not outer_raw
+            db._repair_conversation_assistant_identity(BackendConnectionWrapper(db, schema_raw, db.backend))
+            assert current_connection_state(db) is outer_state
+            assert outer_state.conn is outer_raw
+            assert schema_raw.info.transaction_status.name == "INTRANS"
+            assert db.backend.execute("SELECT 1 AS value", connection=schema_raw).rows == [{"value": 1}]
+        assert outer.execute("SELECT 1 AS value").fetchone() == {"value": 1}
+    with pytest.raises(ClosedChaChaOperationError):
+        outer.execute("SELECT 1")
+    if needs_repair:
+        repaired = db.get_conversation_by_id(conversation)
+        assert (repaired["assistant_kind"], repaired["assistant_id"], repaired["assistant_startup_json"]) == (
+            "character", str(character), origin,
+        )
+
+
 @pytest.mark.parametrize("damage", [
     "ALTER TABLE note_attachments DISABLE ROW LEVEL SECURITY",
     "DROP INDEX idx_note_attachments_owner_dataset_blob",
@@ -267,6 +314,54 @@ def test_failed_bootstrap_can_retry_on_the_same_backend(
         backend.get_pool().close_all()
 
 
+def test_cold_worker_waits_for_schema_owner_beyond_ddl_lock_budget(
+    pg_database_config: DatabaseConfig, tmp_path: Path,
+) -> None:
+    """A delayed schema owner must not prevent another worker's first Notes use."""
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    waiter_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+
+    class ObservedBootstrap(CharactersRAGDB):
+        """Observe effective migration deadlines before delegating unchanged DDL."""
+
+        def _apply_schema_v4_postgres(self, conn: object) -> None:
+            """The acquisition budget must not leak into the first schema write."""
+            assert self.backend.execute(
+                "SELECT current_setting('lock_timeout') AS lock_timeout, "
+                "current_setting('statement_timeout') AS statement_timeout",
+                connection=conn,
+            ).rows[0] == {"lock_timeout": "5s", "statement_timeout": "30s"}
+            super()._apply_schema_v4_postgres(conn)
+
+    def create_owner_note() -> str:
+        """Initialize a cold worker and round-trip an owner-bound note."""
+        db = ObservedBootstrap(tmp_path / "waiter.db", client_id="2", backend=waiter_backend)
+        try:
+            note = db.add_note(title="Delayed bootstrap", content="Waiter can persist content")
+            return db.get_note_by_id(note)["content"]
+        finally:
+            db.close_connection()
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as workers:
+            with postgres_schema_migration(owner_backend, "100ms") as owner_connection:
+                waiter = workers.submit(create_owner_note)
+                deadline = time.monotonic() + 10
+                while not owner_backend.execute(
+                    "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND NOT granted "
+                    "AND database=(SELECT oid FROM pg_database WHERE datname=current_database())",
+                    connection=owner_connection,
+                ).scalar:
+                    assert not waiter.done(), "Cold worker finished before waiting for the schema owner"
+                    assert time.monotonic() < deadline, "Cold worker did not reach the schema lock"
+                    time.sleep(0.01)
+                owner_backend.execute("SELECT pg_sleep(5.5)", connection=owner_connection)
+            assert waiter.result(timeout=30) == "Waiter can persist content"
+    finally:
+        for backend in (owner_backend, waiter_backend):
+            backend.get_pool().close_all()
+
+
 @pytest.mark.parametrize("reuse_backend", [True, False], ids=["one-worker", "separate-workers"])
 def test_simultaneous_first_users_share_successful_bootstrap(
     pg_database_config: DatabaseConfig, tmp_path: Path, reuse_backend: bool,
@@ -336,7 +431,7 @@ def test_v70_upgrade_retries_after_late_failure_without_publishing_readiness(
         replacement = CharactersRAGDB(tmp_path / "upgraded.db", client_id="1", backend=backend)
         assert replacement.get_note_by_id(note)["content"] == "Existing v70 content"
         assert backend.execute("SELECT version FROM db_schema_version WHERE schema_name=%s",
-                               (legacy._SCHEMA_NAME,)).scalar == 72
+                               (legacy._SCHEMA_NAME,)).scalar == replacement._POSTGRES_SCHEMA_VERSION
     finally:
         for db in (legacy, replacement):
             if db is not None:
@@ -366,6 +461,35 @@ def test_current_schema_opens_and_searches_on_a_read_only_cold_backend(
     finally:
         if replacement is not None:
             replacement.close_connection()
+        backend.get_pool().close_all()
+
+
+def test_read_only_bootstrap_rejects_required_identity_repair_without_changing_origin(pg_bootstrap, tmp_path):
+    """A read-only checkout may validate clean identity; historical repairs must remain writable."""
+    from psycopg.conninfo import make_conninfo
+
+    f, config = pg_bootstrap
+    db = f.db
+    character = db.add_character_card({"name": "Historical repair source"})
+    conversation = db.add_conversation(
+        {"character_id": character, "title": "Historical repair"},
+        assistant_startup=AssistantStartup(source="explicit"),
+    )
+    with db.transaction() as conn:
+        conn.execute("UPDATE conversations SET assistant_id = NULL WHERE id = ?", (conversation,))
+    before = db.get_conversation_by_id(conversation)
+    assert before["assistant_startup_json"] is not None
+    read_only_config = replace(config, connection_string=make_conninfo(
+        host=config.pg_host, port=str(config.pg_port), dbname=config.pg_database,
+        user=config.pg_user, password=config.pg_password,
+        options="-c default_transaction_read_only=on",
+    ))
+    backend = DatabaseBackendFactory.create_backend(read_only_config)
+    try:
+        with pytest.raises(CharactersRAGDBError, match="PostgreSQL query execution failed"):
+            CharactersRAGDB(tmp_path / "dirty-read-only.db", client_id="1", backend=backend)
+        assert db.get_conversation_by_id(conversation) == before
+    finally:
         backend.get_pool().close_all()
 
 

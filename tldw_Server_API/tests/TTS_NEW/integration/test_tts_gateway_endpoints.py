@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -391,10 +393,11 @@ async def test_tts_catalog_routes_enforce_rate_limit_dependency(
     assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
 
 
-async def test_tts_catalog_routes_remain_public_with_server_credential_context(
+async def test_tts_catalog_routes_reject_anonymous_before_provider_discovery(
     test_client,
 ) -> None:
     catalog_user_ids: list[int | None] = []
+    service_calls: list[bool] = []
 
     class _Service:
         async def get_capabilities(self):
@@ -417,6 +420,7 @@ async def test_tts_catalog_routes_remain_public_with_server_credential_context(
             return {}
 
     async def _get_service():
+        service_calls.append(True)
         return _Service()
 
     async def _reject_required_user():
@@ -434,10 +438,11 @@ async def test_tts_catalog_routes_remain_public_with_server_credential_context(
         test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
         test_client.app.dependency_overrides.pop(audio_tts.get_request_user, None)
 
-    assert providers.status_code == status.HTTP_200_OK
-    assert model_info.status_code == status.HTTP_200_OK
-    assert voices.status_code == status.HTTP_200_OK
-    assert catalog_user_ids == [None, None, None]
+    assert providers.status_code == status.HTTP_401_UNAUTHORIZED
+    assert model_info.status_code == status.HTTP_401_UNAUTHORIZED
+    assert voices.status_code == status.HTTP_401_UNAUTHORIZED
+    assert catalog_user_ids == []
+    assert service_calls == []
 
 
 async def test_gateway_provider_and_model_scoped_voice_catalog(
@@ -826,6 +831,7 @@ async def test_missing_gateway_credential_returns_static_overlay_without_discove
 )
 async def test_gateway_catalog_advertises_only_executable_conversion_routes(
     tmp_path,
+    monkeypatch,
     conversion_enabled: bool,
     source_format: str,
     executable_state: str,
@@ -845,7 +851,14 @@ async def test_gateway_catalog_advertises_only_executable_conversion_routes(
     if executable_state == "missing":
         spec = replace(spec, ffmpeg_path=None)
     elif executable_state == "non_executable":
-        executable.chmod(0o600)
+        real_access = os.access
+
+        def deny_execute(path, mode):
+            if Path(path) == executable and mode & os.X_OK:
+                return False
+            return real_access(path, mode)
+
+        monkeypatch.setattr(os, "access", deny_execute)
 
     provider = TTSServiceV2._serialize_gateway_provider(spec, None)
     capabilities = provider["model_capabilities"]["Vendor/Exact"]

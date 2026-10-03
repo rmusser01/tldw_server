@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, closing
 from contextvars import copy_context
@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS vn_asset_slots (
     depends_on_slot_id INTEGER REFERENCES vn_asset_slots(id),
     status TEXT NOT NULL DEFAULT 'planned',
     last_error TEXT,
+    last_failed_batch_id INTEGER,
+    latest_generation_batch_id INTEGER,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(pack_id, slot_key)
@@ -126,6 +128,9 @@ CREATE TABLE IF NOT EXISTS vn_asset_batches (
     started_at DATETIME,
     completed_at DATETIME,
     options_json TEXT NOT NULL DEFAULT '{}',
+    recipe_json TEXT,
+    execution_recipe_json TEXT,
+    source_batch_id INTEGER,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -295,6 +300,7 @@ def ensure_vn_asset_tables(db: CharactersRAGDB) -> None:
             conn.execute(statement)
         _ensure_batch_fanout_columns(conn)
         _ensure_recipe_outcome_columns(conn)
+        _ensure_slot_failure_column(conn)
 
 
 class VNAssetPacksRepository:
@@ -1454,6 +1460,57 @@ class VNAssetPacksRepository:
             )
         return self.get_slot(slot_id)
 
+    def mark_slot_generation_started(self, slot_id: int, batch_id: int) -> None:
+        """Show legacy progress while fencing authored diagnostic ownership.
+
+        Latest/unowned slots retain same-batch failure display and diagnostics.
+        A different owner permits only verified inline/Jobs activity to update
+        derived display, never clearing that owner's error/source or overriding
+        its explicit failure guard. Stale markers alone are a no-op. Return
+        None. An observational Jobs-reader outage retains only independently
+        verified inline activity and never blocks backend work or logs raw
+        reader details. Database failures still roll back and propagate.
+        """
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            updated = conn.execute(
+                """UPDATE vn_asset_slots
+                   SET status = CASE WHEN last_failed_batch_id = ? THEN status ELSE 'generating' END,
+                       last_error = CASE WHEN last_failed_batch_id = ? THEN last_error ELSE NULL END,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)""",
+                (batch_id, batch_id, slot_id, batch_id),
+            )
+            if not updated.rowcount:
+                self._refresh_slot_generation_status(conn, slot_id, active_legacy_only=True)
+
+    def mark_slot_generation_succeeded(self, slot_id: int, batch_id: int) -> None:
+        """Clear older failures, but retain any failure from this same batch."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_slots
+                   SET status = CASE WHEN last_failed_batch_id = ? THEN status ELSE 'reviewing' END,
+                       last_error = CASE WHEN last_failed_batch_id = ? THEN last_error ELSE NULL END,
+                       last_failed_batch_id = CASE
+                           WHEN last_failed_batch_id = ? THEN last_failed_batch_id ELSE NULL END,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)""",
+                (batch_id, batch_id, batch_id, slot_id, batch_id),
+            )
+
+    def mark_slot_generation_failed(self, slot_id: int, batch_id: int, error: str) -> None:
+        """Record failure only when this batch still owns the slot's latest outcome."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_slots
+                   SET status = 'failed', last_error = ?, last_failed_batch_id = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)""",
+                (error, batch_id, slot_id, batch_id),
+            )
+
     def delete_slot(self, slot_id: int) -> None:
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
@@ -1946,7 +2003,34 @@ class VNAssetPacksRepository:
         options: Mapping[str, Any] | None = None,
         recipes: list[Mapping[str, Any]] | None = None,
         idempotency_receipt: Mapping[str, str] | None = None,
+        recipe: Mapping[str, Any] | None = None,
+        execution_recipe: Mapping[str, Any] | None = None,
+        source_batch_id: int | None = None,
     ) -> dict[str, Any]:
+        """Persist a batch and both independently supplied recipe representations.
+
+        Args:
+            recipes: Frozen per-variant entries with slot_id, variant_index and
+                recipe; a nonempty list matching planned_count (or total_variants)
+                selects the V1 outcome ledger. None retains legacy execution.
+            idempotency_receipt: Exact scoped in-progress receipt to link in the
+                same transaction; an unclaimed or already-linked receipt fails.
+            recipe: Authored batch snapshot; queued positive-count slots acquire
+                latest-generation display ownership, never queue/lease authority.
+            execution_recipe: Optional already-pinned execution snapshot.
+            source_batch_id: Retry provenance, validated by the service.
+
+        Returns:
+            The persisted batch, with nullable snapshot/source fields and the
+            ledger version. Neither representation is inferred from the other;
+            absent historical snapshots do not authorize regeneration.
+
+        Raises:
+            VNAssetGenerationError: Recipe count or receipt admission fails.
+            KeyError, TypeError, ValueError: Supplied entries cannot be serialized
+                or interpreted. Database errors propagate; all inserts, receipt
+                linkage and slot ownership updates roll back together.
+        """
         self._ensure_schema_initialized()
         if recipes is not None:
             expected_count = total_variants if planned_count is None else planned_count
@@ -1964,9 +2048,12 @@ class VNAssetPacksRepository:
                     total_variants,
                     planned_count,
                     options_json,
-                    recipe_version
+                    recipe_version,
+                    recipe_json,
+                    execution_recipe_json,
+                    source_batch_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     pack_id,
@@ -1978,6 +2065,9 @@ class VNAssetPacksRepository:
                     total_variants if planned_count is None else planned_count,
                     json.dumps(dict(options or {})),
                     1 if recipes is not None else 0,
+                    json.dumps(dict(recipe)) if recipe is not None else None,
+                    json.dumps(dict(execution_recipe)) if execution_recipe is not None else None,
+                    source_batch_id,
                 ),
             )
             batch_id = cursor.lastrowid
@@ -2016,10 +2106,232 @@ class VNAssetPacksRepository:
                             json.dumps(dict(entry["recipe"])),
                         ),
                     )
+            if recipe is not None and status == "queued":
+                conn.executemany(
+                    """UPDATE vn_asset_slots SET latest_generation_batch_id = ?, updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ? AND pack_id = ?""",
+                    (
+                        (batch_id, int(slot["slot_id"]), pack_id)
+                        for slot in recipe.get("slots", [])
+                        if int(slot["variant_count"]) > 0
+                    ),
+                )
         batch = self.get_batch(batch_id)
         if batch is None:
             raise RuntimeError("created_batch_not_found")
         return batch
+
+    def fail_batch_enqueue(self, batch_id: int, error: str) -> None:
+        """Record a rejected parent job on the batch and its owned slots atomically."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            batch = conn.execute(
+                "SELECT pack_id, recipe_json, status FROM vn_asset_batches WHERE id = ?", (batch_id,)
+            ).fetchone()
+            if batch is None:
+                raise ValueError("vn_asset_batch_not_found")
+            if batch["status"] != "queued":
+                return
+            conn.execute(
+                """UPDATE vn_asset_batches SET status = 'failed', enqueue_error = ?,
+                   updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+                (error, batch_id),
+            )
+            recipe = json.loads(batch["recipe_json"]) if batch["recipe_json"] else {"slots": []}
+            conn.executemany(
+                """UPDATE vn_asset_slots SET status = 'failed', last_error = ?,
+                   last_failed_batch_id = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND pack_id = ? AND latest_generation_batch_id = ?""",
+                (
+                    (error, batch_id, int(slot["slot_id"]), int(batch["pack_id"]), batch_id)
+                    for slot in recipe["slots"]
+                    if int(slot["variant_count"]) > 0
+                ),
+            )
+
+    def set_execution_recipe_if_absent(
+        self, batch_id: int, recipe: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Pin recipe only for an absent execution snapshot and return the batch.
+
+        Existing JSON is immutable, including an explicit empty snapshot.
+        Missing batches raise ValueError; serialization/database errors propagate.
+        """
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_batches SET execution_recipe_json = ?,
+                   updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND execution_recipe_json IS NULL""",
+                (json.dumps(dict(recipe)), batch_id),
+            )
+        batch = self.get_batch(batch_id)
+        if batch is None:
+            raise ValueError("vn_asset_batch_not_found")
+        return batch
+
+    def complete_batch_fanout(
+        self,
+        batch_id: int,
+        *,
+        planned_count: int,
+        enqueued_count: int,
+        total_slots: int,
+    ) -> dict[str, Any]:
+        """Record complete fanout without replacing V1 outcome-derived status.
+
+        V0 enqueue-only failures can recover their owned display. V1 terminal
+        outcomes are never reopened by fanout recovery. Counters for published
+        or failed variants remain untouched; missing batches raise ValueError
+        and database/reconciliation errors propagate atomically.
+        """
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            # Recover the enqueue outcome without erasing children that already persisted an image.
+            recovering = conn.execute(
+                """SELECT 1 FROM vn_asset_batches
+                   WHERE id = ? AND recipe_version = 0 AND status = 'failed' AND enqueue_error IS NOT NULL
+                     AND failed_count = 0""",
+                (batch_id,),
+            ).fetchone()
+            if recovering is not None:
+                conn.execute(
+                    """UPDATE vn_asset_slots
+                       SET status = CASE WHEN EXISTS (
+                           SELECT 1 FROM vn_asset_items AS item
+                           WHERE item.slot_id = vn_asset_slots.id AND item.source = 'generated'
+                             AND (item.generated_file_id IS NOT NULL OR item.storage_ref IS NOT NULL)
+                             AND CASE WHEN json_valid(item.source_context_snapshot_json)
+                               THEN json_extract(item.source_context_snapshot_json, '$.batch_id')
+                               END = ?
+                       ) THEN 'reviewing' ELSE 'generating' END,
+                       last_error = NULL, last_failed_batch_id = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                       WHERE latest_generation_batch_id = ? AND last_failed_batch_id = ?""",
+                    (batch_id, batch_id, batch_id),
+                )
+            conn.execute(
+                """UPDATE vn_asset_batches
+                   SET status = CASE
+                       WHEN status IN ('queued', 'enqueued')
+                         OR (recipe_version = 0 AND status = 'failed'
+                             AND enqueue_error IS NOT NULL AND failed_count = 0)
+                       THEN 'enqueued' ELSE status END,
+                       planned_count = ?, enqueued_count = ?,
+                       enqueue_error = CASE
+                           WHEN recipe_version = 1 AND status IN ('failed', 'cancelled')
+                           THEN enqueue_error ELSE NULL END,
+                       total_slots = ?, total_variants = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (planned_count, enqueued_count, total_slots, planned_count, batch_id),
+            )
+            conn.execute(
+                """UPDATE vn_asset_batches
+                   SET status = 'completed', completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND status = 'enqueued' AND failed_count = 0
+                     AND planned_count >= 0 AND completed_count >= planned_count""",
+                (batch_id,),
+            )
+        batch = self.get_batch(batch_id)
+        if batch is None:
+            raise ValueError("vn_asset_batch_not_found")
+        return batch
+
+    def fail_batch_fanout_if_active(
+        self,
+        batch_id: int,
+        *,
+        error: str,
+        planned_count: int | None = None,
+        enqueued_count: int | None = None,
+        failed_slot_ids: Iterable[int] = (),
+    ) -> dict[str, Any]:
+        """Record active fanout errors with version-specific recovery semantics.
+
+        V1 keeps outcome-derived status/counters and slot provenance: partial
+        enqueue records progress/error for recovery of the same original batch.
+        V0 retains exhausted-fanout failure of only the supplied still-owned
+        slots or same-pack NULL legacy ownership. Terminal V1 rows are unchanged.
+        Return the persisted batch; missing batches raise ValueError and
+        database errors roll back writes.
+        """
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """UPDATE vn_asset_batches
+                   SET status = CASE WHEN recipe_version = 0 THEN 'failed' ELSE status END,
+                       planned_count = COALESCE(?, planned_count),
+                       enqueued_count = COALESCE(?, enqueued_count),
+                       enqueue_error = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND (
+                       status IN ('queued', 'enqueued', 'processing')
+                       OR (recipe_version = 0 AND status = 'failed'
+                           AND enqueue_error IS NOT NULL AND failed_count = 0)
+                   )""",
+                (planned_count, enqueued_count, error, batch_id),
+            )
+            if cursor.rowcount:
+                conn.executemany(
+                    """UPDATE vn_asset_slots
+                       SET status = 'failed', last_error = ?, last_failed_batch_id = ?,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ?
+                         AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)
+                         AND pack_id = (
+                             SELECT pack_id FROM vn_asset_batches WHERE id = ? AND recipe_version = 0
+                         )""",
+                    ((error, batch_id, slot_id, batch_id, batch_id) for slot_id in failed_slot_ids),
+                )
+        batch = self.get_batch(batch_id)
+        if batch is None:
+            raise ValueError("vn_asset_batch_not_found")
+        return batch
+
+    def record_batch_variant_success(self, batch_id: int) -> None:
+        """Increment completion and transition status in one transaction."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_batches
+                   SET completed_count = completed_count + 1,
+                       status = CASE
+                           WHEN status IN ('failed', 'completed', 'cancelled') THEN status
+                           WHEN COALESCE(NULLIF(planned_count, 0), total_variants, 0) > 0
+                             AND completed_count + 1 >= COALESCE(NULLIF(planned_count, 0), total_variants, 0)
+                           THEN 'completed'
+                           ELSE 'processing'
+                       END,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (batch_id,),
+            )
+            conn.execute(
+                """UPDATE vn_asset_batches
+                   SET completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
+                   WHERE id = ? AND status = 'completed'""",
+                (batch_id,),
+            )
+
+    def record_batch_variant_failure(self, batch_id: int, *, slot_id: int, error: str) -> None:
+        """Record the final slot and batch failure in one transaction."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_slots
+                   SET status = 'failed', last_error = ?, last_failed_batch_id = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)""",
+                (error, batch_id, slot_id, batch_id),
+            )
+            conn.execute(
+                """UPDATE vn_asset_batches
+                   SET failed_count = failed_count + 1,
+                       status = CASE WHEN status IN ('completed', 'cancelled') THEN status ELSE 'failed' END,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (batch_id,),
+            )
 
     def get_batch(self, batch_id: int) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
@@ -2082,12 +2394,19 @@ class VNAssetPacksRepository:
     def _refresh_slot_generation_status(
         self, conn: Any, slot_id: int, *, fallback_status: str | None = None,
         finishing_delivery: tuple[int, str] | None = None,
+        active_legacy_only: bool = False,
     ) -> None:
         """Read exact legacy activity after write admission, then reconcile V1.
 
         Failed V0 batches may still have executing children; cancelled batches
         never contribute. Published provenance settles only its exact Jobs
         delivery while completing. Aggregate counters are not liveness.
+        active_legacy_only skips all display writes without verified legacy
+        activity, retaining stale callers' authored ownership/provenance fences.
+        For active_legacy_only, an observational Jobs-reader failure retains
+        only verified inline activity; otherwise reader errors propagate.
+        No execution admission is granted; all database operations outside
+        that reader callback retain their original failure propagation.
         """
         slot = conn.execute(
             """
@@ -2119,25 +2438,34 @@ class VNAssetPacksRepository:
                     fingerprint = context.get("legacy_delivery_fingerprint")
                     if isinstance(fingerprint, str) and fingerprint:
                         settled.add((context["batch_id"], context["variant_index"], fingerprint))
-            jobs_active, queued = self.legacy_activity_reader(
-                int(slot["pack_id"]), slot_id, int(slot["owner_user_id"]), batches, settled, finishing_delivery,
-            )
-            active = active or jobs_active
+            try:
+                jobs_active, queued = self.legacy_activity_reader(
+                    int(slot["pack_id"]), slot_id, int(slot["owner_user_id"]), batches, settled, finishing_delivery,
+                )
+            except Exception:  # noqa: BLE001 - only this observational callback is advisory on legacy start
+                if not active_legacy_only:
+                    raise
+            else:
+                active = active or jobs_active
+        if active_legacy_only and not active:
+            return
         _refresh_slot_generation_status(conn, slot_id, legacy_activity=(active, queued), fallback_status=fallback_status)
 
     def cancel_batch(self, batch_id: int) -> dict[str, Any] | None:
         """Cancel batch_id and return its row, or None if it does not exist.
 
         Reconcile already-cancelled V1 batches, preserving completed/failed
-        recipes and counters. V0 keeps unconditional cancellation. Database
-        failures propagate and roll back the transition.
+        recipes and counters. An already-reconciled V1 batch keeps its exact row,
+        including updated_at, while slot reconciliation remains caller-owned.
+        V0 keeps unconditional cancellation. Database failures propagate and
+        roll back the transition.
         """
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
             # Acquire write admission before observing the batch or its recipes.
             conn.execute("UPDATE vn_asset_batches SET status = status WHERE id = ?", (batch_id,))
             batch = conn.execute(
-                "SELECT status, recipe_version FROM vn_asset_batches WHERE id = ?", (batch_id,)
+                "SELECT status, recipe_version, cancelled_count FROM vn_asset_batches WHERE id = ?", (batch_id,)
             ).fetchone()
             if batch is None:
                 return None
@@ -2147,25 +2475,29 @@ class VNAssetPacksRepository:
                     (batch_id,),
                 )
             elif batch["status"] not in {"completed", "failed"}:
-                conn.execute(
+                changed_recipes = conn.execute(
                     """
                     UPDATE vn_asset_generation_recipes SET outcome_status = 'cancelled'
                     WHERE batch_id = ? AND outcome_status NOT IN ('completed', 'failed', 'cancelled')
                     """,
                     (batch_id,),
-                )
-                conn.execute(
-                    """
-                    UPDATE vn_asset_batches
-                    SET status = 'cancelled',
-                        cancelled_count = (
-                            SELECT COUNT(*) FROM vn_asset_generation_recipes
-                            WHERE batch_id = ? AND outcome_status = 'cancelled'
-                        ), updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                    """,
-                    (batch_id, batch_id),
-                )
+                ).rowcount
+                cancelled_count = conn.execute(
+                    """SELECT COUNT(*) FROM vn_asset_generation_recipes
+                       WHERE batch_id = ? AND outcome_status = 'cancelled'""",
+                    (batch_id,),
+                ).fetchone()[0]
+                if (
+                    batch["status"] != "cancelled"
+                    or changed_recipes
+                    or batch["cancelled_count"] != cancelled_count
+                ):
+                    conn.execute(
+                        """UPDATE vn_asset_batches
+                           SET status = 'cancelled', cancelled_count = ?, updated_at = CURRENT_TIMESTAMP
+                           WHERE id = ?""",
+                        (cancelled_count, batch_id),
+                    )
                 for row in conn.execute(
                     "SELECT DISTINCT slot_id FROM vn_asset_generation_recipes WHERE batch_id = ?", (batch_id,)
                 ).fetchall():
@@ -2188,7 +2520,10 @@ class VNAssetPacksRepository:
         surviving slot without changing approved items or bytes. Cancellation
         takes precedence: leftover recipes become cancelled, adding only new
         cancellations to historical counts. Completed batches are unchanged;
-        a repeated failure is idempotent.
+        a repeated failure is idempotent. Newly failed recipe slots record this
+        batch's error/source only for its latest owner or same-pack NULL legacy
+        ownership, without overriding derived review status. Cancelled batches
+        never publish failure provenance.
         Missing rows do not imply new outcomes or permission to delete assets.
         Database/reconciliation failures propagate and roll back all changes.
         """
@@ -2196,7 +2531,7 @@ class VNAssetPacksRepository:
         with self.db.transaction() as conn:
             conn.execute("UPDATE vn_asset_batches SET status=status WHERE id=?", (batch_id,))
             batch = conn.execute(
-                "SELECT status, recipe_version FROM vn_asset_batches WHERE id=?", (batch_id,),
+                "SELECT pack_id, status, recipe_version FROM vn_asset_batches WHERE id=?", (batch_id,),
             ).fetchone()
             if batch is None:
                 return None
@@ -2205,6 +2540,13 @@ class VNAssetPacksRepository:
             if batch["status"] == "completed":
                 return self.get_batch(batch_id)
             cancelled = batch["status"] == "cancelled"
+            newly_failed_slot_ids = [] if cancelled else [int(row["slot_id"]) for row in conn.execute(
+                """
+                SELECT DISTINCT slot_id FROM vn_asset_generation_recipes
+                WHERE batch_id=? AND outcome_status NOT IN ('completed', 'failed', 'cancelled')
+                """,
+                (batch_id,),
+            ).fetchall()]
             updated = conn.execute(
                 """
                 UPDATE vn_asset_generation_recipes SET outcome_status=?
@@ -2230,6 +2572,13 @@ class VNAssetPacksRepository:
                 ).fetchall()
                 for row in slots:
                     self._refresh_slot_generation_status(conn, int(row["slot_id"]))
+                conn.executemany(
+                    """UPDATE vn_asset_slots SET last_error = ?, last_failed_batch_id = ?
+                       WHERE id = ? AND pack_id = ?
+                         AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)""",
+                    ((error, batch_id, slot_id, batch["pack_id"], batch_id)
+                     for slot_id in newly_failed_slot_ids),
+                )
         return self.get_batch(batch_id)
 
     async def fail_batch_integrity_async(self, batch_id: int, *, error: str) -> dict[str, Any] | None:
@@ -2469,7 +2818,9 @@ class VNAssetPacksRepository:
         nonterminal batch. Jobs claims require validate_authority; inline claims
         need only their current token. The callback runs after write admission
         and before any visible slot change. Reconcile all work sharing the slot
-        and clear its error. Raises retryable VNAssetGenerationError on lost
+        and clear older errors only for the latest owner (or unowned legacy
+        display), retaining same-batch failure provenance. Raises retryable
+        VNAssetGenerationError on lost
         authority, fence or terminal batch; callback/database errors propagate
         and roll back. Jobs changes after admission are not retroactive.
         """
@@ -2497,7 +2848,10 @@ class VNAssetPacksRepository:
                 raise VNAssetGenerationError("vn_asset_job_lease_lost", retryable=True, **context)
             self._refresh_slot_generation_status(conn, slot_id)
             conn.execute(
-                "UPDATE vn_asset_slots SET last_error = NULL WHERE id = ?", (slot_id,),
+                """UPDATE vn_asset_slots
+                   SET last_error = CASE WHEN last_failed_batch_id = ? THEN last_error ELSE NULL END
+                   WHERE id = ? AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)""",
+                (batch_id, slot_id, batch_id),
             )
 
     def reserve_variant_item(
@@ -2585,6 +2939,8 @@ class VNAssetPacksRepository:
         validate_authority admits publication after the write lock. Completed
         outcomes replay without mutation. Raises VNAssetGenerationError for
         identity, state, fence, or storage failures; callback/DB errors propagate.
+        Slot failure provenance changes only for the latest owner (or unowned
+        legacy display), retaining failures from a sibling in this same batch.
         """
         self._ensure_schema_initialized()
         context = {
@@ -2640,7 +2996,14 @@ class VNAssetPacksRepository:
             )
             _refresh_batch_outcome_counts(conn, batch_id)
             self._refresh_slot_generation_status(conn, slot_id)
-            conn.execute("UPDATE vn_asset_slots SET last_error = NULL WHERE id = ?", (slot_id,))
+            conn.execute(
+                """UPDATE vn_asset_slots
+                   SET last_error = CASE WHEN last_failed_batch_id = ? THEN last_error ELSE NULL END,
+                       last_failed_batch_id = CASE
+                           WHEN last_failed_batch_id = ? THEN last_failed_batch_id ELSE NULL END
+                   WHERE id = ? AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)""",
+                (batch_id, batch_id, slot_id, batch_id),
+            )
         result = self.get_item(item_id)
         if result is None:
             raise VNAssetGenerationError("completed_item_not_found", retryable=True, **context)
@@ -2656,6 +3019,8 @@ class VNAssetPacksRepository:
         attempt_token fences claimed work; None only admits unclaimed legacy
         reservations. validate_authority runs under the write lock. Terminal or
         stale outcomes are a no-op; callback/database failures propagate.
+        Failure provenance is recorded only for the latest slot owner (or
+        unowned legacy display), independently of durable per-variant outcomes.
         """
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
@@ -2679,7 +3044,11 @@ class VNAssetPacksRepository:
                 return
             _refresh_batch_outcome_counts(conn, batch_id)
             self._refresh_slot_generation_status(conn, slot_id)
-            conn.execute("UPDATE vn_asset_slots SET last_error = ? WHERE id = ?", (error, slot_id))
+            conn.execute(
+                """UPDATE vn_asset_slots SET last_error = ?, last_failed_batch_id = ?
+                   WHERE id = ? AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)""",
+                (error, batch_id, slot_id, batch_id),
+            )
 
     def mark_batch_enqueued(
         self,
@@ -3005,6 +3374,7 @@ def _slot_update_statement(field_name: str) -> str | None:
         ),
         "status": "UPDATE vn_asset_slots SET status = ? WHERE id = ?",
         "last_error": "UPDATE vn_asset_slots SET last_error = ? WHERE id = ?",
+        "last_failed_batch_id": "UPDATE vn_asset_slots SET last_failed_batch_id = ? WHERE id = ?",
     }
     return statements.get(field_name)
 
@@ -3017,13 +3387,20 @@ def _require_sqlite_chacha_db(db: CharactersRAGDB) -> None:
 
 
 def _ensure_batch_fanout_columns(conn: Any) -> None:
-    """Add missing fanout/receipt columns on conn; return None, propagating SQL errors."""
+    """Add missing fanout/receipt/snapshot columns without rewriting existing values.
+
+    Missing snapshots remain NULL and missing ledger versions remain V0.
+    Return None; database errors propagate to the caller's migration transaction.
+    """
     columns = {row[1] for row in conn.execute("PRAGMA table_info(vn_asset_batches)").fetchall()}
     additions = {
         "planned_count": "ALTER TABLE vn_asset_batches ADD COLUMN planned_count INTEGER NOT NULL DEFAULT 0",
         "enqueued_count": "ALTER TABLE vn_asset_batches ADD COLUMN enqueued_count INTEGER NOT NULL DEFAULT 0",
         "enqueue_error": "ALTER TABLE vn_asset_batches ADD COLUMN enqueue_error TEXT",
         "recipe_version": "ALTER TABLE vn_asset_batches ADD COLUMN recipe_version INTEGER NOT NULL DEFAULT 0",
+        "recipe_json": "ALTER TABLE vn_asset_batches ADD COLUMN recipe_json TEXT",
+        "execution_recipe_json": "ALTER TABLE vn_asset_batches ADD COLUMN execution_recipe_json TEXT",
+        "source_batch_id": "ALTER TABLE vn_asset_batches ADD COLUMN source_batch_id INTEGER",
     }
     for column_name, statement in additions.items():
         if column_name not in columns:
@@ -3105,13 +3482,58 @@ def _refresh_slot_generation_status(
     completed recipes without items do not manufacture review readiness.
     A legacy terminal fallback fills only planned/cancelled display, never
     overriding review, skipped, active/queued work or a derived failure.
+    An explicitly recorded failure still owned by the latest authored batch
+    retains its display across older outcome reconciliation. This display guard
+    also retains a NULL-owned failure only for a terminal V0 source in the same
+    pack, unless a later V1 batch has planned work in a nonterminal batch or a
+    surviving completed candidate on this slot. Planned work derives generating
+    when claimed and queued when unclaimed. AUTOINCREMENT batch IDs order that
+    history without inferring authored/latest ownership. Older V1 history and
+    remaining publication by the same failed V0 do not bypass the guard;
+    an unowned V1 failure never overrides review status through this guard.
+    It neither admits execution nor changes any variant outcome or Jobs lease.
     Missing slots are a no-op; SQL errors propagate and roll back the caller's
     outcome transition. This repository does not support row-lock backends.
     """
     slot = conn.execute(
-        "SELECT status, required_for_runtime FROM vn_asset_slots WHERE id = ?", (slot_id,),
+        """SELECT pack_id, status, required_for_runtime, last_failed_batch_id, latest_generation_batch_id
+           FROM vn_asset_slots WHERE id = ?""", (slot_id,),
     ).fetchone()
     if slot is None:
+        return
+    if (
+        slot["status"] == "failed"
+        and slot["last_failed_batch_id"] is not None
+        and (
+            slot["last_failed_batch_id"] == slot["latest_generation_batch_id"]
+            or (
+                slot["latest_generation_batch_id"] is None
+                and conn.execute(
+                    """SELECT 1 FROM vn_asset_batches AS failed
+                       WHERE failed.id = ? AND failed.pack_id = ?
+                         AND failed.recipe_version = 0 AND failed.status = 'failed'
+                         AND NOT EXISTS (
+                             SELECT 1 FROM vn_asset_generation_recipes AS recipe
+                             JOIN vn_asset_batches AS newer ON newer.id = recipe.batch_id
+                             LEFT JOIN vn_asset_items AS item ON item.id = recipe.item_id
+                               AND item.slot_id = recipe.slot_id AND item.pack_id = newer.pack_id
+                             WHERE recipe.slot_id = ? AND newer.pack_id = failed.pack_id
+                               AND newer.id > failed.id AND newer.recipe_version = 1
+                               AND (
+                                   (recipe.outcome_status = 'planned'
+                                    AND newer.status NOT IN ('completed', 'failed', 'cancelled'))
+                                   OR (recipe.outcome_status = 'completed' AND item.id IS NOT NULL
+                                       AND NOT EXISTS (
+                                           SELECT 1 FROM vn_asset_generation_recipes AS hidden
+                                           WHERE hidden.item_id = item.id AND hidden.outcome_status != 'completed'
+                                       ))
+                               )
+                         )""",
+                    (slot["last_failed_batch_id"], slot["pack_id"], slot_id),
+                ).fetchone() is not None
+            )
+        )
+    ):
         return
     counts = conn.execute(
         """
@@ -3201,3 +3623,15 @@ def _refresh_batch_outcome_counts(conn: Any, batch_id: int) -> None:
             batch_id,
         ),
     )
+
+
+def _ensure_slot_failure_column(conn: Any) -> None:
+    """Add nullable slot failure/ownership fields, preserving existing provenance.
+
+    Legacy rows remain unowned; return None and propagate database errors.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(vn_asset_slots)").fetchall()}
+    if "last_failed_batch_id" not in columns:
+        conn.execute("ALTER TABLE vn_asset_slots ADD COLUMN last_failed_batch_id INTEGER")
+    if "latest_generation_batch_id" not in columns:
+        conn.execute("ALTER TABLE vn_asset_slots ADD COLUMN latest_generation_batch_id INTEGER")

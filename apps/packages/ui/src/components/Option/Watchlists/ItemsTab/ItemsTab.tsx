@@ -102,6 +102,7 @@ import {
   getWatchlistChatTotalChars,
   WATCHLIST_CHAT_CONTENT_WARN_THRESHOLD
 } from "@/services/tldw/watchlist-chat-handoff"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const { Search } = Input
 
@@ -305,17 +306,10 @@ const getDomain = (url: string | null | undefined): string | null => {
   }
 }
 
-const isEditableTarget = (target: EventTarget | null): boolean => {
-  if (!(target instanceof HTMLElement)) return false
-  if (target.isContentEditable) return true
-  const tagName = target.tagName.toLowerCase()
-  if (tagName === "input" || tagName === "textarea" || tagName === "select") {
-    return true
-  }
-  if (target.closest("[contenteditable='true']")) return true
-  if (target.closest(".ant-select-dropdown")) return true
-  return false
-}
+// Ant Select renders its option list in a portal; keys there belong to the select.
+const isShortcutBlockedTarget = (target: EventTarget | null): boolean =>
+  isEditableTarget(target) ||
+  (target instanceof Element && target.closest(".ant-select-dropdown") !== null)
 
 const useSafeNavigate = () => {
   try {
@@ -2112,7 +2106,7 @@ export const ItemsTab: React.FC = () => {
   const handleShortcutKeyDown = useCallback((event: KeyboardEvent) => {
     if (event.defaultPrevented) return
     if (event.metaKey || event.ctrlKey || event.altKey) return
-    if (isEditableTarget(event.target)) return
+    if (isShortcutBlockedTarget(event.target)) return
     if (shortcutsOpen && event.key !== "Escape") return
 
     if (shortcutsOpen && event.key === "Escape") {

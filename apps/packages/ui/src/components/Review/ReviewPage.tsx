@@ -1,3 +1,4 @@
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React from "react"
 import {
   Button,
@@ -22,7 +23,6 @@ import { bgRequest } from "@/services/background-proxy"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { getNoteKeywords, searchNoteKeywords } from "@/services/note-keywords"
 import { useTranslation } from "react-i18next"
-import { useMessageOption } from "@/hooks/useMessageOption"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import {
   SaveIcon,
@@ -33,6 +33,9 @@ import {
 } from "lucide-react"
 import { ChevronDown, CopyIcon, SendIcon } from "lucide-react"
 import { useNavigate } from "react-router-dom"
+import { useMessageOption } from "@/hooks/useMessageOption"
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
+import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from "@/services/tldw/media-chat-handoff"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
@@ -52,7 +55,6 @@ import { usePromptSearch } from "@/components/Review/usePromptSearch"
 import { getDemoMediaItems } from "@/utils/demo-content"
 import { setSetting } from "@/services/settings/registry"
 import {
-  DISCUSS_MEDIA_PROMPT_SETTING,
   LAST_MEDIA_ID_SETTING
 } from "@/services/settings/ui-settings"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
@@ -98,11 +100,19 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
     selectedModel,
     messages,
     setMessages,
-    setChatMode,
-    setSelectedKnowledge,
-    setRagMediaIds
   } = useMessageOption()
   const navigate = useNavigate()
+  const ownerScope = useHomeMilestoneScope()
+  const handoffBoundaryRevision = React.useRef(0)
+  React.useLayoutEffect(() => watchChatAccountChanges(invalidated => {
+    if (invalidated) handoffBoundaryRevision.current += 1
+  }), [])
+  const handoffLifetime = React.useRef<AbortController | null>(null)
+  React.useLayoutEffect(() => {
+    const lifetime = new AbortController()
+    handoffLifetime.current = lifetime
+    return () => lifetime.abort()
+  }, [ownerScope, selected?.id])
   const [lastPrompt, setLastPrompt] = React.useState<string | null>(null)
   const [mediaTypes, setMediaTypes] = React.useState<string[]>([])
   const [availableMediaTypes, setAvailableMediaTypes] = React.useState<
@@ -2414,46 +2424,22 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
                             }>
                             <Button
                               icon={(<SendIcon className="w-4 h-4" />) as any}
-                              onClick={() => {
-                                const title =
-                                  selected.title || String(selected.id)
-                                const content =
-                                  selectedContent ||
-                                  contentFromDetail(selectedDetail) ||
-                                  ""
+                              onClick={async () => {
+                                const boundaryRevision = handoffBoundaryRevision.current
+                                const lifetime = handoffLifetime.current
+                                if (!ownerScope || !lifetime || lifetime.signal.aborted) return
                                 try {
-                                  const payload = {
+                                  const token = await createMediaChatHandoff({
                                     mediaId: String(selected.id),
-                                    title,
-                                    content,
-                                    mode: "normal" as const
-                                  }
-                                  void setSetting(
-                                    DISCUSS_MEDIA_PROMPT_SETTING,
-                                    payload
-                                  )
-                                  try {
-                                    window.dispatchEvent(
-                                      new CustomEvent("tldw:discuss-media", {
-                                        detail: payload
-                                      })
-                                    )
-                                  } catch {
-                                    // ignore event errors
-                                  }
+                                    title: selected.title || String(selected.id),
+                                    content: selectedContent || contentFromDetail(selectedDetail) || "",
+                                    mode: "normal", ownerScope
+                                  })
+                                  if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted) { await removeMediaChatHandoff(token); return }
+                                  navigate(buildMediaChatHandoffRoute(token))
                                 } catch {
-                                  // ignore storage errors
+                                  message.error(t("review:reviewPage.chatPrepareFailed", "Could not prepare this source for Chat. Please try again."))
                                 }
-                                setChatMode("normal")
-                                setSelectedKnowledge(null as any)
-                                setRagMediaIds(null)
-                                navigate("/")
-                                message.success(
-                                  t(
-                                    "review:reviewPage.chatPrepared",
-                                    "Prepared chat with this media in the composer."
-                                  )
-                                )
                               }}>
                               {t(
                                 "review:reviewPage.chatWithMedia",
@@ -2469,55 +2455,22 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
                               ) as string
                             }>
                             <Button
-                              onClick={() => {
+                              onClick={async () => {
+                                const boundaryRevision = handoffBoundaryRevision.current
+                                const lifetime = handoffLifetime.current
+                                if (!ownerScope || !lifetime || lifetime.signal.aborted) return
                                 const idNum = Number(selected.id)
                                 if (!Number.isFinite(idNum)) {
-                                  message.warning(
-                                    t(
-                                      "review:reviewPage.chatAboutMediaInvalidId",
-                                      "This media item does not have a numeric id yet."
-                                    )
-                                  )
+                                  message.warning(t("review:reviewPage.chatAboutMediaInvalidId", "This media item does not have a numeric id yet."))
                                   return
                                 }
-                                setSelectedKnowledge(null as any)
-                                setRagMediaIds([idNum])
-                                setChatMode("rag")
                                 try {
-                                  const payload = {
-                                    mediaId: String(selected.id),
-                                    mode: "rag_media" as const
-                                  }
-                                  void setSetting(
-                                    DISCUSS_MEDIA_PROMPT_SETTING,
-                                    payload
-                                  )
-                                  if (typeof window !== "undefined") {
-                                    window.dispatchEvent(
-                                      new CustomEvent("tldw:discuss-media", {
-                                        detail: payload
-                                      })
-                                    )
-                                  }
+                                  const token = await createMediaChatHandoff({ mediaId: String(selected.id), mode: "rag_media", ownerScope })
+                                  if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted) { await removeMediaChatHandoff(token); return }
+                                  navigate(buildMediaChatHandoffRoute(token))
                                 } catch {
-                                  // ignore storage/event errors
+                                  message.error(t("review:reviewPage.chatPrepareFailed", "Could not prepare this source for Chat. Please try again."))
                                 }
-                                navigate("/")
-                                try {
-                                  if (typeof window !== "undefined") {
-                                    window.dispatchEvent(
-                                      new CustomEvent("tldw:focus-composer")
-                                    )
-                                  }
-                                } catch {
-                                  // ignore
-                                }
-                                message.success(
-                                  t(
-                                    "review:reviewPage.chatAboutMediaRagSent",
-                                    "Opened media-scoped RAG chat."
-                                  )
-                                )
                               }}>
                               {t(
                                 "review:reviewPage.chatAboutMedia",

@@ -1,3 +1,5 @@
+import { HistorySelectionProvider } from '@/hooks/chat/useHistorySelection';
+import { formatSelectedHistory } from '@/db/dexie/helpers';
 import React, { lazy, Suspense, useState, useContext, useCallback } from 'react';
 
 import { Drawer, Tooltip } from 'antd';
@@ -37,7 +39,7 @@ import { useMobile } from '@/hooks/useMediaQuery';
 import { useSetting } from '@/hooks/useSetting';
 import { useServerOnline } from '@/hooks/useServerOnline';
 import { ChatSidebar } from '@/components/Common/ChatSidebar';
-import { EventOnlyHosts } from '@/components/Common/EventHosts';
+import { PageHelpModalHost } from '@/components/Common/PageHelpModalHost';
 import { PageAssistLoader } from '@/components/Common/PageAssistLoader';
 import { setSettingsReturnTo } from '@/utils/settings-return';
 import { WorkflowIntegrationHost } from '@/components/Common/Workflow';
@@ -58,7 +60,7 @@ import {
   useNotificationLifecycle,
 } from '@web/components/notifications/NotificationLifecycleProvider';
 import { NotificationToastBridge } from '@web/components/notifications/NotificationToastBridge';
-import { CommandPalette } from '@/components/Common/CommandPalette';
+import { CommandPaletteHost } from '@/components/Common/CommandPaletteHost';
 import {
   useConnectionActions,
   useConnectionState,
@@ -681,7 +683,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           )}
 
           {/* Command Palette - global keyboard shortcut ⌘K */}
-          {!hideHeader && <CommandPalette {...commandPaletteProps} />}
+          <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
 
           {/* Shared walkthrough runner for route-level tour controls */}
           <Suspense fallback={null}>
@@ -703,8 +705,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 
           <BuddyShellHost root="web" />
 
-          {/* Ensure event-driven modals are available even when the header is hidden */}
-          {hideHeader && <EventOnlyHosts commandPaletteProps={commandPaletteProps} />}
+          {/* Keep help events available when the header is hidden */}
+          {hideHeader && <PageHelpModalHost />}
 
           {/* Workflow landing modal + active workflow overlay */}
           <WorkflowIntegrationHost autoShowPaths={['/']} />
@@ -839,7 +841,7 @@ function RootLayoutShell({
 
   const notificationsEnabled = !effectiveHideHeader;
 
-  return (
+  const content = (
     <DemoModeProvider>
       <NotificationRuntimeOwner enabled={notificationsEnabled}>
         <LayoutShellContext.Provider value={{ inShell: true, setOverrides }}>
@@ -852,6 +854,18 @@ function RootLayoutShell({
       </NotificationRuntimeOwner>
     </DemoModeProvider>
   );
+  return location.pathname === "/chat" ? (
+    <HistorySelectionProvider
+      storageKey="tldw-h1-playground-reference"
+      onCapture={(capture) => {
+        const display = formatSelectedHistory(capture);
+        useStoreMessageOption.getState().setHistory(display.history);
+        useStoreMessageOption.getState().setMessages(display.messages);
+      }}
+    >
+      {content}
+    </HistorySelectionProvider>
+  ) : content;
 }
 
 function NotificationRuntimeOwner({

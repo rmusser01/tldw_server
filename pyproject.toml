@@ -10,9 +10,9 @@ build-backend = "setuptools.build_meta"
 ###########################
 [project]
 name = "tldw-server"
-version = "0.1.43"
+version = "0.1.46"
 description = "A comprehensive research assistant and media analysis platform - Too Long; Didn't Watch Server"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 readme = "README.md"
 # Use SPDX license expression as a string to avoid deprecation warnings.
 # Project is licensed under GPLv3.
@@ -24,7 +24,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Sound/Audio :: Analysis",
@@ -54,7 +53,7 @@ dependencies = [
   "typer>=0.12.0",
   "defusedxml>=0.7.0",
   "email-validator>=2.0.0",
-  "fastapi>=0.136.3,<0.137.0",
+  "fastapi>=0.142.1,<0.143.0",
   "httpcore[asyncio]>=1.0.9,<2",
   "httpx>=0.24.0",
   "certifi>=2024.2.2",
@@ -585,6 +584,7 @@ filterwarnings = [
 markers = [
     "asyncio: mark test as async",
     "unit: marks tests as unit tests",
+    "packaging: marks tests that build distribution artifacts and shell out",
     "integration: marks tests as integration tests",
     "postgres: marks tests that require PostgreSQL",
     "e2e: marks end-to-end UI tests",
@@ -956,7 +956,6 @@ exclude = []
 "tldw_Server_API/app/core/Character_Chat/modules/character_templates.py" = ["BLE001"]
 "tldw_Server_API/app/core/Character_Chat/modules/character_utils.py" = ["BLE001"]
 "tldw_Server_API/app/core/Character_Chat/modules/character_validation.py" = ["BLE001"]
-"tldw_Server_API/app/core/Chat/Workflows.py" = ["BLE001"]
 "tldw_Server_API/app/core/Chat/chat_characters.py" = ["BLE001"]
 "tldw_Server_API/app/core/Chat/chat_helpers.py" = ["BLE001"]
 "tldw_Server_API/app/core/Chat/chat_history.py" = ["BLE001"]
@@ -1814,7 +1813,7 @@ exclude = []
 known-first-party = ["tldw_Server_API"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
