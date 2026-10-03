@@ -2828,6 +2828,7 @@ app.get("/favicon.ico", include_in_schema=False)(favicon)
 
 app.get(
     "/",
+    response_model=None,
     openapi_extra={"security": []},
     responses={
         _starlette_status.HTTP_307_TEMPORARY_REDIRECT: {
@@ -2904,6 +2905,7 @@ try:
         app.add_api_route(
             f"{API_V1_PREFIX}/metrics",
             api_metrics,
+            response_model=None,
             methods=["GET"],
             tags=["monitoring"],
             dependencies=[
@@ -2924,6 +2926,7 @@ except _STARTUP_GUARD_EXCEPTIONS as _metrics_rt_err:
     app.add_api_route(
         f"{API_V1_PREFIX}/metrics",
         api_metrics,
+        response_model=None,
         methods=["GET"],
         tags=["monitoring"],
         dependencies=[

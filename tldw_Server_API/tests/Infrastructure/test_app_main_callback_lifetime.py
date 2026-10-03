@@ -45,7 +45,9 @@ def test_registered_main_callbacks_release_the_retired_app(
         consumer = FastAPI()
         for index, endpoint in enumerate(endpoints[:-1]):
             consumer.add_api_route(f"/retained/{index}", endpoint)
-        # Real classification is the native retaining boundary; no cache clearing.
+        # Exercise all real classification caches at the retaining boundary.
+        # These assertions guard cache admission for this causal regression,
+        # rather than claim a general public FastAPI API contract.
         for endpoint in endpoints:
             assert models._is_coroutine_callable(endpoint) is True
             assert models._is_gen_callable(endpoint) is False
@@ -61,6 +63,7 @@ def test_registered_main_callbacks_release_the_retired_app(
     assert app_ref() is None, "registered control-plane callbacks retained the retired app"
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_api_metrics_preserves_its_existing_call_counter() -> None:
     """Moving the callback must preserve existing monitoring series."""
