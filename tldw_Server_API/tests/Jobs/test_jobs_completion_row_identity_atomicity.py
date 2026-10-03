@@ -24,6 +24,7 @@ _COMPLETION_B = "token-b"
 
 
 def _is_completion_read(sql: Any) -> bool:
+    """Identify the authoritative completion lookup for the race hooks."""
     normalized = " ".join(str(sql).upper().split())
     return (
         normalized.startswith("SELECT ")
@@ -37,9 +38,11 @@ class _FetchedRow:
     """Return the snapshot consumed before the competing write was attempted."""
 
     def __init__(self, row: Any) -> None:
+        """Retain the row fetched before invoking the competing writer."""
         self._row = row
 
     def fetchone(self) -> Any:
+        """Return the retained row once, matching cursor consumption."""
         row, self._row = self._row, None
         return row
 
@@ -48,18 +51,22 @@ class _SQLiteCompletionReadHook:
     """Delegate the connection and hook only its first completion state read."""
 
     def __init__(self, inner: Any, callback: Callable[[], None]) -> None:
+        """Wrap a SQLite connection with a one-shot completion callback."""
         self._inner = inner
         self._callback = callback
         self.fired = False
 
     def __enter__(self) -> _SQLiteCompletionReadHook:
+        """Enter the wrapped transaction while retaining the read hook."""
         self._inner.__enter__()
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> Any:
+        """Delegate transaction commit or rollback to the connection."""
         return self._inner.__exit__(exc_type, exc, tb)
 
     def execute(self, sql: str, parameters: Any = ()) -> Any:
+        """Attempt the competing write after fetching completion facts."""
         cursor = self._inner.execute(sql, parameters)
         if not self.fired and _is_completion_read(sql):
             self.fired = True
@@ -70,6 +77,7 @@ class _SQLiteCompletionReadHook:
         return cursor
 
     def __getattr__(self, name: str) -> Any:
+        """Delegate connection operations unrelated to the hooked read."""
         return getattr(self._inner, name)
 
 
@@ -77,6 +85,7 @@ class _PostgresCompletionReadHook:
     """Hook fetchone after the real, RLS-aware cursor executes the state read."""
 
     def __init__(self, inner: Any, callback: Callable[[], None]) -> None:
+        """Wrap the real PostgreSQL cursor without replacing its RLS setup."""
         self._inner = inner
         self._callback = callback
         self._armed = False
@@ -84,6 +93,7 @@ class _PostgresCompletionReadHook:
         self.row_locked = False
 
     def execute(self, sql: Any, parameters: Any = None) -> Any:
+        """Arm the callback and record whether completion requested a lock."""
         result = self._inner.execute(sql, parameters)
         if not self.fired and _is_completion_read(sql):
             self._armed = True
@@ -91,6 +101,7 @@ class _PostgresCompletionReadHook:
         return result
 
     def fetchone(self) -> Any:
+        """Invoke the competing transaction after consuming completion facts."""
         row = self._inner.fetchone()
         if self._armed:
             self._armed = False
@@ -99,6 +110,7 @@ class _PostgresCompletionReadHook:
         return row
 
     def __getattr__(self, name: str) -> Any:
+        """Delegate cursor operations unrelated to the hooked read."""
         return getattr(self._inner, name)
 
 
@@ -107,12 +119,14 @@ def _hook_completion_read(
     monkeypatch: pytest.MonkeyPatch,
     callback: Callable[[], None],
 ) -> list[Any]:
+    """Install a one-shot read callback while keeping real backend execution."""
     hooks: list[Any] = []
     if jm.backend == "postgres":
         original_cursor = jm._pg_cursor
 
         @contextmanager
         def pg_cursor(conn: Any) -> Iterator[Any]:
+            """Yield the hooked first cursor using the manager's RLS context."""
             with original_cursor(conn) as cursor:
                 if not hooks:
                     hook = _PostgresCompletionReadHook(cursor, callback)
@@ -126,6 +140,7 @@ def _hook_completion_read(
         original_connect = jm._connect
 
         def connect() -> Any:
+            """Wrap only the first connection used by the completion attempt."""
             conn = original_connect()
             if not hooks:
                 hook = _SQLiteCompletionReadHook(conn, callback)
@@ -139,6 +154,7 @@ def _hook_completion_read(
 
 @pytest.fixture(autouse=True)
 def _completion_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enable atomic bookkeeping and isolate completion policy settings."""
     monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     monkeypatch.setenv("JOBS_EVENTS_ENABLED", "false")
@@ -155,6 +171,7 @@ def _completion_env(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
 )
 def jm(request: pytest.FixtureRequest, tmp_path: Path) -> JobManager:
+    """Provide SQLite or the existing isolated Jobs PostgreSQL fixture."""
     if request.param == "postgres":
         pytest.importorskip("psycopg")
         dsn = request.getfixturevalue("jobs_pg_dsn")
@@ -163,6 +180,7 @@ def jm(request: pytest.FixtureRequest, tmp_path: Path) -> JobManager:
 
 
 def _create_job(jm: JobManager, *, processing: bool = False) -> dict[str, Any]:
+    """Create a scoped job and optionally acquire its real processing lease."""
     created = jm.create_job(
         domain=_DOMAIN,
         queue=_QUEUE,
@@ -193,6 +211,7 @@ def _rows(
     postgres_sql: str,
     parameters: tuple[Any, ...],
 ) -> list[dict[str, Any]]:
+    """Read durable backend rows through the manager's connection policy."""
     conn = jm._connect()
     try:
         if jm.backend == "postgres":
@@ -205,6 +224,7 @@ def _rows(
 
 
 def _raw_job(jm: JobManager, job_id: int) -> dict[str, Any] | None:
+    """Read stored job fields without facade normalization."""
     rows = _rows(
         jm,
         "SELECT * FROM jobs WHERE id=?",
@@ -215,6 +235,7 @@ def _raw_job(jm: JobManager, job_id: int) -> dict[str, Any] | None:
 
 
 def _counters(jm: JobManager) -> tuple[int, ...]:
+    """Read all lifecycle counters for the regression job scope."""
     rows = _rows(
         jm,
         "SELECT ready_count, scheduled_count, processing_count, quarantined_count "
@@ -236,6 +257,7 @@ def _counters(jm: JobManager) -> tuple[int, ...]:
 
 
 def _events(jm: JobManager, job_id: int) -> list[dict[str, Any]]:
+    """Read the job's durable outbox events in insertion order."""
     return _rows(
         jm,
         "SELECT * FROM job_events WHERE job_id=? ORDER BY id",
@@ -245,6 +267,7 @@ def _events(jm: JobManager, job_id: int) -> list[dict[str, Any]]:
 
 
 def _snapshot(jm: JobManager, job_id: int) -> tuple[Any, ...]:
+    """Capture job state, counters and events for no-mutation assertions."""
     return _raw_job(jm, job_id), _counters(jm), _events(jm, job_id)
 
 
@@ -254,6 +277,7 @@ def _set_identity_and_token(
     raw_uuid: str | None,
     token: str | None = None,
 ) -> None:
+    """Seed raw identity and token values without normalizing legacy UUIDs."""
     conn = jm._connect()
     try:
         with conn:
@@ -271,6 +295,7 @@ def _set_identity_and_token(
 
 
 def _completion_observers(jm: JobManager, monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
+    """Capture post-commit metrics and observer calls without external effects."""
     import tldw_Server_API.app.core.Jobs.manager as manager_module
 
     calls: dict[str, list[Any]] = {
@@ -299,6 +324,7 @@ def _completion_observers(jm: JobManager, monkeypatch: pytest.MonkeyPatch) -> di
 
 
 def _assert_one_completion(jm: JobManager, job_id: int, *, processing: bool = False) -> None:
+    """Assert one completion with balanced counters and original event context."""
     assert _counters(jm) == (0, 0, 0, 0)
     expected_events = ["job.created"]
     if processing:
@@ -312,6 +338,7 @@ def _assert_one_completion(jm: JobManager, job_id: int, *, processing: bool = Fa
 
 
 def _zero_timeout_connection(db_path: Path) -> sqlite3.Connection:
+    """Open a competing SQLite writer that reports contention immediately."""
     conn = sqlite3.connect(str(db_path), timeout=0)
     try:
         configure_sqlite_connection(conn, busy_timeout_ms=0)
@@ -323,12 +350,14 @@ def _zero_timeout_connection(db_path: Path) -> sqlite3.Connection:
 
 
 def _assert_sqlite_busy(codes: list[int]) -> None:
+    """Check contention using SQLite error codes rather than message text."""
     assert len(codes) == 1
     assert codes[0] & 0xFF in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
 
 
 @pytest.mark.unit
 def test_sqlite_missing_row_cannot_complete_concurrent_insert(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A locked miss cannot complete a row inserted after the transaction."""
     db_path = tmp_path / "completion-missing.db"
     manager = JobManager(db_path)
     creator = JobManager(db_path)
@@ -337,6 +366,7 @@ def test_sqlite_missing_row_cannot_complete_concurrent_insert(tmp_path: Path, mo
     inserted: list[dict[str, Any]] = []
 
     def insert_after_missing_read() -> None:
+        """Attempt insertion while completion holds its immediate transaction."""
         try:
             inserted.append(_create_job(creator))
         except sqlite3.OperationalError as exc:
@@ -366,6 +396,7 @@ def test_sqlite_missing_row_cannot_complete_concurrent_insert(tmp_path: Path, mo
 def test_sqlite_existing_row_cannot_be_replaced_after_completion_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """SQLite holds the original row identity through atomic completion."""
     db_path = tmp_path / "completion-replacement.db"
     manager = JobManager(db_path)
     original = _create_job(manager)
@@ -373,6 +404,7 @@ def test_sqlite_existing_row_cannot_be_replaced_after_completion_read(
     busy_codes: list[int] = []
 
     def replace_after_read() -> None:
+        """Attempt same-ID replacement through an independent SQLite writer."""
         conn = _zero_timeout_connection(db_path)
         try:
             with conn:
@@ -413,6 +445,7 @@ def test_sqlite_existing_row_cannot_be_replaced_after_completion_read(
 def test_postgres_missing_row_cannot_complete_concurrent_insert(
     jobs_pg_dsn: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A PostgreSQL miss remains false even when a new row commits afterward."""
     pytest.importorskip("psycopg")
     manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     creator = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
@@ -434,6 +467,7 @@ def test_postgres_missing_row_cannot_complete_concurrent_insert(
 def test_postgres_completion_locks_processing_row_before_fetchone_callback(
     jobs_pg_dsn: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The authoritative PostgreSQL read locks the row before completion."""
     psycopg = pytest.importorskip("psycopg")
     manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     acquired = _create_job(manager, processing=True)
@@ -442,6 +476,7 @@ def test_postgres_completion_locks_processing_row_before_fetchone_callback(
     lock_errors: list[Any] = []
 
     def attempt_competing_lock() -> None:
+        """Prove a second transaction cannot acquire the observed row lock."""
         conn = psycopg.connect(jobs_pg_dsn)
         try:
             with conn.cursor() as cursor:
@@ -490,6 +525,7 @@ def test_postgres_completion_locks_processing_row_before_fetchone_callback(
 def test_expected_uuid_mismatch_has_no_mutation_or_side_effects(
     jm: JobManager, monkeypatch: pytest.MonkeyPatch, processing: bool
 ) -> None:
+    """Reject stale UUIDs without changing queued or processing jobs."""
     job = _create_job(jm, processing=processing)
     job_id = int(job["id"])
     before = _snapshot(jm, job_id)
@@ -513,6 +549,7 @@ def test_expected_uuid_mismatch_has_no_mutation_or_side_effects(
 
 
 def test_stale_uuid_cannot_replay_replacement_completion_token(jm: JobManager, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A matching token cannot replay completion for a replacement UUID."""
     original = _create_job(jm)
     job_id = int(original["id"])
     _set_identity_and_token(jm, job_id, "replacement-uuid")
@@ -539,6 +576,7 @@ def test_stale_uuid_cannot_replay_replacement_completion_token(jm: JobManager, m
 def test_legacy_raw_uuid_is_preserved_and_same_token_replays_once(
     jm: JobManager, monkeypatch: pytest.MonkeyPatch, raw_uuid: str | None
 ) -> None:
+    """Preserve raw legacy UUIDs and keep matching-token replay idempotent."""
     created = _create_job(jm)
     job_id = int(created["id"])
     _set_identity_and_token(jm, job_id, raw_uuid)
@@ -572,6 +610,7 @@ def test_legacy_raw_uuid_is_preserved_and_same_token_replays_once(
 def test_queued_stored_token_rejects_different_token_then_transitions_once(
     jm: JobManager, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Reject a conflicting queued token before accepting its matching token."""
     created = _create_job(jm)
     job_id = int(created["id"])
     _set_identity_and_token(jm, job_id, created["uuid"], _COMPLETION_A)
@@ -613,6 +652,7 @@ def test_sqlite_completion_preflight_precedes_identity_lookup(
     identity: str,
     preflight: str,
 ) -> None:
+    """Preflight errors retain precedence over missing or stale identity."""
     manager = JobManager(tmp_path / "completion-preflight.db")
     job_id = 1
     before = None

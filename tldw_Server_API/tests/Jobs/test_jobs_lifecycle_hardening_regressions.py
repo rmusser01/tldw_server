@@ -790,6 +790,7 @@ def test_completion_missing_counter_reconciliation_failure_rolls_back_everything
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A counter reconciliation SQL error rolls back all completion effects."""
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     monkeypatch.setenv("JOBS_EVENTS_ENABLED", "true")
     monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
@@ -1216,6 +1217,7 @@ def test_completion_sla_savepoint_control_failure_rolls_back_core_completion(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """SLA savepoint control errors roll back mandatory completion effects."""
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     monkeypatch.setenv("JOBS_EVENTS_ENABLED", "true")
     monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")

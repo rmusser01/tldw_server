@@ -1,5 +1,5 @@
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -237,6 +237,7 @@ def test_rls_completion_respects_visible_legacy_null_identity(
     monkeypatch: pytest.MonkeyPatch,
     owner_user_id: str,
 ) -> None:
+    """Lock and complete only the RLS-visible row, preserving its null UUID."""
     admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
     ensure_jobs_tables_pg(admin_dsn)
     ensure_jobs_rls_policies_pg(admin_dsn)
@@ -249,6 +250,7 @@ def test_rls_completion_respects_visible_legacy_null_identity(
     lock_attempted: list[bool] = []
 
     def prove_row_locked() -> None:
+        """Prove the visible completion read already holds its row lock."""
         with psycopg.connect(admin_dsn) as conn, conn.cursor() as cur:
             with pytest.raises(psycopg.errors.LockNotAvailable):
                 cur.execute(
@@ -258,7 +260,8 @@ def test_rls_completion_respects_visible_legacy_null_identity(
         lock_attempted.append(True)
 
     @contextmanager
-    def cursor_with_lock_proof(conn: Any):
+    def cursor_with_lock_proof(conn: Any) -> Iterator[_CompletionReadCursor]:
+        """Yield an RLS-aware cursor that checks locking after the state read."""
         with original_cursor(conn) as cur:
             yield _CompletionReadCursor(cur, prove_row_locked, expect_missing=False)
 
@@ -303,6 +306,8 @@ def test_rls_completion_respects_visible_legacy_null_identity(
 
 
 class _CompletionReadCursor:
+    """Hook the authoritative completion read while delegating real SQL."""
+
     def __init__(
         self,
         inner: Any,
@@ -310,6 +315,7 @@ class _CompletionReadCursor:
         *,
         expect_missing: bool = True,
     ) -> None:
+        """Configure the callback and expected visibility of the fetched row."""
         self._inner = inner
         self._after_read = after_read
         self._expect_missing = expect_missing
@@ -317,6 +323,7 @@ class _CompletionReadCursor:
         self.fired = False
 
     def execute(self, sql: Any, params: Any = None) -> Any:
+        """Arm the callback only for the first authoritative completion read."""
         normalized = " ".join(str(sql).upper().split())
         if (
             not self.fired
@@ -328,6 +335,7 @@ class _CompletionReadCursor:
         return self._inner.execute(sql, params)
 
     def fetchone(self) -> Any:
+        """Check visibility and invoke the callback after fetching real facts."""
         row = self._inner.fetchone()
         if self._armed:
             self._armed = False
@@ -337,12 +345,14 @@ class _CompletionReadCursor:
         return row
 
     def __getattr__(self, name: str) -> Any:
+        """Delegate cursor operations unrelated to completion read hooks."""
         return getattr(self._inner, name)
 
 
 def test_rls_completion_miss_cannot_complete_concurrent_visible_insert(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """An RLS-visible concurrent insert cannot turn a locked miss into success."""
     admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
     ensure_jobs_tables_pg(admin_dsn)
     ensure_jobs_rls_policies_pg(admin_dsn)
@@ -350,6 +360,7 @@ def test_rls_completion_miss_cannot_complete_concurrent_visible_insert(
     inserted: dict[str, int] = {}
 
     def insert_visible_job() -> None:
+        """Commit a visible same-ID job after the completion lookup misses."""
         with psycopg.connect(admin_dsn) as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO jobs(id, uuid, domain, queue, job_type, owner_user_id, "
@@ -363,7 +374,8 @@ def test_rls_completion_miss_cannot_complete_concurrent_visible_insert(
     hooks: list[_CompletionReadCursor] = []
 
     @contextmanager
-    def cursor_with_hook(conn: Any):
+    def cursor_with_hook(conn: Any) -> Iterator[_CompletionReadCursor]:
+        """Yield the existing RLS cursor with the concurrent insertion hook."""
         with original_cursor(conn) as cur:
             hook = _CompletionReadCursor(cur, insert_visible_job)
             hooks.append(hook)

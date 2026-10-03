@@ -1339,3 +1339,36 @@ and historical repair to TASK-13216 and TASK-13217.
   pending integration. The human requester must write the required
   `Change summary`; no merge was performed. Strict extraction remains a
   separate next work item after this defect fix merges.
+
+## Qodo Review Follow-Up: 2026-10-02
+
+- [x] Validate all four rule findings from the completed Qodo review of
+  `59f8c5582651a1bfce6ecce29b17566aa5792e34` (zero reported bugs).
+- [x] Document every new test/helper definition and annotate both RLS cursor
+  context managers with `Iterator[_CompletionReadCursor]`. An AST audit
+  identified the missing documentation/types before editing and passed after
+  editing. A separate AST comparison confirms only docstrings and return/import
+  annotations changed; production and test behavior are unchanged.
+- [x] Track the existing completion SQL ownership concern as TASK-13421.
+  Relocating SQL is outside this approved focused fix and must preserve the
+  authoritative transaction and RLS context in a separately approved design.
+- [x] Validate that the new PostgreSQL tests use the existing `jobs_pg_dsn`
+  fixture, which delegates isolation to the shared `pg_temp_db` fixture.
+  AuthNZ's suite-local `isolated_test_environment` is not a Jobs fixture;
+  no independent database provisioning was added by this PR.
+- [x] Rerun the focused matrices: SQLite 247 passed / 70 deselected;
+  required PostgreSQL 90 passed / 76 deselected, no skips, including the
+  opt-in outbox/SSE tests. Artifacts: `/tmp/task13215_qodo_sqlite.xml` and
+  `/tmp/task13215_qodo_postgres.xml`.
+- [x] Verify Ruff, new-module Black, runtime/test compilation, whitespace and
+  scoped production/test Bandit baseline comparisons. Both delta reports have
+  no findings or errors: `/tmp/bandit_task_13215_qodo_delta.json` and
+  `/tmp/bandit_task_13215_qodo_tests_delta.json` (test B101 excluded).
+- [ ] Publish the review corrections and reply in all original inline threads.
+- [ ] Verify current-head review and required hosted CI, then merge only while
+  the branch remains based on live `dev` and all authorized merge gates pass.
+
+The requester has supplied the verbatim human `Change summary` and authorized
+the conditional merge. The PR is ready for review, not draft. Hosted required
+checks and dedicated Jobs CI remain pending; local verification does not
+replace them.
