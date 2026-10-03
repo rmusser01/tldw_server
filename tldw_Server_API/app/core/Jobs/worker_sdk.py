@@ -1027,6 +1027,7 @@ class WorkerSDK:
                         or is_truthy(os.getenv("JOBS_REQUIRE_COMPLETION_TOKEN"))
                         else None
                     ),
+                    expected_uuid=str(job.get("uuid") or ""),
                     enforce=enforce,
                 )
                 if not ok:
