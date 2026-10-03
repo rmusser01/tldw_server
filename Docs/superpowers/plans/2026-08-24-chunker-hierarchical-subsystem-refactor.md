@@ -784,10 +784,11 @@ service cases passed. Before wiring the public delegate, the two focused active
 lookup/private-helper contracts failed as expected (2 failed, 63 deselected).
 The extraction keeps the exact section mutation algorithm and per-call option
 order; characterization patches now target `service.compute_paragraph_spans` and
-`builder.build_leaf_block`. The service carries present template hierarchy grouping
-through unchanged, as explicitly required by the approved Task 5 handoff.
+`builder.build_leaf_block`. The initial extraction incorrectly added template
+hierarchy grouping passthrough based on a mistaken handoff; this was not baseline
+behavior and is corrected below as a validated extraction regression.
 
-Task 5 final verification (2026-10-02): the required seven-file suite passed with
+Task 5 initial extraction verification (2026-10-02): the required seven-file suite passed with
 122 tests, 0 failures, and 257 warnings. The shared spans/process_text regression
 suite passed with 171 tests, 1 existing PyThaiNLP skip, 0 failures, and 356 warnings.
 Ruff passed on all 5 touched Python files after replacing the 4 copied legacy
@@ -798,11 +799,34 @@ touched tests. Bandit scanned 1,959 production LOC with 0 findings and 0 errors.
 `git diff --check` passed. AST self-review verified identical builder mutation and
 service coordination after only lookup/name/annotation normalization, unchanged
 public flatten/flat-composition methods, and the exact one-assignment constructor.
-The pinned tree body did not contain the grouping passthrough described in the
-handoff; Task 5 implements that explicit approved requirement and tests identity
-preservation for a populated mapping, an empty mapping, and None. No grouping
-algorithm, flattening, or Task 6 file is changed. The extraction commit contains
-this Task 5 evidence and TASK-13215 notes; the task remains In Progress.
+Review confirmed the pinned tree body returns exactly seven keys and never looks
+up template hierarchy after span computation. The added passthrough was therefore
+an extraction regression, not an approved correction or preserved behavior.
+It is removed in the separate corrective commit below. No grouping algorithm,
+flattening, or Task 6 file is changed. TASK-13215 remains In Progress.
+
+Task 5 envelope regression correction (2026-10-02): the validated regression was
+recorded through official Backlog MCP before edits. Replaced the mistaken
+passthrough tests with fixed-span compatibility tests: populated, empty, and None
+grouping are ignored, the envelope has exactly its baseline seven keys, and an
+unused malformed hierarchy sentinel is never inspected. RED: all 4 cases failed
+against the extracted service (13 deselected, 20 warnings), exposing the added
+key and truthiness lookup. Removed only the extra hierarchy/grouping lookup and
+restored the direct seven-key return. This is a refactor-induced compatibility
+repair; no pre-existing behavior correction is claimed or approved.
+
+Corrective GREEN/gates: 17 direct builder/service tests passed (46 warnings),
+123 required tests passed (259 warnings), and the shared spans/process_text
+regression suite passed with 171 tests and 1 existing PyThaiNLP skip (356 warnings).
+Ruff passed on all 5 Task 5 Python paths. Black passed on the 4 scoped new/test
+files and chunker.py ranges 26 and 394-425; no legacy whole-file formatting.
+Compileall passed for hierarchical, chunker.py, and both test files. Bandit scanned
+1,955 production LOC with 0 findings/errors. `git diff --check` passed. AST review
+proved the seven-key return is identical to the pinned baseline and no template
+lookup remains after spans. Only service.py, test_hierarchical_builder.py, this
+Task 5 plan evidence, and the official Backlog record changed in the corrective
+commit: `fix: preserve hierarchical tree envelope during extraction`. Task 6
+remains untouched; implementation awaits reviews with TASK-13215 In Progress.
 
 ## Task 6: Extract Grouping and Activate It in Flattening
 
