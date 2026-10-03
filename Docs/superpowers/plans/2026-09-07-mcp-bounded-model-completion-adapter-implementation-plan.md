@@ -308,13 +308,24 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 ### Task 4.3: Add the single-attempt OpenAI transport
 
-**Status:** In Progress
+**Status:** Complete
 
 **API compatibility adjustment:** The bounded JSON path selects HTTPX from its explicit native client; it does not accept the generic request helper's `backend` keyword. Redirect suppression uses `allow_redirects=False` at the bounded helper and the native stream IO always uses `follow_redirects=False`.
+
+**Certification revalidation:** The shared selected-host certificate-pin probe blocks the event loop. A parent probe requested cancellation at 10 ms but completed at 54 ms before cancellation could run. This optional path is not certified: reject selected-endpoint pinning at construction/health and recheck the fresh client's pin state before any fetch, without disabling operator pins. Unrelated-host pins remain compatible. ADR-061 records the limitation.
+
+**Review/revalidation (2026-10-03):** The independent spec review reproduced a genuine pre-response egress denial incorrectly classified as shared infrastructure. Its explicit security-policy provenance must remain breaker neutral. HTTP status and provider-response failures remain neutral, and arbitrary fixed transport defects remain shared. A separate parent regression reproduced nine pre-existing observability test failures when core config was collected first; the mocked HTTP fixture now declares only its additional port `8443`, preserving all host/deny/private policy controls. The core-first reproducer passes `83` tests and the combined transport/normalization/contracts/accounting/HTTP/credential gate passes `852`, with no command-line egress override.
+
+**Review boundary:** The managed run deadline's hard ceiling of 120 seconds is enforced at Task 4.4 initialization, rather than inferred from the HTTP transport timeout. Terminal HTTP-client close failures still return a detached failure; the explicit valid-result preservation rule applies to accounting and credential-use persistence, not arbitrary client teardown. The independent spec review did not validate a broader preservation requirement. Non-terminating teardown remains covered by retained-child containment.
+
+**Quality-review repair (2026-10-03):** Python 3.14's cancelled `asyncio.shield()` installs a late-exception logging callback. Independent full-transport probes and a parent helper-boundary reproduction confirmed private response/client-cleanup exception content reaches the event-loop error handler despite later retrieval. Replace only the owned-operation wait with callback-free task draining; preserve first/repeated/simultaneous caller cancellation and client ownership. Add delayed-error tests for both cleanup paths and capture the loop handler/default asyncio logger. This is a sanitization repair, not a broader terminal-close result-preservation change.
+
+**Final verification (2026-10-03):** The egress repair passed independent spec re-review. A fresh bypass/regression and quality repair review approved the callback-free owned wait after 164 transport tests and 284 additional in-memory probes, including the original shield leak as a positive control. The parent four-case stream/client cleanup privacy regression and 12 cancellation/race cases pass; the fresh combined transport/normalization/contracts/accounting/HTTP/credential gate passes `858` tests. Ruff, Black (including the touched fixture range), compilation, and production Bandit pass; Bandit reports zero findings/errors. Verification used macOS CPython 3.14.3 with its default event loop and mocked provider I/O; other Python versions/loop implementations and fatal process signals were not exercised. No validated Task 4.3 findings remain.
 
 **Files:**
 - Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/transport.py`
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_transport.py`
+- Modify: `tldw_Server_API/tests/http_client/test_http_client_sensitive_observability.py`
 
 1. Write request-capture tests proving the request uses `ProviderCallCredentials.trusted_endpoint`, generated credential headers, and the frozen model only. Reject unsupported providers and missing endpoint/credential state before dispatch.
 2. Build one OpenAI chat-completions payload with `stream=false`, `n=1`, `tools=None`, no `tool_choice` field, and the provider-native output-token field selected from the frozen model policy. Do not accept extra headers/body, endpoint, model, retry, fallback, or stream settings from the completion request.
