@@ -50,6 +50,10 @@ _BASELINE_PERMISSIONS: Sequence[PermissionDef] = (
     ),
     ("notes.link_keyword", "Accept Notes keyword-link suggestions", "notes"),
     ("keywords.create", "Create keywords while accepting suggestions", "keywords"),
+    ("calendar.read", "Read calendars and items", "calendar"),
+    ("calendar.write", "Manage calendars and local items", "calendar"),
+    ("calendar.sync", "Manage external calendar sync", "calendar"),
+    ("calendar.admin", "Administer calendars", "calendar"),
 )
 
 _MCP_PERMISSIONS: Sequence[PermissionDef] = (
@@ -88,6 +92,9 @@ def _build_role_grants(
                 "notes.graph.suggest",
                 "notes.link_keyword",
                 "keywords.create",
+                "calendar.read",
+                "calendar.write",
+                "calendar.sync",
             )
             if p in base
         ],
@@ -96,7 +103,7 @@ def _build_role_grants(
             for p in ("notes.graph.suggest", "notes.link_keyword", "keywords.create")
             if p in base
         ],
-        "viewer": [p for p in ("media.read",) if p in base],
+        "viewer": [p for p in ("media.read", "calendar.read") if p in base],
         "reviewer": [
             p
             for p in (

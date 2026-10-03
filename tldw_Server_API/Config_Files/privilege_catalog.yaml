@@ -1,6 +1,33 @@
 version: 1.0.0
 updated_at: 2026-06-09T00:00:00Z
 scopes:
+  - id: calendar.read
+    description: Read authorized calendars, items, and bounded calendar views.
+    resource_tags: [calendar, read]
+    sensitivity_tier: moderate
+    rate_limit_class: standard
+    default_roles: [admin, user, viewer]
+    feature_flag_id: null
+    ownership_predicates: []
+    doc_url: null
+  - id: calendar.write
+    description: Manage authorized local calendar items and user-owned context.
+    resource_tags: [calendar, write]
+    sensitivity_tier: high
+    rate_limit_class: admin
+    default_roles: [admin, user]
+    feature_flag_id: null
+    ownership_predicates: []
+    doc_url: null
+  - id: calendar.sync
+    description: Manage authorized external accounts and read-only synchronization.
+    resource_tags: [calendar, synchronization]
+    sensitivity_tier: high
+    rate_limit_class: admin
+    default_roles: [admin, user]
+    feature_flag_id: null
+    ownership_predicates: []
+    doc_url: null
   - id: media.ingest
     description: Ingest new media assets via upload, URL fetch, or pipeline triggers.
     resource_tags:

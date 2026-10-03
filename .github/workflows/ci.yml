@@ -531,6 +531,7 @@ jobs:
               tldw_Server_API/tests/Image_Generation
           - name: gap-verified-2
             paths: >-
+              tldw_Server_API/tests/Calendar
               tldw_Server_API/tests/Claims_Extraction
               tldw_Server_API/tests/Discord
               tldw_Server_API/tests/Files
@@ -2179,6 +2180,7 @@ jobs:
               tldw_Server_API/tests/Image_Generation
           - name: gap-verified-2
             paths: >-
+              tldw_Server_API/tests/Calendar
               tldw_Server_API/tests/Claims_Extraction
               tldw_Server_API/tests/Discord
               tldw_Server_API/tests/Files
