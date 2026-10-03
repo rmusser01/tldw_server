@@ -6,13 +6,13 @@ Owner: TASK13260.281. PR: https://github.com/rmusser01/tldw_server/pull/3096
 **Goal**: Publish the existing repairs on the latest dev without the integration merge.
 **Success Criteria**: Rebase preserves the reviewed source; publish with an exact force-with-lease.
 **Tests**: Compare pre/post trees and run git diff --check; qualify any actual source changes.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 2: Address Qodo review
 **Goal**: Verify and resolve actionable Qodo findings against the actual PR source.
 **Success Criteria**: Findings have fixes or source-supported replies; changed behavior has causal regressions and independent review.
 **Tests**: Affected suites, touched lint, and Bandit for changed Python production scope.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Stage 3: Verify gates and merge
 **Goal**: Merge the reviewed final head normally.
