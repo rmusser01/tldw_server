@@ -1,6 +1,7 @@
 # Embeddings Stage 3: Durable Store And Jobs Runner
 
 Date: 2026-10-02
+Revised: 2026-10-03
 Task: TASK-13421
 Status: Design sections approved; consolidated written spec awaiting requester review.
 Predecessor: TASK-12973, completed through merged PR #2790.
@@ -11,7 +12,7 @@ Build a dormant internal durability foundation for the Embeddings workflow. Jobs
 owns the root operational lifecycle; Embeddings owns execution detail. The
 foundation must be independently testable before any production entrypoint uses
 it. This spec consolidates the approved architecture, persistence, execution,
-recovery, verification, and four subsequent review corrections.
+recovery, verification, and the subsequent review corrections.
 
 In scope:
 
@@ -40,7 +41,7 @@ must not create its tables, admit roots, start workers, or resolve content.
 
 ADR required: yes. This establishes durable persistence and execution/recovery
 ownership rules. Proposed governing record:
-[ADR-058](../../ADR/058-embeddings-durable-workflow-foundation.md).
+[ADR-059](../../ADR/059-embeddings-durable-workflow-foundation.md).
 
 [ADR-003](../../ADR/003-jobs-vs-scheduler-default.md) governs Jobs selection;
 [ADR-022](../../ADR/022-embeddings-api-and-media-pipeline.md) remains governing for
@@ -62,10 +63,10 @@ or supersede its accepted rationale.
 | Jobs prepared capability | Exact owner/root identity, acquisition, live lease proofs, continuation, retry/terminal dispositions, and retained operation acknowledgement proofs | Jobs-owned contracts and database abstractions |
 | Embeddings repository | Manifests, generations, attempts, checkpoints, operation claims, and retention | DB_Management abstractions and transaction-enlisted Jobs fence validation |
 | Durable coordinator | One bounded batch per acquisition; preparation, pinned execution, and checkpoint orchestration | Narrow repository and adapter ports |
-| Source resolver | Authorize and retrieve the exact referenced source revision under byte bounds | Injected source-specific authority |
+| Source resolver | Authorize and retrieve one bounded batch of exact source revisions, preserving item order | Injected source-specific authority |
 | Provider executor | One reported provider dispatch with a certified embedding-space identity | Injected provider adapter |
-| Output sink | Atomic first-accepted writes, immutable lookup receipts, sealing/closure, and scoped cleanup | Injected sink adapter |
-| Accounting boundary | Idempotent reservation and one terminal settlement per attempt | Injected boundary-owned accounting implementation |
+| Output sink | Bounded batch lookup/writes, authoritative receipt absence, first-accepted values, sealing/closure, and scoped cleanup | Injected sink adapter |
+| Accounting boundary | Atomically ordered reservation and absorbing terminal settlement per attempt | Injected boundary-owned accounting implementation |
 | Reconciler | Resolve existing operation intents and receipts; never compute embeddings | Repository, Jobs capability, sink, and accounting ports |
 
 New domain SQL and migrations live under `app/core/DB_Management/`; Embeddings
@@ -104,6 +105,9 @@ source-consistent read. It must bound data while reading, not after loading it.
 Changed, deleted, unavailable, or unauthorized revisions stop execution; never
 substitute the latest content or silently rebuild the manifest. Missing sources
 do not prevent receipt-only accounting or cleanup recovery.
+The coordinator submits one bounded batch-resolution call and validates the
+returned index order and revisions. This is not 64 sequential per-item calls;
+adapter admission requires the full batch to meet its certified deadline.
 
 Each generation pins provider, model, trusted backend/model revision, dimensions,
 dimension/vector policy, transform identity, batch size, and policy fingerprint.
@@ -225,15 +229,17 @@ claim cannot acknowledge another claimant's operation.
    recover accepted output receipts before planning new paid work. The batch
    range is the contiguous interval starting at the committed cursor; only
    missing indexes within that range reach the executor.
-4. Resolve/authorize exact source revisions in order, enforce byte limits, and
-   prepare against the pinned policy. Create or resume the bounded attempt;
-   persist and acknowledge its idempotent accounting reservation.
+4. Resolve/authorize the batch's exact source revisions, preserve index order,
+   enforce byte limits, and prepare against the pinned policy. Create or resume
+   the bounded attempt; persist and acknowledge its idempotent accounting
+   reservation.
 5. Atomically revalidate live execution authority and record dispatch intent
    before calling the provider. Once intent exists, absence of a response is an
    unknown dispatch, not proof that the provider was never called. An executor
    may not hide retries that bypass attempt identities, budgets, or accounting.
 6. Validate count, finite numeric shape, dimensions, and postprocessing. Obtain
-   first-accepted sink receipts for each missing item under bounded write permits.
+   first-accepted sink receipts through one bounded batch write for missing items
+   under bounded write permits. Partial acceptance is recovered by batch lookup.
 7. When every batch item has a valid receipt, atomically checkpoint the receipts,
    contiguous cursor, attempt outcome, settlement intent, and logical Jobs
    continuation/terminal intent. Never advance across a missing item.
@@ -317,6 +323,23 @@ conservative settlement contract; it is never implicitly refunded. Production
 units/pricing/adjustments remain boundary-owned and out of scope. Tests use a fake
 ledger that rejects conflicting terminal settlements and detects duplicate effects.
 
+Reservation and settlement are atomically ordered at the accounting boundary
+under exact owner/workflow/generation/attempt identity and immutable effect facts.
+Terminal settlement is absorbing: a delayed first reservation or replay after
+release/settlement returns `already_terminal` with the existing proof, never a
+new hold or a dispatch-eligible reservation acknowledgement. Release for proven
+non-dispatch may create a terminal tombstone even if the reservation has not yet
+arrived; it cannot be an unrecorded no-op that allows a late hold to appear.
+
+Persist terminal settlement intent by attempt CAS before delivering it, preventing
+concurrent dispatch or new reservation delivery authority. Previously issued
+reservation deliveries are time-bounded. Keep terminal proof through their maximum
+validity horizon; after proof pruning, reject expired delivery authority rather
+than implicitly recreating the reservation. A stale delivery claim cannot reopen
+the ledger even when it is too old to acknowledge its domain operation. If the
+adapter cannot certify this ordering and retention, it is unavailable. This adds
+no production billing hookup or pricing policy.
+
 ## Sink Receipt And Generation Contract
 
 The sink contract is stronger than stable keys or ordinary `upsert`:
@@ -334,6 +357,12 @@ The sink contract is stronger than stable keys or ordinary `upsert`:
   sink identity, embedding-space fingerprint, dimensions, and accepted payload
   digest. Receipt lookup must distinguish accepted, absent, unavailable, and closed
   or conflicting identity. Unavailable lookup is not a cache miss.
+- Batch lookup must provide writer-authoritative, linearizable accepted/absent
+  decisions for each item. A write accepted before lookup begins cannot be hidden
+  behind `absent`. Lagging replicas, unresolved writes, and uncertain visibility
+  return `unavailable`; halt new paid work for that batch and reconcile under the
+  existing finite budgets. Concurrent acceptance after a certified absence still
+  uses first-accepted-write arbitration; it does not weaken the lookup guarantee.
 - Enforce expiring writer permits and irreversible sealing/closure at the sink,
   not only in a pre-write database check. Seal rejects new values but preserves
   receipt lookup. Closure cannot race with a write that recreates deleted output.
@@ -377,9 +406,41 @@ manifest even when each individual field fits.
 | Retained workflows / unresolved rows | Maximum 32 retained workflows per owner; 100,000 owner rows and 500,000 global domain rows |
 | Concurrent roots | Maximum 4 per owner and 32 globally; Jobs may impose stricter limits |
 | Operation delivery / scan | Maximum 5 automatic deliveries; scan maximum 100 rows |
-| Resolver / provider / sink / accounting call | 10 / 120 / 10 / 10 seconds |
+| Batch resolver / provider / batch sink / accounting call | 10 / 120 / 10 / 10 seconds; lookup and write limits cover the full batch |
+| Normal batch calls | Maximum 1 resolver, 1 receipt lookup, 1 write, 1 provider; at most 9 non-provider port calls including first/final-batch lifecycle and Jobs proof delivery |
+| Preflight recovery / local preparation and DB work | Maximum 60 / 20 seconds per acquisition |
 | Batch acquisition quantum | 300 seconds end to end, including reconciliation and cleanup of child tasks |
 | Adapter cancellation grace | 5 seconds, included in the 300-second quantum |
+
+### Batch Progress Budget
+
+Resolver, sink receipt lookup, and sink write ports accept at most one 64-item
+batch each. Their 10-second limits cover the whole call, not each item. An adapter
+that can only resolve items serially within separate 10-second limits is not
+certified for the default batch. It must supply a bounded batch implementation or
+be admitted with a smaller batch size and an explicitly certified timing plan.
+Batch size and call plan remain pinned; no runtime resizing or persistent raw-text
+checkpoint is introduced. Internal adapter fan-out, when used, must also be
+bounded and share the batch deadline without hidden retries.
+
+The conservative normal first/final-batch plan allocates 60 seconds to preflight
+recovery, 20 to local preparation/DB work, at most nine 10-second non-provider
+calls, 120 to one provider call, and 5 to child-task teardown: 295 seconds, leaving
+5 seconds of scheduling margin. Non-provider calls comprise batch lookup, opening,
+resolution, reservation, writing, settlement, sealing, Jobs disposition, and Jobs
+proof release. Skip unnecessary calls rather than repurposing their allowance for
+extra attempts or synchronous recovery retries. Perform additional recovery in a
+later bounded acquisition; if required obligations remain after preflight, persist
+progress and yield without dispatch. Successful baseline execution must reach a
+batch checkpoint under this plan, including first/last and partial batches.
+
+Before dispatch, reserve the provider's full selected deadline plus the remaining
+critical-path call/local budgets and cancellation grace. An undersized remaining
+quantum must not be turned into a predictably truncated paid attempt. Repeated
+pre-dispatch quantum exhaustion without durable progress is a typed certification
+or policy failure, not unbounded budget-neutral continuation. Tests use a virtual
+monotonic clock, not long sleeps, to prove the normal plan and reject the original
+64-times-6-second serial-resolution counterexample before provider dispatch.
 
 Admission reserves a conservative upper bound for future domain rows, accounting
 for items, all permitted generations/attempts, output receipts, operations, and
@@ -452,12 +513,12 @@ skips, and skips leave backend certification incomplete until CI supplies eviden
 | State machine | Closed vocabularies and monotonic phases; property-based acquire/renew/expire/retry/fallback/cancel/replay sequences; cursor prefix, generation isolation, immutable manifests, and terminal non-revival even after admin requeue |
 | Admission | Duplicate creates; crash after manifest, Jobs admission, and binding; definitive rejection versus unknown outcome; early acquisition; exact owner/UUID/payload conflicts; atomic aggregate capacity limits |
 | Concurrency | Same-version checkpoints; cancellation between validation and write; expired execution/recovery claims; fixed lock ordering on real SQLite/PostgreSQL transactions |
-| Provider/sink | Partial receipt recovery; no recomputation of accepted output; same-identity competing vectors preserve the original winner and settle both attempts; identity conflicts; space changes; unavailable lookups; close/delete versus late writes; permit expiry |
-| Accounting | Crash before/after reservation and dispatch intent; known/unknown outcomes; cancellation and timeout; conflicting settlement rejection; no duplicate reserve/terminal effects |
+| Provider/sink | Partial receipt recovery; no recomputation of accepted output; writer-authoritative absence after lost acknowledgement; lagging visibility returns unavailable and blocks new paid work; same-identity competing vectors preserve the original winner and settle both attempts; identity conflicts; space changes; close/delete versus late writes; permit expiry |
+| Accounting | Crash before/after reservation and dispatch intent; known/unknown outcomes; cancellation and timeout; terminal release before delayed first reserve; reserve replay after settlement; absorbing terminal proof and expired-delivery rejection after pruning; conflicting settlement rejection; no duplicate reserve/terminal effects |
 | Jobs intents | Applied-but-unacknowledged transitions; stale unapplied commands under a new lease; obsolete intent supersession; replay after a later transition and after archival; exact retained proofs |
 | Retention | Missing/error/conflicting root lookup; prune before acknowledgement; exhausted operations retain obligations/capacity; completed output survives domain pruning; scoped cleanup only |
 | Migration/security | Fresh/upgrade/repeat/interrupted migration; missing schema; all six RLS tables; denied missing/cross-owner CRUD and cleanup; foreign-key mismatches; connection reuse isolation |
-| Bounds/deadlines | Every limit and one-over case; native/postprocessed bounds and malformed/oversized responses before materialization; cumulative call deadlines within one quantum; hanging/cancellation-resistant adapters; no lease revival or hidden retry multiplication |
+| Bounds/deadlines | Every limit and one-over case; native/postprocessed bounds and malformed/oversized responses before materialization; full 64-item bulk path checkpoints within the 295-second timing plan; reject 64 serial 6-second resolutions and undersized pre-dispatch budget; cumulative call deadlines within one quantum; hanging/cancellation-resistant adapters; no lease revival or hidden retry multiplication |
 | Compatibility/dormancy | Inline flag on/off endpoint parity; legacy media/storage path unchanged; Admin Webhook prepared regression; no startup migration/worker/admission/adapter calls |
 
 Implementation completion requires both backend integration/parity evidence,
@@ -482,6 +543,14 @@ all lease fields; a late canonical completion returned `backend_conflict`; an
 unapplied old-lease intent returned `stale_lease`; and replay of an earlier marker
 after a later transition returned `wrong_status`. These establish existing boundary
 behavior, not successful execution of the unimplemented Stage 3 contracts.
+
+The 2026-10-03 written-spec review added four approved corrections: absorbing
+accounting terminal records, a certified batch-level progress budget,
+writer-authoritative sink absence, and ADR renumbering. Read-only countermodels
+demonstrated the missing ordering, serial-timeout, and lagging-lookup guarantees;
+these were requirements gaps, not observed production failures. ADR-058 is now
+the accepted Jobs completion row-identity decision in `origin/dev`; this proposal
+is ADR-059. Recheck numbering before integration and preserve accepted ADR-058.
 
 ## Delivery And Approval Gates
 
