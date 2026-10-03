@@ -89,6 +89,9 @@ def test_group_override_rejects_bad_input(auth_headers: dict) -> None:
         assert client.put(f"{base}/preferences.ui.theme", headers=auth_headers, json={"value": 1}).status_code == 400
         assert client.put(f"{base}/{KEY}", headers=auth_headers, json={"value": -1}).status_code == 400
         assert client.put(f"/api/v1/admin/orgs/987654321/profile/overrides/{KEY}", headers=auth_headers, json={"value": 1}).status_code == 404
+        # A bool or numeric string must not be coerced into a number by the schema (spec 2 review A2).
+        assert client.put(f"{base}/{KEY}", headers=auth_headers, json={"value": True}).status_code == 400
+        assert client.put(f"{base}/{KEY}", headers=auth_headers, json={"value": "5"}).status_code == 400
 
 
 async def test_group_override_requires_platform_admin(monkeypatch: pytest.MonkeyPatch) -> None:

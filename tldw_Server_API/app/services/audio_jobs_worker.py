@@ -139,14 +139,18 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                                 f"Failed to get limits for owner candidate {cand}; assuming unlimited: {e}"
                             )
                             limits = {}
+                        raw_max_jobs = limits.get("concurrent_jobs")
                         try:
-                            max_jobs = int(limits.get("concurrent_jobs") or 0)
+                            max_jobs = int(raw_max_jobs) if raw_max_jobs is not None else None
                         except (ValueError, TypeError) as e:
                             logger.warning(
-                                f"Could not parse concurrent_jobs for owner candidate {cand}; assuming 0 (unlimited): {e}"
+                                f"Could not parse concurrent_jobs for owner candidate {cand}; assuming unlimited: {e}"
                             )
-                            max_jobs = 0
+                            max_jobs = None
                         if max_jobs == 0:
+                            # 0 blocks this owner entirely (spec 2); try the next candidate.
+                            continue
+                        if max_jobs is None:
                             owner_candidate = cand
                             break
                         # Count current processing for this owner
@@ -200,14 +204,15 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                     f"Failed to get limits for owner {owner}; assuming unlimited: {e}"
                 )
                 limits_owner = {}
+            raw_max_jobs_owner = limits_owner.get("concurrent_jobs")
             try:
-                max_jobs = int(limits_owner.get("concurrent_jobs") or 0)
+                max_jobs = int(raw_max_jobs_owner) if raw_max_jobs_owner is not None else None
             except (ValueError, TypeError) as e:
                 logger.warning(
-                    f"Could not parse concurrent_jobs for owner {owner}; assuming 0 (unlimited): {e}"
+                    f"Could not parse concurrent_jobs for owner {owner}; assuming unlimited: {e}"
                 )
-                max_jobs = 0
-            if max_jobs:
+                max_jobs = None
+            if max_jobs is not None:
                 # Count current processing jobs for this owner in 'audio' domain
                 try:
                     conn = jm._connect()  # use manager connection for simplicity
@@ -234,7 +239,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                         f"Failed to count processing jobs for owner {owner}; assuming 0: {e}"
                     )
                     count = 0
-                if count > max_jobs:
+                if count >= max_jobs:
                     # Put job back with backoff to allow other owners to proceed
                     lease_id = str(job.get("lease_id"))
                     jm.fail_job(

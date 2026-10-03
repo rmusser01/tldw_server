@@ -267,7 +267,9 @@ class UserProfileBatchResponse(BaseModel):
 class GroupLimitOverrideRequest(BaseModel):
     """Body for setting a team/org ``limits.*`` override; ``value`` null removes it."""
 
-    value: int | float | None = None
+    # Any, not int | float | None: that would let Pydantic coerce True -> 1 and
+    # "5" -> 5 before _validate_value's type checks ever run (spec 2 review A2).
+    value: Any = None
 
 
 class GroupLimitOverrideResponse(BaseModel):
