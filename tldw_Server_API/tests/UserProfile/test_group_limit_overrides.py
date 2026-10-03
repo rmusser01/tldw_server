@@ -115,7 +115,6 @@ def test_group_override_rejects_bad_input(auth_headers: dict) -> None:
 
 async def test_group_override_requires_platform_admin(monkeypatch: pytest.MonkeyPatch) -> None:
     """A principal that is neither single-user nor platform admin gets 403 before any write."""
-    monkeypatch.setattr(admin_profiles_service, "is_single_user_principal", lambda _p: False)
     monkeypatch.setattr(admin_profiles_service.admin_scope_service, "is_platform_admin", lambda _p: False)
     principal = AuthPrincipal(kind="user", user_id=5, is_admin=False)
     with pytest.raises(HTTPException) as exc:

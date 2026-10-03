@@ -35,7 +35,7 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     list_org_memberships_for_user,
     list_team_members,
 )
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_single_user_principal
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.config import load_comprehensive_config
@@ -363,7 +363,10 @@ class _ProfileAdminScope:
 
 async def _get_profile_admin_scope(principal: AuthPrincipal) -> _ProfileAdminScope:
     """Resolve the principal's organization/team admin scope."""
-    if is_single_user_principal(principal) or admin_scope_service.is_platform_admin(principal):
+    # is_platform_admin() already grants single-user principals outside enterprise
+    # mode; an extra `is_single_user_principal(...) or` here would bypass its
+    # enterprise-mode denial (same bug class as Qodo Q2; round 2 finding).
+    if admin_scope_service.is_platform_admin(principal):
         return _ProfileAdminScope(
             org_admin_ids=None,
             team_admin_ids=set(),
