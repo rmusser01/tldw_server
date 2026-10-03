@@ -34,8 +34,10 @@ files that would change and exits 1 if there are any. Every `task edit`
 normalizes the file it edits first.
 
 `tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py`, run by the
-`backend-required` gate, checks that every task file parses and that the count
-of files still needing normalization never rises.
+`backend-required` gate, checks that every task file a PR adds or edits is
+canonical. It reads only the files changed since the merge base with the PR's
+base commit, so a PR is never failed for a file it did not touch. The
+`backlog-task-format` pre-commit hook runs the same check on changed task files.
 
 ## Oracle Fixtures
 

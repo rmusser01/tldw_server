@@ -420,7 +420,7 @@ Read-only investigation can proceed without a Backlog.md task. If investigation 
 
 Use backlog-py (`tools/backlog-py`), the repository's Python Backlog.md clone, to read and change task files ([ADR-059](Docs/ADR/059-backlog-py-task-editor-cutover.md)). Run it from the repository root as `PYTHONPATH=tools/backlog-py/src python -m backlog_py --cwd <repo> ...`, or install it once with `pip install -e tools/backlog-py` and use the `backlog-py` command. Never install it as `backlog` on PATH.
 
-Do not use the Node `backlog` CLI or the Backlog.md MCP server to create or edit task files. The Node CLI writes `SECTION:NOTES` where backlog-py writes `SECTION:IMPLEMENTATION_NOTES`, and a Node edit of a backlog-py task, even a label-only edit, nests the notes and duplicates the final-summary markers. `tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py` fails a PR that adds such files.
+Do not use the Node `backlog` CLI or the Backlog.md MCP server to create or edit task files. The Node CLI writes `SECTION:NOTES` where backlog-py writes `SECTION:IMPLEMENTATION_NOTES`, and a Node edit of a backlog-py task, even a label-only edit, nests the notes and duplicates the final-summary markers. In `backend-required`, `tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py` fails a PR whose added or edited task files are not canonical; on a PR that changes only `backlog/`, the `backlog-task-format` pre-commit hook flags them instead.
 
 Search before creating tasks to avoid duplicates. Prefer one Backlog.md task per reviewable unit of work, and split work that grows too broad. Keep the task current with status, notes, plan links, touched files when useful, verification results, blockers, PR links, and final summary.
 
@@ -430,7 +430,7 @@ Common backlog-py commands (prefix each with the invocation above):
 
 - Read: `search "query" --plain`, `task list --plain`, `task <id>` (the whole file; `--plain` prints only the header and description), `board`.
 - Create: `task create "Title" -d "Why and what" --ac "Criterion" --ac "Another" -l label1,label2 --dep TASK-1 [--id TASK-N] [--notes "..."]`.
-- Edit: `task edit <id>` with `-s "In Progress"`, `-t "New title"` (renames the file), `-l labels` (replaces them), `--ac "Added criterion"`, `--remove-ac N`, `--check-ac N`, `--check-dod N`, `--append-notes "..."`, `--notes "..."` (replaces them), `--final-summary "..."`, `--dep TASK-1`.
+- Edit: `task edit <id>` with `-s "In Progress"`, `-t "New title"` (renames the file), `-l labels` (replaces them), `--ac "Added criterion"`, `--remove-ac N`, `--check-ac N`, `--check-dod N`, `--append-notes "..."` (repeatable), `--notes "..."` (replaces them), `--final-summary "..."`, `--dep TASK-1`.
 - Repair: `task normalize [--check] [path...]` rewrites Node-format or nested sections into the canonical format without dropping text; every backlog-py edit already does this for the file it touches.
 
 Task ids collide when concurrent sessions each take the next local id. Before creating a task, find the highest id across `origin/dev` and all open PR branches, and pass a higher one with `--id`:

@@ -241,9 +241,13 @@ jobs:
       # source pinning (TASK-13380) need a required gate for the same reason, as do
       # the backlog task-format ratchet and backlog-py's own tests (TASK-13440,
       # ADR-059): backlog-py is the task editor, and its normalizer defines the ratchet.
+      # The task-format ratchet checks only the task files this PR changed since its
+      # merge base with BACKLOG_TASK_FORMAT_BASE, so it never fails a PR for a file
+      # that reached dev through a backlog-only PR this gate did not run on.
       - name: Enforce CI contracts and code ratchets
         if: needs.changes.outputs.backend_changed == 'true'
         env:
+          BACKLOG_TASK_FORMAT_BASE: ${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
           PYTHONPATH: .
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
           TEST_MODE: "true"
