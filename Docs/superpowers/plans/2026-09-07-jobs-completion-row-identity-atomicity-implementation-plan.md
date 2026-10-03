@@ -1374,3 +1374,37 @@ The requester has supplied the verbatim human `Change summary` and authorized
 the conditional merge. The PR is ready for review, not draft. Hosted required
 checks and dedicated Jobs CI remain pending; local verification does not
 replace them.
+
+## Published ADR CI Repair: 2026-10-02
+
+**Goal:** Include deterministic public ADR output with its canonical source.
+**Success Criteria:** Published-file parity and the strict MkDocs build pass
+without changing the accepted decision, production code, tests or build gates.
+**Tests:** Existing full Docs suite and public/private boundary checker.
+**Status:** In Progress (local candidate verified; current-head hosted CI pending).
+
+- Hosted run `37087339481`, job `111103298847`, reported 210 passes and two
+  failures on `798609b7601d052f0b89a011d024fdce1cb3f044`: the generated ADR-058
+  file was absent from the tracked published manifest, and the newly refreshed
+  but uncommitted page caused a creation/revision fallback timestamp warning.
+- The shared local environment lacked MkDocs. The existing CI toolchain was
+  installed under `/tmp/task13215-mkdocs` for verification only, without changing
+  project dependencies or the shared virtual environment.
+- Reproduced both CI failures with the toolchain and refresh output. Staging
+  the generated publication fixed tracked-file parity; the strict date warning
+  remained until the generated page had real committed Git history.
+- Used the existing `Helper_Scripts/refresh_docs_published.sh`, changing only
+  `Docs/Published/ADR/058-jobs-completion-row-identity.md` and its ADR index.
+  Both files match their canonical sources exactly; a second refresh produced
+  no unstaged publication diff. No date-plugin or strict-build policy changed.
+- Verified the exact staged documentation tree
+  `46206d7e0a8ab45b84f14e97f5b48ad937240e06` in a temporary shared clone with a
+  local verification commit, leaving the actual branch and source history
+  untouched. Full Docs suite: 212 passed / 440 existing project warnings,
+  including the zero-warning strict MkDocs build. Artifact:
+  `/tmp/task13215_docs_candidate.xml`.
+- The public/private documentation boundary checker passed. This repair changes
+  generated Markdown and tracking records only; no new Python security scope
+  was introduced, and the prior scoped Bandit deltas remain applicable.
+- Current-head hosted checks, dedicated Jobs CI and the latest live `dev`
+  pre-merge check remain mandatory; no failed or pending check is waived.
