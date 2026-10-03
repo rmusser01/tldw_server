@@ -15,7 +15,25 @@ The live-tier runner (`scripts/live-tier-uat/run.mjs`) starts an isolated
 backend with fresh databases, the mock OpenAI-compatible LLM and the web UI on
 reserved ports, runs the `ux-regression` Playwright project with zero retries,
 fails on skipped tests, and writes `test-results/live-tier-uat/<run-id>/`.
-CI runs it nightly (`.github/workflows/ux-regression-nightly.yml`).
+
+In CI:
+
+- **Pull requests.** The `ux-regression` job ("E2E UX Regression
+  (notes/chat)") in `.github/workflows/frontend-e2e-tiers.yml` runs the suite
+  when a PR to `dev` or `main` changes the notes/chat UI, the shared UI
+  layers under it (`components/Common`, `hooks`, `services`, `db`, `store`),
+  the notes/chat endpoints, `DB_Management`, or this harness. Other PRs skip
+  the run after a quick diff. The path list is in the job's
+  `Detect notes/chat UX changes` step. The job is advisory: it is not a
+  required check. On failure it uploads `test-results/` as
+  `e2e-ux-regression-results`.
+- **Manual.** Dispatch "Frontend E2E Tiers" with `tier=all-tiers` and the
+  branch as the ref. That runs every tier, this suite included, regardless
+  of paths.
+- **Nightly.** `.github/workflows/ux-regression-nightly.yml` runs it daily,
+  but only from the default branch (`main`). GitHub ignores scheduled
+  workflows on other branches, so the nightly starts once this harness is
+  released to `main`, and it tests `main`'s code.
 
 These specs never run in the default `chromium` project: they need a real
 backend, not the smoke route mocks.
