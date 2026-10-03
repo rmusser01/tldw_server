@@ -24,7 +24,7 @@ modified_files:
 - tldw_Server_API/tests/Chunking/
 - Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
 - Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md
-updated_date: 2026-10-03 01:59
+updated_date: 2026-10-03 02:11
 ---
 
 ## Description
@@ -37,9 +37,9 @@ Continue the user-approved compatibility-first hierarchical subsystem refactor. 
 <!-- AC:BEGIN -->
 - [x] #1 The implementation branch is reconciled with current origin/dev and focused baseline characterization is rerun before production edits
 - [x] #2 Frozen characterization tests cover option handling, leaf call traces, spans, malformed trees, flatten aliasing, logging, signatures, and import boundaries
-- [ ] #3 The hierarchical package is extracted with the approved component interfaces and dependency direction while public hierarchy behavior remains compatible
+- [x] #3 The hierarchical package is extracted with the approved component interfaces and dependency direction while public hierarchy behavior remains compatible
 - [x] #4 The approved private span and header-title helpers are removed and process_text imports the shared span function directly
-- [ ] #5 Focused and complete Chunking tests, compileall, Ruff, scoped Black, Bandit, and git diff --check pass with results recorded
+- [x] #5 Focused and complete Chunking tests, compileall, Ruff, scoped Black, Bandit, and git diff --check pass with results recorded
 - [ ] #6 The PR remains non-merge-ready until the human requester supplies the required Change summary explaining what changed and why
 <!-- AC:END -->
 
@@ -64,20 +64,45 @@ Final gates after seventh-path migration: Ruff all seven Python paths passes; Bl
 Changed paths: created hierarchical/flatten.py and tests/Chunking/test_hierarchical_flatten.py; modified chunker.py, hierarchical/service.py, tests/Chunking/test_hierarchy_refactor_contracts.py, test_hierarchy_malformed_contracts.py, and the explicitly authorized test_hierarchical_grouping.py lookup only, Task7 section in approved plan, and this unique record. Task7 Steps1-6 finalized by commit subject refactor: extract hierarchical flattening. Starting HEAD52abf0bc014c0a5b38db225ec3224532fc44b5f0 and pinned origin/dev86e287fee7bfa1a1588639232e35db3666851ded unchanged before commit. No fetch/rebase/push, main-checkout edits, unrelated/historical task mutation, validation/deepcopy/error handling correction, or Task8 typing cleanup. Existing environment/config/deprecation warnings remain; missing-module RED emitted known closed-stream Loguru diagnostics. Two spans.py122/127 typing issues remain reserved for Task8. TASK-13422 remains In Progress: overall final verification/reviews and human-written PR Change summary gates remain open.
 2026-10-02 Task8 preflight before production cleanup: verified clean HEAD b38c0cd74816d78d80d72faed2ae07dc134d8e7c, branch codex/chunker-hierarchical-refactor-design and unchanged pinned origin/dev86e287fee7bfa1a1588639232e35db3666851ded. Fresh exact mypy RED /tmp/task13422_mypy_red.txt exits1:13 hierarchy-local errors across spans.py122/127, grouping.py127/214/239, flatten.py51/52/53/68/121/123/124/139 (7 source files). Span fallback will use identity cast(int, code_fence_start), not assert/guard, preserving even None on exceptional append; rename template-rule kind to avoid classifier optional inference conflict. Additional grouping/flatten errors independently validated as dynamic dict.get values (including malformed values/second-read semantics); narrowly annotate affected local text/metadata/config/weight values Any rather than coercing or adding validation. Existing frozen malformed/component contracts retained. No behavior correction. Ownership search shows only absence assertions plus builder.py private _extract_header_title definition/calls: approved Task5 explicitly moves helper here and spec320/570 requires builder ownership, so do not delete/rename it merely to satisfy contradictory Task8 broad search expectation; clarify plan wording. No outer-owner hierarchy imports. Steps8-10 and independent reviews remain controller-owned; task stays In Progress.
 2026-10-02 Task8 preflight GREEN: exact Task7 14-file suite348passed/1establishedPyThaiNLPskip/711warnings/3.08s (/tmp/task13422_preflight_focused.txt); full normal-sandbox Chunking777passed/1same skip/1963warnings/47.84s (/tmp/task13422_preflight_full.txt), both exit0. Separate AST boundary selection24passed/47deselected/60warnings/1.17s (/tmp/task13422_preflight_ast.txt). Exact compileall and Ruff exit0; scoped Black exit0,15files unchanged (no whole-file legacy formatting). Exact informational mypy exit0 residual output: Success: no issues found in 7 source files (/tmp/task13422_mypy_green.txt). No process_text baseline changes. Exact Bandit JSON /tmp/bandit_task_13422.json inspected:0findings,0errors,2822LOC; high/medium/low/undefined severity and confidence all0; nosec0,skipped_tests0. Existing config/deprecation warnings remain, no environment workaround/newskip/install. Self-review normalized ASTs for spans/grouping/flatten identical to starting HEAD after stripping annotations, undoing local template_kind rename, and unwrapping identity cast; frozen public argument ASTs and flat composition unchanged against pinned origin/dev; package helper byte-identical. Ownership AST contracts pass; builder private title helper intentionally retained per Task5/spec, plan expectation clarified. No dormant duplicate body, new guards, coercions, broad suppressions, exception handling changes or behavior corrections. Branch/working diffchecks pass. Exact changed files: hierarchical/spans.py,grouping.py,flatten.py; approved plan; only current task. Steps1-7/completion evidence updated; Steps8-10 remain pending independent spec/quality reviews then separate final doc/evidence pass and controller PR. Task In Progress. Historical tracking/main checkout untouched. Incremental preflight commit planned: refactor: clarify hierarchical span annotations, not Step9 final commit.
+2026-10-02 final Task8 Steps8/9 evidence: controller explicitly reports separate final whole-branch SPEC and QUALITY APPROVED on immutable86e287fee7bfa1a1588639232e35db3666851ded..ae72a4702f1baeeac70f5abb35ec512f769a0152, no actionableP0-P3 findings/no code changes required. Actual controller full log read (/tmp/task13422_final_controller_tests.txt):777passed,1optionalPyThaiNLPskip,1963warnings,48.76s. Skip source is test_thai_sentence_with_pythainlp_if_available, reason PyThaiNLP not available; no new skip. Actual controller BanditJSON read (/tmp/bandit_task_13422_controller.json):0findings,0errors,2822LOC, all severity/confidence counts0,nosec0,skipped_tests0. Controller additionally reports independent Ruffpass/Black15unchanged/compileallpass/mypy0issues7sourcefiles/diffcheckclean; consistent with directly verified preflight evidence above. Exact mypy residual: Success: no issues found in 7 source files. Focused14file preflight348passed/1skip/711warnings3.08s; AST24passed/47deselected/60warnings1.17s. Existing config/deprecation warnings remain. Main checkout, production/tests and historical records untouched in this final pass. Only plan/current task evidence edited; no further broad tests required because reviewed code unchanged. Fresh branch diffcheck passes; final docs-only staged scope/diffcheck required before commit. Plan Steps8/9 and final review checklist checked; Step10 draftPR against dev pending controller. AC3/4/5 checked;AC6 remains open;DoD2-6 checked,DoD1 open;status In Progress. Explicit merge blocker: human requester must write their own Change summary explaining what changed and why these architecture/compatibility choices were selected. AI technical summary is not that human-owned summary. Pending historical archive exception user answer remains controller-owned; no old record edits/archive. Final evidence commit subject test: verify hierarchical subsystem refactor (this docs-only commit), SHA to be reported to controller after creation.
+
+Verified branch commit inventory through reviewed code head:
+5e4ecb0b966ee6779592e2d46f717e42ca157aa8 docs: design Chunker hierarchical refactor
+8e21d2730d1053b87245276c7019e8e686c7bee9 docs: tighten hierarchical refactor contracts
+90c9bbe8ea21970330a4a57a2d932bf601eecb85 docs: define hierarchical refactor delivery gates
+6be96260918f7e1ae619d5861eb0bbefe06aa8de docs: plan hierarchical subsystem refactor
+d3c28256c981e0e709fdea2a02a09badcef9f568 docs: reconcile hierarchical refactor baseline
+3bb3fc13731c2f65e27d40e2b7447cf36e42a1b9 docs: refresh hierarchical refactor baseline
+b0e24d0632bf71cd7c4c698b17dbf0ac3ab36211 docs: preserve hierarchical task provenance
+4587d002a07716f6fffdf3e5baed08699b48e83d test: characterize hierarchical chunking contracts
+c18db2bd66ef70a2cfda97340bc226d9421773a9 test: strengthen hierarchical compatibility contracts
+9a0f02f729d920ca1004cfece306748f90af5e07 test: harden hierarchical characterization coverage
+6b3b7f857bd907977bb55b31f3dfa2ab1fbb1dcc refactor: share hierarchical paragraph spans
+72a957c1b403c4823376bbde3c4eefc5a13dddf0 test: tighten hierarchical import boundaries
+b397c524c2619250cc26679c3df8716d9858a6ab refactor: extract hierarchical leaf construction
+38c3e232fb96776ffefb84dc02e676b88023da24 docs: reconcile hierarchical refactor baseline before tree extraction
+198fb5204cf4301e27cd9904a923cc7062a6e78c refactor: extract hierarchical tree builder
+b8d015c5821e23091023d70972f426953fdaa766 fix: preserve hierarchical tree envelope during extraction
+3e34078eef78111633a210cda4a476baa25abbeb refactor: extract hierarchical grouping
+52abf0bc014c0a5b38db225ec3224532fc44b5f0 docs: reconcile Chunker workstream tracking identities
+b38c0cd74816d78d80d72faed2ae07dc134d8e7c refactor: extract hierarchical flattening
+ae72a4702f1baeeac70f5abb35ec512f769a0152 refactor: clarify hierarchical span annotations
+
+Final changed-file inventory: hierarchy package __init__/models/spans/leaves/builder/grouping/flatten/service; public chunker.py; process_text/models.py and dispatch.py; frozen hierarchy/malformed/spans/leaves/builder/grouping/flatten contracts plus narrow process_text component seam migration; approved spec/plan and historical tracking reconciliation provenance. This final pass touches only Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md and backlog/tasks/task-13422 - Implement-Chunker-hierarchical-subsystem-refactor.md. No final behavior correction. Prior b8d015c582 restores exact baseline envelope after extraction regression, not baseline defect correction.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Technical implementation and independent SPEC/QUALITY review complete; PR/human summary gates remain open. Extracted hierarchy into passive models/protocols, shared span detection, leaf construction, tree builder, low-level grouping, flatten traversal, and coordination service. Chunker retains exact public signatures and public flat composition; process-text imports shared spans directly, removing the private ownership seam. Boundaries reduce duplicate implementation and make ownership mechanically testable while preserving exact observed offsets, calls, malformed-input behavior, aliasing, and exception handling. Type cleanup is annotation-only with identity cast/local rename. Separate b8d015c582 restored the seven-key envelope after an extraction regression; no baseline behavior correction or final code changes. Reviewed code head ae72a4702f1baeeac70f5abb35ec512f769a0152 against pinned origin/dev86e287fee7bfa1a1588639232e35db3666851ded: focused348pass/1optional skip; controller full777pass/1optionalPyThaiNLPskip/1963warnings48.76s; AST24pass;compile/Ruff/Black pass;mypy0issues7files;Bandit0findings0errors2822LOC;diffcheckclean. Evidence paths and commit history in notes/plan. Final Step9 is documentation-only. MERGE BLOCKER: human requester must author their own Change summary explaining what changed and why these boundaries/compatibility choices were chosen; this AI technical summary does not satisfy that gate. Step10 draftPR against dev is pending controller; historical archive exception awaits user answer and controller handling. TASK-13422 remains In Progress;AC6 and overallDoD1 unchecked.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
