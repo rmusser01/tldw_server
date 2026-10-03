@@ -2473,13 +2473,16 @@ async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
     service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)
     pack = service.create_pack(VNAssetPackCreate(title="Async Capture", primary_character_id=character_id))
     service.create_slot(pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="sprite.primary"))
-    entered = threading.Event()
+    loop = asyncio.get_running_loop()
+    entered = asyncio.Event()
     release = threading.Event()
+    capture_unblocked = threading.Event()
     original = service_module.build_authored_recipe
 
     def slow_recipe(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        entered.set()
-        release.wait(timeout=2)
+        loop.call_soon_threadsafe(entered.set)
+        release.wait(timeout=5)
+        capture_unblocked.set()
         return original(*args, **kwargs)
 
     monkeypatch.setattr(service_module, "build_authored_recipe", slow_recipe)
@@ -2491,16 +2494,15 @@ async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
     url = f"/api/v1/vn/vn-assets/packs/{pack.id}/generate"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        loop = asyncio.get_running_loop()
-        started_at = loop.time()
         request_task = asyncio.create_task(client.post(url, json={"idempotency_key": "capture-offload"}))
         try:
-            await asyncio.to_thread(entered.wait, 2)
-            assert entered.is_set()
-            assert loop.time() - started_at < 1.0
+            # Timeouts bound a broken test; progress is checked before capture is released.
+            await asyncio.wait_for(entered.wait(), timeout=10)
+            assert not capture_unblocked.is_set()
+            assert not request_task.done()
         finally:
             release.set()
-        response = await request_task
+            response = await request_task
 
     assert response.status_code == 202
 
