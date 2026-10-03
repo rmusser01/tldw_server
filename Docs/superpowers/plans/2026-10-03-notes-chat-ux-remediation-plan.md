@@ -52,10 +52,19 @@ Two P0s sit in later-stage groups: NE-04 (Print, G16) and CC-05 (server prompt l
 
 ---
 
-## Open decisions (owner input needed)
+## Decisions (resolved 2026-10-03)
 
-| # | Decision | Affects | Recommendation |
+| # | Question | Affects | Decision |
 |---|---|---|---|
+| D1 | Should WebUI and side-panel chats save to the server by default? | G03, G04, G05, E2 | **Yes.** Chats save to the server by default when connected; "Temporary chat" stays local. Honest labels ("Saved on this device" until the server acknowledges) ship first in Stage 1; server-by-default lands in Stage 2. |
+| D2 | Canonical wikilink syntax: `[[Title]]` or `[[id:UUID]]`? | G09, E7 | **Both.** Users write `[[Title]]`; the server resolves titles to ids, and the client, renderer and graph parser accept both forms. |
+| D3 | Permanent delete and Empty Trash for notes (NL-06)? | G15 (backend) | **Yes.** Add hard delete and Empty Trash, with optional retention-based auto-purge. |
+| D4 | Compare mode (CM-05): enable it or remove its entry points? | G11, E5 | **Hide until verified.** Remove the four entry points now; re-enable behind the flag once Compare passes its own verification. |
+| D5 | Interim WYSIWYG mode while NE-01 is open? | G01 | **Hide until fixed.** Hide the WYSIWYG toggle in the first Stage 1 PR and restore it with the NE-01 fix. |
+| D6 | A full Notes surface in the side panel (N3)? | G08, E3 | **Decide after the D7 spike.** Ship the quick-save improvements (XS-13) now. |
+| D7 | When to run the design spike for one conversation model (S1/S2) and server-side, resumable generation (S3)? | E2 | **During Stage 2**, so Stage 4 builds on a decided model. The spike's output also settles D6. |
+
+---|---|---|---|
 | D1 | Should WebUI and side-panel chats save to the server by default, or stay local-first with explicit promotion? | G03, G04, E2 | Save to the server by default when connected; keep "Temporary chat" local. Ship honest labels ("Saved on this device") immediately either way. |
 | D2 | Canonical wikilink syntax: `[[Title]]` or `[[id:UUID]]`? | G09, E7 | Users write `[[Title]]`; the server resolves titles to ids and the graph parser accepts both forms. |
 | D3 | Permanent delete and Empty Trash for notes (NL-06)? | G15 (backend) | Add hard delete and Empty Trash, plus optional retention-based auto-purge. |
@@ -87,13 +96,13 @@ Two P0s sit in later-stage groups: NE-04 (Print, G16) and CC-05 (server prompt l
 **Goal:** No user action silently loses, corrupts or overwrites data, and no status message claims a save, delete or restore that didn't happen.
 
 **PR slices (in order):**
-1. **G01 (#3102) — mitigate WYSIWYG now (D5).** Hide or flag the WYSIWYG toggle. S.
+1. **G01 (#3102) — hide WYSIWYG until fixed (D5).** Hide the WYSIWYG toggle; slice 4 restores it with the NE-01 fix. S.
 2. **G02 (#3103) — fix the notes list contract (NL-01).** Send `limit`/`offset`, read `pagination.total`, and sort server-side (or sort across the full result). Add a contract test. M. *Unblocks NL-02, NS-04, G09 and G15.*
 3. **G02 — export pages correctly (NL-02).** Terminate on the true total, show progress with Cancel, or switch to the server export endpoints. S.
 4. **G01 — fix WYSIWYG typing (NE-01).** Make the `contentEditable` uncontrolled and write `innerHTML` only on explicit external revisions. Add an e2e that types at human speed. Re-enable the toggle. M.
 5. **G01 — notes save state machine (NS-01, NS-N1, NS-03, NS-N2, NS-05, NS-02, NS-06).** One state machine for debounce, flush on unmount and route change (plus a `beforeunload` guard), retry by status code (no retry on 400/409), a conflict flow with keep mine / take theirs / copy my text, the offline queue for network errors, server auto-title for untitled notes, and one acknowledged status. NS-N1 (S) can ship first as a stopgap. M overall.
 6. **G02 — bulk "Add tags" (NL-03)** that merges keywords instead of replacing them, with Undo. **NS-04:** update the edited row in place instead of refetching the whole list. M.
-7. **G03 (#3104) — honest persistence labels (CS-03, XS-05).** Derive labels from acknowledged state (D1). S, day one.
+7. **G03 (#3104) — honest persistence labels (CS-03, XS-05).** Derive labels from acknowledged state: "Saved on this device" until the server acknowledges a save. S, day one. Server-by-default saving (D1) follows in Stage 2.
 8. **G03 — interrupted replies (CS-04, CS-N3).** Persist the user turn before streaming, keep partial output marked "Interrupted" with Retry, add a leave guard, and never create empty server chats. L.
 9. **G03 — restore from Trash (CS-N2).** Restore every message; a backend check may be needed. M.
 10. **G04 (#3105) — side-panel integrity (XS-01, XS-07, XP-08, XS-06).** Opening a past chat opens a new tab; Delete and Rename act on the real chat (with Undo) or are relabelled; tabs refresh on focus and before send, with stale-leaf detection; recents appear without searching. M–L.
@@ -125,7 +134,9 @@ Two P0s sit in later-stage groups: NE-04 (Print, G16) and CC-05 (server prompt l
 5. **G07 (#3108) — finding past chats (CS-02).** History visible by default and remembered, local and server chats listed, content search. Then the S items: CS-N1, CS-06, CS-07, CS-08, CS-09, CS-10, CS-11.
 6. **G08 (#3109) — Save to Notes everywhere (XP-02, S, P0).** Keep `serverMessageId` when formatting loaded history. Then XP-01 (unsynced chats), XP-03 (provenance: title, tags, "Open note", readable back-link), XP-04 ("Chat about this note"), XS-13 (side-panel quick-save).
 7. **G11 (#3112) — server prompt library (CC-05, P0).** Pulled forward from Stage 3: the Prompt picker lists server prompts. M.
-8. **G09 (#3110) — wikilinks (NE-02).** After D2: render and follow `[[Title]]` links, create backlinks and graph edges, and autocomplete across the whole library. Then NE-10 and, once G02 has landed, NL-11.
+8. **G09 (#3110) — wikilinks (NE-02).** Per D2, accept both `[[Title]]` and `[[id:UUID]]`: render and follow links, create backlinks and graph edges, and autocomplete across the whole library. Then NE-10 and, once G02 has landed, NL-11.
+9. **G03 (#3104) + G05 (#3106) — save chats to the server by default (D1).** When connected, create the server conversation on first send and write each turn; "Temporary chat" stays local; local-only chats from before the change can be promoted with one action. Builds on the G05 controller reset. M.
+10. **E2 (#3126) — design spike (D7).** One conversation model across the side panel, extension full page and WebUI (S1/S2), and server-side resumable generation (S3). Output: a design doc with the chosen model, migration path, and the D6 decision on a side-panel Notes surface. Timebox: one to two weeks.
 
 **Success criteria:**
 - After New chat or Clear, the request contains zero prior messages.
@@ -136,8 +147,9 @@ Two P0s sit in later-stage groups: NE-04 (Print, G16) and CC-05 (server prompt l
 - Save to Notes is available on all sampled server chats.
 - `[[Title]]` links click through and create backlinks.
 - Selecting two tags narrows the results (G15 NL-N1 may ride along here).
+- A new chat sent while connected appears in server history (D1).
 
-**Tests:** Playground integration tests (E1.4) for every reset and iteration path; mock-LLM fixtures for slow first token, truncation and provider errors; e2e for XP-02 on seeded server chats; contract test for prompts.
+**Tests:** Playground integration tests (E1.4) for every reset and iteration path; server-history e2e for D1; mock-LLM fixtures for slow first token, truncation and provider errors; e2e for XP-02 on seeded server chats; contract test for prompts.
 **Status:** Not Started
 
 ---
@@ -148,7 +160,7 @@ Two P0s sit in later-stage groups: NE-04 (Print, G16) and CC-05 (server prompt l
 
 **PR slices (in order):**
 1. **G10 (#3111) — first send works (CC-01, CC-03, XS-02, XS-17, CC-06).** Use the server's default provider, mark the model "Ready" only after a probe or reply, remove the false offline state, give the side panel a default model and a labelled selector and open it on Chat, and use one model label format. Pairs with E6 Q2.
-2. **G11 (#3112) — commands that don't misfire (CC-N1, XS-08; S, P1).** Slash commands run on Enter or selection; Ctrl+E shows its mode or is removed. Then CM-05 (per D4), CC-11, CC-12, CC-10, CC-08. Fold CC-07 and CC-09 into the composer restructure.
+2. **G11 (#3112) — commands that don't misfire (CC-N1, XS-08; S, P1).** Slash commands run on Enter or selection; Ctrl+E shows its mode or is removed. Then CM-05 (hide Compare's entry points until verified, per D4), CC-11, CC-12, CC-10, CC-08. Fold CC-07 and CC-09 into the composer restructure.
 3. **E5 (#3129) N12 + G12 (#3113) — composer and chrome.** Restructure the composer (one row of intent, Casual/Pro sets the density). This resolves CO-03, CO-06, CC-07 and CC-09 together. Then CO-04 and CO-05 (rails auto-collapse; no 2x2 grid on tablets), CO-01 and CO-N1 with N13 (mobile bottom sheet), CO-02 (mount the help-modal host; S, can ship anytime) and CO-07.
 4. **G13 (#3114) — Notes layout and onboarding.** NO-01 first (add `/notes` to the viewport-constrained routes), then NO-N1 (the tour runner skips missing targets), NO-02 (tour positioning), NO-04 (empty state and editor mutually exclusive), NO-03 (tablet and phone), NL-12, NL-13, NL-14, NE-08, NE-09. Pairs with E6 Q10 and Q11.
 5. **E8 (#3132) Q14 + G14 (#3115) — words and tokens.** Adopt the §10 glossary and add a copy lint. Then XP-13, XP-14, XS-12, XP-11, XP-17 (one destructive-action pattern), XP-15 and XP-20 (with AX-07 and AX-08 in G23, as one theme-token change), and XP-19.
@@ -172,7 +184,7 @@ Two P0s sit in later-stage groups: NE-04 (Print, G16) and CC-05 (server prompt l
 
 **PR slices (in order):**
 1. **G18 (#3119) — addresses and navigation (XP-05 first).** Notes and chats get URLs that survive reload and Back/Forward, and page titles name the item. Then XP-06 (⌘K finds and creates notes and chats; with E4 N5), and XP-07 and XP-10 through one shortcut registry (E4 N21).
-2. **G15 (#3116) — notes at scale.** NL-04 (row density and snippets), NL-07 (keep server ranking, show the match), NL-N1 (AND, exact tag matching), NL-08, NL-09 (local-date Timeline; S, quick win), NL-10 (folders and correct counts; with E7 N18), NL-05 (select-all, progress, Undo), NL-06 (permanent delete; D3, backend), NL-15, NL-16, NL-17.
+2. **G15 (#3116) — notes at scale.** NL-04 (row density and snippets), NL-07 (keep server ranking, show the match), NL-N1 (AND, exact tag matching), NL-08, NL-09 (local-date Timeline; S, quick win), NL-10 (folders and correct counts; with E7 N18), NL-05 (select-all, progress, Undo), NL-06 (permanent delete and Empty Trash with optional auto-purge; D3, backend), NL-15, NL-16, NL-17.
 3. **G16 (#3117) — editor and preview.** NE-04 (Print) ships early through the quick-win track. Then NE-05, NE-07, NE-N1, NE-06 (list continuation; checklist and numbered-list buttons), and NE-03 (collapsible TOC; with E7 N20).
 4. **G17 (#3118) — messages.** CM-04 (persist model and generation metadata server-side; backend), CM-07 and CM-08 (with E8 N26, one Markdown renderer), CM-09 (actions without hover), CM-10, CM-11 (scroll to your message on send), CM-13.
 5. **G19 (#3120) — side-panel layout and parity.** Layout first: XS-03, XS-04, XS-09, XS-15, XS-14, XS-18. Then states: XS-10 (Stop while pending), XS-11 (Retry when offline), XS-16 (one parameter editor). Then hand-offs and parity: XP-09 (with E2 N6), XP-12, XP-18.
@@ -243,7 +255,7 @@ Enhancement quick wins from §8.1: Q2 working model on first run (E6), Q3 OS pre
 | E3 Capture ↔ converse loop | #3127 | Stage 4 | G08 (XP-02), G18 (XP-05) |
 | E4 Navigation and keyboard | #3128 | Stage 4 | G18, G21 |
 | E7 Notes at scale | #3131 | Stage 4 | G01, G02, G09, G15 |
-| E2 One conversation model | #3126 | Design spike in Stage 2, build in Stage 4 | G03, G04, D1, D7 |
+| E2 One conversation model | #3126 | Design spike during Stage 2 (D7), build in Stage 4 | G03, G04, D1 |
 
 ---
 
