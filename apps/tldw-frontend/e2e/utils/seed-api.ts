@@ -18,6 +18,10 @@ export type SeedApi = {
 
 export type SeededNote = { id: string; title: string }
 
+export type ServerNote = { id: string; title: string; content: string; version: number }
+
+export type SeedChatMessage = { role: "user" | "assistant"; content: string }
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const retryDelayMs = (response: APIResponse, attempt: number): number => {
@@ -120,4 +124,54 @@ export async function notesTotal(api: SeedApi): Promise<number> {
   const total = Number(payload?.pagination?.total ?? payload?.total)
   if (!Number.isFinite(total)) throw new Error("Notes list did not report a total")
   return total
+}
+
+/** Read one note as the server stores it (content and optimistic-lock version). */
+export async function readNote(api: SeedApi, id: string): Promise<ServerNote> {
+  const response = await expectOk(await api.get(`/api/v1/notes/${encodeURIComponent(id)}`), `Reading note ${id}`)
+  const payload = await response.json()
+  return {
+    id: String(payload?.id ?? id),
+    title: String(payload?.title ?? ""),
+    content: String(payload?.content ?? ""),
+    version: Number(payload?.version),
+  }
+}
+
+/** Create a character card and return its numeric id. */
+export async function createCharacter(api: SeedApi, name: string): Promise<number> {
+  const greeting = `Hello from ${name}.`
+  const response = await expectOk(
+    await api.post("/api/v1/characters/", { name, greeting, first_message: greeting }),
+    `Creating character ${name}`
+  )
+  const created = await response.json()
+  const id = Number(created?.id)
+  if (!Number.isInteger(id) || id <= 0) throw new Error(`Character ${name} was created without a numeric id`)
+  return id
+}
+
+/**
+ * Create a saved server chat with the given messages, in order, and return
+ * its id. The chat is attached to `characterId`, like a chat started from the
+ * character picker.
+ */
+export async function createChatWithMessages(
+  api: SeedApi,
+  { characterId, title, messages }: { characterId: number; title: string; messages: SeedChatMessage[] }
+): Promise<string> {
+  const response = await expectOk(
+    await api.post("/api/v1/chats/", { title, character_id: characterId, state: "in-progress", source: "e2e" }),
+    `Creating chat ${title}`
+  )
+  const created = await response.json()
+  const chatId = String(created?.id ?? created?.chat_id ?? created?.conversation_id ?? "")
+  if (!chatId) throw new Error(`Chat ${title} was created without an id`)
+  for (const message of messages) {
+    await expectOk(
+      await api.post(`/api/v1/chats/${encodeURIComponent(chatId)}/messages`, message),
+      `Adding a ${message.role} message to chat ${title}`
+    )
+  }
+  return chatId
 }
