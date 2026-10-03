@@ -529,7 +529,7 @@ async def test_audio_gpu_worker_sanitizes_owner_slot_release_log(monkeypatch):
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_audio_worker_owner_concurrent_jobs_zero_blocks_the_job(monkeypatch, tmp_path):
-    """limits.audio_concurrent_jobs == 0 must block the owner's job, not mean unlimited (spec 2)."""
+    """limits.audio_concurrent_jobs == 0 must fail the job now, not requeue it forever (spec 2, Qodo Q13)."""
     jobs_db_path = tmp_path / "jobs_cap_zero.db"
     monkeypatch.setenv("JOBS_DB_PATH", str(jobs_db_path))
 
@@ -572,22 +572,174 @@ async def test_audio_worker_owner_concurrent_jobs_zero_blocks_the_job(monkeypatc
     stop = asyncio.Event()
     task = asyncio.create_task(worker.run_audio_jobs_worker(stop))
     try:
-        saw_requeue = False
+        job_state: dict = {}
         for _ in range(80):
             await asyncio.sleep(0.05)
             if task.done():
                 exc = task.exception()
                 pytest.fail(f"audio worker crashed unexpectedly: {exc!r}")
             job_state = jm.get_job(job_id) or {}
-            if int(job_state.get("retry_count") or 0) >= 1:
-                saw_requeue = True
+            if job_state.get("status") in {"failed", "quarantined"}:
                 break
 
-        assert saw_requeue, "job with concurrent_jobs=0 was not requeued (0 must block)"
         assert started_calls == [], "a job blocked by concurrent_jobs=0 must not count as started"
-        job_state = jm.get_job(job_id) or {}
-        assert job_state.get("status") == "queued"
+        assert job_state.get("status") == "failed", "a 0 cap must terminally fail the job, not requeue it"
+        assert int(job_state.get("retry_count") or 0) == 0, "a non-retryable 0-cap failure must not bump retries"
+        err_text = str(job_state.get("last_error") or job_state.get("error_message") or "")
+        assert "audio_concurrent_jobs" in err_text
         assert limits_calls, "get_limits_for_user must have been consulted"
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=2.0)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_worker_owner_at_limit_runs_the_job(monkeypatch, tmp_path):
+    """limits.audio_concurrent_jobs == 1 with no other processing job must let the job run (Qodo Q3)."""
+    jobs_db_path = tmp_path / "jobs_cap_one_runs.db"
+    monkeypatch.setenv("JOBS_DB_PATH", str(jobs_db_path))
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+
+    started_calls: list[int] = []
+    released_calls: list[int] = []
+    _orig_release_job = JobManager.release_job
+
+    def _recording_release_job(self, job_id, **kwargs):
+        released_calls.append(job_id)
+        return _orig_release_job(self, job_id, **kwargs)
+
+    async def _fake_get_limits_for_user(user_id: int):
+        return {"daily_minutes": None, "concurrent_streams": None, "concurrent_jobs": 1, "max_file_size_mb": None}
+
+    async def _fake_can_start_job(user_id: int):
+        return True, ""
+
+    async def _fake_increment_jobs_started(user_id: int):
+        started_calls.append(user_id)
+
+    async def _fake_finish_job(user_id: int):
+        return None
+
+    monkeypatch.setattr(worker, "get_limits_for_user", _fake_get_limits_for_user, raising=True)
+    monkeypatch.setattr(worker, "can_start_job", _fake_can_start_job, raising=True)
+    monkeypatch.setattr(worker, "increment_jobs_started", _fake_increment_jobs_started, raising=True)
+    monkeypatch.setattr(worker, "finish_job", _fake_finish_job, raising=True)
+    monkeypatch.setattr(JobManager, "release_job", _recording_release_job, raising=True)
+
+    # audio_store has no further stage, so the job simply completes.
+    row = jm.create_job(
+        domain="audio",
+        queue="default",
+        job_type="audio_store",
+        payload={"segments": [], "text": ""},
+        owner_user_id="9",
+    )
+    job_id = int(row["id"])
+
+    stop = asyncio.Event()
+    task = asyncio.create_task(worker.run_audio_jobs_worker(stop))
+    try:
+        job_state: dict = {}
+        for _ in range(80):
+            await asyncio.sleep(0.05)
+            if task.done():
+                exc = task.exception()
+                pytest.fail(f"audio worker crashed unexpectedly: {exc!r}")
+            job_state = jm.get_job(job_id) or {}
+            if job_state.get("status") not in {None, "queued", "processing"}:
+                break
+
+        assert started_calls == [9], "a job at exactly its owner's limit must be allowed to start"
+        assert released_calls == [], "a job within its owner's limit must never be capacity-deferred"
+        assert job_state.get("status") == "completed"
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=2.0)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_worker_owner_over_limit_defers_repeatedly_without_quarantine(monkeypatch, tmp_path):
+    """Repeated capacity deferrals must never bump retries or quarantine the job (Qodo Q3, Q13)."""
+    jobs_db_path = tmp_path / "jobs_cap_one_defers.db"
+    monkeypatch.setenv("JOBS_DB_PATH", str(jobs_db_path))
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.05")
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+
+    released_calls: list[int] = []
+    failed_calls: list[tuple] = []
+    _orig_release_job = JobManager.release_job
+
+    def _recording_release_job(self, job_id, **kwargs):
+        released_calls.append(job_id)
+        return _orig_release_job(self, job_id, **kwargs)
+
+    async def _fake_get_limits_for_user(user_id: int):
+        return {"daily_minutes": None, "concurrent_streams": None, "concurrent_jobs": 1, "max_file_size_mb": None}
+
+    async def _fake_can_start_job(user_id: int):
+        return True, ""
+
+    async def _fake_increment_jobs_started(user_id: int):
+        return None
+
+    async def _fake_finish_job(user_id: int):
+        return None
+
+    monkeypatch.setattr(worker, "get_limits_for_user", _fake_get_limits_for_user, raising=True)
+    monkeypatch.setattr(worker, "can_start_job", _fake_can_start_job, raising=True)
+    monkeypatch.setattr(worker, "increment_jobs_started", _fake_increment_jobs_started, raising=True)
+    monkeypatch.setattr(worker, "finish_job", _fake_finish_job, raising=True)
+    monkeypatch.setattr(JobManager, "release_job", _recording_release_job, raising=True)
+
+    # A long-running processing job already occupies this owner's one slot.
+    occupying = jm.create_job(
+        domain="audio",
+        queue="default",
+        job_type="audio_store",
+        payload={"segments": [], "text": "occupying"},
+        owner_user_id="11",
+    )
+    occupied = jm.acquire_next_job(domain="audio", queue="default", lease_seconds=120, worker_id="pretend-other-worker")
+    assert occupied and int(occupied["id"]) == int(occupying["id"])
+
+    # A second job for the same owner should be repeatedly deferred, not failed.
+    row = jm.create_job(
+        domain="audio",
+        queue="default",
+        job_type="audio_store",
+        payload={"segments": [], "text": "waiting"},
+        owner_user_id="11",
+    )
+    job_id = int(row["id"])
+
+    stop = asyncio.Event()
+    task = asyncio.create_task(worker.run_audio_jobs_worker(stop))
+    try:
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if task.done():
+                exc = task.exception()
+                pytest.fail(f"audio worker crashed unexpectedly: {exc!r}")
+            if len([j for j in released_calls if j == job_id]) >= 3:
+                break
+
+        assert len([j for j in released_calls if j == job_id]) >= 3, "expected 3+ capacity deferrals"
+        assert failed_calls == [], "capacity deferrals must never call fail_job"
+        job_state = jm.get_job(job_id) or {}
+        assert job_state.get("status") == "queued", "a capacity-deferred job must stay queued, not fail/quarantine"
+        assert int(job_state.get("retry_count") or 0) == 0, "capacity deferrals must not bump retry_count"
     finally:
         stop.set()
         await asyncio.wait_for(task, timeout=2.0)

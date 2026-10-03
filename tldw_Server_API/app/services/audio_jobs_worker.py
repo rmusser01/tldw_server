@@ -213,7 +213,22 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                 )
                 max_jobs = None
             if max_jobs is not None:
-                # Count current processing jobs for this owner in 'audio' domain
+                if max_jobs <= 0:
+                    # A 0 cap blocks this owner outright (spec 2); fail now instead
+                    # of leaving the job queued forever.
+                    lease_id = str(job.get("lease_id"))
+                    jm.fail_job(
+                        int(job["id"]),
+                        error="audio job quota is 0 for this user (limits.audio_concurrent_jobs)",
+                        retryable=False,
+                        worker_id=worker_id,
+                        lease_id=lease_id,
+                        completion_token=lease_id,
+                    )
+                    continue
+                # Count current processing jobs for this owner in 'audio' domain.
+                # acquire_next_job() above already moved this job to 'processing',
+                # so the count below includes it.
                 try:
                     conn = jm._connect()  # use manager connection for simplicity
                     count = 0
@@ -239,18 +254,22 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                         f"Failed to count processing jobs for owner {owner}; assuming 0: {e}"
                     )
                     count = 0
-                if count >= max_jobs:
-                    # Put job back with backoff to allow other owners to proceed
+                # count already includes this job, so only defer when it pushes the
+                # owner over the cap (count <= max_jobs must be allowed to run).
+                if count > max_jobs:
+                    # Capacity wait, not a failure: release without bumping
+                    # retry/failure-streak counters so repeated deferrals can
+                    # never quarantine or fail this job. release_job() has no
+                    # backoff parameter, so pace retries at poll_sleep here to
+                    # avoid spinning the loop while the owner is at capacity.
                     lease_id = str(job.get("lease_id"))
-                    jm.fail_job(
+                    jm.release_job(
                         int(job["id"]),
-                        error="owner concurrency cap",
-                        retryable=True,
-                        backoff_seconds=10,
                         worker_id=worker_id,
                         lease_id=lease_id,
-                        completion_token=lease_id,
+                        reason="owner concurrency cap",
                     )
+                    await asyncio.sleep(poll_sleep)
                     continue
 
             # Enforce per-user concurrent job cap
