@@ -23,9 +23,7 @@ from tldw_Server_API.app.core.testing import is_test_mode
 from .base import ChunkerConfig, ChunkingMethod, ChunkResult
 from .error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS as _CHUNKER_NONCRITICAL_EXCEPTIONS
 from .exceptions import ChunkingError, InvalidChunkingMethodError, InvalidInputError
-from .hierarchical.leaves import build_leaf_block
-from .hierarchical.models import HierarchyTextViews, ResolvedHierarchyOptions
-from .hierarchical.spans import compute_paragraph_spans
+from .hierarchical.service import HierarchyService
 from .llm_context import _LLM_UNSET
 from .option_utils import _coerce_bool_option
 from .process_text import ProcessTextPipeline, TelemetryHooks
@@ -396,10 +394,6 @@ class Chunker:
         logger.debug(f"Registered {len(self._strategy_factories)} strategy factories (lazy)")
 
     # ---------------- Hierarchical chunking (integrated) -----------------
-    def _extract_header_title(self, s: str) -> str:
-        if s.lstrip().startswith('#'):
-            return re.sub(r'^\s*#{1,6}\s+', '', s).strip()
-        return s.strip()
 
     def chunk_text_hierarchical_tree(
         self,
@@ -419,155 +413,15 @@ class Chunker:
         method_options supports a hierarchical-only flag:
         - sanitize_output (bool, default True): emit sanitized text instead of raw slices.
         """
-        if not isinstance(text, str):
-            raise InvalidInputError(f"Expected string input, got {type(text).__name__}")
-        if not text:
-            return {'type': 'hierarchical', 'schema_version': 1, 'root': {'kind': 'root', 'children': []}}
-        self._enforce_text_size(text, source="chunk_text_hierarchical_tree")
-        method_opts = dict(method_options or {})
-        # Hierarchical output text sanitization (default on; opt-out via method_options)
-        sanitize_output = True
-        if "sanitize_output" in method_opts:
-            try:
-                sanitize_output = bool(method_opts.get("sanitize_output"))
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                sanitize_output = True
-            method_opts.pop("sanitize_output", None)
-        method = self._normalize_method_argument(method) or self.config.default_method.value
-        max_size = max_size if max_size is not None else self.config.default_max_size
-        overlap = overlap if overlap is not None else self.config.default_overlap
-        language = language or self.config.language
-        method = self._resolve_method(method, language, method_opts)
-
-        # Sanitize once for stable offsets; output text can be sanitized or raw based on flag.
-        clean_text = self._sanitize_input(text, suppress_security_log=True)
-        output_text = clean_text if sanitize_output else text
-        text_views = HierarchyTextViews(original=text, sanitized=clean_text, output=output_text)
-        resolved_options = ResolvedHierarchyOptions(
+        return HierarchyService(self).build_tree(
+            text=text,
             method=method,
             max_size=max_size,
             overlap=overlap,
             language=language,
-            method_options=method_opts,
-            sanitize_output=sanitize_output,
+            template=template,
+            method_options=method_options,
         )
-
-        # Build blocks from spans
-        spans = compute_paragraph_spans(text, template)
-        root = {'kind': 'root', 'level': 0, 'title': None, 'start_offset': 0, 'end_offset': len(text), 'children': []}
-        current_section: Optional[dict[str, Any]] = None
-        section_stack: list[dict[str, Any]] = []
-        preface_section: Optional[dict[str, Any]] = None
-
-        def _add_block(parent: dict[str, Any], start: int, end: int, kind: str) -> None:
-            block = build_leaf_block(self, text_views, (start, end, kind), resolved_options)
-            if block is not None:
-                parent.setdefault("children", []).append(block)
-
-        def _close_section(section: Optional[dict[str, Any]], end: int):
-            if section is not None and section.get('end_offset') is None:
-                section['end_offset'] = end
-
-        def _ensure_preface_section(start: int) -> dict[str, Any]:
-            nonlocal preface_section
-            if preface_section is None:
-                preface_section = {
-                    'kind': 'section',
-                    'level': 1,
-                    'title': None,
-                    'start_offset': start,
-                    'end_offset': None,
-                    'children': []
-                }
-                root['children'].append(preface_section)
-            elif preface_section.get('start_offset') is None:
-                preface_section['start_offset'] = start
-            return preface_section
-
-        for (bstart, bend, bkind) in spans:
-            header_segment = text[bstart:bend]
-
-            # New section on Markdown header
-            if bkind == 'header_atx':
-                # Close previous sections (including any preface) before starting a new one
-                _close_section(preface_section, bstart)
-                level_match = re.match(r'^\s*(#{1,6})\s', header_segment)
-                level = len(level_match.group(1)) if level_match else 1
-                while section_stack and section_stack[-1].get('level', 0) >= level:
-                    top = section_stack.pop()
-                    _close_section(top, bstart)
-                parent_section = section_stack[-1] if section_stack else root
-                current_section = {
-                    'kind': 'section',
-                    'level': level,
-                    'title': self._extract_header_title(header_segment),
-                    'start_offset': bstart,
-                    'end_offset': None,
-                    'children': [],
-                    'source_kind': 'header_atx',
-                }
-                parent_section.setdefault('children', []).append(current_section)
-                section_stack.append(current_section)
-                # Record the header itself as a block so offsets include the title text
-                _add_block(current_section, bstart, bend, bkind)
-            elif bkind == 'bold_subsection':
-                # Bold-only lines promoted to subsections under the nearest
-                # non-bold section (typically the current chapter/agency).
-                # We deliberately do not reset the higher-level chapter stack
-                # so these remain nested inside their parent chapter.
-                # Find the nearest ancestor section that was not itself created
-                # from a bold-only subsection.
-                target_parent: Optional[dict[str, Any]] = None
-                for sec in reversed(section_stack):
-                    if sec.get('kind') == 'section' and sec.get('source_kind') != 'bold_subsection':
-                        target_parent = sec
-                        break
-                if target_parent is None:
-                    target_parent = _ensure_preface_section(bstart)
-
-                # Close any previously-open bold subsections under this parent
-                # so that new bold headings become siblings rather than nested.
-                while section_stack:
-                    top = section_stack[-1]
-                    if top is target_parent or top.get('source_kind') != 'bold_subsection':
-                        break
-                    section_stack.pop()
-                    _close_section(top, bstart)
-
-                parent_level = int(target_parent.get('level', 1) or 1)
-                level = min(parent_level + 1, 6)
-                current_section = {
-                    'kind': 'section',
-                    'level': level,
-                    'title': self._extract_header_title(header_segment),
-                    'start_offset': bstart,
-                    'end_offset': None,
-                    'children': [],
-                    'source_kind': 'bold_subsection',
-                }
-                target_parent.setdefault('children', []).append(current_section)
-                section_stack.append(current_section)
-                # Record the bold heading itself as a block inside the subsection
-                _add_block(current_section, bstart, bend, bkind)
-            elif bkind != 'blank':
-                current_section = section_stack[-1] if section_stack else None
-                target_parent = current_section if current_section is not None else _ensure_preface_section(bstart)
-                _add_block(target_parent, bstart, bend, bkind)
-
-        # Close tail
-        while section_stack:
-            _close_section(section_stack.pop(), len(text))
-        _close_section(preface_section, len(text))
-
-        return {
-            'type': 'hierarchical',
-            'schema_version': 1,
-            'method': method,
-            'language': language,
-            'max_size': max_size,
-            'overlap': overlap,
-            'root': root,
-        }
 
     def flatten_hierarchical(self, tree: dict[str, Any]) -> list[dict[str, Any]]:
         """Flatten a hierarchical tree into a list of dict chunks with ancestry info."""

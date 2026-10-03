@@ -662,7 +662,7 @@ git commit -m "refactor: extract hierarchical leaf construction"
 - Modify `tldw_Server_API/app/core/Chunking/chunker.py`
 - Modify `tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py`
 
-- [ ] **Step 1: Add failing builder and service tests**
+- [x] **Step 1: Add failing builder and service tests**
 
 Directly test `build_hierarchy_tree(...)` with a fake leaf context and fixed spans. Use explicit expected dictionaries for:
 
@@ -694,7 +694,7 @@ defaults and replace one context method between two calls, and assert the second
 call observes both changes. This proves the service does not snapshot context
 state or bound methods at construction time.
 
-- [ ] **Step 2: Move all tree mutation into `builder.py`**
+- [x] **Step 2: Move all tree mutation into `builder.py`**
 
 Implement `build_hierarchy_tree(...)` with the required interface. Move `_extract_header_title(...)` into this module as a private module function. The builder exclusively owns:
 
@@ -707,7 +707,7 @@ Implement `build_hierarchy_tree(...)` with the required interface. Move `_extrac
 
 It calls `build_leaf_block(...)`, appends only non-`None` results, and treats text views/options/spans as read-only. It does not import `Chunker`, `process_text`, `service`, `flatten`, or `grouping`.
 
-- [ ] **Step 3: Implement per-call tree coordination in `service.py`**
+- [x] **Step 3: Implement per-call tree coordination in `service.py`**
 
 Use a `HierarchyService` with `__init__(self, context: HierarchyContext) -> None`
 and `build_tree(self, text: str, method: Any = None, max_size: Any = None,
@@ -735,7 +735,7 @@ Preserve the exact current order:
 
 Do not add a top-level catch. Do not validate or coerce the frozen dataclasses.
 
-- [ ] **Step 4: Replace the public tree body and remove the private title seam**
+- [x] **Step 4: Replace the public tree body and remove the private title seam**
 
 Keep the existing public signature and docstring, with this body:
 
@@ -753,7 +753,7 @@ return HierarchyService(self).build_tree(
 
 Delete `_extract_header_title(...)` and all now-stale tree imports/locals from `chunker.py`. Add assertions that `Chunker` has neither `_extract_header_title` nor `_compute_paragraph_spans`.
 
-- [ ] **Step 5: Run builder, service, and end-to-end hierarchy tests**
+- [x] **Step 5: Run builder, service, and end-to-end hierarchy tests**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -770,12 +770,39 @@ python -m pytest \
 
 Expected: all pass with public signature and option/call-trace tests unchanged.
 
-- [ ] **Step 6: Commit the tree extraction**
+- [x] **Step 6: Commit the tree extraction**
 
 ```bash
 git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/builder.py tldw_Server_API/app/core/Chunking/hierarchical/service.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_builder.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
 git commit -m "refactor: extract hierarchical tree builder"
 ```
+
+Task 5 test-first evidence (2026-10-02): tests-only run of the builder and
+contract files stopped with two expected import errors because the builder/service
+modules did not exist. After extracting those modules, all 16 direct builder and
+service cases passed. Before wiring the public delegate, the two focused active
+lookup/private-helper contracts failed as expected (2 failed, 63 deselected).
+The extraction keeps the exact section mutation algorithm and per-call option
+order; characterization patches now target `service.compute_paragraph_spans` and
+`builder.build_leaf_block`. The service carries present template hierarchy grouping
+through unchanged, as explicitly required by the approved Task 5 handoff.
+
+Task 5 final verification (2026-10-02): the required seven-file suite passed with
+122 tests, 0 failures, and 257 warnings. The shared spans/process_text regression
+suite passed with 171 tests, 1 existing PyThaiNLP skip, 0 failures, and 356 warnings.
+Ruff passed on all 5 touched Python files after replacing the 4 copied legacy
+Optional annotations with union syntax. Black checks passed on the 4 scoped
+new/test files and changed chunker.py ranges 26 and 394-425; no whole-file legacy
+formatting was applied. Compileall passed for hierarchical, chunker.py, and both
+touched tests. Bandit scanned 1,959 production LOC with 0 findings and 0 errors.
+`git diff --check` passed. AST self-review verified identical builder mutation and
+service coordination after only lookup/name/annotation normalization, unchanged
+public flatten/flat-composition methods, and the exact one-assignment constructor.
+The pinned tree body did not contain the grouping passthrough described in the
+handoff; Task 5 implements that explicit approved requirement and tests identity
+preservation for a populated mapping, an empty mapping, and None. No grouping
+algorithm, flattening, or Task 6 file is changed. The extraction commit contains
+this Task 5 evidence and TASK-13215 notes; the task remains In Progress.
 
 ## Task 6: Extract Grouping and Activate It in Flattening
 
