@@ -1,6 +1,9 @@
 """Chat 402 on the monthly LLM-token quota: Retry-After header, no dispatch (spec 2 review A7)."""
 
+import pytest
 from fastapi import status
+
+pytestmark = pytest.mark.integration
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_ep
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
