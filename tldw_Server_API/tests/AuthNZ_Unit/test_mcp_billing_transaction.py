@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.repos.billing_repo import AuthnzBillingRepo
-from tldw_Server_API.app.core.Billing import subscription_service
+from tldw_Server_API.app.core.Billing import enforcement, subscription_service
 from tldw_Server_API.app.core.Billing.enforcement import BillingEnforcer
 from tldw_Server_API.app.core.Billing.plan_limits import get_plan_limits
 from tldw_Server_API.app.core.Billing.subscription_service import SubscriptionService
@@ -72,6 +72,7 @@ class OneSlotPool:
 
 @pytest.fixture
 def billing_store(monkeypatch):
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
     raw = sqlite3.connect(":memory:")
     raw.executescript("""
         CREATE TABLE subscription_plans (
@@ -189,6 +190,61 @@ async def test_oss_without_billing_repo_keeps_canonical_free_limits_with_connect
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "repo_wired,quota_switch",
+    [(False, None), (False, "false"), (False, "true"), (True, None), (True, "false")],
+)
+@pytest.mark.parametrize("operator_limit", [None, 0, 100])
+async def test_inactive_billing_uses_operator_limit_without_org_queries(
+    billing_store, monkeypatch, repo_wired, quota_switch, operator_limit
+):
+    store = billing_store
+    if quota_switch is None:
+        monkeypatch.delenv("USAGE_QUOTAS_ENABLED")
+        monkeypatch.delenv("LIMIT_ENFORCEMENT_ENABLED", raising=False)
+        monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: None)
+    else:
+        monkeypatch.setenv("USAGE_QUOTAS_ENABLED", quota_switch)
+    service = SubscriptionService(db_pool=store.pool, billing_repo=store.repo if repo_wired else None)
+    limit_lookup = AsyncMock(wraps=service.get_org_limits)
+    monkeypatch.setattr(service, "get_org_limits", limit_lookup)
+    monkeypatch.setattr(subscription_service, "_subscription_service", service)
+    enforcer = BillingEnforcer()
+    enforcer._limits_cache[10] = ({"llm_tokens_month": 999999}, 1e99)
+
+    assert (
+        await enforcer.get_mcp_token_limit(
+            SimpleNamespace(kind="org", value=10), operator_limit=operator_limit, conn=store.conn
+        )
+        == operator_limit
+    )
+    limit_lookup.assert_not_awaited()
+    assert store.conn.queries == []
+    assert store.pool.acquire_attempts == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [RuntimeError("activation unavailable"), asyncio.CancelledError()])
+async def test_activation_failure_propagates_without_subscription_lookup(billing_store, monkeypatch, failure):
+    activation = AsyncMock(side_effect=failure)
+    limit_lookup = AsyncMock(return_value={"llm_tokens_month": 40})
+    monkeypatch.setattr(enforcement, "billing_checks_active", activation)
+    monkeypatch.setattr(billing_store.service, "get_org_limits", limit_lookup)
+    enforcer = BillingEnforcer()
+    enforcer._limits_cache[10] = ({"llm_tokens_month": 999999}, 1e99)
+    monkeypatch.setenv("BILLING_ENFORCEMENT_FAILURE_MODE", "open")
+
+    with pytest.raises(type(failure)) as raised:
+        await enforcer.get_mcp_token_limit(
+            SimpleNamespace(kind="org", value=10), operator_limit=100, conn=billing_store.conn
+        )
+    assert raised.value is failure
+    activation.assert_awaited_once_with()
+    limit_lookup.assert_not_awaited()
+    assert billing_store.conn.queries == []
+
+
+@pytest.mark.asyncio
 async def test_strict_lookup_backend_failure_propagates_without_fallback(billing_store, monkeypatch):
     store = billing_store
     monkeypatch.setenv("BILLING_ENFORCEMENT_FAILURE_MODE", "open")
@@ -203,6 +259,7 @@ async def test_strict_lookup_backend_failure_propagates_without_fallback(billing
 
 @pytest.mark.asyncio
 async def test_strict_lookup_service_failure_propagates(monkeypatch):
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
     failure = RuntimeError("billing unavailable")
     monkeypatch.setattr(subscription_service, "get_subscription_service", AsyncMock(side_effect=failure))
     with pytest.raises(RuntimeError) as raised:
@@ -219,7 +276,9 @@ async def test_mcp_limit_requires_connection_argument():
 
 
 @pytest.mark.asyncio
-async def test_mcp_limit_rejects_null_connection(billing_store):
+@pytest.mark.parametrize("quota_switch", ["true", "false"])
+async def test_mcp_limit_rejects_null_connection(billing_store, monkeypatch, quota_switch):
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", quota_switch)
     with pytest.raises(ValueError, match="connection"):
         await BillingEnforcer().get_mcp_token_limit(
             SimpleNamespace(kind="org", value=10), operator_limit=100, conn=None
@@ -237,7 +296,9 @@ async def test_repository_strict_api_rejects_null_connection(billing_store):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["user", "team"])
 @pytest.mark.parametrize("operator_limit", [None, 0, 100])
-async def test_non_org_scope_uses_only_operator_quota(kind, operator_limit, monkeypatch):
+@pytest.mark.parametrize("quota_switch", ["true", "false"])
+async def test_non_org_scope_uses_only_operator_quota(kind, operator_limit, monkeypatch, quota_switch):
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", quota_switch)
     service_factory = AsyncMock(side_effect=AssertionError("organization lookup is forbidden"))
     monkeypatch.setattr(subscription_service, "get_subscription_service", service_factory)
     assert (
@@ -278,7 +339,9 @@ async def test_invalid_subscription_quota_propagates_not_operator_fallback(billi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tokens", [True, "40", 40.0, -1, 1 << 63])
-async def test_invalid_operator_quota_fails_before_billing_read(billing_store, tokens):
+@pytest.mark.parametrize("quota_switch", ["true", "false"])
+async def test_invalid_operator_quota_fails_before_billing_read(billing_store, monkeypatch, tokens, quota_switch):
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", quota_switch)
     store = billing_store
     with pytest.raises(ValueError, match="operator quota"):
         await BillingEnforcer().get_mcp_token_limit(
@@ -301,6 +364,7 @@ async def test_malformed_stored_json_preserves_legacy_normalization(billing_stor
 
 @pytest.mark.asyncio
 async def test_strict_repository_cancellation_propagates_without_legacy_retry(monkeypatch):
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
     repo = SimpleNamespace(
         get_org_limits=AsyncMock(),
         get_org_limits_on_connection=AsyncMock(side_effect=asyncio.CancelledError),

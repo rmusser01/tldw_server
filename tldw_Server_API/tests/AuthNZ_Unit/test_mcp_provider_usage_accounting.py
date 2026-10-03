@@ -177,6 +177,7 @@ async def test_strict_mcp_usage_rejects_conflicting_cost_split(usage_store):
 
 @pytest.mark.asyncio
 async def test_strict_billing_limits_never_use_cached_fallback(monkeypatch):
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
     enforcer = BillingEnforcer()
     enforcer._limits_cache[10] = ({"llm_tokens_month": 999999}, 1e99)
 
@@ -190,7 +191,13 @@ async def test_strict_billing_limits_never_use_cached_fallback(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_strict_billing_limits_cap_operator_and_subscription(monkeypatch):
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
+
     class Service:
+        @property
+        def has_billing_repo(self):
+            return True
+
         async def get_org_limits(self, org_id, *, conn=None):
             assert conn == "locked"
             return {"llm_tokens_month": 40}

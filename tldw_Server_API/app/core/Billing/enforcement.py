@@ -289,14 +289,18 @@ class BillingEnforcer:
             return self._permissive_limit_fallbacks()
 
     async def get_mcp_token_limit(self, scope: Any, *, operator_limit: int | None, conn: Any) -> int | None:
-        """Read fresh MCP limits on the supplied transaction, with no fallback."""
+        """Combine operator and active hosted limits on the supplied transaction."""
         if conn is None:
             raise ValueError("MCP billing limits require a supplied connection")
         if operator_limit is not None and (type(operator_limit) is not int or not 0 <= operator_limit < (1 << 63)):
             raise ValueError("Invalid MCP operator quota")
         if scope.kind != "org":
             return operator_limit
-        from tldw_Server_API.app.core.Billing.subscription_service import get_subscription_service
+        if not await billing_checks_active():
+            return operator_limit
+        from tldw_Server_API.app.core.Billing.subscription_service import (
+            get_subscription_service,
+        )
 
         limits = await (await get_subscription_service()).get_org_limits(scope.value, conn=conn)
         value = limits["llm_tokens_month"]
