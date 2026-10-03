@@ -68,8 +68,8 @@ async def test_require_team_manager_allows_lead_member(
     async def _fake_team_members(team_id: int):
         assert team_id == 25
         return [
-            {"user_id": 5, "role": "member"},
-            {"user_id": 42, "role": "lead"},
+            {"user_id": 5, "role": "member", "status": "active"},
+            {"user_id": 42, "role": "lead", "status": "active"},
         ]
 
     monkeypatch.setattr(shared_keys_scoped, "list_team_members", _fake_team_members)
@@ -86,7 +86,7 @@ async def test_require_team_manager_denies_non_manager_member(
 ) -> None:
     async def _fake_team_members(team_id: int):
         assert team_id == 3
-        return [{"user_id": 42, "role": "member"}]
+        return [{"user_id": 42, "role": "member", "status": "active"}]
 
     monkeypatch.setattr(shared_keys_scoped, "list_team_members", _fake_team_members)
 
@@ -97,6 +97,23 @@ async def test_require_team_manager_denies_non_manager_member(
         )
     assert exc.value.status_code == 403
     assert exc.value.detail == "Team manager role required"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [None, "inactive", "suspended"])
+async def test_require_team_manager_denies_inactive_lead(
+    monkeypatch: pytest.MonkeyPatch, status: str | None,
+) -> None:
+    async def team_members(_team_id: int) -> list[dict]:
+        return [{"user_id": 42, "role": "lead", "status": status}]
+
+    monkeypatch.setattr(shared_keys_scoped, "list_team_members", team_members)
+    with pytest.raises(HTTPException) as exc:
+        await shared_keys_scoped._require_team_manager(
+            _principal(user_id=42, roles=["user"]),
+            team_id=3,
+        )
+    assert exc.value.status_code == 403
 
 
 def test_principal_user_id_rejects_invalid_values() -> None:
