@@ -26,6 +26,23 @@ def aggregate_claims_review_metrics_window(
     The caller supplies the owner DB and any privileged PostgreSQL maintenance
     scope. All SQL, including owner filtering and serialization, stays in the DB
     layer; this function only validates and assembles domain metric records.
+
+    Args:
+        db: Open owner database session supporting transactional metric writes.
+        owner_user_id: Canonical positive decimal owner identifier.
+        start_date: Inclusive first UTC review date, supplied as a date value.
+        end_date: Inclusive last UTC review date, supplied as a date value.
+
+    Returns:
+        Number of observed date/extractor/version groups upserted. Returns zero
+        when no reviews match; historical groups absent from the window remain.
+
+    Raises:
+        ValueError: If the owner is not canonical, either date is not a date
+            value, or the window is reversed, exceeds 366 days, or ends at
+            date.max (the exclusive upper bound must be representable).
+        Exception: Database read, lock, or write failures propagate to the
+            caller after the database transaction rolls back.
     """
     if not is_routable_claims_owner_id_text(owner_user_id):
         raise ValueError("review metrics owner must be a canonical positive integer")

@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends import factory as backend_factory
 from tldw_Server_API.app.core.DB_Management.backends import sqlite_backend
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import (
@@ -32,6 +31,16 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.factory import (
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.factory import (
     create_media_database as runtime_create_media_database,
 )
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+def reject_factory_backend_creation(monkeypatch):
+    def reject(*args, **kwargs):
+        pytest.fail("Existing-only resolution must not construct a factory-managed backend")
+
+    monkeypatch.setattr(DatabaseBackendFactory, "create_backend", reject)
 
 
 def test_existing_only_does_not_create_missing_database(tmp_path):
@@ -93,7 +102,7 @@ def test_existing_only_ignores_creating_backend_and_keeps_registry_unchanged(tmp
 @pytest.mark.parametrize("entrypoint", ["constructor", "api", "runtime"])
 @pytest.mark.parametrize("file_exists", [False, True])
 def test_existing_only_without_supplied_backend_leaves_registry_unchanged(
-    tmp_path, monkeypatch, entrypoint, file_exists
+    tmp_path, monkeypatch, entrypoint, file_exists, reject_factory_backend_creation
 ):
     path = tmp_path / "fresh-media.db"
     if file_exists:
@@ -114,7 +123,6 @@ def test_existing_only_without_supplied_backend_leaves_registry_unchanged(
         postgres_content_mode=False, backend_loader=creating_loader,
     )
     monkeypatch.setattr(media_db_api, "build_media_runtime_config", lambda: runtime)
-    before = dict(backend_factory._sqlite_backend_registry)
 
     def open_database():
         if entrypoint == "constructor":
@@ -126,14 +134,12 @@ def test_existing_only_without_supplied_backend_leaves_registry_unchanged(
     if file_exists:
         db = open_database()
         try:
-            assert dict(backend_factory._sqlite_backend_registry) == before
             assert not is_factory_managed_backend(db.backend)
         finally:
             db.close_connection()
     else:
         with pytest.raises(FileNotFoundError):
             open_database()
-    assert dict(backend_factory._sqlite_backend_registry) == before
     assert loader_calls == []
 
 
@@ -322,7 +328,9 @@ def test_existing_only_postgres_preserves_routing_without_creating_local_path(tm
 
 
 @pytest.mark.parametrize("routing", ["config", "environment", "default_config"])
-def test_existing_only_constructor_preserves_configured_postgres_resolution(tmp_path, monkeypatch, routing):
+def test_existing_only_constructor_preserves_configured_postgres_resolution(
+    tmp_path, monkeypatch, routing, reject_factory_backend_creation
+):
     path = tmp_path / "absent" / "unused.db"
     backend = SimpleNamespace(backend_type=BackendType.POSTGRESQL)
     config = ConfigParser()
@@ -338,7 +346,6 @@ def test_existing_only_constructor_preserves_configured_postgres_resolution(tmp_
         monkeypatch.setattr(backend_resolution, "load_comprehensive_config", lambda: config)
     monkeypatch.setattr(backend_resolution, "get_content_backend", lambda _config: backend)
     monkeypatch.setattr(MediaDatabase, "_initialize_schema", lambda _self: pytest.fail("Schema bootstrap"))
-    before = dict(backend_factory._sqlite_backend_registry)
     db = MediaDatabase(
         client_id="42", db_path=str(path), existing_only=True,
         config=None if routing == "default_config" else config,
@@ -348,20 +355,19 @@ def test_existing_only_constructor_preserves_configured_postgres_resolution(tmp_
     finally:
         db.close_connection()
     assert not path.parent.exists()
-    assert dict(backend_factory._sqlite_backend_registry) == before
 
 
-def test_existing_only_failed_postgres_resolution_does_not_fall_back_to_creating_sqlite(tmp_path, monkeypatch):
+def test_existing_only_failed_postgres_resolution_does_not_fall_back_to_creating_sqlite(
+    tmp_path, monkeypatch, reject_factory_backend_creation
+):
     path = tmp_path / "fresh-media.db"
     config = ConfigParser()
     config.read_dict({"Database": {"type": "postgresql"}})
     monkeypatch.delenv("TLDW_CONTENT_DB_BACKEND", raising=False)
     monkeypatch.delenv("CONTENT_DB_MODE", raising=False)
     monkeypatch.setattr(backend_resolution, "get_content_backend", lambda _config: None)
-    before = dict(backend_factory._sqlite_backend_registry)
     with pytest.raises(media_db_api.DatabaseError, match="PostgreSQL content backend requested"):
         MediaDatabase(client_id="42", db_path=str(path), config=config, existing_only=True)
-    assert dict(backend_factory._sqlite_backend_registry) == before
     assert not path.exists()
 
 
