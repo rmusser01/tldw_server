@@ -26,7 +26,7 @@ Associated task: TASK13260.281.1 (umbrella TASK13260.281). Source-only repair; t
 
 - [x] Reproduce punctuation failure and wrapped FTS-error fallback.
 - [x] Quote literal FTS text, catch the database wrapper error, and avoid unfiltered results.
-- [x] Run database search and API search tests.
+- [x] Run the real SQLite database search tests.
 
 ## Stage 3: Saved character generation metadata
 **Goal:** Permit recognized generation metadata already captured into snapshot sampling.
@@ -60,3 +60,5 @@ Associated task: TASK13260.281.1 (umbrella TASK13260.281). Source-only repair; t
 - [x] Report test counts and limitations to coordinator for publication.
 
 Coordinator verification:342 distinct affected backend cases passed, including two review regressions for embedded author/keyword text after wrapped FTS failure. Final Prompt DB suite128pass. Independent source review is clear; final Bandit six production files0findings/0errors. Ruff has no new findings;19 inherited source/test findings remain. No live UAT, native lifetime or installer acceptance.
+
+Published source was merged with current dev7117 without conflicts; all reviewed repair source paths remained unchanged. Final integrated affected backend run passes353cases across12suites, no failures/skips. Pytest reported pre-existing old temporary-directory cleanup warnings after the passing run; no unrelated cleanup was attempted.

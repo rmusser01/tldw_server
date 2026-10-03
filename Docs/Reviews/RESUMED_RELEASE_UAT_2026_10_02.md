@@ -1,6 +1,6 @@
 # Resumed release UAT — 2026-10-02
 
-Tracking: TASK13260, In Progress. UAT261 and its original acceptance criteria remain open. Live UAT is on hold while the human-requested repair PR is completed. Its scope remains all43 families (A12/B9/C12/X4/S6), applicable database/auth cells, Web/extension surfaces, fresh state, clean installation, supported upgrades and D/L/U modes. No full-run or human acceptance is claimed.
+Tracking: TASK13260, In Progress. UAT261 and its original acceptance criteria remain open. Live UAT remains on hold pending corrected-runtime readiness and the outstanding browser recovery direction. Reviewed source fixes are published in draft PR3096. Its scope remains all43 families (A12/B9/C12/X4/S6), applicable database/auth cells, Web/extension surfaces, fresh state, clean installation, supported upgrades and D/L/U modes. No full-run or human acceptance is claimed.
 
 ## Open bugs
 
@@ -22,7 +22,7 @@ Tracking: TASK13260, In Progress. UAT261 and its original acceptance criteria re
 | C07 Repository output | Generate repository text in dark mode. Output textarea has pale text on white, contrast about1.18. | Legible themed output. |
 | S03 Kanban detail | Create one board/two lists/three cards and open SELENE card2. Checklist200 response is a wrapper; frontend treats it as an array and crashes at .map. | Open the card detail with empty checklist/comments. |
 
-All15 original UAT failures remain open for corrected-runtime qualification. Their source corrections are independently reviewed in draft [PR3096](https://github.com/rmusser01/tldw_server/pull/3096). Source regression results do not replace live UAT or human acceptance.
+All 15 original UAT failures remain open for corrected-runtime qualification. Their source corrections are independently reviewed in draft [PR3096](https://github.com/rmusser01/tldw_server/pull/3096). Source regression results do not replace live UAT or human acceptance.
 
 ## Reviewed source corrections
 
@@ -34,7 +34,7 @@ All15 original UAT failures remain open for corrected-runtime qualification. The
 | TASK13260.281.4 | B01, B04, C07 | Normalize one Character envelope for JSON/PNG, gate Play and Preview on actual provider/voice readiness with guidance, and apply existing foreground/background theme colors to repository output. |
 | TASK13260.280 | S03 | Unpack checklist/comment response envelopes, hydrate checklist items, map canonical mutation fields, and block button/Enter submission after load failure. |
 
-Final affected checks: 342 distinct backend cases and 241 frontend cases across22 suites passed. Independent actual-source review has no unresolved Critical/Important findings. Bandit on all six touched Python production files has0findings/0errors. Touched frontend lint has0errors; inherited warnings remain. The full frontend typecheck completes with existing unrelated dependency/React diagnostics and no touched-path diagnostics, so it is not a project-wide typecheck pass. Existing Python lint findings remain outside the changed lines.
+Final affected checks: 353 backend cases on the integrated dev7117 source (12 suites, no failures/skips) and 241 frontend cases across 22 suites passed. Independent actual-source review has no unresolved Critical/Important findings. Bandit on all six touched Python production files has 0 findings/0 errors. Touched frontend lint has 0 errors; inherited warnings remain. The full frontend typecheck completes with existing unrelated dependency/React diagnostics and no touched-path diagnostics, so it is not a project-wide typecheck pass. Existing Python lint findings remain outside the changed lines.
 
 The dark-mode color correction uses the original observed readability failure and source inspection plus existing repository component checks; no mirrored CSS-class test or new live visual pass is claimed. All corrections still need fresh, separately authorized corrected-runtime UAT. The inherited first50-comment pagination limit remains unqualified.
 
@@ -50,7 +50,7 @@ The dark-mode color correction uses the original observed readability failure an
 
 ## Repair PR continuation
 
-The human requested all recorded root causes be addressed in one PR before further UAT. TASK13260.281 and its four repair children own this work in PR3096, based on current dev at1c8491ff. UAT execution is on hold while the reviewed corrections are published. Source tests and UAT acceptance remain separate.
+The human requested all recorded root causes be addressed in one PR before further UAT. TASK13260.281 and its four repair children own this work in PR3096, with dev7117efa8 preserved through a conflict-free normal merge. Reviewed fixes are published; UAT execution remains on hold for runtime readiness and browser direction. Source tests and UAT acceptance remain separate.
 
 ## Current continuation
 
