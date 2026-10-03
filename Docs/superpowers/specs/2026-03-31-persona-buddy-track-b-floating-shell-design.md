@@ -322,6 +322,8 @@ This is a presence toggle, not a full identity-mode switch. Since inline avatars
 
 ### 6. Desktop-Only Boundary
 
+**Update (TASK-13423, 2026-10-02):** The browser-width suppression below is superseded. An active enabled Buddy now remains mounted when a web pane narrows below 1024 pixels, using the existing position clamping and controls. This preserves its live session and unsent draft through resizing. The surface and ownership gates still apply.
+
 Track B should explicitly suppress the buddy shell on responsive web narrow/mobile layouts.
 
 This should be treated as a deliberate rollout boundary, not a degraded desktop implementation. Mobile shell behavior can be designed later with its own interaction and layout assumptions.
