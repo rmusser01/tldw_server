@@ -1,4 +1,4 @@
-"""Test-only damaged VN persistence fixtures; never imported by runtime code."""
+"""Private damaged VN persistence fixtures; imported only by isolated tests."""
 
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 
@@ -10,13 +10,13 @@ def delete_recipe_rows(
     """Remove exactly the selected recipe rows to exercise fail-closed readers.
 
     Args:
-        repo: Real isolated VN database repository.
-        batch_id: Batch whose recipe ledger is deliberately damaged.
-        slot_id: Optional slot restriction; None selects every slot.
-        variant_index: Optional variant restriction; None selects every variant.
+        repo (VNAssetPacksRepository): Real isolated VN database repository.
+        batch_id (int): Batch whose recipe ledger is deliberately damaged.
+        slot_id (int | None): Optional restriction; None selects every slot.
+        variant_index (int | None): Optional restriction; None selects every variant.
 
     Returns:
-        None after the native database write; database errors propagate.
+        None: Completes the native database write; database errors propagate.
     """
     repo.db.execute_query(
         """DELETE FROM vn_asset_generation_recipes WHERE batch_id = ?
@@ -29,11 +29,11 @@ def corrupt_recipe_version(repo: VNAssetPacksRepository, batch_id: int) -> None:
     """Set the explicit unsupported version used by damaged-ledger controls.
 
     Args:
-        repo: Real isolated VN database repository.
-        batch_id: Batch whose persisted version is deliberately damaged.
+        repo (VNAssetPacksRepository): Real isolated VN database repository.
+        batch_id (int): Batch whose persisted version is deliberately damaged.
 
     Returns:
-        None after writing unsupported version99; native errors propagate.
+        None: Writes unsupported version99; native errors propagate.
     """
     repo.db.execute_query(
         "UPDATE vn_asset_batches SET recipe_version = 99 WHERE id = ?", (batch_id,),
@@ -44,13 +44,13 @@ def set_recipe_item(repo: VNAssetPacksRepository, batch_id: int, slot_id: int, i
     """Corrupt or restore the first variant's item link in a test database.
 
     Args:
-        repo: Test-owned repository.
-        batch_id: Selected batch.
-        slot_id: Selected slot.
-        item_id: Replacement item link, including an unmarked null link.
+        repo (VNAssetPacksRepository): Test-owned repository.
+        batch_id (int): Selected batch.
+        slot_id (int): Selected slot.
+        item_id (int | None): Replacement item link, including an unmarked null link.
 
     Returns:
-        None; updates only the selected test recipe.
+        None: Updates only the selected test recipe; native errors propagate.
     """
     repo.db.execute_query(
         "UPDATE vn_asset_generation_recipes SET item_id = ? WHERE batch_id = ? AND slot_id = ? AND variant_index = 0",
@@ -62,13 +62,13 @@ def set_deletion_receipt(repo: VNAssetPacksRepository, batch_id: int, slot_id: i
     """Corrupt or restore the first variant's deletion receipt for fail-closed tests.
 
     Args:
-        repo: Test-owned repository.
-        batch_id: Selected batch.
-        slot_id: Selected slot.
-        receipt: Serialized replacement, deliberately not validated by the fixture.
+        repo (VNAssetPacksRepository): Test-owned repository.
+        batch_id (int): Selected batch.
+        slot_id (int): Selected slot.
+        receipt (str | None): Serialized replacement, deliberately not validated.
 
     Returns:
-        None; updates only the selected test recipe.
+        None: Updates only the selected test recipe; native errors propagate.
     """
     repo.db.execute_query(
         "UPDATE vn_asset_generation_recipes SET deleted_item_json = ? "
@@ -81,9 +81,9 @@ def drop_deletion_receipt_column(repo: VNAssetPacksRepository) -> None:
     """Restore the pre-receipt schema to exercise additive upgrade behavior.
 
     Args:
-        repo: Isolated test repository with no deliberate deletion receipts.
+        repo (VNAssetPacksRepository): Isolated repository with no deletion receipts.
 
     Returns:
-        None; removes the new test column without altering old recipe data.
+        None: Removes the column without altering recipe data; native errors propagate.
     """
     repo.db.execute_query("ALTER TABLE vn_asset_generation_recipes DROP COLUMN deleted_item_json")

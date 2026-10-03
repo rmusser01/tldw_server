@@ -26,6 +26,10 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetSlotCreate,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.DB_Management._vn_asset_corruption_test_support import (
+    corrupt_recipe_version,
+    delete_recipe_rows,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenResult
@@ -38,7 +42,6 @@ from tldw_Server_API.app.core.VN_Assets.jobs import (
     vn_asset_generation_jobs_queue,
 )
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
-from tldw_Server_API.tests.DB_Management.vn_asset_corruption import corrupt_recipe_version, delete_recipe_rows
 
 
 class FakeJobs:
@@ -408,10 +411,22 @@ async def test_outcome_query_does_not_block_async_worker_loop(
             super().close()
 
     connect = sqlite3.connect
+    reader_uri = f"{service.repo.db.db_path.as_uri()}?mode=ro"
 
-    def observed_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
-        """Track newly owned reader handles without changing SQLite results."""
-        connection = connect(*args, **kwargs, factory=ObservedConnection)
+    def observed_connect(database: str, *args: Any, **kwargs: Any) -> sqlite3.Connection:
+        """Observe only this VN database's independent read-only handles.
+
+        Args:
+            database (str): Original SQLite database path or URI.
+            args (Any): Unchanged positional connection arguments.
+            kwargs (Any): Unchanged keyword connection arguments.
+
+        Returns:
+            sqlite3.Connection: Native handle, instrumented only for reader_uri.
+        """
+        if database != reader_uri:
+            return connect(database, *args, **kwargs)
+        connection = connect(database, *args, **kwargs, factory=ObservedConnection)
         owned_connections.append(connection)
         with closing(connection.execute("PRAGMA busy_timeout")) as cursor:
             reader_timeouts.append(cursor.fetchone()[0])

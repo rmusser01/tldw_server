@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -54,6 +52,11 @@ async def exercise_completed_deletion(root: Path) -> dict[str, Any]:
     from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile, setup_database
     from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+    from tldw_Server_API.app.core.DB_Management._vn_asset_corruption_test_support import (
+        drop_deletion_receipt_column,
+        set_deletion_receipt,
+        set_recipe_item,
+    )
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
@@ -64,11 +67,6 @@ async def exercise_completed_deletion(root: Path) -> dict[str, Any]:
     from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
     from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
-    from tldw_Server_API.tests.DB_Management.vn_asset_corruption import (
-        drop_deletion_receipt_column,
-        set_deletion_receipt,
-        set_recipe_item,
-    )
     from tldw_Server_API.tests.VN_Assets.test_generation_jobs import (
         FakeGenerationGate,
         FakeImageAdapter,
@@ -244,11 +242,7 @@ def test_native_completed_deletion_replays_without_resurrection(tmp_path: Path) 
         "XDG_CACHE_HOME": str(tmp_path / "cache"),
         "VN_DELETION_TEST_FILE": str(Path(__file__).resolve()),
     })
-    try:
-        assert _run_runtime(tmp_path, env, NATIVE_SCRIPT) == {
-            "backend": "sqlite", "replayed_original": True, "approved_preserved": True,
-            "adapter_calls": 2, "saver_calls": 2, "counters": [2, 0, 0],
-        }
-    finally:
-        if evidence := os.environ.get("TASK63_EVIDENCE"):
-            shutil.copytree(tmp_path, Path(evidence) / "native")
+    assert _run_runtime(tmp_path, env, NATIVE_SCRIPT) == {
+        "backend": "sqlite", "replayed_original": True, "approved_preserved": True,
+        "adapter_calls": 2, "saver_calls": 2, "counters": [2, 0, 0],
+    }
