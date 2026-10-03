@@ -12,7 +12,7 @@
 
 **Design source:** `Docs/superpowers/specs/2026-07-23-mcp-skills-model-only-runner-design.md`
 
-**ADR check (2026-10-02):** ADR required: yes. [ADR-058](../../ADR/058-authoritative-provider-credential-scope.md) records exact authenticated scope and absence-only credential fallback. ADR-025 remains the governing provider-routing decision; the bounded adapter's stricter mode disables credential endpoint overrides.
+**ADR check (2026-10-02):** ADR required: yes. [ADR-059](../../ADR/059-authoritative-provider-credential-scope.md) records exact authenticated scope and absence-only credential fallback. ADR-025 remains the governing provider-routing decision; the bounded adapter's stricter mode disables credential endpoint overrides.
 
 **Rebase (2026-10-02):** Stage 1 commits rebased cleanly onto `origin/dev` at `9958110df2` before Stage 2 implementation. All five planning/implementation commits were subsequently rebased cleanly onto the newer `origin/dev` at `86e287fee7`; `git range-diff` confirmed unchanged patches before the final evidence update.
 
@@ -172,7 +172,7 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Status:** Complete
 
-**ADR check (2026-10-02):** ADR required: yes. [ADR-059](../../ADR/059-mcp-durable-provider-accounting.md) records durable conservative admission/dispatch/settlement. ADR-018 and ADR-056 continue to govern the existing Resource Governor policy.
+**ADR check (2026-10-02):** ADR required: yes. [ADR-060](../../ADR/060-mcp-durable-provider-accounting.md) records durable conservative admission/dispatch/settlement. ADR-018 and ADR-056 continue to govern the existing Resource Governor policy.
 
 **Revalidation adjustment (2026-10-02):** Acquire the durable scope lock before reading uncached canonical actual usage, not only before summing reservations. The repository accepts a required snapshot-reader callback on the transaction connection, preventing stale snapshots from missing a just-reconciled MCP call. Settlement takes the same lock. All unresolved reservations remain chargeable regardless of age; billing-period reset cannot erase an ambiguous dispatch. Legacy Chat is not coordinated by this lock.
 
@@ -258,7 +258,13 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Tests:** Egress pinning, decompressed limit-plus-one, no retry/redirect/fallback, cancellation, output normalization property tests, retained child and shutdown, sanitized failure provenance.
 
-**Status:** Not Started
+**Status:** In Progress
+
+**Rebase/revalidation (2026-10-03):** Rebasing all eight local commits onto `origin/dev` at `4c4f197f68` changed no production patch; the sole conflict preserved both ADR index additions. Upstream owns ADR-058 for Jobs, so the unmerged MCP credential/accounting ADRs are renumbered to ADR-059/060 without changing their decisions. The new hosted-only Billing activation contract is being revalidated before transport composition; explicit MCP operator limits and durable recording remain separate from implicit OSS free-plan enforcement.
+
+**ADR check (2026-10-03):** ADR required: yes. [ADR-061](../../ADR/061-mcp-certified-completion-lifecycle.md) records the certified single-attempt transport and retained-child lifecycle; ADR-025/026 govern routing/egress and ADR-059/060 govern credentials/accounting.
+
+**Implementation adjustment (2026-10-03):** The existing JSON helper could consume a full final decoded chunk beyond `max_bytes + 1`. Its public byte-stream wrapper now accepts an optional decoded-byte budget and clips the final chunk to the first overflow byte before the JSON helper rejects it. Unbounded streams and legacy delegate keyword defaults remain unchanged. The guarantee covers application consumption and envelope retention, not internal codec allocations.
 
 ### Task 4.1: Carry configured endpoint through bounded streaming JSON
 
@@ -315,7 +321,7 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 5. `shutdown()` stops new calls and cancels owned children. `wait_for_shutdown_completion()` drains all retained children without dropping references. The late-task callback removes ownership but does not clear the unhealthy latch; a later explicit `is_healthy()` check may re-establish health only after it revalidates that no retained work remains, the adapter is not closing, and all certified capabilities still hold.
 6. Close the per-call credential runtime in `finally` on every path. Mark credential usage after valid completion; its failure follows the conservative post-success accounting rule and cannot replace the result.
 7. Determine breaker behavior only from explicit trusted failure domains. Never infer shared failure from HTTP status or Python exception class.
-7. Commit: `feat(mcp): own completion request lifecycle`
+8. Commit: `feat(mcp): own completion request lifecycle`
 
 ## Stage 5: Host Composition And Quality Gates
 

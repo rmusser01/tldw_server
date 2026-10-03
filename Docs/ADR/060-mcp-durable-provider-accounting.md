@@ -1,4 +1,4 @@
-# ADR-059: MCP Durable Provider Accounting
+# ADR-060: MCP Durable Provider Accounting
 
 **Status:** Proposed
 **Date:** 2026-10-02
