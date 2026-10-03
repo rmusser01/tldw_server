@@ -266,7 +266,11 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Implementation adjustment (2026-10-03):** The existing JSON helper could consume a full final decoded chunk beyond `max_bytes + 1`. Its public byte-stream wrapper now accepts an optional decoded-byte budget and clips the final chunk to the first overflow byte before the JSON helper rejects it. Unbounded streams and legacy delegate keyword defaults remain unchanged. The guarantee covers application consumption and envelope retention, not internal codec allocations.
 
+**Billing compatibility verification (2026-10-03):** The strict MCP limit getter now applies hosted subscription caps only while `billing_checks_active()` is true, preserving explicit operator bounds and mandatory records on inactive/OSS deployments. Seventeen new red cases reproduced the implicit-free-plan defect before repair. Independent spec/quality review approved; parent Billing/accounting regressions passed `160` tests and the canonical PostgreSQL reservation/composition/Billing matrix passed `86` with zero skips. Ruff, compilation, changed-range formatting, and Bandit passed. Committed as `375a20e868`.
+
 ### Task 4.1: Carry configured endpoint through bounded streaming JSON
+
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/http_client.py`
@@ -281,12 +285,17 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 5. Run the focused HTTP client suite listed above.
 6. Commit: `fix(http): enforce endpoint scope on bounded streams`
 
+**Verification (2026-10-03):** Missing scope propagation and final-chunk over-consumption were reproduced before implementation. The independent specification review passed. Quality review additionally reproduced scope loss inside certificate-pinning validation in both backends; the new two-case red regression now passes after conditional scope propagation to those checks. Independent repair re-review approved both scoped and unscoped real-policy pinning probes. The fresh full HTTP suite passes `327` tests. Bandit found no issues; nine existing Ruff diagnostics were reproduced from the unchanged baseline.
+
 ### Task 4.2: Implement strict response normalization
 
+**Status:** Complete
+
 **Files:**
-- Modify: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/__init__.py`
 - Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/normalization.py`
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_normalization.py`
+
+**Implementation adjustment:** Internal helpers use explicit module imports, consistent with the accounting boundary; the package initializer remains a namespace rather than re-exporting transport internals.
 
 1. Write table and property tests before implementation. Cover zero/two choices, non-text content, tool/function calls, empty/whitespace output, lone surrogates, C0/C1 controls, CRLF/CR conversion, exact character/byte limits, multibyte boundary overflow, and atomic rejection without truncation.
 2. Validate the bounded JSON envelope, require exactly one choice, reject any tool/function call signal, and require textual `message.content`.
@@ -295,7 +304,13 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 5. Return a frozen internal normalized result with bounded provider usage counts for accounting; convert only content to the host-neutral result.
 6. Commit: `feat(mcp): normalize model output deterministically`
 
+**Verification (2026-10-03):** Independent specification and code-quality reviews approved the two-file boundary. TDD exercised 249 normalization cases, including six Hypothesis properties. The parent normalization/contracts/accounting regression gate passed `314` tests. Ruff, Black, compilation, and production Bandit passed. Committed as `d1aed10bd5`.
+
 ### Task 4.3: Add the single-attempt OpenAI transport
+
+**Status:** In Progress
+
+**API compatibility adjustment:** The bounded JSON path selects HTTPX from its explicit native client; it does not accept the generic request helper's `backend` keyword. Redirect suppression uses `allow_redirects=False` at the bounded helper and the native stream IO always uses `follow_redirects=False`.
 
 **Files:**
 - Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/transport.py`
