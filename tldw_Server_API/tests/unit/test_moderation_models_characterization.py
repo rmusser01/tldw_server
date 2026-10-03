@@ -246,24 +246,7 @@ def test_policy_to_dict_does_not_swallow_unlisted_exceptions():
         policy.to_dict()
 
 
-def test_policy_type_descriptors_and_tuples_are_literal():
-    assert isinstance(inspect.getattr_static(PolicyCompiler, "policy_types"), staticmethod)
-    assert isinstance(inspect.getattr_static(PolicyEvaluator, "policy_types"), staticmethod)
-    assert str(inspect.signature(PolicyCompiler.policy_types)) == (
-        "() -> 'tuple[type[ModerationPolicy], type[PatternRule]]'"
-    )
-    assert str(inspect.signature(PolicyEvaluator.policy_types)) == (
-        "() -> 'tuple[type[ModerationPolicy], type[PatternRule], " "type[ModerationEvaluationResult]]'"
-    )
-    assert PolicyCompiler.policy_types() == (ModerationPolicy, PatternRule)
-    assert PolicyEvaluator.policy_types() == (
-        ModerationPolicy,
-        PatternRule,
-        ModerationEvaluationResult,
-    )
-
-
-def test_compiler_uses_overridden_policy_types():
+def test_compiler_ignores_legacy_model_type_hook():
     class ReplacementPolicy:
         def __init__(self, **values):
             self.values = values
@@ -273,22 +256,43 @@ def test_compiler_uses_overridden_policy_types():
         def policy_types():
             return ReplacementPolicy, PatternRule
 
-    result = ReplacementCompiler().compile_global(
+    compiler = ReplacementCompiler()
+    global_result = compiler.compile_global(
         PolicyCompilationInput(
             config=ResolvedModerationConfig(),
             runtime_override={},
-            blocklist_lines=[],
+            blocklist_lines=["secret -> block #confidential"],
             pii_rules=[],
         )
     )
 
-    assert isinstance(result.policy, ReplacementPolicy)
-    assert result.policy.values["block_patterns"] == []
+    assert type(global_result.policy) is ModerationPolicy
+    assert len(global_result.policy.block_patterns) == 1
+    assert type(global_result.policy.block_patterns[0]) is PatternRule
+
+    user_result = compiler.compile_user_policy(
+        global_result.policy,
+        {
+            "rules": [
+                {
+                    "pattern": "token",
+                    "action": "warn",
+                    "phase": "input",
+                    "is_regex": False,
+                }
+            ]
+        },
+    )
+
+    assert type(user_result.policy) is ModerationPolicy
+    assert len(user_result.policy.block_patterns) == 2
+    assert all(type(rule) is PatternRule for rule in user_result.policy.block_patterns)
 
 
-def test_evaluator_uses_overridden_policy_types():
+def test_evaluator_ignores_legacy_model_type_hook():
     class ReplacementResult:
-        pass
+        def __init__(self, **values):
+            self.__dict__.update(values)
 
     class ReplacementEvaluator(PolicyEvaluator):
         @staticmethod
@@ -296,11 +300,22 @@ def test_evaluator_uses_overridden_policy_types():
             return ModerationPolicy, PatternRule, ReplacementResult
 
     result = ReplacementEvaluator().evaluate_text(
-        "",
-        ModerationPolicy(enabled=False),
+        "secret",
+        ModerationPolicy(
+            enabled=True,
+            block_patterns=[
+                PatternRule(
+                    regex=re.compile("secret"),
+                    action="block",
+                    phase="input",
+                    categories={"confidential"},
+                )
+            ],
+        ),
         "input",
         _LIMITS,
         include_redacted_text=False,
     )
 
-    assert isinstance(result, ReplacementResult)
+    assert type(result) is ModerationEvaluationResult
+    assert result.action == "block"
