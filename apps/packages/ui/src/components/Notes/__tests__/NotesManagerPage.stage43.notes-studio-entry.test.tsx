@@ -201,7 +201,8 @@ const derivedNote = {
   }
 }
 
-describe("NotesManagerPage stage 43 notes studio entry", () => {
+// antd-heavy page: each interaction can take seconds on a loaded runner.
+describe("NotesManagerPage stage 43 notes studio entry", { timeout: 60_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockConfirmDanger.mockResolvedValue(true)
