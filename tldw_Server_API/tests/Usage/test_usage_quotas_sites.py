@@ -79,15 +79,26 @@ def test_storage_pool_guard_disabled_when_quotas_off(quotas_off: None) -> None:
 
 
 async def test_workflows_cap_skipped_when_quotas_off(quotas_off: None) -> None:
-    class _ExplodingRequest:
-        """Any attribute access means the cap logic ran."""
+    """Raising on attribute access doesn't work here: every lookup inside the
+    cap logic is wrapped in a try/except over `_WORKFLOWS_NONCRITICAL_EXCEPTIONS`,
+    which includes `AssertionError`, so a raise is swallowed and the function
+    falls through to its own unrelated early return either way. Recording the
+    accessed names instead lets the test tell "never inspected" apart from
+    "inspected, then the exception was swallowed".
+    """
+    accessed: list[str] = []
+
+    class _RecordingRequest:
+        """Any attribute access is recorded; it never means the cap logic stopped."""
 
         def __getattr__(self, name: str) -> object:
-            raise AssertionError(f"the workflows cap must not inspect the request ({name})")
+            accessed.append(name)
+            return None
 
     await workflows_ep._enforce_workflows_daily_cap(
-        request=_ExplodingRequest(), current_user=SimpleNamespace(id=1), db=None
+        request=_RecordingRequest(), current_user=SimpleNamespace(id=1), db=None
     )
+    assert accessed == []
 
 
 def test_chatbooks_quotas_follow_the_switch(monkeypatch: pytest.MonkeyPatch) -> None:
