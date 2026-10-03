@@ -108,7 +108,7 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
 
         # The check and the daily-ledger write are one atomic operation keyed by
         # this run's id, so two concurrent scheduled runs cannot both pass
-        # against the same remaining slot (Qodo Q17).
+        # against the same remaining slot.
         if not (await workflows_runs_consume(user_id, run_id)).allowed:
             raise RuntimeError("Daily workflow run quota exceeded")
         try:

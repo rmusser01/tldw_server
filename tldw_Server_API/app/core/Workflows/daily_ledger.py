@@ -109,7 +109,7 @@ async def consume_workflow_run_if_within_cap(
     run_id: str,
     daily_cap: int | None,
 ) -> tuple[bool, int]:
-    """Atomically admit and record one workflow run against the daily cap (Qodo Q17).
+    """Atomically admit and record one workflow run against the daily cap.
 
     The admission check and the ledger write are the single atomic
     ``ResourceDailyLedger.add_if_within_daily_cap`` operation, so two
