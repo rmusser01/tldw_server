@@ -360,6 +360,15 @@ class UserRateLimiter:
         """
         config = await self._get_user_config(user_id)
 
+        from tldw_Server_API.app.core.Usage.quota_checks import as_quota_user_id
+        from tldw_Server_API.app.core.Usage.quota_resolver import user_quota
+
+        quota_uid = as_quota_user_id(user_id)
+        daily_caps = {
+            "max_evaluations_per_day": await user_quota(quota_uid, "limits.evaluations_per_day"),
+            "max_tokens_per_day": await user_quota(quota_uid, "limits.evaluation_tokens_per_day"),
+        }
+
         if _rg_evaluations_enabled() and config.tier != UserTier.CUSTOM:
             policy_id = _policy_id_for_config(config, is_batch=is_batch)
             rg_decision = await _maybe_enforce_with_rg_evaluations(
@@ -388,6 +397,7 @@ class UserRateLimiter:
                     tokens_requested,
                     estimated_cost,
                     config,
+                    **daily_caps,
                 )
                 if not usage_ok:
                     return False, usage_meta
@@ -408,6 +418,7 @@ class UserRateLimiter:
                 tokens_requested,
                 estimated_cost,
                 config,
+                **daily_caps,
             )
             if not usage_ok:
                 return False, usage_meta
@@ -426,6 +437,7 @@ class UserRateLimiter:
             tokens_requested,
             estimated_cost,
             config,
+            **daily_caps,
         )
         if not usage_ok:
             return False, usage_meta
@@ -686,6 +698,8 @@ class UserRateLimiter:
         tokens_used: int,
         cost: float,
         config: RateLimitConfig,
+        max_evaluations_per_day: float | None = None,
+        max_tokens_per_day: float | None = None,
     ) -> tuple[bool, dict[str, Any]]:
         """Atomically enforce cost caps and record estimated request usage."""
         allowed, metadata, now, normalized_tokens = await asyncio.to_thread(
@@ -695,6 +709,8 @@ class UserRateLimiter:
             tokens_used,
             cost,
             config,
+            max_evaluations_per_day,
+            max_tokens_per_day,
         )
         if not allowed:
             return False, metadata
@@ -714,6 +730,8 @@ class UserRateLimiter:
         tokens_used: int,
         cost: float,
         config: RateLimitConfig,
+        max_evaluations_per_day: float | None = None,
+        max_tokens_per_day: float | None = None,
     ) -> tuple[bool, dict[str, Any], datetime, int]:
         now = datetime.now(timezone.utc)
         today = now.date()
@@ -730,6 +748,31 @@ class UserRateLimiter:
         try:
             conn.execute("BEGIN IMMEDIATE")
             try:
+                if max_evaluations_per_day is not None or max_tokens_per_day is not None:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT total_evaluations, total_tokens FROM daily_usage WHERE user_id = ? AND date = ?",
+                        (user_id, str(today)),
+                    )
+                    row = cursor.fetchone()
+                    used_evaluations = int(row[0] or 0) if row else 0
+                    used_tokens = int(row[1] or 0) if row else 0
+                    breach = None
+                    if max_evaluations_per_day is not None and used_evaluations + 1 > max_evaluations_per_day:
+                        breach = ("Daily evaluation limit exceeded", max_evaluations_per_day, used_evaluations)
+                    elif max_tokens_per_day is not None and used_tokens + normalized_tokens > max_tokens_per_day:
+                        breach = ("Daily evaluation token limit exceeded", max_tokens_per_day, used_tokens)
+                    if breach is not None:
+                        conn.rollback()
+                        reset_at = datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+                        return False, {
+                            "error": breach[0],
+                            "limit": breach[1],
+                            "used": breach[2],
+                            "retry_after": max(1, int((reset_at - datetime.now(timezone.utc)).total_seconds())),
+                            "resets_at": reset_at.isoformat(),
+                        }, now, normalized_tokens
+
                 if normalized_cost > 0:
                     cursor = conn.cursor()
                     cursor.execute(
