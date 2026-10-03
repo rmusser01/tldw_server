@@ -119,7 +119,6 @@ PRIVATE_COERCER_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/Ingestion_Media_Processing/OCR/backends/nemotron_parse.py": 1,
     "tldw_Server_API/app/core/Ingestion_Media_Processing/OCR/registry.py": 1,
     "tldw_Server_API/app/core/Ingestion_Media_Processing/PDF/mineru_adapter.py": 2,
-    "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": 1,
     "tldw_Server_API/app/core/Ingestion_Sources/access_policy.py": 1,
     "tldw_Server_API/app/core/Jobs/manager.py": 1,
     "tldw_Server_API/app/core/Jobs/queue_stats.py": 1,

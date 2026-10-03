@@ -113,7 +113,6 @@ _PERSISTENCE_NONCRITICAL_EXCEPTIONS = (
     InputError,
 )
 
-_MEDIA_INGESTION_POLICY_ID = "media.default"
 _MEDIA_INGESTION_BYTES_CATEGORY = "ingestion_bytes"
 
 _media_ingestion_daily_ledger = None
@@ -127,13 +126,6 @@ _SHARED_TRANSCRIPT_REUSABLE_HOSTS = frozenset(
         "youtu.be",
     }
 )
-
-
-def _safe_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-        return int(default)
 
 
 def _resolve_media_writer(db_instance: Any) -> Any:
