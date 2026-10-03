@@ -2,7 +2,7 @@
 """Pydantic schemas for user profile endpoints."""
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -262,3 +262,18 @@ class UserProfileBatchResponse(BaseModel):
     limit: int = Field(..., description="Page size")
     pages: int = Field(..., description="Total page count")
     pagination: PagePaginationMeta
+
+
+class GroupLimitOverrideRequest(BaseModel):
+    """Body for setting a team/org ``limits.*`` override; ``value`` null removes it."""
+
+    value: int | float | None = None
+
+
+class GroupLimitOverrideResponse(BaseModel):
+    """The team/org override after the write; ``value`` null means removed."""
+
+    scope: Literal["org", "team"]
+    id: int
+    key: str
+    value: int | float | None

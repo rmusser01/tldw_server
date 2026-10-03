@@ -11,6 +11,8 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_session_manager_dep,
 )
 from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
+    GroupLimitOverrideRequest,
+    GroupLimitOverrideResponse,
     UserProfileBatchResponse,
     UserProfileBulkUpdateRequest,
     UserProfileBulkUpdateResponse,
@@ -150,3 +152,51 @@ async def admin_bulk_update_user_profiles(
         except Exception:
             logger.warning("Admin audit emission failed")
     return response
+
+
+async def _group_override(
+    scope: str, group_id: int, key: str, value: Any, http_request: Request, principal: AuthPrincipal
+) -> GroupLimitOverrideResponse:
+    """Apply a team/org limits.* override and emit its admin audit event."""
+    response, audit_info = await admin_profiles_service.set_group_limit_override(
+        scope=scope, group_id=group_id, key=key, value=value, principal=principal
+    )
+    try:
+        await _get_emit_admin_audit_event()(http_request, principal, **audit_info)
+    except Exception:
+        logger.warning("Admin audit emission failed")
+    return GroupLimitOverrideResponse(**response)
+
+
+@router.put("/orgs/{org_id}/profile/overrides/{key}", response_model=GroupLimitOverrideResponse)
+async def admin_set_org_limit_override(
+    org_id: int, key: str, payload: GroupLimitOverrideRequest, http_request: Request,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> GroupLimitOverrideResponse:
+    """Set (value null removes) an org's limits.* override; each member's allowance (platform admin)."""
+    return await _group_override("org", org_id, key, payload.value, http_request, principal)
+
+
+@router.delete("/orgs/{org_id}/profile/overrides/{key}", response_model=GroupLimitOverrideResponse)
+async def admin_delete_org_limit_override(
+    org_id: int, key: str, http_request: Request, principal: AuthPrincipal = Depends(get_auth_principal),
+) -> GroupLimitOverrideResponse:
+    """Remove an org's limits.* override (platform admin)."""
+    return await _group_override("org", org_id, key, None, http_request, principal)
+
+
+@router.put("/teams/{team_id}/profile/overrides/{key}", response_model=GroupLimitOverrideResponse)
+async def admin_set_team_limit_override(
+    team_id: int, key: str, payload: GroupLimitOverrideRequest, http_request: Request,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> GroupLimitOverrideResponse:
+    """Set (value null removes) a team's limits.* override; each member's allowance (platform admin)."""
+    return await _group_override("team", team_id, key, payload.value, http_request, principal)
+
+
+@router.delete("/teams/{team_id}/profile/overrides/{key}", response_model=GroupLimitOverrideResponse)
+async def admin_delete_team_limit_override(
+    team_id: int, key: str, http_request: Request, principal: AuthPrincipal = Depends(get_auth_principal),
+) -> GroupLimitOverrideResponse:
+    """Remove a team's limits.* override (platform admin)."""
+    return await _group_override("team", team_id, key, None, http_request, principal)
