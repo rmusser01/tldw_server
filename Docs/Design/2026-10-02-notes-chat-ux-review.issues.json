@@ -5171,7 +5171,11 @@
     "Result rows show chat state, e.g. \"💬 RAG chunking strategy · resolved\" (lens-visual#5).",
     "Enter acts by type: open a note or chat, apply a prompt, switch to a model, start a chat with a character (pu-chat#1)."
    ],
-   "code": "N5"
+   "code": "N5",
+   "decisions": {
+    "D8": "Cmd/Ctrl+K is one switcher for content and commands, with a \">\" prefix for commands. Cmd/Ctrl+P and Cmd/Ctrl+O open the same switcher pre-filtered to notes and chats.",
+    "D11": "Cmd/Ctrl+Enter opens a result beside the current page: notes in the Notes Dock now, chats in split view once S4 lands. Shift+Enter opens a new browser tab."
+   }
   },
   {
    "id": "IDEA-02",
@@ -5373,7 +5377,11 @@
    "restored_details": [
     "A first-run hint offers \"Switch to Pro anytime\" (ft-chat#5)."
    ],
-   "code": "N12"
+   "code": "N12",
+   "decisions": {
+    "D9": "Pro mode adds a persistent right panel instead of more toolbar buttons; the panel absorbs today's cockpit rails.",
+    "D10": "Two rows on desktop (input + Send; then attach / Knowledge / Web / Model / More). One row on phones and the narrow side panel (+, input, model chip, Send), with the bottom-sheet composer (N13)."
+   }
   },
   {
    "id": "IDEA-12",
@@ -5391,7 +5399,10 @@
     "title": "Chat composer, message states and branching",
     "url": "https://github.com/rmusser01/tldw_server/issues/3129"
    },
-   "code": "N13"
+   "code": "N13",
+   "decisions": {
+    "D10": "Two rows on desktop (input + Send; then attach / Knowledge / Web / Model / More). One row on phones and the narrow side panel (+, input, model chip, Send), with the bottom-sheet composer (N13)."
+   }
   },
   {
    "id": "IDEA-13",
@@ -6243,7 +6254,7 @@
   "url": "https://github.com/rmusser01/tldw_server/issues/3101"
  },
  "plan": "Docs/superpowers/plans/2026-10-03-notes-chat-ux-remediation-plan.md",
- "pending_decisions": [
+ "resolved_decisions": [
   {
    "id": "D8",
    "group": "E4",
@@ -6252,7 +6263,9 @@
    ],
    "question": "Which shortcut opens the quick switcher?",
    "options": "(a) Cmd/Ctrl+K is one universal switcher for content and commands, with a \">\" prefix for commands (canonical IDEA-01). (b) Cmd/Ctrl+P (and Cmd/Ctrl+O) open a content switcher and Cmd/Ctrl+K stays the command palette (lens-visual#5, pu-notes#1).",
-   "recommendation": "(a) with aliases: the header already advertises \"Search ⌘K\", so users expect to find things there (XP-06). Cmd/Ctrl+P and Cmd/Ctrl+O open the same switcher pre-filtered to notes and chats."
+   "recommendation": "(a) with aliases: the header already advertises \"Search ⌘K\", so users expect to find things there (XP-06). Cmd/Ctrl+P and Cmd/Ctrl+O open the same switcher pre-filtered to notes and chats.",
+   "decision": "Cmd/Ctrl+K is one switcher for content and commands, with a \">\" prefix for commands. Cmd/Ctrl+P and Cmd/Ctrl+O open the same switcher pre-filtered to notes and chats.",
+   "resolved": "2026-10-03"
   },
   {
    "id": "D9",
@@ -6262,7 +6275,9 @@
    ],
    "question": "What does Pro mode add to the composer?",
    "options": "(a) The full toolbar plus rails and token chip (canonical IDEA-11, ft-chat#5). (b) A persistent right panel instead of more toolbar buttons (lens-visual#4).",
-   "recommendation": "(b): adding buttons recreates the toolbar overload in CO-03 and CO-06; one right panel can absorb today's cockpit rails (CO-04)."
+   "recommendation": "(b): adding buttons recreates the toolbar overload in CO-03 and CO-06; one right panel can absorb today's cockpit rails (CO-04).",
+   "decision": "Pro mode adds a persistent right panel instead of more toolbar buttons; the panel absorbs today's cockpit rails.",
+   "resolved": "2026-10-03"
   },
   {
    "id": "D10",
@@ -6273,7 +6288,9 @@
    ],
    "question": "How many rows does the Casual composer use?",
    "options": "(a) Two rows: input + Send, then attach / Knowledge / Web / Model / More chips (lens-visual#4, canonical). (b) One row: +, input, model chip, Send (ft-chat#5).",
-   "recommendation": "(a) on desktop, so Knowledge and Web stay one click away; (b) on phones and the narrow side panel, together with the bottom-sheet composer (N13)."
+   "recommendation": "(a) on desktop, so Knowledge and Web stay one click away; (b) on phones and the narrow side panel, together with the bottom-sheet composer (N13).",
+   "decision": "Two rows on desktop (input + Send; then attach / Knowledge / Web / Model / More). One row on phones and the narrow side panel (+, input, model chip, Send), with the bottom-sheet composer (N13).",
+   "resolved": "2026-10-03"
   },
   {
    "id": "D11",
@@ -6283,7 +6300,9 @@
    ],
    "question": "What does Cmd/Ctrl+Enter do on a switcher result?",
    "options": "(a) Open in a new tab or split view (canonical IDEA-01, lens-visual#5). (b) Open the note in the Notes Dock beside the current page (pu-notes#1).",
-   "recommendation": "Open beside the current page: notes in the Notes Dock now, chats in split view once S4 lands; Shift+Enter opens a new browser tab."
+   "recommendation": "Open beside the current page: notes in the Notes Dock now, chats in split view once S4 lands; Shift+Enter opens a new browser tab.",
+   "decision": "Cmd/Ctrl+Enter opens a result beside the current page: notes in the Notes Dock now, chats in split view once S4 lands. Shift+Enter opens a new browser tab.",
+   "resolved": "2026-10-03"
   }
  ]
 }

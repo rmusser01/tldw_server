@@ -2310,7 +2310,7 @@ After the issues were filed, an audit checked that no enhancement was lost. It t
 - **Nothing was dropped outright.** Every raw idea maps to at least one canonical idea.
 - **12 raw ideas lost details** in consolidation. The 30 details are restored below and on the enhancement group issues.
 - **5 suggestions never became ideas.** They are added as Q16, Q17 and N29–N31.
-- **4 design conflicts between reviewers** were settled without discussion. They are now pending decisions D8–D11.
+- **4 design conflicts between reviewers** had been settled without discussion. The owner decided them as D8–D11 (below).
 
 **New ideas**
 
@@ -2374,14 +2374,14 @@ Trash retention with auto-purge, also found by the sweep, is covered by decision
 - **N28 · Typed API client and contract tests for Notes and Chat** (E1, #3125)
   - Seed fixtures spread over realistic dates; the API or import path accepts `created_at`, and import preserves original note dates (pu-notes and pu-chat coverage gaps).
 
-**Pending decisions**
+**Decisions on the design conflicts (resolved 2026-10-03)**
 
-| # | Question | Options | Recommendation |
-|---|---|---|---|
-| D8 | Which shortcut opens the quick switcher? | (a) Cmd/Ctrl+K is one universal switcher for content and commands, with a ">" prefix for commands (canonical IDEA-01). (b) Cmd/Ctrl+P (and Cmd/Ctrl+O) open a content switcher and Cmd/Ctrl+K stays the command palette (lens-visual#5, pu-notes#1). | (a) with aliases: the header already advertises "Search ⌘K", so users expect to find things there (XP-06). Cmd/Ctrl+P and Cmd/Ctrl+O open the same switcher pre-filtered to notes and chats. |
-| D9 | What does Pro mode add to the composer? | (a) The full toolbar plus rails and token chip (canonical IDEA-11, ft-chat#5). (b) A persistent right panel instead of more toolbar buttons (lens-visual#4). | (b): adding buttons recreates the toolbar overload in CO-03 and CO-06; one right panel can absorb today's cockpit rails (CO-04). |
-| D10 | How many rows does the Casual composer use? | (a) Two rows: input + Send, then attach / Knowledge / Web / Model / More chips (lens-visual#4, canonical). (b) One row: +, input, model chip, Send (ft-chat#5). | (a) on desktop, so Knowledge and Web stay one click away; (b) on phones and the narrow side panel, together with the bottom-sheet composer (N13). |
-| D11 | What does Cmd/Ctrl+Enter do on a switcher result? | (a) Open in a new tab or split view (canonical IDEA-01, lens-visual#5). (b) Open the note in the Notes Dock beside the current page (pu-notes#1). | Open beside the current page: notes in the Notes Dock now, chats in split view once S4 lands; Shift+Enter opens a new browser tab. |
+| # | Question | Decision |
+|---|---|---|
+| D8 | Which shortcut opens the quick switcher? | **Cmd/Ctrl+K is one switcher for content and commands**, with a ">" prefix for commands. Cmd/Ctrl+P and Cmd/Ctrl+O open the same switcher pre-filtered to notes and chats. |
+| D9 | What does Pro mode add to the composer? | **Pro mode adds a persistent right panel** instead of more toolbar buttons; the panel absorbs today's cockpit rails. |
+| D10 | How many rows does the Casual composer use? | **Two rows on desktop** (input + Send; then attach / Knowledge / Web / Model / More). **One row on phones and the narrow side panel** (+, input, model chip, Send), with the bottom-sheet composer (N13). |
+| D11 | What does Cmd/Ctrl+Enter do on a switcher result? | **Cmd/Ctrl+Enter opens a result beside the current page**: notes in the Notes Dock now, chats in split view once S4 lands. **Shift+Enter opens a new browser tab.** |
 
 ## 9. Strengths to preserve
 

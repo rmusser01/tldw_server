@@ -64,16 +64,16 @@ Two P0s sit in later-stage groups: NE-04 (Print, G16) and CC-05 (server prompt l
 | D6 | A full Notes surface in the side panel (N3)? | G08, E3 | **Decide after the D7 spike.** Ship the quick-save improvements (XS-13) now. |
 | D7 | When to run the design spike for one conversation model (S1/S2) and server-side, resumable generation (S3)? | E2 | **During Stage 2**, so Stage 4 builds on a decided model. The spike's output also settles D6. |
 
-### Pending decisions (proposed 2026-10-03)
+### Composer and switcher decisions (resolved 2026-10-03)
 
-The enhancement audit found design conflicts between reviewers that consolidation settled without discussion. They need owner decisions before the Stage 3–4 work that depends on them.
+The enhancement audit found design conflicts between reviewers that consolidation had settled without discussion. The owner decided them:
 
-| # | Question | Affects | Options | Recommendation |
-|---|---|---|---|---|
-| D8 | Which shortcut opens the quick switcher? | E4 (IDEA-01) | (a) Cmd/Ctrl+K is one universal switcher for content and commands, with a ">" prefix for commands (canonical IDEA-01). (b) Cmd/Ctrl+P (and Cmd/Ctrl+O) open a content switcher and Cmd/Ctrl+K stays the command palette (lens-visual#5, pu-notes#1). | (a) with aliases: the header already advertises "Search ⌘K", so users expect to find things there (XP-06). Cmd/Ctrl+P and Cmd/Ctrl+O open the same switcher pre-filtered to notes and chats. |
-| D9 | What does Pro mode add to the composer? | E5 (IDEA-11) | (a) The full toolbar plus rails and token chip (canonical IDEA-11, ft-chat#5). (b) A persistent right panel instead of more toolbar buttons (lens-visual#4). | (b): adding buttons recreates the toolbar overload in CO-03 and CO-06; one right panel can absorb today's cockpit rails (CO-04). |
-| D10 | How many rows does the Casual composer use? | E5 (IDEA-11, IDEA-12) | (a) Two rows: input + Send, then attach / Knowledge / Web / Model / More chips (lens-visual#4, canonical). (b) One row: +, input, model chip, Send (ft-chat#5). | (a) on desktop, so Knowledge and Web stay one click away; (b) on phones and the narrow side panel, together with the bottom-sheet composer (N13). |
-| D11 | What does Cmd/Ctrl+Enter do on a switcher result? | E4 (IDEA-01) | (a) Open in a new tab or split view (canonical IDEA-01, lens-visual#5). (b) Open the note in the Notes Dock beside the current page (pu-notes#1). | Open beside the current page: notes in the Notes Dock now, chats in split view once S4 lands; Shift+Enter opens a new browser tab. |
+| # | Question | Affects | Decision |
+|---|---|---|---|
+| D8 | Which shortcut opens the quick switcher? | E4 (IDEA-01, N5) | **Cmd/Ctrl+K is one switcher for content and commands**, with a ">" prefix for commands. Cmd/Ctrl+P and Cmd/Ctrl+O open the same switcher pre-filtered to notes and chats. |
+| D9 | What does Pro mode add to the composer? | E5 (IDEA-11, N12) | **Pro mode adds a persistent right panel** instead of more toolbar buttons; the panel absorbs today's cockpit rails. |
+| D10 | How many rows does the Casual composer use? | E5 (IDEA-11, N12; IDEA-12, N13) | **Two rows on desktop** (input + Send; then attach / Knowledge / Web / Model / More). **One row on phones and the narrow side panel** (+, input, model chip, Send), with the bottom-sheet composer (N13). |
+| D11 | What does Cmd/Ctrl+Enter do on a switcher result? | E4 (IDEA-01, N5) | **Cmd/Ctrl+Enter opens a result beside the current page**: notes in the Notes Dock now, chats in split view once S4 lands. **Shift+Enter opens a new browser tab.** |
 
 ---|---|---|---|
 | D1 | Should WebUI and side-panel chats save to the server by default, or stay local-first with explicit promotion? | G03, G04, E2 | Save to the server by default when connected; keep "Temporary chat" local. Ship honest labels ("Saved on this device") immediately either way. |
@@ -172,7 +172,7 @@ The enhancement audit found design conflicts between reviewers that consolidatio
 **PR slices (in order):**
 1. **G10 (#3111) — first send works (CC-01, CC-03, XS-02, XS-17, CC-06).** Use the server's default provider, mark the model "Ready" only after a probe or reply, remove the false offline state, give the side panel a default model and a labelled selector and open it on Chat, and use one model label format. Pairs with E6 Q2.
 2. **G11 (#3112) — commands that don't misfire (CC-N1, XS-08; S, P1).** Slash commands run on Enter or selection; Ctrl+E shows its mode or is removed. Then CM-05 (hide Compare's entry points until verified, per D4), CC-11, CC-12, CC-10, CC-08. Fold CC-07 and CC-09 into the composer restructure.
-3. **E5 (#3129) N12 + G12 (#3113) — composer and chrome.** Restructure the composer (one row of intent, Casual/Pro sets the density). This resolves CO-03, CO-06, CC-07 and CC-09 together. Then CO-04 and CO-05 (rails auto-collapse; no 2x2 grid on tablets), CO-01 and CO-N1 with N13 (mobile bottom sheet), CO-02 (mount the help-modal host; S, can ship anytime) and CO-07.
+3. **E5 (#3129) N12 + G12 (#3113) — composer and chrome.** Restructure the composer per D9/D10: Casual uses two rows on desktop and one row on phones and the narrow side panel; Pro adds a persistent right panel that absorbs the cockpit rails instead of more toolbar buttons. This resolves CO-03, CO-06, CC-07 and CC-09 together. Then CO-04 and CO-05 (rails auto-collapse; no 2x2 grid on tablets), CO-01 and CO-N1 with N13 (mobile bottom sheet), CO-02 (mount the help-modal host; S, can ship anytime) and CO-07.
 4. **G13 (#3114) — Notes layout and onboarding.** NO-01 first (add `/notes` to the viewport-constrained routes), then NO-N1 (the tour runner skips missing targets), NO-02 (tour positioning), NO-04 (empty state and editor mutually exclusive), NO-03 (tablet and phone), NL-12, NL-13, NL-14, NE-08, NE-09. Pairs with E6 Q10 and Q11.
 5. **E8 (#3132) Q14 + G14 (#3115) — words and tokens.** Adopt the §10 glossary and add a copy lint. Then XP-13, XP-14, XS-12, XP-11, XP-17 (one destructive-action pattern), XP-15 and XP-20 (with AX-07 and AX-08 in G23, as one theme-token change), and XP-19.
 
@@ -194,7 +194,7 @@ The enhancement audit found design conflicts between reviewers that consolidatio
 **Goal:** A power user can browse, organize and move between notes and chats at library scale, on any surface, by keyboard.
 
 **PR slices (in order):**
-1. **G18 (#3119) — addresses and navigation (XP-05 first).** Notes and chats get URLs that survive reload and Back/Forward, and page titles name the item. Then XP-06 (⌘K finds and creates notes and chats; with E4 N5), and XP-07 and XP-10 through one shortcut registry (E4 N21).
+1. **G18 (#3119) — addresses and navigation (XP-05 first).** Notes and chats get URLs that survive reload and Back/Forward, and page titles name the item. Then XP-06 (⌘K finds and creates notes and chats; with E4 N5 per D8/D11: one ⌘K switcher with a ">" command prefix, ⌘P/⌘O aliases filtered to notes and chats, ⌘Enter opens beside, ⇧Enter opens a new tab), and XP-07 and XP-10 through one shortcut registry (E4 N21).
 2. **G15 (#3116) — notes at scale.** NL-04 (row density and snippets), NL-07 (keep server ranking, show the match), NL-N1 (AND, exact tag matching), NL-08, NL-09 (local-date Timeline; S, quick win), NL-10 (folders and correct counts; with E7 N18), NL-05 (select-all, progress, Undo), NL-06 (permanent delete and Empty Trash with optional auto-purge; D3, backend), NL-15, NL-16, NL-17.
 3. **G16 (#3117) — editor and preview.** NE-04 (Print) ships early through the quick-win track. Then NE-05, NE-07, NE-N1, NE-06 (list continuation; checklist and numbered-list buttons), and NE-03 (collapsible TOC; with E7 N20).
 4. **G17 (#3118) — messages.** CM-04 (persist model and generation metadata server-side; backend), CM-07 and CM-08 (with E8 N26, one Markdown renderer), CM-09 (actions without hover), CM-10, CM-11 (scroll to your message on send), CM-13.
