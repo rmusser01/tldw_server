@@ -1,8 +1,14 @@
 # Chunker Hierarchical Subsystem Refactor Design
 
-Backlog design task: `TASK-13112`
+Backlog design task: `TASK-13421`
 
-Backlog implementation task: `TASK-13215`
+Backlog implementation task: `TASK-13422`
+
+Tracking reconciliation on 2026-10-02: these unique records replace the
+workstream's colliding `TASK-13112` design and `TASK-13215` implementation
+IDs. The old records retain historical approvals and verification evidence;
+only the new IDs may be used for subsequent task mutations. Unrelated upstream
+records are unchanged. The original approved design and scope remain intact.
 
 ## Purpose
 
@@ -107,16 +113,16 @@ require caller migrations.
 
 ## Delivery Tracking And PR Ownership
 
-`TASK-13112` remains design-only. `TASK-13215` owns the implementation plan,
+`TASK-13421` remains design-only. `TASK-13422` owns the implementation plan,
 production code, tests, verification results, and PR links, and depends on the
 completed design task. No production file is edited until this spec is approved,
-`TASK-13112` is finalized, `TASK-13215` is moved to `In Progress`, and the isolated
+`TASK-13421` is finalized, `TASK-13422` is moved to `In Progress`, and the isolated
 implementation branch passes the baseline reconciliation gate.
 
-The implementation plan is linked from `TASK-13215` and references both tasks and
-this spec. Design-review history remains on `TASK-13112`; implementation findings,
+The implementation plan is linked from `TASK-13422` and references both tasks and
+this spec. Design-review history remains on `TASK-13421`; implementation findings,
 correction-gate evidence, touched files, and verification results belong on
-`TASK-13215`.
+`TASK-13422`.
 
 The implementation PR is not merge-ready until the human requester writes the
 required `Change summary` in their own words. The agent may prepare factual inputs,
@@ -552,7 +558,7 @@ silently excluded.
 
 ## Implementation Staging
 
-1. Confirm `TASK-13112` is complete, move `TASK-13215` to `In Progress`, link the
+1. Confirm `TASK-13421` is complete, move `TASK-13422` to `In Progress`, link the
    approved implementation plan, and reconcile `origin/dev` against the recorded
    baseline. If it advanced,
    update the baseline and rerun the focused suite before production edits.
@@ -604,7 +610,7 @@ stage begins.
   boundaries, and integration behavior.
 - The implementation baseline is explicitly reconciled with current `origin/dev`;
   an advanced baseline is recorded and re-characterized before production edits.
-- `TASK-13215` owns implementation tracking and links the approved spec, plan,
+- `TASK-13422` owns implementation tracking and links the approved spec, plan,
   verification evidence, commits, and PR.
 - Any included correction satisfies and records the correction gate.
 - The complete focused verification gate passes, including Bandit.
