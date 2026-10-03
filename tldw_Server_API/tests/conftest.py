@@ -883,6 +883,17 @@ def healthy_no_override_tts_credential_snapshot():
         )
 
 
+@pytest.fixture()
+def billing_repo_wired(monkeypatch):
+    """Simulate the hosted product: a billing repository is wired into SubscriptionService."""
+    from tldw_Server_API.app.core.Billing import subscription_service
+
+    async def _wired() -> bool:
+        return True
+
+    monkeypatch.setattr(subscription_service, "billing_repo_configured", _wired)
+
+
 class _TestUsageLogger:
     def __init__(self):
         self.events = []
