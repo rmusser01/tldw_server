@@ -1,6 +1,7 @@
 import asyncio
 import gc
 import sqlite3
+from typing import Any
 
 import pytest
 
@@ -647,8 +648,24 @@ async def test_run_success_completes_job(monkeypatch, tmp_path):
     calls = []
     orig_complete = jm.complete_job
 
-    def spy_complete(job_id, **kwargs):
-
+    def spy_complete(
+        job_id: int,
+        *,
+        result: dict[str, Any] | None,
+        worker_id: str | None,
+        lease_id: str | None,
+        completion_token: str | None,
+        expected_uuid: str | None,
+        enforce: bool | None,
+    ) -> bool:
+        kwargs = {
+            "result": result,
+            "worker_id": worker_id,
+            "lease_id": lease_id,
+            "completion_token": completion_token,
+            "expected_uuid": expected_uuid,
+            "enforce": enforce,
+        }
         calls.append({"job_id": job_id, **kwargs})
         return orig_complete(job_id, **kwargs)
 
@@ -665,6 +682,7 @@ async def test_run_success_completes_job(monkeypatch, tmp_path):
     await asyncio.wait_for(sdk.run(handler=handler), timeout=1)
 
     assert calls and int(calls[0]["job_id"]) == int(job["id"])
+    assert calls[0]["expected_uuid"] == job["uuid"]
     stored = jm.get_job(int(job["id"]))
     assert stored["status"] == "completed"
 
