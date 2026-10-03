@@ -19,7 +19,7 @@ documentation:
 modified_files:
 - Docs/superpowers/specs/2026-10-02-moderation-policy-types-retirement-design.md
 - backlog/tasks/task-13421 - Design-Moderation-policy-types-retirement.md
-updated_date: 2026-10-03 20:37
+updated_date: 2026-10-03 20:40
 ---
 
 ## Description
@@ -44,6 +44,7 @@ Audit completed on current origin/dev 86e287fee7. policy_types() exists only in 
 Design specification self-review completed: no TBD/TODO placeholders, unresolved ambiguity, or cross-scope implementation dependency remains. The review added an explicit TDD red/green proof for ignoring legacy subclass hooks, exact implementation file scope, representative clean-process import-isolation operations, and a ban on private-layout tests. git diff --cached --check passed before commit. Design commit: 18659bd296. Bandit is not applicable because this task changes documentation and its Backlog record only.
 Written-spec review identified five corrections before implementation planning: reconcile the source-audit gate with the intentional legacy-hook regression fixtures; narrow behavior-preservation language to supported ModerationService/runtime callers; declare private runtime-alias rebinding outside compatibility because removing the evaluator cache changes that monkeypatch behavior; describe rollback as one-PR rather than one-commit; and keep the task open until the amended written spec is approved.
 Applied all five written-spec review corrections. The verification gate now allows only the intentional legacy-hook regression fixtures; behavior-preservation claims are limited to supported service/runtime paths; private runtime-alias rebinding is explicitly unsupported and covered as a risk; rollback is one PR; TASK-13421 remains In Progress pending approval of the amended written specification.
+After the review-correction commit, the branch was rebased cleanly onto current origin/dev 4c4f197f68; no intervening commit touched the Moderation production/test scope. Rebased commits are 1d5c9aeb58 (design), 67a1120a5f (initial task completion record), and 3d2233a575 (review corrections). The focused current-dev baseline was rerun after rebase: 119 passed, 250 warnings in 1.86s. The task remains In Progress pending approval of the amended written spec.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
