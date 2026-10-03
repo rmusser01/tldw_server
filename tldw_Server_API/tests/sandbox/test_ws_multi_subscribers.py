@@ -51,6 +51,11 @@ def _client(monkeypatch) -> TestClient:
         parts.append("sandbox")
     monkeypatch.setenv("ROUTES_ENABLE", ",".join(parts))
     _force_docker_preflight_available(monkeypatch)
+    # Settings may already be cached with the session default (synthetic
+    # frames on); re-read them so the run endpoint sees the env above.
+    from tldw_Server_API.app.core.config import clear_config_cache
+
+    clear_config_cache()
     from tldw_Server_API.app.main import app  # import after env is set
     return TestClient(app)
 
@@ -126,6 +131,12 @@ def test_ws_multi_subscribers_receive_same_order(monkeypatch) -> None:
             assert seqs1 == sorted(seqs1)
             assert seqs2 == sorted(seqs2)
             assert seqs1 == seqs2
+            # Buffered history arrives once: the next frame is new, not a replayed copy
+            hub.publish_stdout(run_id, b"C\n")
+            next1 = _receive_data_frames(ws1, 1)[0]
+            next2 = _receive_data_frames(ws2, 1)[0]
+            assert (next1.get("type"), next1.get("data"), next1.get("seq")) == ("stdout", "C\n", seqs1[-1] + 1)
+            assert next2 == next1
 
 
 def test_ws_reconnect_drain_buffer(monkeypatch) -> None:
