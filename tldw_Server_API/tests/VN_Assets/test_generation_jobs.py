@@ -26,6 +26,10 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetSlotCreate,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.DB_Management._vn_asset_corruption_test_support import (
+    corrupt_recipe_version,
+    delete_recipe_rows,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenResult
@@ -241,10 +245,7 @@ async def test_integrity_admission_releases_surviving_partial_fanout_reservation
         item_fields={"pack_id": pack_with_slots.id},
     )
     service.repo.update_batch(batch.batch_id, {"enqueued_count": 1})
-    service.repo.db.execute_query(
-        "DELETE FROM vn_asset_generation_recipes WHERE batch_id=? AND variant_index=1",
-        (batch.batch_id,),
-    )
+    delete_recipe_rows(service.repo, batch.batch_id, variant_index=1)
     adapter = FakeImageAdapter()
     worker = VNAssetGenerationWorker(
         repo=service.repo, jobs_manager=fake_jobs, image_registry=FakeImageRegistry(adapter),
@@ -257,9 +258,7 @@ async def test_integrity_admission_releases_surviving_partial_fanout_reservation
             """Remove the completed row after admission observes it, before replay reads."""
             outcome = await original_read(batch_id, slot_id, variant_index)
             if outcome is not None and outcome["outcome_status"] == "completed":
-                service.repo.db.execute_query(
-                    "DELETE FROM vn_asset_generation_recipes WHERE batch_id=? AND variant_index=0", (batch_id,),
-                )
+                delete_recipe_rows(service.repo, batch_id, variant_index=0)
             return outcome
 
         monkeypatch.setattr(service.repo, "get_variant_outcome_async", disappear_after_observation)
@@ -308,10 +307,7 @@ async def test_integrity_reconciliation_does_not_block_async_worker_loop(
         pack_with_slots.id, user_id=1,
         request=VNAssetGenerationRequest(slot_ids=[slot.id for slot in slots], variant_count=2),
     )
-    service.repo.db.execute_query(
-        "DELETE FROM vn_asset_generation_recipes WHERE batch_id=? AND slot_id=? AND variant_index=1",
-        (batch.batch_id, slots[0].id),
-    )
+    delete_recipe_rows(service.repo, batch.batch_id, slot_id=slots[0].id, variant_index=1)
     service.repo.create_batch(
         pack_id=pack_with_slots.id, requested_by_user_id=1, total_variants=2,
         options={"slot_ids": [slot.id for slot in slots], "variant_count": 1},
@@ -415,10 +411,22 @@ async def test_outcome_query_does_not_block_async_worker_loop(
             super().close()
 
     connect = sqlite3.connect
+    reader_uri = f"{service.repo.db.db_path.as_uri()}?mode=ro"
 
-    def observed_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
-        """Track newly owned reader handles without changing SQLite results."""
-        connection = connect(*args, **kwargs, factory=ObservedConnection)
+    def observed_connect(database: str, *args: Any, **kwargs: Any) -> sqlite3.Connection:
+        """Observe only this VN database's independent read-only handles.
+
+        Args:
+            database (str): Original SQLite database path or URI.
+            args (Any): Unchanged positional connection arguments.
+            kwargs (Any): Unchanged keyword connection arguments.
+
+        Returns:
+            sqlite3.Connection: Native handle, instrumented only for reader_uri.
+        """
+        if database != reader_uri:
+            return connect(database, *args, **kwargs)
+        connection = connect(database, *args, **kwargs, factory=ObservedConnection)
         owned_connections.append(connection)
         with closing(connection.execute("PRAGMA busy_timeout")) as cursor:
             reader_timeouts.append(cursor.fetchone()[0])
@@ -1556,8 +1564,19 @@ async def test_versioned_batch_with_missing_recipe_fails_closed(
     fake_jobs: FakeJobs,
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A missing versioned recipe rejects generation instead of using live inputs."""
+    """Reject missing recipes and translate the native error through routed HTTP.
+
+    Args:
+        fake_jobs: Jobs boundary used by submission and the route dependency.
+        service: Real SQLite-backed generation service.
+        pack_with_slots: Owned pack and its configured generation slots.
+        monkeypatch: Isolate the service error at the public route boundary.
+
+    Returns:
+        None; asserts fail-closed generation and the public error response.
+    """
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -1566,10 +1585,7 @@ async def test_versioned_batch_with_missing_recipe_fails_closed(
         user_id=1,
         request=VNAssetGenerationRequest(slot_ids=[slot.id]),
     )
-    service.repo.db.execute_query(
-        "DELETE FROM vn_asset_generation_recipes WHERE batch_id = ?",
-        (batch.batch_id,),
-    )
+    delete_recipe_rows(service.repo, batch.batch_id)
     adapter = FakeImageAdapter()
     worker = VNAssetGenerationWorker(
         repo=service.repo,
@@ -1589,9 +1605,32 @@ async def test_versioned_batch_with_missing_recipe_fails_closed(
         })
     assert error.value.code == "vn_asset_recipe_not_found"
     assert error.value.context["batch_id"] == batch.batch_id
-    translated = vn_assets_endpoint._handle_value_error(error.value)
-    assert translated.status_code == 404
-    assert translated.detail == "vn_asset_recipe_not_found"
+
+    def reject_start(*args: Any, **kwargs: Any) -> Any:
+        """Carry the native worker error across the public service boundary.
+
+        Args:
+            args: Generation operation positional arguments, unused on failure.
+            kwargs: Generation operation keyword arguments, unused on failure.
+
+        Returns:
+            Never returns; raises the actual captured damaged-ledger error.
+        """
+        raise error.value
+
+    monkeypatch.setattr(service, "start_generation", reject_start)
+    app = FastAPI()
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
+    app.dependency_overrides[get_request_user] = lambda: User(id=1, username="vn-generator")
+    app.dependency_overrides[vn_assets_endpoint._service] = lambda: service
+    app.dependency_overrides[vn_assets_endpoint._job_manager] = lambda: fake_jobs
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/v1/vn/vn-assets/packs/{pack_with_slots.id}/generate",
+            json={"idempotency_key": "damaged-ledger-http"},
+        )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "vn_asset_recipe_not_found"
     assert adapter.requests == []
     assert service.repo.get_batch(batch.batch_id)["status"] == "failed"
 
@@ -1612,10 +1651,7 @@ async def test_unknown_recipe_version_never_uses_mutable_sources(
         user_id=1,
         request=VNAssetGenerationRequest(slot_ids=[slot.id]),
     )
-    service.repo.db.execute_query(
-        "UPDATE vn_asset_batches SET recipe_version = 99 WHERE id = ?",
-        (batch.batch_id,),
-    )
+    corrupt_recipe_version(service.repo, batch.batch_id)
     adapter = FakeImageAdapter()
     worker = VNAssetGenerationWorker(
         repo=service.repo,

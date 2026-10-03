@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -123,6 +124,111 @@ async def test_db_lookup_scopes_real_sqlite_rows_without_committing() -> None:
         assert await queries.find_live_by_storage_path(user_id=5, storage_path="missing' OR 1=1 --") is None
         assert conn.in_transaction
         await conn.rollback()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lookup", ["source_ref", "storage_path"])
+@pytest.mark.parametrize("outcome", ["hit", "miss", "read_error"])
+async def test_sqlite_lookup_closes_cursor_without_owning_transaction(
+    lookup: str, outcome: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catch leaked real cursors and stolen caller transaction ownership.
+
+    Args:
+        lookup (str): Source-reference or storage-path lookup to exercise.
+        outcome (str): Matching row, missing row, or native row-read failure.
+        monkeypatch (pytest.MonkeyPatch): Capture the real lookup cursor only.
+
+    Returns:
+        None: The cursor is unusable but the caller can read, write and roll back.
+    """
+    from tldw_Server_API.app.core.DB_Management.vn_generated_files_queries import VNGeneratedFilesQueries
+
+    cursors: list[aiosqlite.Cursor] = []
+    fetchone = aiosqlite.Cursor.fetchone
+    read_error = sqlite3.OperationalError("injected row-read failure")
+
+    async def capture_fetchone(cursor: aiosqlite.Cursor) -> Any:
+        """Observe the actual resource while retaining its native read operation.
+
+        Args:
+            cursor (aiosqlite.Cursor): Real cursor returned by SQLite execution.
+
+        Returns:
+            Any: The unchanged native row, or None when the lookup misses.
+        """
+        cursors.append(cursor)
+        return await fetchone(cursor)
+
+    def fail_read(cursor: sqlite3.Cursor, row: tuple[Any, ...]) -> Any:
+        """Raise at SQLite's row-materialization boundary, keeping its cursor real.
+
+        Args:
+            cursor (sqlite3.Cursor): Native SQLite cursor performing the read.
+            row (tuple[Any, ...]): Native row that would otherwise be returned.
+
+        Returns:
+            Any: Never returns; propagates the original native read error.
+        """
+        raise read_error
+
+    async with aiosqlite.connect(":memory:") as conn:
+        async with conn.execute("""
+            CREATE TABLE generated_files (
+                id INTEGER PRIMARY KEY, user_id INTEGER, source_feature TEXT,
+                source_ref TEXT, storage_path TEXT, is_deleted INTEGER
+            )
+        """):
+            pass
+        await conn.commit()
+        async with conn.execute("BEGIN IMMEDIATE"):
+            pass
+        async with conn.execute(
+            "INSERT INTO generated_files VALUES (?, ?, ?, ?, ?, ?)",
+            (7, 5, "vn_assets", "vn_asset_item:42", "vn_assets/live.png", 0),
+        ):
+            pass
+
+        queries = VNGeneratedFilesQueries(conn, postgres=False)
+        method = getattr(queries, f"find_live_by_{lookup}")
+        params = {"user_id": 6 if outcome == "miss" else 5}
+        if lookup == "source_ref":
+            params.update(source_feature="vn_assets", source_ref="vn_asset_item:42")
+        else:
+            params.update(storage_path="vn_assets/live.png")
+        with monkeypatch.context() as patch:
+            patch.setattr(aiosqlite.Cursor, "fetchone", capture_fetchone)
+            if outcome == "read_error":
+                conn.row_factory = fail_read
+            try:
+                if outcome == "read_error":
+                    with pytest.raises(sqlite3.OperationalError) as caught:
+                        await method(**params)
+                    assert caught.value is read_error
+                else:
+                    result = await method(**params)
+                    assert result == (None if outcome == "miss" else {
+                        "id": 7, "user_id": 5, "source_feature": "vn_assets",
+                        "source_ref": "vn_asset_item:42", "storage_path": "vn_assets/live.png",
+                        "is_deleted": 0,
+                    })
+            finally:
+                conn.row_factory = None
+
+        assert conn.in_transaction
+        async with conn.execute("SELECT id FROM generated_files") as caller_cursor:
+            assert await caller_cursor.fetchone() == (7,)
+        async with conn.execute(
+            "INSERT INTO generated_files VALUES (?, ?, ?, ?, ?, ?)",
+            (8, 5, "vn_assets", "vn_asset_item:43", "vn_assets/other.png", 0),
+        ):
+            pass
+        await conn.rollback()
+        async with conn.execute("SELECT COUNT(*) FROM generated_files") as caller_cursor:
+            assert await caller_cursor.fetchone() == (0,)
+        lookup_cursor, = cursors
+        with pytest.raises(sqlite3.ProgrammingError, match="closed cursor"):
+            await lookup_cursor.execute("SELECT 1")
 
 
 def test_vn_runtime_derives_pg_config_from_required_isolation(

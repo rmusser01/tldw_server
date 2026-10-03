@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio as real_asyncio
 import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -1052,7 +1053,17 @@ async def test_cleanup_completed_v1_preserves_ledger_and_removes_file(
     fake_generated_files_repo: FakeGeneratedFilesRepo,
     outputs_dir: Path,
 ) -> None:
-    """Remove completed V1 storage while preserving outcomes and batch counters."""
+    """Remove completed V1 storage while preserving a deletion receipt and counters.
+
+    Args:
+        chacha_db: Isolated native VN database.
+        asset_with_generated_file: Owned asset and registered file identity.
+        fake_generated_files_repo: Public storage boundary used by this control.
+        outputs_dir: Private physical file root.
+
+    Returns:
+        None; asserts deletion, exact retained identity and unchanged counters.
+    """
     asset = asset_with_generated_file
     service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
     batch = service.repo.create_batch(
@@ -1091,7 +1102,12 @@ async def test_cleanup_completed_v1_preserves_ledger_and_removes_file(
     assert fake_generated_files_repo.records == {}
     assert unregistered == [asset.file_id]
     assert not (outputs_dir / "vn_assets/fixture.png").exists()
-    assert service.repo.get_variant_outcome(batch["id"], asset.slot_id, 0) == {**before_recipe, "item_id": None}
+    after_recipe = service.repo.get_variant_outcome(batch["id"], asset.slot_id, 0)
+    assert after_recipe == {**before_recipe, "item_id": None, "deleted_item_json": after_recipe["deleted_item_json"]}
+    assert json.loads(after_recipe["deleted_item_json"]) == {
+        "batch_id": batch["id"], "generated_file_id": asset.file_id, "id": asset.item_id,
+        "owner_user_id": USER_ID, "pack_id": asset.pack_id, "slot_id": asset.slot_id, "variant_index": 0,
+    }
     assert service.repo.get_batch(batch["id"]) == before_batch
 
 

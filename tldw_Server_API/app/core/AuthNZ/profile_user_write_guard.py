@@ -872,9 +872,15 @@ def _bootstrap_simple_constraint_is_canonical(
     *,
     backend: str,
 ) -> bool:
+    if isinstance(kind, exp.AutoIncrementColumnConstraint):
+        # SQLGlot30 needs column context to render SQLite AUTOINCREMENT.
+        return (
+            backend == "sqlite"
+            and type(kind) is exp.AutoIncrementColumnConstraint
+            and not kind.args
+        )
     expected_sql: dict[type[exp.Expression], str] = {
         exp.PrimaryKeyColumnConstraint: "PRIMARY KEY",
-        exp.AutoIncrementColumnConstraint: "AUTOINCREMENT",
         exp.UniqueColumnConstraint: "UNIQUE",
         exp.NotNullColumnConstraint: "NOT NULL",
     }

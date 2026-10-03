@@ -445,7 +445,16 @@ async def test_async_integrity_preserves_inline_and_actual_jobs_activity(
 async def test_async_outcome_read_preserves_owner_connection_fallback(
     mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Private memory and uncommitted caller work retain their original connection."""
+    """Retain original connection ownership when reading complete outcome metadata.
+
+    Args:
+        mode: Private memory or an uncommitted caller transaction.
+        tmp_path: File-backed caller database location.
+        monkeypatch: Reject any attempted transfer of owner-only work.
+
+    Returns:
+        None; asserts exact outcome metadata and original connection ownership.
+    """
     database = CharactersRAGDB(":memory:" if mode == "private-memory" else str(tmp_path / "owner.db"), client_id="owner-read")
     repo = VNAssetPacksRepository.initialized(database)
     character = database.add_character_card({"name": "Owner"})
@@ -465,7 +474,7 @@ async def test_async_outcome_read_preserves_owner_connection_fallback(
             owner.execute("BEGIN")
             owner.execute("UPDATE vn_asset_generation_recipes SET claim_token='uncommitted'")
         outcome = await repo.get_variant_outcome_async(batch["id"], slot["id"], 0)
-        assert outcome == {"outcome_status": "planned", "item_id": None, "claim_token": "uncommitted" if mode == "caller-transaction" else None, "claim_lease_id": None}
+        assert outcome == {"outcome_status": "planned", "item_id": None, "claim_token": "uncommitted" if mode == "caller-transaction" else None, "claim_lease_id": None, "deleted_item_json": None}
         assert await repo.get_variant_outcome_async(batch["id"], slot["id"], 99) is None
         assert database.get_connection() is owner
         if mode == "caller-transaction":
@@ -513,6 +522,14 @@ def test_existing_batch_table_gains_recipe_version(chacha_db: CharactersRAGDB) -
 
 @pytest.mark.integration
 def test_existing_recipe_table_gains_outcome_columns(chacha_db: CharactersRAGDB) -> None:
+    """Upgrade a pre-outcome ledger without inventing deletion receipts.
+
+    Args:
+        chacha_db: Isolated native SQLite database with the old recipe schema.
+
+    Returns:
+        None; asserts additive outcome, fence and receipt columns.
+    """
     chacha_db.execute_query(
         "CREATE TABLE vn_asset_generation_recipes ("
         "batch_id INTEGER, slot_id INTEGER, variant_index INTEGER, recipe_json TEXT)"
@@ -526,7 +543,7 @@ def test_existing_recipe_table_gains_outcome_columns(chacha_db: CharactersRAGDB)
             "PRAGMA table_info(vn_asset_generation_recipes)"
         ).fetchall()
     }
-    assert {"outcome_status", "item_id", "claim_token", "claim_lease_id"}.issubset(columns)
+    assert {"outcome_status", "item_id", "claim_token", "claim_lease_id", "deleted_item_json"}.issubset(columns)
 
 
 @pytest.mark.integration

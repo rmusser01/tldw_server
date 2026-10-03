@@ -7,11 +7,13 @@ from statistics import mean, quantiles
 from time import perf_counter
 
 import pytest
+from sqlglot import exp
 from sqlglot import logger as sqlglot_logger
 
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     ProfileUserWriteRejected,
     _active_capability_count,
+    _bootstrap_simple_constraint_is_canonical,
     _classification_cache_clear,
     _classification_cache_info,
     _classify_sql,
@@ -23,6 +25,54 @@ from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def test_sqlite_autoincrement_accepts_canonical_ast_without_column_context() -> None:
+    """Accept the canonical context-free AST.
+
+    Returns:
+        None: Assertions verify the canonical SQLite node is accepted.
+    """
+    assert _bootstrap_simple_constraint_is_canonical(
+        exp.AutoIncrementColumnConstraint(), backend="sqlite"
+    )
+
+
+@pytest.mark.parametrize(
+    "args", [{"this": exp.Literal.number("1")}, {"this": None}, {"extra": True}]
+)
+def test_sqlite_autoincrement_rejects_noncanonical_arguments(
+    args: dict[str, object],
+) -> None:
+    """Reject every nonempty AUTOINCREMENT argument mapping.
+
+    Args:
+        args (dict[str, object]): Noncanonical parsed-node arguments.
+    Returns:
+        None: Assertions verify no malformed node is accepted.
+    """
+    assert not _bootstrap_simple_constraint_is_canonical(
+        exp.AutoIncrementColumnConstraint(**args), backend="sqlite"
+    )
+
+
+def test_autoincrement_rejects_other_backend_and_derived_ast_type() -> None:
+    """Keep the compatibility exception limited to the exact SQLite AST.
+
+    Returns:
+        None: Assertions verify backend and type rejection.
+    """
+    class DerivedAutoIncrement(exp.AutoIncrementColumnConstraint):
+        """Represent a noncanonical derived constraint for rejection."""
+
+        pass
+
+    assert not _bootstrap_simple_constraint_is_canonical(
+        exp.AutoIncrementColumnConstraint(), backend="postgres"
+    )
+    assert not _bootstrap_simple_constraint_is_canonical(
+        DerivedAutoIncrement(), backend="sqlite"
+    )
 
 
 @pytest.mark.parametrize(

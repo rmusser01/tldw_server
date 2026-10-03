@@ -420,6 +420,11 @@ class VNAssetGenerationWorker:
             return None
         if outcome["outcome_status"] != "completed" and not allow_publication:
             return None
+        if outcome.get("deleted_item_json") is not None:
+            return _deleted_variant_result(
+                outcome, batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
+                user_id=user_id, pack_id=pack_id,
+            )
         item_id = _positive_int(outcome.get("item_id"))
         if item_id is None:
             return None
@@ -1298,6 +1303,41 @@ def _loads_json_list(value: Any) -> list[Any]:
     except json.JSONDecodeError:
         return []
     return loaded if isinstance(loaded, list) else []
+
+
+def _deleted_variant_result(
+    outcome: Mapping[str, Any], *, batch_id: int, slot_id: int, variant_index: int,
+    user_id: int, pack_id: int,
+) -> dict[str, Any]:
+    """Replay an intentional deletion receipt without resurrecting assets.
+
+    Args:
+        outcome: Persisted recipe outcome and deletion receipt.
+        batch_id: Original batch identity.
+        slot_id: Original slot identity.
+        variant_index: Original variant identity.
+        user_id: Already-authorized batch owner.
+        pack_id: Already-authorized pack identity.
+
+    Returns:
+        Original stable Jobs result; malformed or mismatched receipts fail closed.
+    """
+    try:
+        receipt = outcome["deleted_item_json"]
+        item = json.loads(receipt) if isinstance(receipt, str) else None
+    except (ValueError, RecursionError):
+        item = None
+    expected = {"batch_id": batch_id, "slot_id": slot_id, "variant_index": variant_index,
+                "owner_user_id": user_id, "pack_id": pack_id}
+    valid = (
+        outcome["outcome_status"] == "completed" and outcome.get("item_id") is None
+        and isinstance(item, dict) and variant_index >= 0
+        and all(type(item.get(key)) is int and item[key] == value for key, value in expected.items())
+        and all(type(item.get(key)) is int and item[key] > 0 for key in ("id", "generated_file_id"))
+    )
+    if not valid:
+        raise VNAssetGenerationError("vn_asset_recipe_item_missing", batch_id=batch_id, slot_id=slot_id)
+    return _generated_variant_result(item, batch_id=batch_id)
 
 
 def _generated_variant_result(item: Mapping[str, Any], *, batch_id: int) -> dict[str, Any]:
