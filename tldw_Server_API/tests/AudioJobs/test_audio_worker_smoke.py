@@ -115,7 +115,7 @@ async def test_audio_worker_transcribe_normalizes_segments_and_text_tuple(monkey
     import tldw_Server_API.app.services.audio_jobs_worker as worker
 
     async def _fake_get_limits_for_user(user_id: int):
-        return {"daily_minutes": 30.0, "concurrent_streams": 1, "concurrent_jobs": 0, "max_file_size_mb": 25}
+        return {"daily_minutes": 30.0, "concurrent_streams": 1, "concurrent_jobs": None, "max_file_size_mb": 25}
 
     async def _fake_can_start_job(user_id: int):
         return True, ""
@@ -204,7 +204,7 @@ async def test_audio_worker_download_error_does_not_crash_worker(monkeypatch, tm
     import tldw_Server_API.app.services.audio_jobs_worker as worker
 
     async def _fake_get_limits_for_user(user_id: int):
-        return {"daily_minutes": 30.0, "concurrent_streams": 1, "concurrent_jobs": 0, "max_file_size_mb": 25}
+        return {"daily_minutes": 30.0, "concurrent_streams": 1, "concurrent_jobs": None, "max_file_size_mb": 25}
 
     async def _fake_can_start_job(user_id: int):
         return True, ""
@@ -524,3 +524,70 @@ async def test_audio_gpu_worker_sanitizes_owner_slot_release_log(monkeypatch):
     rendered_logs = _render_log_records(logger_capture.records)
     assert "/tmp/private/quota.db" not in rendered_logs
     assert "RELEASE" not in rendered_logs
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_worker_owner_concurrent_jobs_zero_blocks_the_job(monkeypatch, tmp_path):
+    """limits.audio_concurrent_jobs == 0 must block the owner's job, not mean unlimited (spec 2)."""
+    jobs_db_path = tmp_path / "jobs_cap_zero.db"
+    monkeypatch.setenv("JOBS_DB_PATH", str(jobs_db_path))
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+
+    limits_calls: list[int] = []
+    started_calls: list[int] = []
+
+    async def _fake_get_limits_for_user(user_id: int):
+        limits_calls.append(user_id)
+        return {"daily_minutes": None, "concurrent_streams": None, "concurrent_jobs": 0, "max_file_size_mb": None}
+
+    async def _fake_can_start_job(user_id: int):
+        return True, ""
+
+    async def _fake_increment_jobs_started(user_id: int):
+        started_calls.append(user_id)
+
+    async def _fake_finish_job(user_id: int):
+        return None
+
+    monkeypatch.setattr(worker, "get_limits_for_user", _fake_get_limits_for_user, raising=True)
+    monkeypatch.setattr(worker, "can_start_job", _fake_can_start_job, raising=True)
+    monkeypatch.setattr(worker, "increment_jobs_started", _fake_increment_jobs_started, raising=True)
+    monkeypatch.setattr(worker, "finish_job", _fake_finish_job, raising=True)
+
+    row = jm.create_job(
+        domain="audio",
+        queue="default",
+        job_type="audio_convert",
+        payload={"local_path": str(tmp_path / "unused.wav")},
+        owner_user_id="7",
+    )
+    job_id = int(row["id"])
+
+    stop = asyncio.Event()
+    task = asyncio.create_task(worker.run_audio_jobs_worker(stop))
+    try:
+        saw_requeue = False
+        for _ in range(80):
+            await asyncio.sleep(0.05)
+            if task.done():
+                exc = task.exception()
+                pytest.fail(f"audio worker crashed unexpectedly: {exc!r}")
+            job_state = jm.get_job(job_id) or {}
+            if int(job_state.get("retry_count") or 0) >= 1:
+                saw_requeue = True
+                break
+
+        assert saw_requeue, "job with concurrent_jobs=0 was not requeued (0 must block)"
+        assert started_calls == [], "a job blocked by concurrent_jobs=0 must not count as started"
+        job_state = jm.get_job(job_id) or {}
+        assert job_state.get("status") == "queued"
+        assert limits_calls, "get_limits_for_user must have been consulted"
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=2.0)
