@@ -17,6 +17,7 @@ pytestmark = pytest.mark.integration
 
 @pytest.mark.asyncio
 async def test_mcp_billing_limits_use_read_only_postgres_transaction(isolated_test_environment, monkeypatch):
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
     _client, _db_name = isolated_test_environment
     pool = await get_db_pool()
     assert pool.pool is not None
