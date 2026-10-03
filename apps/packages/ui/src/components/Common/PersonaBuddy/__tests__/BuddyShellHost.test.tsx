@@ -507,6 +507,73 @@ describe("BuddyShellHost", () => {
     vi.unstubAllGlobals()
   })
 
+  it("shares the pack list and detail through StrictMode replay", async () => {
+    const pack = buildVisualPack()
+    const summary = { ...pack, assets_by_id: {} }
+    const pending = deferred<{
+      packs: (typeof summary)[]
+      active_pack: typeof summary
+    }>()
+    visualMocks.listPersonaVisualPacks.mockReturnValue(pending.promise)
+    visualMocks.getPersonaVisualPack.mockResolvedValue(pack)
+    render(
+      <React.StrictMode>
+        <MemoryRouter>
+          <BuddyShellRenderContextProvider
+            initialContext={personaContext("persona-1")}
+          >
+            <BuddyShellHost root="sidepanel" />
+          </BuddyShellRenderContextProvider>
+        </MemoryRouter>
+      </React.StrictMode>
+    )
+    expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      pending.resolve({ packs: [summary], active_pack: summary })
+    })
+    await screen.findByTestId("persona-buddy-visual-wrapper")
+    expect(visualMocks.getPersonaVisualPack).toHaveBeenCalledTimes(1)
+  })
+
+  it("retains loaded artwork through three effect replays and refreshes on activation", async () => {
+    let revision = 0
+    const registerEffect = React.useEffect
+    vi.spyOn(React, "useEffect").mockImplementation((effect, deps) =>
+      registerEffect(effect, deps ? [...deps, revision] : deps)
+    )
+    const pack = buildVisualPack()
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [pack],
+      active_pack: pack
+    })
+    const context = personaContext("persona-1")
+    const view = renderHost({ root: "sidepanel", context })
+    await screen.findByTestId("persona-buddy-visual-wrapper")
+    for (revision = 1; revision <= 3; revision++) {
+      view.rerender(
+        <MemoryRouter>
+          <BuddyShellRenderContextProvider initialContext={context}>
+            <BuddyShellHost root="sidepanel" />
+          </BuddyShellRenderContextProvider>
+        </MemoryRouter>
+      )
+      expect(
+        screen.getByTestId("persona-buddy-visual-wrapper")
+      ).toBeInTheDocument()
+      await act(async () => {})
+    }
+    expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledTimes(1)
+    fireEvent(
+      window,
+      new CustomEvent(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, {
+        detail: { personaId: "persona-1" }
+      })
+    )
+    await waitFor(() =>
+      expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledTimes(2)
+    )
+  })
+
   it("keeps expanded controls in the viewport and restores their usable position on remount", () => {
     vi.stubGlobal("innerWidth", 1280)
     vi.stubGlobal("innerHeight", 720)
