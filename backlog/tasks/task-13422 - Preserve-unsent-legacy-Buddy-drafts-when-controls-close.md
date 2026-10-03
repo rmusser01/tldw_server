@@ -49,6 +49,7 @@ Closing legacy Buddy controls now keeps the existing Popover state, preserving u
 - Scope limits: no full suite, physical microphone, audibility, or provider request test. Persona change, Buddy unmount, and page reload end the draft lifetime. The historical repeated-reload cause and overall Buddy acceptance remain open.
 
 2026-10-02 publication qualification: current server dev df17c8ac3f introduced an unrelated TASK-13420. Recreated this unpublished Buddy record as TASK-13422 with the canonical Python CLI after scanning all reachable and local task IDs, then removed only this branch's superseded record. Existing acceptance outcomes, plan and evidence are preserved. Rebase retained the repair patch exactly; no incoming apps files changed, so prior tests/browser evidence remain applicable with their original source attribution. The original local receipt and commit remain unchanged.
+October 3 follow-up: the published Buddy guide now includes the source closed-draft guidance after the canonical refresh performed under TASK-13423. All 33 targeted docs-refresh parity tests pass; no draft implementation changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
