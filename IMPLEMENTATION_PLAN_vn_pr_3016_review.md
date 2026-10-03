@@ -65,12 +65,17 @@ Independent SPEC/QUALITY PASS; task-65-report.md and task-65-review.md retained.
 **Success Criteria**: Reproduction establishes root cause, concrete fix approved,
 sensitive regression and independent review pass.
 **Tests**: Narrow reproductions matching CI environment; affected regression scope.
-**Status**: In Progress
+**Status**: Complete
 Task59 nested asyncio-plugin fix already exists in child; parent old-head failure
 remains evidence until new-head CI actually runs. Child CI logs sanitize the
 native cause. A matching-SQLGlot30.20.0 isolated run now reproduces UsersDB
 bootstrap rejection: standalone AUTOINCREMENT rendering differs from29.0.1.
-The narrow AST-validation fix plan is explicitly approved and in implementation.
+The narrow AST-validation fix is implemented and independently SPEC/QUALITY
+PASS after correcting the bootstrap test's preservation-observation order.
+SQLGlot30 RED2intendedfail, GREEN127pass;29GREEN127pass. Final corrected native
+bootstrap1pass on each version; managed-boundaries30 21pass. Scoped Ruff,
+compile/diff checks pass; Bandit49/49 unchanged findings, not blanket clean.
+Evidence/reviews: task-66-approved-20261002. Tasks64/65/67 committed9a5271aa2e.
 Diagnosis: human-fixes-20261002/task-66-ci-diagnosis.md.
 Additional Task67 local test diagnosis: shared sqlite3 instrumentation samples
 other backend handles before their 10-second configuration. Intended read-only
@@ -103,8 +108,8 @@ selected historical manifest entries; do not refresh old manifests.
 Integration path risk: dev-88f8b8-integration-diagnosis.md; workflow/source
 changes remain unaudited, not verified causes of bootstrap failures.
 ADR required: no for test/tracking changes; ADR002/004/006 apply.
-Tasks64/65/67 complete locally and independently approved, uncommitted and
-unpublished. Automation prompt condensed from84725to6860 characters; exact
+Tasks64/65/67 committed; Task66 complete locally and independently reviewed.
+Publication is approved and underway. Automation prompt condensed from84725to6860 characters; exact
 before/after TOML snapshots retained. Status/schedule/target preserved and
 stored prompt equality verified. It remains ACTIVE/QUIET on known blockers.
 New human-fixes-20261002/SHA256SUMS verifies68selected immutable inputs,

@@ -4,7 +4,7 @@ title: Address PR 3016 Qodo durability findings
 status: In Progress
 assignee: []
 created_date: '2026-09-26 00:52'
-updated_date: '2026-10-03 01:14'
+updated_date: '2026-10-03 01:30'
 labels:
   - vn-assets
   - review
@@ -56,6 +56,8 @@ Plan IMPLEMENTATION_PLAN_vn_pr_3016_review.md; design Docs/Design/2026-10-02-vn-
 Uncommitted/unpublished fixes; no commit/push/public replies/resolutions/body changes/fetch/rebase/merge/cleanup. Parent guarded Verification-only approval, child OWN human Change summary and safe current-dev integration/full exact-head review/7requiredpasses remain separate. AC5/AC6/DoD pending. Preserve checkout/main/backups/already-applied stashes. ADR required:no; ADR002/004/006 govern. Automation native prompt condensed84725to6860characters with exact before/after TOML archives and equality/status/schedule/target verified; ACTIVE/QUIET on known blockers.
 
 Human authorization 2026-10-02: after the presented next actions (publication of reviewed Tasks64/65/67, held Task66 bootstrap fix, parent current-dev integration, then fresh exact-head review/CI), requester explicitly replied APPROVED. This supersedes the separate Task66 implementation/publication/integration hold. Execute the narrow exact-AST/empty-arguments SQLite AUTOINCREMENT guard compatibility fix with real UsersDB regression and rejection controls, independent SPEC/QUALITY review, scoped verification, publication and safe parent integration. Preserve existing requester Change summary, frozen evidence, backups and applied stashes. Child OWN human-written Change summary and guarded parent Verification-only body edit remain separate. Merge normally only after genuine exact-head review, seven required passes, strict current-dev integration and human gate; AC5/AC6/DoD remain pending.
+
+Task66 implemented under newest explicit approval: exact SQLite AutoIncrementColumnConstraint with empty AST args; no other guard/DDL/dependency/workflow changes. Matching SQLGlot30 RED2 intended failures then127pass; SQLGlot29 same127pass. Independent P2 observation ordering fixed, affected native bootstrap1pass on30/29 (18.45s/16.47s); managed-boundaries30 21pass. Ruff/format/compile/diff pass. Unfiltered Bandit49/49 normalized equality, inherited8 B105 and3 B608 plus38 pytest B101; not blanket clean. Dalton independent SPEC/QUALITY PASS on scoped re-review, closed. Evidence task-66-approved-20261002; frozen reports preserved. Approved Tasks64/65/67 committed9a5271aa2e; source publication follows Task66 commit. Parent/dev merge-tree now reproduces7 conflicts including authored retry and reload recovery; no safe integration credit yet. AC5/AC6/DoD and child OWN summary remain pending.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
