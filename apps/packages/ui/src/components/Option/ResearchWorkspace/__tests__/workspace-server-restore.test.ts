@@ -22,6 +22,7 @@ vi.mock("@/services/service-prompts", () => ({
 }));
 
 import { useWorkspaceStore } from "@/store/workspace";
+import { retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance";
 import {
   readMigratedResearchWorkspaceId,
   restoreMigratedResearchWorkspace,
@@ -38,6 +39,7 @@ const context = () => ({
     version: 1,
     deleted: false,
     archived: false,
+    workspace_profile: "research",
     study_materials_policy: "workspace",
     banner_title: "Research",
     banner_subtitle: "Two sources",
@@ -59,11 +61,15 @@ const context = () => ({
   },
   partial_errors: [] as Array<{ scope: string; code: string; message: string }>,
 });
-const restore = (apply = useWorkspaceStore.getState().restoreServerWorkspace) =>
-  restoreMigratedResearchWorkspace({
+const restore = (apply?: Parameters<typeof restoreMigratedResearchWorkspace>[0]["apply"]) => {
+  const origin = useWorkspaceStore.getState().workspaceId;
+  return restoreMigratedResearchWorkspace({
     signal: new AbortController().signal,
-    apply,
+    apply: apply ?? ((workspace, scopeKey) => useWorkspaceStore.getState().installServerWorkspace(
+      workspace, { scopeKey, expectedWorkspaceId: origin },
+    )),
   });
+};
 
 beforeEach(() => {
   localStorage.clear();
@@ -106,6 +112,64 @@ beforeEach(() => {
 });
 
 describe("migrated Research Workspace restoration", () => {
+  it("restores a scoped UUID note without granting provenance source membership", async () => {
+    const evidence = { importId: "knowledge-import", threadId: null, snapshot: false, sources: [] };
+    const content = retainKnowledgeNoteProvenance("Canonical UUID note", {
+      origin: "knowledge_qa",
+      research: {
+        workspace_id: "original", import_id: "knowledge-import",
+        sources: [{ mediaId: 7, evidence }, { mediaId: 99, evidence }],
+      },
+    });
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request: { path: string }) =>
+      request.path.startsWith("/api/v1/notes/search/")
+        ? { notes: [{ id: "12345678-1234-4123-8123-123456789abc", title: "Knowledge note", content, version: 4, keywords: ["workspace:original", "larch"] }] }
+        : originalRequest(request),
+    );
+    await expect(restore()).resolves.toBe(true);
+    const state = useWorkspaceStore.getState();
+    expect(state.currentNote).toMatchObject({
+      id: "12345678-1234-4123-8123-123456789abc", content, version: 4,
+      serverWorkspaceId: "original", serverScopeKey: "original-alice", isDirty: false,
+    });
+    expect(state.sources).toMatchObject([{ id: "source-1", mediaId: 7, knowledgeQaEvidence: evidence }]);
+    expect(state.sources).toHaveLength(1);
+    expect(state.selectedSourceIds).toEqual(["source-1"]);
+    expect(state.serverWorkspace?.notes).toMatchObject([{ id: 1, workspace_id: "original" }]);
+    expect(boundary.request).toHaveBeenCalledWith(expect.objectContaining({
+      path: expect.stringContaining("/api/v1/notes/search/"),
+      servicePromptConfig: expect.objectContaining({ expectedUserId: "alice" }),
+      headers: { "X-TLDW-Expected-User-ID": "alice" },
+      abortSignal: boundary.controller.signal,
+      method: "GET",
+    }));
+  });
+
+  it("retains canonical account provenance, complete notes and reconciliation baseline", async () => {
+    await restore();
+    expect(useWorkspaceStore.getState().serverWorkspace).toMatchObject({
+      scopeKey: "original-alice",
+      metadata: { id: "original", workspace_profile: "research" },
+      notes: [{ id: 1, workspace_id: "original", content: "Keep this note" }],
+      selectedSourceSignature: "source-1",
+    });
+  });
+
+  it("refuses restoration over a retained empty-ID draft without replacing it", async () => {
+    useWorkspaceStore.getState().updateNoteContent("Retained unsaved draft");
+    await expect(restore()).rejects.toThrow(/install|draft/i);
+    expect(useWorkspaceStore.getState().workspaceId).toBe("");
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      content: "Retained unsaved draft", isDirty: true,
+    });
+  });
+
+  it("does not report success when the final installation is refused", async () => {
+    await expect(restore(() => false)).rejects.toThrow(/install/i);
+    expect(useWorkspaceStore.getState().workspaceId).toBe("");
+  });
+
   it.each([
     "jobs_unavailable",
     "media_db_unavailable",
@@ -174,7 +238,7 @@ describe("migrated Research Workspace restoration", () => {
     expect(readMigratedResearchWorkspaceId(localStorage)).toBe("original");
   });
 
-  it("restores note content with empty keywords when legacy keywords JSON is malformed", async () => {
+  it("retains full canonical note content even when keywords JSON is malformed", async () => {
     boundary.request.mockImplementation(async ({ path }: { path: string }) =>
       path.endsWith("/context")
         ? context()
@@ -192,10 +256,10 @@ describe("migrated Research Workspace restoration", () => {
           : [],
     );
     await expect(restore()).resolves.toBe(true);
-    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
-      content: "Keep this note",
-      keywords: [],
+    expect(useWorkspaceStore.getState().serverWorkspace?.notes[0]).toMatchObject({
+      content: "Keep this note", keywords_json: "bad JSON",
     });
+    expect(useWorkspaceStore.getState().currentNote.id).toBeUndefined();
   });
 
   it("confirms an unbound legacy identity in the scoped server list before binding and restoring it", async () => {
@@ -253,11 +317,7 @@ describe("migrated Research Workspace restoration", () => {
         },
       ],
       selectedSourceIds: ["source-1"],
-      currentNote: {
-        title: "Saved note",
-        content: "Keep this note",
-        isDirty: false,
-      },
+      serverWorkspace: { scopeKey: "original-alice", notes: [{ title: "Saved note", content: "Keep this note" }] },
     });
     expect(readMigratedResearchWorkspaceId(localStorage)).toBe("original");
     expect(

@@ -46,6 +46,7 @@ import {
   cloneWorkspaceChatSession,
   buildWorkspaceUndoSnapshot,
   cloneWorkspaceValue,
+  hasRetainedWorkspaceContent,
   reviveDateOrNull,
   reviveSources,
   reviveSourceFolders,
@@ -71,7 +72,6 @@ type WorkspaceListSliceActions = Pick<
   WorkspaceState,
   // Workspace Identity Actions
   | 'initializeWorkspace'
-  | 'restoreServerWorkspace'
   | 'setWorkspaceName'
   | 'loadWorkspace'
   // Audio Settings Actions
@@ -195,15 +195,6 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
     }))
 
     return id
-  },
-
-  restoreServerWorkspace: (snapshot) => {
-    set((state) => ({
-      ...applyWorkspaceSnapshot(snapshot),
-      savedWorkspaces: upsertSavedWorkspace(state.savedWorkspaces, createSavedWorkspaceEntry(snapshot, new Date())),
-      archivedWorkspaces: state.archivedWorkspaces.filter(workspace => workspace.id !== snapshot.workspaceId),
-      workspaceSnapshots: { ...state.workspaceSnapshots, [snapshot.workspaceId]: snapshot }
-    }))
   },
 
   setWorkspaceName: (name) => {
@@ -575,6 +566,10 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
   installServerWorkspace: (workspace, { scopeKey, expectedWorkspaceId }) => {
     const state = get()
     if (state.workspaceId !== expectedWorkspaceId || !workspace.metadata) return false
+    if (workspace.currentNote && (typeof workspace.currentNote.id !== "string" ||
+        !workspace.currentNote.id.trim() || workspace.currentNote.serverWorkspaceId !== workspace.id ||
+        workspace.currentNote.serverScopeKey !== scopeKey)) return false
+    if (!state.workspaceId && (hasRetainedWorkspaceContent(state) || state.workspaceChatReferenceId)) return false
     const metadata = workspace.metadata
     const now = new Date()
     const outgoing = state.workspaceId ? buildWorkspaceSnapshot(state) : null
@@ -585,9 +580,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       isWorkspaceChatSessionKeyForWorkspace(key, workspace.id) &&
       (session.messages.length > 0 || session.history.length > 0 || session.serverChatId || session.historyId))
     // Older snapshots have no principal provenance. Do not adopt or discard their content.
-    if (cached && !cached.serverWorkspace && (cached.currentNote.isDirty || cached.currentNote.id ||
-        cached.currentNote.title || cached.currentNote.content || cached.notes || cached.workspaceBanner.image ||
-        cached.sources.length || cached.generatedArtifacts.length || hasLegacyChat ||
+    if (cached && !cached.serverWorkspace && (hasRetainedWorkspaceContent(cached) || hasLegacyChat ||
         cached.workspaceChatReferenceId !== workspace.id)) return false
     const previous = cached?.serverWorkspace ? cached : null
     if (previous?.currentNote.isDirty && previous.currentNote.serverScopeKey && previous.currentNote.serverScopeKey !== scopeKey) return false
@@ -625,8 +618,8 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
         voice: metadata.audio_voice ?? DEFAULT_AUDIO_SETTINGS.voice,
         speed: metadata.audio_speed ?? DEFAULT_AUDIO_SETTINGS.speed
       },
-      currentNote: previous?.currentNote.isDirty ? { ...previous.currentNote } : { ...DEFAULT_WORKSPACE_NOTE },
-      notes: previous?.notes || "",
+      currentNote: previous?.currentNote.isDirty ? { ...previous.currentNote } : { ...(workspace.currentNote || DEFAULT_WORKSPACE_NOTE) },
+      notes: previous?.currentNote.isDirty ? previous.notes : workspace.currentNote?.content ?? previous?.notes ?? "",
       serverWorkspace: {
         scopeKey,
         sourceSignature: buildResearchWorkspaceServerSourceSignature(workspace.sources),

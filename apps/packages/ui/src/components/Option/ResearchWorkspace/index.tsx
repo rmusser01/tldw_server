@@ -13,7 +13,7 @@ import {
   Command,
   Loader2
 } from "lucide-react"
-import { createWorkspaceStorage, useWorkspaceStore } from "@/store/workspace"
+import { createWorkspaceStorage, hasRetainedWorkspaceContent, useWorkspaceStore } from "@/store/workspace"
 import { useTutorialStore } from "@/store/tutorials"
 import {
   WORKSPACE_CONFLICT_NOTICE_THROTTLE_MS,
@@ -1240,10 +1240,26 @@ const ResearchWorkspaceBody: React.FC = () => {
     image: null
   }
   const initializeWorkspace = useWorkspaceStore((s) => s.initializeWorkspace)
-  const restoreServerWorkspace = useWorkspaceStore((s) => s.restoreServerWorkspace)
+  const installServerWorkspace = useWorkspaceStore((s) => s.installServerWorkspace)
   const [workspaceRestoreError, setWorkspaceRestoreError] = React.useState(false)
   const [workspaceRestoreAttempt, setWorkspaceRestoreAttempt] = React.useState(0)
   const createNewWorkspace = useWorkspaceStore((s) => s.createNewWorkspace)
+  const startSeparateWorkspace = React.useCallback(() => {
+    const retained = useWorkspaceStore.getState()
+    if (retained.workspaceId || (!hasRetainedWorkspaceContent(retained) && !retained.workspaceChatReferenceId)) {
+      createNewWorkspace()
+      return
+    }
+    Modal.confirm({
+      title: t("playground:workspace.discardRetainedTitle", "Discard retained workspace content?"),
+      content: t("playground:workspace.discardRetainedContent", "Starting a separate workspace will discard this local content."),
+      okText: t("playground:workspace.discardAndStart", "Discard and start new"),
+      cancelText: t("common:cancel", "Cancel"),
+      onOk: () => {
+        if (useWorkspaceStore.getState() === retained) createNewWorkspace()
+      }
+    })
+  }, [createNewWorkspace, t])
   const addSources = useWorkspaceStore((s) => s.addSources)
   const workspaceTag = useWorkspaceStore((s) => s.workspaceTag)
   const setSelectedSourceIds = useWorkspaceStore((s) => s.setSelectedSourceIds)
@@ -2725,27 +2741,42 @@ const ResearchWorkspaceBody: React.FC = () => {
   // Initialize workspace on mount if not already initialized — use ref to keep dep stable
   const initRef = React.useRef(initializeWorkspace)
   initRef.current = initializeWorkspace
-  const currentWorkspaceIdRef = React.useRef(workspaceId)
-  currentWorkspaceIdRef.current = workspaceId
   useEffect(() => {
     if (!isStoreHydrated) return
     if (workspaceId) return
 
     let cancelled = false
     const restoration = new AbortController()
+    const origin = useWorkspaceStore.getState().workspaceId
+    let lastWorkspaceId = origin
+    const stopWorkspace = useWorkspaceStore.subscribe(() => {
+      const nextWorkspaceId = useWorkspaceStore.getState().workspaceId
+      if (nextWorkspaceId !== lastWorkspaceId) restoration.abort()
+      lastWorkspaceId = nextWorkspaceId
+    })
+    const current = () => !cancelled && !restoration.signal.aborted &&
+      useWorkspaceStore.getState().storeHydrated !== false &&
+      useWorkspaceStore.getState().workspaceId === origin
     void Promise.resolve().then(async () => {
-      if (!cancelled && !currentWorkspaceIdRef.current) {
+      if (current() && !origin) {
         setWorkspaceRestoreError(false)
         try {
           const restored = await restoreMigratedResearchWorkspace({
             signal: restoration.signal,
-            apply: snapshot => {
-              if (!cancelled && !currentWorkspaceIdRef.current) restoreServerWorkspace(snapshot)
+            apply: (workspace, scopeKey) => {
+              if (!current()) return false
+              stopWorkspace()
+              return installServerWorkspace(workspace, { scopeKey, expectedWorkspaceId: origin })
             }
           })
-          if (restored || cancelled || currentWorkspaceIdRef.current) return
+          if (restored || !current() || useWorkspaceStore.getState().workspaceId) return
         } catch {
-          if (!cancelled) setWorkspaceRestoreError(true)
+          if (current()) setWorkspaceRestoreError(true)
+          return
+        }
+        const retained = useWorkspaceStore.getState()
+        if (hasRetainedWorkspaceContent(retained) || retained.workspaceChatReferenceId) {
+          setWorkspaceRestoreError(true)
           return
         }
         const initialStorageKeys =
@@ -2756,10 +2787,12 @@ const ResearchWorkspaceBody: React.FC = () => {
             key.startsWith(WORKSPACE_STORAGE_SPLIT_KEY_PREFIX)
         )
         if (!hadWorkspaceContentBeforeInitialization) {
+          stopWorkspace()
           const initializedWorkspaceId = initRef.current()
           markFreshWorkspaceInitializationForRuntime(initializedWorkspaceId)
           return
         }
+        stopWorkspace()
         initRef.current()
       }
     })
@@ -2767,8 +2800,9 @@ const ResearchWorkspaceBody: React.FC = () => {
     return () => {
       cancelled = true
       restoration.abort()
+      stopWorkspace()
     }
-  }, [isStoreHydrated, workspaceId, restoreServerWorkspace, workspaceRestoreAttempt])
+  }, [isStoreHydrated, workspaceId, installServerWorkspace, workspaceRestoreAttempt])
 
   useEffect(() => {
     if (!statusGuardrailsEnabled) return
@@ -2915,7 +2949,7 @@ const ResearchWorkspaceBody: React.FC = () => {
 
       if (event.altKey && !hasPrimaryModifier && event.shiftKey && key === "n") {
         event.preventDefault()
-        createNewWorkspace()
+        startSeparateWorkspace()
         return
       }
 
@@ -2976,7 +3010,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   }, [
     clearCurrentNote,
     closeGlobalSearch,
-    createNewWorkspace,
+    startSeparateWorkspace,
     currentNote.content,
     currentNote.isDirty,
     currentNote.keywords.length,
@@ -3407,7 +3441,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
   ]
 
-  if (!isStoreHydrated) {
+  if (!isStoreHydrated || (!workspaceId && !workspaceRestoreError)) {
     return <ResearchWorkspaceSkeleton isMobile={isMobile} />
   }
 
@@ -3417,7 +3451,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       <Button className="mt-2" onClick={() => setWorkspaceRestoreAttempt(attempt => attempt + 1)}>
         {t("common:retry", "Retry")}
       </Button>
-      <Button className="ml-2 mt-2" onClick={() => createNewWorkspace()}>
+      <Button className="ml-2 mt-2" onClick={startSeparateWorkspace}>
         {t("playground:workspace.startNewAfterRestoreFailure", "Start new workspace")}
       </Button>
       <p className="mt-2 text-sm text-text-muted">

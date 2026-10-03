@@ -4,6 +4,7 @@ import { useWorkspaceStore } from "@/store/workspace"
 import { hydrateWorkspaceFromServer } from "@/store/workspace-api"
 import { serverWorkspacePayload } from "@/store/__tests__/workspace-activation.fixtures"
 import { QuickNotesSection } from "../StudioPane/QuickNotesSection"
+import { restoreMigratedResearchWorkspace } from "../workspace-server-restore"
 
 // Unit regression: real notes/store behavior, external requests and messages doubled.
 const boundary = vi.hoisted(() => ({ request: vi.fn(), keywords: vi.fn(), resolve: vi.fn() }))
@@ -54,6 +55,43 @@ describe("canonical QuickNotes adapter (unit boundary doubles)", () => {
     expect(boundary.request).not.toHaveBeenCalled()
     expect(boundary.keywords).not.toHaveBeenCalled()
     expect(screen.getByRole("button", { name: /Update/ })).toBeDisabled()
+  })
+
+  it("keeps migrated canonical notes view-only and never dispatches colliding legacy note IDs", async () => {
+    const retained = serverWorkspacePayload()
+    localStorage.setItem("tldw:research-workspace:migration:tombstone:migrated", JSON.stringify({
+      serverWorkspaceId: "server-research", migrationId: "migrated", contentRetained: false,
+      serverScopeKey: "owner-a", deletedAt: "2026-10-03T00:00:00Z",
+    }))
+    boundary.request.mockImplementation(async ({ path }: { path: string }) => {
+      if (path.endsWith("/context")) return {
+        workspace_id: retained.id, workspace: retained.metadata,
+        sources: { items: retained.sources }, partial_errors: [],
+      }
+      if (path.endsWith("/artifacts")) return retained.artifacts
+      if (path.endsWith("/notes")) return retained.notes
+      if (path === "/api/v1/notes/search/?tokens=workspace%3Aserver-research&limit=100&include_keywords=true") return { notes: [] }
+      throw new Error(`Unexpected legacy request ${path}`)
+    })
+    const origin = useWorkspaceStore.getState().workspaceId
+    await restoreMigratedResearchWorkspace({
+      signal: new AbortController().signal,
+      apply: (workspace, scopeKey) => useWorkspaceStore.getState().installServerWorkspace(
+        workspace, { scopeKey, expectedWorkspaceId: origin },
+      ),
+    })
+    render(<QuickNotesSection />)
+    fireEvent.click(await screen.findByRole("button", { name: "Canonical Note" }))
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      id: 7, content: "Canonical body", serverWorkspaceId: "server-research", serverScopeKey: "owner-a",
+    })
+    expect(screen.getByRole("button", { name: /Update/ })).toBeDisabled()
+    expect(screen.getByRole("textbox", { name: "Note content" })).toHaveAttribute("readonly")
+    expect(boundary.request.mock.calls.map(([request]) => request.path)).toEqual([
+      "/api/v1/workspaces/server-research/context", "/api/v1/workspaces/server-research/artifacts", "/api/v1/workspaces/server-research/notes",
+      "/api/v1/notes/search/?tokens=workspace%3Aserver-research&limit=100&include_keywords=true",
+    ])
+    expect(boundary.keywords).not.toHaveBeenCalled()
   })
 
   it("does not strip a canonical keyword merely because it matches a legacy workspace tag", async () => {

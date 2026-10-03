@@ -2156,7 +2156,6 @@ export interface WorkspaceSourceTransferExecutionResult
 
 interface WorkspaceIdentityActions {
   initializeWorkspace: (name?: string) => string
-  restoreServerWorkspace: (snapshot: WorkspaceSnapshot) => void
   setWorkspaceName: (name: string) => void
   loadWorkspace: (config: WorkspaceConfig) => void
 }
@@ -3395,6 +3394,13 @@ const migratePersistedWorkspaceState = (
     )
   }
 }
+
+/** Nonempty unowned content must not be adopted or discarded by automatic bootstrap. */
+export const hasRetainedWorkspaceContent = (state: Pick<WorkspaceSnapshot,
+  "currentNote" | "notes" | "sources" | "generatedArtifacts" | "workspaceBanner"
+>): boolean => Boolean(state.currentNote.isDirty || state.currentNote.id != null ||
+  state.currentNote.title || state.currentNote.content || state.currentNote.keywords.length ||
+  state.notes || state.sources.length || state.generatedArtifacts.length || state.workspaceBanner.image)
 
 export const createEmptyWorkspaceSnapshot = ({
   id,

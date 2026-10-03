@@ -27,6 +27,24 @@ tree with an independently reconciled expected integration tree.
 **Tests**: Ancestry, tree/range comparisons and focused conflict regressions.
 **Status**: In Progress
 
+Integration findings: retain unconditional retrieval-only RAG from dev while
+preserving the PR's protected admission tests. The real pipeline exposed a stale
+whole-module unit mock; preserve actual exports and complete default option keys.
+Frontend typecheck reproduced four missing dispatch-field errors in the shared
+history helper; its parameter contract and RAG forwarding now include those
+existing fields. Migration restoration uses complete canonical hydration and the
+existing owner-qualified installer instead of a second unqualified snapshot path.
+The initial body stays pending, transitions are fenced, retained empty-ID content
+(including keywords) is not overwritten, and discard requires explicit consent.
+Four initial restoration regressions and three fallback cases failed before their
+fixes. The confirmation's initial declaration-order failure is retained separately.
+Fresh combined frontend295 tests pass, including mounted real-store StrictMode
+switch/unmount/account/success and canonical note-domain regressions; these are
+unit/integration doubles, not UAT. CI-helper/route-auth29 pass. Incoming backend
+qualification remains running; no current-base live acceptance is claimed yet.
+The incoming Redis window-growth reload limitation is already documented under
+TASK-13430 Known limits; it is not new to this PR and is not claimed remediated.
+
 ### Stage B: Fresh Qualification
 **Goal**: Qualify changed runtime and incoming integration on the new source.
 **Success Criteria**: Owning/incoming tests, TypeScript/lint/build and touched-scope
@@ -34,7 +52,7 @@ Bandit pass; actual Chrome raw-CDP acceptance uses live authenticated services,
 databases, Gemma and embeddings without mocks or automatic resends.
 **Tests**: Durable chat, RAG/history/prompt recovery, Research hydration and
 workspace switching, desktop/mobile send/stream/stop/reload/source handling.
-**Status**: Not Started
+**Status**: In Progress
 
 ### Stage C: Review and Hosted CI
 **Goal**: Publish only a verified integration and address actual final-head review.

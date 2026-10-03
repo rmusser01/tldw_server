@@ -24,6 +24,7 @@ import type {
   TraceableArtifactReviewMetadata,
   TraceableArtifactVersionMetadata,
   WorkspaceSource,
+  WorkspaceNote,
   WorkspaceSourceReviewUpdate,
   WorkspaceSourceType
 } from "../types/workspace"
@@ -46,6 +47,7 @@ export interface LocalWorkspaceState {
   selectedSourceIds: string[]
   artifacts: GeneratedArtifact[]
   notes: any[]
+  currentNote?: WorkspaceNote
   metadata?: WorkspaceApiResponse
   version: number
 }
