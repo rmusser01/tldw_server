@@ -55,6 +55,12 @@ async def test_media_bytes_429_when_daily_mb_spent(quota: dict) -> None:
     assert len(quota["recorded"]) == 1
 
 
+async def test_media_bytes_skips_check_and_record_for_a_non_numeric_user_id(quota: dict) -> None:
+    """A non-numeric user id must not raise; the check and the per-user record are both skipped."""
+    await persistence._enforce_and_record_media_bytes("not-a-number", 3 * MB)
+    assert quota["recorded"] == []
+
+
 async def test_workflows_cap_429_at_allowance(quota: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """At the user's daily run allowance the endpoint refuses with 429 and rate-limit headers."""
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
@@ -66,6 +72,21 @@ async def test_workflows_cap_429_at_allowance(quota: dict, monkeypatch: pytest.M
     with pytest.raises(HTTPException) as exc:
         await workflows_ep._enforce_workflows_daily_cap(request=SimpleNamespace(), current_user=SimpleNamespace(id=7), db=None)
     assert exc.value.status_code == 429
+
+
+async def test_workflows_runs_decision_allows_when_disabled_via_env_even_at_zero(
+    quota: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """WORKFLOWS_DISABLE_QUOTAS makes workflows_runs_decision UNLIMITED, even with limit=0.
+
+    The scheduler path (workflow_run) calls workflows_runs_decision directly, with
+    no way to honor the env escape hatch unless the function itself does.
+    """
+    monkeypatch.setenv("WORKFLOWS_DISABLE_QUOTAS", "1")
+    quota["limits"]["limits.workflows_runs_per_day"] = 0
+    quota["used"] = 0.0
+    decision = await quota_checks.workflows_runs_decision(7)
+    assert decision.allowed is True
 
 
 async def test_scheduler_refuses_a_run_past_the_allowance(quota: dict, monkeypatch: pytest.MonkeyPatch) -> None:

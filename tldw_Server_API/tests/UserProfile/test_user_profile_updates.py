@@ -236,6 +236,7 @@ async def test_invalid_identity_email_log_excludes_validation_details(
             membership_context=None,
             is_postgres_backend=False,
             anchor=object(),
+            result=update_service_module.UpdateResult(),
         )
 
     assert debug_calls == [("Invalid email update for user {}", (7,))]

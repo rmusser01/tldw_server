@@ -37,6 +37,10 @@ from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import (
 class UpdateResult:
     applied: list[str] = field(default_factory=list)
     skipped: list[dict[str, str]] = field(default_factory=list)
+    # Set when a write in this call touched the quota resolver's cache (a
+    # limits.* override write or null-delete); invalidate_user runs once,
+    # after anchor.finalize(), instead of inline mid-transaction (spec 2 review A8).
+    needs_quota_invalidation: bool = False
 
 
 @dataclass
@@ -154,7 +158,7 @@ class UserProfileUpdateService:
                         await anchor.capture()
                         await repo.delete_override(user_id=user_id, key=key, db_conn=db_conn)
                         anchor.mark_changed()
-                        invalidate_user(user_id)
+                        result.needs_quota_invalidation = True
                     result.applied.append(key)
                     continue
                 result.skipped.append({"key": key, "message": "null_not_allowed"})
@@ -182,6 +186,7 @@ class UserProfileUpdateService:
                     membership_context=membership_context,
                     is_postgres_backend=is_postgres_backend,
                     anchor=anchor,
+                    result=result,
                 )
             except ValueError as exc:
                 result.skipped.append({"key": key, "message": str(exc)})
@@ -194,6 +199,8 @@ class UserProfileUpdateService:
 
         if not dry_run:
             await anchor.finalize()
+            if result.needs_quota_invalidation:
+                invalidate_user(user_id)
         return result
 
     async def _apply_key_update(
@@ -211,6 +218,7 @@ class UserProfileUpdateService:
         membership_context: _MembershipContext | None,
         is_postgres_backend: bool,
         anchor: _CallerOwnedAnchor,
+        result: UpdateResult,
     ) -> bool:
         if key == "identity.email":
             try:
@@ -330,7 +338,7 @@ class UserProfileUpdateService:
                     db_conn=db_conn,
                 )
                 anchor.mark_changed()
-                invalidate_user(user_id)
+                result.needs_quota_invalidation = True
             return True
 
         if key.startswith("preferences."):
