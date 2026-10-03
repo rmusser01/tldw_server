@@ -108,6 +108,7 @@ from tldw_Server_API.app.core.AuthNZ.lockout_tracker import (
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.identity_provider_repo import IdentityProviderRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
@@ -164,7 +165,6 @@ from tldw_Server_API.app.services.auth_service import (
     verify_user_email_once as _svc_verify_user_email_once,
 )
 from tldw_Server_API.app.services.registration_service import RegistrationService
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
     AssertionError,

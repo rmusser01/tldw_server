@@ -10,6 +10,8 @@
 
 **Source design:** `Docs/superpowers/specs/2026-07-20-userprofiles-single-update-pipeline-stage2-design.md`
 
+**ADR check (Work Package 2):** ADR required: yes. ADR path: `Docs/ADR/058-authnz-membership-writer-transaction-and-version-ownership.md`. The approved shared membership writer creates a durable AuthNZ transaction, authorization, lock-order, and profile-version ownership boundary; the ADR backfills that decision without changing the approved Stage 2 scope.
+
 **Planning baseline:** Reconciled against `origin/dev` at `2e0d3f1a2cfcad9798008f5bd249d91bbac43f07`. Before implementation, start a fresh `codex/` worktree from the then-current `origin/dev` and bring this spec and plan onto it. Re-run the inventory tests before editing because the runtime writer set may have grown.
 
 ---

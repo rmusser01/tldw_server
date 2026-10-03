@@ -58,7 +58,7 @@ DIRECT_MEMBERSHIP_PROXY_CALLS = frozenset(
 )
 SERVING_MEMBERSHIP_CONTEXT_CATEGORIES = {
     "tldw_Server_API/app/api/v1/endpoints/auth.py": "trusted",
-    "tldw_Server_API/app/api/v1/endpoints/admin/admin_tenant_provisioning.py": "actor",
+    "tldw_Server_API/app/core/AuthNZ/tenant_provisioning.py": "actor",
     "tldw_Server_API/app/api/v1/endpoints/orgs.py": "actor",
     "tldw_Server_API/app/services/admin_e2e_support_service.py": "trusted",
     "tldw_Server_API/app/services/admin_orgs_service.py": "actor",
@@ -95,7 +95,7 @@ BOUNDED_TASK8_TRANSACTION_FUNCTIONS = {
     "tldw_Server_API/app/core/AuthNZ/federation/provisioning_service.py": frozenset(
         {"apply_mapped_grants"}
     ),
-    "tldw_Server_API/app/api/v1/endpoints/admin/admin_tenant_provisioning.py": frozenset(
+    "tldw_Server_API/app/core/AuthNZ/tenant_provisioning.py": frozenset(
         {"provision_tenant"}
     ),
     "tldw_Server_API/app/core/AuthNZ/repos/org_provider_secrets_repo.py": frozenset(
@@ -2062,6 +2062,7 @@ def test_task8_membership_paths_do_not_import_work_package3_pipeline() -> None:
         APP_ROOT / "services/registration_service.py",
         APP_ROOT / "services/org_invite_service.py",
         APP_ROOT / "api/v1/endpoints/admin/admin_tenant_provisioning.py",
+        APP_ROOT / "core/AuthNZ/tenant_provisioning.py",
     )
     forbidden_modules = {
         "tldw_Server_API.app.core.UserProfiles.contracts",

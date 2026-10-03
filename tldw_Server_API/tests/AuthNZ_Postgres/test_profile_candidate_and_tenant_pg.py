@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import uuid
 
-import asyncpg
 import pytest
 from fastapi import HTTPException
 
@@ -30,15 +29,12 @@ def _principal(user_id: int = 1) -> AuthPrincipal:
     )
 
 
-async def _execute_intentionally_invalid_candidate_ddl(conn, statement: str) -> None:
-    """Bypass the users firewall only to construct invalid candidate metadata."""
-    await asyncpg.Connection.execute(conn, statement)
-
-
 @pytest.mark.asyncio
+@pytest.mark.parametrize("admin_permission", ["system.configure", "admin"])
 async def test_postgres_tenant_provisioning_uses_real_defaults_and_rolls_back(
     test_db_pool,
     monkeypatch: pytest.MonkeyPatch,
+    admin_permission: str,
 ) -> None:
     suffix = uuid.uuid4().hex[:10]
     org_name = f"Tenant {suffix}"
@@ -63,15 +59,16 @@ async def test_postgres_tenant_provisioning_uses_real_defaults_and_rolls_back(
                 "username": f"admin_{suffix}",
                 "email": f"admin_{suffix}@example.com",
                 "password_hash": "hash",
-                "role": "admin",
+                "role": "user",
                 "is_active": True,
                 "is_verified": True,
             },
         )
         permission_id = await conn.fetchval(
             "INSERT INTO public.permissions (name, description, category) "
-            "VALUES ('system.configure', 'Configure system', 'system') "
-            "ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id"
+            "VALUES ($1, 'Tenant provision permission', 'system') "
+            "ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id",
+            admin_permission,
         )
         actor_user_id = actor_result.affected_user_ids[0]
         await conn.execute(

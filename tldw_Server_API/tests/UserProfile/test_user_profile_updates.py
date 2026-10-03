@@ -1023,8 +1023,8 @@ async def test_membership_batch_preserves_opposite_scope_order_and_one_mixed_tou
         def __init__(self, _pool: object) -> None:
             pass
 
-        async def ensure_tables(self) -> None:
-            return None
+        async def ensure_tables(self, *, db_conn=None) -> None:
+            assert db_conn is not None
 
         async def upsert_override(self, **_kwargs) -> None:
             execution_order.append("preference_write")
