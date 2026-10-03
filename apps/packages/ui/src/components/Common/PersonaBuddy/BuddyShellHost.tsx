@@ -3,7 +3,7 @@ import { useBuddyManagementStore } from "@/store/buddy-management"
 import { createPortal } from "react-dom"
 
 import { useSetting } from "@/hooks/useSetting"
-import { useDesktop, useMediaQuery } from "@/hooks/useMediaQuery"
+import { useMediaQuery } from "@/hooks/useMediaQuery"
 import { usePersonaLiveControl } from "@/hooks/usePersonaLiveControl"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
@@ -1113,17 +1113,12 @@ export const BuddyShellHost: React.FC<BuddyShellHostProps> = ({ root }) => {
   const renderContext = useBuddyShellRenderContext()
   const [selectedAssistant] = useSelectedAssistant()
   const [buddyShellEnabled] = useSetting(PERSONA_BUDDY_SHELL_ENABLED_SETTING)
-  const isDesktop = useDesktop()
 
   if (!buddyShellEnabled || independentAttached) {
     return null
   }
 
   if (!renderContext?.surface_active) {
-    return null
-  }
-
-  if (root !== "sidepanel" && !isDesktop) {
     return null
   }
 
