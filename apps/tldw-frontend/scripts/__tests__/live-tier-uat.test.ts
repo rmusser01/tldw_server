@@ -29,6 +29,8 @@ import {
   assertFreshRunTargets,
   assertServicesStopped,
   buildCommands,
+  EXTENSION_DIR_ENV,
+  resolveExtensionBuild,
   assertNoMutableRepoDatabasePaths,
   assertOnlyLoopbackHttpRequests,
   isCertificationRun,
@@ -390,6 +392,58 @@ describe("live Tier UAT runner contract", () => {
     expect(filteredCommands.playwrightRun.args).toEqual(expect.arrayContaining([
       "--grep", "Sources",
     ]))
+    expect(commands.playwrightRun.env).not.toHaveProperty(EXTENSION_DIR_ENV)
+  })
+
+  it("builds the browser extension only for runs that include ux-regression", () => {
+    const baseEnv = { NODE_ENV: "test" as const, PATH: process.env.PATH, HOME: "/home/runner" }
+    const extensionRoot = path.resolve(frontendRoot, "../extension")
+    const builtDir = path.join(extensionRoot, ".output/chrome-mv3")
+
+    expect(resolveExtensionBuild({ frontendRoot, projects: ["tier-1", "tier-2"], baseEnv })).toBeNull()
+
+    const build = resolveExtensionBuild({ frontendRoot, projects: ["ux-regression"], baseEnv })
+    expect(build?.dir).toBe(builtDir)
+    expect(build?.command).toMatchObject({
+      name: "extension-build",
+      command: "bun",
+      args: ["run", "build:chrome:prod"],
+      cwd: extensionRoot,
+    })
+    expect(build?.command?.env).toEqual({ PATH: process.env.PATH, HOME: "/home/runner" })
+
+    // A prebuilt directory replaces the build step but is still handed to the specs.
+    const prebuilt = resolveExtensionBuild({
+      frontendRoot,
+      projects: ["ux-regression"],
+      baseEnv: { ...baseEnv, [EXTENSION_DIR_ENV]: "/tmp/prebuilt-extension" },
+    })
+    expect(prebuilt).toEqual({ dir: "/tmp/prebuilt-extension", command: null })
+
+    const commands = buildCommands({
+      repoRoot,
+      frontendRoot,
+      ports: { backend: 18180, web: 18181, mock: 18182 },
+      profile: {
+        repoRoot,
+        runDir: "/tmp/live-tier",
+        logsDir: "/tmp/live-tier/logs",
+        reportsDir: "/tmp/live-tier/reports",
+        configPath: "/tmp/live-tier/config.txt",
+        envPath: "/tmp/live-tier/.env",
+        usersDbPath: "/tmp/live-tier/users.db",
+        databaseDir: "/tmp/live-tier/Databases",
+        fixtureRoot: path.join(frontendRoot, "e2e/fixtures/media"),
+        acpWorkspaceRootBase: "/tmp/live-tier/acp-workspaces",
+        databasePaths: { evaluations: "/tmp/live-tier/evaluations.db" },
+      },
+      projects: ["ux-regression"],
+      workers: 1,
+      runId: "run-extension",
+      baseEnv,
+    })
+    expect(commands.playwrightRun.env[EXTENSION_DIR_ENV]).toBe(builtDir)
+    expect(commands.playwrightList.env[EXTENSION_DIR_ENV]).toBe(builtDir)
   })
 
   it("stops only registered process groups in reverse startup order", async () => {
