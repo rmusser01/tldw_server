@@ -1074,7 +1074,10 @@ async def set_group_limit_override(
     Platform admins only: a customer's org admin must not lift their own members.
     The value is each member's allowance; storage stays per-user until PR C.
     """
-    if not (is_single_user_principal(principal) or admin_scope_service.is_platform_admin(principal)):
+    # is_platform_admin() already grants single-user principals outside enterprise
+    # mode; an extra `is_single_user_principal(...) or` here would bypass its
+    # enterprise-mode denial (Qodo Q2).
+    if not admin_scope_service.is_platform_admin(principal):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Platform admin required")
     entry = {e.key: e for e in load_user_profile_catalog().entries}.get(key)
     if entry is None or not key.startswith("limits.") or key == "limits.storage_quota_mb":

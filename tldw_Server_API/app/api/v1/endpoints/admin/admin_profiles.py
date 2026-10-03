@@ -164,7 +164,10 @@ async def _group_override(
     try:
         await _get_emit_admin_audit_event()(http_request, principal, **audit_info)
     except Exception:
-        logger.warning("Admin audit emission failed")
+        logger.opt(exception=True).warning(
+            "Admin audit emission failed for {} {} override {} ({})",
+            scope, group_id, key, audit_info.get("action"),
+        )
     return GroupLimitOverrideResponse(**response)
 
 
