@@ -1,7 +1,7 @@
 ---
 id: TASK-13421
 title: Design Moderation policy_types retirement
-status: Done
+status: In Progress
 created_date: 2026-10-03 01:11
 labels:
 - Moderation
@@ -19,7 +19,7 @@ documentation:
 modified_files:
 - Docs/superpowers/specs/2026-10-02-moderation-policy-types-retirement-design.md
 - backlog/tasks/task-13421 - Design-Moderation-policy-types-retirement.md
-updated_date: 2026-10-03 01:17
+updated_date: 2026-10-03 20:37
 ---
 
 ## Description
@@ -34,7 +34,7 @@ Design the next structural Moderation refactor slice: retire PolicyCompiler.poli
 - [x] #2 The design defines the exact compatibility break and preserves all public ModerationService and model import contracts.
 - [x] #3 Compiler/evaluator canonical-type wiring, runtime namespace behavior, and import-isolation replacements are specified.
 - [x] #4 Compilation-first, focused, downstream, lint, security, and mergeability verification gates are specified.
-- [x] #5 The approved design is committed in Docs/superpowers/specs.
+- [ ] #5 The approved design is committed in Docs/superpowers/specs.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -42,6 +42,8 @@ Design the next structural Moderation refactor slice: retire PolicyCompiler.poli
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Audit completed on current origin/dev 86e287fee7. policy_types() exists only in PolicyCompiler/PolicyEvaluator internal production calls; no endpoint, service caller, public documentation, or integration caller uses it. Hook-specific tests preserve descriptors, tuple/cache identity, clean-process service isolation, and subclass model substitution. The approved design retires direct calls and subclass substitution, preserves canonical model/service imports, replaces hook-based import tests with representative operations, and avoids private-layout assertions. Focused baseline: 119 passed, 250 warnings across compiler, evaluator, model characterization, canonical-model, and import suites.
 Design specification self-review completed: no TBD/TODO placeholders, unresolved ambiguity, or cross-scope implementation dependency remains. The review added an explicit TDD red/green proof for ignoring legacy subclass hooks, exact implementation file scope, representative clean-process import-isolation operations, and a ban on private-layout tests. git diff --cached --check passed before commit. Design commit: 18659bd296. Bandit is not applicable because this task changes documentation and its Backlog record only.
+Written-spec review identified five corrections before implementation planning: reconcile the source-audit gate with the intentional legacy-hook regression fixtures; narrow behavior-preservation language to supported ModerationService/runtime callers; declare private runtime-alias rebinding outside compatibility because removing the evaluator cache changes that monkeypatch behavior; describe rollback as one-PR rather than one-commit; and keep the task open until the amended written spec is approved.
+Applied all five written-spec review corrections. The verification gate now allows only the intentional legacy-hook regression fixtures; behavior-preservation claims are limited to supported service/runtime paths; private runtime-alias rebinding is explicitly unsupported and covered as a risk; rollback is one PR; TASK-13421 remains In Progress pending approval of the amended written specification.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -52,10 +54,10 @@ Approved and committed a narrow design to retire PolicyCompiler.policy_types() a
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
+- [ ] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
