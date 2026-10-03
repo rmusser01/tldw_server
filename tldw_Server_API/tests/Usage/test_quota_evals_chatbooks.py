@@ -84,3 +84,73 @@ async def test_resolve_job_limits_reads_the_resolver(monkeypatch: pytest.MonkeyP
     service = _Service(exports=0, active=0)
     service.user_id_int = 7
     assert await service._resolve_job_limits() == ChatbookJobLimits(exports_per_day=4, imports_per_day=None, concurrent_jobs=1)
+
+
+def test_evaluations_endpoint_daily_cap_fires_for_the_authenticated_user(tmp_path, monkeypatch) -> None:
+    """A non-numeric credential must not blind the per-user daily evaluation cap (spec 2 §4).
+
+    `verify_api_key` returns the raw API key/JWT string, not a user id. The limiter must be
+    keyed by `current_user.id` (the authenticated user), not by that credential, or
+    `as_quota_user_id` never resolves and the daily cap never fires for real traffic.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from tldw_Server_API.app.api.v1.endpoints.evaluations import evaluations_unified
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+    from tldw_Server_API.app.core.Usage import quota_resolver
+
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
+    monkeypatch.setenv("RG_ENABLED", "0")
+
+    fresh_limiter = UserRateLimiter(db_path=str(tmp_path / "endpoint_evals.db"))
+    monkeypatch.setattr(evaluations_unified, "get_user_rate_limiter_for_user", lambda _uid: fresh_limiter)
+
+    class _FakeEvalService:
+        """Records calls instead of running a real proposition evaluation."""
+
+        def __init__(self) -> None:
+            """Start with no recorded calls."""
+            self.calls: list[dict] = []
+
+        async def evaluate_propositions(self, **kwargs) -> dict:
+            """Record the call; return a minimal well-formed result."""
+            self.calls.append(kwargs)
+            return {
+                "results": {"metrics": {}, "counts": {}, "details": {}},
+                "evaluation_id": "fake-eval",
+                "evaluation_time": 0.0,
+            }
+
+    fake_service = _FakeEvalService()
+    monkeypatch.setattr(evaluations_unified, "get_unified_evaluation_service_for_user", lambda _uid: fake_service)
+
+    seen_uids: list[object] = []
+
+    async def _fake_user_quota(uid: object, key: str) -> object:
+        """Only a real (numeric) user id gets the daily cap of 1; a credential string must not."""
+        seen_uids.append(uid)
+        if key == "limits.evaluations_per_day" and isinstance(uid, int):
+            return 1
+        return None
+
+    monkeypatch.setattr(quota_resolver, "user_quota", _fake_user_quota)
+
+    app = FastAPI()
+    app.include_router(evaluations_unified.router, prefix="/api/v1")
+    headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+    payload = {
+        "extracted": ["Alice founded Acme Corp in 2020"],
+        "reference": ["Alice founded Acme Corp in 2020"],
+        "method": "jaccard",
+        "threshold": 0.5,
+    }
+
+    with TestClient(app) as client:
+        first = client.post("/api/v1/evaluations/propositions", json=payload, headers=headers)
+        second = client.post("/api/v1/evaluations/propositions", json=payload, headers=headers)
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 429, second.text
+    assert len(fake_service.calls) == 1
+    assert any(isinstance(uid, int) for uid in seen_uids), seen_uids
