@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-10-01 17:53'
-updated_date: '2026-10-02 01:56'
+updated_date: '2026-10-03 01:51'
 labels:
   - bug
   - sync
@@ -37,6 +37,8 @@ Fix (tldw_Server_API/app/core/Sync/v2/personal_context_relay.py): the deadline n
 Tests: added test_relay_finishes_a_row_whose_staging_crossed_the_deadline in tests/Sync/test_sync_v2_personal_context_recovery_budget.py; it fails without the fix. Renamed test_relay_rechecks_deadline_after_each_successful_current_row_check to test_relay_current_row_deadline_stops_only_rows_it_has_not_staged; its three post-stage cases now expect the row to be finished, and the before-stage and acknowledged cases are unchanged. Results: before the fix the target test failed 3/13 plain runs (plus 4/8 instrumented). After the fix it passed 20/20 consecutive runs, 10 of them under heavy concurrent load, and 5/5 with the 60/120 ms slow-staging injection. Relay files (recovery_budget, relay, relay_recovery) 156 passed; Personalization/test_personal_context_activation.py 32 passed. Full tests/Sync (xdist): 2985 passed, 1 skipped, 30 failed. All 30 failures are PostgreSQL tests that timed out inside the pg_server fixture on 'docker rm -f tldw_postgres_test' (the host's shared Docker daemon is wedged; no local Postgres), before any product code runs. Their SQLite variants pass, and PostgreSQL relay coverage is left to CI. ruff clean. Bandit: uvx bandit -ll personal_context_relay.py reports no issues. PR #3078.
 
 Known gap, not changed: failure paths (acknowledge_row/finalize_authority raising, or uncertain record after the deadline) can still leave a staged row hidden and unfinalized. A later relay retries it unless an activation covers the batch first; covered_by_activation batches have no orphan cleanup (only purge_terminal batches do). Docs: no documentation change needed (DoD #3 not applicable).
+
+Landing: the relay fix itself reached dev through the release-0.1.46 sync PR #3088 (commit 3b5051d9fb), which reused #3078's repair after hitting the same handshake failure. #3078 then merged with only this task's close-out. Qodo's docstring findings on #3078 (the deadline_open helper and the regression test's stage/finalize callbacks) were addressed in the follow-up PR chore/followups-13410-13416. The remaining gap (a staged row orphaned when acknowledge_row/finalize_authority raises and an activation covers its batch) is TASK-13431.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

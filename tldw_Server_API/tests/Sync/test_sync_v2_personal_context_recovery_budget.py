@@ -1731,6 +1731,7 @@ def test_relay_finishes_a_row_whose_staging_crossed_the_deadline() -> None:
     )
 
     def stage(row: PublicationSourceRow, *_args: Any) -> AuthorityStageReceipt:
+        """Stage the row and move the clock to the deadline, as a slow host would."""
         publications.actions.append("stage")
         clock.now_ns = 100
         return AuthorityStageReceipt(
@@ -1744,6 +1745,7 @@ def test_relay_finishes_a_row_whose_staging_crossed_the_deadline() -> None:
         )
 
     def finalize(*_args: Any) -> None:
+        """Record that the staged row was finalized despite the passed deadline."""
         publications.actions.append("finalize")
 
     result = PersonalContextRelay(
