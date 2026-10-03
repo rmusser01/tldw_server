@@ -49,6 +49,7 @@ import { SidePanelBody } from "~/components/Sidepanel/Chat/body"
 import { SidepanelForm } from "~/components/Sidepanel/Chat/form"
 import { SidepanelHeaderSimple } from "~/components/Sidepanel/Chat/SidepanelHeaderSimple"
 import { ConnectionBanner } from "~/components/Sidepanel/Chat/ConnectionBanner"
+import { renameTabConversation } from "~/components/Sidepanel/Chat/tab-conversation-actions"
 import { useMessage } from "~/hooks/useMessage"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
@@ -1163,9 +1164,25 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
     (nextLabel: string) => {
       const trimmed = nextLabel.trim()
       if (!owner.isCurrent() || isRestoringChat || !activeTabId || !trimmed) return
-      useSidepanelChatTabsStore.getState().renameTab(activeTabId, trimmed)
+      const tab = useSidepanelChatTabsStore.getState().tabs.find((item) => item.id === activeTabId)
+      if (!tab) return
+      // Rename the conversation, not just its tab (XS-07).
+      void renameTabConversation(tab, trimmed, owner.snapshot.requestScope)
+        .then((title) => {
+          if (owner.isCurrent()) useSidepanelChatTabsStore.getState().renameTab(tab.id, title)
+        })
+        .catch((error) => {
+          console.error("[sidepanel] Failed to rename chat", error)
+          notification.error({
+            message: t("common:error", "Error"),
+            description: t(
+              "sidepanel:contextMenu.renameFailed",
+              "Couldn't rename this conversation. Its name is unchanged."
+            )
+          })
+        })
     },
-    [activeTabId, owner, isRestoringChat]
+    [activeTabId, owner, isRestoringChat, notification, t]
   )
 
   React.useEffect(() => {

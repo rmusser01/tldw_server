@@ -115,6 +115,10 @@ vi.mock("../FolderPickerModal", () => ({
   FolderPickerModal: () => null
 }))
 
+vi.mock("@/hooks/useUndoNotification", () => ({
+  useUndoNotification: () => ({ showUndoNotification: vi.fn() })
+}))
+
 const search = vi.hoisted(() => vi.fn())
 const connection = vi.hoisted(() => ({ isConnected: true }))
 vi.mock("@/hooks/useConnectionState", () => ({

@@ -13,7 +13,8 @@ import {
   Download,
   FileJson,
   FileText,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type { SidepanelChatTab } from "@/store/sidepanel-chat-tabs"
@@ -25,16 +26,22 @@ export type ConversationStatus =
   | "non_viable"
   | null
 
+/** Resolve `false` to keep a dialog open, e.g. after the action failed. */
+type DialogAction = void | boolean | Promise<void | boolean>
+
 export type ConversationContextMenuProps = {
   tab: SidepanelChatTab
   children: React.ReactNode
-  onRename: (tabId: string, newLabel: string) => void
+  onRename: (tabId: string, newLabel: string) => DialogAction
   onTogglePin: (tabId: string) => void
   onSetStatus: (tabId: string, status: ConversationStatus) => void
   onAddToFolder: (tabId: string) => void
   onExportJSON: (tabId: string) => void
   onExportMarkdown: (tabId: string) => void
-  onDelete: (tabId: string) => void
+  /** Delete the tab's server chat; offered only for a tab bound to one. */
+  onDelete: (tabId: string) => DialogAction
+  /** Close the tab. A tab with no server chat offers this instead of Delete. */
+  onCloseTab: (tabId: string) => void
   currentStatus?: ConversationStatus
 }
 
@@ -50,23 +57,40 @@ export const ConversationContextMenu: React.FC<
   onExportJSON,
   onExportMarkdown,
   onDelete,
+  onCloseTab,
   currentStatus
 }) => {
   const { t } = useTranslation(["common", "sidepanel"])
   const [renameModalOpen, setRenameModalOpen] = React.useState(false)
   const [renameValue, setRenameValue] = React.useState(tab.label)
+  const [renaming, setRenaming] = React.useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false)
+  const [deleting, setDeleting] = React.useState(false)
+  const deletesServerChat = Boolean(tab.serverChatId)
 
-  const handleRenameSubmit = () => {
-    if (renameValue.trim()) {
-      onRename(tab.id, renameValue.trim())
+  const handleRenameSubmit = async () => {
+    if (renaming) return
+    const nextLabel = renameValue.trim()
+    if (!nextLabel || nextLabel === tab.label) {
+      setRenameModalOpen(false)
+      return
     }
-    setRenameModalOpen(false)
+    setRenaming(true)
+    try {
+      if ((await onRename(tab.id, nextLabel)) !== false) setRenameModalOpen(false)
+    } finally {
+      setRenaming(false)
+    }
   }
 
-  const handleDeleteConfirm = () => {
-    onDelete(tab.id)
-    setDeleteConfirmOpen(false)
+  const handleDeleteConfirm = async () => {
+    if (deleting) return
+    setDeleting(true)
+    try {
+      if ((await onDelete(tab.id)) !== false) setDeleteConfirmOpen(false)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const statusItems: MenuProps["items"] = [
@@ -159,13 +183,21 @@ export const ConversationContextMenu: React.FC<
       children: exportItems
     },
     { type: "divider" },
-    {
-      key: "delete",
-      icon: <Trash2 className="size-3" />,
-      label: t("common:delete", "Delete"),
-      danger: true,
-      onClick: () => setDeleteConfirmOpen(true)
-    }
+    deletesServerChat
+      ? {
+          key: "delete",
+          icon: <Trash2 className="size-3" />,
+          label: t("common:delete", "Delete"),
+          danger: true,
+          onClick: () => setDeleteConfirmOpen(true)
+        }
+      : {
+          // Nothing is deleted: the chat has no server copy to remove.
+          key: "close",
+          icon: <X className="size-3" />,
+          label: t("sidepanel:contextMenu.closeTab", "Close tab"),
+          onClick: () => onCloseTab(tab.id)
+        }
   ]
 
   return (
@@ -182,16 +214,17 @@ export const ConversationContextMenu: React.FC<
       <Modal
         open={renameModalOpen}
         title={t("sidepanel:contextMenu.renameTitle", "Rename conversation")}
-        onOk={handleRenameSubmit}
+        onOk={() => void handleRenameSubmit()}
         onCancel={() => setRenameModalOpen(false)}
         okText={t("common:save", "Save")}
         cancelText={t("common:cancel", "Cancel")}
+        confirmLoading={renaming}
         destroyOnHidden
       >
         <Input
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
-          onPressEnter={handleRenameSubmit}
+          onPressEnter={() => void handleRenameSubmit()}
           autoFocus
           placeholder={t(
             "sidepanel:contextMenu.renamePlaceholder",
@@ -204,18 +237,19 @@ export const ConversationContextMenu: React.FC<
       <Modal
         open={deleteConfirmOpen}
         title={t("sidepanel:contextMenu.deleteTitle", "Delete conversation")}
-        onOk={handleDeleteConfirm}
+        onOk={() => void handleDeleteConfirm()}
         onCancel={() => setDeleteConfirmOpen(false)}
-        okText={t("common:delete", "Delete")}
+        okText={t("sidepanel:contextMenu.moveToTrash", "Move to Trash")}
         cancelText={t("common:cancel", "Cancel")}
-        okButtonProps={{ danger: true }}
+        okButtonProps={{ danger: true, loading: deleting }}
         destroyOnHidden
       >
         <p>
-          {t(
-            "sidepanel:contextMenu.deleteConfirm",
-            "Are you sure you want to delete this conversation? This action cannot be undone."
-          )}
+          {t("sidepanel:contextMenu.moveToTrashConfirm", {
+            defaultValue:
+              "\"{{title}}\" moves to Trash and its tab closes. You can undo this right away, or restore it later from Trash in the full chat page.",
+            title: tab.label
+          })}
         </p>
       </Modal>
     </>

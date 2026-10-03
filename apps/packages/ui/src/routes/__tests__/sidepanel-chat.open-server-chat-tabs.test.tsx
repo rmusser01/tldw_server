@@ -26,6 +26,8 @@ const io = vi.hoisted(() => ({
   sequence: 0,
   data: new Map<string, unknown>(),
   server: vi.fn(),
+  updateChat: vi.fn(),
+  updateHistory: vi.fn(),
   failCapture: new Set<string>()
 }))
 
@@ -235,7 +237,8 @@ vi.mock("@/db/dexie/helpers", async (importOriginal) => ({
   getTitleById: async () => "",
   getRecentChatFromCopilot: async () => null,
   getFullChatData: async () => null,
-  formatSelectedHistory: (capture: { chatId: string }) => displayFor(capture.chatId)
+  formatSelectedHistory: (capture: { chatId: string }) => displayFor(capture.chatId),
+  updateHistory: (...args: unknown[]) => io.updateHistory(...args)
 }))
 vi.mock("@/services/app", () => ({ copilotResumeLastChat: async () => false }))
 vi.mock("@/services/web-clipper/enrichment", () => ({
@@ -255,7 +258,9 @@ vi.mock("@/components/Sidepanel/Chat/form", () => ({
   SidepanelForm: () => null
 }))
 vi.mock("@/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({
-  SidepanelHeaderSimple: () => null
+  SidepanelHeaderSimple: (props: { onRenameTitle?: (title: string) => void }) => (
+    <button onClick={() => props.onRenameTitle?.("Renamed in header")}>Rename from header</button>
+  )
 }))
 vi.mock("@/components/Sidepanel/Chat/ConnectionBanner", () => ({
   ConnectionBanner: () => null
@@ -306,6 +311,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: async () => {},
     listChatMessages: (...args: unknown[]) => io.server(...args),
+    updateChat: (...args: unknown[]) => io.updateChat(...args),
     ensureConfigForRequest: async () => ({
       serverUrl: "http://chat.test",
       authMode: "multi-user"
@@ -537,5 +543,48 @@ describe("side-panel tabs when opening a past chat (XS-01)", () => {
       { id: "tab-a", serverChatId: "chat-1", messages: transcript("chat-1") }
     ])
     expect(screen.getByText("chat-2 answer")).toBeInTheDocument()
+  })
+})
+
+describe("side-panel header rename (XS-07)", () => {
+  beforeEach(() => {
+    io.sequence = 0
+    io.data.clear()
+    io.failCapture.clear()
+    io.server.mockReset().mockImplementation(async (chatId: string) => serverMessages(chatId))
+    io.updateChat.mockReset().mockImplementation(async (_id: string, data: { title: string }) => ({ title: data.title }))
+    io.updateHistory.mockReset().mockResolvedValue(undefined)
+    window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+    useSidepanelChatTabsStore.getState().clear()
+    useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: null })
+    seedTabs()
+  })
+
+  it("renames the active tab's server chat and local copy, not just the tab", async () => {
+    render(<SidepanelChat />)
+    await screen.findByText("chat-1 answer")
+    fireEvent.click(screen.getByRole("button", { name: "Rename from header" }))
+    await waitFor(() =>
+      expect(useSidepanelChatTabsStore.getState().tabs.find((tab) => tab.id === "tab-a")?.label).toBe(
+        "Renamed in header"
+      )
+    )
+    expect(io.updateChat).toHaveBeenCalledWith(
+      "chat-1",
+      { title: "Renamed in header" },
+      { requestScope: expect.objectContaining({ userId: "alice" }) }
+    )
+    expect(io.updateHistory).toHaveBeenCalledWith("local-chat-1", "Renamed in header")
+  })
+
+  it("keeps the tab's name when the server rename fails", async () => {
+    io.updateChat.mockRejectedValue(new Error("HTTP 409"))
+    render(<SidepanelChat />)
+    await screen.findByText("chat-1 answer")
+    fireEvent.click(screen.getByRole("button", { name: "Rename from header" }))
+    await waitFor(() => expect(io.updateChat).toHaveBeenCalled())
+    await act(async () => {})
+    expect(useSidepanelChatTabsStore.getState().tabs.find((tab) => tab.id === "tab-a")?.label).toBe("Title chat-1")
+    expect(io.updateHistory).not.toHaveBeenCalled()
   })
 })

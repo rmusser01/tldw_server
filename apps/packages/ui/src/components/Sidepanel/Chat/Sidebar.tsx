@@ -40,6 +40,13 @@ import { ConversationContextMenu } from "./ConversationContextMenu"
 import { FolderPickerModal } from "./FolderPickerModal"
 import { exportTabToJSON, exportTabToMarkdown } from "@/utils/conversation-export"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { useUndoNotification } from "@/hooks/useUndoNotification"
+import {
+  moveServerChatToTrash,
+  removeLocalCopyOfServerChat,
+  renameTabConversation,
+  restoreServerChatFromTrash
+} from "./tab-conversation-actions"
 
 const DEFAULT_SIDEBAR_WIDTH = 288
 const SIDEBAR_MIN_WIDTH = 240
@@ -322,12 +329,113 @@ export const SidepanelChatSidebar = ({
     }
   }, [isResizing])
 
-  // Context menu handlers
+  // Context menu handlers. Rename and Delete act on the tab's conversation
+  // (XS-07); each resolves false to keep its dialog open after a failure.
+  const { showUndoNotification } = useUndoNotification()
+  // Undo can run after this sidebar re-renders or closes; reopen through the
+  // latest handler, whose tab list no longer holds the deleted tab.
+  const openServerChatRef = React.useRef(onOpenServerChat)
+  openServerChatRef.current = onOpenServerChat
+  const unverifiedAccountMessage = t(
+    "sidepanel:contextMenu.accountUnverified",
+    "This conversation can't be changed until your account is verified."
+  )
+
   const handleRename = React.useCallback(
-    (tabId: string, newLabel: string) => {
-      renameTab(tabId, newLabel)
+    async (tabId: string, newLabel: string): Promise<boolean> => {
+      const tab = tabs.find((item) => item.id === tabId)
+      if (!tab) return true
+      if (tab.serverChatId && !owner?.isCurrent()) {
+        message.error(unverifiedAccountMessage)
+        return false
+      }
+      try {
+        const title = await renameTabConversation(
+          tab,
+          newLabel,
+          owner?.snapshot.requestScope
+        )
+        if (tab.serverChatId) {
+          void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+          if (!owner?.isCurrent()) return true
+        }
+        renameTab(tabId, title)
+        return true
+      } catch (error) {
+        console.error("[sidepanel] Failed to rename chat", error)
+        message.error(
+          t(
+            "sidepanel:contextMenu.renameFailed",
+            "Couldn't rename this conversation. Its name is unchanged."
+          )
+        )
+        return false
+      }
     },
-    [renameTab]
+    [owner, queryClient, renameTab, t, tabs, unverifiedAccountMessage]
+  )
+
+  const handleDeleteTab = React.useCallback(
+    async (tabId: string): Promise<boolean> => {
+      const tab = tabs.find((item) => item.id === tabId)
+      const chatId = tab?.serverChatId
+      if (!tab || !chatId) {
+        onCloseTab(tabId)
+        return true
+      }
+      if (!owner?.isCurrent()) {
+        message.error(unverifiedAccountMessage)
+        return false
+      }
+      try {
+        await moveServerChatToTrash(chatId, owner.snapshot.requestScope)
+      } catch (error) {
+        console.error("[sidepanel] Failed to move chat to Trash", error)
+        message.error(
+          t(
+            "sidepanel:contextMenu.moveToTrashFailed",
+            "Couldn't move this conversation to Trash. It is still saved."
+          )
+        )
+        return false
+      }
+      void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+      if (!owner.isCurrent()) return true
+      onCloseTab(tabId)
+      await removeLocalCopyOfServerChat(chatId, owner.ownerKey)
+      showUndoNotification({
+        title: t("sidepanel:contextMenu.movedToTrash", "Moved to Trash"),
+        description: t("sidepanel:contextMenu.movedToTrashDescription", {
+          defaultValue: "\"{{title}}\" is in Trash.",
+          title: tab.label
+        }),
+        onUndo: async () => {
+          if (!owner.isCurrent()) {
+            throw new Error(unverifiedAccountMessage)
+          }
+          const restored = await restoreServerChatFromTrash(chatId)
+          void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+          if (!owner.isCurrent()) return
+          const createdAtMs = Date.parse(restored?.created_at ?? "")
+          openServerChatRef.current?.({
+            ...restored,
+            id: String(restored?.id ?? chatId),
+            title: restored?.title || tab.label,
+            createdAtMs: Number.isNaN(createdAtMs) ? Date.now() : createdAtMs
+          })
+        }
+      })
+      return true
+    },
+    [
+      onCloseTab,
+      owner,
+      queryClient,
+      showUndoNotification,
+      t,
+      tabs,
+      unverifiedAccountMessage
+    ]
   )
 
   const handleSetStatus = React.useCallback(
@@ -618,7 +726,8 @@ export const SidepanelChatSidebar = ({
           onAddToFolder={handleAddToFolder}
           onExportJSON={handleExportJSON}
           onExportMarkdown={handleExportMarkdown}
-          onDelete={onCloseTab}
+          onDelete={handleDeleteTab}
+          onCloseTab={onCloseTab}
           currentStatus={tab.status}
         >
           {row}
@@ -635,6 +744,7 @@ export const SidepanelChatSidebar = ({
       toggleTabSelected,
       handleRowClick,
       onCloseTab,
+      handleDeleteTab,
       handleRename,
       handleSetStatus,
       handleAddToFolder,
