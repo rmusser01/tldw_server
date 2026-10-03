@@ -28,12 +28,6 @@ const {
   mockClearSetting: vi.fn()
 }))
 
-// WYSIWYG input is hidden by default (D5, #3102); this suite exercises it.
-vi.mock("@/components/Notes/notes-manager-utils", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/components/Notes/notes-manager-utils")>()
-  return { ...actual, NOTES_WYSIWYG_INPUT_ENABLED: true }
-})
-
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -457,7 +451,9 @@ describe("NotesManagerPage stage 44 notes studio view", () => {
     currentStale = true
 
     renderPage()
-    fireEvent.click(await screen.findByTestId("notes-input-mode-wysiwyg"))
+    // The WYSIWYG toggle is hidden until NE-01 is fixed (D5, #3102). When it
+    // returns, click "notes-input-mode-wysiwyg" here again so this test also
+    // proves that continuing the plain note resets WYSIWYG back to Markdown.
 
     const staleBanner = await screen.findByTestId("notes-studio-stale-banner")
     fireEvent.click(
