@@ -17,6 +17,10 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     UserProviderKeyUpsertRequest,
 )
 from tldw_Server_API.app.core.AuthNZ import byok_testing
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipAuthority,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
@@ -421,6 +425,21 @@ def _install_boundary(monkeypatch: pytest.MonkeyPatch, adapter: Any, pool: _Obse
     monkeypatch.setattr(shared_service, "require_byok_enabled", lambda: None)
     monkeypatch.setattr(shared_service, "is_provider_allowlisted", lambda _provider: True)
     monkeypatch.setattr(shared_service, "normalize_credential_fields", lambda *_args, **_kwargs: {})
+
+    async def authorize_scope_write(
+        *, scope_type: str, scope_id: int,
+        authorization_context: ActorMembershipWriteContext,
+    ) -> None:
+        assert (scope_type, scope_id) == ("org", 42)
+        assert authorization_context == ActorMembershipWriteContext(
+            actor_user_id=7,
+            required_authority=MembershipAuthority.PLATFORM_ADMIN,
+        )
+
+    async def shared_repo() -> SimpleNamespace:
+        return SimpleNamespace(authorize_scope_write=authorize_scope_write)
+
+    monkeypatch.setattr(shared_service, "get_shared_byok_repo", shared_repo)
     monkeypatch.setattr(scoped_routes, "_require_byok_enabled", lambda: None)
     monkeypatch.setattr(scoped_routes, "_require_org_manager", _allow_scope)
     monkeypatch.setattr(scoped_routes, "is_provider_allowlisted", lambda _provider: True)
