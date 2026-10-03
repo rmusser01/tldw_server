@@ -356,6 +356,11 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
+from tldw_Server_API.app.core.Usage.quota_checks import (
+    as_quota_user_id,
+    check_usage,
+    llm_tokens_this_month,
+)
 from tldw_Server_API.app.core.Usage.usage_tracker import backfill_legacy_tokens_to_ledger
 
 from . import chat_dictionaries, chat_documents, chat_grammars
@@ -4258,6 +4263,32 @@ async def create_chat_completion(
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
                     logger.debug(f"Billing token pre-check failed (fail-open): {_billing_err}")
                     _billing_enforcer = None
+
+            # Usage quotas (spec 2 §4): the user's monthly LLM token allowance.
+            _quota_uid = as_quota_user_id(getattr(current_user, "id", None))
+            try:
+                _quota_tokens = (
+                    estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json)) if request_json else 1000
+                )
+            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                _quota_tokens = 1000
+            _llm_decision = await check_usage(
+                _quota_uid,
+                "limits.llm_tokens_per_month",
+                max(1, _quota_tokens),
+                lambda: llm_tokens_this_month(_quota_uid),
+            )
+            if not _llm_decision.allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail={
+                        "error": "limit_exceeded",
+                        "category": "llm_tokens_month",
+                        "current": int(_llm_decision.used),
+                        "limit": _llm_decision.limit,
+                        "message": "Monthly LLM token limit reached",
+                    },
+                )
 
             # Resolve one effective model before either durable macro creation or direct dispatch.
             provider = selected_provider
