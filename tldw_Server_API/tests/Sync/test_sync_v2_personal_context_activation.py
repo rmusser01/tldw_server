@@ -726,15 +726,8 @@ def test_activation_cannot_strand_a_staged_authority_row_left_unfinished(
     else:
         monkeypatch.setattr(relay, "finalize_authority", fail_once(relay.finalize_authority))
 
-    proof = None
-    for _attempt in range(2):  # A client restarts an activation that must wait for the relay.
-        try:
-            proof = _seed_exchange(service, dataset.dataset_id)
-            break
-        except SyncStoreError as exc:
-            assert str(exc) == "personal_context_activation_required"
+    proof = _seed_exchange(service, dataset.dataset_id)  # Restarts activation once, as a client does.
     assert injected == [failing_step]
-    assert proof is not None
 
     key_id, key = canonical.sync_integrity_key(manifest.profile_id)
     payload = {
