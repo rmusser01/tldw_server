@@ -3,18 +3,17 @@ id: TASK-13406
 title: Review remaining M5 smoke exceptions before October 8
 status: In Progress
 assignee: []
-created_date: '2026-10-01 08:02'
-updated_date: '2026-10-02 01:55'
+created_date: 2026-10-01 08:02
+updated_date: 2026-10-03 01:02
 labels: []
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/pull/3023'
-  - TASK-13377.9
-  - 'https://github.com/rmusser01/tldw_server/pull/3077'
+- https://github.com/rmusser01/tldw_server/pull/3023
+- TASK-13377.9
+- https://github.com/rmusser01/tldw_server/pull/3077
 documentation:
-  - >-
-    Docs/Product/Completed/WebUI-related/M5_1_Smoke_Warning_HardGate_Allowlist_Policy_2026_02.md
-  - Docs/Operations/Email_Real_PST_Validation_2026-09-26.md
+- Docs/Product/Completed/WebUI-related/M5_1_Smoke_Warning_HardGate_Allowlist_Policy_2026_02.md
+- Docs/Operations/Email_Real_PST_Validation_2026-09-26.md
 ---
 
 ## Description
@@ -32,10 +31,8 @@ Follow up on TASK-13377.9 and PR3023 before the four remaining exceptions expire
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Duplicate search completed through official CLI after MCP task_search300s timeout. CLI root create failed with Maximum call stack size exceeded; diagnostic /tmp/email_pr3023_ux_followup_create_cli_20261001.log retained. First explicit MCP request rejected unknown status Backlog, with no task created; repository config confirms To Do/In Progress/Done. Explicit ID13406 is above verified largest existing main task13405; official MCP used instead of manual task-file edits. Four existing rule owners are WebUI; no human assignee is invented. Evidence /tmp/email_pr3023_ux_quality_20261001.json and /tmp/email_pr3023_ux_raw_diagnostics_20261001.jsonl. Current repair checks:6focused,101strict production all-pages,16forced recovery fixtures pass; scopes overlap.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-10-01: Human authorized completing this task, TASK13407 and the TASK13178 tracking closeout. Reusing the clean isolated email worktree on codex/email-followup-closeout-20261001 from fresh dev d81c13fddd1dac1948b30401af0388932a0af8f2. Official MCP read calls did not return; official CLI fallback is available. Trace and reproduce before minimal source/fixture changes; preserve hard-gate and expiry enforcement. Plan: Docs/Plans/IMPLEMENTATION_PLAN_email_followup_burndown_20261001.md.
 
@@ -44,8 +41,8 @@ TASK13406: all four general exceptions retired. Supported AntD size400 replaces 
 Published reviewed fixes as d4693fefe37bc75d9d9b54026c77c12de3200c76 on codex/email-followup-closeout-20261001; normal push verified. Draft PR3077 contains the implementation and this tracking closeout. Repair acceptance is locally complete; this new PR is not merged and its human-written Change summary and hosted CI are pending. Source receipt /tmp/email_followup_closeout_receipt_20261001.json binds ten exact source paths and frozen verification artifacts. Browser coverage checks the AuthNZ manifest entry plus selected-document content/render; the real AuthNZ guide HTTP probe is separate. Task-owned servers stopped after identity verification; shared installations and unrelated resources preserved. Completed owned plan retained at /tmp/email_followup_plan_completed_20261001.md after all stages are complete.
 
 Merge-gate audit correction: implementation and local verification are complete, but the repository-wide Definition of Done requires a human-written Change summary for this new AI-authored PR. PR3077 is draft and awaits that human input plus hosted CI. Restored In Progress with this explicit remaining DoD item; no source changes or repeat tests. The prior completed-plan snapshot is retained as /tmp/email_followup_plan_pre_gate_diagnostic_20261001.md, and the owned plan remains Stage3 In Progress until this requirement is satisfied. TASK13178 remains Done because its implementation PR2887 was already merged.
-<!-- SECTION:NOTES:END -->
-
+2026-10-02: Requester supplied PR3077 Change summary directly in this chat; published verbatim. Human gate satisfied. Dev 86e287fee7bfa1a1588639232e35db3666851ded advances original d81c13f base across 91 paths with smoke/task merge conflicts. Refresh preserves upstream history and test-local expected emissions. TASK13414 added a deliberate Wayfinding document-404 rule; retire it from the general allowlist within its own exact recovery fixture, with regression evidence. Task remains In Progress pending refreshed verification and actual merge.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
@@ -60,5 +57,5 @@ Retired all four remaining general smoke exceptions without renewing dates or wi
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
-- [ ] #7 New AI-authored PR has a requester-written Change summary explaining what changed and why these implementation choices were made.
+- [x] #7 New AI-authored PR has a requester-written Change summary explaining what changed and why these implementation choices were made.
 <!-- DOD:END -->

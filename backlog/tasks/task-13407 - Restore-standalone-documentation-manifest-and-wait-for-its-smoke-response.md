@@ -3,16 +3,16 @@ id: TASK-13407
 title: Restore standalone documentation manifest and wait for its smoke response
 status: In Progress
 assignee: []
-created_date: '2026-10-01 08:10'
-updated_date: '2026-10-02 01:55'
+created_date: 2026-10-01 08:10
+updated_date: 2026-10-03 01:02
 labels: []
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/pull/3023'
-  - TASK-13377.9
-  - 'https://github.com/rmusser01/tldw_server/pull/3077'
+- https://github.com/rmusser01/tldw_server/pull/3023
+- TASK-13377.9
+- https://github.com/rmusser01/tldw_server/pull/3077
 documentation:
-  - Docs/Operations/Email_Real_PST_Validation_2026-09-26.md
+- Docs/Operations/Email_Real_PST_Validation_2026-09-26.md
 ---
 
 ## Description
@@ -30,10 +30,8 @@ Fresh PR3023 browser diagnostics captured a late GET /api/documentation/manifest
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Official CLI duplicate search 'documentation manifest' completed: /tmp/email_pr3023_ux_docs_followup_search_20261001.txt; existing returned standalone entries concern MCP documentation and do not cover this WebUI unit. Explicit ID13407 follows verified TASK13406. CLI creation is unavailable for this task due to retained repeated stack-overflow diagnostics, so official MCP is used. Raw late-response evidence /tmp/email_pr3023_ux_raw_diagnostics_20261001.jsonl. Immutable test-maintenance patch d001ed8bde3cc2aff39c1a4abe4faa59f68961c282241cae14f19f998740966f reviewed independently; reviewer says this separate inherited defect does not block that patch, but prohibits any zero-raw-error or functional documentation acceptance claim. No human assignee is invented.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-10-01: Human authorized completing the documentation runtime and deterministic smoke repair. Isolated follow-up branch starts at dev d81c13fddd1dac1948b30401af0388932a0af8f2. Official MCP read calls did not return; official CLI fallback used. Reproduce the deployed standalone layout, preserve containment and source validation, then verify actual manifest/content. Plan: Docs/Plans/IMPLEMENTATION_PLAN_email_followup_burndown_20261001.md.
 
@@ -42,8 +40,8 @@ TASK13407: original nested standalone with intended Docs/Published present repro
 Published reviewed fixes as d4693fefe37bc75d9d9b54026c77c12de3200c76 on codex/email-followup-closeout-20261001; normal push verified. Draft PR3077 contains the implementation and this tracking closeout. Repair acceptance is locally complete; this new PR is not merged and its human-written Change summary and hosted CI are pending. Source receipt /tmp/email_followup_closeout_receipt_20261001.json binds ten exact source paths and frozen verification artifacts. Browser coverage checks the AuthNZ manifest entry plus selected-document content/render; the real AuthNZ guide HTTP probe is separate. Task-owned servers stopped after identity verification; shared installations and unrelated resources preserved. Completed owned plan retained at /tmp/email_followup_plan_completed_20261001.md after all stages are complete.
 
 Merge-gate audit correction: implementation and local verification are complete, but the repository-wide Definition of Done requires a human-written Change summary for this new AI-authored PR. PR3077 is draft and awaits that human input plus hosted CI. Restored In Progress with this explicit remaining DoD item; no source changes or repeat tests. The prior completed-plan snapshot is retained as /tmp/email_followup_plan_pre_gate_diagnostic_20261001.md, and the owned plan remains Stage3 In Progress until this requirement is satisfied. TASK13178 remains Done because its implementation PR2887 was already merged.
-<!-- SECTION:NOTES:END -->
-
+2026-10-02: Requester supplied PR3077 Change summary directly in this chat; published verbatim. Human gate satisfied. Refreshing reviewed branch onto dev 86e287fee7bfa1a1588639232e35db3666851ded before hosted checks and actual merge. Earlier receipts retain original source/transitive/dependency bindings. Task remains In Progress pending refreshed verification and merge.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
@@ -58,5 +56,5 @@ Restored standalone published-server documentation using traced source files and
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
-- [ ] #7 New AI-authored PR has a requester-written Change summary explaining what changed and why these implementation choices were made.
+- [x] #7 New AI-authored PR has a requester-written Change summary explaining what changed and why these implementation choices were made.
 <!-- DOD:END -->
