@@ -638,6 +638,13 @@ PyThaiNLP skip. Ruff, scoped Black, compileall, Bandit (0 findings/errors), and
 `git diff --check --cached` passed. Fresh commands and historical RED/GREEN
 provenance are recorded in TASK-13215. Recovery stops before Task 5.
 
+Task 4 specification and quality reviews approved on 2026-10-02 with no
+actionable findings. Before Task 5, the isolated branch was rebased without
+conflicts onto `86e287fee7bfa1a1588639232e35db3666851ded`; intervening
+Chunking changes affect only template-owner tests. The expanded ten-file
+compatibility suite passed (210 passed, 1 existing optional skip, 435 warnings).
+The spec and TASK-13215 record this updated baseline and verification.
+
 - [x] **Step 5: Commit the leaf extraction**
 
 ```bash

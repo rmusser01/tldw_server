@@ -4,7 +4,7 @@ title: Implement Chunker hierarchical subsystem refactor
 status: In Progress
 assignee: []
 created_date: 2026-09-07 19:26
-updated_date: 2026-10-03 00:21
+updated_date: 2026-10-03 00:35
 labels:
 - chunking
 - refactor
@@ -100,4 +100,5 @@ Fresh verification, each command run after source /Users/appledev/Documents/GitH
 - git diff --check --cached: exit 0.
 
 Scoped self-review found no concrete Task 4 problem: rewrite-method membership, metadata invalid-offset handling, exact logs, rolling search/clamping, nested/outer fallback behavior, freshness/non-mutation, call-time lookup, and the active leaves.py AST dependency boundary match the approved requirements. Existing test environment warnings/config fallback and OpenTelemetry output remain. Only Task 4 plan steps are finalized by the recovery commit; TASK-13215 remains In Progress, later Task 5-8 work and full final gates remain open. Commit subject: refactor: extract hierarchical leaf construction; the commit includes this tracking evidence and the Task 4 plan update.
+2026-10-02 Task 4 specification and independent quality reviews approved with no actionable findings. Before Task 5, fetched origin/dev at 86e287fee7bfa1a1588639232e35db3666851ded and inspected the scoped delta from Task 4 base 6cd2745f696af04668a61c20b84ab8a9e69ca5e4: only template-owner test changes, no Chunking source or hierarchy/process_text contract changes. Rebased all 13 workstream commits without conflicts, leaving the main checkout untouched. Post-rebase ten-file characterization suite: 210 passed, 1 existing PyThaiNLP skip, 0 failures, 435 warnings in 3.91s. Spec and plan updated before further production edits. This reconciliation changes documentation/tracking only; no new Bandit scan needed. Implementation remains In Progress.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
