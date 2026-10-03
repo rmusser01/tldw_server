@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
     VersionedUserWriteGateway,
 )
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import get_rate_limiter
+from tldw_Server_API.app.core.Usage.quota_resolver import invalidate_user
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import (
     UserProfileCatalogEntry,
@@ -141,7 +142,9 @@ class UserProfileUpdateService:
                 continue
 
             if value is None:
-                if key.startswith("preferences."):
+                if key.startswith("preferences.") or (
+                    key.startswith("limits.") and key != "limits.storage_quota_mb"
+                ):
                     if not dry_run:
                         repo = repo_holder.get("repo")
                         if repo is None:
@@ -151,6 +154,7 @@ class UserProfileUpdateService:
                         await anchor.capture()
                         await repo.delete_override(user_id=user_id, key=key, db_conn=db_conn)
                         anchor.mark_changed()
+                        invalidate_user(user_id)
                     result.applied.append(key)
                     continue
                 result.skipped.append({"key": key, "message": "null_not_allowed"})
@@ -308,7 +312,9 @@ class UserProfileUpdateService:
                     )
             return True
 
-        if key in {"limits.audio_daily_minutes", "limits.audio_concurrent_jobs"}:
+        if key.startswith("limits."):
+            # Every limits.* key except storage (PR C) is a plain user override the
+            # quota resolver reads (spec 2 §3).
             if not dry_run:
                 repo = repo_holder.get("repo")
                 if repo is None:
@@ -324,57 +330,7 @@ class UserProfileUpdateService:
                     db_conn=db_conn,
                 )
                 anchor.mark_changed()
-            return True
-
-        if key in {"limits.evaluations_per_minute", "limits.evaluations_per_day"}:
-            if not dry_run:
-                repo = repo_holder.get("repo")
-                if repo is None:
-                    repo = UserProfileOverridesRepo(self._db_pool)
-                    await repo.ensure_tables(db_conn=db_conn)
-                    repo_holder["repo"] = repo
-                await anchor.capture()
-                await repo.upsert_override(
-                    user_id=user_id,
-                    key=key,
-                    value=value,
-                    updated_by=updated_by,
-                    db_conn=db_conn,
-                )
-                anchor.mark_changed()
-                try:
-                    from tldw_Server_API.app.core.Evaluations.user_rate_limiter import (
-                        UserTier,
-                        get_user_rate_limiter_for_user,
-                    )
-
-                    limiter = get_user_rate_limiter_for_user(user_id)
-                    config = await limiter._get_user_config(str(user_id))
-                    custom_limits = {
-                        "evaluations_per_minute": config.evaluations_per_minute,
-                        "batch_evaluations_per_minute": config.batch_evaluations_per_minute,
-                        "evaluations_per_day": config.evaluations_per_day,
-                        "total_tokens_per_day": config.total_tokens_per_day,
-                        "burst_size": config.burst_size,
-                        "max_cost_per_day": config.max_cost_per_day,
-                        "max_cost_per_month": config.max_cost_per_month,
-                    }
-                    if key == "limits.evaluations_per_minute":
-                        custom_limits["evaluations_per_minute"] = int(value)
-                    else:
-                        custom_limits["evaluations_per_day"] = int(value)
-                    updated = await limiter.upgrade_user_tier(
-                        str(user_id),
-                        UserTier.CUSTOM,
-                        custom_limits=custom_limits,
-                    )
-                    if not updated:
-                        raise ValueError("evaluations_limit_update_failed")
-                except ValueError:
-                    raise
-                except Exception as exc:
-                    logger.debug("Evaluations limit update failed for user {}: {}", user_id, exc)
-                    raise ValueError("evaluations_limit_update_failed") from exc
+                invalidate_user(user_id)
             return True
 
         if key.startswith("preferences."):
