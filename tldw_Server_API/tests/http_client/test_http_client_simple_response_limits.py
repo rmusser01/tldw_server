@@ -9,6 +9,124 @@ import tldw_Server_API.app.core.http_client as hc
 URL = "https://example.com/article"
 
 
+@pytest.mark.asyncio
+async def test_bounded_async_json_consumes_limit_plus_one_before_rejecting_large_chunks(monkeypatch):
+    observed = []
+    closed = []
+
+    class Adapter:
+        async def stream_bytes(self, **kwargs):
+            await kwargs["on_response"](200, {"content-type": "application/json"})
+            try:
+                yield b"{" * 65536
+                yield b"x" * 65536
+                raise AssertionError("Reader must stop at the overflow boundary")
+            finally:
+                closed.append(True)
+
+    stream_bytes = hc.astream_bytes
+
+    async def observed_stream(**kwargs):
+        stream = stream_bytes(**kwargs)
+        try:
+            async for chunk in stream:
+                observed.append(len(chunk))
+                yield chunk
+        finally:
+            await stream.aclose()
+
+    def forbidden_decode(_body):
+        raise AssertionError("Oversized envelopes must not reach JSON decoding")
+
+    monkeypatch.setattr(hc, "_get_transport_adapter", lambda _name: Adapter())
+    monkeypatch.setattr(hc, "astream_bytes", observed_stream)
+    monkeypatch.setattr(hc, "json", SimpleNamespace(loads=forbidden_decode))
+    with pytest.raises(hc.JSONDecodeError, match="max_bytes"):
+        await hc.afetch_json(method="GET", url=URL, max_bytes=65538)
+
+    assert sum(observed) == 65539
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_bounded_async_json_caps_decoded_gzip_and_closes_without_reading_next_chunk(monkeypatch):
+    import gzip
+
+    import httpx
+
+    state = {"reads": 0, "closes": 0, "requests": 0}
+    payload = gzip.compress(b'{"text":"' + b"x" * 8192 + b'"}')
+    assert len(payload) < 64
+
+    class Body(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            state["reads"] += 1
+            yield payload
+            raise AssertionError("Overflow must close before another wire chunk")
+
+        async def aclose(self):
+            state["closes"] += 1
+
+    def handler(request):
+        state["requests"] += 1
+        return httpx.Response(
+            200,
+            request=request,
+            stream=Body(),
+            headers={
+                "content-type": "application/json",
+                "content-encoding": "gzip",
+                "content-length": str(len(payload)),
+            },
+        )
+
+    async def validate(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", validate)
+    client = hc.create_async_client(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(hc.JSONDecodeError, match="max_bytes"):
+            await hc.afetch_json(
+                method="GET",
+                url=URL,
+                client=client,
+                max_bytes=64,
+                retry=hc.RetryPolicy(attempts=1),
+                allow_redirects=False,
+            )
+    finally:
+        await client.aclose()
+
+    assert state == {"reads": 1, "closes": 1, "requests": 1}
+
+
+@pytest.mark.asyncio
+async def test_bounded_async_json_cancellation_closes_owned_stream_and_propagates(monkeypatch):
+    import asyncio
+
+    entered = asyncio.Event()
+    closed = []
+
+    class Adapter:
+        async def stream_bytes(self, **kwargs):
+            await kwargs["on_response"](200, {"content-type": "application/json"})
+            try:
+                entered.set()
+                await asyncio.Event().wait()
+                yield b"unreachable"
+            finally:
+                closed.append(True)
+
+    monkeypatch.setattr(hc, "_get_transport_adapter", lambda _name: Adapter())
+    task = asyncio.create_task(hc.afetch_json(method="GET", url=URL, max_bytes=64))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert closed == [True]
+
+
 class _StreamingResponse:
     def __init__(
         self,

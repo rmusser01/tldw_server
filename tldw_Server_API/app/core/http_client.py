@@ -5580,6 +5580,7 @@ async def _afetch_json_bounded(
     **kwargs: Any,
 ) -> Any:
     allow_redirects = bool(kwargs.pop("allow_redirects", True))
+    kwargs["max_response_bytes"] = max_bytes
     hop_headers = dict(kwargs.pop("headers", None) or {})
     hop_cookies = kwargs.pop("cookies", None)
     current_url = url
@@ -6368,12 +6369,16 @@ async def astream_bytes(
     retry: RetryPolicy | None = None,
     chunk_size: int = 65536,
     cert_pinning: dict[str, set[str]] | None = None,
+    max_response_bytes: int | None = None,
     sensitive_observability: bool = False,
     on_response: ResponseHeadersCallback | None = None,
     raise_for_status: bool = True,
     verify: bool | str | ssl.SSLContext | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> AsyncGenerator[bytes, None]:
+    """Stream decoded bytes, optionally stopping after the first overflow byte."""
+    if max_response_bytes is not None and (type(max_response_bytes) is not int or max_response_bytes < 0):
+        raise ValueError("max_response_bytes must be a non-negative integer")
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
     )
@@ -6403,9 +6408,18 @@ async def astream_bytes(
         verify=verify,
         configured_endpoint=configured_endpoint,
     )
+    consumed = 0
     try:
         async for chunk in stream:
-            yield chunk
+            if max_response_bytes is None:
+                yield chunk
+                continue
+            remaining = max_response_bytes + 1 - consumed
+            bounded_chunk = chunk[:remaining]
+            consumed += len(bounded_chunk)
+            yield bounded_chunk
+            if consumed > max_response_bytes:
+                raise NetworkError("Response exceeds max_response_bytes limit")
     finally:
         close = getattr(stream, "aclose", None)
         if close is not None:
