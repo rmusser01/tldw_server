@@ -14,7 +14,7 @@ import pytest
 from loguru import logger
 
 from tldw_Server_API.app.core.Chunking import Chunker
-from tldw_Server_API.app.core.Chunking import chunker as chunker_module
+from tldw_Server_API.app.core.Chunking.hierarchical import builder, service
 from tldw_Server_API.app.core.Chunking.hierarchical.models import (
     HierarchyContext,
     HierarchyTextViews,
@@ -68,7 +68,7 @@ def _patch_single_block(
 ) -> None:
     monkeypatch.setattr(chunker, "_sanitize_input", lambda *_args, **_kwargs: "raw")
     monkeypatch.setattr(
-        chunker_module,
+        service,
         "compute_paragraph_spans",
         lambda *_args, **_kwargs: [(0, 3, "paragraph")],
     )
@@ -200,6 +200,19 @@ def test_hierarchy_protocols_expose_required_members() -> None:
 
 def test_process_text_context_no_longer_exposes_private_paragraph_spans() -> None:
     assert "_compute_paragraph_spans" not in ProcessTextContext.__dict__
+
+
+def test_chunker_no_longer_exposes_private_hierarchy_helpers() -> None:
+    assert not hasattr(Chunker, "_compute_paragraph_spans")
+    assert not hasattr(Chunker, "_extract_header_title")
+
+
+def test_builder_does_not_import_coordination_or_flattening() -> None:
+    _assert_no_forbidden_resolved_imports(
+        _HIERARCHICAL_PACKAGE / "builder.py",
+        _FORBIDDEN_HIERARCHICAL_IMPORTS
+        | {f"{_HIERARCHICAL_PACKAGE_NAME}.{name}" for name in ("service", "flatten", "grouping")},
+    )
 
 
 def test_hierarchical_modules_do_not_import_outer_owners() -> None:
@@ -424,7 +437,7 @@ def test_hierarchy_tree_uses_call_time_leaf_builder_with_resolved_call_data(
         calls.append((context, texts, span, options))
         return sentinel_block
 
-    monkeypatch.setattr(chunker_module, "build_leaf_block", fake_build_leaf_block)
+    monkeypatch.setattr(builder, "build_leaf_block", fake_build_leaf_block)
 
     tree = chunker.chunk_text_hierarchical_tree(
         "raw",
