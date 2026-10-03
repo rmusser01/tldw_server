@@ -5,6 +5,7 @@ import contextlib
 import dataclasses
 import itertools
 import json
+import math
 import os
 import time
 import uuid
@@ -68,6 +69,20 @@ def _window_members(category: str, limit: int, units: int = 0) -> tuple[int, int
     """
     quantum = max(1, int(limit) // 1000) if category == "tokens" else 1
     return quantum, (int(limit) + quantum - 1) // quantum, (int(units) + quantum - 1) // quantum
+
+
+# Slack on a window key's TTL for clock skew between workers and Redis.
+_WINDOW_TTL_MARGIN_S = 5
+
+
+def _window_ttl(window: float) -> int:
+    """TTL that every add puts on a window key, so an idle entity's key expires.
+
+    The newest member leaves the window ``window`` seconds after it was added, so the
+    key is dead by then. Never shorter than the window: a key that expired early
+    would forget live members and over-admit.
+    """
+    return math.ceil(window) + _WINDOW_TTL_MARGIN_S
 
 
 @dataclass
@@ -541,10 +556,13 @@ class RedisResourceGovernor(ResourceGovernor):
                 pass
         return cnt
 
-    async def _add_members(self, *, key: str, members: list[str], now: float) -> None:
+    async def _add_members(self, *, key: str, members: list[str], now: float, window: int) -> None:
         client = await self._client_get()
-        with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):
+        try:
             await client.zadd(key, dict.fromkeys(members, now))
+            await client.expire(key, _window_ttl(window))
+        except _RG_NONCRITICAL_EXCEPTIONS:
+            logger.debug("RG window add/expire failed for key={}", key, exc_info=True)
 
     async def _zrem_members(self, *, key: str, members: list[str]) -> None:
         client = await self._client_get()
@@ -586,7 +604,7 @@ class RedisResourceGovernor(ResourceGovernor):
                 # approximate retry_after via the oldest member's score instead.
                 if not is_stub and limit > 0 and count >= limit:
                     # Try to estimate oldest score via Lua helper (non-mutating when window is full)
-                    rng = await client.evalsha(await self._ensure_tokens_lua(), 1, key, int(limit), int(window), float(now))
+                    rng = await client.evalsha(await self._ensure_tokens_lua(), 1, key, int(limit), int(window), float(now), _window_ttl(window))
                     # When window is full, eval returns [0, ra]
                     if isinstance(rng, (list, tuple)) and len(rng) >= 2 and int(rng[0]) == 0:
                         ra = int(rng[1])
@@ -625,6 +643,7 @@ class RedisResourceGovernor(ResourceGovernor):
         local limit = tonumber(ARGV[1])
         local window = tonumber(ARGV[2])
         local now = tonumber(ARGV[3])
+        local ttl = tonumber(ARGV[4])
         local cutoff = now - window
         -- purge expired window entries
         redis.call('ZREMRANGEBYSCORE', key, '-inf', cutoff)
@@ -632,6 +651,7 @@ class RedisResourceGovernor(ResourceGovernor):
         if count < limit then
           local member = tostring(now) .. ':' .. tostring(count + 1)
           redis.call('ZADD', key, now, member)
+          redis.call('EXPIRE', key, ttl)
           return {1, 0}
         else
           local oldest = redis.call('ZRANGE', key, 0, 0, 'BYSCORE', 'REV')
@@ -656,7 +676,7 @@ class RedisResourceGovernor(ResourceGovernor):
         Load a Lua script that atomically checks and inserts members across multiple keys.
 
         KEYS: [k1, k2, ...]
-        ARGV: [now, key_count, (limit1, window1, units1, members_csv1), (limit2, window2, units2, members_csv2), ...]
+        ARGV: [now, key_count, (limit1, window1, units1, ttl1, members_csv1), (limit2, window2, units2, ttl2, members_csv2), ...]
 
         Returns: {1, 0} if all allowed and inserted, otherwise {0, max_retry_after}.
 
@@ -693,7 +713,7 @@ class RedisResourceGovernor(ResourceGovernor):
             local ra = math.max(1, math.floor(oldest_score + window - now))
             if ra > max_ra then max_ra = ra end
           end
-          base = base + 4
+          base = base + 5
         end
         if max_ra > 0 then
           return {0, max_ra}
@@ -705,14 +725,16 @@ class RedisResourceGovernor(ResourceGovernor):
           local limit = tonumber(ARGV[base]);
           local window = tonumber(ARGV[base+1]);
           local units = tonumber(ARGV[base+2]);
-          local csv = ARGV[base+3]
+          local ttl = tonumber(ARGV[base+3]);
+          local csv = ARGV[base+4]
           local inserted = 0
           for member in string.gmatch(csv or '', '([^,]+)') do
             if inserted >= units then break end
             redis.call('ZADD', key, now, member)
             inserted = inserted + 1
           end
-          base = base + 4
+          redis.call('EXPIRE', key, ttl)
+          base = base + 5
         end
         return {1, 0}
         """
@@ -1601,7 +1623,7 @@ class RedisResourceGovernor(ResourceGovernor):
                             keys.append(key)
                             members = [f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}" for i in range(units_m)]
                             tmp_members.append((category, sc, ev, key, members))
-                            argv.extend([int(limit_m), int(window), int(units_m), ",".join(members)])
+                            argv.extend([int(limit_m), int(window), int(units_m), _window_ttl(window), ",".join(members)])
                 if keys:
                     sha = await self._ensure_multi_reserve_lua()
                     if sha:
@@ -1677,7 +1699,7 @@ class RedisResourceGovernor(ResourceGovernor):
                     if units <= 0:
                         continue
                     if category in ("requests", "tokens"):
-                        limit = _rate_window(pol, category)[0]
+                        limit, window = _rate_window(pol, category)
                         if category == "tokens" and limit <= 0:
                             continue
                         _q, _limit_m, units_m = _window_members(category, limit, units)
@@ -1685,7 +1707,7 @@ class RedisResourceGovernor(ResourceGovernor):
                         for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             members = [f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}" for i in range(units_m)]
-                            await self._add_members(key=key, members=members, now=now)
+                            await self._add_members(key=key, members=members, now=now, window=window)
                             with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):
                                 logger.debug(
                                     "RG stub add: policy_id={pid} cat={cat} scope={sc} entity={ev} units={units}",
@@ -1719,7 +1741,7 @@ class RedisResourceGovernor(ResourceGovernor):
                                         # Capacity reached for this scope; stop adding more here
                                         break
                                     member = f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}"
-                                    await self._add_members(key=key, members=[member], now=now)
+                                    await self._add_members(key=key, members=[member], now=now, window=window)
                                     added_for_scope.append(member)
                                 except _RG_NONCRITICAL_EXCEPTIONS:
                                     if cat_fail == "fail_open":
@@ -2453,7 +2475,7 @@ class RedisResourceGovernor(ResourceGovernor):
                     try:
                         res = await self._ensure_tokens_lua()
                         if res:
-                            pair = await (await self._client_get()).evalsha(res, 1, key, int(limit_m), int(window), float(now))
+                            pair = await (await self._client_get()).evalsha(res, 1, key, int(limit_m), int(window), float(now), _window_ttl(window))
                             if isinstance(pair, (list, tuple)) and int(pair[0]) == 0:
                                 resets.append(int(pair[1]))
                             else:
