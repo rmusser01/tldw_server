@@ -473,9 +473,10 @@ jobs:
           retention-days: 7
 
   # ── UX regression (notes/chat — PRs that touch them, or all-tiers) ────
-  # Red-first reproductions of verified /notes and /chat defects (#3125). The
-  # live-tier runner starts its own isolated backend, mock LLM and web UI, so
-  # this job needs no services. It is advisory: the dev ruleset does not
+  # Red-first reproductions of verified /notes and /chat defects (#3125),
+  # including the extension side panel's chat. The live-tier runner builds the
+  # browser extension, then starts its own isolated backend, mock LLM and web
+  # UI, so this job needs no services. It is advisory: the dev ruleset does not
   # require it and no required gate reads it. ux-regression-nightly.yml cannot
   # stand in for it, because GitHub reads scheduled workflows from the
   # default branch only.
@@ -561,6 +562,10 @@ jobs:
                 apps/packages/ui/src/store/* | \
                 apps/packages/ui/src/routes/option-notes.tsx | \
                 apps/packages/ui/src/routes/option-chat.tsx | \
+                apps/packages/ui/src/routes/sidepanel-* | \
+                apps/packages/ui/src/entries/sidepanel/* | \
+                apps/packages/ui/src/entries/background.ts | \
+                apps/extension/* | \
                 apps/tldw-frontend/pages/notes.tsx | \
                 apps/tldw-frontend/pages/chat/* | \
                 apps/tldw-frontend/e2e/ux-regression/* | \
@@ -570,6 +575,7 @@ jobs:
                 tldw_Server_API/app/api/v1/endpoints/notes*.py | \
                 tldw_Server_API/app/api/v1/endpoints/chat*.py | \
                 tldw_Server_API/app/api/v1/endpoints/character_chat*.py | \
+                tldw_Server_API/app/api/v1/endpoints/character_messages.py | \
                 tldw_Server_API/app/core/DB_Management/* | \
                 .github/workflows/frontend-e2e-tiers.yml)
                   run=true
@@ -621,11 +627,16 @@ jobs:
         working-directory: apps
         run: bun install --frozen-lockfile
 
+      # Installs full Chromium beside the headless shell: the side-panel specs
+      # load the extension, which only full Chromium (new headless) can do.
       - name: Install Playwright Chromium
         if: steps.scope.outputs.run == 'true'
         working-directory: apps/tldw-frontend
         run: bunx playwright install --with-deps chromium
 
+      # The runner builds apps/extension first (~2-3 min) for the side-panel
+      # specs. Its output is in this step's log; a failed build stops the run
+      # and keeps extension-build.log in the uploaded evidence.
       - name: Run UX regression reproductions
         if: steps.scope.outputs.run == 'true'
         working-directory: apps/tldw-frontend

@@ -38,9 +38,10 @@ In CI:
 
 - **Pull requests.** The `ux-regression` job ("E2E UX Regression
   (notes/chat)") in `.github/workflows/frontend-e2e-tiers.yml` runs the suite
-  when a PR to `dev` or `main` changes the notes/chat UI, the shared UI
-  layers under it (`components/Common`, `hooks`, `services`, `db`, `store`),
-  the notes/chat endpoints, `DB_Management`, or this harness. Other PRs skip
+  when a PR to `dev` or `main` changes the notes/chat UI, the extension side
+  panel or the extension itself, the shared UI layers under them
+  (`components/Common`, `hooks`, `services`, `db`, `store`), the notes/chat
+  endpoints, `DB_Management`, or this harness. Other PRs skip
   the run after a quick diff. The path list is in the job's
   `Detect notes/chat UX changes` step. The job is advisory: it is not a
   required check. On failure it uploads `test-results/` as
