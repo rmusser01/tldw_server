@@ -557,7 +557,7 @@ git commit -m "refactor: share hierarchical paragraph spans"
 - Modify `tldw_Server_API/app/core/Chunking/chunker.py`
 - Modify `tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py`
 
-- [ ] **Step 1: Add failing direct leaf tests**
+- [x] **Step 1: Add failing direct leaf tests**
 
 Build a small fake implementing only `LeafChunkingContext`. Instantiate `HierarchyTextViews` and `ResolvedHierarchyOptions` directly. Cover:
 
@@ -582,7 +582,7 @@ python -m pytest tldw_Server_API/tests/Chunking/test_hierarchical_leaves.py -q
 
 Expected red: `hierarchical.leaves` or `build_leaf_block` is missing.
 
-- [ ] **Step 2: Move the leaf algorithm without changing branches**
+- [x] **Step 2: Move the leaf algorithm without changing branches**
 
 Implement `build_leaf_block(...)` with the required signature. Define the rewrite-method set at module scope using current `ChunkingMethod` values plus `"code_ast"`. Return this shape for non-empty spans:
 
@@ -598,7 +598,7 @@ Implement `build_leaf_block(...)` with the required signature. Define the rewrit
 
 Keep `chunks = None` and the current nested/outer `CHUNKER_NONCRITICAL_EXCEPTIONS` structure so the bounded second plain attempt remains possible. Keep exact debug and warning messages. `leaves.py` must not receive a parent/root/stack or mutate `texts`, `span`, or `options`.
 
-- [ ] **Step 3: Replace the active local leaf body**
+- [x] **Step 3: Replace the active local leaf body**
 
 In the existing `chunk_text_hierarchical_tree(...)` body, create one `HierarchyTextViews` and one `ResolvedHierarchyOptions` after option resolution and sanitization. Replace `_add_block(...)` internals with:
 
@@ -616,7 +616,7 @@ def _add_block(parent: dict[str, Any], start: int, end: int, kind: str) -> None:
 
 Remove the duplicate rewrite set and leaf mapping code from `chunker.py`. Keep option resolution and tree mutation there until Task 5.
 
-- [ ] **Step 4: Run component and public contract tests**
+- [x] **Step 4: Run component and public contract tests**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -631,7 +631,14 @@ python -m pytest \
 
 Expected: all pass, including exact call traces and logs.
 
-- [ ] **Step 5: Commit the leaf extraction**
+Recovery verification (2026-10-02): reused the existing six staged Task 4 files
+without changing production or test code. The required Task 4 suite passed with
+109 tests; the Task 3 regression suite passed with 169 tests and the existing
+PyThaiNLP skip. Ruff, scoped Black, compileall, Bandit (0 findings/errors), and
+`git diff --check --cached` passed. Fresh commands and historical RED/GREEN
+provenance are recorded in TASK-13215. Recovery stops before Task 5.
+
+- [x] **Step 5: Commit the leaf extraction**
 
 ```bash
 git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/leaves.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_leaves.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
