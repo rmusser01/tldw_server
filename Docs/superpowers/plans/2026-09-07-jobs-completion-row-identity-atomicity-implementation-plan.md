@@ -1364,7 +1364,9 @@ and historical repair to TASK-13216 and TASK-13217.
   scoped production/test Bandit baseline comparisons. Both delta reports have
   no findings or errors: `/tmp/bandit_task_13215_qodo_delta.json` and
   `/tmp/bandit_task_13215_qodo_tests_delta.json` (test B101 excluded).
-- [ ] Publish the review corrections and reply in all original inline threads.
+- [x] Publish the review corrections and reply in all original inline threads.
+  Correction commit `83a68c7203978d9bb0f36a57699d74e637928040` is pushed;
+  all four original Qodo threads have evidence-backed replies and are resolved.
 - [ ] Verify current-head review and required hosted CI, then merge only while
   the branch remains based on live `dev` and all authorized merge gates pass.
 
