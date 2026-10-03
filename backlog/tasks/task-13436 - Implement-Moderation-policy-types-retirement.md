@@ -19,7 +19,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_models_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_models_imports.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py
-updated_date: 2026-10-03 22:19
+updated_date: 2026-10-03 22:40
 ---
 
 ## Description
@@ -50,6 +50,8 @@ Follow the approved implementation plan: establish the two inverse subclass regr
 Execution started with the user-selected subagent-driven workflow. The implementation will follow the committed plan at db1fb1497b with spec-compliance and code-quality review checkpoints.
 Pre-edit focused baseline: 119 passed, 250 warnings in 1.77s on Python 3.14.3.
 TDD red: the two inverse legacy-hook tests collected successfully and both failed on exact canonical-type assertions: compiler returned ReplacementPolicy and evaluator returned ReplacementResult (2 failed, 16 warnings). Green: py_compile passed for all five changed Python files; inverse tests 2 passed; focused suite 115 passed; all Moderation unit tests 293 passed; Guardian 89 passed; Chat integration 17 passed; Workflow moderation adapters 12 passed (47 deselected); Audio redaction 1 passed. Quality: Ruff passed, Black check passed after scoped formatting of the touched compiler file, Bandit reported 0 findings (/tmp/bandit_TASK-13436.json), and git diff --check passed. Source audit: zero policy_types references in production and exactly two local legacy fixture definitions across the three changed test files. Self-review found no parsing, scanning, ranking, redaction, exception, service-dispatch, model, or moderation_service behavior changes; the diff is limited to the approved six-file write set.
+Code-quality review requested stronger inverse-hook coverage: both legacy hooks returned canonical PatternRule, so a partial migration of rule selection could escape. Reopened to substitute an incompatible replacement rule and exercise compiler rule construction plus evaluator snippet, redaction, counted redaction, and evaluation paths.
+Correction evidence: strengthened both inverse fixtures with incompatible ReplacementRule classes. Compiler coverage now detects policy and rule slot regressions for global and user compilation. Evaluator coverage now exercises build_sanitized_snippet, redact_text, redact_text_with_count, and evaluate_text with canonical rule/result identity assertions. Verification: changed test py_compile passed; inverse tests 2 passed; focused suite 115 passed; Ruff passed; Black check passed; source audit found zero production policy_types references and exactly two local test fixture definitions; git diff --check passed. Self-review confirmed only the characterization test and task record changed; production is untouched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
