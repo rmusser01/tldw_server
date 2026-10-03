@@ -141,7 +141,7 @@ Use the Backlog MCP task edit operation for `TASK-13215` to append the remote
 base hash, commands, pass counts, deselections, and warnings. Mark Stage 1
 `Complete` and Stage 2 `In Progress` in this plan.
 
-- [ ] **Step 6: Commit the refreshed planning checkpoint if tracking changed**
+- [x] **Step 6: Commit the refreshed planning checkpoint if tracking changed**
 
 Execution adjustment: consolidate this documentation checkpoint with Task 7.3
 after final verification; no implementation checkpoint will contain red tests.
@@ -1097,7 +1097,11 @@ finds no unresolved in-scope issue; task evidence is current.
 
 **Tests:** Full commands below plus mandatory Jobs CI after PR creation.
 
-**Status:** In Progress
+**Status:** Complete
+
+Local implementation, review, verification, final rebase, and draft PR
+preparation are complete. Remote CI and the human-authored `Change summary`
+remain merge gates; this stage does not claim that CI passed or authorize merge.
 
 ### Task 6: Run full local verification and security checks
 
@@ -1187,7 +1191,7 @@ run Bandit's `--baseline` check; require exit zero and no new results/errors.
 Record raw and delta report paths and summary in `TASK-13215`. Do not suppress
 an existing finding to claim that the raw scan is clean.
 
-- [ ] **Step 5: Inspect final scope and repository state**
+- [x] **Step 5: Inspect final scope and repository state**
 
 ```bash
 git diff origin/dev...HEAD --check
@@ -1212,7 +1216,7 @@ current code and tests before editing. For any valid in-scope issue, use
 add a failing test, apply the smallest correction, and rerun the affected
 matrix. Record unrelated defects in separate Backlog tasks.
 
-- [ ] **Step 2: Update execution records**
+- [x] **Step 2: Update execution records**
 
 Mark all completed stages and checkboxes in this plan. Through Backlog MCP,
 update `TASK-13215` with:
@@ -1227,7 +1231,7 @@ update `TASK-13215` with:
 - TASK-13216 and TASK-13217 as excluded follow-ups
 ```
 
-- [ ] **Step 3: Commit final review evidence**
+- [x] **Step 3: Commit final review evidence**
 
 ```bash
 git add Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md \
@@ -1239,7 +1243,7 @@ git commit -m "docs(jobs): record completion atomicity verification"
 Expected: commit hooks pass and no production or test file is unexpectedly
 staged.
 
-- [ ] **Step 4: Rebase and rerun affected verification before PR creation**
+- [x] **Step 4: Rebase and rerun affected verification before PR creation**
 
 Refresh the explicit remote `dev` ref and rebase. If `manager.py`,
 `worker_sdk.py`, another Jobs runtime dependency, or any touched test changed
@@ -1248,7 +1252,7 @@ atomicity module, forced-RLS completion cases, and strict WorkerSDK success test
 on both applicable backends. Never resolve unrelated history by replaying old
 `dev` commits; verify the remote hash before rebasing.
 
-- [ ] **Step 5: Prepare the PR without merging**
+- [x] **Step 5: Prepare the PR without merging**
 
 Push the branch and create a PR against `dev`. Do not author the required human
 `Change summary` on the requester's behalf. The PR remains draft or explicitly
@@ -1298,7 +1302,7 @@ and historical repair to TASK-13216 and TASK-13217.
   retains a second processing job to prove the exact counter change `2 -> 1`.
 - The final upstream update to `86e287fee7bfa1a1588639232e35db3666851ded`
   changes only unrelated MCP gateway tests and their task record. Final rebase
-  and focused rerun are pending before PR creation.
+  and focused rerun completed before PR creation.
 - ADR-058 records the approved durable completion contract under the current
   repository ADR workflow. TASK-13216 and TASK-13217 remain separate follow-ups.
 - Final review added forced-RLS competing `NOWAIT` lock proof, missing-counter
@@ -1319,3 +1323,19 @@ and historical repair to TASK-13216 and TASK-13217.
 - The green manager/test boundary and WorkerSDK forwarding were committed
   separately, with references to TASK-13215 and this plan. Documentation and
   baseline checkpoints are consolidated into the final verification record.
+- Final rebase onto explicitly verified live dev
+  `86e287fee7bfa1a1588639232e35db3666851ded` succeeded without conflicts.
+  Post-rebase verification: SQLite atomicity/strict-worker 16 passed /
+  9 deselected; required PostgreSQL atomicity/forced-RLS 12 passed /
+  15 deselected. A mistyped PostgreSQL test node initially failed collection;
+  the corrected actual node ran successfully. Ruff and complete branch
+  whitespace checks passed again.
+- Draft PR: https://github.com/rmusser01/tldw_server/pull/3092, base `dev`.
+  Initial `gh pr create` resolved the unrelated upstream repository and failed;
+  explicit `--repo rmusser01/tldw_server` created the verified draft without
+  altering upstream. Dedicated Jobs CI was queued automatically for the PR.
+  Repository-required checks and Jobs CI are pending, not waived.
+- The branch/worktree is retained for PR review. TASK-13215 remains in progress
+  pending integration. The human requester must write the required
+  `Change summary`; no merge was performed. Strict extraction remains a
+  separate next work item after this defect fix merges.

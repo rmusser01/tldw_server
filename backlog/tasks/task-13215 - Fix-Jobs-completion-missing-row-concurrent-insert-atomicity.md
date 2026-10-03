@@ -13,6 +13,7 @@ references:
 - codex/jobs-completion-foundation@877c86e7bb
 - TASK-13216
 - TASK-13217
+- https://github.com/rmusser01/tldw_server/pull/3092
 documentation:
 - Docs/superpowers/specs/2026-09-07-jobs-completion-row-identity-atomicity-design.md
 - Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md
@@ -31,7 +32,7 @@ modified_files:
 - tldw_Server_API/tests/Jobs/test_jobs_lifecycle_hardening_regressions.py
 - tldw_Server_API/tests/Jobs/test_jobs_rls_postgres.py
 - tldw_Server_API/tests/Jobs/test_worker_sdk.py
-updated_date: 2026-10-03 00:50
+updated_date: 2026-10-03 00:56
 ---
 
 ## Description
@@ -66,20 +67,21 @@ Final plan review verified the live remote dev tip remains e3174f1ad9f6dd0b11e4e
 2026-10-02 execution resumed using subagent-driven development. Rebased the three planning commits cleanly onto live dev 9958110df2a9011e19f48b0eae821353e19d4af8. Focused SQLite baseline: 127 passed, 55 deselected, 82 warnings. Latest dev changes RLS to transaction-local fail-closed context; tests retain the original cursor path. ADR assessment: required yes because the optional acquired-row identity precondition is a durable completion API rule; record ADR-058 from the already-approved design, with no renewed decision or scope change.
 2026-10-02 red/green evidence: two SQLite race failures (miss completed concurrent row; replacement-uuid completed), two PostgreSQL race failures (miss completed concurrent row; missing initial row lock); 13 SQLite UUID contract TypeErrors. Forced-RLS miss returned True/new row completed; strict WorkerSDK spy had no call because expected_uuid was absent. Fix implemented both backend locked lookups, immediate false on miss/stale UUID, captured raw UUID guards, direct state branches, authoritative bookkeeping, ordinary WorkerSDK UUID forwarding. Green expanded matrices: 242 SQLite passed / 65 deselected; 83 PostgreSQL passed / 71 deselected with 2 opt-in SSE skips. Explicit RUN_PG_JOBS_TESTS=1 and JOBS_SSE_TEST_MAX_SECONDS=0.5 rerun: both SSE tests passed. Worker suites 132 passed; new atomicity module 24 passed. Black new module, Ruff all touched Python files, py_compile runtime, diff check passed. Raw Bandit had one unchanged B608 warning in canonical webhook pruning; archived dev baseline comparison exit zero with no new results/errors at /tmp/bandit_task_13215_delta.json. Initial spec review findings fixed by full completion-field RLS snapshots and concurrent processing counter 2->1 with a retained sentinel. Final spec/quality review and final dev rebase remain in progress.
 Final integrated review/verification: spec re-review confirmed forced-RLS NOWAIT lock proof, missing-counter reconciliation real SQL failure rollback, optional SLA attachment/outbox failures, and creation/release/rollback-to savepoint-control failures all close the identified coverage gaps. Runtime/worker quality review reported no actionable findings; final lifecycle-test quality pass is pending. Fresh matrices: SQLite 247 passed / 70 deselected / 1212 warnings; required PostgreSQL 90 passed / 76 deselected / 358 warnings with no skips, including opt-in outbox tests using RUN_PG_JOBS_TESTS=1 and bounded SSE. Ruff all six touched Python files, Black new module, runtime py_compile, diff check, production Bandit delta passed. Full touched test-scope Bandit (B101 excluded for assertions) initially flagged two new literal fixture tokens; reused existing acquired UUID/seeded lease instead, delta comparison using normalized archived filenames now exit zero with no findings/errors at /tmp/bandit_task_13215_tests_delta.json. Final rebase/push/draft PR pending; no merge authorized in this task.
+Final code-quality review (including lifecycle test additions/token cleanup) has no actionable findings. Both implementation commits and the ADR/verification documentation checkpoint were committed with hooks enabled, then all six branch commits rebased cleanly onto explicitly verified live dev 86e287fee7bfa1a1588639232e35db3666851ded. Upstream changes were unrelated MCP tests only. Post-rebase: atomicity/strict worker SQLite 16 passed / 9 deselected / 51 warnings; required PostgreSQL atomicity/RLS completion 12 passed / 15 deselected / 36 warnings. Initial PG collection had a mistyped node; corrected actual test name passed. Ruff and full branch diff check passed. Branch pushed; draft PR #3092 opened against dev and attached to the chat: https://github.com/rmusser01/tldw_server/pull/3092. gh initially resolved the unrelated upstream repo, so explicit --repo rmusser01/tldw_server was used. Jobs Suite queued automatically via pull_request; mandatory repository gates and Jobs CI remain pending. Human-authored Change summary must be added by requester before merge. No merge performed; retain worktree for review, and keep strict extraction/TASK-13216/TASK-13217 excluded.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the approved completion row-identity atomicity fix in the existing JobManager facade and ordinary WorkerSDK success path. PostgreSQL FOR UPDATE / SQLite BEGIN IMMEDIATE establish authoritative identity; a locked miss or stale expected UUID rejects completion; all mutations/replay use null-safe raw UUID guards. Deterministic race, RLS, legacy UUID, exact replay counter, and real rollback coverage included. Final focused matrices: SQLite 247 passed and required PostgreSQL 90 passed (no skips); post-rebase 16 SQLite/worker and 12 PostgreSQL/RLS passed. Ruff, scoped Black, syntax, whitespace and no-new-finding production/test Bandit comparisons passed; all validated review gaps addressed. Draft PR #3092 against dev is open. Implementation and PR preparation complete; task remains In Progress until remote CI, human-written Change summary, and separately authorized integration are completed. No broad caller migration, historical repair, or completion extraction performed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
