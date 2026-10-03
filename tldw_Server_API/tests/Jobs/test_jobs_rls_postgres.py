@@ -1,4 +1,6 @@
 import os
+from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, urlparse, urlunparse
@@ -220,13 +222,167 @@ def _read_lifecycle_facts(dsn: str, job_id: int) -> tuple[Any, ...]:
             cur.execute(
                 (
                     "SELECT status, leased_until, worker_id, lease_id, acquired_at, started_at, "
-                    "progress_percent, progress_message FROM jobs WHERE id = %s"
+                    "progress_percent, progress_message, result, completion_token, "
+                    "completed_at, uuid FROM jobs WHERE id = %s"
                 ),
                 (job_id,),
             )
             row = cur.fetchone()
     assert row is not None
     return tuple(row)
+
+
+@pytest.mark.parametrize("owner_user_id", ["u1", "u2"])
+def test_rls_completion_respects_visible_legacy_null_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    owner_user_id: str,
+) -> None:
+    admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    ensure_jobs_rls_policies_pg(admin_dsn)
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    job_id = _seed_processing_job(admin_dsn, owner_user_id=owner_user_id)
+    before = _read_lifecycle_facts(admin_dsn, job_id)
+    manager = JobManager(backend="postgres", db_url=rls_dsn)
+    original_cursor = manager._pg_cursor
+    lock_attempted: list[bool] = []
+
+    def prove_row_locked() -> None:
+        with psycopg.connect(admin_dsn) as conn, conn.cursor() as cur:
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                cur.execute(
+                    "SELECT id FROM jobs WHERE id=%s FOR UPDATE NOWAIT", (job_id,)
+                )
+            conn.rollback()
+        lock_attempted.append(True)
+
+    @contextmanager
+    def cursor_with_lock_proof(conn: Any):
+        with original_cursor(conn) as cur:
+            yield _CompletionReadCursor(cur, prove_row_locked, expect_missing=False)
+
+    if owner_user_id == "u1":
+        monkeypatch.setattr(manager, "_pg_cursor", cursor_with_lock_proof)
+    JobManager.set_rls_context(
+        is_admin=False, domain_allowlist="chatbooks", owner_user_id="u1"
+    )
+    try:
+        completed = manager.complete_job(
+            job_id,
+            worker_id="worker-1",
+            lease_id="lease-1",
+            completion_token=str(before[3]),
+            expected_uuid="",
+            enforce=True,
+        )
+    finally:
+        JobManager.clear_rls_context()
+
+    assert completed is (owner_user_id == "u1")
+    assert lock_attempted == ([True] if owner_user_id == "u1" else [])
+    if owner_user_id == "u2":
+        assert _read_lifecycle_facts(admin_dsn, job_id) == before
+    with psycopg.connect(admin_dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, uuid FROM jobs WHERE id=%s", (job_id,))
+        assert cur.fetchone() == (
+            "completed" if owner_user_id == "u1" else "processing", None
+        )
+        cur.execute(
+            "SELECT COUNT(*) FROM job_events WHERE job_id=%s "
+            "AND event_type='job.completed'",
+            (job_id,),
+        )
+        assert cur.fetchone()[0] == int(owner_user_id == "u1")
+        cur.execute(
+            "SELECT ready_count, scheduled_count, processing_count "
+            "FROM job_counters WHERE domain='chatbooks' AND queue='default' "
+            "AND job_type='export'"
+        )
+        assert cur.fetchone() == ((0, 0, 0) if owner_user_id == "u1" else None)
+
+
+class _CompletionReadCursor:
+    def __init__(
+        self,
+        inner: Any,
+        after_read: Callable[[], None],
+        *,
+        expect_missing: bool = True,
+    ) -> None:
+        self._inner = inner
+        self._after_read = after_read
+        self._expect_missing = expect_missing
+        self._armed = False
+        self.fired = False
+
+    def execute(self, sql: Any, params: Any = None) -> Any:
+        normalized = " ".join(str(sql).upper().split())
+        if (
+            not self.fired
+            and normalized.startswith("SELECT ")
+            and "COMPLETION_TOKEN" in normalized
+            and "FROM JOBS WHERE ID" in normalized
+        ):
+            self._armed = True
+        return self._inner.execute(sql, params)
+
+    def fetchone(self) -> Any:
+        row = self._inner.fetchone()
+        if self._armed:
+            self._armed = False
+            self.fired = True
+            assert (row is None) is self._expect_missing
+            self._after_read()
+        return row
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+def test_rls_completion_miss_cannot_complete_concurrent_visible_insert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    ensure_jobs_rls_policies_pg(admin_dsn)
+    manager = JobManager(backend="postgres", db_url=rls_dsn)
+    inserted: dict[str, int] = {}
+
+    def insert_visible_job() -> None:
+        with psycopg.connect(admin_dsn) as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO jobs(id, uuid, domain, queue, job_type, owner_user_id, "
+                "payload, status, priority, max_retries, created_at) "
+                "VALUES(1, 'concurrent-uuid', 'chatbooks', 'default', 'export', "
+                "'u1', '{}'::jsonb, 'queued', 5, 3, NOW()) RETURNING id"
+            )
+            inserted["id"] = cur.fetchone()[0]
+
+    original_cursor = manager._pg_cursor
+    hooks: list[_CompletionReadCursor] = []
+
+    @contextmanager
+    def cursor_with_hook(conn: Any):
+        with original_cursor(conn) as cur:
+            hook = _CompletionReadCursor(cur, insert_visible_job)
+            hooks.append(hook)
+            yield hook
+
+    monkeypatch.setattr(manager, "_pg_cursor", cursor_with_hook)
+    JobManager.set_rls_context(
+        is_admin=False, domain_allowlist="chatbooks", owner_user_id="u1"
+    )
+    try:
+        completed = manager.complete_job(1, result={"ok": True}, enforce=False)
+    finally:
+        JobManager.clear_rls_context()
+    assert completed is False
+    assert hooks[0].fired is True
+    assert inserted == {"id": 1}
+    with psycopg.connect(admin_dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, result FROM jobs WHERE id=1")
+        assert cur.fetchone() == ("queued", None)
 
 
 def test_rls_context_filters_results(monkeypatch):

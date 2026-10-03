@@ -7212,11 +7212,13 @@ class JobManager:
         worker_id: str | None = None,
         lease_id: str | None = None,
         completion_token: str | None = None,
+        expected_uuid: str | None = None,
         enforce: bool | None = None,
     ) -> bool:
         """Mark a job as completed and clear the lease.
 
         See `renew_job_lease` for enforcement semantics.
+        When supplied, `expected_uuid` must match the locked row's identity.
         """
         # Strong exactly-once finalize (optional): require a completion_token when enabled
         if (
@@ -7261,23 +7263,32 @@ class JobManager:
                                 logger.info(
                                     f"[JM TEST MUT] complete_job enter job_id={job_id} enforce={enforce} backend=pg"
                                 )
-                        # Pre-fetch for metrics and idempotency
+                        # Lock the authoritative row before classification or mutation.
                         cur.execute(
-                            "SELECT status, completion_token, worker_id, lease_id, domain, queue, job_type, available_at, started_at, acquired_at, trace_id, request_id, owner_user_id FROM jobs WHERE id = %s",
+                            "SELECT id, uuid, status, completion_token, worker_id, lease_id, "
+                            "domain, queue, job_type, available_at, started_at, acquired_at, "
+                            "trace_id, request_id, owner_user_id FROM jobs WHERE id = %s FOR UPDATE",
                             (int(job_id),),
                         )
                         base = cur.fetchone()
-                        if base:
-                            st = str(base.get("status"))
-                            ct = base.get("completion_token")
-                            if st in {"completed", "failed", "cancelled", "quarantined"}:
-                                # A token only replays the operation that produced its state.
-                                return bool(
-                                    st == "completed"
-                                    and completion_token
-                                    and ct
-                                    and str(ct) == str(completion_token)
-                                )
+                        if base is None:
+                            return False
+                        stored_uuid = base.get("uuid")
+                        if (
+                            expected_uuid is not None
+                            and str(stored_uuid or "") != str(expected_uuid)
+                        ):
+                            return False
+                        st = str(base.get("status"))
+                        ct = base.get("completion_token")
+                        if st in {"completed", "failed", "cancelled", "quarantined"}:
+                            # A token only replays the operation that produced its state.
+                            return bool(
+                                st == "completed"
+                                and completion_token
+                                and ct
+                                and str(ct) == str(completion_token)
+                            )
                         # Apply encryption if configured (domain available from base)
                         try:
                             if base:
@@ -7286,16 +7297,19 @@ class JobManager:
                             pass
                         completed_from_processing = False
                         completed_from_queued = False
-                        if enforce:
+                        ok = False
+                        result_json = json.dumps(res_obj) if res_obj is not None else None
+                        if st == "processing" and enforce:
                             cur.execute(
                                 (
                                     "UPDATE jobs SET status = 'completed', result = %s::jsonb, completed_at = NOW(), completion_token = %s, "
-                                    "leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s AND (completion_token IS NULL OR completion_token = %s)"
+                                    "leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = %s AND uuid IS NOT DISTINCT FROM %s AND status = 'processing' AND worker_id = %s AND lease_id = %s AND (completion_token IS NULL OR completion_token = %s)"
                                 ),
                                 (
-                                    json.dumps(res_obj) if res_obj is not None else None,
+                                    result_json,
                                     completion_token,
                                     int(job_id),
+                                    stored_uuid,
                                     worker_id,
                                     lease_id,
                                     completion_token,
@@ -7303,57 +7317,55 @@ class JobManager:
                             )
                             ok = cur.rowcount > 0
                             completed_from_processing = ok
-                            if not ok and completion_token:
-                                # Idempotent retry if already completed with same token (race)
-                                cur.execute("SELECT completion_token, status FROM jobs WHERE id = %s", (int(job_id),))
-                                chk = cur.fetchone()
-                                if (
-                                    chk
-                                    and str(chk.get("completion_token") or "") == str(completion_token)
-                                    and str(chk.get("status")) == "completed"
-                                ):
-                                    return True
-                        else:
+                        elif st == "processing":
                             cur.execute(
-                                "UPDATE jobs SET status = 'completed', result = %s::jsonb, completed_at = NOW(), completion_token = COALESCE(completion_token, %s), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = %s AND status = 'processing' AND (completion_token IS NULL OR completion_token = %s)",
+                                "UPDATE jobs SET status = 'completed', result = %s::jsonb, completed_at = NOW(), completion_token = COALESCE(completion_token, %s), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = %s AND uuid IS NOT DISTINCT FROM %s AND status = 'processing' AND (completion_token IS NULL OR completion_token = %s)",
                                 (
-                                    json.dumps(res_obj) if res_obj is not None else None,
+                                    result_json,
                                     completion_token,
                                     int(job_id),
+                                    stored_uuid,
                                     completion_token,
                                 ),
                             )
                             completed_from_processing = cur.rowcount > 0
                             ok = completed_from_processing
-                            if not ok:
-                                # Admin-style finalize: optionally allow completing queued without lease when enforcement disabled
-                                try:
-                                    allow = {
-                                        d.strip().lower()
-                                        for d in os.getenv(
-                                            "JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS",
-                                            "chatbooks,embeddings",
-                                        ).split(",")
-                                        if d.strip()
-                                    }
-                                    cur.execute("SELECT domain FROM jobs WHERE id = %s", (int(job_id),))
-                                    row_dom = cur.fetchone()
-                                    dom_val = str(row_dom.get("domain") or "").lower() if row_dom else ""
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    allow = {"chatbooks", "embeddings"}
-                                    dom_val = ""
-                                if dom_val in allow:
-                                    cur.execute(
-                                        "UPDATE jobs SET status = 'completed', result = %s::jsonb, completed_at = NOW(), completion_token = COALESCE(completion_token, %s), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = %s AND status = 'queued' AND (completion_token IS NULL OR completion_token = %s)",
-                                        (
-                                            json.dumps(res_obj) if res_obj is not None else None,
-                                            completion_token,
-                                            int(job_id),
-                                            completion_token,
-                                        ),
-                                    )
-                                    completed_from_queued = cur.rowcount > 0
-                                    ok = completed_from_queued
+                        elif st == "queued" and not enforce:
+                            allow = {
+                                d.strip().lower()
+                                for d in os.getenv(
+                                    "JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS",
+                                    "chatbooks,embeddings",
+                                ).split(",")
+                                if d.strip()
+                            }
+                            if str(base.get("domain") or "").lower() in allow:
+                                cur.execute(
+                                    "UPDATE jobs SET status = 'completed', result = %s::jsonb, completed_at = NOW(), completion_token = COALESCE(completion_token, %s), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = %s AND uuid IS NOT DISTINCT FROM %s AND status = 'queued' AND (completion_token IS NULL OR completion_token = %s)",
+                                    (
+                                        result_json,
+                                        completion_token,
+                                        int(job_id),
+                                        stored_uuid,
+                                        completion_token,
+                                    ),
+                                )
+                                completed_from_queued = cur.rowcount > 0
+                                ok = completed_from_queued
+                        if not ok and completion_token:
+                            cur.execute(
+                                "SELECT completion_token, status FROM jobs "
+                                "WHERE id = %s AND uuid IS NOT DISTINCT FROM %s",
+                                (int(job_id), stored_uuid),
+                            )
+                            chk = cur.fetchone()
+                            if (
+                                chk
+                                and chk.get("completion_token")
+                                and str(chk["completion_token"]) == str(completion_token)
+                                and str(chk.get("status")) == "completed"
+                            ):
+                                return True
                         if _test_mode:
                             try:
                                 cur.execute("SELECT id, status FROM jobs WHERE id = %s", (int(job_id),))
@@ -7521,44 +7533,57 @@ class JobManager:
                         # fall through to finally and return
             else:
                 with conn:
+                    conn.execute("BEGIN IMMEDIATE")
                     if _test_mode:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             logger.info(
                                 f"[JM TEST MUT] complete_job enter job_id={job_id} enforce={enforce} backend=sqlite"
                             )
-                    # Pre-fetch for metrics + idempotency
-                    rowm = conn.execute(
-                        "SELECT status, completion_token, domain, queue, job_type, available_at, started_at, acquired_at, trace_id, request_id, owner_user_id FROM jobs WHERE id = ?",
+                    # Reserve the writer before loading authoritative completion facts.
+                    row = conn.execute(
+                        "SELECT id, uuid, status, completion_token, worker_id, lease_id, "
+                        "domain, queue, job_type, available_at, started_at, acquired_at, "
+                        "trace_id, request_id, owner_user_id FROM jobs WHERE id = ?",
                         (job_id,),
                     ).fetchone()
-                    if rowm:
-                        st = str(rowm[0])
-                        ct = rowm[1]
-                        if st in {"completed", "failed", "cancelled", "quarantined"}:
-                            return bool(
-                                st == "completed"
-                                and completion_token
-                                and ct
-                                and str(ct) == str(completion_token)
-                            )
+                    if row is None:
+                        return False
+                    base = dict(row)
+                    stored_uuid = base.get("uuid")
+                    if (
+                        expected_uuid is not None
+                        and str(stored_uuid or "") != str(expected_uuid)
+                    ):
+                        return False
+                    st = str(base.get("status"))
+                    ct = base.get("completion_token")
+                    if st in {"completed", "failed", "cancelled", "quarantined"}:
+                        return bool(
+                            st == "completed"
+                            and completion_token
+                            and ct
+                            and str(ct) == str(completion_token)
+                        )
                     # Apply encryption if configured
                     try:
-                        if rowm:
-                            res_obj = self._maybe_encrypt_json(res_obj, str(rowm[2]))
+                        res_obj = self._maybe_encrypt_json(res_obj, str(base.get("domain")))
                     except _JOB_NONCRITICAL_EXCEPTIONS:
                         pass
                     completed_from_processing = False
                     completed_from_queued = False
-                    if enforce:
+                    ok = False
+                    result_json = json.dumps(res_obj) if res_obj is not None else None
+                    if st == "processing" and enforce:
                         conn.execute(
                             (
                                 "UPDATE jobs SET status = 'completed', result = ?, completed_at = DATETIME('now'), completion_token = ?, "
-                                "leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = ? AND status = 'processing' AND worker_id = ? AND lease_id = ? AND (completion_token IS NULL OR completion_token = ?)"
+                                "leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = ? AND uuid IS ? AND status = 'processing' AND worker_id = ? AND lease_id = ? AND (completion_token IS NULL OR completion_token = ?)"
                             ),
                             (
-                                json.dumps(res_obj) if res_obj is not None else None,
+                                result_json,
                                 completion_token,
                                 job_id,
+                                stored_uuid,
                                 worker_id,
                                 lease_id,
                                 completion_token,
@@ -7567,61 +7592,62 @@ class JobManager:
                         cur = conn.execute("SELECT changes()")
                         ok = (cur.fetchone()[0] or 0) > 0
                         completed_from_processing = ok
-                        if not ok and completion_token:
-                            chk = conn.execute(
-                                "SELECT completion_token, status FROM jobs WHERE id = ?", (job_id,)
-                            ).fetchone()
-                            if chk and str(chk[0] or "") == str(completion_token) and str(chk[1]) == "completed":
-                                return True
-                    else:
+                    elif st == "processing":
                         conn.execute(
                             (
                                 "UPDATE jobs SET status = 'completed', result = ?, completed_at = DATETIME('now'), completion_token = COALESCE(completion_token, ?), leased_until = NULL, worker_id = NULL, lease_id = NULL "
-                                "WHERE id = ? AND status = 'processing' AND (completion_token IS NULL OR completion_token = ?)"
+                                "WHERE id = ? AND uuid IS ? AND status = 'processing' AND (completion_token IS NULL OR completion_token = ?)"
                             ),
                             (
-                                json.dumps(res_obj) if res_obj is not None else None,
+                                result_json,
                                 completion_token,
                                 job_id,
+                                stored_uuid,
                                 completion_token,
                             ),
                         )
                         cur = conn.execute("SELECT changes()")
                         completed_from_processing = (cur.fetchone()[0] or 0) > 0
                         ok = completed_from_processing
-                        if not ok:
-                            # Admin-style finalize: optionally allow completing queued without lease when enforcement is disabled
-                            try:
-                                allow = {
-                                    d.strip().lower()
-                                    for d in (
-                                        os.getenv(
-                                            "JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS", "chatbooks,embeddings"
-                                        ).split(",")
-                                    )
-                                    if d.strip()
-                                }
-                                row_dom = conn.execute("SELECT domain FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                                dom_val = str(row_dom[0]).lower() if row_dom and row_dom[0] else ""
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                allow = {"chatbooks", "embeddings"}
-                                dom_val = ""
-                            if dom_val in allow:
-                                conn.execute(
-                                    (
-                                        "UPDATE jobs SET status = 'completed', result = ?, completed_at = DATETIME('now'), completion_token = COALESCE(completion_token, ?), leased_until = NULL, worker_id = NULL, lease_id = NULL "
-                                        "WHERE id = ? AND status = 'queued' AND (completion_token IS NULL OR completion_token = ?)"
-                                    ),
-                                    (
-                                        json.dumps(res_obj) if res_obj is not None else None,
-                                        completion_token,
-                                        job_id,
-                                        completion_token,
-                                    ),
-                                )
-                                cur2 = conn.execute("SELECT changes()")
-                                completed_from_queued = (cur2.fetchone()[0] or 0) > 0
-                                ok = completed_from_queued
+                    elif st == "queued" and not enforce:
+                        allow = {
+                            d.strip().lower()
+                            for d in os.getenv(
+                                "JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS",
+                                "chatbooks,embeddings",
+                            ).split(",")
+                            if d.strip()
+                        }
+                        if str(base.get("domain") or "").lower() in allow:
+                            conn.execute(
+                                (
+                                    "UPDATE jobs SET status = 'completed', result = ?, completed_at = DATETIME('now'), completion_token = COALESCE(completion_token, ?), leased_until = NULL, worker_id = NULL, lease_id = NULL "
+                                    "WHERE id = ? AND uuid IS ? AND status = 'queued' AND (completion_token IS NULL OR completion_token = ?)"
+                                ),
+                                (
+                                    result_json,
+                                    completion_token,
+                                    job_id,
+                                    stored_uuid,
+                                    completion_token,
+                                ),
+                            )
+                            cur2 = conn.execute("SELECT changes()")
+                            completed_from_queued = (cur2.fetchone()[0] or 0) > 0
+                            ok = completed_from_queued
+                    if not ok and completion_token:
+                        chk = conn.execute(
+                            "SELECT completion_token, status FROM jobs "
+                            "WHERE id = ? AND uuid IS ?",
+                            (job_id, stored_uuid),
+                        ).fetchone()
+                        if (
+                            chk
+                            and chk[0]
+                            and str(chk[0]) == str(completion_token)
+                            and str(chk[1]) == "completed"
+                        ):
+                            return True
                     if _test_mode:
                         try:
                             _r = conn.execute("SELECT id, status FROM jobs WHERE id = ?", (int(job_id),)).fetchone()
@@ -7637,15 +7663,15 @@ class JobManager:
                             pass
                     # Truncation metric (SQLite)
                     try:
-                        if rowm and ok and isinstance(res_obj, dict) and res_obj.get("_truncated"):
+                        if ok and isinstance(res_obj, dict) and res_obj.get("_truncated"):
                             post_commit_side_effects.append(
                                 (
                                     increment_json_truncated,
                                     (
                                         {
-                                            "domain": rowm[2],
-                                            "queue": rowm[3],
-                                            "job_type": rowm[4],
+                                            "domain": base.get("domain"),
+                                            "queue": base.get("queue"),
+                                            "job_type": base.get("job_type"),
                                         },
                                         "result",
                                     ),
@@ -7656,18 +7682,8 @@ class JobManager:
                         pass
                     # Metrics: duration + counters
                     try:
-                        if rowm and ok:
-                            d = {
-                                "domain": rowm[2],
-                                "queue": rowm[3],
-                                "job_type": rowm[4],
-                                "available_at": rowm[5],
-                                "started_at": rowm[6],
-                                "acquired_at": rowm[7],
-                                "trace_id": rowm[8] if len(rowm) > 8 else None,
-                                "request_id": rowm[9] if len(rowm) > 9 else None,
-                                "owner_user_id": rowm[10] if len(rowm) > 10 else None,
-                            }
+                        if ok:
+                            d = dict(base)
                             s = _parse_dt(d.get("started_at")) or _parse_dt(d.get("acquired_at"))
                             post_commit_side_effects.append(
                                 (
@@ -7716,18 +7732,12 @@ class JobManager:
                     except _JOB_NONCRITICAL_EXCEPTIONS:
                         pass
                     if (
-                        rowm
-                        and ok
+                        ok
                         and JobManager._is_truthy(
                             os.getenv("JOBS_COUNTERS_ENABLED", "")
                         )
                     ):
-                        d_counter = {
-                            "domain": rowm[2],
-                            "queue": rowm[3],
-                            "job_type": rowm[4],
-                            "available_at": rowm[5],
-                        }
+                        d_counter = dict(base)
                         if completed_from_processing:
                             counter_cursor = conn.execute(
                                 "UPDATE job_counters SET processing_count = CASE WHEN processing_count>0 THEN processing_count-1 ELSE 0 END, updated_at = DATETIME('now') WHERE domain=? AND queue=? AND job_type=?",
@@ -7763,17 +7773,8 @@ class JobManager:
                                 queue=d_counter["queue"],
                                 job_type=d_counter["job_type"],
                             )
-                    if rowm and ok:
-                        d_sla = {
-                            "domain": rowm[2],
-                            "queue": rowm[3],
-                            "job_type": rowm[4],
-                            "started_at": rowm[6],
-                            "acquired_at": rowm[7],
-                            "trace_id": rowm[8] if len(rowm) > 8 else None,
-                            "request_id": rowm[9] if len(rowm) > 9 else None,
-                            "owner_user_id": rowm[10] if len(rowm) > 10 else None,
-                        }
+                    if ok:
+                        d_sla = dict(base)
                         self._stage_completion_sla_breach(
                             conn,
                             job_id=int(job_id),
@@ -7783,12 +7784,12 @@ class JobManager:
                         )
                         ev = {
                             "id": int(job_id),
-                            "domain": rowm[2],
-                            "queue": rowm[3],
-                            "job_type": rowm[4],
-                            "owner_user_id": rowm[10] if len(rowm) > 10 else None,
-                            "request_id": rowm[9] if len(rowm) > 9 else None,
-                            "trace_id": rowm[8] if len(rowm) > 8 else None,
+                            "domain": base.get("domain"),
+                            "queue": base.get("queue"),
+                            "job_type": base.get("job_type"),
+                            "owner_user_id": base.get("owner_user_id"),
+                            "request_id": base.get("request_id"),
+                            "trace_id": base.get("trace_id"),
                         }
                         if outbox_enabled:
                             _insert_lifecycle_event(
