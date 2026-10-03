@@ -674,19 +674,19 @@ git commit -m "refactor(authnz): complete membership writer migration"
 **Goal**: Preserve current dev behavior and repair WP2's CI baseline/publication drift.
 **Success Criteria**: Current dev is an ancestor; Jobs ADR058 is preserved; WP2 ADR059 is published; existing tenant predicate baseline matches without new exemptions.
 **Tests**: Required ratchets, backend unit smoke, profile/writer/tenant/email regression, live PostgreSQL gate, strict docs build after publication commit.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 2: Full-Suite Fixture Compatibility
 **Goal**: Align fixtures and fakes with the approved managed membership and persisted authorization contracts.
 **Success Criteria**: Related CI failures are reproduced and pass after focused corrections; production guards and authorizations are unchanged; independent review and touched-scope Bandit have no new actionable finding.
 **Tests**: Failed AuthNZ, Privileges, Admin, Billing, Sharing, Chunking and MCP cases, plus structural inventory.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: Exact-Head Review and Merge
 **Goal**: Merge PR2821 only after the authorized gates pass.
 **Success Criteria**: Exact-head required CI and Qodo review are successful, current dev is an ancestor, human Change summary remains verbatim, merge commit is read back, TASK-13001.2 is finalized, and the heartbeat is paused.
 **Tests**: Authoritative GitHub PR/ref/check/review readbacks and expected-head merge precondition.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Work Package 3: Typed Pipeline and Effects
 

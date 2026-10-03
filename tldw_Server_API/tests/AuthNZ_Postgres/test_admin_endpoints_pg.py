@@ -114,7 +114,7 @@ async def test_admin_endpoints_pg(test_db_pool):
     await mgr.initialize()
 
     # Insert admin user
-    user_id = await ensure_test_user(pool, "pgadmin", "pgadmin@example.com")
+    user_id = await ensure_test_user(pool, "pgadmin", "pgadmin@example.com", role="admin")
 
     # Override AuthPrincipal to treat this user as admin for claim-first gates
     async def _principal_override(request: Request):  # type: ignore[override]
@@ -301,7 +301,7 @@ async def test_org_member_list_pagination_filters_pg(test_db_pool):
     )
 
     # Insert admin user and override principal for claim-first gates
-    admin_id = await ensure_test_user(pool, "pg-root-admin", "pg-root-admin@example.com")
+    admin_id = await ensure_test_user(pool, "pg-root-admin", "pg-root-admin@example.com", role="admin")
 
     async def _principal_override(request=None):  # type: ignore[override]
         principal = AuthPrincipal(
