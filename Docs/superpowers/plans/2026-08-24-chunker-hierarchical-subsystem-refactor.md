@@ -1264,12 +1264,12 @@ legacy hierarchy body or broad formatting churn. Branch and working-tree
 modules, this plan, and current TASK-13422. Historical tracking files visible
 in the cumulative branch diff remain controller-owned and untouched here.
 
-Steps 8-10 remain pending final independent specification/quality reviews,
-the separate Step 9 evidence pass, and controller-owned PR handoff. TASK-13422
-remains In Progress; the human-written Change summary merge gate remains open.
-The incremental annotation/evidence commit is not the final Step 9 commit.
+At preflight completion, Steps 8-10 remained pending. Final review and Step 9
+evidence below supersede that status; controller-owned Step 10 remains pending.
+The annotation/evidence commit `ae72a4702f1baeeac70f5abb35ec512f769a0152`
+was incremental, not the final Step 9 commit.
 
-- [ ] **Step 8: Review the final diff and repository checks**
+- [x] **Step 8: Review the final diff and repository checks**
 
 ```bash
 git diff --check origin/dev...HEAD
@@ -1290,7 +1290,7 @@ Confirm:
 
 Use `superpowers:requesting-code-review` for a final code review. Validate every finding before editing, use `superpowers:receiving-code-review` for feedback, and rerun the affected focused tests after each accepted fix.
 
-- [ ] **Step 9: Final verification commit**
+- [x] **Step 9: Final verification commit**
 
 Update `TASK-13422` with all commit hashes, touched files, focused/full test counts, compile/Ruff/Black/mypy/Bandit results, known skips, and the absence or evidence of gated corrections. Then commit any final verified cleanup and task evidence:
 
@@ -1300,6 +1300,45 @@ git commit -m "test: verify hierarchical subsystem refactor"
 ```
 
 If there is no code cleanup after the previous commit, make this a documentation-only evidence commit rather than an empty commit.
+
+Final review/evidence (2026-10-02): controller reports separate whole-branch
+SPEC and QUALITY approvals of immutable
+`86e287fee7bfa1a1588639232e35db3666851ded..ae72a4702f1baeeac70f5abb35ec512f769a0152`,
+with no actionable P0-P3 findings and no requested code changes. Previous
+Tasks 1-7 approvals and compatibility gates remain intact. Controller's actual
+full-suite log was read: **777 passed, 1 established optional PyThaiNLP skip,
+1963 warnings, 48.76s** (`/tmp/task13422_final_controller_tests.txt`). Controller
+Bandit JSON was read: **0 findings, 0 errors, 2822 LOC**, all severity/confidence
+counts zero, nosec/skipped-tests zero (`/tmp/bandit_task_13422_controller.json`).
+Controller additionally reports independent Ruff pass, Black 15 files unchanged,
+compileall pass, mypy 0 issues in 7 files, and clean diff check. These agree with
+the directly verified preflight gates above, including focused **348 passed,
+1 skip** and separate AST boundary **24 passed**. No code changed after the
+reviewed/verified head; this final pass changes only this plan and TASK-13422.
+No additional broad test run is needed for documentation-only changes.
+
+Technical summary: passive models/protocols and shared paragraph spans now sit
+below leaf construction, tree building, grouping, flatten traversal, and the
+coordination service. Public Chunker wrappers retain their signatures; public
+flat composition still calls both public methods. Process-text dispatch imports
+the shared span function directly. These boundaries eliminate duplicated
+hierarchy ownership and the private cross-subsystem span seam while preserving
+observed call multiplicity, offsets, malformed values, aliasing, and exception
+behavior. Local annotation cleanup preserves runtime behavior. The only earlier
+`fix:` commit, `b8d015c5821e23091023d70972f426953fdaa766`, reverted an extraction
+regression to restore the exact seven-key envelope, not a baseline behavior
+correction. No new behavior correction was introduced during final verification.
+Full branch commit history through `ae72a4702` is recorded in TASK-13422.
+
+Step 9 is the documentation-only commit named
+`test: verify hierarchical subsystem refactor`. TASK-13422 AC 3/4/5 and evidence
+DoD 2-6 are satisfied; AC 6 and overall DoD 1 remain open, status In Progress.
+Explicit merge blocker: the human requester must write their own Change summary
+explaining both what changed and why these boundaries/compatibility choices were
+selected. An AI-written technical summary does not satisfy that requirement.
+Step 10 draft PR against dev remains controller-owned and pending. Historical
+record archive exception still awaits the user's answer; old records are
+controller-owned and untouched. No push, PR, rebase, or archive in this pass.
 
 - [ ] **Step 10: Push and prepare the PR against `dev`**
 
@@ -1340,5 +1379,5 @@ If any step cannot be satisfied, document the finding and defer it without chang
 - [x] Public signatures, public flat composition, and package helper remain compatible.
 - [x] AST dependency rules pass and no dormant duplicate hierarchy body remains.
 - [x] Full Chunking suite and all static/security gates recorded.
-- [ ] Final review findings validated and addressed.
+- [x] Final review findings validated and addressed (SPEC/QUALITY approved; no actionable findings).
 - [ ] PR targets `dev`; human-written `Change summary` merge gate remains explicit.
