@@ -1,9 +1,10 @@
 ---
 id: TASK-13430
 title: 'RG Redis window keys (rg:win:*) never expire'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-02 02:02'
+updated_date: '2026-10-03 01:20'
 labels:
   - rate-limit
 dependencies: []
@@ -24,16 +25,32 @@ Suggested fix: on every add, EXPIRE each window key at its policy window plus a 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every Redis window key carries a TTL of at least its policy window
-- [ ] #2 A test proves an idle entity's window keys expire
+- [x] #1 Every Redis window key carries a TTL of at least its policy window
+- [x] #2 A test proves an idle entity's window keys expire
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Every add to a window ZSET now EXPIREs the key at ceil(window) + 5 s (governor_redis._window_ttl): 65 s at 60 s windows, longer when rpm < 1. The TTL is never shorter than the window, so an idle entity's rg:win:* keys expire once their window has passed.
+Multi-key reserve Lua: per-key ARGV group (limit, window, units, ttl, csv), EXPIRE after the ZADD loop. Tokens Lua: ttl is ARGV[4], EXPIRE after ZADD. Python paths (stub and real-Redis fallback) EXPIRE in _add_members. The in-memory stub's tokens-script emulation (_eval_rate_limiter) mirrors the EXPIRE.
+The changed script has a new SHA, so workers on old and new code run side by side during a rolling deploy.
+Tests: stub TTL tests in test_governor_redis.py (requests, tokens, rpm 0.3 / 600 s, tokens script) and real-Redis integration/test_redis_real_window_ttl.py (Lua TTLs, idle keys gone after a 1 s patched TTL). RG suite with real Redis (-n 4): 415 passed, 2 xfailed. Docs + redis_factory tests: 223 passed. Docs/Deployment/horizontal-scaling.md key table corrected (tokens are ZSETs, not fixed-window INCRBY) and Published refreshed.
+Known limits: lease keys (rg:lease:*) get no TTL, because renew can shorten it and a correct TTL needs EXPIRE GT (Redis 7); only crashed processes leave lease keys behind. Keys written before this deploy get a TTL on their next write; keys of entities idle since before the deploy stay until deleted by hand. A reload that lengthens a requests window can leave an unwritten key with the old, shorter TTL, which allows a brief over-admit bounded by that window.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+RG Redis sliding-window keys now expire: every add sets a TTL of ceil(window) + 5 s on both the Lua paths and the Python paths, and the in-memory stub mirrors it. Real-Redis tests prove an idle entity's keys disappear. RG suite: 415 passed with real Redis.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
