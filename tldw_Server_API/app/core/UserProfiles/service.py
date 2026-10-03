@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeam
 from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
     AuthnzUserProviderSecretsRepo,
 )
+from tldw_Server_API.app.core.UserProfiles.limits_precedence import LIMITS_PREFIX, most_generous_values
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import (
     OrgProfileOverridesRepo,
     TeamProfileOverridesRepo,
@@ -575,6 +576,8 @@ class UserProfileService:
 
         org_overrides: dict[str, dict[str, Any]] = {}
         team_overrides: dict[str, dict[str, Any]] = {}
+        org_rows: list[dict[str, Any]] = []
+        team_rows: list[dict[str, Any]] = []
         try:
             org_ids, team_ids = await self._get_membership_ids(user_id)
             if org_ids:
@@ -590,12 +593,21 @@ class UserProfileService:
         except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Org/team overrides unavailable for user {}: {}", user_id, exc)
 
+        team_limits = most_generous_values(team_rows)
+        org_limits = most_generous_values(org_rows)
+
         effective: dict[str, Any] = {}
         for entry in entries:
             key = str(entry.key)
             if key in overrides:
                 value = overrides.get(key)
                 source = "user"
+            elif key.startswith(LIMITS_PREFIX) and key in team_limits:
+                value = team_limits[key]
+                source = "team"
+            elif key.startswith(LIMITS_PREFIX) and key in org_limits:
+                value = org_limits[key]
+                source = "org"
             elif key in team_overrides:
                 value = team_overrides[key]["value"]
                 source = "team"

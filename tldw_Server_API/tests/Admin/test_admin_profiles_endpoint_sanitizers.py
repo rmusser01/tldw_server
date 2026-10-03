@@ -16,6 +16,10 @@ class _LoggerStub:
     def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
         self.warning_records.append((message, args, kwargs))
 
+    def opt(self, **_kwargs: Any) -> _LoggerStub:
+        """Mirror loguru's `logger.opt(...)`, which returns a logger to call `.warning()` on."""
+        return self
+
 
 async def _raise_audit_error(*_args: Any, **_kwargs: Any) -> None:
     raise RuntimeError("profile audit backend exploded at /private/audit.db")
@@ -150,3 +154,33 @@ async def test_bulk_update_user_profiles_sanitizes_audit_warning_log(
 
     assert result is response
     assert logger_stub.warning_records == [("Admin audit emission failed", (), {})]
+
+
+@pytest.mark.asyncio
+async def test_group_override_audit_warning_log_has_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed group-override audit logs the group type/id, key and operation, plus the exception (Qodo Q6)."""
+    logger_stub = _LoggerStub()
+
+    async def _set_group_limit_override(**_kwargs: Any):
+        return (
+            {"scope": "team", "id": 9, "key": "limits.rag_queries_per_day", "value": 20},
+            {"action": "team_profile_override.set"},
+        )
+
+    monkeypatch.setattr(admin_profiles, "logger", logger_stub)
+    monkeypatch.setattr(
+        admin_profiles.admin_profiles_service,
+        "set_group_limit_override",
+        _set_group_limit_override,
+    )
+    monkeypatch.setattr(admin_profiles, "_get_emit_admin_audit_event", lambda: _raise_audit_error)
+
+    result = await admin_profiles._group_override(
+        "team", 9, "limits.rag_queries_per_day", 20, object(), object()
+    )
+
+    assert result.value == 20
+    assert len(logger_stub.warning_records) == 1
+    message, args, _kwargs = logger_stub.warning_records[0]
+    assert message == "Admin audit emission failed for {} {} override {} ({})"
+    assert args == ("team", 9, "limits.rag_queries_per_day", "team_profile_override.set")
