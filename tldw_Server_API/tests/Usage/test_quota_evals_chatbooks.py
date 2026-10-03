@@ -26,6 +26,14 @@ async def test_daily_evaluation_cap_is_atomic_with_the_reservation(tmp_path) -> 
     assert ok is False and meta["error"] == "Daily evaluation limit exceeded" and meta["limit"] == 2
 
 
+async def test_daily_evaluation_cap_of_zero_refuses_the_first_evaluation(tmp_path) -> None:
+    """max_evaluations_per_day == 0 must block, not mean unlimited (spec 2 review B2)."""
+    limiter = _limiter(tmp_path)
+    config = await limiter._get_user_config("7")
+    ok, meta = await limiter._reserve_request_usage("7", "/e", 0, 0.0, config, max_evaluations_per_day=0)
+    assert ok is False and meta["error"] == "Daily evaluation limit exceeded" and meta["limit"] == 0
+
+
 async def test_daily_evaluation_token_cap(tmp_path) -> None:
     """A request whose tokens would pass the daily token cap is refused."""
     limiter = _limiter(tmp_path)
@@ -70,6 +78,20 @@ def test_chatbook_admission_uses_the_resolved_limits(monkeypatch: pytest.MonkeyP
         _Service(exports=3, active=0)._check_chatbook_job_admission("export", ChatbookJobLimits(exports_per_day=3))
     with pytest.raises(QuotaExceededError):
         _Service(exports=0, active=2)._check_chatbook_job_admission("export", ChatbookJobLimits(concurrent_jobs=2))
+
+
+def test_chatbooks_exports_per_day_of_zero_refuses_the_first_export(monkeypatch: pytest.MonkeyPatch) -> None:
+    """exports_per_day == 0 must block, not mean unlimited (spec 2 review B2)."""
+    _quotas_live(monkeypatch)
+    with pytest.raises(QuotaExceededError):
+        _Service(exports=0, active=0)._check_chatbook_job_admission("export", ChatbookJobLimits(exports_per_day=0))
+
+
+def test_chatbooks_concurrent_jobs_of_zero_refuses_the_first_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    """concurrent_jobs == 0 must block, not mean unlimited (spec 2 review B2)."""
+    _quotas_live(monkeypatch)
+    with pytest.raises(QuotaExceededError):
+        _Service(exports=0, active=0)._check_chatbook_job_admission("export", ChatbookJobLimits(concurrent_jobs=0))
 
 
 async def test_resolve_job_limits_reads_the_resolver(monkeypatch: pytest.MonkeyPatch) -> None:

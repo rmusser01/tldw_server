@@ -7,7 +7,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.orgs_teams import add_team_member, create_organization, create_team
+from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
+    add_team_member,
+    create_organization,
+    create_team,
+    remove_team_member,
+)
 from tldw_Server_API.app.core.Usage import quota_resolver
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import TeamProfileOverridesRepo
 from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
@@ -80,25 +85,34 @@ def test_generic_limit_write_and_null_delete(auth_headers: dict, monkeypatch: py
     )
     with TestClient(app) as client:
         user_id = _user_id(client, auth_headers)
-        resp = client.patch(
-            f"/api/v1/admin/users/{user_id}/profile",
-            headers=auth_headers,
-            json={"updates": [{"key": "limits.rag_queries_per_day", "value": 5}, {"key": "limits.evaluations_per_day", "value": 9}]},
-        )
-        assert resp.status_code == 200
-        assert set(resp.json()["applied"]) == {"limits.rag_queries_per_day", "limits.evaluations_per_day"}
-        assert asyncio.run(quota_resolver.user_quota(user_id, "limits.rag_queries_per_day")) == 5
-        assert asyncio.run(quota_resolver.user_quota(user_id, "limits.evaluations_per_day")) == 9
-        assert flips == []  # writing an evaluations limit no longer flips the user to the CUSTOM tier
+        try:
+            resp = client.patch(
+                f"/api/v1/admin/users/{user_id}/profile",
+                headers=auth_headers,
+                json={"updates": [{"key": "limits.rag_queries_per_day", "value": 5}, {"key": "limits.evaluations_per_day", "value": 9}]},
+            )
+            assert resp.status_code == 200
+            assert set(resp.json()["applied"]) == {"limits.rag_queries_per_day", "limits.evaluations_per_day"}
+            assert asyncio.run(quota_resolver.user_quota(user_id, "limits.rag_queries_per_day")) == 5
+            assert asyncio.run(quota_resolver.user_quota(user_id, "limits.evaluations_per_day")) == 9
+            assert flips == []  # writing an evaluations limit no longer flips the user to the CUSTOM tier
 
-        resp = client.patch(
-            f"/api/v1/admin/users/{user_id}/profile",
-            headers=auth_headers,
-            json={"updates": [{"key": "limits.rag_queries_per_day", "value": None}]},
-        )
-        assert resp.status_code == 200
-        assert "limits.rag_queries_per_day" in resp.json()["applied"]
-        assert asyncio.run(quota_resolver.user_quota(user_id, "limits.rag_queries_per_day")) is None
+            resp = client.patch(
+                f"/api/v1/admin/users/{user_id}/profile",
+                headers=auth_headers,
+                json={"updates": [{"key": "limits.rag_queries_per_day", "value": None}]},
+            )
+            assert resp.status_code == 200
+            assert "limits.rag_queries_per_day" in resp.json()["applied"]
+            assert asyncio.run(quota_resolver.user_quota(user_id, "limits.rag_queries_per_day")) is None
+        finally:
+            # limits.evaluations_per_day was never nulled above; clear it through the
+            # same PATCH path so it doesn't leak a 9/day cap into a later test.
+            client.patch(
+                f"/api/v1/admin/users/{user_id}/profile",
+                headers=auth_headers,
+                json={"updates": [{"key": "limits.evaluations_per_day", "value": None}]},
+            )
 
 
 def test_profile_view_shows_most_generous_team_value(auth_headers: dict) -> None:
@@ -106,12 +120,15 @@ def test_profile_view_shows_most_generous_team_value(auth_headers: dict) -> None
     with TestClient(app) as client:
         user_id = _user_id(client, auth_headers)
         suffix = uuid.uuid4().hex[:8]
+        team_ids: dict[str, int] = {}
 
         async def _setup() -> dict:
             """Two teams with different values; read the effective profile."""
             org = await create_organization(name=f"Limits Org {suffix}", owner_user_id=None)
             low = await create_team(org_id=int(org["id"]), name=f"Low {suffix}")
             high = await create_team(org_id=int(org["id"]), name=f"High {suffix}")
+            team_ids["low"] = int(low["id"])
+            team_ids["high"] = int(high["id"])
             await add_team_member(team_id=int(low["id"]), user_id=user_id)
             await add_team_member(team_id=int(high["id"]), user_id=user_id)
             pool = await get_db_pool()
@@ -121,16 +138,28 @@ def test_profile_view_shows_most_generous_team_value(auth_headers: dict) -> None
             await repo.upsert_override(team_id=int(high["id"]), key="limits.workflows_runs_per_day", value=50, updated_by=None)
             return await UserProfileService(pool)._build_effective_config(user_id, include_sources=True, mask_secrets=False)
 
-        effective = asyncio.run(_setup())
-        assert effective["limits.workflows_runs_per_day"] == {"value": 50, "source": "team"}
+        async def _cleanup() -> None:
+            """Remove the team overrides and memberships this test created, through the same repos."""
+            pool = await get_db_pool()
+            repo = TeamProfileOverridesRepo(pool)
+            for team_id in team_ids.values():
+                await repo.delete_override(team_id=team_id, key="limits.workflows_runs_per_day")
+                await remove_team_member(team_id=team_id, user_id=user_id)
 
-        # These team overrides were written directly through the repo (there is
-        # no per-user key to invalidate), the same way the platform-admin
-        # team/org override endpoint writes them in production
-        # (admin_profiles_service.set_group_limit_override calls
-        # invalidate_all_quotas() right after its own repo upsert). Without this,
-        # the resolver's 60s cache -- already primed empty for this user by the
-        # _user_id() lookup above, before these teams/overrides existed -- would
-        # make the read below flake between a stale empty result and 50.
-        quota_resolver.invalidate_all()
-        assert asyncio.run(quota_resolver.user_quota(user_id, "limits.workflows_runs_per_day")) == 50
+        try:
+            effective = asyncio.run(_setup())
+            assert effective["limits.workflows_runs_per_day"] == {"value": 50, "source": "team"}
+
+            # These team overrides were written directly through the repo (there is
+            # no per-user key to invalidate), the same way the platform-admin
+            # team/org override endpoint writes them in production
+            # (admin_profiles_service.set_group_limit_override calls
+            # invalidate_all_quotas() right after its own repo upsert). Without this,
+            # the resolver's 60s cache -- already primed empty for this user by the
+            # _user_id() lookup above, before these teams/overrides existed -- would
+            # make the read below flake between a stale empty result and 50.
+            quota_resolver.invalidate_all()
+            assert asyncio.run(quota_resolver.user_quota(user_id, "limits.workflows_runs_per_day")) == 50
+        finally:
+            asyncio.run(_cleanup())
+            quota_resolver.invalidate_all()
