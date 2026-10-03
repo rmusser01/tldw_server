@@ -3,9 +3,10 @@ id: TASK-13417
 title: >-
   rg_route_map_lint loses ~188 routes when the policy loader loads before
   iter_served_routes
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-02 01:39'
+updated_date: '2026-10-03 01:42'
 labels:
   - ci
   - rate-limit
@@ -32,16 +33,32 @@ vs. calling iter_served_routes(app.routes) once before importing/using default_p
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The lint sees the same served routes regardless of call order
-- [ ] #2 A test fails if the lint's route set differs from iter_served_routes on a fresh app
+- [x] #1 The lint sees the same served routes regardless of call order
+- [x] #2 A test fails if the lint's route set differs from iter_served_routes on a fresh app
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Root cause was import order, not the FastAPI route cache: rg_route_map_lint.main() imported policy_loader before load_app(), which imports core/config.py. Outside pytest that module caches the real config.txt at import, so load_app()'s TLDW_CONFIG_FILE copy was ignored and all 188 routes of default-off routers (benchmarks, connectors, personalization, audiobooks, slack, sandbox, ...) never mounted. Under pytest the config import is lazy, so CI never saw it; the 'iter_served_routes first' observation was a red herring.
+Fix: route_auth_ratchet.load_app() calls config.clear_config_cache() when config is already imported, so the built app does not depend on what the caller imported first.
+Lint setup moved into load_inputs(). New test test_lint_sees_the_routes_a_fresh_app_serves compares it with a fresh load_app() in subprocesses with the pytest markers dropped; the shipped-map test runs the same way.
+Removed the by_path allowlist entries for /api/v1/benchmarks*, /api/v1/connectors* and /api/v1/personalization*. The lint is clean at 2878 routes with no new findings. Lint tests: 20 passed. Bandit: CI helper and test only; scoped run not needed. No docs affected.
+Side fix in the same PR: test_rg_metrics_redis_backend used a fixed namespace against the local real Redis and flaked on back-to-back runs; it now uses a uuid namespace.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The RG route_map lint now sees the same 2878 served routes however it is invoked: load_app() clears config.py's import-time cache before building the app. A test compares the lint's route set with a fresh load_app() outside pytest's lazy-config mode, and the three allowlist entries that only existed because routes were invisible are gone.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
