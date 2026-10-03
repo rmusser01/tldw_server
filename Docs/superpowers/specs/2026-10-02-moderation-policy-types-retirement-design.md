@@ -129,7 +129,10 @@ In `policy_evaluator.py`:
 - remove the now-unused `functools.lru_cache` import
 - replace runtime `PatternRule` selection with `_PatternRule`
 - construct every evaluator result with `_ModerationEvaluationResult`
-- retain the existing `TYPE_CHECKING` imports and private runtime aliases
+- retain the existing `TYPE_CHECKING` imports
+- retain the private runtime aliases used by evaluator operations
+  (`_PatternRule` and `_ModerationEvaluationResult`), and remove the now-unused
+  `_ModerationPolicy` runtime import with the hook
 
 Evaluation, redaction, snippet, scan, match, and count paths remain literal
 apart from canonical class selection. No helper dispatch or algorithm changes
