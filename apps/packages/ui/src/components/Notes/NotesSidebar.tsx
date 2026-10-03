@@ -116,6 +116,7 @@ export interface NotesSidebarProps {
   conversationLabelById: Record<string, string>
   importSubmitting: boolean
   exportProgress: ExportProgressState | null
+  cancelExport?: () => void
 
   // Callbacks - sidebar controls
   setMobileSidebarOpen: (open: boolean) => void
@@ -249,6 +250,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   conversationLabelById,
   importSubmitting,
   exportProgress,
+  cancelExport,
 
   // Callbacks - sidebar controls
   setMobileSidebarOpen,
@@ -1315,6 +1317,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 onSyncFolder={onSyncFolder}
                 importInProgress={importSubmitting}
                 exportProgress={exportProgress}
+                onCancelExport={cancelExport}
               />
             )}
           </div>
