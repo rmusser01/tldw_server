@@ -35,6 +35,8 @@ Only the handle that inserted a durable daily-ledger row owns its downward settl
 
 Completion concurrency uses the governor's existing `jobs` lease category. DB-backed Billing limit reads use the admission transaction connection, never a nested pool acquisition. Pre-dispatch cleanup attempts governor release even if durable storage is unavailable. Local release/dispatch markers make those boundaries mutually exclusive, and the durable state fence prevents refunds after dispatch begins. Failed release cannot authorize later dispatch on a refunded governor handle.
 
+Hosted subscription limits apply only when the usage-quota master switch is enabled and a Billing repository is wired, following the host's Billing activation contract. OSS or inactive hosted Billing does not impose implicit free-plan limits. Explicit MCP operator bounds and durable usage/reservation recording remain mandatory for this certified execution path. Activation failures still fail closed rather than impersonating an inactive deployment.
+
 The per-scope lock coordinates MCP admission and settlement, not legacy Chat calls that do not adopt this protocol. Operator pricing is captured by value; stored accounting excludes prompt, output, credentials, arbitrary metadata, and raw provider usage.
 
 The canonical usage row determines which completed calls and billing period are counted. Its legacy floating-point USD columns remain compatible, but strict MCP cost enforcement reads the exact integer actual cost from the reservation audit row committed in the same transaction. A missing or inconsistent settlement fails closed instead of reconstructing MCP costs from lossy floats.
