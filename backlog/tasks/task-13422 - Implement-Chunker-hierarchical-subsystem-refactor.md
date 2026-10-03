@@ -13,6 +13,7 @@ priority: high
 references:
 - TASK-13421
 - backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md
+- https://github.com/rmusser01/tldw_server/pull/3095
 documentation:
 - Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
 - Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md
@@ -24,7 +25,7 @@ modified_files:
 - tldw_Server_API/tests/Chunking/
 - Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
 - Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md
-updated_date: 2026-10-03 02:11
+updated_date: 2026-10-03 02:15
 ---
 
 ## Description
@@ -89,12 +90,13 @@ b38c0cd74816d78d80d72faed2ae07dc134d8e7c refactor: extract hierarchical flatteni
 ae72a4702f1baeeac70f5abb35ec512f769a0152 refactor: clarify hierarchical span annotations
 
 Final changed-file inventory: hierarchy package __init__/models/spans/leaves/builder/grouping/flatten/service; public chunker.py; process_text/models.py and dispatch.py; frozen hierarchy/malformed/spans/leaves/builder/grouping/flatten contracts plus narrow process_text component seam migration; approved spec/plan and historical tracking reconciliation provenance. This final pass touches only Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md and backlog/tasks/task-13422 - Implement-Chunker-hierarchical-subsystem-refactor.md. No final behavior correction. Prior b8d015c582 restores exact baseline envelope after extraction regression, not baseline defect correction.
+2026-10-02 Step10 handoff: pushed codex/chunker-hierarchical-refactor-design and created draft PR #3095 against dev: https://github.com/rmusser01/tldw_server/pull/3095. PR includes module/compatibility rationale, focused348pass1skip/full777pass1skip, compile/Ruff/Black/mypy/Bandit evidence, spec/plan links, and explicit human-written Change summary merge blocker. App artifact attached. Code at ae72a4702 and final docs evidence at5225c7fcf; controller independently reran full tests777pass1skip1963warnings48.76s and all static/security checks, Bandit0findings/errors2822LOC. Final specification and quality reviews approved with no remaining actionable code findings. Task stays In Progress; AC6human gate remains unchecked. Historical colliding task records remain preserved pending requester's scoped archive preference, unrelated upstream records untouched. Worktree retained for review; no merge performed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Technical implementation and independent SPEC/QUALITY review complete; PR/human summary gates remain open. Extracted hierarchy into passive models/protocols, shared span detection, leaf construction, tree builder, low-level grouping, flatten traversal, and coordination service. Chunker retains exact public signatures and public flat composition; process-text imports shared spans directly, removing the private ownership seam. Boundaries reduce duplicate implementation and make ownership mechanically testable while preserving exact observed offsets, calls, malformed-input behavior, aliasing, and exception handling. Type cleanup is annotation-only with identity cast/local rename. Separate b8d015c582 restored the seven-key envelope after an extraction regression; no baseline behavior correction or final code changes. Reviewed code head ae72a4702f1baeeac70f5abb35ec512f769a0152 against pinned origin/dev86e287fee7bfa1a1588639232e35db3666851ded: focused348pass/1optional skip; controller full777pass/1optionalPyThaiNLPskip/1963warnings48.76s; AST24pass;compile/Ruff/Black pass;mypy0issues7files;Bandit0findings0errors2822LOC;diffcheckclean. Evidence paths and commit history in notes/plan. Final Step9 is documentation-only. MERGE BLOCKER: human requester must author their own Change summary explaining what changed and why these boundaries/compatibility choices were chosen; this AI technical summary does not satisfy that gate. Step10 draftPR against dev is pending controller; historical archive exception awaits user answer and controller handling. TASK-13422 remains In Progress;AC6 and overallDoD1 unchecked.
+Implemented the approved compatibility-first hierarchy decomposition into passive models/protocols, shared spans, leaf construction, tree building, grouping, flatten traversal, and live-context service coordination. Chunker retains its public signatures and flat composition; process_text uses the shared span function directly. Focused boundaries and direct contracts improve reviewability without changing observed offsets, option precedence, call multiplicity, exception/logging behavior, malformed-input handling, or shallow identities. Type cleanup uses localized annotations, an identity cast and a local rename; b8d015c582 restores the baseline envelope after an extraction regression, not a baseline behavior correction. Both final whole-branch reviews approved. Focused348passed/1optional skip; full777passed/1PyThaiNLPskip; compileall/Ruff/scopedBlack/mypy pass; Bandit0findings/0errors2822LOC; diff checks clean. Draft PR #3095 is open against dev: https://github.com/rmusser01/tldw_server/pull/3095. Worktree preserved. MERGE BLOCKER: the human requester must write their own Change summary explaining what changed and why these boundaries and compatibility choices were selected; this AI technical summary does not satisfy that gate. Task remains In Progress with AC6/overallDoD1 open. Historical colliding records are preserved pending the requester's scoped archive preference; unrelated upstream records untouched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

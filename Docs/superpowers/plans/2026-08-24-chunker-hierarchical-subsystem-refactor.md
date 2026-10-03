@@ -1340,7 +1340,7 @@ Step 10 draft PR against dev remains controller-owned and pending. Historical
 record archive exception still awaits the user's answer; old records are
 controller-owned and untouched. No push, PR, rebase, or archive in this pass.
 
-- [ ] **Step 10: Push and prepare the PR against `dev`**
+- [x] **Step 10: Push and prepare the PR against `dev`**
 
 Use `superpowers:finishing-a-development-branch`. Push the implementation branch, create the PR against `dev`, and include:
 
@@ -1353,6 +1353,15 @@ Use `superpowers:finishing-a-development-branch`. Push the implementation branch
 - an explicit merge blocker stating that the human requester must write the required `Change summary` in their own words, explaining both what changed and why these boundaries and compatibility choices were selected.
 
 Do not mark `TASK-13422` Done or the PR merge-ready until that human-written summary exists and all acceptance criteria are checked.
+
+Handoff (2026-10-02): draft PR [#3095](https://github.com/rmusser01/tldw_server/pull/3095)
+is open against `dev` from `codex/chunker-hierarchical-refactor-design` and attached
+to the chat. Both final reviews approved the implementation. The controller's
+fresh full suite passed with 777 passed, 1 established PyThaiNLP skip, and 1,963
+warnings; Ruff, scoped Black, compileall, mypy, Bandit, and diff checks passed.
+The worktree is retained. `TASK-13422` remains In Progress with the human-written
+`Change summary` merge gate open. Historical task archiving awaits the explicit
+preference requested in this chat; no unrelated record was changed.
 
 ## Behavior-Correction Stop Rule
 
@@ -1380,4 +1389,4 @@ If any step cannot be satisfied, document the finding and defer it without chang
 - [x] AST dependency rules pass and no dormant duplicate hierarchy body remains.
 - [x] Full Chunking suite and all static/security gates recorded.
 - [x] Final review findings validated and addressed (SPEC/QUALITY approved; no actionable findings).
-- [ ] PR targets `dev`; human-written `Change summary` merge gate remains explicit.
+- [x] PR targets `dev`; human-written `Change summary` merge gate remains explicit.
