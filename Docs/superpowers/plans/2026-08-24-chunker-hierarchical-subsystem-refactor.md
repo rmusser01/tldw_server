@@ -1123,7 +1123,7 @@ for Task 8, later reviews, and the human PR Change summary. No Task 8 work done.
 - Update `TASK-13422` through Backlog MCP.
 - Update this plan's checkboxes as tasks complete.
 
-- [ ] **Step 1: Remove stale imports and verify ownership mechanically**
+- [x] **Step 1: Remove stale imports and verify ownership mechanically**
 
 Run:
 
@@ -1134,18 +1134,20 @@ rg -n "from .*Chunking\.chunker|import .*Chunking\.chunker|from .*process_text|i
 
 Expected:
 
-- no production definition or call remains for either removed private helper;
+- no production definition or call remains for `_compute_paragraph_spans` or the
+  removed `Chunker._extract_header_title` method; the builder-owned private
+  `_extract_header_title` function remains as required by Task 5 and the spec;
 - references in tests exist only in explicit absence assertions;
 - no hierarchy module imports or names `Chunker` or `process_text`;
 - `leaves.py` and `grouping.py` contain no service/builder/flatten imports.
 
 Run the AST dependency tests after cleanup.
 
-- [ ] **Step 2: Run focused hierarchy tests**
+- [x] **Step 2: Run focused hierarchy tests**
 
 Run the exact Task 7 focused command again. Expected: all pass.
 
-- [ ] **Step 3: Run the complete Chunking suite**
+- [x] **Step 3: Run the complete Chunking suite**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1154,7 +1156,7 @@ python -m pytest tldw_Server_API/tests/Chunking -q
 
 Expected: all tests pass with only established skips. Investigate and record any unrelated failure before proceeding.
 
-- [ ] **Step 4: Compile touched production and test modules**
+- [x] **Step 4: Compile touched production and test modules**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1174,7 +1176,7 @@ python -m compileall -q \
 
 Expected: exit code `0` with no syntax errors.
 
-- [ ] **Step 5: Run Ruff and scoped Black**
+- [x] **Step 5: Run Ruff and scoped Black**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1204,7 +1206,7 @@ python -m black --check \
 
 Expected: both commands exit `0`. Do not run Black across legacy `chunker.py`, existing `process_text` modules, or existing tests.
 
-- [ ] **Step 6: Run informational mypy on the new package**
+- [x] **Step 6: Run informational mypy on the new package**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1213,7 +1215,7 @@ python -m mypy tldw_Server_API/app/core/Chunking/hierarchical
 
 Fix hierarchy-local type errors that can be corrected without changing runtime behavior. Record exact residual output in `TASK-13422`; do not add broad suppressions and do not treat the five known `process_text` baseline errors as part of this scope.
 
-- [ ] **Step 7: Run Bandit on touched production code**
+- [x] **Step 7: Run Bandit on touched production code**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1222,10 +1224,50 @@ python -m bandit -r \
   tldw_Server_API/app/core/Chunking/chunker.py \
   tldw_Server_API/app/core/Chunking/process_text/models.py \
   tldw_Server_API/app/core/Chunking/process_text/dispatch.py \
-  -f json -o /tmp/bandit_task_13215.json
+  -f json -o /tmp/bandit_task_13422.json
 ```
 
-Expected: no new findings in touched code. Inspect `/tmp/bandit_task_13215.json` and record the issue count and severity summary in `TASK-13422`.
+Expected: no new findings in touched code. Inspect `/tmp/bandit_task_13422.json` and record the issue count and severity summary in `TASK-13422`.
+
+Task 8 preflight evidence (2026-10-02, starting HEAD `b38c0cd748`): Steps 1-7
+verified in the normal sandbox with the shared project virtual environment.
+Fresh mypy RED found 13 hierarchy-local errors in spans/grouping/flatten
+(`/tmp/task13422_mypy_red.txt`). Narrow cleanup renames the template-rule local,
+uses an identity `cast(int, code_fence_start)` only in the existing exceptional
+append, and annotates dynamic dictionary text/metadata/config/weight locals as
+`Any`. No guards, coercions, suppressions, exception changes, or behavior
+corrections were added. Rationale was recorded in TASK-13422 before production
+edits. Existing malformed-value contracts remain unchanged.
+
+Fresh gates: exact 14-file suite **348 passed, 1 established PyThaiNLP skip,
+711 warnings, 3.08s** (`/tmp/task13422_preflight_focused.txt`); complete Chunking
+suite **777 passed, 1 established PyThaiNLP skip, 1963 warnings, 47.84s**
+(`/tmp/task13422_preflight_full.txt`); separate AST import/dependency selection
+**24 passed, 47 deselected, 60 warnings, 1.17s**
+(`/tmp/task13422_preflight_ast.txt`). Compileall and exact Ruff exit 0; scoped
+Black exits 0, 15 files unchanged. Exact informational mypy exits 0:
+`Success: no issues found in 7 source files` (`/tmp/task13422_mypy_green.txt`).
+Known process_text baseline errors are outside this command/scope and untouched.
+Bandit JSON inspected: **0 findings, 0 errors, all severity and confidence
+counts 0, 2822 LOC, 0 nosec, 0 skipped tests** (`/tmp/bandit_task_13422.json`).
+Existing configuration/deprecation warning output remains; no token-cache
+workaround, dependency installation, or new skip.
+
+Ownership/self-review: no hierarchy outer-owner imports; private span helper
+absent; header-title helper exists only in its spec-required builder owner.
+Normalized AST comparison with preflight HEAD is identical for all three cleaned
+modules after removing annotations, undoing the local rename, and unwrapping
+the identity cast. Public wrapper argument ASTs and flat-composition AST are
+unchanged from pinned origin/dev; package helper is byte-identical. No dormant
+legacy hierarchy body or broad formatting churn. Branch and working-tree
+`git diff --check` pass. Preflight edits are limited to these three production
+modules, this plan, and current TASK-13422. Historical tracking files visible
+in the cumulative branch diff remain controller-owned and untouched here.
+
+Steps 8-10 remain pending final independent specification/quality reviews,
+the separate Step 9 evidence pass, and controller-owned PR handoff. TASK-13422
+remains In Progress; the human-written Change summary merge gate remains open.
+The incremental annotation/evidence commit is not the final Step 9 commit.
 
 - [ ] **Step 8: Review the final diff and repository checks**
 
@@ -1291,12 +1333,12 @@ If any step cannot be satisfied, document the finding and defer it without chang
 
 - [x] Reconciled current `origin/dev` baseline recorded before production edits.
 - [x] Frozen public/malformed/identity/call/log/span characterizations pass.
-- [ ] Shared models and spans extracted; process protocol/private span seam removed.
-- [ ] Leaves extracted with exact call multiplicity and offset fallback behavior.
-- [ ] Builder/service extracted; private header-title seam removed.
-- [ ] Grouping and flattening extracted with current malformed and aliasing behavior.
-- [ ] Public signatures, public flat composition, and package helper remain compatible.
-- [ ] AST dependency rules pass and no dormant duplicate hierarchy body remains.
-- [ ] Full Chunking suite and all static/security gates recorded.
+- [x] Shared models and spans extracted; process protocol/private span seam removed.
+- [x] Leaves extracted with exact call multiplicity and offset fallback behavior.
+- [x] Builder/service extracted; private header-title seam removed.
+- [x] Grouping and flattening extracted with current malformed and aliasing behavior.
+- [x] Public signatures, public flat composition, and package helper remain compatible.
+- [x] AST dependency rules pass and no dormant duplicate hierarchy body remains.
+- [x] Full Chunking suite and all static/security gates recorded.
 - [ ] Final review findings validated and addressed.
 - [ ] PR targets `dev`; human-written `Change summary` merge gate remains explicit.
