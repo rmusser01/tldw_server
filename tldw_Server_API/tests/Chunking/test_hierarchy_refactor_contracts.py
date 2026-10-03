@@ -406,6 +406,53 @@ def test_sanitize_output_truthiness_is_evaluated_before_method_resolution(
     assert events == ["truthiness", "resolve"]
 
 
+def test_hierarchy_tree_uses_call_time_leaf_builder_with_resolved_call_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+    nested = {"items": []}
+    sentinel_block = {"kind": "sentinel", "children": []}
+    calls: list[tuple[Any, Any, Any, Any]] = []
+    _patch_single_block(monkeypatch, chunker, resolved_method="fixed_size")
+
+    def fake_build_leaf_block(
+        context: Any,
+        texts: Any,
+        span: Any,
+        options: Any,
+    ) -> dict[str, Any]:
+        calls.append((context, texts, span, options))
+        return sentinel_block
+
+    monkeypatch.setattr(chunker_module, "build_leaf_block", fake_build_leaf_block)
+
+    tree = chunker.chunk_text_hierarchical_tree(
+        "raw",
+        method="fixed_size",
+        max_size=7,
+        overlap=2,
+        language="de",
+        method_options={"sanitize_output": False, "nested": nested},
+    )
+
+    assert len(calls) == 1
+    context, texts, span, options = calls[0]
+    assert context is chunker
+    assert texts == HierarchyTextViews(original="raw", sanitized="raw", output="raw")
+    assert span == (0, 3, "paragraph")
+    assert options == ResolvedHierarchyOptions(
+        method="fixed_size",
+        max_size=7,
+        overlap=2,
+        language="de",
+        method_options={"nested": nested},
+        sanitize_output=False,
+    )
+    assert options.method_options["nested"] is nested
+    assert tree["root"]["children"][0]["children"] == [sentinel_block]
+    assert tree["root"]["children"][0]["children"][0] is sentinel_block
+
+
 @pytest.mark.parametrize("method", ["words", "sentences", "tokens"])
 def test_metadata_leaf_methods_call_metadata_once_on_success(
     monkeypatch: pytest.MonkeyPatch,
