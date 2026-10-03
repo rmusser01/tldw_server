@@ -594,7 +594,13 @@ async def _monthly_minutes_exhausted(user_id: int, monthly_limit: float | None, 
     """True when this request would take the user past their calendar-month (UTC) minutes."""
     if monthly_limit is None:
         return False
-    used_seconds = await ledger_used_this_month(str(int(user_id)), "minutes")
+    try:
+        used_seconds = await ledger_used_this_month(str(int(user_id)), "minutes")
+    except Exception:  # noqa: BLE001 - a counter failure must not block requests (spec 2 §2)
+        logger.opt(exception=True).warning(
+            "Audio monthly-minutes counter failed for user_id={}; treating month as not exhausted", user_id
+        )
+        return False
     return used_seconds + _audio_minutes_units(minutes_requested) > _audio_minutes_units(float(monthly_limit))
 
 
