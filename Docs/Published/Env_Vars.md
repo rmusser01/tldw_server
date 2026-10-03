@@ -323,6 +323,7 @@ Usage quotas are per-user budgets, **off by default**: a stock install, single-u
 - Not quotas (unchanged): per-file upload size caps, character-chat count caps, per-minute rates. Synchronous concurrency (media ingest requests, audio streams, direct transcription) is not limited per user.
 - Billing-plan limits additionally need a billing repository (hosted product only); without one, billing checks never run. A wired repository with the switch off logs a warning once, at startup.
 - Operators on `RG_POLICY_STORE=db` whose stored `evals.*` policies carry a `daily_cap` keep that cap until they remove it from the stored policy; evaluation daily caps now come from `limits.evaluations_per_day` / `limits.evaluation_tokens_per_day`.
+- `WORKFLOWS_DISABLE_QUOTAS` and `CHATBOOKS_DISABLE_QUOTAS` (`true|1`): per-module escape hatches that turn off the workflows and chatbooks quota checks respectively, even with the master switch (`USAGE_QUOTAS_ENABLED`) on. `WORKFLOWS_DISABLE_QUOTAS` is read inside `quota_checks.workflows_runs_decision`, so it covers both the `/workflows` endpoint's daily-cap check and the scheduler's direct call for scheduled runs. `CHATBOOKS_DISABLE_QUOTAS` is read by `Chatbooks.quota_manager.QuotaManager`, covering exports/day, imports/day, and concurrent-jobs admission.
 
 ## Resource Governor (Unified Rate Limiting)
 

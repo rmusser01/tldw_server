@@ -189,10 +189,9 @@ policies:
     scopes: [user, api_key]
 
   # Workflows (ad-hoc runs, schedules, admin).
-  # Ingress limits bound request rate, while `workflows_runs.daily_cap`
-  # integrates with the Workflows daily ledger/RG helpers to enforce a
-  # durable per-user daily runs cap. The default cap (1000) aligns with
-  # the WORKFLOWS_QUOTA_DAILY_PER_USER env fallback used by the API.
+  # This block bounds request rate only. The durable per-user daily runs
+  # cap is `limits.workflows_runs_per_day` (spec 2), enforced by
+  # quota_checks.workflows_runs_decision, not by this RG policy.
   workflows.default:
     requests: { rpm: 300, burst: 2.0 }
     scopes: [user, api_key]
