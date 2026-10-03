@@ -931,21 +931,7 @@ class APIKeyManager:
                     return None
 
             if record_usage:
-                # Update usage statistics
-                await self._update_usage(key_info['id'], ip_address)
-
-                # Optional lightweight audit of usage
-                try:
-                    if self.settings.API_KEY_AUDIT_LOG_USAGE:
-                        await self._log_action(
-                            key_info['id'],
-                            "used",
-                            key_info.get('user_id'),
-                            details=usage_details,
-                        )
-                except Exception as _e:
-                    # Do not fail request on audit write
-                    logger.debug(f"API key usage audit skipped/failed: {_e}")
+                await self.record_key_usage(key_info['id'], key_info.get('user_id'), ip_address, usage_details)
 
             return key_info
 
@@ -1222,6 +1208,21 @@ class APIKeyManager:
         """
         key_scopes = normalize_scope(key_scope)
         return has_scope(key_scopes, required_scope)
+
+    async def record_key_usage(
+        self,
+        key_id: int,
+        user_id: Optional[int] = None,
+        ip_address: Optional[str] = None,
+        usage_details: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Update a key's usage statistics and, with API_KEY_AUDIT_LOG_USAGE, write a "used" audit row."""
+        await self._update_usage(key_id, ip_address)
+        try:
+            if self.settings.API_KEY_AUDIT_LOG_USAGE:
+                await self._log_action(key_id, "used", user_id, details=usage_details)
+        except Exception as _e:  # noqa: BLE001 - do not fail the request on an audit write
+            logger.debug(f"API key usage audit skipped/failed: {_e}")
 
     async def _update_usage(self, key_id: int, ip_address: Optional[str] = None) -> None:
         """Update usage statistics for a key"""
