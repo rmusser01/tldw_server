@@ -21,3 +21,11 @@ def test_stock_evaluation_policies_have_no_daily_caps() -> None:
         if isinstance(spec, dict) and "daily_cap" in spec
     ]
     assert offenders == []
+
+
+def test_stock_policies_carry_no_usage_quota_categories() -> None:
+    """Media, audio and workflow quotas moved to limits.*; the stock RG policy keeps only rates."""
+    policies = yaml.safe_load(_POLICIES.read_text())["policies"]
+    assert not {"jobs", "ingestion_bytes"} & set(policies["media.default"])
+    assert not {"streams", "jobs", "minutes"} & set(policies["audio.default"])
+    assert "workflows_runs" not in policies["workflows.default"]

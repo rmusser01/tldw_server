@@ -109,14 +109,12 @@ policies:
     scopes: [service]
     fail_mode: fallback_memory
 
-  # Audio: concurrency via streams + durable minutes cap
+  # Audio: request-rate safety net only.
   audio.default:
     # Allow reasonable request rate so informational GETs (status/limits)
-    # are not denied by middleware. Concurrency/minutes are enforced separately.
+    # are not denied by middleware. Per-user audio minutes and queued-job
+    # concurrency are UserProfiles limits.* values (spec 2).
     requests: { rpm: 300, burst: 2.0 }
-    streams: { max_concurrent: 2, ttl_sec: 90 }
-    jobs:    { max_concurrent: 2, ttl_sec: 600 }
-    minutes: { daily_cap: 120, rounding: ceil }
     scopes: [user, api_key, ip]
     fail_mode: fail_closed
 
@@ -197,7 +195,6 @@ policies:
   # the WORKFLOWS_QUOTA_DAILY_PER_USER env fallback used by the API.
   workflows.default:
     requests: { rpm: 300, burst: 2.0 }
-    workflows_runs: { daily_cap: 1000 }
     scopes: [user, api_key]
 
   # Prompt Studio API (projects/prompts/tests/optimization).
@@ -224,8 +221,6 @@ policies:
   # concurrent ingestion workflows in development.
   media.default:
     requests: { rpm: 600, burst: 1.2 }
-    jobs: { max_concurrent: 2, ttl_sec: 1800 }
-    ingestion_bytes: { daily_cap: 2147483648 }
     scopes: [user, api_key]
 
   # Media access endpoints (listing, item retrieval, file download).
