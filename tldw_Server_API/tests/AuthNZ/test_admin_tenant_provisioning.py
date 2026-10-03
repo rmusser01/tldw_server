@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipAuthority,
     MembershipAuthorizationError,
     MembershipTargetNotFound,
+    MembershipWriterContractError,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
@@ -105,6 +106,21 @@ class TestProvisionEndpointUnit:
     """Unit tests for the provision_tenant endpoint logic using mocks."""
 
     @pytest.mark.asyncio
+    async def test_core_rejects_non_owner_role_before_database_work(self):
+        pool = MagicMock(pool=None)
+        with pytest.raises(MembershipWriterContractError):
+            await tenant_provisioning.provision_tenant(
+                pool,
+                actor_user_id=1,
+                username="tenant_user",
+                email="tenant@example.com",
+                password_hash="hash",
+                org_name="TenantOrg",
+                role="member",
+            )
+        pool.transaction.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_provision_calls_steps(self):
         """Verify the endpoint function orchestrates user+org+member creation."""
         from tldw_Server_API.app.api.v1.endpoints.admin import admin_tenant_provisioning
@@ -120,16 +136,16 @@ class TestProvisionEndpointUnit:
         # Build mock connection & pool
         lookup_cursor = AsyncMock()
         lookup_cursor.fetchone = AsyncMock(return_value=None)
-        user_cursor = AsyncMock(lastrowid=42, rowcount=1)
         org_cursor = AsyncMock(lastrowid=10, rowcount=1)
         repo = AsyncMock()
         creation_writer = AsyncMock()
+        gateway = AsyncMock()
+        gateway.insert_user.return_value = SimpleNamespace(affected_user_ids=(42,))
 
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(
             side_effect=[
                 lookup_cursor,
-                user_cursor,
                 org_cursor,
             ]
         )
@@ -153,14 +169,21 @@ class TestProvisionEndpointUnit:
                 return_value=mock_pw_svc,
             ),
             patch.object(
-                admin_tenant_provisioning,
-                "AuthnzOrgsTeamsRepo",
-                return_value=repo,
+                tenant_provisioning,
+                "VersionedUserWriteGateway",
+                return_value=gateway,
             ),
             patch.object(
-                admin_tenant_provisioning,
+                tenant_provisioning,
+                "AuthnzOrgsTeamsRepo",
+                return_value=repo,
+                create=True,
+            ),
+            patch.object(
+                tenant_provisioning,
                 "MembershipWriter",
                 return_value=creation_writer,
+                create=True,
             ),
         ):
             result = await admin_tenant_provisioning.provision_tenant(
@@ -221,14 +244,16 @@ class TestProvisionEndpointUnit:
                 return_value=gateway,
             ) as gateway_type,
             patch.object(
-                admin_tenant_provisioning,
+                tenant_provisioning,
                 "AuthnzOrgsTeamsRepo",
                 return_value=repo,
+                create=True,
             ),
             patch.object(
-                admin_tenant_provisioning,
+                tenant_provisioning,
                 "MembershipWriter",
                 return_value=creation_writer,
+                create=True,
             ),
         ):
             password_service.return_value.hash_password.return_value = "hashed"
@@ -277,7 +302,7 @@ class TestProvisionEndpointUnit:
         repo = AsyncMock()
         creation_writer = AsyncMock()
         monkeypatch.setattr(
-            admin_tenant_provisioning,
+            tenant_provisioning,
             "AuthnzOrgsTeamsRepo",
             MagicMock(return_value=repo),
             raising=False,
@@ -293,12 +318,12 @@ class TestProvisionEndpointUnit:
                 "tldw_Server_API.app.core.AuthNZ.password_service.get_password_service"
             ) as password_service,
             patch.object(
-                admin_tenant_provisioning,
+                tenant_provisioning,
                 "VersionedUserWriteGateway",
                 return_value=gateway,
             ),
             patch.object(
-                admin_tenant_provisioning,
+                tenant_provisioning,
                 "MembershipWriter",
                 return_value=creation_writer,
                 create=True,
@@ -333,6 +358,7 @@ class TestProvisionEndpointUnit:
         assert kwargs["team_role"] is None
         assert kwargs["team_failure_is_best_effort"] is False
         assert isinstance(kwargs["operation_time"], datetime)
+        assert kwargs["operation_time"].utcoffset().total_seconds() == 0
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -375,17 +401,18 @@ class TestProvisionEndpointUnit:
                 "tldw_Server_API.app.core.AuthNZ.password_service.get_password_service"
             ) as password_service,
             patch.object(
-                admin_tenant_provisioning,
+                tenant_provisioning,
                 "VersionedUserWriteGateway",
                 return_value=gateway,
             ),
             patch.object(
-                admin_tenant_provisioning,
+                tenant_provisioning,
                 "AuthnzOrgsTeamsRepo",
                 return_value=repo,
+                create=True,
             ),
             patch.object(
-                admin_tenant_provisioning,
+                tenant_provisioning,
                 "MembershipWriter",
                 return_value=creation_writer,
                 create=True,
@@ -464,14 +491,16 @@ class TestProvisionEndpointUnit:
                 return_value=gateway,
             ),
             patch.object(
-                admin_tenant_provisioning,
+                tenant_provisioning,
                 "AuthnzOrgsTeamsRepo",
                 return_value=repo,
+                create=True,
             ),
             patch.object(
-                admin_tenant_provisioning,
+                tenant_provisioning,
                 "MembershipWriter",
                 return_value=creation_writer,
+                create=True,
             ),
         ):
             password_service.return_value.hash_password.return_value = "hashed"
@@ -551,10 +580,16 @@ class TestProvisionEndpointUnit:
             org_name="TenantOrg",
         )
 
-        with patch(
-            "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
-            new_callable=AsyncMock,
-            return_value=_BusyPool(),
+        with (
+            patch(
+                "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
+                new_callable=AsyncMock,
+                return_value=_BusyPool(),
+            ),
+            patch(
+                "tldw_Server_API.app.core.AuthNZ.password_service.get_password_service",
+                return_value=SimpleNamespace(hash_password=lambda _value: "hash"),
+            ),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await admin_tenant_provisioning.provision_tenant(

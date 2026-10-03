@@ -36,57 +36,6 @@ async def _execute_membership_fixture_sql(test_db_pool, query: str, *args) -> No
         )
 
 
-async def _insert_postgres_user(
-    test_db_pool,
-    *,
-    username: str,
-    email: str,
-    password_hash: str,
-    role: str = "user",
-    is_superuser: bool = False,
-) -> int:
-    from tldw_Server_API.app.core.AuthNZ.profile_version import (
-        VersionedUserWriteGateway,
-    )
-
-    async with test_db_pool.transaction() as conn:
-        result = await VersionedUserWriteGateway("postgres").insert_user(
-            conn,
-            values={
-                "uuid": str(uuid.uuid4()),
-                "username": username,
-                "email": email,
-                "password_hash": password_hash,
-                "role": role,
-                "is_active": True,
-                "is_verified": True,
-                "is_superuser": is_superuser,
-                "storage_quota_mb": 5120,
-            },
-        )
-    return result.affected_user_ids[0]
-
-
-async def _set_postgres_user_active(
-    test_db_pool,
-    *,
-    user_id: int,
-    value: bool | None,
-) -> None:
-    from tldw_Server_API.app.core.AuthNZ.profile_version import (
-        VersionedUserWriteGateway,
-    )
-
-    async with test_db_pool.transaction() as conn:
-        await VersionedUserWriteGateway("postgres").execute_update(
-            conn,
-            user_id=user_id,
-            profile_visible_fields=("is_active",),
-            statement="UPDATE public.users SET is_active = $1 WHERE id = $2",
-            parameters=(value, user_id),
-        )
-
-
 class _PostgresMutationConnectionGate:
     def __init__(self, connection, owner: "_PostgresMutationGatePool") -> None:
         self.connection = connection
