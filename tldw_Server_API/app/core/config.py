@@ -923,6 +923,26 @@ openai_tts_mappings = {
 
 
 # --- Helper Function (Optional but can keep dictionary creation clean) ---
+def _load_claims_review_metrics_settings(parser: configparser.ConfigParser | None) -> dict[str, Any]:
+    """Load Claims production flags while leaving numeric bounds to consumers."""
+    defaults = {
+        "CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED": "false",
+        "CLAIMS_REVIEW_METRICS_INTERVAL_SEC": "86400",
+        "CLAIMS_REVIEW_METRICS_LOOKBACK_DAYS": "2",
+        "CLAIMS_REVIEW_METRICS_JOBS_ENABLED": "false",
+        "CLAIMS_JOBS_ENABLED": "false",
+        "CLAIMS_JOBS_QUEUE": "default",
+        "CLAIMS_JOBS_MAX_RETRIES_REVIEW_METRICS": "3",
+    }
+    resolved: dict[str, Any] = {}
+    for key, default in defaults.items():
+        raw = os.getenv(key)
+        if raw is None:
+            raw = parser.get("ClaimsMonitoring", key, raw=True, fallback=default) if parser else default
+        resolved[key] = is_truthy(raw) if key.endswith("_ENABLED") else raw
+    return resolved
+
+
 def load_settings():
     """
     Assembles application configuration from environment variables and configuration files into a single mapping.
@@ -1826,6 +1846,7 @@ def load_settings():
         "CLAIMS_REBUILD_POLICY": os.getenv("CLAIMS_REBUILD_POLICY", "missing"),
         "CLAIMS_STALE_DAYS": int(os.getenv("CLAIMS_STALE_DAYS", "7")),
 
+        **_load_claims_review_metrics_settings(load_comprehensive_config()),
         # Claims monitoring (alerts/config)
         **(lambda: (
             (lambda _cp, _env: (

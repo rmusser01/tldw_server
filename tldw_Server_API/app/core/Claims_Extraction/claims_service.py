@@ -3211,6 +3211,11 @@ def aggregate_claims_review_extractor_metrics_daily(
     report_date: str | None = None,
     lookback_days: int | None = None,
 ) -> int:
+    """Resolve legacy date arguments and delegate to explicit window aggregation."""
+    from tldw_Server_API.app.core.Claims_Extraction.claims_review_metrics import (
+        aggregate_claims_review_metrics_window,
+    )
+
     if db.backend_type == BackendType.POSTGRESQL and not target_user_id:
         logger.debug("Claims review metrics aggregation skipped: missing target_user_id for Postgres")
         return 0
@@ -3224,138 +3229,19 @@ def aggregate_claims_review_extractor_metrics_daily(
             )
         except _CLAIMS_NONCRITICAL_EXCEPTIONS:
             lookback_val = 2
-        lookback_val = max(1, lookback_val)
-        today = datetime.utcnow().date()
+        lookback_val = max(1, min(366, lookback_val))
+        today = datetime.now(timezone.utc).date()
         start_date = today - timedelta(days=lookback_val - 1)
         end_date = today
     else:
         end_date = start_date
 
-    if start_date is None:
-        return 0
-
-    start_dt = datetime.combine(start_date, datetime.min.time())
-    end_dt = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
-
-    if db.backend_type == BackendType.POSTGRESQL:
-        placeholder = "%s"
-        start_param = start_dt
-        end_param = end_dt
-        claims_table = "claims"
-        media_table = "media"
-    else:
-        placeholder = "?"
-        start_param = start_dt.strftime("%Y-%m-%d %H:%M:%S")
-        end_param = end_dt.strftime("%Y-%m-%d %H:%M:%S")
-        claims_table = "Claims"
-        media_table = "Media"
-
-    owner_filter_sql = ""
-    params: list[Any] = [start_param, end_param]
-    if db.backend_type == BackendType.POSTGRESQL and target_user_id:
-        owner_filter_sql = (
-            f" AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = {placeholder}"
-        )
-        params.append(str(target_user_id))
-
-    date_expr = "DATE(l.created_at)"
-    metrics_sql = (
-        "SELECT "
-        + date_expr
-        + " AS day, "
-        "COALESCE(c.extractor, 'unknown') AS extractor, "
-        "COALESCE(c.extractor_version, '') AS extractor_version, "
-        "COUNT(*) AS total_reviewed, "
-        "SUM(CASE WHEN lower(l.new_status) = 'approved' THEN 1 ELSE 0 END) AS approved_count, "
-        "SUM(CASE WHEN lower(l.new_status) = 'rejected' THEN 1 ELSE 0 END) AS rejected_count, "
-        "SUM(CASE WHEN lower(l.new_status) = 'flagged' THEN 1 ELSE 0 END) AS flagged_count, "
-        "SUM(CASE WHEN lower(l.new_status) = 'reassigned' THEN 1 ELSE 0 END) AS reassigned_count, "
-        "SUM(CASE WHEN l.old_text IS NOT NULL AND l.new_text IS NOT NULL AND l.old_text <> l.new_text "
-        "THEN 1 ELSE 0 END) AS edited_count "
-        "FROM claims_review_log l "
-        f"LEFT JOIN {claims_table} c ON c.id = l.claim_id "
-        f"LEFT JOIN {media_table} m ON m.id = c.media_id "
-        f"WHERE l.created_at >= {placeholder} AND l.created_at < {placeholder}"
-        + owner_filter_sql
-        + " GROUP BY day, extractor, extractor_version ORDER BY day ASC"
+    return aggregate_claims_review_metrics_window(
+        db=db,
+        owner_user_id=user_id_value,
+        start_date=start_date,
+        end_date=end_date,
     )
-
-    reason_sql = (
-        "SELECT "
-        + date_expr
-        + " AS day, "
-        "COALESCE(c.extractor, 'unknown') AS extractor, "
-        "COALESCE(c.extractor_version, '') AS extractor_version, "
-        "l.reason_code, COUNT(*) AS count "
-        "FROM claims_review_log l "
-        f"LEFT JOIN {claims_table} c ON c.id = l.claim_id "
-        f"LEFT JOIN {media_table} m ON m.id = c.media_id "
-        f"WHERE l.created_at >= {placeholder} AND l.created_at < {placeholder}"
-        + owner_filter_sql
-        + " GROUP BY day, extractor, extractor_version, l.reason_code"
-    )
-
-    metrics_rows = db.execute_query(metrics_sql, tuple(params)).fetchall()
-    if not metrics_rows:
-        return 0
-
-    reason_rows = db.execute_query(reason_sql, tuple(params)).fetchall()
-    reason_counts: dict[tuple[str, str, str], dict[str, int]] = {}
-    for row in reason_rows:
-        try:
-            day_val = row[0]
-            extractor_val = row[1]
-            version_val = row[2]
-            reason_val = row[3]
-            count_val = row[4]
-        except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-            continue
-        if reason_val is None:
-            continue
-        reason_key = str(reason_val).strip()
-        if not reason_key:
-            continue
-        day_str = day_val.isoformat() if hasattr(day_val, "isoformat") else str(day_val)
-        extractor_key = str(extractor_val or "unknown")
-        version_key = str(version_val or "")
-        key = (day_str, extractor_key, version_key)
-        counts_for_key = reason_counts.setdefault(key, {})
-        counts_for_key[reason_key] = counts_for_key.get(reason_key, 0) + int(count_val or 0)
-
-    written = 0
-    for row in metrics_rows:
-        try:
-            day_val = row[0]
-            extractor_val = row[1]
-            version_val = row[2]
-            total_reviewed = row[3]
-            approved_count = row[4]
-            rejected_count = row[5]
-            flagged_count = row[6]
-            reassigned_count = row[7]
-            edited_count = row[8]
-        except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-            continue
-        day_str = day_val.isoformat() if hasattr(day_val, "isoformat") else str(day_val)
-        extractor_key = str(extractor_val or "unknown")
-        version_key = str(version_val or "")
-        reason_payload = reason_counts.get((day_str, extractor_key, version_key))
-        db.upsert_claims_review_extractor_metrics_daily(
-            user_id=user_id_value,
-            report_date=day_str,
-            extractor=extractor_key,
-            extractor_version=version_key,
-            total_reviewed=int(total_reviewed or 0),
-            approved_count=int(approved_count or 0),
-            rejected_count=int(rejected_count or 0),
-            flagged_count=int(flagged_count or 0),
-            reassigned_count=int(reassigned_count or 0),
-            edited_count=int(edited_count or 0),
-            reason_code_counts_json=json.dumps(reason_payload) if reason_payload else None,
-        )
-        written += 1
-
-    return written
 
 
 def list_claims_review_metrics(

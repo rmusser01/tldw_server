@@ -101,7 +101,7 @@ def list_claims_review_user_ids_page(self, *, start_date: date, end_date: date,
 **Goal:** Register the new domain job in existing Claims Jobs integration.
 **Success Criteria:** Exact payload/owner validation, typed admission, owner-scoped data handling, safe outcomes/errors, export classifier parity.
 **Tests:** Strict types/dates, admission replay, owner mismatch, missing data, delayed execution, classifier matrix.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 3: Contract, Producer Helper, And Handler
 
