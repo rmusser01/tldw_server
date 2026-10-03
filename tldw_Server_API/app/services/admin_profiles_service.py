@@ -364,8 +364,8 @@ class _ProfileAdminScope:
 async def _get_profile_admin_scope(principal: AuthPrincipal) -> _ProfileAdminScope:
     """Resolve the principal's organization/team admin scope."""
     # is_platform_admin() already grants single-user principals outside enterprise
-    # mode; an extra `is_single_user_principal(...) or` here would bypass its
-    # enterprise-mode denial (same bug class as Qodo Q2; round 2 finding).
+    # mode; checking is_single_user_principal() here too would bypass its
+    # enterprise-mode denial.
     if admin_scope_service.is_platform_admin(principal):
         return _ProfileAdminScope(
             org_admin_ids=None,
@@ -1079,7 +1079,7 @@ async def set_group_limit_override(
     """
     # is_platform_admin() already grants single-user principals outside enterprise
     # mode; an extra `is_single_user_principal(...) or` here would bypass its
-    # enterprise-mode denial (Qodo Q2).
+    # enterprise-mode denial.
     if not admin_scope_service.is_platform_admin(principal):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Platform admin required")
     entry = {e.key: e for e in load_user_profile_catalog().entries}.get(key)

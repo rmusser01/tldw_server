@@ -168,7 +168,7 @@ async def workflows_runs_decision(user_id: Any) -> QuotaDecision:
 
 
 async def workflows_runs_consume(user_id: Any, run_id: str) -> QuotaDecision:
-    """Atomically admit and record one workflow run (Qodo Q17).
+    """Atomically admit and record one workflow run.
 
     Unlike ``workflows_runs_decision`` (read-only), this performs the
     admission check and the ledger write as one atomic operation

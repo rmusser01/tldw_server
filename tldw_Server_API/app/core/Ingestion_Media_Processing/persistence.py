@@ -284,7 +284,7 @@ async def _enforce_and_record_media_bytes(user_id: Any, total_uploaded_bytes: in
     When the user has a limit, the admission check and the ledger write are
     one atomic operation (``ResourceDailyLedger.add_if_within_daily_cap``), so
     two concurrent uploads cannot both pass against the same remaining daily
-    allowance (Qodo Q16).
+    allowance.
     """
     if total_uploaded_bytes <= 0:
         return
