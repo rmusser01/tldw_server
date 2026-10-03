@@ -112,6 +112,12 @@ async def test_team_membership_audit_events_postgres(tmp_path, real_audit_servic
         assert r.status_code == 200, r.text
         org = r.json()
 
+        r = client.post(
+            f"/api/v1/admin/orgs/{org['id']}/members",
+            json={"user_id": int(target_id), "role": "member"},
+        )
+        assert r.status_code == 200, r.text
+
         # Create team
         r = client.post(f"/api/v1/admin/orgs/{org['id']}/teams", json={"name": "QA-PG"})
         assert r.status_code == 200, r.text

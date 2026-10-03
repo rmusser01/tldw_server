@@ -9,6 +9,10 @@ import pytest
 import pytest_asyncio
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import ensure_authnz_core_tables_pg
 from tldw_Server_API.app.core.AuthNZ.repos.managed_secret_refs_repo import ManagedSecretRefsRepo
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
@@ -84,7 +88,13 @@ async def test_scoped_user_and_organization_counts_postgres(profile_array_pool):
     finally:
         await connection.close()
     org_id = await pool.fetchval("INSERT INTO organizations (name) VALUES ($1) RETURNING id", "scoped-org")
-    await pool.execute("INSERT INTO org_members (org_id, user_id) VALUES ($1, $2)", org_id, user_id)
+    await AuthnzOrgsTeamsRepo(pool).add_org_member(
+        org_id=org_id,
+        user_id=user_id,
+        context=TrustedMembershipWriteContext(
+            trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+        ),
+    )
 
     organizations, org_total = await AuthnzOrgsTeamsRepo(pool).list_organizations(org_ids=[org_id], with_total=True)
     users, user_total = await AuthnzUsersRepo(pool).list_users(org_ids=[org_id], limit=10, offset=0)

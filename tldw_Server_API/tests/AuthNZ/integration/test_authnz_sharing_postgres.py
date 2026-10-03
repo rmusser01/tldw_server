@@ -16,6 +16,14 @@ from tldw_Server_API.app.api.v1.schemas.sharing_schemas import (
     ShareWorkspaceRequest,
     TokenResponse,
 )
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+    _execute_membership_scope_sql,
+)
+from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 
 pytestmark = pytest.mark.integration
 
@@ -82,13 +90,19 @@ async def test_postgres_authoritative_share_queries_follow_current_membership_an
         (org_id, "Sharing Authority Team", "sharing-authority-team"),
     )
     team_id = int(team["id"])
-    await pool.execute(
-        "INSERT INTO org_members (org_id, user_id, status) VALUES (?, ?, 'active')",
-        (org_id, recipient_id),
+    membership_repo = AuthnzOrgsTeamsRepo(pool)
+    fixture_context = TrustedMembershipWriteContext(
+        trusted_reason=TrustedMembershipReason.BOOTSTRAP,
     )
-    await pool.execute(
-        "INSERT INTO team_members (team_id, user_id, status) VALUES (?, ?, 'active')",
-        (team_id, recipient_id),
+    await membership_repo.add_org_member(
+        org_id=org_id,
+        user_id=recipient_id,
+        context=fixture_context,
+    )
+    await membership_repo.add_team_member(
+        team_id=team_id,
+        user_id=recipient_id,
+        context=fixture_context,
     )
 
     repo = SharedWorkspaceRepo(pool)
@@ -124,18 +138,24 @@ async def test_postgres_authoritative_share_queries_follow_current_membership_an
         row["id"] for row in await repo.list_active_shares_for_user(recipient_id)
     }
 
-    await pool.execute(
-        "UPDATE team_members SET status = 'suspended' WHERE team_id = ? AND user_id = ?",
-        (team_id, recipient_id),
-    )
+    # Suspension is a read-authorization fixture, not a public writer operation.
+    async with pool.transaction() as conn:
+        await _execute_membership_scope_sql(
+            conn,
+            "UPDATE public.team_members SET status = 'suspended' WHERE team_id = $1 AND user_id = $2",
+            team_id,
+            recipient_id,
+            backend="postgres",
+        )
     assert await repo.get_active_share_for_user(team_share["id"], recipient_id) is None
     assert [row["id"] for row in await repo.list_active_shares_for_user(recipient_id)] == [
         org_share["id"]
     ]
 
-    await pool.execute(
-        "DELETE FROM org_members WHERE org_id = ? AND user_id = ?",
-        (org_id, recipient_id),
+    await membership_repo.remove_org_member(
+        org_id=org_id,
+        user_id=recipient_id,
+        context=fixture_context,
     )
     assert await repo.list_active_shares_for_user(recipient_id) == []
 
