@@ -11,6 +11,7 @@ from typing import Any, NoReturn, Protocol
 from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    AuthoritativeProviderScope,
     ByokResolutionError,
     ByokResolutionStatus,
     ResolvedByokCredentials,
@@ -78,11 +79,15 @@ class _ProviderCallTransportSnapshot:
 def _trusted_endpoint_from_snapshot(
     provider: str,
     app_config: Mapping[str, Any] | None,
+    *,
+    authoritative: bool = False,
 ) -> TrustedProviderEndpoint | None:
     """Build an exact-origin capability solely from a captured config snapshot."""
 
     provider_norm = canonical_provider_name(provider)
     field_spec = _SCOPED_ENDPOINT_FIELDS.get(provider_norm)
+    if authoritative and provider_norm == "openai":
+        field_spec = ("openai_api", ("api_base_url", "api_base", "base_url"))
     custom_number = custom_openai_provider_number(provider_norm)
     if field_spec is None and custom_number is not None:
         field_spec = (
@@ -374,6 +379,8 @@ class ProviderCredentialRuntime:
 
     __slots__ = (
         "_user_id",
+        "_authoritative_scope",
+        "_authoritative_tasks",
         "_team_ids",
         "_org_ids",
         "_trusted_base_url_override",
@@ -407,8 +414,22 @@ class ProviderCredentialRuntime:
         server_config_snapshot: Mapping[str, Any] | None = None,
         override_snapshot_resolver: _OverrideSnapshotResolver | None = None,
         resolver: _Resolver | None = None,
+        authoritative_scope: AuthoritativeProviderScope | None = None,
     ) -> None:
         uses_default_resolver = resolver is None or resolver is resolve_byok_credentials
+        if authoritative_scope is not None:
+            if (
+                type(authoritative_scope) is not AuthoritativeProviderScope
+                or type(user_id) is not int
+                or user_id != authoritative_scope.user_id
+                or team_ids
+                or org_ids
+                or not uses_default_resolver
+                or fallback_resolver is not None
+                or override_snapshot_resolver is not None
+            ):
+                raise ValueError("Authoritative resolution requires one exact scope and frozen settings")
+            trusted_base_url_override = False
         if uses_default_resolver and fallback_resolver is not None:
             raise ValueError(
                 "Default credential resolution requires a frozen server config snapshot"
@@ -427,6 +448,8 @@ class ProviderCredentialRuntime:
                 RuntimeError("Provider server configuration is unavailable")
             )
         self._user_id = user_id
+        self._authoritative_scope = authoritative_scope
+        self._authoritative_tasks: set[asyncio.Task[_ResolvedEntry]] = set()
         self._team_ids = list(team_ids or ())
         self._org_ids = list(org_ids or ())
         self._trusted_base_url_override = trusted_base_url_override is True
@@ -458,6 +481,22 @@ class ProviderCredentialRuntime:
         """Return explicit credentials for a normalized provider."""
         self._ensure_open()
         provider_norm = canonical_provider_name(provider)
+        if self._authoritative_scope is not None:
+            generation = self._generations.get(provider_norm, 0) + 1
+            self._generations[provider_norm] = generation
+            task = asyncio.create_task(
+                self._resolve_entry(
+                    provider_norm,
+                    generation=generation,
+                    force_refresh=force_refresh,
+                    override_snapshot=None,
+                )
+            )
+            self._authoritative_tasks.add(task)
+            task.add_done_callback(self._forget_authoritative_task)
+            entry = await self._await_owned(task)
+            self._ensure_open()
+            return self._new_handle(provider_norm, entry)
         if force_refresh:
             override_snapshot = self._capture_override_snapshot(provider_norm, model)
             return await self._refresh(provider_norm, model, override_snapshot)
@@ -695,6 +734,8 @@ class ProviderCredentialRuntime:
                 "force_oauth_refresh": force_refresh,
                 "trusted_base_url_override": self._trusted_base_url_override,
             }
+            if self._authoritative_scope is not None:
+                resolver_kwargs["authoritative_scope"] = self._authoritative_scope
             if self._uses_default_resolver:
                 if override_snapshot is not None:
                     base_fallback = resolve_static_server_fallback_from_snapshot(
@@ -866,7 +907,8 @@ class ProviderCredentialRuntime:
             ),
             trusted_endpoint=_trusted_endpoint_from_snapshot(
                 provider,
-                app_config,
+                self._server_config_snapshot if self._authoritative_scope is not None else app_config,
+                authoritative=self._authoritative_scope is not None,
             ),
             _issued_token=_RUNTIME_ISSUED_CREDENTIAL_TOKEN,
         )
@@ -896,8 +938,13 @@ class ProviderCredentialRuntime:
         if not task.cancelled():
             task.exception()
 
+    def _forget_authoritative_task(self, task: asyncio.Task[_ResolvedEntry]) -> None:
+        self._authoritative_tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
+
     async def _close_owned(self) -> None:
-        cancellable_tasks = set(self._inflight.values()) | set(self._refresh_tasks.values())
+        cancellable_tasks = set(self._inflight.values()) | set(self._refresh_tasks.values()) | self._authoritative_tasks
         usage_tasks = set(self._usage_tasks.values())
         for task in cancellable_tasks:
             if not task.done():
@@ -919,6 +966,7 @@ class ProviderCredentialRuntime:
             self._issued_entries.clear()
             self._inflight.clear()
             self._refresh_tasks.clear()
+            self._authoritative_tasks.clear()
             self._usage_tasks.clear()
             self._refresh_locks.clear()
             self._refreshed_generations.clear()
@@ -926,6 +974,7 @@ class ProviderCredentialRuntime:
             self._team_ids.clear()
             self._org_ids.clear()
             self._user_id = None
+            self._authoritative_scope = None
             self._trusted_base_url_override = False
             self._fallback_resolver = None
             self._server_config_snapshot.clear()

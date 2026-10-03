@@ -14,7 +14,7 @@
 
 **ADR check (2026-10-02):** ADR required: yes. [ADR-058](../../ADR/058-authoritative-provider-credential-scope.md) records exact authenticated scope and absence-only credential fallback. ADR-025 remains the governing provider-routing decision; the bounded adapter's stricter mode disables credential endpoint overrides.
 
-**Rebase (2026-10-02):** Stage 1 commits rebased cleanly onto `origin/dev` at `9958110df2` before Stage 2 implementation.
+**Rebase (2026-10-02):** Stage 1 commits rebased cleanly onto `origin/dev` at `9958110df2` before Stage 2 implementation. All five planning/implementation commits were subsequently rebased cleanly onto the newer `origin/dev` at `86e287fee7`; `git range-diff` confirmed unchanged patches before the final evidence update.
 
 ## Revalidation Decisions
 
@@ -104,7 +104,7 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Tests:** Unit plus SQLite/PostgreSQL resolution matrices, concurrent revocation checks, precedence, absence versus unauthorized state, fixed endpoint, snapshot immutability, legacy caller compatibility.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 2.1: Add an exact shared-scope authorization query
 
@@ -151,6 +151,16 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 7. Commit: `feat(authnz): enforce authoritative BYOK scope precedence`
 
 **Stage 2 review decisions (2026-10-02):** Every strict resolution owns a fresh authority read; it cannot reuse either cached credentials or an older in-flight lookup. All supplied active scope relationships are checked even when a user key wins. Disabling BYOK or its provider allowlist cannot replace an existing exact-scope key with a broader server key; verified absence still allows the frozen server fallback. Legacy resolution retains its existing defaults.
+
+**Stage 2 verification (2026-10-02):**
+- Repository/result/SQLite matrices and unchanged legacy repository regression gates contributed `227 passed` to the combined `500 passed, 1 skipped` gate before the final shutdown regression was added.
+- The final Task 2.2 runtime gate passed `274 passed, 1 skipped`, including the deterministic close-during-waiter-cleanup regression. The skip is the installed `aiosqlite` lacking `InterfaceError`.
+- The canonical isolated AuthNZ PostgreSQL fixture passed `5 passed`, exercising the same 96 matrix cases with no skips. An initial sandbox-only run reported PostgreSQL unavailable; the normal local-service-access rerun passed without fixture changes.
+- Independent spec and code-quality review findings were reproduced and fixed: policy-denied scoped credentials must not fall back, older in-flight authority reads cannot be reused, and shutdown cannot publish a completed credential handle during waiter cleanup. No actionable Stage 2 findings remain.
+- Rebased Stage 1 transport/model-contract gate passed `188 passed`; Persona WebSocket regression gate passed `98 passed`.
+- Final post-rebase combined credential/runtime, model-contract, prepared-integrity, mounted/HTTP-auth transport, and MCP CLI gate passed `561 passed, 1 skipped` on `origin/dev` at `86e287fee7`. The same driver-specific skip is the only skip. The intervening `dev` work changed only CLI tests and its task record; PostgreSQL and repository matrix patches were unchanged.
+- Ruff and `compileall` passed. Black passed on new files and formatted only changed ranges in existing files. Bandit reported zero findings and zero scan errors across the five touched production files (`bandit_task_2294_3_2_stage2.json`, ignored local report).
+- Scope checks remain authoritative at each database read, not a transaction spanning all scope reads or network dispatch. Later adapter admission/dispatch checks are still required.
 
 ## Stage 3: Durable Admission And Accounting
 

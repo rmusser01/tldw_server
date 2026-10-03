@@ -4618,3 +4618,275 @@ async def test_invalid_required_credential_source_fails_closed(monkeypatch) -> N
     assert exc_info.value.code == "invalid_provider_credentials"
     assert exc_info.value.__context__ is None
     assert exc_info.value.__cause__ is None
+
+
+@pytest.mark.parametrize("field", ["user_id", "team_id", "organization_id"])
+@pytest.mark.parametrize("value", [True, False, 0, -1, "7", [7], 7.0])
+def test_authoritative_scope_requires_exact_positive_ids(field, value):
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import AuthoritativeProviderScope
+
+    fields = {"user_id": 7, "team_id": 11, "organization_id": 13}
+    fields[field] = value
+    with pytest.raises(ValueError):
+        AuthoritativeProviderScope(**fields)
+
+
+def test_authoritative_scope_is_immutable():
+    from dataclasses import FrozenInstanceError
+
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import AuthoritativeProviderScope
+
+    scope = AuthoritativeProviderScope(user_id=7)
+    with pytest.raises(FrozenInstanceError):
+        scope.user_id = 8
+
+
+@pytest.fixture
+def authoritative_repos(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result import (
+        ProviderScopeResult,
+        ProviderScopeStatus,
+    )
+
+    monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    reset_settings()
+    states = {source: ProviderScopeResult(ProviderScopeStatus.AUTHORIZED_ABSENT) for source in ("user", "team", "org")}
+    calls = []
+
+    class UserRepo:
+        async def resolve_authorized_secret(self, user_id, provider):
+            calls.append(("user", user_id, provider))
+            return states["user"]
+
+    class SharedRepo:
+        async def resolve_authorized_secret(self, scope_type, scope_id, user_id, provider, **kwargs):
+            calls.append((scope_type, scope_id, user_id, provider, kwargs))
+            return states[scope_type]
+
+    async def user_repo():
+        return UserRepo()
+
+    async def shared_repo():
+        return SharedRepo()
+
+    async def no_membership_guess(*args, **kwargs):
+        raise AssertionError("exact scope must never infer memberships")
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", user_repo)
+    monkeypatch.setattr(byok_runtime, "_get_org_repo", shared_repo)
+    monkeypatch.setattr(byok_runtime, "list_memberships_for_user", no_membership_guess)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+    return states, calls
+
+
+@pytest.mark.parametrize("source", ["user", "team", "org", "server_default"])
+@pytest.mark.asyncio
+async def test_authoritative_credentials_follow_exact_precedence(authoritative_repos, source):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result import (
+        ProviderScopeResult,
+        ProviderScopeStatus,
+    )
+
+    states, calls = authoritative_repos
+    sources = ("user", "team", "org")
+    if source in sources:
+        for candidate in sources[sources.index(source) :]:
+            states[candidate] = ProviderScopeResult(
+                ProviderScopeStatus.RESOLVED,
+                _encrypted_row(build_secret_payload(f"{candidate}-key")),
+            )
+    result = await byok_runtime.resolve_byok_credentials(
+        "oai",
+        user_id=7,
+        authoritative_scope=byok_runtime.AuthoritativeProviderScope(7, 11, 13),
+        server_config_snapshot={"openai_api": {"api_key": "server_default-key"}},
+    )
+    assert result.source == source
+    assert result.api_key == f"{source}-key"
+    assert calls == [
+        ("user", 7, "openai"),
+        ("team", 11, 7, "openai", {"active_team_id": 11, "active_organization_id": 13}),
+        ("org", 13, 7, "openai", {"active_team_id": 11, "active_organization_id": 13}),
+    ]
+
+
+@pytest.mark.parametrize("source", ["user", "team", "org"])
+@pytest.mark.parametrize(
+    ("state", "code"),
+    [("unauthorized", "credential_scope_revoked"), ("unavailable", "credential_store_unavailable")],
+)
+@pytest.mark.asyncio
+async def test_authoritative_scope_failure_never_uses_broader_key(authoritative_repos, source, state, code):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result import (
+        ProviderScopeResult,
+        ProviderScopeStatus,
+    )
+
+    states, _calls = authoritative_repos
+    states[source] = ProviderScopeResult(ProviderScopeStatus(state))
+    with pytest.raises(byok_runtime.ByokResolutionError) as failure:
+        await byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=7,
+            authoritative_scope=byok_runtime.AuthoritativeProviderScope(7, 11, 13),
+            server_config_snapshot={"openai_api": {"api_key": "broader-key"}},
+        )
+    assert failure.value.code == code
+    assert failure.value.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_authoritative_scope_validates_relationship_even_with_user_key(authoritative_repos):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result import (
+        ProviderScopeResult,
+        ProviderScopeStatus,
+    )
+
+    states, _calls = authoritative_repos
+    states["user"] = ProviderScopeResult(ProviderScopeStatus.RESOLVED, _encrypted_row(build_secret_payload("user-key")))
+    states["team"] = ProviderScopeResult(ProviderScopeStatus.UNAUTHORIZED)
+    with pytest.raises(byok_runtime.ByokResolutionError, match="credential_scope_revoked"):
+        await byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=7,
+            authoritative_scope=byok_runtime.AuthoritativeProviderScope(7, 11, 13),
+            server_config_snapshot={},
+        )
+
+
+@pytest.mark.asyncio
+async def test_authoritative_personal_scope_skips_shared_lookup(authoritative_repos):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    _states, calls = authoritative_repos
+    await byok_runtime.resolve_byok_credentials(
+        "openai",
+        user_id=7,
+        authoritative_scope=byok_runtime.AuthoritativeProviderScope(7),
+        server_config_snapshot={},
+    )
+    assert calls == [("user", 7, "openai")]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"team_ids": [11]},
+        {"org_ids": [13]},
+        {"user_id": 8},
+        {"required_source": "server_default"},
+        {"request": object()},
+        {"fallback_resolver": lambda _provider: "live-key"},
+        {"fallback_override": "replacement-key"},
+    ],
+)
+@pytest.mark.asyncio
+async def test_authoritative_mode_rejects_competing_scope_and_fallback_inputs(extra):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    kwargs = {"user_id": 7, "server_config_snapshot": {}}
+    kwargs.update(extra)
+    with pytest.raises(byok_runtime.ByokResolutionError, match="invalid_provider_credentials"):
+        await byok_runtime.resolve_byok_credentials(
+            "openai", authoritative_scope=byok_runtime.AuthoritativeProviderScope(7), **kwargs
+        )
+
+
+@pytest.mark.asyncio
+async def test_authoritative_scope_ignores_byok_endpoint_override(authoritative_repos):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result import (
+        ProviderScopeResult,
+        ProviderScopeStatus,
+    )
+
+    states, _calls = authoritative_repos
+    states["user"] = ProviderScopeResult(
+        ProviderScopeStatus.RESOLVED,
+        _encrypted_row(
+            build_secret_payload("user-key", credential_fields={"base_url": "https://untrusted.example/v1"})
+        ),
+    )
+    result = await byok_runtime.resolve_byok_credentials(
+        "openai",
+        user_id=7,
+        authoritative_scope=byok_runtime.AuthoritativeProviderScope(7),
+        trusted_base_url_override=True,
+        server_config_snapshot={"openai_api": {"api_base_url": "https://fixed.example/v1"}},
+    )
+    assert result.app_config["openai_api"]["api_base_url"] == "https://fixed.example/v1"
+    assert "base_url" not in result.credential_fields
+
+
+@pytest.mark.asyncio
+async def test_authoritative_alias_conflict_is_invalid_credentials(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import ProviderCredentialAliasConflictError
+
+    repo = SimpleNamespace(
+        resolve_authorized_secret=AsyncMock(
+            side_effect=ProviderCredentialAliasConflictError("private-credential-conflict")
+        )
+    )
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", AsyncMock(return_value=repo))
+    with pytest.raises(byok_runtime.ByokResolutionError) as failure:
+        await byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=7,
+            authoritative_scope=byok_runtime.AuthoritativeProviderScope(7),
+            server_config_snapshot={},
+        )
+    assert failure.value.code == "invalid_provider_credentials"
+    assert failure.value.__context__ is None
+    assert "private-credential" not in repr(failure.value)
+
+
+@pytest.mark.parametrize(("enabled", "allowlisted"), [(False, True), (True, False)])
+@pytest.mark.asyncio
+async def test_authoritative_policy_denial_cannot_replace_present_key(
+    authoritative_repos, monkeypatch, enabled, allowlisted
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result import (
+        ProviderScopeResult,
+        ProviderScopeStatus,
+    )
+
+    states, _calls = authoritative_repos
+    states["user"] = ProviderScopeResult(ProviderScopeStatus.RESOLVED, _encrypted_row(build_secret_payload("user-key")))
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: enabled)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: allowlisted)
+    with pytest.raises(byok_runtime.ByokResolutionError, match="invalid_provider_credentials"):
+        await byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=7,
+            authoritative_scope=byok_runtime.AuthoritativeProviderScope(7),
+            server_config_snapshot={"openai_api": {"api_key": "broader-key"}},
+        )
+
+
+@pytest.mark.parametrize(("enabled", "allowlisted"), [(False, True), (True, False)])
+@pytest.mark.asyncio
+async def test_authoritative_verified_absence_allows_static_server_key(
+    authoritative_repos, monkeypatch, enabled, allowlisted
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: enabled)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: allowlisted)
+    result = await byok_runtime.resolve_byok_credentials(
+        "openai",
+        user_id=7,
+        authoritative_scope=byok_runtime.AuthoritativeProviderScope(7),
+        server_config_snapshot={"openai_api": {"api_key": "server-key"}},
+    )
+    assert (result.source, result.api_key) == ("server_default", "server-key")
