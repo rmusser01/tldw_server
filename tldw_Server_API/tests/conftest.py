@@ -316,6 +316,27 @@ def auth_headers():
 
 
 @pytest.fixture(autouse=True)
+def _reset_usage_quota_resolver_cache():
+    """Clear the Usage quota resolver's per-user cache before each test.
+
+    `quota_resolver.user_quota` caches each user's effective ``limits.*``
+    values for 60s in a module-level dict (keyed by user id, not by test or
+    event loop). Any earlier test or request that reads a user's profile can
+    prime that cache, which then leaks into a later test still inside the
+    60s window and makes its resolver reads return stale data. This is cheap
+    insurance for every suite; test files that also exercise the resolver
+    directly may still keep their own local reset for clarity.
+    """
+    try:
+        from tldw_Server_API.app.core.Usage import quota_resolver
+
+        quota_resolver.invalidate_all()
+    except Exception:
+        _ = None
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _restore_auth_env_and_singletons():
     """Restore shared AuthNZ-related env and singleton state between tests.
 
