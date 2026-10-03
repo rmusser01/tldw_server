@@ -155,6 +155,11 @@ export async function createCharacter(api: SeedApi, name: string): Promise<numbe
  * Create a saved server chat with the given messages, in order, and return
  * its id. The chat is attached to `characterId`, like a chat started from the
  * character picker.
+ *
+ * Each message replies to the one before it (`parent_message_id`), as the
+ * chat UI saves a conversation. Clients that walk the message tree, such as
+ * the extension's history selection, cannot load a chat whose messages are
+ * unlinked.
  */
 export async function createChatWithMessages(
   api: SeedApi,
@@ -167,11 +172,17 @@ export async function createChatWithMessages(
   const created = await response.json()
   const chatId = String(created?.id ?? created?.chat_id ?? created?.conversation_id ?? "")
   if (!chatId) throw new Error(`Chat ${title} was created without an id`)
+  let parentId: string | null = null
   for (const message of messages) {
-    await expectOk(
-      await api.post(`/api/v1/chats/${encodeURIComponent(chatId)}/messages`, message),
+    const added = await expectOk(
+      await api.post(
+        `/api/v1/chats/${encodeURIComponent(chatId)}/messages`,
+        parentId ? { ...message, parent_message_id: parentId } : message
+      ),
       `Adding a ${message.role} message to chat ${title}`
     )
+    parentId = String((await added.json())?.id ?? "")
+    if (!parentId) throw new Error(`A ${message.role} message in chat ${title} was created without an id`)
   }
   return chatId
 }
