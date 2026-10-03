@@ -181,7 +181,6 @@ def permanently_delete_item(db_instance: MediaDbLike, media_id: int) -> bool:
 
 
 __all__ = [
-    "check_media_and_whisper_model",
     "empty_trash",
     "permanently_delete_item",
 ]
