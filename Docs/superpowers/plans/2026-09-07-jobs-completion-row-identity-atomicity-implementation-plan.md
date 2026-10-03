@@ -1408,3 +1408,37 @@ without changing the accepted decision, production code, tests or build gates.
   was introduced, and the prior scoped Bandit deltas remain applicable.
 - Current-head hosted checks, dedicated Jobs CI and the latest live `dev`
   pre-merge check remain mandatory; no failed or pending check is waived.
+
+## Live Dev Rebase Verification: 2026-10-02
+
+**Goal:** Refresh the reviewed PR onto the latest live base without scope changes.
+**Success Criteria:** Preserve all PR patches and rerun the affected verification.
+**Tests:** Full focused SQLite/PostgreSQL matrices, Docs suite and quality gates.
+**Status:** In Progress (local verification complete; publication and hosted gates pending).
+
+- Live `dev` advanced to `1c8491ff341053468afb9ffde9b379707c9e3bad`
+  through the unrelated Sandbox stream fan-out fix in PR #3081. Inspected all
+  six incoming paths; none overlaps this PR's ownership or Jobs runtime.
+- Rebased all ten commits without conflicts. `git range-diff` reports every
+  patch unchanged against the previously published
+  `3e5bd688aa06fe039e41570e5c18abc9b09260f0` series. The verified rebased source
+  head is `b080d6523c3ff6e889906ab247f5c7a0a3f96392`.
+- Fresh SQLite matrix: 247 passed / 70 deselected / 1212 warnings. Required
+  PostgreSQL: 90 passed / 76 deselected / 359 warnings, no skips, including
+  opt-in outbox/SSE tests. Full Docs: 212 passed / 440 existing project warnings,
+  including the strict MkDocs build. XML records are
+  `/tmp/task13215_rebase_1c84_sqlite.xml`,
+  `/tmp/task13215_rebase_1c84_postgres.xml` and
+  `/tmp/task13215_rebase_1c84_docs.xml`.
+- Ruff across all six touched Python files, new-module Black, syntax compilation
+  and branch whitespace checks passed. Production/test Bandit baseline deltas
+  both contain zero findings and zero errors at
+  `/tmp/bandit_task_13215_rebase_1c84_delta.json` and
+  `/tmp/bandit_task_13215_rebase_1c84_tests_delta.json`; test B101 is excluded,
+  and inherited warnings are unchanged.
+- Full paginated PR discussions/reviews/inline comments remain unchanged.
+  All original Qodo feedback has a validated disposition. Revalidate completed
+  review applicability and require the newly published head's hosted checks;
+  neither prior-head CI nor local verification permits an early merge.
+- Recheck live `dev` and the remote PR head before the SHA-specific
+  force-with-lease publication. Preserve the requester's verbatim summary.
