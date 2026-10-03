@@ -18,7 +18,7 @@
 **Goal:** Add a shared opt-in session mode that cannot create or initialize missing SQLite data.
 **Success Criteria:** Normal callers retain creating behavior; existing-only callers use a private `mode=rw` backend, create no directories, and skip schema bootstrap.
 **Tests:** Missing path, existing data, deletion at open, permissions, registry isolation, PostgreSQL routing.
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 1: Shared Media DB Open Contract
 
@@ -50,7 +50,7 @@ def test_existing_only_does_not_create_missing_database(tmp_path):
 **Goal:** Move domain aggregation out of claims_service, centralize its SQL, and make one window atomic and consistent.
 **Success Criteria:** UTC bounds/grouping, stable JSON, serialized owner calculations, no per-row commit, one source snapshot, bounded discovery.
 **Tests:** Counts/reasons, UTC boundaries, multi-group rollback, duplicate upserts, owner isolation and RLS, lookback bounds.
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 2: Media DB Operations And Domain Adapter
 
@@ -101,7 +101,7 @@ def list_claims_review_user_ids_page(self, *, start_date: date, end_date: date,
 **Goal:** Register the new domain job in existing Claims Jobs integration.
 **Success Criteria:** Exact payload/owner validation, typed admission, owner-scoped data handling, safe outcomes/errors, export classifier parity.
 **Tests:** Strict types/dates, admission replay, owner mismatch, missing data, delayed execution, classifier matrix.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 3: Contract, Producer Helper, And Handler
 
@@ -134,7 +134,7 @@ assert validate_review_metrics_payload(payload) == payload
 **Goal:** Replace the sleep loop with the configured APScheduler producer and retain a mutually exclusive local route.
 **Success Criteria:** Immutable routing, bounded nonblocking fan-out, idempotency, safe configuration/shutdown and documented rollout.
 **Tests:** Full flag matrix, overflow, midnight/leap properties, idempotent fan-out, transient-only retry, shutdown, startup lifecycle, API regressions.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 4: APScheduler Producer
 
