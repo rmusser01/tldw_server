@@ -2476,10 +2476,14 @@ async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
     entered = threading.Event()
     release = threading.Event()
     original = service_module.build_authored_recipe
+    loop = asyncio.get_running_loop()
+    release_observed: list[bool] = []
 
     def slow_recipe(*args: Any, **kwargs: Any) -> dict[str, Any]:
         entered.set()
-        release.wait(timeout=2)
+        # The loop must release capture while the worker is blocked.
+        loop.call_soon_threadsafe(release.set)
+        release_observed.append(release.wait(timeout=2))
         return original(*args, **kwargs)
 
     monkeypatch.setattr(service_module, "build_authored_recipe", slow_recipe)
@@ -2491,18 +2495,14 @@ async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
     url = f"/api/v1/vn/vn-assets/packs/{pack.id}/generate"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        loop = asyncio.get_running_loop()
-        started_at = loop.time()
-        request_task = asyncio.create_task(client.post(url, json={"idempotency_key": "capture-offload"}))
         try:
-            await asyncio.to_thread(entered.wait, 2)
-            assert entered.is_set()
-            assert loop.time() - started_at < 1.0
+            response = await client.post(url, json={"idempotency_key": "capture-offload"})
         finally:
             release.set()
-        response = await request_task
 
     assert response.status_code == 202
+    assert entered.is_set()
+    assert release_observed == [True]
 
 
 def test_generation_api_enqueues_parent_job(
