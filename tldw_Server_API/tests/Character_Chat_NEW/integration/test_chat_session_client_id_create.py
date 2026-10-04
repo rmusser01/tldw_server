@@ -101,6 +101,12 @@ def test_replay_returns_the_same_chat_and_creates_no_duplicate(client: TestClien
     assert second.json()["id"] == first.json()["id"] == CHAT_ID
     assert second.json()["created_at"] == first.json()["created_at"]
     assert _count(db) == 1
+    # The stored fingerprint is internal: no response carries it.
+    listed = client.get(PATH)
+    assert listed.status_code == 200, listed.text
+    for payload in (first.text, second.text, listed.text, client.get(f"{PATH}{CHAT_ID}").text):
+        assert "create_request_fingerprint" not in payload
+        assert db.get_conversation_by_id(CHAT_ID)["create_request_fingerprint"] not in payload
 
 
 def test_replay_compares_the_original_request_not_the_current_chat(client: TestClient, db: CharactersRAGDB) -> None:

@@ -7615,7 +7615,9 @@ UPDATE db_schema_version SET version = 75 WHERE schema_name = 'rag_char_chat_sch
 
     _MIGRATION_SQL_V78_TO_V79_POSTGRES = """
 ALTER TABLE conversations ADD COLUMN create_request_fingerprint TEXT
-    CHECK (create_request_fingerprint IS NULL OR create_request_fingerprint ~ '^[0-9a-f]{64}$');
+    CHECK (create_request_fingerprint IS NULL OR (
+        length(create_request_fingerprint) = 64 AND create_request_fingerprint !~ '[^0-9a-f]'
+    ));
 UPDATE db_schema_version SET version = 79 WHERE schema_name = 'rag_char_chat_schema' AND version = 78;
 """
 
