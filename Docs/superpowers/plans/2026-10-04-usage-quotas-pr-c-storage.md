@@ -43,14 +43,19 @@
 - **Group values for storage are allowed.** PR B rejected team/org `limits.storage_quota_mb` overrides only because enforcement still read the column. Once enforcement reads the resolver, a team or org value is each member's own storage allowance, matching owner decision 1. Remove the rejection. The team/org *shared pools* are a separate mechanism and stay as they are.
 - **The registration-code branch is dead code and gets deleted.** `registration_service.py:393-394` (`if 'storage_quota_mb' in code_info`) can never fire, because no column or schema field carries it.
 - **Admin system stats stop summing the column.** `total_quota_mb` becomes `null`: a sum of mostly-unlimited per-user values has no meaning. The admin page's formatter already renders `null` as "–".
-- **Storage-endpoint writes bump no `profile_version`.** `set_user_quota` writes the override repo directly, the same as PR B's group-override routes. The profile path's generic branch still bumps it.
+- **Storage quota writes outside the profile path bump no `profile_version`.** That covers the two storage endpoints and the admin `PUT /admin/users/{id}`. They write the override repo directly, the same as PR B's group-override routes. `profile_version` is the optimistic-lock token for user self-edits, and quotas are not user-writable, so no lost update is possible. The profile path's generic branch still bumps it.
 - **Postgres backfill runs once.** It is guarded by the marker table `authnz_data_backfills`, so an override an admin later deletes is never re-created from the stale column. SQLite's numbered migration already runs once.
+- **A failed Postgres backfill never blocks startup.** It logs an ERROR and retries at the next start. The marker is written in the same transaction as the copy, so a failed run leaves no marker. A one-time data copy must not stop every PG install, including self-hosters with quotas off, from booting.
+- **Writes inside a request transaction use that transaction's connection.** `PUT /admin/users/{id}` runs inside `Depends(get_db_transaction)`, and SQLite takes the write lock eagerly (`BEGIN IMMEDIATE`). A second connection writing the override would stall 5 s and fail with "database is locked". So `update_user` writes the override on `db`, the request connection, exactly as `update_service` does. `set_user_quota` (its own connection) is only for the two storage endpoints, which have no transaction dependency.
+- **`GET` quota status has no side effects, and `has_quota` means "a quota is set".** That is the meaning `QuotaStatus.has_quota` already has for the team/org pools, not `check_quota`'s "this request fits". The GET reads through `StorageQuotaService.user_quota_status`, never through `check_quota`.
+- **Quota changes through `PUT /admin/users/{id}` are audited.** The audit event fires even without `reason`, with `storage_quota_mb` in its metadata. The two storage endpoints stay unaudited, as before this PR; that is parked in the ledger as a follow-up candidate.
 - **The unused `UserQuotaUpdateRequest`** (`admin_schemas.py:228`, no references) stays untouched.
+- **Spec erratum:** spec §5 and Testing 9 name "registration codes" as a writer. That branch is dead and gets deleted (see above). The PR body says so, for PR D's doc pass.
 
 ## Review Focus
 
 1. **A quota an admin cleared stays cleared across restarts.** The Postgres backfill must not re-copy the stale column value. Covered by the Task 5 test `test_pg_backfill_runs_once_and_never_resurrects`.
-2. **An admin "edit user" request that omits `storage_quota_mb` leaves the quota alone, and an explicit `null` clears it.** Covered by the Task 2 test `test_admin_update_quota_absent_vs_null`.
+2. **An admin "edit user" request that omits `storage_quota_mb` leaves the quota alone, an explicit `null` clears it, and a quota sent with another field in one PUT succeeds.** On SQLite in production that last case would stall and fail with "database is locked" if the override were written on a second connection. Covered by the Task 2 test `test_admin_update_quota_absent_vs_null`; the same-connection rule is enforced by construction and checked by the reviewer, because the test adapter can't reproduce the lock.
 3. **Unlimited shows as `null`, never 0 or 5120,** on `GET /users/storage` (including its fallback path), `/users/me`, admin list and detail, and the profile `quotas` section. Covered by the Task 4 tests.
 4. **A team `limits.storage_quota_mb` limits members' uploads, and a member's own value overrides it.** Covered by the Task 2 test `test_team_storage_value_enforced_and_user_value_wins`.
 5. **Quota `0` blocks any non-empty upload, and quotas off admit 5 GB + 1 MB despite a stale 5120 column.** Covered by the Task 1 tests.
@@ -71,7 +76,11 @@
   - `tldw_Server_API/tests/Usage/test_usage_quotas_sites.py`
   - `tldw_Server_API/tests/AuthNZ/unit/test_storage_quota_service_backend_selection.py`
   - `tldw_Server_API/tests/AuthNZ/unit/test_versioned_user_write_gateway.py`
-  - `tldw_Server_API/tests/DB_Management/unit/test_users_db_update_backend_detection.py`
+  - `tldw_Server_API/tests/UserProfile/test_user_profile_updates.py:129-162`
+
+  In that last file, `set_user_quota` no longer bumps `profile_version` (see Rulings), so rewrite the `after_quota > before` assertion to `after_quota == before`. Don't delete it.
+
+  `tests/DB_Management/unit/test_users_db_update_backend_detection.py` is an AST check that `set_user_quota` has no `await ...commit()`. The new body has none, so it needs no change.
 
 **Interfaces:**
 - Consumes: `quota_resolver.user_quota(user_id: int, key: str) -> float | None`, `quota_resolver.invalidate_user(user_id: int)`, `quota_checks.as_quota_user_id(value) -> int | None`, and `UserProfileOverridesRepo(db_pool)` with `.ensure_tables()`, `.upsert_override(*, user_id, key, value, updated_by, db_conn=None)` and `.delete_override(*, user_id, key, db_conn=None)`.
@@ -80,7 +89,8 @@
   - `quota_view(used_mb: float, quota_mb: int | None) -> dict[str, Any]`, with the keys `quota_mb`, `available_mb` and `usage_percentage`, all `None` when unlimited
   - `async resolved_storage_quota_mb(user_id) -> int | None`
   - `async with_resolved_storage_quota(user: dict) -> dict`, a copy with `storage_quota_mb` replaced by the resolved value
-  - `StorageQuotaService.set_user_quota(user_id: int, quota_mb: int | None, *, updated_by: int | None = None) -> dict`. It returns `user_id`, `storage_quota_mb` (the *effective* value after the write), `storage_used_mb`, `available_mb` and `usage_percentage`. It raises `UserNotFoundError`, raises `ValueError` on negative values, and raises `StorageError` on repo failure.
+  - `StorageQuotaService.set_user_quota(user_id: int, quota_mb: int | None, *, updated_by: int | None = None) -> dict`. It returns `user_id`, `storage_quota_mb` (the *effective* value after the write), `storage_used_mb`, `available_mb` and `usage_percentage`. It raises `UserNotFoundError`, raises `ValueError` on negative values, and raises `StorageError` on repo failure. It uses its own connection, so call it ONLY outside a request transaction (the two storage endpoints).
+  - `StorageQuotaService.user_quota_status(user_id: int) -> dict`. It returns the keys of the `QuotaStatus` shape: `quota_mb` (None means unlimited), `used_mb`, `remaining_mb` (None means unlimited), `usage_pct` (0.0 when unlimited), and `has_quota`, which is `quota_mb is not None` and means "a quota is set". It is read-only: no cache writes, no gauges. It raises `UserNotFoundError`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -157,6 +167,54 @@ def test_quota_view_unlimited_and_limited() -> None:
     """quota_view yields None fields when unlimited and arithmetic when limited."""
     assert sqs.quota_view(10.0, None) == {"quota_mb": None, "available_mb": None, "usage_percentage": None}
     assert sqs.quota_view(25.0, 100) == {"quota_mb": 100, "available_mb": 75.0, "usage_percentage": 25.0}
+
+
+async def test_switch_off_admits_past_stale_column(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Quotas off (the OSS default): the real resolver returns None, so 5 GB + 1 MB is admitted despite the 5120 column."""
+    monkeypatch.delenv("USAGE_QUOTAS_ENABLED", raising=False)
+    monkeypatch.delenv("LIMIT_ENFORCEMENT_ENABLED", raising=False)
+    monkeypatch.setattr(config_module, "load_comprehensive_config", lambda *a, **k: None)
+    svc = sqs.StorageQuotaService(db_pool=_Pool())
+    svc._initialized = True
+    ok, info = await svc.check_quota(7, 5 * 1024 * MB + MB)
+    assert ok is True and info["quota_mb"] is None
+
+
+async def test_combined_pool_denial_raises_quota_exceeded(service, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A blocking team pool with raise_on_exceed=True raises QuotaExceededError (it used to raise TypeError)."""
+
+    class _PoolRepo:
+        """A team pool that is full."""
+
+        async def can_allocate(self, new_bytes, team_id=None, org_id=None):
+            """Refuse."""
+            return False, "team pool full"
+
+        async def check_quota_status(self, team_id=None, org_id=None):
+            """Report the full pool."""
+            return {"quota_mb": 1, "used_mb": 1.0}
+
+    async def _repo():
+        """The full pool repo."""
+        return _PoolRepo()
+
+    monkeypatch.setattr(service, "get_storage_quotas_repo", _repo)
+    with pytest.raises(QuotaExceededError):
+        await service.check_combined_quota(7, MB, team_id=3, raise_on_exceed=True)
+
+
+async def test_user_quota_status_is_read_only_and_has_quota_means_set(service) -> None:
+    """user_quota_status reports has_quota only when a value is set, and leaves the usage cache untouched."""
+    assert await service.user_quota_status(7) == {
+        "quota_mb": None, "used_mb": 100.0, "remaining_mb": None, "usage_pct": 0.0, "has_quota": False,
+    }
+    service.limits[7] = 400
+    status = await service.user_quota_status(7)
+    assert status["has_quota"] is True and status["remaining_mb"] == 300.0 and status["usage_pct"] == 25.0
+    assert "quota:7" not in service.quota_cache
+```
+
+The module imports for these tests are `from tldw_Server_API.app.core import config as config_module` and `from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError`. The quotas-off stub mirrors PR A's switch tests in `tests/Usage/test_usage_quotas_*.py`. If they stub `load_comprehensive_config` elsewhere, for example where `usage_quotas_enabled` imports it, patch the same target.
 ```
 
 Add a test for `set_user_quota` in the same file. It uses a call-recording repo; Task 3's endpoint tests cover the real database round-trip:
@@ -266,15 +324,16 @@ Then:
 - Set `has_quota = quota_mb is None or projected_mb <= quota_mb`. The resolver returns None when quotas are off, so drop the `or not usage_quotas_enabled()`.
 - Build `quota_info` as `{"user_id", "current_usage_mb", "new_size_mb", "projected_usage_mb", "has_quota", **quota_view(current_mb, quota_mb)}`, keeping the existing rounding for the first four.
 
-**`check_combined_quota`.** The user level no longer needs the switch, but the shared pools still do:
+**`check_combined_quota`.** Leave the `has_quota` boolean as it is: the user half is already never False when quotas are off. Fix only the raise, which today passes three arguments to `QuotaExceededError(used_mb, quota_mb)` and so raises `TypeError` on every combined denial:
 
 ```python
-        has_quota = has_user_quota and (
-            (has_team_quota and has_org_quota) or not usage_quotas_enabled()
-        )
+                raise QuotaExceededError(
+                    new_bytes / (1024 * 1024),
+                    user_info.get("quota_mb") or 0,
+                )
 ```
 
-Also pass `user_info.get("quota_mb") or 0` to `QuotaExceededError`, since the user quota is None when a pool blocks.
+Keep the existing `logger`/context about the blocking level if there is one; `combined_info["blocking_level"]` still carries it for callers that don't raise.
 
 **`calculate_user_storage`.** `storage_cache` keeps the usage figures. Merge the quota in on every return:
 - Keep the `_get_user_storage_info` existence check (it raises `UserNotFoundError`).
@@ -283,18 +342,37 @@ Also pass `user_info.get("quota_mb") or 0` to `QuotaExceededError`, since the us
 - On a cache hit, return `{**cached, **quota_view(cached["total_mb"], await resolved_storage_quota_mb(user_id))}`.
 - Keep the info log; `{quota_mb}` may print `None`.
 
-**`update_usage`.**
-- Keep the transaction that updates and reads `storage_used_mb`.
-- Move the quota read AFTER the `async with ... transaction()` block, so no override query runs inside the write transaction: `quota = await resolved_storage_quota_mb(user_id)`.
-- Warn only when `quota is not None and new_usage > quota`.
-- Emit the quota gauge only when it is not None.
-- Return `{"user_id", "storage_used_mb": round(new_usage, 2), "storage_quota_mb": quota, "available_mb": ..., "usage_percentage": ...}`, taking the last two from `quota_view(new_usage, quota)`.
+**`update_usage`.** Restructure it explicitly. Today the warning, the gauges and the `return` sit INSIDE the `async with self.db_pool.transaction()` block (~331-370):
+- Inside the transaction keep only the `storage_used_mb` UPDATE and the read-back. Drop `storage_quota_mb` from both SELECTs (~298 and ~319), so they read `SELECT storage_used_mb FROM users WHERE id = ...`, and set `new_usage` from them.
+- AFTER the `async with` block, still inside the outer `try`: `quota = await resolved_storage_quota_mb(user_id)`, then the `quota_cache.pop`, the over-quota warning (only when `quota is not None and new_usage > quota`), the large-change info log, the gauges (quota gauge only when not None), and the `return {"user_id", "storage_used_mb": round(new_usage, 2), "storage_quota_mb": quota, "available_mb": ..., "usage_percentage": ...}` (the last two from `quota_view(new_usage, quota)`).
+
+This way no override query runs while the write transaction holds the SQLite lock.
 
 **`get_storage_breakdown`.** Set `"quota_mb": await resolved_storage_quota_mb(user_id)`.
 
-**`get_all_users_storage`.**
-- Per row, `quota = await resolved_storage_quota_mb(user.get("id"))`, then `{"user_id", "username", "storage_used_mb", "storage_quota_mb": quota, **{k: v for k, v in quota_view(used, quota).items() if k != "quota_mb"}}`.
-- Above the loop, add `# ponytail: one resolver lookup per user (60 s cached); batch by user ids if admin lists grow past a few thousand`.
+**`get_all_users_storage`.** It has no app callers today, only tests. Per row, `quota = await resolved_storage_quota_mb(user.get("id"))`, then `{"user_id", "username", "storage_used_mb", "storage_quota_mb": quota, **{k: v for k, v in quota_view(used, quota).items() if k != "quota_mb"}}`.
+
+**`user_quota_status`** (new, read-only, used by Task 3's endpoints):
+
+```python
+    async def user_quota_status(self, user_id: int) -> dict[str, Any]:
+        """The user's quota as a QuotaStatus-shaped dict; has_quota means "a quota is set" (read-only)."""
+        if not self._initialized:
+            await self.initialize()
+        user_info = await self._get_user_storage_info(user_id)
+        if not user_info:
+            raise UserNotFoundError(f"User {user_id}")
+        used = float(user_info["storage_used_mb"])
+        quota = await resolved_storage_quota_mb(user_id)
+        view = quota_view(used, quota)
+        return {
+            "quota_mb": quota,
+            "used_mb": round(used, 2),
+            "remaining_mb": view["available_mb"],
+            "usage_pct": view["usage_percentage"] if view["usage_percentage"] is not None else 0.0,
+            "has_quota": quota is not None,
+        }
+```
 
 **`get_user_generated_files_usage`.** Set `usage["quota_mb"] = await resolved_storage_quota_mb(user_id)` and keep `quota_used_mb` from the row.
 
@@ -340,6 +418,13 @@ Also pass `user_info.get("quota_mb") or 0` to `QuotaExceededError`, since the us
 
 If the repo's BLE001 baseline rejects that `noqa` (run `tests/lint`), catch `(RuntimeError, ValueError, OSError, sqlite3.Error)` plus the asyncpg base error the module already handles. Match whatever narrower tuple the file uses elsewhere.
 
+**Schemas fed directly by these service methods.** Change them in this task, so no commit serves a None quota through a non-nullable schema; `GET /users/storage` would otherwise 500 between Task 1 and Task 4.
+- `tldw_Server_API/app/api/v1/schemas/auth_schemas.py:~417-422`, `StorageQuotaResponse`: `storage_quota_mb: Optional[int]`, `available_mb: Optional[float]`, `usage_percentage: Optional[float]`, each `Field(None, ...)` with the description noting "null means unlimited".
+- `tldw_Server_API/app/api/v1/schemas/storage_schemas.py`, `UsageBreakdownResponse`: `quota_mb: int | None`, `available_mb: float | None`, `usage_percentage: float | None`.
+- `tldw_Server_API/app/api/v1/endpoints/storage_usage.py:~60-125`: build those responses None-safely, so the soft and hard limit flags are False when the quota is None.
+
+Then refresh the OpenAPI fingerprint: `/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python Helper_Scripts/export_openapi_schema.py --fingerprint apps/tldw-frontend/lib/api/openapi.fingerprint.json`.
+
 - [ ] **Step 5: Run the new tests and confirm they PASS, then fix the pinning tests**
 
 Run the Step 2 command; expect PASS. Then run:
@@ -347,11 +432,21 @@ Run the Step 2 command; expect PASS. Then run:
 ```bash
 TLDW_TEST_NO_DOCKER=1 /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q -n 4 \
   tldw_Server_API/tests/Storage tldw_Server_API/tests/Services/test_storage_quota_service.py \
-  tldw_Server_API/tests/Usage tldw_Server_API/tests/AuthNZ/unit/test_storage_quota_service_backend_selection.py \
-  tldw_Server_API/tests/AuthNZ/unit/test_versioned_user_write_gateway.py \
-  tldw_Server_API/tests/DB_Management/unit/test_users_db_update_backend_detection.py \
+  tldw_Server_API/tests/Usage tldw_Server_API/tests/AuthNZ/unit tldw_Server_API/tests/AuthNZ_Unit \
+  tldw_Server_API/tests/AuthNZ/integration tldw_Server_API/tests/UserProfile tldw_Server_API/tests/Admin \
   tldw_Server_API/tests/MediaIngestion_NEW/unit tldw_Server_API/tests/VN_Assets
 ```
+
+Every commit must leave the suite green (CLAUDE.md). If a reader test now fails only because the quota moved, rewrite it here in Task 1, not later:
+- `tests/AuthNZ/unit/test_user_endpoints.py:350,384`
+- `tests/AuthNZ/integration/test_auth_comprehensive.py:411`
+- `tests/UserProfile/test_user_profile_read.py`
+
+Rewrite each failure that pins the OLD contract to the new one. The old contract covers four things:
+- the quota read from the column;
+- a `(current, quota)` tuple in `quota_cache`;
+- `set_user_quota` writing `UPDATE users SET storage_quota_mb`, or clamping to 100;
+- `or not usage_quotas_enabled()` on the user level.
 
 Rewrite each failure that pins the OLD contract to the new one. The old contract covers four things:
 - the quota read from the column;
@@ -364,7 +459,9 @@ Keep every assertion about live behavior. Tests that only stub `check_quota(self
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tldw_Server_API/app/services/storage_quota_service.py tldw_Server_API/tests/Usage/test_storage_quota_resolver.py <each rewritten test file>
+git add tldw_Server_API/app/services/storage_quota_service.py tldw_Server_API/tests/Usage/test_storage_quota_resolver.py \
+  tldw_Server_API/app/api/v1/schemas/auth_schemas.py tldw_Server_API/app/api/v1/schemas/storage_schemas.py \
+  tldw_Server_API/app/api/v1/endpoints/storage_usage.py apps/tldw-frontend/lib/api/openapi.fingerprint.json <each rewritten test file>
 git commit -m "feat(quotas): storage quota comes from limits.storage_quota_mb via the resolver; null is unlimited (spec 2 §5)
 
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
@@ -376,8 +473,8 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/UserProfiles/update_service.py`. Change line ~150 (null-delete condition), delete the storage special case at ~299-321, and update the comment at ~324.
-- Modify: `tldw_Server_API/app/services/admin_users_service.py`. Change `update_user` (the storage block at ~421-425 and the "No fields to update" check).
-- Modify: `tldw_Server_API/app/services/registration_service.py`. Change `register_user`: the override at ~378-381, the dead registration-code branch at ~392-394, the INSERT, and the returned dicts at ~429 and ~501.
+- Modify: `tldw_Server_API/app/services/admin_users_service.py`. Change `update_user` (the storage block at ~421-425, the "No fields to update" check, and the audit emission at ~473-489).
+- Modify: `tldw_Server_API/app/services/registration_service.py`. Change `register_user`: the override at ~378-381, the dead registration-code branch at ~392-394, an override write after the INSERT, and ONLY the returned dict at ~493-505. The `gateway.insert_user(... values={..., "storage_quota_mb": storage_quota})` at ~415-430 stays as it is: `public.users.storage_quota_mb` is `NOT NULL`, so writing None there would break user creation on Postgres.
 - Modify: `tldw_Server_API/app/api/v1/schemas/admin_schemas.py:74,148`. Change `UserUpdateRequest` / `AdminUserCreateRequest.storage_quota_mb` from `ge=100` to `ge=0`.
 - Modify: `tldw_Server_API/app/services/admin_profiles_service.py`. Remove the storage special cases at ~212, ~239-245, ~306 and ~1086.
 - Test: create `tldw_Server_API/tests/UserProfile/_storage_quota_helpers.py` and `tldw_Server_API/tests/UserProfile/test_storage_quota_writers.py`. Update the tests that pin the old write path:
@@ -386,7 +483,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
   - `tests/Admin/test_admin_user_api.py`, `tests/AuthNZ/integration/test_registration_role_membership_postgres.py`
 
 **Interfaces:**
-- Consumes (Task 1): `StorageQuotaService.set_user_quota(user_id, quota_mb, *, updated_by=None)`, `get_storage_service()`, `resolved_storage_quota_mb(user_id)` and `STORAGE_QUOTA_KEY`.
+- Consumes (Task 1): `resolved_storage_quota_mb(user_id)` and `STORAGE_QUOTA_KEY`. Also `UserProfileOverridesRepo(db_pool)` with `.ensure_tables(db_conn=...)`, `.upsert_override(..., db_conn=...)` and `.delete_override(..., db_conn=...)`, and `quota_resolver.invalidate_user`. Task 2 does NOT call `StorageQuotaService.set_user_quota`: its writers run inside a request transaction and must write on that transaction's connection (see Rulings).
 - Produces: `limits.storage_quota_mb` writes on every path land in `user_config_overrides`. A `null` deletes. Team and org override routes accept the key.
 
 - [ ] **Step 1: Write the failing tests**
@@ -496,6 +593,10 @@ def test_admin_update_quota_absent_vs_null(auth_headers: dict) -> None:
             assert quota(user_id) == 0
             assert client.put(url, headers=auth_headers, json={"storage_quota_mb": None, "reason": "quota test clear"}).status_code == 200
             assert quota(user_id) is None
+            # A users-table write and the override write in one PUT must share the request transaction.
+            both = {"is_verified": True, "storage_quota_mb": 64, "reason": "both fields at once"}
+            assert client.put(url, headers=auth_headers, json=both).status_code == 200
+            assert quota(user_id) == 64
         finally:
             patch_quota(client, auth_headers, user_id, None)
 
@@ -516,9 +617,15 @@ def test_team_storage_value_enforced_and_user_value_wins(auth_headers: dict) -> 
             client.delete(team_url, headers=auth_headers)
 ```
 
-If `PUT /api/v1/admin/users/{id}` refuses an admin editing themselves, or needs extra fields (`reason`, `admin_password`), satisfy the route's own rules. Read `UserUpdateRequest` and the route. If self-edits are refused outright, edit a second user created as in the next test.
+The plan review verified the rules: the single-user admin may edit itself, and `reason` (min 8 chars) and `admin_password` are required only for `role`/`is_active`.
 
-Also add `test_admin_create_with_quota_writes_override`, with the docstring "Creating a user with storage_quota_mb=250 yields an enforced 250; without it, unlimited." The admin create route refuses user creation in the local single-user test profile ("User creation is not allowed in local-single-user profile"). So call `registration_service.register_user(...)` directly, exactly as `admin_users_service.create_user` does (same keyword arguments, including `created_by` and `storage_quota_override=250`), then assert `quota(new_id) == 250`. A second call without the override gives `quota(other_id) is None`.
+**Known test blind spot.** The test DB adapter (`API_Deps/auth_deps.py:573-578`) opens a real transaction only on Postgres. On SQLite this test can't reproduce the production "database is locked" stall that a second connection would cause. Step 4's same-connection rule prevents that bug by construction; the reviewer checks it by reading the code.
+
+Also add `test_admin_create_with_quota_writes_override`, with the docstring "Creating a user with storage_quota_mb=250 yields an enforced 250; without it, unlimited." The admin create route refuses user creation in the local single-user test profile ("User creation is not allowed in local-single-user profile"). So:
+- Get the service with `RegistrationService()` plus `await svc.initialize()`, or the `get_registration_service_dep` the route uses.
+- Call `register_user(...)` with the same keyword arguments `admin_users_service.create_user` passes, including `created_by` and `storage_quota_override=250`.
+- Use a password that passes `validate_password_strength`, and `uuid`-unique usernames and emails, since rows persist in the session DB.
+- Assert `quota(new_id) == 250`. A second user without the override gives `quota(other_id) is None`.
 
 In `tests/UserProfile/test_group_limit_overrides.py`, `test_group_override_rejects_bad_input` asserts that `limits.storage_quota_mb` is refused with 400. Delete that one line, because storage is now accepted; the team test above covers acceptance.
 
@@ -542,20 +649,30 @@ The generic branch already sets `result.needs_quota_invalidation = True`, which 
 In `admin_users_service.update_user`:
 - Replace the `if request.storage_quota_mb is not None:` column block with `quota_requested = "storage_quota_mb" in request.model_fields_set`.
 - Change the "No fields to update" guard to `if not updates and not quota_requested:`.
-- Make the users-table UPDATE (and whatever builds and executes it) run only `if updates:`. Read the function and keep the role-sync, audit and gateway behavior unchanged for the other fields.
-- After the transaction commits, add:
+- Make the users-table UPDATE (and whatever builds and executes it) run only `if updates:`. Read the function and keep the role-sync and gateway behavior unchanged for the other fields.
+- `update_user` runs inside the endpoint's `Depends(get_db_transaction)`, so its `db` IS the request transaction, and the commit happens after the service returns. Write the override on that same connection, never through `set_user_quota` or a second connection: SQLite holds `BEGIN IMMEDIATE` for the whole request, so a second writer stalls 5 s and fails. Add this inside the function, after the users-table update (or in its place when `updates` is empty):
 
 ```python
         if quota_requested:
-            storage_service = await get_storage_service()
-            await storage_service.set_user_quota(
-                user_id,
-                request.storage_quota_mb,
-                updated_by=int(principal.user_id) if principal.user_id is not None else None,
-            )
+            overrides = UserProfileOverridesRepo(await get_db_pool())
+            await overrides.ensure_tables(db_conn=db)
+            if request.storage_quota_mb is None:
+                await overrides.delete_override(user_id=int(user_id), key=STORAGE_QUOTA_KEY, db_conn=db)
+            else:
+                await overrides.upsert_override(
+                    user_id=int(user_id),
+                    key=STORAGE_QUOTA_KEY,
+                    value=int(request.storage_quota_mb),
+                    updated_by=int(principal.user_id) if principal.user_id is not None else None,
+                    db_conn=db,
+                )
+            quota_resolver.invalidate_user(int(user_id))
 ```
 
-Import `get_storage_service` from `tldw_Server_API.app.services.storage_quota_service`. If the function's audit record lists the changed fields, keep `storage_quota_mb` in it when `quota_requested`. In `admin_schemas.py`, change `UserUpdateRequest.storage_quota_mb` and `AdminUserCreateRequest.storage_quota_mb` to `int | None = Field(None, ge=0)`.
+  Use the function's real name for the request connection (`db`). `get_db_pool` comes from `tldw_Server_API.app.core.AuthNZ.database`, and `STORAGE_QUOTA_KEY` from `storage_quota_service`. The invalidation runs before the dependency commits; a concurrent read in that window can re-cache the old value for at most 60 s, the same accepted bound as PR B's profile path.
+- **Audit.** When `quota_requested`, emit the function's existing audit event even without `reason`, and include `storage_quota_mb` (the new value, or None) in its metadata. Read ~473-489 and reuse the same helper and event name; only the condition and the metadata change.
+
+In `admin_schemas.py`, change `UserUpdateRequest.storage_quota_mb` and `AdminUserCreateRequest.storage_quota_mb` to `int | None = Field(None, ge=0)`.
 
 - [ ] **Step 5: Registration writes the override**
 
@@ -576,12 +693,15 @@ In `registration_service.register_user`:
                     )
 ```
 
-Use the function's real variable for the new id and its real pool attribute; read the code. Both returned dicts (`"storage_quota_mb": storage_quota`) become `"storage_quota_mb": int(storage_quota_override) if privileged_creation and storage_quota_override is not None else None`.
+Use the function's real variable for the new id and its real pool attribute; read the code.
+- The `gateway.insert_user(... values={..., "storage_quota_mb": storage_quota})` at ~415-430 stays exactly as it is. The column is `NOT NULL` on Postgres.
+- ONLY the returned dict at ~493-505 changes, to `"storage_quota_mb": int(storage_quota_override) if privileged_creation and storage_quota_override is not None else None`.
+- `upsert_override(db_conn=conn)` is correct on both backends (the reviewer verified this): the repo switches between asyncpg and aiosqlite call shapes, and the FK to the just-inserted user is satisfied inside the same transaction.
 
 - [ ] **Step 6: Team and org values allowed; audit diff uses the effective config**
 
 In `admin_profiles_service.py`:
-- At ~1086, `set_group_limit_override`: drop `or key == "limits.storage_quota_mb"`.
+- At ~1086, `set_group_limit_override`: drop `or key == "limits.storage_quota_mb"`. Update its docstring (~1076-1078, "storage stays per-user until PR C") to say a team or org storage value is each member's allowance, separate from the team/org shared storage pools.
 - At ~212: `needs_user_record = bool(key_set & identity_keys)`.
 - Delete the `if user_row and "limits.storage_quota_mb" in key_set:` block (~239-245).
 - At ~306, drop `and key != "limits.storage_quota_mb"`, so the "before" value comes from `_build_effective_config` like every other `limits.*` key.
@@ -618,10 +738,13 @@ Refresh the OpenAPI fingerprint first: the `ge=0` change alters the contract.
 - Modify: `tldw_Server_API/app/api/v1/schemas/storage_schemas.py`. Add `SetUserQuotaRequest`; `SetQuotaRequest` stays for team/org pools.
 - Modify: `tldw_Server_API/app/api/v1/endpoints/storage_admin_quotas.py:39-66`. Change `set_user_quota`.
 - Modify: `tldw_Server_API/app/api/v1/endpoints/admin/admin_storage_quotas.py`. Change `get_user_storage_quota` (~109-132) and `update_user_storage_quota` (~135-162), and the local `StorageQuotaResponse` (`usage_pct: float | None = 0.0`).
-- Test: create `tldw_Server_API/tests/Storage/test_user_quota_endpoints.py`. Update `tests/Storage/test_storage_endpoints.py:981,1000-1004`, `tests/Admin/test_admin_storage_quotas.py:333-367` and `tests/AuthNZ_Unit/test_storage_admin_claims.py`.
+- Test: create `tldw_Server_API/tests/Storage/test_user_quota_endpoints.py`. Update:
+  - `tests/Storage/test_storage_endpoints.py:981,1000-1004`;
+  - `tests/Admin/test_admin_storage_quotas.py:333-367`;
+  - `tests/AuthNZ_Unit/test_storage_admin_claims.py:52`. Its fake `set_user_quota(self, user_id, quota_mb)` must accept the new `updated_by=` keyword, or the endpoint returns 500. `tests/Storage/conftest.py:155` is an `AsyncMock` and needs nothing.
 
 **Interfaces:**
-- Consumes (Task 1): `StorageQuotaService.set_user_quota`, `StorageQuotaService.check_quota(user_id, 0)` (for the status read), `get_storage_service()`.
+- Consumes (Task 1): `StorageQuotaService.set_user_quota`, `StorageQuotaService.user_quota_status(user_id)` (for the read-only status), `get_storage_service()`.
 - Produces: `SetUserQuotaRequest(quota_mb: int | None = Field(..., ge=0), soft_limit_pct: int = 80, hard_limit_pct: int = 100)`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -720,16 +843,17 @@ In `storage_admin_quotas.set_user_quota`:
             "usage_pct": pct if pct is not None else 0.0,
             "at_soft_limit": pct is not None and pct >= request.soft_limit_pct,
             "at_hard_limit": pct is not None and pct >= request.hard_limit_pct,
-            "has_quota": True,
+            "has_quota": result.get("storage_quota_mb") is not None,
         }
 ```
 
+  `has_quota` means "a quota is set", the meaning `QuotaStatus` already has for the pools; it is not "this request fits".
 - Keep the 404 and 500 mapping. Also map `ValueError` to 422.
 
 In `admin_storage_quotas.py`:
 - Add `UpdateUserQuotaRequest(BaseModel)` with `quota_mb: int | None = Field(..., ge=0)`.
-- `get_user_storage_quota`: `has_quota, info = await (await get_storage_service()).check_quota(user_id, 0)`, then return `StorageQuotaResponse(quota_mb=info["quota_mb"], used_mb=info["current_usage_mb"], remaining_mb=info["available_mb"], usage_pct=info["usage_percentage"], has_quota=has_quota)`. Map `UserNotFoundError` to 404.
-- `update_user_storage_quota(user_id, body: UpdateUserQuotaRequest)`: call `set_user_quota(user_id, body.quota_mb)` and return its dict. Map `UserNotFoundError` to 404 and `ValueError` to 422. Keep the sanitized 500 for the `_NONCRITICAL_EXCEPTIONS`.
+- `get_user_storage_quota`: `return StorageQuotaResponse(**await (await get_storage_service()).user_quota_status(user_id))`. That is read-only, with no `check_quota` cache or gauge side effects, and `has_quota` means "a quota is set". Map `UserNotFoundError` to 404.
+- `update_user_storage_quota(user_id, body: UpdateUserQuotaRequest)`: call `set_user_quota(user_id, body.quota_mb, updated_by=None)` and return its dict. The parent admin router enforces the role and this route has no principal parameter; don't add one. Map `UserNotFoundError` to 404 and `ValueError` to 422. Keep the sanitized 500 for the `_NONCRITICAL_EXCEPTIONS`.
 - Fix both docstrings (the user is no longer treated as an org), and drop the misleading "Currently delegates to the org-level quota" text.
 - Change the local `StorageQuotaResponse.usage_pct` to `float | None = 0.0`.
 
@@ -764,22 +888,26 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
   - `/me` (~573, ~649);
   - `GET /storage` fallback (~1047-1056).
 - Modify `tldw_Server_API/app/api/v1/endpoints/auth.py:~3991` (`storage_quota_mb=_current_user_value(..., 1000)`).
-- Modify `tldw_Server_API/app/services/admin_users_service.py`: `list_users`, `export_users` and `get_user_details` overlay the resolved value.
+- Modify `tldw_Server_API/app/services/admin_users_service.py`. Overlay the resolved value in:
+  - `create_user`'s response (~196-205, which returns `repo.get_user_by_id(...)` raw as `UserSummary`);
+  - `list_users`, `export_users` and `get_user_details`.
 - Modify `tldw_Server_API/app/services/admin_system_service.py:~178,~215,~297`: drop `SUM(storage_quota_mb)`, so `total_quota_mb` is None.
 - Modify `tldw_Server_API/app/core/UserProfiles/service.py:~439-460` (`_build_quotas`).
-- Modify the schemas:
+- Modify the schemas. Task 1 already made `StorageQuotaResponse` and `UsageBreakdownResponse` nullable; leave them.
   - `auth_schemas.py:277` `UserResponse.storage_quota_mb: Optional[int]`;
-  - `auth_schemas.py:~417-422` `StorageQuotaResponse.storage_quota_mb/available_mb/usage_percentage`: Optional;
   - `admin_schemas.py:179` `UserSummary.storage_quota_mb: int | None`;
-  - `admin_schemas.py:~454` `StorageStats.total_quota_mb: float | None`;
-  - `user_profile_schemas.py:109` `UserProfileQuotas.storage_quota_mb: Optional[int]`;
-  - `storage_schemas.py` `UsageBreakdownResponse.quota_mb/available_mb/usage_percentage`: Optional.
-- Modify `tldw_Server_API/app/api/v1/endpoints/storage_usage.py:~60-125` so it is None-safe when building `UsageBreakdownResponse` and `StorageUsageResponse`.
+  - `admin_schemas.py:~456` `StorageStats.total_quota_mb: float | None`;
+  - `user_profile_schemas.py:109` `UserProfileQuotas.storage_quota_mb: Optional[int]`.
 - Modify the frontend types:
-  - `apps/packages/ui/src/services/tldw/TldwApiClient.ts:338,1477`: `storage_quota_mb: number | null`;
-  - `:1495`: `storage_quota_mb?: number | null`;
+  - `apps/packages/ui/src/services/tldw/TldwApiClient.ts`:
+    - `:338` `storage_quota_mb: number | null`, plus `:339-340` `available_mb` and `usage_percentage`, both `number | null`;
+    - `:1477` `storage_quota_mb: number | null`;
+    - `:1495` `storage_quota_mb?: number | null`.
+  - `apps/packages/ui/src/services/tldw/domains/admin.ts:672`: `updateUserStorageQuota` payload `{ quota_mb: number | null }`;
   - `apps/tldw-frontend/lib/auth.ts:27`: `storage_quota_mb?: number | null`;
   - the stats type behind `ServerAdminPage.tsx:665` (`total_quota_mb`): `number | null`.
+
+  The reviewer found no admin edit form that sends a quota, so there is no UI `min=100` to change.
 - Test: create `tldw_Server_API/tests/UserProfile/test_storage_quota_readers.py`. Update:
   - `tests/AuthNZ/integration/test_auth_comprehensive.py:411`
   - `tests/AuthNZ/integration/test_user_endpoints_integration.py:298`
@@ -874,15 +1002,15 @@ Expected: the responses show 5120 (or 1000), and Pydantic rejects None.
 - [ ] **Step 3: Implement**
 
 **`users.py`.**
-- In `_resolve_user_context`, change the fallback dict's `"storage_quota_mb"` to `None`. After the repo loads the user, return `await with_resolved_storage_quota(dict(user))` in place of the raw row.
+- In `_resolve_user_context`, change the fallback dict's `"storage_quota_mb"` to `None`. The function returns `{**fallback, **user_dict}` (~254-277); return `await with_resolved_storage_quota({**fallback, **user_dict})` instead, so the merged dict carries the resolved value.
 - At `/me` (~573, ~649), use `storage_quota_mb=user_context.get("storage_quota_mb")` with no default.
 - In the `GET /storage` fallback, use `quota = user_context.get("storage_quota_mb")` and `used = float(user_context.get("storage_used_mb", 0.0))`, then return `StorageQuotaResponse(user_id=..., storage_used_mb=used, storage_quota_mb=quota, available_mb=view["available_mb"], usage_percentage=view["usage_percentage"])`, where `view = quota_view(used, quota)`.
 
 **`auth.py:~3991`.** Use `storage_quota_mb=await resolved_storage_quota_mb(user_id)`. The enclosing function is async; check, and use its user id variable.
 
 **`admin_users_service`.**
-- In `list_users` and `export_users`, set `users = [await with_resolved_storage_quota(u) for u in users]` before returning or serializing.
-- In `get_user_details`, overlay the single row the same way, before the response is built.
+- In `list_users` and `export_users`, set `users = [await with_resolved_storage_quota(u) for u in users]` before returning or serializing. Above each, add `# ponytail: up to ~5 resolver queries per user on a cold 60 s cache when quotas are on (free when off); batch by user ids (one user_config_overrides IN-query plus the membership queries) if exports pass a few thousand users`.
+- In `get_user_details` and in `create_user`'s returned user (~196-205), overlay the single row the same way, before the response is built.
 
 **`admin_system_service`.**
 - Delete the `SUM(storage_quota_mb) as total_quota_mb,` line from both queries.
@@ -893,11 +1021,13 @@ Expected: the responses show 5120 (or 1000), and Pydantic rejects None.
 - Seed with `"storage_quota_mb": await resolved_storage_quota_mb(user_id)`.
 - When the live `storage_info` is available, set `quotas["storage_quota_mb"] = live_quota` (it may be None). Keep `storage_used_mb` handling as it is.
 
-Also apply the schema edits listed under Files, and make `storage_usage.py` None-safe:
-- `usage_percentage` stays `round(... ) if quota_mb else None`.
-- `at_soft_limit` / `at_hard_limit` are False when the quota is None.
+Also apply the schema edits listed under Files.
 
-Then apply the four frontend type edits. Run `cd apps/packages/ui && bunx tsc --noEmit -p .`, or the package's existing typecheck script; check `package.json`. If a consumer fails typecheck on `number | null`, make it treat null as "no quota", as `ServerAdminPage.formatMegabytesForAdmin` already does.
+Then apply the frontend type edits and typecheck both packages:
+- `bunx tsc --noEmit -p apps/packages/ui`. That package has no `typecheck` script, but `apps/packages/ui/tsconfig.json` exists.
+- `cd apps/tldw-frontend && npm run typecheck`.
+
+If a consumer fails typecheck on `number | null`, make it treat null as "no quota", as `ServerAdminPage.formatMegabytesForAdmin` already does. If bun or npm isn't available, record that in the report; don't skip silently.
 
 - [ ] **Step 4: Run the tests and confirm they PASS; fix the pinning tests**
 
@@ -1020,7 +1150,10 @@ If the `users` table has other `NOT NULL` columns without defaults (check migrat
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ import storage_quota_backfill
-from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import ensure_storage_quota_overrides_backfill_pg
+from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+    ensure_authnz_core_tables_pg,
+    ensure_storage_quota_overrides_backfill_pg,
+)
 
 pytestmark = pytest.mark.integration
 KEY = "limits.storage_quota_mb"
@@ -1039,10 +1172,11 @@ async def _override(pool, user_id: int):
     return await pool.fetchval("SELECT value_json FROM user_config_overrides WHERE user_id = $1 AND key = $2", user_id, KEY)
 
 
-async def test_pg_backfill_copies_non_default_values(isolated_test_environment, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_pg_backfill_copies_non_default_values(test_db_pool, monkeypatch: pytest.MonkeyPatch) -> None:
     """2048 is copied; 5120 and the configured default are not."""
     monkeypatch.setattr(storage_quota_backfill, "skip_values", lambda: [5120, 10240])
-    pool = ...  # the DatabasePool from isolated_test_environment, as in test_storage_quotas_bootstrap_postgres.py
+    pool = test_db_pool
+    assert await ensure_authnz_core_tables_pg(pool)  # the fixture DB has users but no user_config_overrides
     u_custom = await _add_user(pool, "pgcustom", 2048)
     u_default = await _add_user(pool, "pgdefault", 5120)
     u_configured = await _add_user(pool, "pgconfigured", 10240)
@@ -1051,10 +1185,11 @@ async def test_pg_backfill_copies_non_default_values(isolated_test_environment, 
     assert await _override(pool, u_default) is None and await _override(pool, u_configured) is None
 
 
-async def test_pg_backfill_runs_once_and_never_resurrects(isolated_test_environment, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_pg_backfill_runs_once_and_never_resurrects(test_db_pool, monkeypatch: pytest.MonkeyPatch) -> None:
     """After the first run, a deleted override is not re-created by a second run."""
     monkeypatch.setattr(storage_quota_backfill, "skip_values", lambda: [5120])
-    pool = ...  # as above
+    pool = test_db_pool
+    assert await ensure_authnz_core_tables_pg(pool)
     user_id = await _add_user(pool, "pgonce", 2048)
     assert await ensure_storage_quota_overrides_backfill_pg(pool) is True
     await pool.execute("DELETE FROM user_config_overrides WHERE user_id = $1 AND key = $2", user_id, KEY)
@@ -1062,7 +1197,7 @@ async def test_pg_backfill_runs_once_and_never_resurrects(isolated_test_environm
     assert await _override(pool, user_id) is None
 ```
 
-The only thing left open (`pool = ...`) is fixture plumbing that `test_storage_quotas_bootstrap_postgres.py` already shows; copy it exactly. Add other `NOT NULL` `users` columns if the PG DDL requires them, and make sure the AuthNZ core tables are ensured first, as that test does.
+`test_db_pool` comes from `tests/AuthNZ/conftest.py` (~1830-1849, used by `test_authnz_quotas_repo_postgres.py`); it skips when Postgres is unavailable. Its DDL creates `users` (NOT NULL without default: only `username`, `email` and `password_hash`), but not `user_config_overrides`, hence the `ensure_authnz_core_tables_pg(pool)` first (`test_profile_array_parameters_postgres.py` does the same). `asyncio_mode = "auto"`, so bare `async def test_` functions run as they are.
 
 - [ ] **Step 2: Run them and confirm they FAIL** (no migration 100, no PG function).
 
@@ -1104,25 +1239,24 @@ def migration_100_copy_storage_quotas_to_user_overrides(conn: sqlite3.Connection
     if not _sqlite_table_exists(conn, "users"):
         logger.info("Migration 100: users table not present; skipping storage quota copy")
         return
-    if not _sqlite_table_exists(conn, "user_config_overrides"):
-        migration_047_create_user_config_overrides_table(conn)
+    # Ensure the table without calling migration 047, which commits inside the runner's transaction.
+    conn.execute("""CREATE TABLE IF NOT EXISTS user_config_overrides (...)""")  # copy 047's DDL verbatim
     skip = skip_values()
-    now = datetime.now(timezone.utc).isoformat()
     placeholders = ",".join("?" for _ in skip)
     cur = conn.execute(
         f"""
         INSERT INTO user_config_overrides (user_id, key, value_json, created_at, updated_at, created_by, updated_by)
-        SELECT id, ?, CAST(storage_quota_mb AS TEXT), ?, ?, NULL, NULL
+        SELECT id, ?, CAST(storage_quota_mb AS TEXT), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL
         FROM users
         WHERE storage_quota_mb IS NOT NULL AND storage_quota_mb NOT IN ({placeholders})
         ON CONFLICT(user_id, key) DO NOTHING
         """,  # nosec B608 - only "?" placeholders are interpolated
-        (STORAGE_QUOTA_KEY, now, now, *skip),
+        (STORAGE_QUOTA_KEY, *skip),
     )
     logger.info("Migration 100: copied {} storage quota(s) to limits.storage_quota_mb", cur.rowcount)
 ```
 
-Check that `datetime` and `timezone` are imported in `migrations.py`. Also check the column list against migration 047's DDL; if 047 has no `created_by`, drop it. Register `Migration(100, "Copy users.storage_quota_mb into limits.storage_quota_mb overrides", migration_100_copy_storage_quotas_to_user_overrides)`. The runner owns the transaction, as it does for 099, so don't commit here.
+Replace the `(...)` with migration 047's `user_config_overrides` DDL, copied verbatim. 047 has `created_by` and `updated_by` (the review verified this). No Python `datetime` is needed: `migrations.py` doesn't import it, and `CURRENT_TIMESTAMP` does the job. Register `Migration(100, "Copy users.storage_quota_mb into limits.storage_quota_mb overrides", migration_100_copy_storage_quotas_to_user_overrides)`. The runner owns the transaction, as it does for 099, so don't commit here.
 
 - [ ] **Step 5: Implement the one-time Postgres backfill**
 
@@ -1166,12 +1300,18 @@ async def ensure_storage_quota_overrides_backfill_pg(pool: DatabasePool) -> bool
                 skip_values(),
             )
         return True
-    except Exception as exc:  # noqa: BLE001 - mirror the sibling ensure_*_pg contract (log, return False)
-        logger.error("Postgres storage quota backfill failed: {}", exc)
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error(
+            "Postgres storage quota backfill failed ({}): {}; it will retry at the next start",
+            type(exc).__name__,
+            exc,
+        )
         return False
 ```
 
-Match how the sibling ensure functions get a connection and catch errors. If they narrow the exception type, narrow this one the same way. Wire it into `_ensure_pg_extras`'s `pg_ensures` list right after "AuthNZ core tables", using the same tuple shape: `("storage quota overrides backfill", ensure_storage_quota_overrides_backfill_pg, "AUTHNZ_STORAGE_QUOTA_BACKFILL_NOT_READY")`. In `initialize.py`, call it after `ensure_authnz_core_tables_pg`, with the same failure handling as its neighbors.
+`_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS` is the file's own tuple (~37-48). The file is not on the BLE001 grandfather list, so no broad `except`. Log the copied row count at INFO on success: read it from the `execute` status string, e.g. `"INSERT 0 3"`.
+
+**Failure never blocks startup** (see Rulings). Wire it into `_ensure_pg_extras`'s `pg_ensures` list right after "AuthNZ core tables" with `None` as the readiness error: `("storage quota overrides backfill", ensure_storage_quota_overrides_backfill_pg, None)`. That is the same shape as `("usage tables", ensure_usage_tables_pg, None)`, so a False logs the loop's existing warning and startup continues. In `initialize.py`, call it after `ensure_authnz_core_tables_pg`, and on False log a warning instead of raising, unlike its raising neighbors. A failed run leaves no marker, so the next start retries.
 
 - [ ] **Step 6: Run the tests and confirm they PASS**, plus the existing migration suites:
 
@@ -1200,9 +1340,9 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ### Task 6: Docs, and a sweep of the remaining storage tests
 
 **Files:**
-- Modify: `Docs/Operations/Env_Vars.md`. In the Usage Quotas section, replace "`limits.storage_quota_mb` (per user only for now)" with "`limits.storage_quota_mb` (storage MB; team and org values are each member's allowance, separate from team/org shared storage pools)". Add one bullet: "Upgrading copies each user's existing storage quota into `limits.storage_quota_mb`, except 5120 and the `DEFAULT_STORAGE_QUOTA_MB` configured at upgrade time. `DEFAULT_STORAGE_QUOTA_MB` no longer sets anyone's quota." If `DEFAULT_STORAGE_QUOTA_MB` has its own entry elsewhere in the file, change its description to "Legacy; no longer applied as a quota (spec 2). Values equal to it are not migrated."
+- Modify: `Docs/Operations/Env_Vars.md`. In the Usage Quotas section, replace "`limits.storage_quota_mb` (per user only for now)" with "`limits.storage_quota_mb` (storage MB; team and org values are each member's allowance, separate from team/org shared storage pools)". Add one bullet: "Upgrading copies each user's existing storage quota into `limits.storage_quota_mb`, except 5120 and the `DEFAULT_STORAGE_QUOTA_MB` configured at upgrade time, which can't be told apart from 'never set'. Those users become unlimited until a value is set. If `DEFAULT_STORAGE_QUOTA_MB` was changed over time, users still on an *older* default carry it over as a real per-user value. `DEFAULT_STORAGE_QUOTA_MB` no longer sets anyone's quota." If `DEFAULT_STORAGE_QUOTA_MB` has its own entry elsewhere in the file, change its description to "Legacy; no longer applied as a quota (spec 2). Values equal to it are not migrated."
 - Modify: `Docs/Operations/Rate_Limits_Troubleshooting.md`. Add a row: "Storage quota exceeded (413), only when `USAGE_QUOTAS_ENABLED` is on: raise or remove the user's (or their team/org's) `limits.storage_quota_mb`."
-- Run `bash Helper_Scripts/refresh_docs_published.sh`, and include the `Docs/Published` diff.
+- Run `bash Helper_Scripts/refresh_docs_published.sh`, and include the `Docs/Published` diff. Only `Env_Vars.md` is mirrored (`refresh_docs_published.sh:165`); `Rate_Limits_Troubleshooting.md` has no mirror.
 
 - [ ] **Step 1: Make the doc edits, run the refresh script, and run `tests/Docs`:**
 
@@ -1247,6 +1387,9 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
   - team and org values now allowed;
   - the migration (SQLite 100, one-time PG marker);
   - the frontend type changes;
+  - upgrade semantics: users on 5120 or the configured default become unlimited once quotas are on; quota edits outside the profile path no longer bump `profile_version`;
+  - the spec erratum: the registration-code writer named in spec §5 and Testing 9 was dead code and is deleted;
+  - the follow-up candidate: the two storage quota endpoints stay unaudited, as before;
   - the verification counts;
   - the `## Change summary` waiver section and the Claude Code footer.
 - [ ] **Step 5: Qodo and merge.**
