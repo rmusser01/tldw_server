@@ -706,3 +706,24 @@ protected recovery, exact draft/history checkpoints, all13rows unchanged,
 zero-send acceptance, NOT a fresh revised Stop activation or full UAT pass.
 Independent correction review finds no actionable issue. Publish the verified
 correction once; exact new-head hosted gates and review remain required.
+
+## Stage 13: Latest Persona Qualification Integration
+**Goal**: Rebase on actual dev bf8f2ad while preserving the qualified Chat
+Workspace implementation and all incoming Persona qualification contracts.
+**Success Criteria**: Resolve only three overlapping tests without weakening
+assertions; preserve real router coverage and the audio quota matrix. Production
+source remains identical to the live artifacts. Fresh owning regressions,
+security, types and full-range hooks pass before one exact-lease publication.
+**Tests**: Settings and owning Chat Workspace Vitest; PostgreSQL audio/auth-admin,
+incoming Persona/DB/CI tests; types, lint, Bandit and source binding.
+**Status**: In Progress
+
+At19:18UTC actual dev advances from502da tobf8f2ad6a42ad6396376020876a5f6a709ec6b34
+through Persona PR3055. Incoming22files are tests, Vitest configuration and
+tracking only. Independent merge-tree identifies three test conflicts: cookie
+logout and timeout form router fixtures, plus PostgreSQL audio quotas. Retain the
+real memory-router coverage and quota off/unset/finite matrix while incorporating
+incoming accessibility assertions and override cleanup. Published23588f9 is
+retained in an exact backup branch. Existing healthy queued CI is not completion;
+the actual merge conflict requires integration. No new native input or inference
+is authorized and narrow acceptance must not become a full UAT claim.
