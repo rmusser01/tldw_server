@@ -383,7 +383,7 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Tests:** Factory/config snapshot, dependency compatibility, end-to-end adapter with fake provider, identity minimization, breaker isolation, full focused regression, lint/compile/Bandit.
 
-**Status:** In Progress
+**Status:** Complete
 
 **Checkpoint acceptance (2026-10-04):** The human's `continue` accepts Stage 4 and authorizes this stage. ADR check: no new ADR is required; ADR-060/061/062 already govern the scope, accounting, and lifecycle rules implemented by composition. Production composition remains lazy, internal, and unavailable without explicit operator accounting and fail-closed governor policy configuration; no module or tool is enabled.
 
@@ -444,7 +444,7 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 ### Task 5.3: Complete static and security verification
 
-**Status:** In Progress
+**Status:** Complete
 
 **Verification preparation (2026-10-04):** Compilation and whole-branch whitespace passed. Prescribed production Bandit passed over `19,465` lines; the extended scan of every branch-touched production Python file passed over `44,059` lines, both with zero findings/errors. Whole-branch Ruff reports ten diagnostics reproduced from unchanged `origin/dev` code in Persona, the shared HTTP client and its redirect test; none is new in this work. These inherited whole-file diagnostics are recorded explicitly, not represented as a passing whole-file lint gate. Changed/new completion code passes focused Ruff. Final cross-module review remains required before task acceptance criteria are checked.
 
@@ -467,6 +467,8 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 **Runtime quality checkpoint (2026-10-04):** The final guard-compatible artifact passed fresh parent MCP core verification (`4,271` passed, three existing optional-parser skips) and the prescribed boundary gate (`1,062` passed). Independent specification review approved `391` focused cases plus 20 offline real-storage probes; the original finding reviewer approved quality after `97` focused cases plus 20 offline probes. Both paid-receipt loss and cleanup-private cancellation leakage are resolved; no validated findings remain. All five manifest hashes match and every test/probe session has drained. Coverage remains `96.13%` on the identical production artifact; Bandit has zero production findings/errors over `44,116` lines. No live-provider/TLS or other Python/event-loop certification is claimed. Commit and pinned-`c95e41fc62` rebase verification are next. Stage 5 remains In Progress solely for final tracking/documentation: the three Backlog ADR documentation links require the requested human-approved metadata exception; runtime implementation and review gates are complete, with no Skills tool enabled.
 
 **Final pinned rebase (2026-10-04):** The reviewed repair checkpoint `bc8dea3221` replayed as `48186fc25f` onto `dev` at `c95e41fc62a07e55fd74052023826c71b2a2c789`. All 19 commits are patch-identical by range comparison. Complete old/new tree comparisons show no production, test, documentation or task-record change; only unrelated upstream Backlog normalization records differ. All five artifact hashes still match. Fresh post-rebase verification passed `1,062` boundary cases, four Backlog-format cases, focused Ruff/Black, compilation, whole-branch whitespace, and production Bandit (zero findings/errors across `44,116` lines). Every configured pre-commit check applicable to the full branch changes passed; YAML/TOML and wizard-only Ruff/Black hooks correctly had no matching files. The immediately pre-rebase full MCP suite (`4,271` passed, three parser skips), AuthNZ suite (`3,169` passed, one driver skip), canonical PostgreSQL parity (`91` passed, no skips), and `96.13%` coverage apply to the byte-identical reviewed source/test artifact. All sessions are drained; the branch remains local and the worktree is preserved. All 11 task acceptance criteria are checked, but Stage 5 and the task remain In Progress only because Backlog documentation-field correction needs the outstanding human approval. No PR, push, merge or Skills enablement occurred.
+
+**Finalization approval (2026-10-04):** The requester approved the metadata-only exception for the three Backlog ADR documentation links. Only those three entries were edited manually; backlog-py normalized and manages all subsequent task changes. ADR-060/061/062 references resolve to the existing proposed records, the task-format gate passed four tests, and all five reviewed runtime/test hashes are unchanged. The documentation blocker is resolved and all five stages are complete. Retain this tracked, linked plan as the implementation and verification record. Finalization changes no runtime behavior, enables no Skills tool, and does not authorize a push, PR or merge.
 
 1. Run Ruff only over touched Python files, using the repository configuration:
    ```bash
