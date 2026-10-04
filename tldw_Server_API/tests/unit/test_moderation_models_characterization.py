@@ -246,18 +246,29 @@ def test_policy_to_dict_does_not_swallow_unlisted_exceptions():
         policy.to_dict()
 
 
-def test_compiler_ignores_legacy_model_type_hook():
+def test_compiler_ignores_legacy_model_type_hook() -> None:
+    """Keep compiled policies and rules canonical despite a legacy override."""
+
     class ReplacementPolicy:
-        def __init__(self, **values):
+        """Stand in for an incompatible policy selected by the retired hook."""
+
+        def __init__(self, **values: object) -> None:
+            """Retain constructor values for the incompatible policy fixture."""
             self.values = values
 
     class ReplacementRule:
-        def __init__(self, **values):
+        """Stand in for an incompatible compiled rule."""
+
+        def __init__(self, **values: object) -> None:
+            """Retain constructor values for the incompatible rule fixture."""
             self.values = values
 
     class ReplacementCompiler(PolicyCompiler):
+        """Expose a legacy hook that compilation must ignore."""
+
         @staticmethod
-        def policy_types():
+        def policy_types() -> tuple[type[ReplacementPolicy], type[ReplacementRule]]:
+            """Return incompatible classes to detect legacy hook dispatch."""
             return ReplacementPolicy, ReplacementRule
 
     compiler = ReplacementCompiler()
@@ -293,18 +304,29 @@ def test_compiler_ignores_legacy_model_type_hook():
     assert all(type(rule) is PatternRule for rule in user_result.policy.block_patterns)
 
 
-def test_evaluator_ignores_legacy_model_type_hook():
+def test_evaluator_ignores_legacy_model_type_hook() -> None:
+    """Keep evaluation and redaction canonical despite a legacy override."""
+
     class ReplacementRule:
-        def __init__(self, **values):
+        """Stand in for an incompatible evaluator rule class."""
+
+        def __init__(self, **values: object) -> None:
+            """Retain constructor values for the incompatible rule fixture."""
             self.values = values
 
     class ReplacementResult:
-        def __init__(self, **values):
+        """Stand in for an incompatible evaluation result."""
+
+        def __init__(self, **values: object) -> None:
+            """Expose supplied result fields for legacy dispatch detection."""
             self.__dict__.update(values)
 
     class ReplacementEvaluator(PolicyEvaluator):
+        """Expose a legacy hook that evaluator operations must ignore."""
+
         @staticmethod
-        def policy_types():
+        def policy_types() -> tuple[type[ModerationPolicy], type[ReplacementRule], type[ReplacementResult]]:
+            """Return incompatible rule and result classes for the regression."""
             return ModerationPolicy, ReplacementRule, ReplacementResult
 
     rule = PatternRule(
