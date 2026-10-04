@@ -196,9 +196,9 @@ class UsageBreakdownResponse(BaseModel):
     by_folder: list[FolderInfo]
     total_bytes: int
     total_mb: float
-    quota_mb: int
-    available_mb: float
-    usage_percentage: float
+    quota_mb: int | None = Field(default=None, description="User quota in MB; null means unlimited")
+    available_mb: float | None = Field(default=None, description="Available quota in MB; null means unlimited")
+    usage_percentage: float | None = Field(default=None, description="Usage percentage; null means unlimited")
 
 
 # =========================================================================

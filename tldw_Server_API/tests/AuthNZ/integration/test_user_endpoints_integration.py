@@ -295,10 +295,13 @@ class TestUserEndpointsIntegration:
         assert "storage_used_mb" in data
         assert "available_mb" in data
         assert "usage_percentage" in data
-        assert data["storage_quota_mb"] > 0
+        # A fresh user has no limits.storage_quota_mb override, so the quota comes
+        # back null (unlimited) from the resolver (spec 2 Sec. 5), not a positive
+        # legacy column value.
+        assert data["storage_quota_mb"] is None
+        assert data["available_mb"] is None
+        assert data["usage_percentage"] is None
         assert data["storage_used_mb"] >= 0
-        assert data["available_mb"] >= 0
-        assert 0 <= data["usage_percentage"] <= 100
 
 
 class TestUserEndpointsEdgeCases:

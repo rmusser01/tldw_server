@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _guard_sql
+from tldw_Server_API.app.core.Usage import quota_resolver
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
 
@@ -85,9 +86,9 @@ class _SQLiteUpdateConnWithFetchrowTrap:
         if "update main.users" in q and "set storage_used_mb" in q:
             self.update_calls += 1
             return _CursorStub()
-        if "select storage_used_mb, storage_quota_mb from users" in q:
+        if "select storage_used_mb from users" in q:
             self.select_calls += 1
-            return _CursorStub(row=(5.5, 100))
+            return _CursorStub(row=(5.5,))
         if "set profile_version" in q:
             return _CursorStub()
         raise AssertionError(f"Unexpected SQLite query: {concrete!r}")
@@ -235,9 +236,18 @@ async def test_recalculate_team_usage_sqlite_backend_selection_ignores_conn_fetc
 
 
 @pytest.mark.asyncio
-async def test_get_all_users_storage_postgres_backend_selection_uses_fetch(tmp_path: Path):
+async def test_get_all_users_storage_postgres_backend_selection_uses_fetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The quota comes from the resolver now, not the row's legacy storage_quota_mb column."""
     conn = _PostgresUsersConnWithExecuteTrap()
     service = _make_service(_PoolStub(postgres=True, acquire_conn=conn), tmp_path)
+
+    async def _user_quota(user_id: int, _key: str):
+        """Both fixture users carry the same 10 MB limit the old column used to."""
+        return 10.0
+
+    monkeypatch.setattr(quota_resolver, "user_quota", _user_quota)
 
     result = await service.get_all_users_storage()
 

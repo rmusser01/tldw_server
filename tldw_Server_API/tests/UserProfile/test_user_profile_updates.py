@@ -151,13 +151,21 @@ def test_committed_quota_status_and_mfa_updates_strictly_advance_profile_version
                 user_id=user_id,
                 updated_at=datetime.now(timezone.utc),
             )
-            await quota_service.set_user_quota(user_id, original_quota)
+            # Restore to "no override" (None), not the legacy column's default: under
+            # the new contract set_user_quota writes a durable user_config_overrides
+            # row, so writing back a concrete number here would leak a stale 5120
+            # override into every later test that reads this user's quota.
+            await quota_service.set_user_quota(user_id, None)
             return tuple(versions)
 
         before, after_quota, after_status, after_mfa = _run_async(
             _exercise_writers()
         )
 
+        # set_user_quota now writes a user_config_overrides row instead of the users
+        # table, but ProfileVersionGateway.read() still folds that row's updated_at
+        # into the composite profile_version via the UNION query (version_gateway.py),
+        # so the observed version still strictly advances (spec 2 Sec. 5).
         assert after_quota > before
         assert after_status > after_quota
         assert after_mfa > after_status

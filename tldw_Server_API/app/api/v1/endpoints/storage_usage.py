@@ -94,11 +94,15 @@ async def get_usage_breakdown(
             total_mb=round(data.get("total_bytes", 0) / (1024 * 1024), 2),
         )
 
-    quota_mb = usage_data.get("quota_mb", 0) or 0
+    quota_mb = usage_data.get("quota_mb")
     total_mb = usage_data.get("total_mb", 0.0)
     quota_used_mb = usage_data.get("quota_used_mb")
     if quota_used_mb is None:
         quota_used_mb = total_mb
+
+    # A None quota means unlimited (spec 2 section 5): leave the derived fields null too.
+    available_mb = max(0, quota_mb - quota_used_mb) if quota_mb is not None else None
+    usage_pct = round((quota_used_mb / quota_mb * 100) if quota_mb else 0, 1) if quota_mb is not None else None
 
     return UsageBreakdownResponse(
         user_id=user.id,
@@ -115,6 +119,6 @@ async def get_usage_breakdown(
         total_bytes=usage_data.get("total_bytes", 0),
         total_mb=total_mb,
         quota_mb=quota_mb,
-        available_mb=max(0, quota_mb - quota_used_mb),
-        usage_percentage=round((quota_used_mb / quota_mb * 100) if quota_mb else 0, 1),
+        available_mb=available_mb,
+        usage_percentage=usage_pct,
     )
