@@ -3,8 +3,8 @@
 Unit tests below verify the Google CSE request formatting that the old inline
 `test_perform_websearch_google` FIXME flagged ("Fails. Need to fix arg
 formatting"): every emitted parameter must be a documented Google Custom Search
-parameter, `cr` must be in `countryXX` form, and unsupported parameters must
-not be sent.
+parameter, `cr` must be in `countryXX` form, date sort expressions are
+forwarded as `sort`, and unsupported values must not be sent.
 
 The external_api-marked smoke cases replace the manual smoke scripts that used
 to live inside tldw_Server_API/app/core/Web_Scraping/WebSearch_APIs.py.
@@ -24,7 +24,7 @@ from tldw_Server_API.app.core.Web_Scraping import WebSearch_APIs as wsa
 GOOGLE_CSE_ALLOWED_PARAMS = {
     "q", "cx", "key", "num", "start", "c2coff", "cr", "dateRestrict",
     "exactTerms", "excludeTerms", "filter", "gl", "hl", "lr", "safe",
-    "googlehost", "siteSearch", "siteSearchFilter",
+    "googlehost", "siteSearch", "siteSearchFilter", "sort",
 }
 
 
@@ -97,9 +97,21 @@ def test_google_country_param_passthrough_when_already_formatted(captured_google
 
 
 @pytest.mark.unit
-def test_google_sort_request_is_not_sent_as_unknown_param(captured_google_params):
+@pytest.mark.parametrize("sort_expression", ["date", "date:r:20260101:20260630", "date:d:s"])
+def test_google_date_sort_expression_is_forwarded(captured_google_params, sort_expression):
     wsa.perform_websearch(
-        "google", "query", "US", "en", "en", 10, sort_results_by="date"
+        "google", "query", "US", "en", "en", 10, sort_results_by=sort_expression
+    )
+
+    assert captured_google_params["sort"] == sort_expression
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("sort_expression", ["relevance", "dated", "  "])
+def test_google_unsupported_sort_value_is_not_sent(captured_google_params, sort_expression):
+    """Non-date values (e.g. the configured default "relevance") 400 the whole request."""
+    wsa.perform_websearch(
+        "google", "query", "US", "en", "en", 10, sort_results_by=sort_expression
     )
 
     assert "sort" not in captured_google_params
@@ -122,7 +134,8 @@ def test_google_sort_request_is_not_sent_as_unknown_param(captured_google_params
         ("serper", {}),
         ("tavily", {}),
         ("searx", {}),
-        ("yandex", {}),
+        # yandex is deliberately absent: search_web_yandex is an unimplemented stub
+        # that can never return results.
     ],
 )
 def test_perform_websearch_provider_smoke(engine: str, kwargs: dict):

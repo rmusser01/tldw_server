@@ -2318,11 +2318,19 @@ def search_web_google(
         if siteSearchFilter:
             params["siteSearchFilter"] = siteSearchFilter
         if sort_results_by:
-            # Google CSE only accepts date-based sort expressions (e.g.
-            # "date", "date:r:YYYYMMDD:YYYYMMDD"); arbitrary configured
-            # values such as "relevance" fail the whole request with
-            # HTTP 400. Drop rather than risk failing the search.
-            logging.debug("Ignoring sort_results_by=%r: not a valid Google CSE sort expression", sort_results_by)
+            # Google CSE sorts by date expressions ("date", "date:r:YYYYMMDD:YYYYMMDD",
+            # "date:d:s"); other values such as the configured default "relevance" fail
+            # the whole request with HTTP 400, so they are dropped instead of sent.
+            # ponytail: date-only allowlist; structured-data attribute sorts
+            # (e.g. "metatags-pubdate:d") are dropped too -- widen if an engine needs them.
+            sort_expression = str(sort_results_by).strip()
+            if sort_expression == "date" or sort_expression.startswith("date:"):
+                params["sort"] = sort_expression
+            else:
+                logging.debug(
+                    "Ignoring sort_results_by={!r}: not a Google CSE date sort expression",
+                    sort_results_by,
+                )
 
         logging.info(
             f"Prepared parameters for Google Search: {_redact_websearch_log_value(params)}"
