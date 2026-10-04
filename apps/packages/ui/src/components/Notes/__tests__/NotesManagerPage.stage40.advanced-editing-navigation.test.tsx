@@ -14,10 +14,8 @@ const {
   mockGetSetting,
   mockSetSetting,
   mockClearSetting,
-  mockPromptModal,
-  wysiwygInputOverride
+  mockPromptModal
 } = vi.hoisted(() => ({
-  wysiwygInputOverride: { enabled: undefined as boolean | undefined },
   mockBgRequest: vi.fn(),
   mockMessageSuccess: vi.fn(),
   mockMessageError: vi.fn(),
@@ -32,14 +30,7 @@ const {
 
 vi.mock("@/components/Notes/notes-manager-utils", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/Notes/notes-manager-utils")>()
-  return {
-    ...actual,
-    promptModal: mockPromptModal,
-    // WYSIWYG input is hidden by default (D5, #3102); tests opt in to exercise it.
-    get NOTES_WYSIWYG_INPUT_ENABLED() {
-      return wysiwygInputOverride.enabled ?? actual.NOTES_WYSIWYG_INPUT_ENABLED
-    }
-  }
+  return { ...actual, promptModal: mockPromptModal }
 })
 
 vi.mock("react-i18next", () => ({
@@ -163,7 +154,6 @@ describe("NotesManagerPage stage 40 advanced editing and navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
-    wysiwygInputOverride.enabled = true
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
     mockSetSetting.mockResolvedValue(undefined)
@@ -193,15 +183,16 @@ describe("NotesManagerPage stage 40 advanced editing and navigation", () => {
     })
   })
 
-  it("hides the WYSIWYG input mode by default while NE-01 is open", async () => {
-    wysiwygInputOverride.enabled = undefined
+  it("offers the WYSIWYG input mode by default now that NE-01 is fixed", async () => {
     renderPage()
 
     expect(
       await screen.findByPlaceholderText("Write your note here... (Markdown supported)")
     ).toBeInTheDocument()
-    expect(screen.queryByTestId("notes-input-mode-toggle")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("notes-input-mode-wysiwyg")).not.toBeInTheDocument()
+    expect(screen.getByTestId("notes-input-mode-toggle")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-input-mode-markdown")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-input-mode-wysiwyg")).toBeInTheDocument()
+    // Markdown stays the default input mode.
     expect(screen.queryByTestId("notes-wysiwyg-editor")).not.toBeInTheDocument()
   }, 10000)
 

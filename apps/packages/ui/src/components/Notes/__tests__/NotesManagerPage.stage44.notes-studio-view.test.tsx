@@ -484,9 +484,7 @@ describe("NotesManagerPage stage 44 notes studio view", { timeout: 60_000 }, () 
     currentStale = true
 
     renderPage()
-    // The WYSIWYG toggle is hidden until NE-01 is fixed (D5, #3102). When it
-    // returns, click "notes-input-mode-wysiwyg" here again so this test also
-    // proves that continuing the plain note resets WYSIWYG back to Markdown.
+    fireEvent.click(await screen.findByTestId("notes-input-mode-wysiwyg"))
 
     const staleBanner = await screen.findByTestId("notes-studio-stale-banner")
     fireEvent.click(
