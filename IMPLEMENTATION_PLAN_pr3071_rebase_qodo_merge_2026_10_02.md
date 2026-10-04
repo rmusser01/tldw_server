@@ -866,6 +866,25 @@ The qualified thirteen-file correction patch is applied in this isolated clone.
 Canonical task/editor149 tests and full PR-range286 hooks pass without skips or
 source mutation. Final publication remains gated on fresh refs and normal hooks.
 
+The final ref check finds actual dev75ab2240 from PR3155, with33 incoming files
+including runtime legacy-path removals. Normal correction commit e23f36b8 is
+retained before topology-preserving rebase to b073c6d1. Complete treec38c6270
+equals the independently computed e23+75 integration, all33 incoming blobs match,
+and all7226 frontend artifact entries remain exact. Independent incoming review
+finds no actionable compatibility or overlap issue; it is static review only.
+Fresh integrated incoming402 passes with9 external-provider opt-in skips,
+durable384 and auth/admin plus durable PostgreSQL170 pass with0skips. Provider
+session-shim/no-unsafe-POST-retry/SSE60 and canonical editor149 pass with0skips.
+Existing framework/deprecation warnings are retained. The expanded23-file raw
+production Bandit scan has3 low findings, identical to the pre-integration e23
+baseline, with0new findings/errors and no added suppressions. The earlier wrong
+c95 baseline collector lacks a PR-added source file and remains failed.
+The real managed SQLite read/reset path, external provider acceptance and
+installation without Gradio are stated coverage gaps, not claimed native UAT.
+Read-only protected database/accepted-input/stash/model preservation passes, but
+Chrome19239 is unavailable and current page preservation cannot be qualified.
+Publication will preserve the exact human summary and require fresh head CI/Qodo.
+
 ## Stage 18: Owning Character Readiness Timeout
 **Goal**: Investigate exact46d E2E Critical run37232844021/job111535574839.
 **Success Criteria**: Establish the actual request/response/readiness failure from
