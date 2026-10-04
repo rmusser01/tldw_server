@@ -412,7 +412,9 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 ### Task 5.2: Run adversarial integration and regression tests
 
-**Status:** In Progress
+**Status:** Complete
+
+**Review and verification (2026-10-04):** Specification and independent quality reviews approved the 42-case real-storage/native-fake-provider suite. Quality probes independently observed real Billing, governor and canonical usage operations, checked fixture restoration, and rejected missing canonical usage and uncommitted dispatch. No runtime defect was validated. Parent prescribed combined gate passed `1,012` tests; branch-aware completion coverage passed `706` tests at `96%`; final full MCP core passed `4,221` tests with three existing optional-parser skips. Ruff, Black, compilation and whitespace passed on the new test file. MockTransport does not validate live TLS/provider behavior; separate canonical PostgreSQL parity passed `91` tests with no skips.
 
 **Files:**
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_integration.py`
@@ -441,6 +443,10 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 6. Commit: `test(mcp): cover bounded completion security contract`
 
 ### Task 5.3: Complete static and security verification
+
+**Status:** In Progress
+
+**Verification preparation (2026-10-04):** Compilation and whole-branch whitespace passed. Prescribed production Bandit passed over `19,465` lines; the extended scan of every branch-touched production Python file passed over `44,059` lines, both with zero findings/errors. Whole-branch Ruff reports ten diagnostics reproduced from unchanged `origin/dev` code in Persona, the shared HTTP client and its redirect test; none is new in this work. These inherited whole-file diagnostics are recorded explicitly, not represented as a passing whole-file lint gate. Changed/new completion code passes focused Ruff. Final cross-module review remains required before task acceptance criteria are checked.
 
 1. Run Ruff only over touched Python files, using the repository configuration:
    ```bash
