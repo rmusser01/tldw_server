@@ -523,6 +523,7 @@ jobs:
        needs.changes.outputs.backend_changed == 'true')
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
         shard:
           - name: gap-verified-1
@@ -2171,6 +2172,7 @@ jobs:
       github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
         shard:
           - name: gap-verified-1
@@ -3755,6 +3757,7 @@ jobs:
       github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
         shard:
           - name: core-server-smoke
@@ -5154,6 +5157,7 @@ jobs:
       github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
         shard:
           - name: core-server-smoke
@@ -6543,6 +6547,7 @@ jobs:
       github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
         os: [windows-latest, macos-latest]
         shard:
