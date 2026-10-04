@@ -148,7 +148,7 @@ export interface NotesSidebarProps {
   deleteMoodboard: () => Promise<void>
   clearBulkSelection: () => void
   exportSelectedBulk: () => void
-  assignKeywordsToSelectedBulk: () => Promise<void>
+  addTagsToSelectedBulk: () => Promise<void>
   deleteSelectedBulk: () => Promise<void>
   toggleNotePinned: (id: string | number) => Promise<void>
   restoreNote: (id: string | number, version?: number) => Promise<void>
@@ -281,7 +281,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   deleteMoodboard,
   clearBulkSelection,
   exportSelectedBulk,
-  assignKeywordsToSelectedBulk,
+  addTagsToSelectedBulk,
   deleteSelectedBulk,
   toggleNotePinned,
   restoreNote,
@@ -1379,12 +1379,12 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   size="small"
                   className={isMobileViewport ? 'min-h-[44px]' : undefined}
                   onClick={() => {
-                    void assignKeywordsToSelectedBulk()
+                    void addTagsToSelectedBulk()
                   }}
                   data-testid="notes-bulk-assign-keywords"
                 >
-                  {t('option:notesSearch.bulkAssignKeywords', {
-                    defaultValue: 'Assign tags'
+                  {t('option:notesSearch.bulkAddTags', {
+                    defaultValue: 'Add tags'
                   })}
                 </Button>
                 <Button
