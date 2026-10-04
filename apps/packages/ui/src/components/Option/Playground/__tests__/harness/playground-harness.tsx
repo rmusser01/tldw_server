@@ -38,6 +38,8 @@ import { useStoreChatModelSettings } from "@/store/model"
 import { useConnectionStore } from "@/store/connection"
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { resetHistoryTurnRegistry } from "@/services/history-turn-keep"
+import { resetServerChatSaveStatus } from "@/store/server-chat-save-status"
 import { tldwModels } from "@/services/tldw"
 import { clearChatModelsCache } from "@/services/tldw-server"
 import { ConnectionPhase } from "@/types/connection"
@@ -107,14 +109,7 @@ const seedBrowserState = (persistedModel: string | null) => {
  * the shared Zustand stores the chat surface writes, client caches keyed on
  * chats, and the fetch stub.
  */
-export const resetPlaygroundHarness = async () => {
-  vi.unstubAllGlobals()
-  getHarnessDb()?.resetAll()
-  // Model catalogs are cached per module; a test's catalog must not leak into the next.
-  clearChatModelsCache()
-  await tldwModels.clearCache()
-  localStorage.clear()
-  sessionStorage.clear()
+const resetAppStores = () => {
   for (const store of [
     useStoreMessageOption,
     useStoreMessage,
@@ -131,6 +126,49 @@ export const resetPlaygroundHarness = async () => {
   }
   client.chatMessagesCache?.clear()
   client.chatMessagesInFlight?.clear()
+  // Page-lifetime chat state: running turns and acknowledged server writes.
+  resetHistoryTurnRegistry()
+  resetServerChatSaveStatus()
+}
+
+export const resetPlaygroundHarness = async () => {
+  vi.unstubAllGlobals()
+  getHarnessDb()?.resetAll()
+  // Model catalogs are cached per module; a test's catalog must not leak into the next.
+  clearChatModelsCache()
+  await tldwModels.clearCache()
+  localStorage.clear()
+  sessionStorage.clear()
+  resetAppStores()
+}
+
+const snapshotStorage = (storage: Storage) =>
+  Object.fromEntries(
+    Array.from({ length: storage.length }, (_, index) => storage.key(index) as string).map(
+      (key) => [key, storage.getItem(key) as string]
+    )
+  )
+
+const restoreStorage = (storage: Storage, entries: Record<string, string>) => {
+  storage.clear()
+  for (const [key, value] of Object.entries(entries)) storage.setItem(key, value)
+}
+
+/**
+ * Model a browser reload of the tab: the mounted app goes away and every
+ * in-memory store starts over, while IndexedDB, localStorage and the tab's
+ * sessionStorage survive. Requests the old page left in flight are abandoned
+ * (never answered), as they are when the page unloads. Remount with
+ * `renderPlayground({ server, keepBrowserState: true })`.
+ */
+export const simulatePageReload = async (view: PlaygroundView) => {
+  view.unmount()
+  const local = snapshotStorage(localStorage)
+  const session = snapshotStorage(sessionStorage)
+  resetAppStores()
+  restoreStorage(localStorage, local)
+  restoreStorage(sessionStorage, session)
+  await usePlaygroundSessionStore.persist.rehydrate()
 }
 
 export type RenderPlaygroundOptions = {
@@ -140,6 +178,8 @@ export type RenderPlaygroundOptions = {
   initialPath?: string
   /** The model persisted from an earlier session; `null` simulates a first run. */
   persistedModel?: string | null
+  /** Remount over the browser storage left by an earlier mount (reload, return to /chat). */
+  keepBrowserState?: boolean
 }
 
 // Vitest resolves the real react-router-dom; the Next.js typecheck maps it to the web
@@ -154,10 +194,11 @@ export const renderPlayground = async ({
   server,
   extras,
   initialPath = "/chat",
-  persistedModel = FAKE_SELECTED_MODEL
+  persistedModel = FAKE_SELECTED_MODEL,
+  keepBrowserState = false
 }: RenderPlaygroundOptions) => {
   installDomPolyfills()
-  seedBrowserState(persistedModel)
+  if (!keepBrowserState) seedBrowserState(persistedModel)
   vi.stubGlobal("fetch", server.fetch)
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } }

@@ -250,6 +250,135 @@ it("clears owned streaming state before following a settled result changes the c
   expect(streaming).toHaveBeenCalledWith(false)
 })
 
+describe("replies that end early after admission (CS-04)", () => {
+  const displayed = () => {
+    let rows: any[] = []
+    return {
+      setMessages: (next: any) => {
+        rows = typeof next === "function" ? next(rows) : next
+      },
+      rows: () => rows
+    }
+  }
+
+  it("keeps a stopped partial reply in the transcript, marked Stopped", async () => {
+    const turn = makeTurn()
+    const controller = new AbortController()
+    mocks.stream.mockImplementation(async function* () {
+      yield "partial"
+      controller.abort()
+      yield " ignored"
+    })
+    const display = displayed()
+    const result = await runChatPipeline(mode, "question", "", false, [], [], controller.signal, {
+      selectedModel: "test",
+      useOCR: false,
+      setMessages: display.setMessages,
+      setHistory: vi.fn(),
+      setHistoryId: vi.fn(),
+      setIsProcessing: vi.fn(),
+      setStreaming: vi.fn(),
+      setAbortController: vi.fn(),
+      historyId: "chat",
+      saveMessageOnSuccess: vi.fn(async () => "chat"),
+      saveMessageOnError: vi.fn(async () => "chat"),
+      historyTurn: turn,
+      userMessageId: "user-new",
+      assistantMessageId: "assistant-new",
+      wasStoppedByUser: () => true
+    } as any)
+    expect(result).toEqual({ status: "skipped", reason: "Request cancelled" })
+    expect(turn.outcome).toBe("stopped")
+    expect(turn.recover).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "partial", outcome: "stopped" }),
+      expect.anything()
+    )
+    expect(display.rows()).toEqual([
+      expect.objectContaining({ id: "user-new" }),
+      expect.objectContaining({
+        id: "assistant-new",
+        message: "partial",
+        generationInfo: expect.objectContaining({ interrupted: true, stopped: true })
+      })
+    ])
+  })
+
+  it("keeps a partial reply cut off by a dropped stream, marked Interrupted", async () => {
+    const turn = makeTurn()
+    mocks.stream.mockImplementation(async function* () {
+      yield "partial"
+      throw new TypeError("network error")
+    })
+    const display = displayed()
+    const result = await invoke(turn, { setMessages: display.setMessages })
+    expect(result).toMatchObject({ status: "failed" })
+    expect(turn.outcome).toBe("interrupted")
+    const reply = display.rows().find((row) => row.id === "assistant-new")
+    expect(reply).toMatchObject({
+      message: "partial",
+      generationInfo: { interrupted: true, interruptionReason: "network error" }
+    })
+    expect(reply.generationInfo.stopped).toBeUndefined()
+  })
+
+  it("records a reply that finished but could not be saved as complete", async () => {
+    const turn = makeTurn()
+    const save = vi.fn(async () => {
+      throw new Error("request_config_scope_changed")
+    })
+    await invoke(turn, { saveMessageOnSuccess: save })
+    expect(turn.outcome).toBe("complete")
+    expect(turn.recover).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "answer", outcome: "complete" }),
+      expect.anything()
+    )
+  })
+
+  it("leaves a failure with nothing to show, or a changed account, in review", async () => {
+    const failed = makeTurn()
+    mocks.stream.mockImplementation(async function* () {
+      yield* []
+      throw new Error("provider down")
+    })
+    await invoke(failed)
+    expect(failed.outcome).toBeUndefined()
+    expect(failed.recover).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: undefined }),
+      expect.anything()
+    )
+
+    const scopeChanged = makeTurn()
+    const scope = new AbortController()
+    mocks.stream.mockImplementation(async function* () {
+      yield "old account answer"
+      scope.abort()
+      throw new Error("Request scope changed")
+    })
+    await invoke(scopeChanged, {
+      servicePromptSnapshot: {
+        scopeSignal: new AbortController().signal,
+        scopeInvalidatedSignal: scope.signal,
+        requestScope: { config: {}, userId: null },
+        definitions: {},
+        release: vi.fn()
+      }
+    })
+    expect(scopeChanged.outcome).toBeUndefined()
+  })
+
+  it("checkpoints the reply as it streams so a reload can keep it", async () => {
+    const turn = makeTurn()
+    turn.checkpoint = vi.fn()
+    mocks.stream.mockImplementation(async function* () {
+      yield "first"
+      yield " second"
+    })
+    await invoke(turn)
+    expect(turn.checkpoint).toHaveBeenNthCalledWith(1, "first")
+    expect(turn.checkpoint).toHaveBeenLastCalledWith("first second")
+  })
+})
+
 it("unknown outcomes live only in scoped recovery, not retryable message bubbles", async () => {
   const turn = makeTurn()
   mocks.append.mockRejectedValue(new Error("unknown write"))

@@ -4,6 +4,7 @@ import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import type { Message } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { acknowledgePromotedChatMessage, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { getChatPromotionBlocker } from "@/db/dexie/chat-promotion"
 import { Modal } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { usePersistenceMode } from "@/hooks/playground"
@@ -347,6 +348,14 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
           requestSnapshot = scopeSnapshot
           if (!isCurrentSave()) return
           requireConnectionReady()
+          // Never copy a chat the history selection owns (it writes its own
+          // turns) or one already on the server: on return to /chat the
+          // transcript here can be stale, which left empty server chats
+          // (CS-N3, #3104).
+          if (!createdChatId) {
+            const blocker = await getChatPromotionBlocker(capturedHistoryId)
+            if (blocker || !isCurrentSave()) return
+          }
           const firstUser = snapshot.find((m) => m.role === "user")
           const explicitSource =
             serverChatSourceRef.current &&
@@ -399,10 +408,25 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
                 createPayload,
                 requestOptions
               )
-              if (!isCurrentSave()) return
               const rawId =
                 (created as any)?.id ?? (created as any)?.chat_id ?? created
               const cid = rawId != null ? String(rawId) : ""
+              if (!isCurrentSave()) {
+                // The save was abandoned while the chat was being created.
+                // Nothing refers to the new chat yet, so delete it rather
+                // than leave an empty server chat behind (CS-N3, #3104).
+                if (cid) {
+                  try {
+                    await tldwClient.deleteChat(cid, {
+                      hardDelete: true,
+                      requestScope: scopeSnapshot.requestScope
+                    })
+                  } catch {
+                    // Best effort: the chat is unreferenced either way.
+                  }
+                }
+                return
+              }
               if (!cid) {
                 throw new Error("Failed to create server chat")
               }

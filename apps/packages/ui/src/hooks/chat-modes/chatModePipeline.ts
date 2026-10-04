@@ -61,6 +61,12 @@ import {
   type ChatSubmitResult
 } from "@/hooks/chat/chat-action-utils"
 import { isAbortLikeError } from "@/hooks/chat/abort-turn-cleanup"
+import {
+  interruptionGenerationInfo,
+  DEFAULT_INTERRUPTION_REASON,
+  STOPPED_INTERRUPTION_REASON
+} from "@/services/history-turn-keep"
+import type { HistoryTurnOutcome } from "@/db/dexie/types"
 import type { DynamicUIRequest } from "@/types/dynamic-ui"
 import type { MessageMetadataExtra } from "@/store/option"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
@@ -94,6 +100,9 @@ export type ChatModeParamsBase = {
   // Scope leases use a derived signal. When that signal aborts without a user
   // cancellation, discard the entire turn so no old-scope output is saved.
   discardCurrentTurnOnAbort?: () => boolean
+  // True when the user pressed Stop, so a kept partial reply reads "Stopped"
+  // rather than "Interrupted" (CS-04).
+  wasStoppedByUser?: () => boolean
   historyId: string | null
   setHistoryId: (id: string) => void
   actorSettings?: ActorSettings
@@ -324,6 +333,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   let promptContent: string | undefined = undefined
   let promptId: string | undefined = undefined
   let streamingTimer: ReturnType<typeof setTimeout> | null = null
+  // The reply finished streaming; anything that fails after this point fails
+  // to save a complete reply, not to generate one.
+  let replyCompleted = false
   let lastStreamingUpdateAt = 0
   let pendingStreamingText = ""
   let pendingReasoningTime = 0
@@ -778,6 +790,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         throw new Error("request_config_scope_changed")
       historyTurn.selection = selection
       historyTurn.input = input
+      historyTurn.replyModel = { name: selectedModel, id: resolvedModelId }
       await historyTurn.beforeDispatch?.()
       if (!historyTurn.validateLease() || signal.aborted)
         throw new Error("request_config_scope_changed")
@@ -880,6 +893,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       }
 
       scheduleStreamingUpdate(`${fullText}▋`, timetaken)
+      historyTurn?.checkpoint?.(fullText)
       count++
     }
 
@@ -1057,6 +1071,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           ] as ChatHistory)
     )
 
+    replyCompleted = true
     await saveMessageOnSuccess({
       historyTurn,
       historyId,
@@ -1109,14 +1124,71 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
     if (historyTurn) {
       if (historyTurn.dispatched) {
+        // The question is already saved with its owner. A reply that ended
+        // early, or finished after its view went away, stays in the
+        // transcript (CS-04, #3104). Failures with nothing to show, and turns
+        // whose account or server changed, stay in review.
+        const scopeInvalidated = Boolean(
+          params.servicePromptSnapshot?.scopeInvalidatedSignal?.aborted
+        )
+        const outcome: HistoryTurnOutcome | undefined =
+          !historyTurn.admission || scopeInvalidated
+            ? undefined
+            : replyCompleted
+              ? "complete"
+              : signal.aborted && params.wasStoppedByUser?.() === true
+                ? "stopped"
+                : signal.aborted || fullText.trim().length > 0
+                  ? "interrupted"
+                  : undefined
+        const keptReason =
+          outcome === "stopped"
+            ? STOPPED_INTERRUPTION_REASON
+            : outcome === "interrupted"
+              ? signal.aborted
+                ? DEFAULT_INTERRUPTION_REASON
+                : e instanceof Error && e.message.trim()
+                  ? e.message.trim()
+                  : DEFAULT_INTERRUPTION_REASON
+              : undefined
+        historyTurn.outcome = outcome
         await historyTurn.recover(
           {
             content: fullText,
             assistantId: resolvedAssistantMessageId,
-            createdAt
+            createdAt,
+            outcome,
+            interruptionReason: keptReason
           },
           e
         )
+        if (outcome) {
+          const marker = interruptionGenerationInfo(outcome, keptReason)
+          setMessagesWithTransition((prev) =>
+            fullText.trim()
+              ? prev.map((row) =>
+                  row.id === resolvedAssistantMessageId
+                    ? updateActiveVariant(row, {
+                        message: fullText,
+                        ...(marker
+                          ? {
+                              generationInfo: {
+                                ...(row.generationInfo || {}),
+                                ...marker
+                              }
+                            }
+                          : {})
+                      })
+                    : row
+                )
+              : prev.filter((row) => row.id !== resolvedAssistantMessageId)
+          )
+          return outcome === "complete"
+            ? chatSubmitSubmitted()
+            : outcome === "stopped"
+              ? chatSubmitSkipped("Request cancelled")
+              : chatSubmitFailed(keptReason ?? DEFAULT_INTERRUPTION_REASON)
+        }
         // Pending/unknown responses are inspected in scoped recovery, never ordinary retry controls.
         setMessagesWithTransition((prev) =>
           prev.filter(
@@ -1176,6 +1248,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       : e instanceof Error && e.message.trim().length > 0
         ? e.message
         : "Something went wrong."
+    const stoppedByUser = isAbort && params.wasStoppedByUser?.() === true
     setMessagesWithTransition((prev) =>
       prev.map((msg) =>
         msg.id === generateMessageId
@@ -1186,6 +1259,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                 generationInfo: {
                   ...(msg.generationInfo || {}),
                   interrupted: true,
+                  ...(stoppedByUser ? { stopped: true } : {}),
                   interruptionReason,
                   interruptedAt: Date.now()
                 }

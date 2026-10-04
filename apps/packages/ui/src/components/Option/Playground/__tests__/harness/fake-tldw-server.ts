@@ -73,6 +73,16 @@ export type CompletionPlan = {
   gate?: Promise<void>
   status?: number
   errorBody?: unknown
+  /**
+   * Stream the reply as these content deltas instead of one chunk. With
+   * `pauseAfterChunks`, the stream stops after that many deltas until `resume`
+   * settles (or the client aborts), which models a reply still being written.
+   */
+  chunks?: string[]
+  pauseAfterChunks?: number
+  resume?: Promise<void>
+  /** After resuming: finish normally (default) or drop the connection. */
+  end?: "finish" | "drop"
 }
 
 type Deferred = { promise: Promise<void>; resolve: () => void }
@@ -88,6 +98,15 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" }
+  })
+
+/** Wait for `gate`, rejecting with an AbortError if the client aborts first. */
+const waitUnlessAborted = (gate: Promise<void>, signal?: AbortSignal | null) =>
+  new Promise<void>((resolve, reject) => {
+    const abort = () => reject(new DOMException("The operation was aborted.", "AbortError"))
+    if (signal?.aborted) return abort()
+    signal?.addEventListener("abort", abort, { once: true })
+    gate.then(resolve, reject)
   })
 
 const sleep = (ms: number, signal?: AbortSignal | null) =>
@@ -316,7 +335,7 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     if (plan.status && plan.status >= 400) {
       return json(plan.errorBody ?? { detail: "Provider failed" }, plan.status)
     }
-    const reply = plan.reply ?? defaultReply
+    const reply = plan.chunks ? plan.chunks.join("") : (plan.reply ?? defaultReply)
     const model = body?.model ?? FAKE_MODEL
     const conversationId = persistCompletionTurn(body, reply)
     if (!body?.stream) {
@@ -337,14 +356,30 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
       async start(controller) {
         try {
           if (plan.firstTokenDelayMs) await sleep(plan.firstTokenDelayMs, signal)
-          controller.enqueue(
-            chunk({
-              id: "chatcmpl-harness",
-              object: "chat.completion.chunk",
-              model,
-              choices: [{ index: 0, delta: { role: "assistant", content: reply }, finish_reason: null }]
-            })
-          )
+          const deltas = plan.chunks ?? [reply]
+          const pause = async () => {
+            // An unresolved `resume` models a page that never hears back.
+            await waitUnlessAborted(plan.resume ?? new Promise<void>(() => {}), signal)
+            if (plan.end === "drop") throw new TypeError("network error")
+          }
+          for (const [index, content] of deltas.entries()) {
+            if (index === plan.pauseAfterChunks) await pause()
+            controller.enqueue(
+              chunk({
+                id: "chatcmpl-harness",
+                object: "chat.completion.chunk",
+                model,
+                choices: [
+                  {
+                    index: 0,
+                    delta: index === 0 ? { role: "assistant", content } : { content },
+                    finish_reason: null
+                  }
+                ]
+              })
+            )
+          }
+          if (plan.pauseAfterChunks === deltas.length) await pause()
           controller.enqueue(
             chunk({
               id: "chatcmpl-harness",
