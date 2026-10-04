@@ -2544,7 +2544,7 @@ class SyncDatabase:
                 self._ensure_key_record_user_id_column(connection=conn)
                 self._ensure_key_record_rotation_columns(connection=conn)
             self._preflight_notes_attachment_bootstrap_tables(connection=conn)
-            self.backend.create_tables(schema, connection=conn)
+            self._create_schema_tables(schema, connection=conn)
             self._ensure_device_lifecycle_columns(connection=conn)
             self._ensure_device_lifecycle_tables(connection=conn)
             self._ensure_background_sync_tables(connection=conn)
@@ -2563,6 +2563,21 @@ class SyncDatabase:
             self._ensure_key_record_user_id_index(connection=conn)
         with self.backend.transaction() as conn:
             self._migrate_versioned_device_state(connection=conn)
+
+    def _create_schema_tables(self, schema: str, *, connection: Any) -> None:
+        """Create fixed Sync tables and indexes without committing SQLite bootstrap.
+
+        Sync schemas contain no triggers or semicolons inside quoted values.
+        Keep SQLite's existing write transaction; other backends retain their
+        schema creation API.
+        """
+        if self.backend_type == BackendType.SQLITE:
+            # executescript would commit the transaction and release its write lock.
+            for statement in schema.split(";"):
+                if statement.strip():
+                    self.execute(statement, connection=connection)
+        else:
+            self.backend.create_tables(schema, connection=connection)
 
     def execute(
         self,
@@ -13753,7 +13768,7 @@ class SyncDatabase:
                 PRIMARY KEY(dataset_id, device_id, attachment_id)
             );
             """
-        self.backend.create_tables(schema, connection=connection)
+        self._create_schema_tables(schema, connection=connection)
         statements = [
             """
             CREATE INDEX IF NOT EXISTS idx_sync_device_authorizations_dataset_device
@@ -13828,7 +13843,7 @@ class SyncDatabase:
                 PRIMARY KEY(dataset_id, device_id)
             );
             """
-        self.backend.create_tables(schema, connection=connection)
+        self._create_schema_tables(schema, connection=connection)
         for statement in (
             """
             CREATE INDEX IF NOT EXISTS idx_sync_background_policies_device
@@ -13997,7 +14012,7 @@ class SyncDatabase:
                 PRIMARY KEY (dataset_id, domain, object_id)
             )
             """
-        self.backend.create_tables(schema, connection=connection)
+        self._create_schema_tables(schema, connection=connection)
         self.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_sync_object_state_dataset_domain_object
@@ -14010,7 +14025,7 @@ class SyncDatabase:
         self, *, connection: Any, projection_exists: bool
     ) -> None:
         cursor_type = "BIGINT" if self.backend_type == BackendType.POSTGRESQL else "INTEGER"
-        self.backend.create_tables(
+        self._create_schema_tables(
             f"""
             CREATE TABLE IF NOT EXISTS sync_current_heads (
                 dataset_id TEXT NOT NULL,
@@ -14106,7 +14121,7 @@ class SyncDatabase:
         timestamp_type = (
             "TIMESTAMPTZ" if self.backend_type == BackendType.POSTGRESQL else "TEXT"
         )
-        self.backend.create_tables(
+        self._create_schema_tables(
             f"""
             CREATE TABLE IF NOT EXISTS sync_materialization_locks (
                 dataset_id TEXT NOT NULL,
@@ -14202,7 +14217,7 @@ class SyncDatabase:
                 CHECK (storage_namespace_id NOT GLOB '*[^0-9a-f]*')
             );
             """
-        self.backend.create_tables(schema, connection=connection)
+        self._create_schema_tables(schema, connection=connection)
         for statement in (
             """
             CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_unresolved
