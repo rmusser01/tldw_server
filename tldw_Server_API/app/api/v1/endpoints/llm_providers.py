@@ -1849,15 +1849,21 @@ def get_configured_providers(
                 api_key = valid_provider_api_key(api_key) or valid_provider_api_key(api_keys_by_provider.get(provider_name))
                 # Catalogs expose server-wide readiness, never principal-scoped BYOK.
                 override_snapshot = capture_provider_override_call_snapshot(provider_name)
-                fallback = override_snapshot.server_fallback(
-                    ServerFallbackCredentials(
-                        api_key=api_key,
-                        credential_fields={},
-                        app_config={},
+                try:
+                    fallback = override_snapshot.server_fallback(
+                        ServerFallbackCredentials(
+                            api_key=api_key,
+                            credential_fields={},
+                            app_config={},
+                        )
                     )
-                )
-                if fallback is not None:
-                    api_key = valid_provider_api_key(fallback.api_key)
+                except ByokResolutionError as error:
+                    if error.code != "invalid_provider_credentials":
+                        raise
+                    api_key = None
+                else:
+                    if fallback is not None:
+                        api_key = valid_provider_api_key(fallback.api_key)
                 override_disabled = override_snapshot.policy_error(None) is not None
                 if api_key:
                     is_configured = True

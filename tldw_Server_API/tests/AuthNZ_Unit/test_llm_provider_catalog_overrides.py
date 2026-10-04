@@ -149,14 +149,32 @@ def test_policy_only_or_placeholder_override_does_not_configure_provider(catalog
     )
 
 
-def test_invalid_override_does_not_fall_back_to_static_key(catalog):
+@pytest.mark.parametrize("peer_key_source", ["static", "override"])
+def test_invalid_override_does_not_fall_back_to_static_key_or_hide_healthy_peer(catalog, peer_key_source):
     client, parser = catalog
     parser.set("API", "deepseek_api_key", "static-test-key")
     _deepseek_override(credentials_invalid=True)
+    if peer_key_source == "static":
+        parser.set("API", "openai_api_key", "healthy-peer-test-key")
+    else:
+        overrides = llm_provider_overrides.get_llm_provider_overrides_snapshot()
+        overrides["openai"] = LLMProviderOverride(
+            provider="openai",
+            api_key="healthy-peer-test-key",
+            is_enabled=True,
+        )
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(overrides)
     response = client.get("/api/v1/llm/providers")
-    assert not any(
-        entry["name"] == "deepseek" and entry["provider_enabled"] for entry in response.json().get("providers", [])
-    )
+    assert response.status_code == 200
+    providers = {entry["name"]: entry for entry in response.json()["providers"]}
+    assert providers["deepseek"]["is_configured"] is False
+    assert providers["deepseek"]["provider_enabled"] is False
+    assert providers["deepseek"]["availability"] == "not-configured"
+    assert providers["openai"]["is_configured"] is True
+    assert providers["openai"]["provider_enabled"] is True
+    assert providers["openai"]["availability"] == "enabled"
+    for private_value in ("static-test-key", "catalog-private-test-key", "healthy-peer-test-key"):
+        assert private_value not in response.text
 
 
 def test_override_key_does_not_configure_local_provider_without_endpoint(catalog):
@@ -202,6 +220,24 @@ def test_unhealthy_override_store_cannot_advertise_static_credentials(catalog, m
     assert result["providers"] == []
     assert result["total_configured"] == 0
     assert "catalog-private-test-key" not in str(result)
+
+
+def test_override_store_health_loss_during_fallback_still_fails_catalog_closed(catalog, monkeypatch):
+    _client, parser = catalog
+    parser.set("API", "openai_api_key", "healthy-peer-test-key")
+    _deepseek_override()
+    snapshot_type = llm_provider_overrides.ProviderOverrideCallSnapshot
+    original_fallback = snapshot_type.server_fallback
+
+    def unhealthy_fallback(snapshot, base_fallback=None):
+        with llm_provider_overrides._OVERRIDE_LOCK:
+            llm_provider_overrides._OVERRIDE_CACHE_HEALTHY = False
+        return original_fallback(snapshot, base_fallback)
+
+    monkeypatch.setattr(snapshot_type, "server_fallback", unhealthy_fallback)
+    result = llm_providers.get_configured_providers()
+    assert result["providers"] == []
+    assert result["total_configured"] == 0
 
 
 @pytest.mark.parametrize(
