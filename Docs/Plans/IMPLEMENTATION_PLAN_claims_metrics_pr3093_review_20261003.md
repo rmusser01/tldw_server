@@ -6,7 +6,7 @@
 **Architecture:** Claims keeps aggregation ownership; shared Jobs owns execution and admission. Reuse one successfully initialized Jobs manager per callback, retain legacy date parsing, and preserve metadata-only diagnostic logging.
 **Tech Stack:** Python, pytest/Hypothesis, APScheduler, Loguru, SQLite/PostgreSQL, shared Jobs, GitHub CLI.
 **Backlog:** TASK-9935.4
-**ADR Check:** No new ADR required. This review and rebase preserve the Jobs ownership boundary governed by `Docs/ADR/003-jobs-vs-scheduler-default.md` without changing durable architecture rules.
+**ADR Check:** No new ADR required. This review and rebase preserve the Jobs ownership boundary governed by `Docs/ADR/003-jobs-vs-scheduler-default.md`. Task-format repairs follow `Docs/ADR/059-backlog-py-task-editor-cutover.md`; no durable architecture rules change.
 
 ## Stage 1: Validate and Reproduce
 **Goal:** Account for eight Qodo findings and existing CI failures.
@@ -52,5 +52,13 @@
 - [x] Rebase all nine PR commits cleanly onto latest fetched dev bf8f2ad6a42ad6396376020876a5f6a709ec6b34. Range-diff confirms each rebased commit is patch-equivalent to its original.
 - [x] Rebased production head d395457272151acf143a4035c2adf1abc423a995: 1,286 scoped tests passed with zero skips, including official PostgreSQL fixtures. All 14 changed production files compiled; Bandit reported zero findings and zero errors.
 - [x] Reverify full Config and docs/ratchets: 324 passed (255 Config and 69 docs/ratchet cases), including strict docs compilation and published-snapshot contracts. Focused corrected-source/test Ruff passed; whitespace checks passed before publication. Verification logs: `/tmp/claims-pr3093-scoped-20261004.log`, `/tmp/claims-pr3093-config-docs-20261004.log`, `/tmp/bandit_claims_pr3093_20261004.json`.
-- [ ] Publish the rebased branch using an explicit lease against remote head fda51e5d1ae03a763b74b95e4ea7292bd883f2b5; wait for required checks and refreshed review on the new head.
+- [x] Publish rebased head 4ac50974825f9cbd663299744f9720bfc11b5d0e using an explicit lease against remote head fda51e5d1ae03a763b74b95e4ea7292bd883f2b5. The human summary remains verbatim; refreshed Qodo reports zero active findings and all eight threads remain resolved.
+- [ ] Wait for all required checks on the final published head. The license policy passed; remaining checks are pending. Address the validated task-format gate below before merge.
 - [x] User explicitly approved automatic follow-up. The 10-minute thread heartbeat `claims-metrics-pr-3093-follow-up` is active, remains quiet on unchanged state, and stops after verified merge. No CI cancellation, hook bypass or admin merge is authorized.
+
+### Backlog Format Gate
+
+- [x] Reproduce the new latest-dev pre-commit failure with the official `backlog-py task normalize --check`: the same four PR-touched task records are noncanonical. ADR-059 now requires backlog-py for all task edits.
+- [x] Normalize only TASK-9935.1, TASK-12993.1, TASK-9935.3 and TASK-9935.4 through the official repository CLI; diff review confirms task text, statuses, criteria, frontmatter and history are preserved. The exact scoped format check passes.
+- [x] Verify Backlog format ratchet/tool tests: 149 passed with no skips. Complete PR-scoped pre-commit passes all applicable hooks with the correction staged; its initial unstaged run had stashed and tested the old records. No runtime/test edits, so Bandit is not applicable to this documentation-only correction. Logs: `/tmp/claims-pr3093-backlog-format-20261004.log`, `/tmp/claims-pr3093-precommit-20261004.log`.
+- [ ] Publish the scoped correction and wait for fresh CI/review. The active follow-up now explicitly uses the latest ADR-059 repository task editor for all future task edits.
