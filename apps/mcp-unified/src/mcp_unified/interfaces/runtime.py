@@ -16,6 +16,7 @@ from mcp_unified.tool_use_reporting.recorder import (
     ToolUseRecorder,
 )
 
+from .model_completion import ModelCompletionPortFactory
 from .policy import (
     ApprovalEvaluator,
     EffectivePolicyResolver,
@@ -394,3 +395,4 @@ class MCPRuntimeDependencies:
     websocket_stream_factory: WebSocketStreamFactory
     tool_use_recorder: ToolUseRecorder = field(default_factory=NoopToolUseRecorder)
     tool_call_hook_manager: ToolCallHookManager = field(default_factory=NoopToolCallHookManager)
+    model_completion_port_factory: ModelCompletionPortFactory | None = None
