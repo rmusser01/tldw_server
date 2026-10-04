@@ -1477,6 +1477,16 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
           }
           document.execCommand(command, false, value)
         }
+        // The command edited the DOM in place: record it without replacing the
+        // editor's nodes, so the caret and selection stay where they are (NE-01).
+        const syncFromRichEditor = () => {
+          const nextHtml = richEditor.innerHTML
+          ed.recordWysiwygEditorHtml(nextHtml)
+          ed.setWysiwygSessionDirty(true)
+          const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)
+          ed.setContentDirty(nextMarkdown)
+          ed.setEditorCursorIndex(nextMarkdown.length)
+        }
         if (action === 'bold') execute('bold')
         else if (action === 'italic') execute('italic')
         else if (action === 'heading') execute('formatBlock', '<h2>')
@@ -1509,22 +1519,12 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
               selection?.addRange(savedSelection)
             }
             execute('createLink', normalizedHref, { focus: false })
-            const nextHtml = richEditor.innerHTML
-            ed.setWysiwygHtml(nextHtml)
-            ed.setWysiwygSessionDirty(true)
-            const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)
-            ed.setContentDirty(nextMarkdown)
-            ed.setEditorCursorIndex(nextMarkdown.length)
+            syncFromRichEditor()
           })()
           return
         } else if (action === 'code') execute('insertText', '`code`')
 
-        const nextHtml = richEditor.innerHTML
-        ed.setWysiwygHtml(nextHtml)
-        ed.setWysiwygSessionDirty(true)
-        const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)
-        ed.setContentDirty(nextMarkdown)
-        ed.setEditorCursorIndex(nextMarkdown.length)
+        syncFromRichEditor()
         return
       }
       const textarea = ed.contentTextareaRef.current
@@ -1644,7 +1644,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         if (ed.editorInputMode === 'wysiwyg') {
           const nextContent = ed.content.trim().length > 0 ? `${ed.content}\n${markdown}` : markdown
           ed.setContentDirty(nextContent)
-          ed.setWysiwygHtml(markdownToWysiwygHtml(nextContent))
+          ed.replaceWysiwygHtml(markdownToWysiwygHtml(nextContent))
           ed.setWysiwygSessionDirty(true)
         } else {
           const activeTextarea = ed.contentTextareaRef.current
@@ -1682,7 +1682,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
   // WYSIWYG handlers
   const enterWysiwygMode = React.useCallback(() => {
     ed.markdownBeforeWysiwygRef.current = ed.content
-    ed.setWysiwygHtml(markdownToWysiwygHtml(ed.content))
+    ed.replaceWysiwygHtml(markdownToWysiwygHtml(ed.content))
     ed.setWysiwygSessionDirty(false)
     ed.setEditorInputMode('wysiwyg')
     ed.setEditorCursorIndex(null)
@@ -1716,10 +1716,12 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     [ed, enterWysiwygMode, exitWysiwygMode]
   )
 
+  // The user's own input never writes back into the editor: record the HTML
+  // and update the Markdown, leaving the DOM (and the caret) alone (NE-01).
   const handleWysiwygInput = React.useCallback(
     (event: React.FormEvent<HTMLDivElement>) => {
       const nextHtml = event.currentTarget.innerHTML
-      ed.setWysiwygHtml(nextHtml)
+      ed.recordWysiwygEditorHtml(nextHtml)
       ed.setWysiwygSessionDirty(true)
       const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)
       ed.setContentDirty(nextMarkdown)
@@ -1889,7 +1891,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
       if (!detailReloaded) {
         ed.setTitle(String(refreshed.note.title || ''))
         ed.setContent(String(refreshed.note.content || ''))
-        ed.setWysiwygHtml(markdownToWysiwygHtml(String(refreshed.note.content || '')))
+        ed.replaceWysiwygHtml(markdownToWysiwygHtml(String(refreshed.note.content || '')))
         ed.setIsDirty(false)
       }
       setSelectedStudioState(refreshed)
@@ -2582,6 +2584,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         usesLargePreviewGuardrails={wl.usesLargePreviewGuardrails}
         largePreviewReady={wl.largePreviewReady}
         wysiwygHtml={ed.wysiwygHtml}
+        wysiwygRevision={ed.wysiwygRevision}
         activeWikilinkQuery={wl.activeWikilinkQuery}
         wikilinkSuggestions={wl.wikilinkSuggestions}
         wikilinkSuggestionDisplayCounts={wl.wikilinkSuggestionDisplayCounts}

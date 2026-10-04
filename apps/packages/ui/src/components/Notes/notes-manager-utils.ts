@@ -397,11 +397,11 @@ export type NotesEditorMode = 'edit' | 'split' | 'preview'
 export type NotesInputMode = 'markdown' | 'wysiwyg'
 
 /**
- * The WYSIWYG input mode is hidden until NE-01 is fixed: its contentEditable is
- * re-rendered from state on every input, so typed text lands at the start of the
- * document and autosave persists it reversed (decision D5, issue #3102).
+ * Shows the Markdown/WYSIWYG input-mode toggle. It was hidden (decision D5,
+ * #3102) while NE-01 made the WYSIWYG editor type backwards; the editor is now
+ * uncontrolled, so the toggle is back. Set to false to hide WYSIWYG again.
  */
-export const NOTES_WYSIWYG_INPUT_ENABLED = false
+export const NOTES_WYSIWYG_INPUT_ENABLED = true
 export type NotesSortOption = 'modified_desc' | 'created_desc' | 'title_asc' | 'title_desc'
 export type KeywordPickerSortMode = 'frequency_desc' | 'alpha_asc' | 'alpha_desc'
 export type KeywordFrequencyTone = 'none' | 'low' | 'medium' | 'high'
@@ -899,6 +899,9 @@ export const markdownInlineToHtml = (value: string): string => {
   return html
 }
 
+/** The WYSIWYG document for an empty note: one empty paragraph to put the caret in. */
+export const EMPTY_WYSIWYG_HTML = '<p><br/></p>'
+
 export const markdownToWysiwygHtml = (markdown: string): string => {
   const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n')
   const slugCounts = new Map<string, number>()
@@ -939,14 +942,14 @@ export const markdownToWysiwygHtml = (markdown: string): string => {
 
     closeList()
     if (line.length === 0) {
-      out.push('<p><br/></p>')
+      out.push(EMPTY_WYSIWYG_HTML)
       continue
     }
     out.push(`<p>${markdownInlineToHtml(line)}</p>`)
   }
 
   closeList()
-  if (out.length === 0) return '<p><br/></p>'
+  if (out.length === 0) return EMPTY_WYSIWYG_HTML
   return out.join('')
 }
 
@@ -1016,6 +1019,55 @@ export const wysiwygHtmlToMarkdown = (html: string): string => {
     .filter(Boolean)
 
   return blocks.join('\n\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/** Characters of text before the selection's end inside `root`, or null when the selection is elsewhere. */
+export const getEditableCaretOffset = (root: HTMLElement): number | null => {
+  const selection = root.ownerDocument.defaultView?.getSelection()
+  if (!selection || selection.rangeCount === 0) return null
+  const range = selection.getRangeAt(0)
+  if (!root.contains(range.endContainer)) return null
+  const prefix = root.ownerDocument.createRange()
+  prefix.selectNodeContents(root)
+  prefix.setEnd(range.endContainer, range.endOffset)
+  return prefix.toString().length
+}
+
+/** Collapse the selection `offset` characters into `root`'s text, or at its end if the text is shorter. */
+export const setEditableCaretOffset = (root: HTMLElement, offset: number): void => {
+  const ownerDocument = root.ownerDocument
+  const selection = ownerDocument.defaultView?.getSelection()
+  if (!selection) return
+  const range = ownerDocument.createRange()
+  range.selectNodeContents(root)
+  range.collapse(false)
+  const walker = ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let remaining = Math.max(0, offset)
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const length = node.textContent?.length ?? 0
+    if (remaining <= length) {
+      range.setStart(node, remaining)
+      range.collapse(true)
+      break
+    }
+    remaining -= length
+  }
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
+/**
+ * Write an external revision into the uncontrolled WYSIWYG editor (NE-01).
+ * Never call this for the user's own input: replacing the nodes moves the caret.
+ * When the editor has focus the caret keeps its text offset, so reloading the
+ * same text (for example after a new note's first autosave) does not throw it
+ * back to the start of the document.
+ */
+export const replaceEditableHtml = (root: HTMLElement, html: string): void => {
+  const caretOffset =
+    root.ownerDocument.activeElement === root ? getEditableCaretOffset(root) : null
+  root.innerHTML = html
+  if (caretOffset != null) setEditableCaretOffset(root, caretOffset)
 }
 
 export const detectImportFormatFromFileName = (fileName: string): ImportFormat => {

@@ -63,6 +63,7 @@ import {
   deriveAllowedTitleStrategies,
   markdownToWysiwygHtml,
   wysiwygHtmlToMarkdown,
+  EMPTY_WYSIWYG_HTML,
   buildSummaryDraft,
   buildOutlineDraft,
   suggestKeywordsDraft,
@@ -204,7 +205,21 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [remoteVersionInfo, setRemoteVersionInfo] = React.useState<RemoteVersionInfo | null>(null)
   const [editorMode, setEditorMode] = React.useState<NotesEditorMode>('edit')
   const [editorInputMode, setEditorInputMode] = React.useState<NotesInputMode>('markdown')
-  const [wysiwygHtml, setWysiwygHtml] = React.useState<string>('<p><br/></p>')
+  // The WYSIWYG contentEditable is uncontrolled (NE-01, #3102). `wysiwygHtml` is
+  // the latest document, from external replacements and from the user's own
+  // edits. The editor writes it into the DOM only when `wysiwygRevision` changes
+  // (an external replacement) or when the editor node mounts, never on input.
+  const [wysiwygHtml, setWysiwygHtmlState] = React.useState<string>(EMPTY_WYSIWYG_HTML)
+  const [wysiwygRevision, setWysiwygRevision] = React.useState(0)
+  /** Replace the WYSIWYG document for an external reason (load, reload, template, mode switch). */
+  const replaceWysiwygHtml = React.useCallback((html: string) => {
+    setWysiwygHtmlState(html)
+    setWysiwygRevision((current) => current + 1)
+  }, [])
+  /** Record HTML the editor already shows (user input or an in-place command); the DOM is left alone. */
+  const recordWysiwygEditorHtml = React.useCallback((html: string) => {
+    setWysiwygHtmlState(html)
+  }, [])
   const [wysiwygSessionDirty, setWysiwygSessionDirty] = React.useState(false)
   const [editorCursorIndex, setEditorCursorIndex] = React.useState<number | null>(null)
   const [titleSuggestionLoading, setTitleSuggestionLoading] = React.useState(false)
@@ -370,10 +385,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setMonitoringNotice(null)
     setRemoteVersionInfo(null)
     setEditorCursorIndex(null)
-    setWysiwygHtml(markdownToWysiwygHtml(String(draft.content || '')))
+    replaceWysiwygHtml(markdownToWysiwygHtml(String(draft.content || '')))
     setWysiwygSessionDirty(false)
     markdownBeforeWysiwygRef.current = String(draft.content || '')
-  }, [setEditorKeywords, setIsDirty, setMonitoringNotice, setSaveIndicator])
+  }, [replaceWysiwygHtml, setEditorKeywords, setIsDirty, setMonitoringNotice, setSaveIndicator])
 
   const upsertOfflineDraft = React.useCallback(
     (
@@ -627,7 +642,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       clearTaskState()
       setRemoteVersionInfo(null)
       setEditorCursorIndex(0)
-      setWysiwygHtml(markdownToWysiwygHtml(String(d?.content || '')))
+      replaceWysiwygHtml(markdownToWysiwygHtml(String(d?.content || '')))
       setWysiwygSessionDirty(false)
       markdownBeforeWysiwygRef.current = String(d?.content || '')
       rememberRecentNote(id, loadedTitle)
@@ -641,7 +656,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (isCurrent()) message.error('Failed to load note')
       return false
     } finally { if (isCurrent()) setLoadingDetail(false) }
-  }, [applyOfflineDraftToEditor, authorityScope, clearAssistUndoState, clearTaskState, isOnline, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords, setIsDirty, setLoadingDetail, setSaveIndicator, setMonitoringNotice])
+  }, [applyOfflineDraftToEditor, authorityScope, clearAssistUndoState, clearTaskState, isOnline, message, refreshTaskStateForNote, rememberRecentNote, replaceWysiwygHtml, setEditorKeywords, setIsDirty, setLoadingDetail, setSaveIndicator, setMonitoringNotice])
 
   const dismissTaskActivity = React.useCallback(async (eventId: string) => {
     const normalizedEventId = String(eventId || '').trim()
@@ -686,10 +701,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     clearTaskState()
     setRemoteVersionInfo(null)
     setEditorCursorIndex(null)
-    setWysiwygHtml('<p><br/></p>')
+    replaceWysiwygHtml(EMPTY_WYSIWYG_HTML)
     setWysiwygSessionDirty(false)
     markdownBeforeWysiwygRef.current = null
-  }, [clearAssistUndoState, clearTaskState, setEditorKeywords, setIsDirty, setMonitoringNotice, setSaveIndicator])
+  }, [clearAssistUndoState, clearTaskState, replaceWysiwygHtml, setEditorKeywords, setIsDirty, setMonitoringNotice, setSaveIndicator])
 
   const confirmDiscardIfDirty = React.useCallback(async (onSaved?: () => void) => {
     if (!isDirty) return true
@@ -2043,21 +2058,23 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     return () => window.removeEventListener('beforeunload', handler)
   }, [isDirty])
 
-  // Reset editor mode on note change
+  // Reset editor mode on note change. The WYSIWYG session flag is reset by the
+  // paths that load a document (loadDetail, resetEditor, offline drafts), not
+  // here: a new note's first save also changes selectedId, and clearing the
+  // flag then would let exitWysiwygMode discard text typed during that save.
   React.useEffect(() => {
     setEditorMode('edit')
     setManualLinkTargetId(null)
     setRemoteVersionInfo(null)
     setEditorCursorIndex(null)
-    setWysiwygSessionDirty(false)
   }, [selectedId])
 
   // Wysiwyg sync
   React.useEffect(() => {
     if (editorInputMode !== 'wysiwyg') return
     if (wysiwygSessionDirty) return
-    setWysiwygHtml(markdownToWysiwygHtml(content))
-  }, [content, editorInputMode, wysiwygSessionDirty])
+    replaceWysiwygHtml(markdownToWysiwygHtml(content))
+  }, [content, editorInputMode, replaceWysiwygHtml, wysiwygSessionDirty])
 
   // Resize textarea
   React.useEffect(() => {
@@ -2405,7 +2422,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     remoteVersionInfo,
     editorMode, setEditorMode,
     editorInputMode, setEditorInputMode,
-    wysiwygHtml, setWysiwygHtml,
+    wysiwygHtml, wysiwygRevision, replaceWysiwygHtml, recordWysiwygEditorHtml,
     wysiwygSessionDirty, setWysiwygSessionDirty,
     editorCursorIndex, setEditorCursorIndex,
     titleSuggestionLoading,

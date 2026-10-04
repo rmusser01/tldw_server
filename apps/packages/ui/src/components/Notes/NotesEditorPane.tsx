@@ -47,6 +47,7 @@ import {
   NOTES_WYSIWYG_INPUT_ENABLED,
   NOTE_TEMPLATES,
   normalizeNotesTitleStrategy,
+  replaceEditableHtml,
   toSafeTestId,
 } from './notes-manager-utils'
 import { NOTES_TITLE_SUGGEST_STRATEGY_SETTING } from '@/services/settings/ui-settings'
@@ -187,8 +188,10 @@ export interface NotesEditorPaneProps {
   usesLargePreviewGuardrails: boolean
   largePreviewReady: boolean
 
-  // WYSIWYG
+  // WYSIWYG (uncontrolled editor, NE-01): the document is written into the DOM
+  // only when the revision changes or the editor node mounts.
   wysiwygHtml: string
+  wysiwygRevision: number
 
   // Wikilinks
   activeWikilinkQuery: ActiveWikilinkQuery | null
@@ -205,7 +208,7 @@ export interface NotesEditorPaneProps {
   // Refs
   titleInputRef: React.Ref<InputRef>
   contentTextareaRef: React.Ref<HTMLTextAreaElement>
-  richEditorRef: React.Ref<HTMLDivElement>
+  richEditorRef: React.RefObject<HTMLDivElement>
   attachmentInputRef: React.Ref<HTMLInputElement>
 
   // Setters used in inline handlers
@@ -378,6 +381,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   usesLargePreviewGuardrails,
   largePreviewReady,
   wysiwygHtml,
+  wysiwygRevision,
   activeWikilinkQuery,
   wikilinkSuggestions,
   wikilinkSuggestionDisplayCounts,
@@ -448,6 +452,21 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   })
   const saveStatusRef = React.useRef<HTMLSpanElement | null>(null)
   const saveStatusDescriptionId = saveIndicatorText ? NOTES_SAVE_STATUS_MESSAGE_ID : null
+
+  // NE-01: React never owns the WYSIWYG editor's children (no
+  // dangerouslySetInnerHTML), so re-renders caused by typing leave the DOM and
+  // the caret alone. The document is written only into a newly mounted editor
+  // node or when the hook publishes an external revision. No dependency array:
+  // the editor can mount or remount on any render (mode, layout, loading).
+  const appliedWysiwygRef = React.useRef<{ node: HTMLDivElement; revision: number } | null>(null)
+  React.useLayoutEffect(() => {
+    const node = richEditorRef.current
+    if (!node) return
+    const applied = appliedWysiwygRef.current
+    if (applied && applied.node === node && applied.revision === wysiwygRevision) return
+    replaceEditableHtml(node, wysiwygHtml)
+    appliedWysiwygRef.current = { node, revision: wysiwygRevision }
+  })
   const contentDescribedBy = joinAriaIds(NOTES_EDITOR_CONTENT_HELP_ID, saveStatusDescriptionId)
 
   React.useEffect(() => {
@@ -1600,7 +1619,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     })}
                     aria-describedby={contentDescribedBy}
                     data-testid="notes-wysiwyg-editor"
-                    dangerouslySetInnerHTML={{ __html: wysiwygHtml }}
                   />
                 ) : (
                   <>
@@ -1739,7 +1757,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   })}
                   aria-describedby={contentDescribedBy}
                   data-testid="notes-wysiwyg-editor"
-                  dangerouslySetInnerHTML={{ __html: wysiwygHtml }}
                 />
               ) : (
                 <>
