@@ -48,7 +48,7 @@ def _count(db: CharactersRAGDB, *, include_deleted: bool = True) -> int:
     return int(db.execute_query(query, read_only=True).fetchone()["n"])
 
 
-def _client(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, *, user_id: int = 1, sync_service: Any = None):
+def _client(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, *, user_id: int = 1):
     app = FastAPI()
     app.include_router(chats.router, prefix="/api/v1/chats")
     app.dependency_overrides[deps.get_chacha_db_for_user] = lambda: db
@@ -56,7 +56,8 @@ def _client(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, *, user_id: in
     app.dependency_overrides[chats.require_expected_user] = lambda: None
     limiter = CharacterRateLimiter(enabled=False, max_chats_per_user=100)
     monkeypatch.setattr(chats, "get_character_rate_limiter", lambda: limiter)
-    monkeypatch.setattr(chats, "_active_chat_sync_service", lambda *_args: sync_service)
+    # No Sync v2 profile: these tests pin the plain path.
+    monkeypatch.setattr(chats, "_active_chat_sync_service", lambda *_args: None)
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -316,12 +317,8 @@ def test_explicit_null_id_behaves_like_no_id(client: TestClient, db: CharactersR
     assert _count(db) == 2
 
 
-def test_client_id_is_refused_while_sync_v2_is_active(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _client(db, monkeypatch, sync_service=object())
-    response = _create(client)
-    assert response.status_code == 409, response.text
-    assert response.json()["detail"]["error_code"] == "sync_client_chat_id_unsupported"
-    assert _count(db) == 0
+# Client ids with an active Sync v2 profile (same replay, 409 and 410 rules, plus the
+# published envelope) are covered in tests/Sync/test_sync_v2_native_history_capture.py.
 
 
 # ---------------------------------------------------------------------------

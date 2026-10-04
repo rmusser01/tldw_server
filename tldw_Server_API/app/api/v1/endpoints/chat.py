@@ -4612,6 +4612,10 @@ async def create_chat_completion(
                     )
                     history_scope = conversation_scope
                     _verify_conversation_ownership(chat_db, final_conversation_id, current_user, history_scope)
+                    # A server-settled turn stays refused for a Sync v2 owner. This request saves the
+                    # reply itself, so no client retry would publish it if its Sync capture were lost.
+                    # Client-managed turns (POST /chats/{id}/messages) are supported.
+                    # See Docs/Design/2026-10-04-d7-sync-v2-native-history.md.
                     if _active_message_sync_service(current_user, history_scope) is not None:
                         raise HTTPException(409, detail={"code": "sync_owner_unsupported", "status": "unsupported_history_capability"})
                     history_owner = native_history_owner_key(request, current_user.id)
@@ -8290,14 +8294,21 @@ async def capture_conversation_history(
     current_user: User = Depends(get_request_user),
 ):
     """Capture a complete owner-bound history manifest and selected content."""
-    from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
     from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection, snapshot_to_wire
     from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
 
     scope = _resolve_conversation_scope(scope_type, workspace_id)
-    _verify_conversation_ownership(db, conversation_id, current_user, scope)
-    if _active_message_sync_service(current_user, scope) is not None:
-        raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
+    conversation = _verify_conversation_ownership(db, conversation_id, current_user, scope)
+    # A capture is a read and the capability handshake for versioned writes. A Sync v2
+    # owner passes it for client-managed turns, whose admission and settlement publish
+    # their envelopes (character_messages.send_message). A chat bound to a character
+    # takes server-settled turns (the server owns its input and result writes), which
+    # that owner cannot use yet, so the handshake still refuses it, before any dispatch.
+    if conversation.get("assistant_kind") == "character" or conversation.get("character_id") is not None:
+        from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
+
+        if _active_message_sync_service(current_user, scope) is not None:
+            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
     owner = native_history_owner_key(request, current_user.id)
     view = body.view.model_dump(mode="json")
     if view["conversation_id"] != conversation_id or view["owner_key"] not in {None, owner}:
@@ -8332,13 +8343,12 @@ async def confirm_conversation_history_projection(
     current_user: User = Depends(get_request_user),
 ):
     """Retain one immutable reviewed interpretation after an authorized source CAS."""
-    from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
     from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
 
     scope = _resolve_conversation_scope(scope_type, workspace_id)
     _verify_conversation_ownership(db, conversation_id, current_user, scope)
-    if _active_message_sync_service(current_user, scope) is not None:
-        raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
+    # The projection is this owner's reading of rows that already exist. It changes no
+    # message, so a Sync v2 owner records it without an envelope.
     if body.confirmation.conversation_id != conversation_id:
         raise HTTPException(409, detail={"code": "owner_conversation_mismatch"})
     try:
