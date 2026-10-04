@@ -30,7 +30,7 @@ old completion cannot remove a newer in-flight request.
 **Success Criteria**: Focused tests, typecheck results, security/ADR assessment,
 task notes, commit, push, and PR are recorded; no private artifacts published.
 **Tests**: Focused Vitest, TypeScript, diff/privacy self-review.
-**Status**: In Progress
+**Status**: Complete
 
 Verification basis: upstream dev `502da5bf0ccd1bc3aa4323e0d0fc430f36821a78`.
 All 417 tests in ten focused suites passed, including 114 ownership regressions.
@@ -47,5 +47,8 @@ response. Fenced reads now pass the existing native `configSnapshot`, preventing
 transport-only joins while retaining domain single-flight. The updated ten-suite
 matrix passes 423 tests; the ownership/scope subset passes 168 tests. Focused
 TypeScript still reports the same seven baseline diagnostics and zero introduced
-errors. Draft PR: https://github.com/rmusser01/tldw_server/pull/3170. Follow-up
-publication and conversion to ready for review remain to be recorded.
+errors. Follow-up commit `a3881455da` is pushed. PR
+https://github.com/rmusser01/tldw_server/pull/3170 is attached and ready for review
+after verification. No dependency symlinks or private fixtures are published.
+Human-authored change summary, upstream CI, and review remain merge gates; this
+work does not assert private beta readiness. No merge or deployment was performed.

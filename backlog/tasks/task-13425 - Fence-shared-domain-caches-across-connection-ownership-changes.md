@@ -1,7 +1,7 @@
 ---
 id: TASK-13425
 title: Fence shared domain caches across connection ownership changes
-status: In Progress
+status: Done
 ---
 
 ## Description
@@ -29,19 +29,21 @@ Final verification before review/publication: all 417 tests passed in ten focuse
 Parent reviewed the generic upstream diff and confirmed the native cache approach, with promise-identity finally cleanup explicitly preserved. Addressed nullable-revision feedback by using a numeric unused revision when shared cache is bypassed; the three ownership/scope suites passed again (162 tests) and focused TypeScript still has only the identical seven baseline diagnostics. Task ID 13425 is absent from current origin/dev; highest current dev ID is 13443 after normalization. Extra standalone read-only reviewer attempt failed before review because the app model alias is unsupported by the CLI account; retrying a recognized model without touching the dirty original checkout.
 Published and attached draft upstream PR https://github.com/rmusser01/tldw_server/pull/3170 against dev, pushed head c2a19358eda0022ce990d9bc53e2739ea12673d5. Parent reviewed public diff and independently verified 155 ownership/scope cases. Completed read-only review found a concrete lower-level bgRequest GET coalescing gap: single-user API-key or identical cookie-config owners can share transport despite domain fencing. Reopening ownership criteria while adding actual-transport RED tests and binding fenced requests to existing configSnapshot contract. No further standalone reviews will run; no review or verification process remains active.
 Transport follow-up verified: six actual bgRequest/fetch regressions reproduced stale Alice data returned to the new API-key owner across public/base/domain character and message reads. getDomainCacheConfigSnapshot synchronously asserts the revision and returns the captured native config; both implementations now pass configSnapshot on shared-cache reads. This excludes transport-only GET coalescing without changing proxy auth protocols and preserves owner-aware domain single-flight and finally promise identity. Fresh matrix: 423/423 tests in ten suites. Focused TypeScript comparison: 7 identical baseline diagnostics (ignoring shifted line numbers), 0 introduced; not a full typecheck pass. ESLint: 0 errors and unchanged 830 warnings. git diff --check clean. Fresh origin/dev remains 502da5bf0ccd1bc3aa4323e0d0fc430f36821a78. No further standalone reviews; completed review finding is addressed. Public PR #3170 remains draft pending the follow-up push, then will become ready for review as requested. Private integration note: transport-level deduplication must be scoped to the same captured owner/epoch or bypassed; config-only cookie scope keys cannot distinguish logout/login.
+Follow-up a3881455da committed and pushed to existing PR https://github.com/rmusser01/tldw_server/pull/3170; PR converted from draft to ready for review after verification. Fresh ownership/scope rerun passed 168/168; full native ten-suite matrix passed 423/423. Tested current dev 502da5bf0ccd1bc3aa4323e0d0fc430f36821a78. Dependency symlinks remain untracked/ignored and excluded from all commits. No private hosted protocol or fixture changes published, no merge/deploy, and no running verification/review sessions. Human-authored Change summary and upstream CI/review remain merge gates, not a private beta-readiness assertion.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Generic shared character/message cache ownership now uses effective native authority plus account revision, synchronous cache/dispatch guards, and identity-safe in-flight cleanup. Review found transport GET coalescing could bypass the domain fence; captured native configSnapshot now excludes those transport-only joins. Real client/base/domain TDD covers 114 ownership cases plus six real-transport API-key cases. Verified 168 focused and 423 broader tests, zero introduced TypeScript diagnostics against seven existing errors, and unchanged lint baseline. Spec, plan, and ADR assessment recorded. Upstream PR #3170 is published, attached, and ready for review; no private code, merge, deployment, or beta-readiness claim.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
