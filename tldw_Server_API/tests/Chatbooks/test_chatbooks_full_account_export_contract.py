@@ -632,7 +632,7 @@ async def test_service_async_payload_preserves_full_account_selection_mode(tmp_p
         captured_payload.update(kwargs["payload"])
         return {"uuid": "core-job-123"}
 
-    monkeypatch.setattr(service, "_save_export_job_with_quota", lambda _job: None)
+    monkeypatch.setattr(service, "_save_export_job_with_quota", lambda _job, _limits=None: None)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Jobs.manager.JobManager.create_job",
         _capture_create_job,

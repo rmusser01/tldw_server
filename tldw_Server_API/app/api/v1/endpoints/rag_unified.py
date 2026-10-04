@@ -41,6 +41,10 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
     managed_media_db_for_owner,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import (
+    enforce_rag_query_quota,
+    require_rag_query_quota,
+)
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
@@ -1388,6 +1392,7 @@ async def source_health_endpoint(
         Depends(RequirePermission(MEDIA_READ)),
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
+        Depends(require_rag_query_quota(1)),
     ]
 )
 async def unified_search_endpoint(
@@ -1667,6 +1672,7 @@ async def unified_batch_endpoint(
             x_tldw_org_id=org_header_id,
             org_id=org_query_id,
         )
+        await enforce_rag_query_quota(getattr(current_user, "id", None), requested_units)
 
         logger.info(
             f"Batch RAG search: {requested_units} queries, "
@@ -1829,6 +1835,7 @@ async def unified_batch_endpoint(
         Depends(check_rate_limit),
         Depends(RequirePermission(MEDIA_READ)),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
+        Depends(require_rag_query_quota(1)),
     ]
 )
 async def simple_search_endpoint(
@@ -2200,6 +2207,7 @@ async def resume_batch_endpoint(
         Depends(check_rate_limit),
         Depends(RequirePermission(MEDIA_READ)),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
+        Depends(require_rag_query_quota(1)),
     ],
     response_class=StreamingResponse,
     responses={

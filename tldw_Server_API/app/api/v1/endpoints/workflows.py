@@ -30,7 +30,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequirePermission, RequireRole, resolve_user_id_for_request, TokenScopeGuard, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequirePermission, RequireRole, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
@@ -70,7 +70,6 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     cookie_websocket_rejection_code,
     resolve_single_user_cookie_websocket,
 )
-from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     create_workflows_database,
@@ -85,18 +84,20 @@ from tldw_Server_API.app.core.exceptions import (
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import afetch as _http_afetch
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
-from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
-from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
 from tldw_Server_API.app.core.Security.egress import (
     ALLOWED_PORTS_ENV,
     DEFAULT_ALLOWED_PORTS,
 )
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import (
-    env_flag_enabled,
     is_explicit_pytest_runtime,
     is_test_mode,
     is_truthy,
+)
+from tldw_Server_API.app.core.Usage.quota_checks import (
+    as_quota_user_id,
+    seconds_until_utc_midnight,
+    workflows_runs_consume,
 )
 from tldw_Server_API.app.services.workflows_webhook_dlq_service import (
     record_webhook_delivery_event,
@@ -111,12 +112,6 @@ from tldw_Server_API.app.core.Workflows.adapters.research._config import (
     DeepResearchLoadBundleConfig,
     DeepResearchSelectBundleFieldsConfig,
     DeepResearchWaitConfig,
-)
-from tldw_Server_API.app.core.Workflows.daily_ledger import (
-    backfill_legacy_runs_to_ledger,
-    get_workflows_daily_ledger,
-    record_workflow_run,
-    workflows_ledger_category,
 )
 from tldw_Server_API.app.core.Workflows.investigation import build_run_investigation
 from tldw_Server_API.app.core.Workflows.investigation import list_run_steps as build_run_steps
@@ -147,26 +142,6 @@ _WORKFLOWS_NONCRITICAL_EXCEPTIONS = (
     NetworkError,
     RetryExhaustedError,
 )
-
-# Best-effort per-process cache for "did we backfill today" keys.
-# Keep it bounded to avoid unbounded growth in long-lived workers.
-_WORKFLOWS_BACKFILL_CACHE: set[str] = set()
-_raw_cache_max = int(os.getenv("WORKFLOWS_BACKFILL_CACHE_MAX", "50000") or "50000")
-_WORKFLOWS_BACKFILL_CACHE_MAX = max(1, _raw_cache_max)
-_WORKFLOWS_QUOTA_RG_FALLBACK_LOGGED = False
-
-
-def _log_workflows_quota_rg_fallback_once(*, reason: str, policy_id: str) -> None:
-    global _WORKFLOWS_QUOTA_RG_FALLBACK_LOGGED
-    if _WORKFLOWS_QUOTA_RG_FALLBACK_LOGGED:
-        return
-    _WORKFLOWS_QUOTA_RG_FALLBACK_LOGGED = True
-    logger.error(
-        "Workflows daily-cap RG check unavailable; using diagnostics-only shim (no legacy fallback enforcement). "
-        "reason={} policy_id={}",
-        reason,
-        policy_id,
-    )
 
 
 def _utcnow_iso() -> str:
@@ -1258,173 +1233,28 @@ async def _enforce_workflows_daily_cap(
     request: Request,
     current_user: User,
     db: WorkflowsDatabase,
-) -> None:
-    """
-    Enforce workflows daily run caps via ResourceDailyLedger/RG.
-
-    Daily cap source:
-      - workflows_runs.daily_cap from the active RG policy.
-
-    Raises HTTPException(429) with legacy-compatible headers on denial.
-    """
-    # Usage quotas off (spec 2). Runs are still recorded by _record_workflow_run_usage.
-    if not usage_quotas_enabled():
-        return
-
-    try:
-        if env_flag_enabled("WORKFLOWS_DISABLE_QUOTAS"):
-            return
-    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Workflows quota: WORKFLOWS_DISABLE_QUOTAS check failed: {}", exc)
-
-    # Derive RG entity key to align ledger accounting with middleware.
-    try:
-        entity = derive_entity_key(request)
-    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(
-            "Workflows quota: entity derivation failed, using user fallback: {}",
-            exc,
-        )
-        entity = f"user:{resolve_user_id_for_request(current_user, error_status=500)}"
-    try:
-        entity_scope, entity_value = entity.split(":", 1)
-    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(
-            "Workflows quota: entity split failed, using user fallback: {}",
-            exc,
-        )
-        entity_scope, entity_value = "user", resolve_user_id_for_request(current_user, error_status=500)
-
-    policy_id = None
-    try:
-        policy_id = str(getattr(request.state, "rg_policy_id", None) or "workflows.default")
-    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(
-            "Workflows quota: rg_policy_id resolution failed, using default: {}",
-            exc,
-        )
-        policy_id = "workflows.default"
-
-    daily_cap_policy = 0
-    try:
-        loader = getattr(request.app.state, "rg_policy_loader", None)
-        if loader is not None and policy_id:
-            pol = loader.get_policy(policy_id) or {}
-            daily_cap_policy = int((pol.get(workflows_ledger_category()) or {}).get("daily_cap") or 0)
-    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(
-            "Workflows quota: RG policy lookup failed for policy_id={}: {}",
-            policy_id,
-            exc,
-        )
-        daily_cap_policy = 0
-
-    if daily_cap_policy <= 0:
-        _log_workflows_quota_rg_fallback_once(
-            reason="missing_rg_daily_cap_policy",
-            policy_id=policy_id,
-        )
-        return
-    daily_cap = daily_cap_policy
-
-    # One-time best-effort backfill of today's legacy counts into ledger.
-    # Guarded by an in-memory per-(tenant, entity, date) key to avoid
-    # re-running on every request in the hot path.
-    try:
-        import datetime as _dt
-
-        tenant_id = _tenant_id_for_user(current_user)
-        today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
-        backfill_key = f"{tenant_id}:{entity_scope}:{entity_value}:{today}"
-        if backfill_key not in _WORKFLOWS_BACKFILL_CACHE:
-            if len(_WORKFLOWS_BACKFILL_CACHE) >= _WORKFLOWS_BACKFILL_CACHE_MAX:
-                _WORKFLOWS_BACKFILL_CACHE.clear()
-            _WORKFLOWS_BACKFILL_CACHE.add(backfill_key)
-            ledger = await get_workflows_daily_ledger()
-            if ledger is not None:
-                await backfill_legacy_runs_to_ledger(
-                    ledger=ledger,
-                    db=db,
-                    tenant_id=tenant_id,
-                    user_id=str(getattr(current_user, "id", "")),
-                    entity_scope=entity_scope,
-                    entity_value=entity_value,
-                )
-    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(
-            "Workflows quota: legacy ledger backfill failed for entity_scope={} entity_value={}: {}",
-            entity_scope,
-            entity_value,
-            exc,
-        )
-
-    # RG is the single source of workflows daily-cap enforcement.
-    try:
-        gov = getattr(request.app.state, "rg_governor", None)
-        if gov is None:
-            _log_workflows_quota_rg_fallback_once(
-                reason="rg_governor_unavailable",
-                policy_id=policy_id,
-            )
-            return
-        dec = await gov.check(
-            RGRequest(
-                entity=entity,
-                categories={workflows_ledger_category(): {"units": 1}},
-                tags={"policy_id": policy_id, "endpoint": request.url.path},
-            )
-        )
-        if not bool(getattr(dec, "allowed", False)):
-            cats = (dec.details or {}).get("categories") or {}
-            cat_det = cats.get(workflows_ledger_category()) or {}
-            remaining = int(cat_det.get("daily_remaining") or cat_det.get("remaining") or 0)
-            retry_after = int(getattr(dec, "retry_after", None) or cat_det.get("retry_after") or 1)
-            reset_epoch = int(time.time()) + retry_after
-            headers = _build_rate_limit_headers(daily_cap, remaining, reset_epoch)
-            raise HTTPException(status_code=429, detail="Daily quota exceeded", headers=headers)
-        return
-    except HTTPException:
-        raise
-    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
-        _log_workflows_quota_rg_fallback_once(
-            reason=f"rg_check_failed:{type(exc).__name__}",
-            policy_id=policy_id,
-        )
-        logger.debug(
-            "Workflows quota: governor check failed for entity={} policy_id={}: {}",
-            entity,
-            policy_id,
-            exc,
-        )
-        return
-
-
-async def _record_workflow_run_usage(
-    *,
-    request: Optional[Request],
-    current_user: User,
     run_id: str,
 ) -> None:
-    """Best-effort shadow-write a workflow run into the daily ledger."""
-    try:
-        if request is not None:
-            entity = derive_entity_key(request)
-        else:
-            entity = f"user:{resolve_user_id_for_request(current_user, error_status=500)}"
-        entity_scope, entity_value = entity.split(":", 1)
-        await record_workflow_run(
-            entity_scope=entity_scope,
-            entity_value=entity_value,
-            run_id=str(run_id),
-            units=1,
-        )
-    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(
-            "Workflows ledger recording failed for run {}: {}",
-            run_id,
-            e,
-        )
+    """Atomically admit and record one workflow run against the daily cap; 429 when spent.
+
+    The admission check and the daily-ledger write are one atomic operation,
+    keyed by ``run_id`` (generated by the caller before this call), so two
+    concurrent requests cannot both pass against the same remaining slot.
+
+    workflows_runs_consume() gates the *check* on usage quotas being on but
+    never gates the *record*: with quotas off it still admits and records
+    the run, exactly as the scheduler's call site does.
+    """
+    # WORKFLOWS_DISABLE_QUOTAS and usage_quotas_enabled() are both checked
+    # inside workflows_runs_consume itself, so the scheduler's direct call
+    # (scheduled runs) honors them the same way this does.
+    decision = await workflows_runs_consume(as_quota_user_id(getattr(current_user, "id", None)), run_id)
+    if decision.allowed:
         return
+    retry_after = seconds_until_utc_midnight()
+    limit = int(decision.limit or 0)
+    headers = _build_rate_limit_headers(limit, max(0, limit - int(decision.used)), int(time.time()) + retry_after)
+    raise HTTPException(status_code=429, detail="Daily quota exceeded", headers=headers)
 
 
 def _build_preflight_issue(
@@ -1887,10 +1717,11 @@ async def run_saved(
                 error=existing.error,
                 definition_version=existing.definition_version,
             )
-    # Daily runs quota is enforced via RG + ResourceDailyLedger.
-    await _enforce_workflows_daily_cap(request=request, current_user=current_user, db=db)
-
+    # Daily runs quota is enforced via RG + ResourceDailyLedger, atomically with
+    # the ledger write below, keyed by this run's id.
     run_id = str(uuid4())
+    await _enforce_workflows_daily_cap(request=request, current_user=current_user, db=db, run_id=run_id)
+
     db.create_run(
         run_id=run_id,
         tenant_id=tenant_id,
@@ -1903,7 +1734,6 @@ async def run_saved(
         session_id=body.session_id if body else None,
         validation_mode=(body.validation_mode if body and getattr(body, "validation_mode", None) else "block"),
     )
-    await _record_workflow_run_usage(request=request, current_user=current_user, run_id=run_id)
     # Special-case: if first step is prompt with force_error or template='bad', mark run failed immediately
     try:
         snap = json.loads(d.definition_json or "{}")
@@ -2371,11 +2201,12 @@ async def run_adhoc(
                 definition_version=existing.definition_version,
             )
 
-    # Daily runs quota is enforced via RG + ResourceDailyLedger.
-    await _enforce_workflows_daily_cap(request=request, current_user=current_user, db=db)
+    # Daily runs quota is enforced via RG + ResourceDailyLedger, atomically with
+    # the ledger write below, keyed by this run's id.
+    run_id = str(uuid4())
+    await _enforce_workflows_daily_cap(request=request, current_user=current_user, db=db, run_id=run_id)
 
     # Persist a snapshot-less run
-    run_id = str(uuid4())
     db.create_run(
         run_id=run_id,
         tenant_id=tenant_id,
@@ -2388,7 +2219,6 @@ async def run_adhoc(
         session_id=body.session_id,
         validation_mode=(body.validation_mode if getattr(body, "validation_mode", None) else "block"),
     )
-    await _record_workflow_run_usage(request=request, current_user=current_user, run_id=run_id)
     engine = WorkflowEngine(db)
     try:
         if body and getattr(body, "secrets", None):
