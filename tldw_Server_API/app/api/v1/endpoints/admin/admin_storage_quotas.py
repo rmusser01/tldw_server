@@ -18,6 +18,7 @@ from tldw_Server_API.app.api.v1.schemas.pagination import (
     default_offset_pagination_aliases,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import UserNotFoundError
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
     AuthnzStorageQuotasRepo,
     DEFAULT_HARD_LIMIT_PCT,
@@ -25,6 +26,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
     DEFAULT_SOFT_LIMIT_PCT,
     DEFAULT_TEAM_QUOTA_MB,
 )
+from tldw_Server_API.app.services.storage_quota_service import get_storage_service
 
 router = APIRouter(prefix="/storage-quotas", tags=["admin-storage-quotas"])
 
@@ -50,7 +52,7 @@ class StorageQuotaResponse(BaseModel):
     quota_mb: int | None = None
     used_mb: float = 0.0
     remaining_mb: float | None = None
-    usage_pct: float = 0.0
+    usage_pct: float | None = 0.0
     at_soft_limit: bool = False
     at_hard_limit: bool = False
     has_quota: bool = False
@@ -72,6 +74,12 @@ class UpdateQuotaRequest(BaseModel):
         le=100,
         description="Hard limit percentage (enforcement threshold)",
     )
+
+
+class UpdateUserQuotaRequest(BaseModel):
+    """Request body for setting a user's own storage quota (limits.storage_quota_mb)."""
+
+    quota_mb: int | None = Field(..., ge=0, description="Quota in MB; 0 blocks uploads; null removes the user's value")
 
 
 class StorageQuotaSummaryResponse(BaseModel):
@@ -112,18 +120,13 @@ async def _get_repo() -> AuthnzStorageQuotasRepo:
     summary="Get user storage quota and usage",
 )
 async def get_user_storage_quota(user_id: int) -> StorageQuotaResponse:
-    """Get a user's storage quota status.
-
-    Currently delegates to the org-level quota that the user belongs to.
-    User-level quotas are stored on the users table; this endpoint provides
-    a unified view.
-    """
+    """Get a user's storage quota status (limits.storage_quota_mb; read-only)."""
     try:
-        repo = await _get_repo()
-        # User-level quotas are on the users table; for org/team quotas
-        # we would need the user's org_id. For now, return org-based status.
-        quota_status = await repo.check_quota_status(org_id=user_id)
+        service = await get_storage_service()
+        quota_status = await service.user_quota_status(user_id)
         return StorageQuotaResponse(**quota_status)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="User not found") from exc
     except _NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Failed to get user storage quota")
         raise HTTPException(
@@ -139,21 +142,16 @@ async def get_user_storage_quota(user_id: int) -> StorageQuotaResponse:
 )
 async def update_user_storage_quota(
     user_id: int,
-    body: UpdateQuotaRequest,
+    body: UpdateUserQuotaRequest,
 ) -> dict[str, Any]:
-    """Update a user's storage quota.
-
-    This sets the org-level quota for the user's primary organization.
-    """
+    """Set (or, with null, remove) a user's own storage quota (limits.storage_quota_mb)."""
     try:
-        repo = await _get_repo()
-        result = await repo.upsert_org_quota(
-            user_id,
-            quota_mb=body.quota_mb,
-            soft_limit_pct=body.soft_limit_pct,
-            hard_limit_pct=body.hard_limit_pct,
-        )
-        return result
+        service = await get_storage_service()
+        return await service.set_user_quota(user_id, body.quota_mb, updated_by=None)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="User not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except _NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Failed to update user storage quota")
         raise HTTPException(

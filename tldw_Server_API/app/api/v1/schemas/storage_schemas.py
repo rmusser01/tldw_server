@@ -251,6 +251,13 @@ class SetQuotaRequest(BaseModel):
     hard_limit_pct: int = Field(default=100, ge=0, le=100, description="Hard limit percentage")
 
 
+class SetUserQuotaRequest(BaseModel):
+    """Set a user's own storage quota (MB); null removes it (unlimited unless a team/org value applies)."""
+    quota_mb: int | None = Field(..., ge=0, description="Quota in MB; 0 blocks uploads; null removes the user's value")
+    soft_limit_pct: int = Field(default=80, ge=0, le=100, description="Soft limit percentage")
+    hard_limit_pct: int = Field(default=100, ge=0, le=100, description="Hard limit percentage")
+
+
 class SetQuotaResponse(BaseModel):
     """Response after setting quota."""
     success: bool

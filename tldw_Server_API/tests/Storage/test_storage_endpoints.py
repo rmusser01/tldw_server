@@ -14,13 +14,14 @@ from importlib import import_module
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from datetime import datetime, timezone
 
 from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoints
 from tldw_Server_API.app.api.v1.endpoints import storage_admin_quotas
 from tldw_Server_API.app.api.v1.endpoints import storage_download
-from tldw_Server_API.app.api.v1.schemas.storage_schemas import SetQuotaRequest
+from tldw_Server_API.app.api.v1.schemas.storage_schemas import SetUserQuotaRequest
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
 
 
@@ -1084,8 +1085,8 @@ class TestAdminQuotaEndpoints:
         """Test admin user quota failures do not leak backend details."""
 
         class _BrokenStorageService:
-            async def set_user_quota(self, user_id, quota_mb):
-                _ = (user_id, quota_mb)
+            async def set_user_quota(self, user_id, quota_mb, *, updated_by=None):
+                _ = (user_id, quota_mb, updated_by)
                 raise StorageError("storage backend exploded")
 
         async def _get_broken_service():
@@ -1096,8 +1097,8 @@ class TestAdminQuotaEndpoints:
         with pytest.raises(HTTPException) as exc_info:
             await storage_endpoints.set_user_quota(
                 user_id=1,
-                request=SetQuotaRequest(quota_mb=1000),
-                _principal=object(),
+                request=SetUserQuotaRequest(quota_mb=1000),
+                principal=SimpleNamespace(user_id=1),
             )
 
         assert exc_info.value.status_code == 500
