@@ -388,8 +388,52 @@ license/workflow/path-classifier ratchets, doc parity and full configured hooks.
 
 The new32-file delta changes task tooling, CI, instructions and ADR-059 only;
 no frontend or production API/config file changes are introduced. Independent
-read-only review is in progress. Current Node-edited parent task visibly contains
-nested NOTES/IMPLEMENTATION_NOTES and duplicated final-summary end markers. Do
-not hand-edit them or normalize the whole repository. Preserve the exact working
-file before the official scoped normalizer runs. Current source-bound UAT and
-failed collector evidence retain their original head, not a fabricated new head.
+read-only review finds no actionable normalizer defect for the exact three owned
+records. Official scoped normalization preserves raw frontmatter, checklists,
+status and substantive notes; all ten changed tasks pass the canonical check.
+Backups retain the original files, and incoming tool tests pass145/0skips.
+Topology-preserving rebase finishes atfb12851f/tree8847cbf5, exactly matching the
+independent integration tree. A historical merge replay is resolved to independent
+intermediate tree27ea5a4d before continuing. All apps/backend/config files remain
+identical to publishedba. Fresh integrated ratchets, full-range hooks, security
+and publication remain pending. Current source-bound UAT and failed collectors
+retain their original head, not a fabricated new head.
+
+## Stage 7: Declared Framework OpenAPI Qualification
+**Goal**: Correct the verified hosted contract-drift failure without weakening
+the gate or changing application behavior.
+**Success Criteria**: Reproduce the exact hosted fingerprint with the repository's
+declared FastAPI/Pydantic versions in an isolated environment; review the schema
+delta, regenerate with the existing exporter/codegen, and pass fresh contract,
+owning regression, production type/build and security checks. Preserve shared
+environments, original failed artifacts and the requester-owned Change summary.
+**Tests**: Full canonical OpenAPI RED/GREEN, selected-durable route contracts,
+owning backend/PostgreSQL and frontend regressions, configured hooks and Bandit.
+**Status**: In Progress
+
+Hosted backend-required atba fails only its OpenAPI contract check. Stable-source
+RED reproduces7bf7df5deaa3ba41cc34cf24b4316490f366b62d05772c4fbc88475fe1be9554
+with2107paths/3261schemas using FastAPI0.142.2/Pydantic2.13.5. The shared local
+environment has Pydantic2.11.7, below the declared requirement; its older snapshot
+contains three redundant input/output schema pairs. Review shows consolidation
+only, with unchanged route and field contracts. The first export overlapped a
+rebase and failed on conflict-marked JSON; it remains unqualified and is not the
+stable RED proof. No dependency is changed in the shared environment. Full native
+Stop qualification still awaits the explicit bounded diagnostic approval.
+
+Fresh declared-framework qualification passes497owning/1backend-specificskip,
+68officialPostgreSQL/0skip,114historycompatibility/0skip,244tooling/CI contracts,
+33docs and210frontend tests. Production typecheck and full configured PR-range
+hooks exit0, including the Backlog format gate; six production paths have Bandit
+0findings/0errors. Ordered substantive-note preservation verifies all ten owned
+task records. Exporter/codegen refreshes the fingerprint and ignored types;
+canonical GREEN matches the hosted fingerprint. An initial codegen misses the
+checkout profile package path and stays failed; the isolated venv now includes
+the two checkout-owned src paths. A permission-only hook attempt remains failed.
+Actual API71798:18101 restarts on unchanged backend/config source with declared
+framework versions, real copied databases, auth, Gemma and embeddings. Both
+18101and18098 preserve original10/eightrows and served contracts/12negative checks;
+all69stashes and separate modela7branch remain unchanged. Independent review
+dispatch fails because app network permission is revoked; no completed review
+is claimed. Fresh immutable build, final-head review/CI and full native Stop
+qualification remain outstanding; no normal merge is attempted yet.
