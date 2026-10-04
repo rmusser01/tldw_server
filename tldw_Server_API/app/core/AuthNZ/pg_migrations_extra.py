@@ -1970,6 +1970,7 @@ _CREATE_USAGE_TABLES = [
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS raw_usage_metadata_json TEXT", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_ts ON llm_usage_log(ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user ON llm_usage_log(user_id)", ()),
+    ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_provider_model ON llm_usage_log(provider, model)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_op_ts ON llm_usage_log(operation, ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_key_ts ON llm_usage_log(key_id, ts)", ()),

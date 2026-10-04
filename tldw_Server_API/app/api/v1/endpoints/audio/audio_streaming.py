@@ -78,7 +78,7 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
 )
 from tldw_Server_API.app.core.Billing.enforcement import (
     LimitCategory,
-    enforcement_enabled,
+    billing_checks_active,
     get_billing_enforcer,
 )
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
@@ -1365,7 +1365,7 @@ async def websocket_transcribe(
 
     # Billing: check transcription minutes quota before streaming begins
     _ws_billing_org_id: int | None = None
-    if enforcement_enabled():
+    if await billing_checks_active():
         try:
             _ws_principal = get_websocket_auth_principal(websocket)
             if _ws_principal is not None:
