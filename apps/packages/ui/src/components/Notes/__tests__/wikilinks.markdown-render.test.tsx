@@ -79,6 +79,17 @@ describe("Notes wikilink preview rendering", { timeout: 60_000 }, () => {
     expect(anchor.querySelector("em, code, .katex")).toBeNull()
   })
 
+  it("keeps the link target in the SillyTavern-compatible rich text mode", async () => {
+    // That mode renders through a separate HTML sanitizer with its own URL allow-list.
+    const index = buildWikilinkIndex([{ id: "note-42", title: "Target Note" }])
+    const preview = renderContentWithResolvedWikilinks("See [[Target Note]] for details.", index)
+
+    render(<Markdown message={preview} richTextModeOverride="st_compat" />)
+
+    const anchor = await anchorFor("[[Target Note]]")
+    expect(parseWikilinkHref(anchor.getAttribute("href") ?? "")).toEqual({ kind: "note", noteId: "note-42" })
+  })
+
   it("leaves ordinary Markdown links and text untouched", async () => {
     const index = buildWikilinkIndex([{ id: "note-42", title: "Target Note" }])
     const preview = renderContentWithResolvedWikilinks(
