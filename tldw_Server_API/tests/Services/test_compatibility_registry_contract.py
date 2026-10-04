@@ -7,7 +7,7 @@ from tldw_Server_API.app.core.deprecations.runtime_registry import (
 )
 
 
-# Compat paths past their sunset dates, removed in TASK-13399.
+# Compat paths past their sunset dates, removed in TASK-13444.
 # Lookups for these keys must come back absent, not raise, so new code
 # cannot silently keep depending on them.
 EXPIRED_COMPAT_KEYS = (

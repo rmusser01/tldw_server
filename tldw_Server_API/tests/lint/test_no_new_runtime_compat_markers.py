@@ -6,7 +6,7 @@ from pathlib import Path
 
 EXPECTED_COMPAT_KEYS: set[str] = set()
 
-# Compat paths whose sunset dates passed and were removed (TASK-13399).
+# Compat paths whose sunset dates passed and were removed (TASK-13444).
 # They must not be resurrected in COMPAT_PATHS or referenced by any
 # log_runtime_deprecation() call site under app/.
 EXPIRED_COMPAT_KEYS = {
