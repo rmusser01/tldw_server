@@ -104,6 +104,30 @@ changes only TypeScript; the fourteen-file production Bandit0 scan remains bound
 to unchanged backend source. Fresh production build and native GREEN remain
 required before this correction is accepted.
 
+Committed correctioncb6b9a9703/treee893b4be passes fresh production build, token sync
+and unchanged budgets (shared540.7KB/600KB, heaviest844.4KB/900KB). Native invalid
+history-address GREEN projects unavailable through the actual controller and both
+rails, disables sends, preserves checkpoints and restores the original valid
+conversation/draft with0sends. Real prepared-context Stop/reload/reprepare/explicit
+Send completes all three core assertions: actual admission/result stream frames,
+one canonical logical input and exact prepared text. Its final style-reset driver
+assertion fails and remains failed; zero-send cleanup/verification continuation
+passes all three checks, including the actual stopped-input protected GET200,
+original UI preference restoration and fresh-loader draft/conversation restoration.
+It does not rewrite the original failed run. Earlier hidden-target,
+retained-own-draft and invalid-warning-wait
+drivers remain failed; accepted turns are inspected, never automatically resent.
+
+Dev advances to d7997bc2052ac52c77427157fe3c5b2e2ca1843f with only five CI matrix
+max-parallel caps at20. Application sources are unchanged by that delta. Integrate
+and verify that exact workflow after final rebase. The matching original issue2033
+task TASK-12135 is reopened through official CLI edit for inherited missing-model
+readiness; prior hydration/offline criteria remain complete and new criteria are
+unchecked. CLI task creation overflows twice; official MCP explicit-ID creation
+times out300seconds and creates no record. No further blind retries or manual
+Backlog file edits. The bounded next-item design is presented for approval; no
+missing-model implementation is bundled into this checkpoint correction.
+
 ### Stage C: Review and Hosted CI
 **Goal**: Publish only a verified integration and address actual final-head review.
 **Success Criteria**: Preserve the human summary; use an exact publication lease;
