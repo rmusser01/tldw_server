@@ -760,7 +760,7 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     assert 'FROM_REF="${{ needs.admission.outputs.base_sha }}"' in workflow_run_branch
     assert 'HEAD_SHA}^' not in workflow_run_branch
     assert 'FROM_REF="${{ github.event.pull_request.base.sha }}"' in pull_request_branch
-    assert 'FROM_REF="${HEAD_SHA}^"' in pull_request_branch
+    assert 'HEAD_SHA}^' not in pull_request_branch
 
     security_job = workflows["security-required.yml"][0]["jobs"]["security-required"]
     pull_request_only_steps = [
