@@ -151,13 +151,19 @@ def _client(
     return TestClient(app, raise_server_exceptions=False)
 
 
-@pytest.fixture
-def db(tmp_path: Path) -> Iterator[CharactersRAGDB]:
-    database = CharactersRAGDB(tmp_path / "1" / "ChaChaNotes.db", client_id="1")
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+def db(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[CharactersRAGDB]:
+    """One owner's store. Both backends ship, so the whole contract runs on both."""
+    backend = None
+    if request.param == "postgres":
+        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+    database = CharactersRAGDB(tmp_path / "1" / "ChaChaNotes.db", client_id="1", backend=backend)
     try:
         yield database
     finally:
         database.close_all_connections()
+        if backend is not None:
+            backend.get_pool().close_all()
 
 
 @pytest.fixture
@@ -199,8 +205,10 @@ def _stored_messages(client: TestClient) -> list[dict[str, Any]]:
     return response.json()["messages"]
 
 
-def _instant(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+def _instant(value: Any) -> datetime:
+    """A stored or returned timestamp as a point in time: SQLite keeps text, PostgreSQL returns datetimes."""
+    moment = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
 
 
 # ---------------------------------------------------------------------------
@@ -301,13 +309,13 @@ def test_timestamps_are_not_restamped_with_the_time_of_the_import(client: TestCl
     body = _simple(last_modified=None)
     assert client.post(PATH, json=body).status_code == 201
     row = db.get_conversation_by_id(CHAT_ID)
-    assert str(row["created_at"]) == "2025-03-01T09:59:30.000Z"
+    assert _instant(row["created_at"]) == _instant("2025-03-01T09:59:30.000Z")
     # No last_modified sent: the newest message, not the import time.
-    assert str(row["last_modified"]) == "2025-03-01T10:01:00.250Z"
-    assert [str(message["timestamp"]) for message in db.get_messages_for_conversation(CHAT_ID)] == [
-        "2025-03-01T10:00:00.250Z", "2025-03-01T10:01:00.250Z",
+    assert _instant(row["last_modified"]) == _instant("2025-03-01T10:01:00.250Z")
+    assert [_instant(message["timestamp"]) for message in db.get_messages_for_conversation(CHAT_ID)] == [
+        _instant("2025-03-01T10:00:00.250Z"), _instant("2025-03-01T10:01:00.250Z"),
     ]
-    assert all(_instant(str(value)) < started for value in (row["created_at"], row["last_modified"]))
+    assert all(_instant(value) < started for value in (row["created_at"], row["last_modified"]))
     listed = client.get(CHATS)
     assert listed.status_code == 200, listed.text
     assert _instant(listed.json()["chats"][0]["last_modified"]) == _instant("2025-03-01T10:01:00.250Z")
@@ -316,8 +324,8 @@ def test_timestamps_are_not_restamped_with_the_time_of_the_import(client: TestCl
 def test_offset_timestamps_are_stored_as_the_same_instant(client: TestClient, db: CharactersRAGDB) -> None:
     messages = [{**_message("pa_q1", None, "user", 0), "timestamp": "2025-03-01T12:00:00.250+02:00"}]
     assert client.post(PATH, json=_body(messages, created_at="2025-03-01T05:59:30-04:00")).status_code == 201
-    assert str(db.get_message_by_id("pa_q1")["timestamp"]) == "2025-03-01T10:00:00.250Z"
-    assert str(db.get_conversation_by_id(CHAT_ID)["created_at"]) == "2025-03-01T09:59:30.000Z"
+    assert _instant(db.get_message_by_id("pa_q1")["timestamp"]) == _instant("2025-03-01T10:00:00.250Z")
+    assert _instant(db.get_conversation_by_id(CHAT_ID)["created_at"]) == _instant("2025-03-01T09:59:30.000Z")
 
 
 def test_imported_text_and_title_are_searchable(client: TestClient) -> None:
@@ -357,9 +365,13 @@ def test_replay_returns_the_same_chat_and_writes_nothing(client: TestClient, db:
         lambda body: {**body, "state": "RESOLVED"},
         lambda body: {**body, "created_at": "2025-03-01T11:59:30+02:00"},
         lambda body: {**body, "character_id": None, "parent_conversation_id": None},
+        lambda body: {**body, "messages": body["messages"][::-1]},
         lambda body: {**body, "messages": [{**message, "images": message.get("images", []), "metadata": message.get("metadata")} for message in body["messages"]]},
     ],
-    ids=["key-order", "uppercase-id", "normalized-state", "same-instant", "explicit-nulls", "explicit-defaults"],
+    ids=[
+        "key-order", "uppercase-id", "normalized-state", "same-instant", "explicit-nulls", "messages-listed-backwards",
+        "explicit-defaults",
+    ],
 )
 def test_replay_matches_equivalent_request_bodies(client: TestClient, db: CharactersRAGDB, equivalent: Any) -> None:
     assert client.post(PATH, json=_body()).status_code == 201
@@ -531,15 +543,20 @@ def test_parent_in_another_conversation_is_not_a_valid_parent(client: TestClient
         {"generation_status": "finished"},
         {"usage": {"prompt_tokens": -1}},
         {"sender_role": "system"},
+        {"model_id": " gpt-4o "},
+        {"cut \ud83d key": 1},
+        {"k" * 5_000: 1},
     ],
-    ids=["sources", "extra-key", "bad-status", "bad-usage", "reserved-key"],
+    ids=["sources", "extra-key", "bad-status", "bad-usage", "reserved-key", "padded-value", "surrogate-key", "long-key"],
 )
 def test_metadata_outside_the_allow_list_is_422_and_writes_nothing(client: TestClient, db: CharactersRAGDB, metadata: dict) -> None:
     messages = [_message("pa_q1", None, "user", 0), _message("pa_a1", "pa_q1", "assistant", 1, metadata=metadata)]
-    response = client.post(PATH, json=_body(messages))
+    # ASCII-escaped JSON, as a browser sends it.
+    response = client.post(PATH, content=json.dumps(_body(messages)), headers={"Content-Type": "application/json"})
     assert response.status_code == 422, response.text
     assert _error(response) == "unsupported_metadata"
     assert response.json()["detail"]["message_id"] == "pa_a1"
+    assert len(response.content) < 600
     assert _counts(db) == dict.fromkeys(TABLES, 0)
 
 
@@ -562,6 +579,12 @@ def test_generation_metadata_on_a_user_message_is_422(client: TestClient, db: Ch
         lambda body: {**body, "state": "archived"},
         lambda body: {**body, "created_at": "2025-03-01T09:59:30"},
         lambda body: {**body, "created_at": 1788256770000},
+        lambda body: {**body, "created_at": "1740823170"},
+        lambda body: {**body, "messages": [{**body["messages"][0], "timestamp": "1740823170000"}]},
+        lambda body: {**body, "created_at": "9999-12-31T23:59:59-10:00"},
+        lambda body: {**body, "messages": [{**body["messages"][0], "timestamp": "0001-01-01T00:00:00+10:00"}]},
+        lambda body: {**body, "character_id": 99999999999999999999},
+        lambda body: {**body, "assistant_kind": "character", "assistant_id": "99999999999999999999"},
         lambda body: {**body, "messages": []},
         lambda body: {**body, "messages": [{**body["messages"][0], "role": "tool"}]},
         lambda body: {**body, "messages": [{**body["messages"][0], "id": "has space"}]},
@@ -585,7 +608,8 @@ def test_generation_metadata_on_a_user_message_is_422(client: TestClient, db: Ch
     ],
     ids=[
         "bad-uuid", "nil-uuid", "no-id", "no-title", "no-created-at", "blank-title", "bad-state", "naive-date",
-        "epoch-number", "no-messages", "tool-role", "id-with-space", "id-with-slash", "id-with-newline", "id-too-long", "bad-timestamp",
+        "epoch-number", "epoch-seconds-text", "epoch-millis-text", "year-9999", "year-1", "huge-character-id",
+        "huge-assistant-id", "no-messages", "tool-role", "id-with-space", "id-with-slash", "id-with-newline", "id-too-long", "bad-timestamp",
         "no-timestamp", "empty-message", "nul-in-text", "lone-surrogate", "fork-without-parent", "persona-without-id",
         "memory-mode-on-character", "persona-with-character", "control-char-in-parent-id", "surrogate-in-assistant-id",
         "surrogate-in-message-id", "surrogate-in-state", "surrogate-in-unknown-key",
@@ -726,10 +750,13 @@ def test_message_id_taken_by_another_owner_is_409_without_a_leak_and_writes_noth
 
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
 def owners(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[SimpleNamespace]:
-    """Two real owners: PostgreSQL shares one database; SQLite uses per-user files."""
-    backend = None
-    if request.param == "postgres":
-        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+    """Two real owners: PostgreSQL shares one database; SQLite uses per-user files.
+
+    The PostgreSQL arm runs as a role that cannot bypass row-level security. The
+    plain test role is a superuser and would see the other owner's rows, which a
+    deployed server's role does not.
+    """
+    backend = request.getfixturevalue("pg_restricted_backend") if request.param == "postgres" else None
     first = CharactersRAGDB(tmp_path / "1" / "ChaChaNotes.db", client_id="1", backend=backend)
     second = CharactersRAGDB(tmp_path / "2" / "ChaChaNotes.db", client_id="2", backend=backend)
     try:
@@ -737,8 +764,6 @@ def owners(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[SimpleNam
     finally:
         first.close_all_connections()
         second.close_all_connections()
-        if backend is not None:
-            backend.get_pool().close_all()
 
 
 def test_another_owner_reusing_ids_never_touches_the_first_owners_chat(
@@ -751,14 +776,27 @@ def test_another_owner_reusing_ids_never_touches_the_first_owners_chat(
     second = _client(owners.second, monkeypatch, user_id=2)
     response = second.post(PATH, json=body)
     if owners.postgres:
+        # The second owner cannot see the chat at all: the primary key alone refuses the id.
+        assert owners.second.get_conversation_by_id(CHAT_ID, include_deleted=True) is None
+        assert owners.second.chat_imports.get_import_state(CHAT_ID) == (None, None)
         assert response.status_code == 409, response.text
         assert _error(response) == "chat_id_conflict"
+        assert set(response.json()["detail"]) == {"error_code", "message"}
         assert SECRET_TITLE not in response.text and SECRET_TEXT not in response.text
         # A fresh conversation id still cannot take the first owner's message id.
-        retry = second.post(PATH, json={**body, "id": "9d2f6a70-1c3b-4e5d-8f90-a1b2c3d4e5f6"})
+        other_chat = "9d2f6a70-1c3b-4e5d-8f90-a1b2c3d4e5f6"
+        retry = second.post(PATH, json={**body, "id": other_chat})
         assert retry.status_code == 409, retry.text
         assert _error(retry) == "message_id_conflict"
-        assert SECRET_TEXT not in retry.text
+        assert SECRET_TEXT not in retry.text and CHAT_ID not in retry.text
+        # Nothing of the refused imports was kept, and the second owner still has no chats.
+        assert owners.second.get_conversation_by_id(other_chat, include_deleted=True) is None
+        assert owners.second.count_conversations_for_user("2", scope_type="global", workspace_id=None) == 0
+        assert second.get(f"{CHATS}{CHAT_ID}").status_code in {403, 404}
+        # With ids of their own the second owner imports normally.
+        own = _body([_message("pa_second", None, "user", 0)], id=other_chat)
+        assert second.post(PATH, json=own).status_code == 201
+        assert owners.first.get_conversation_by_id(other_chat, include_deleted=True) is None
     else:
         # Each SQLite owner has a separate store, so the ids name the caller's own new chat.
         assert response.status_code == 201, response.text

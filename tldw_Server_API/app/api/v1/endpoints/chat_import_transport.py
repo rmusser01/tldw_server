@@ -10,6 +10,10 @@ other chat requests. Two defaults of the framework do not fit that:
   field is the entire body. This route reports where and why the body is
   invalid and leaves the content out. The response is ASCII-escaped, because
   the rejected text may hold half of a surrogate pair that cannot be encoded.
+
+The body is still read and parsed before the request is authenticated, as for
+every JSON route here: the framework reads a declared body before it resolves
+dependencies. The limit bounds that work; it does not move it behind the login.
 """
 
 from __future__ import annotations

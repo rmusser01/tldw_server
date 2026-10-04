@@ -20,7 +20,7 @@ from tldw_Server_API.app.core.Chat.conversation_import import (
     import_fingerprint_from_authority,
     import_message_authority,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, UniqueConstraintError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     ConflictError,
@@ -60,6 +60,24 @@ class ChatImportStore:
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
+
+    def _require_own_transaction(self) -> None:
+        """Refuse to run inside a transaction that someone else opened.
+
+        Joined to an open transaction, the import would be committed or rolled
+        back by whoever opened it, and "all or nothing" would no longer be this
+        method's to promise. SQLite reports an open transaction on the thread's
+        connection. PostgreSQL connections may hold an open read, which the
+        import's own transaction settles, so there only a managed transaction
+        that is already in progress counts.
+        """
+        state = self._db._connection_state()
+        if self._db.backend_type == BackendType.SQLITE:
+            joined = bool(getattr(getattr(state, "conn", None), "in_transaction", False))
+        else:
+            joined = bool(getattr(state, "tx_depth", 0))
+        if joined:
+            raise CharactersRAGDBError("A chat import needs its own transaction.")  # noqa: TRY003
 
     def get_import_state(self, conversation_id: str) -> tuple[dict[str, Any] | None, str | None]:
         """Return the conversation with this id and the import fingerprint stored with its messages.
@@ -118,7 +136,8 @@ class ChatImportStore:
             ConflictError: The conversation id (``entity="conversations"``) or a
                 message id (``entity="messages"``) is already taken. Nothing is
                 written.
-            CharactersRAGDBError: Any other database failure. Nothing is written.
+            CharactersRAGDBError: A transaction is already open on this
+                connection, or any other database failure. Nothing is written.
         """
         owner = str(owner_client_id or "").strip()
         if not owner:
@@ -144,6 +163,7 @@ class ChatImportStore:
         conv_data = {field: conversation.get(field) for field in _CONVERSATION_FIELDS}
         conv_data.update(client_id=owner, scope_type="global", workspace_id=None)
 
+        self._require_own_transaction()
         with self._db.transaction() as conn:
             if conn.execute("SELECT 1 FROM conversations WHERE id = ?", (conversation_id,)).fetchone() is not None:
                 raise ConflictError(  # noqa: TRY003

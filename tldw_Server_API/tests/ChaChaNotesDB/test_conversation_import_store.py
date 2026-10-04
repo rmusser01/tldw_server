@@ -10,12 +10,18 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.Chat.conversation_import import import_fingerprint_from_authority
+from tldw_Server_API.app.core.Chat.conversation_import import (
+    DEFAULT_CONVERSATION_STATE,
+    import_fingerprint_from_authority,
+)
+from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -31,13 +37,24 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
 TABLES = ("conversations", "messages", "message_metadata", "message_images")
 
 
-@pytest.fixture
-def db(tmp_path: Path) -> Iterator[CharactersRAGDB]:
-    database = CharactersRAGDB(tmp_path / "import.db", client_id="1")
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+def db(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[CharactersRAGDB]:
+    backend = None
+    if request.param == "postgres":
+        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+    database = CharactersRAGDB(tmp_path / "import.db", client_id="1", backend=backend)
     try:
         yield database
     finally:
         database.close_all_connections()
+        if backend is not None:
+            backend.get_pool().close_all()
+
+
+def _instant(value: Any) -> datetime:
+    """A stored timestamp as a point in time: SQLite keeps text, PostgreSQL returns datetimes."""
+    moment = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
 
 
 def _conversation(**extra: Any) -> dict[str, Any]:
@@ -94,8 +111,8 @@ def test_import_writes_the_conversation_with_its_own_dates(db: CharactersRAGDB) 
     assert _import(db) == CHAT_ID
     row = db.get_conversation_by_id(CHAT_ID)
     assert (row["title"], row["state"], row["client_id"], row["version"]) == ("Trip planning", "resolved", "1", 1)
-    assert str(row["created_at"]) == "2026-09-01T10:00:00.000Z"
-    assert str(row["last_modified"]) == "2026-09-01T10:04:00.000Z"
+    assert _instant(row["created_at"]) == _instant("2026-09-01T10:00:00.000Z")
+    assert _instant(row["last_modified"]) == _instant("2026-09-01T10:04:00.000Z")
     assert (row["root_id"], row["scope_type"], row["workspace_id"]) == (CHAT_ID, "global", None)
     assert not row["deleted"]
 
@@ -103,11 +120,11 @@ def test_import_writes_the_conversation_with_its_own_dates(db: CharactersRAGDB) 
 def test_import_keeps_ids_parents_senders_timestamps_and_versions(db: CharactersRAGDB) -> None:
     _import(db)
     rows = db.get_messages_for_conversation(CHAT_ID, limit=50)
-    assert [(row["id"], row["parent_message_id"], row["sender"], str(row["timestamp"])) for row in rows] == [
-        ("m1", None, "user", "2026-09-01T10:00:00.000Z"),
-        ("m2", "m1", "assistant", "2026-09-01T10:01:00.000Z"),
-        ("m3", "m1", "assistant", "2026-09-01T10:02:00.000Z"),
-        ("m4", "m3", "user", "2026-09-01T10:03:00.000Z"),
+    assert [(row["id"], row["parent_message_id"], row["sender"], _instant(row["timestamp"])) for row in rows] == [
+        ("m1", None, "user", _instant("2026-09-01T10:00:00.000Z")),
+        ("m2", "m1", "assistant", _instant("2026-09-01T10:01:00.000Z")),
+        ("m3", "m1", "assistant", _instant("2026-09-01T10:02:00.000Z")),
+        ("m4", "m3", "user", _instant("2026-09-01T10:03:00.000Z")),
     ]
     assert {row["version"] for row in rows} == {1}
     assert {row["client_id"] for row in rows} == {"1"}
@@ -204,6 +221,66 @@ def test_taken_message_id_is_a_conflict_and_rolls_the_whole_import_back(db: Char
     assert db.search_messages_by_content("text of m1") == []
 
 
+def test_conversation_id_held_by_a_row_the_caller_cannot_see_is_a_conflict(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under PostgreSQL row-level security another owner's chat is invisible; only the primary key refuses."""
+
+    def hidden_row_holds_the_id(*_args: Any, **_kwargs: Any) -> str:
+        raise UniqueConstraintError("PostgreSQL query execution failed")
+
+    monkeypatch.setattr(db.conversation_store, "add_conversation", hidden_row_holds_the_id)
+    before = _counts(db)
+    with pytest.raises(ConflictError) as raised:
+        _import(db)
+    assert (raised.value.entity, raised.value.entity_id) == ("conversations", CHAT_ID)
+    assert _counts(db) == before
+
+
+def test_message_id_held_by_a_row_the_caller_cannot_see_is_a_conflict(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PostgreSQL reports the taken key without detail, wrapped by the message store."""
+    real = db.message_store.add_message
+
+    def hidden_row_holds_m3(msg_data: dict[str, Any], **kwargs: Any) -> str:
+        if msg_data["id"] == "m3":
+            try:
+                raise UniqueConstraintError("PostgreSQL query execution failed")
+            except UniqueConstraintError as error:
+                raise CharactersRAGDBError("Database error adding message") from error
+        return real(msg_data, **kwargs)
+
+    monkeypatch.setattr(db.message_store, "add_message", hidden_row_holds_m3)
+    before = _counts(db)
+    with pytest.raises(ConflictError) as raised:
+        _import(db)
+    assert (raised.value.entity, raised.value.entity_id) == ("messages", "m3")
+    assert _counts(db) == before
+    assert db.get_conversation_by_id(CHAT_ID, include_deleted=True) is None
+
+
+def test_other_database_errors_are_not_reported_as_id_conflicts(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(*_args: Any, **_kwargs: Any) -> str:
+        raise CharactersRAGDBError("Database error adding message: connection lost")
+
+    monkeypatch.setattr(db.message_store, "add_message", broken)
+    before = _counts(db)
+    with pytest.raises(CharactersRAGDBError) as raised:
+        _import(db)
+    assert not isinstance(raised.value, ConflictError)
+    assert _counts(db) == before
+
+
+def test_default_state_matches_the_store(db: CharactersRAGDB) -> None:
+    """An omitted state is fingerprinted as the default, so the two must not drift apart."""
+    assert DEFAULT_CONVERSATION_STATE == db._DEFAULT_CONVERSATION_STATE
+    _import(db, conversation=_conversation(state=None))
+    assert db.get_conversation_by_id(CHAT_ID)["state"] == DEFAULT_CONVERSATION_STATE
+
+
 def test_failure_part_way_through_leaves_nothing_behind(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     real = db.message_store._add_message_metadata_with_conn
     calls = {"n": 0}
@@ -225,6 +302,16 @@ def test_failure_part_way_through_leaves_nothing_behind(db: CharactersRAGDB, mon
     monkeypatch.undo()
     assert _import(db) == CHAT_ID
     assert _counts(db)["messages"] == 4
+
+
+def test_import_refuses_to_join_a_transaction_it_does_not_own(db: CharactersRAGDB) -> None:
+    """Joined to an open transaction, the import would be committed or rolled back by someone else."""
+    before = _counts(db)
+    with db.transaction():
+        with pytest.raises(CharactersRAGDBError, match="own transaction"):
+            _import(db)
+    assert _counts(db) == before
+    assert _import(db) == CHAT_ID
 
 
 def test_child_listed_before_its_parent_is_refused_before_any_write(db: CharactersRAGDB) -> None:

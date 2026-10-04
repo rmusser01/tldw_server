@@ -210,6 +210,21 @@ def test_naive_timestamp_is_rejected() -> None:
     assert _code(_request(created_at=datetime(2026, 9, 1, 10, 0))) == ("invalid_timestamp", 422)
 
 
+@pytest.mark.parametrize(
+    "extreme",
+    [
+        datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone(timedelta(hours=-10))),
+        datetime(1, 1, 1, tzinfo=timezone(timedelta(hours=10))),
+    ],
+    ids=["past-the-last-year", "before-the-first-year"],
+)
+def test_timestamp_that_cannot_be_expressed_in_utc_is_rejected(extreme: datetime) -> None:
+    """Converting these to UTC leaves the range of dates; that is an invalid timestamp, not a crash."""
+    assert _code(_request([_message("m1", None, timestamp=extreme)])) == ("invalid_timestamp", 422)
+    assert _code(_request(created_at=extreme)) == ("invalid_timestamp", 422)
+    assert _code(_request(last_modified=extreme)) == ("invalid_timestamp", 422)
+
+
 def test_pre_epoch_timestamp_is_rejected() -> None:
     old = datetime(1969, 12, 31, tzinfo=timezone.utc)
     assert _code(_request([_message("m1", None, timestamp=old)])) == ("invalid_timestamp", 422)
@@ -265,7 +280,7 @@ def test_blank_title_is_rejected() -> None:
 
 def test_allow_listed_metadata_is_stored_with_the_sender_role() -> None:
     metadata = {
-        "model_id": " gpt-4o-mini ",
+        "model_id": "gpt-4o-mini",
         "provider": "openai",
         "finish_reason": "stop",
         "generation_status": "complete",
@@ -291,8 +306,14 @@ def test_allow_listed_metadata_is_stored_with_the_sender_role() -> None:
         {"generation_status": "finished"},
         {"usage": {"prompt_tokens": 1, "cost": 2}},
         {"model_id": ""},
+        {"model_id": " gpt-4o "},
+        {"provider": "openai "},
+        {"finish_reason": "\tstop"},
     ],
-    ids=["unknown-key", "reserved-key", "bad-status", "bad-usage", "empty-model"],
+    ids=[
+        "unknown-key", "reserved-key", "bad-status", "bad-usage", "empty-model",
+        "padded-model", "padded-provider", "padded-finish-reason",
+    ],
 )
 def test_metadata_outside_the_allow_list_is_rejected(metadata: dict[str, Any]) -> None:
     request = _request([_message("m1", None), _message("m2", "m1", "assistant", 1, metadata=metadata)])
@@ -300,6 +321,20 @@ def test_metadata_outside_the_allow_list_is_rejected(metadata: dict[str, Any]) -
         _prepare(request)
     assert (raised.value.code, raised.value.status_code) == ("unsupported_metadata", 422)
     assert raised.value.detail()["message_id"] == "m2"
+
+
+def test_unknown_metadata_keys_are_named_briefly_and_in_plain_ascii() -> None:
+    """The refusal names the keys, but never echoes long or unencodable text back."""
+    metadata = {"x" * 5_000: 1, "cut \ud83d key": 2, **{f"key{index}": index for index in range(40)}}
+    request = _request([_message("m1", None), _message("m2", "m1", "assistant", 1, metadata=metadata)])
+    with pytest.raises(ChatImportError) as raised:
+        _prepare(request)
+    detail = raised.value.detail()
+    assert detail["error_code"] == "unsupported_metadata"
+    encoded = json.dumps(detail, ensure_ascii=False).encode("utf-8")
+    assert len(encoded) < 600
+    assert detail["message"].isascii()
+    assert "key0" in detail["message"]
 
 
 def test_generation_metadata_is_only_accepted_on_assistant_messages() -> None:
@@ -333,6 +368,14 @@ def test_unsupported_image_bytes_are_rejected() -> None:
 def test_image_over_the_per_image_limit_is_rejected() -> None:
     big = base64.b64encode(PNG + b"\x00" * 64).decode()
     assert _code(_request([_message("m1", None, images=[big])])) == ("image_too_large", 413)
+
+
+def test_padded_image_text_is_refused_on_its_length_before_it_is_processed() -> None:
+    """Whitespace inside base64 is allowed, but not as a way to send megabytes of padding."""
+    wrapped = "\n".join(base64.b64encode(PNG).decode()[index:index + 8] for index in range(0, 32, 8))
+    assert _prepare(_request([_message("m1", None, images=[wrapped])])).messages[0]["images"][0]["data"] == PNG
+    padded = base64.b64encode(PNG).decode() + " " * 10_000
+    assert _code(_request([_message("m1", None, images=[padded])])) == ("image_too_large", 413)
 
 
 def test_images_over_the_import_total_are_rejected() -> None:
@@ -398,12 +441,28 @@ def test_conversation_changes_change_the_fingerprint(change: dict[str, Any]) -> 
         [_message("m1", None), _message("m2", "m1", "assistant", 1, images=[base64.b64encode(PNG).decode()])],
         [_message("m1", None), _message("m2", "m1", "assistant", 1), _message("m3", "m2", "user", 2)],
         [_message("m1", None)],
-        [_message("m2", "m1", "assistant", 1), _message("m1", None)],
     ],
-    ids=["content", "parent", "timestamp", "role", "metadata", "image", "added", "removed", "order"],
+    ids=["content", "parent", "timestamp", "role", "metadata", "image", "added", "removed"],
 )
 def test_message_changes_change_the_fingerprint(messages: list[dict[str, Any]]) -> None:
     assert _prepare(_request(messages)).fingerprint != _prepare(_request()).fingerprint
+
+
+def test_fingerprint_follows_the_stored_order_not_the_order_of_the_request() -> None:
+    """Listing the same messages in another order stores the same chat, so it is the same import."""
+    listed_backwards = _request([_message("m2", "m1", "assistant", 1), _message("m1", None)])
+    assert _prepare(listed_backwards).fingerprint == _prepare(_request()).fingerprint
+    # Equal timestamps are stored in the order they were sent, so there the order is part of the chat.
+    tied = [_message("a", None, minute=3), _message("b", None, minute=3)]
+    assert _prepare(_request(tied)).fingerprint != _prepare(_request(tied[::-1])).fingerprint
+    # A parent is always stored before its child, however a tie between them was listed.
+    family = [_message("parent", None, minute=3), _message("child", "parent", minute=3)]
+    assert _prepare(_request(family)).fingerprint == _prepare(_request(family[::-1])).fingerprint
+
+
+def test_omitted_state_is_the_default_state() -> None:
+    assert _prepare(_request(state="in-progress")).fingerprint == _prepare(_request()).fingerprint
+    assert _prepare(_request()).conversation["state"] == "in-progress"
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +517,16 @@ def test_replay_is_only_for_the_same_owner_and_the_same_request() -> None:
     # A trashed chat that is not this import is still only a conflict: nothing about it is revealed.
     assert refused(existing={**row, "deleted": 1}, fingerprint="b" * 64) == (CHAT_ID_CONFLICT, 409)
     assert refused(existing={**row, "deleted": 1}, owner_id="2") == (CHAT_ID_CONFLICT, 409)
+
+
+def test_refusals_do_not_suggest_that_a_new_chat_id_alone_is_enough() -> None:
+    """Message ids of the existing chat stay taken, so only new ids throughout can be imported."""
+    row = {"id": CHAT_ID, "client_id": "1", "deleted": 1}
+    for kwargs in ({"fingerprint": "a" * 64}, {"fingerprint": "b" * 64}):
+        with pytest.raises(ChatImportError) as raised:
+            resolve_import_replay(row, owner_id="1", stored_fingerprint="a" * 64, **kwargs)
+        assert "new id" not in raised.value.message
+        assert "message" in raised.value.message
 
 
 def test_refusals_carry_no_detail_of_the_existing_chat() -> None:

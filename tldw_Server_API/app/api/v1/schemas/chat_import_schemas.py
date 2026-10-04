@@ -14,6 +14,7 @@ chat scope, as live version-1 rows.
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
@@ -34,11 +35,19 @@ CHAT_IMPORT_ID_MAX_LENGTH = 255
 # Message ids become path segments (``/messages/{id}``), so they are limited to
 # characters that need no escaping and cannot be a dot segment.
 CHAT_IMPORT_MESSAGE_ID_PATTERN = r"^[A-Za-z0-9_][A-Za-z0-9_.:~-]*$"
+# Character ids are stored in a signed 64-bit column.
+CHAT_IMPORT_MAX_CHARACTER_ID = 2**63 - 1
+
+_ISO_DATE_TIME_START = re.compile(r"\d{4}-\d{2}-\d{2}[Tt ]\d{2}:")
 
 
 def _iso_string(value: Any) -> Any:
-    """Accept ISO 8601 text only, so a bare number is never guessed to be seconds or milliseconds."""
-    if not isinstance(value, str):
+    """Accept ISO 8601 date-time text only.
+
+    A number, or a string of digits, would otherwise be read as a Unix time and
+    guessed to be seconds or milliseconds from its size.
+    """
+    if not isinstance(value, str) or _ISO_DATE_TIME_START.match(value) is None:
         raise ValueError("Expected an ISO 8601 timestamp string with a UTC offset")
     return value
 
@@ -159,7 +168,9 @@ class ChatImportRequest(BaseModel):
         None,
         description="When the chat was last changed. Defaults to its newest message, never to the time of the import.",
     )
-    character_id: int | None = Field(None, gt=0, description="ID of the character for this chat")
+    character_id: int | None = Field(
+        None, gt=0, le=CHAT_IMPORT_MAX_CHARACTER_ID, description="ID of the character for this chat"
+    )
     assistant_kind: Literal["character", "persona"] | None = Field(
         None, description="Normalized assistant identity kind for this chat"
     )
@@ -229,12 +240,11 @@ class ChatImportRequest(BaseModel):
             if self.character_id is None:
                 if not self.assistant_id:
                     raise ValueError("Character chats require character_id or a numeric assistant_id.")
-                try:
-                    self.character_id = int(self.assistant_id)
-                except ValueError as exc:
-                    raise ValueError("Character assistant_id must be numeric.") from exc
-                if self.character_id <= 0:
-                    raise ValueError("Character assistant_id must be a positive integer.")
+                if not self.assistant_id.isascii() or not self.assistant_id.isdigit():
+                    raise ValueError("Character assistant_id must be numeric.")
+                self.character_id = int(self.assistant_id)
+                if not 0 < self.character_id <= CHAT_IMPORT_MAX_CHARACTER_ID:
+                    raise ValueError("Character assistant_id is out of range.")
             self.assistant_id = str(self.character_id)
             return self
         if not self.assistant_id:
@@ -246,6 +256,7 @@ class ChatImportRequest(BaseModel):
 
 __all__ = [
     "CHAT_IMPORT_ID_MAX_LENGTH",
+    "CHAT_IMPORT_MAX_CHARACTER_ID",
     "CHAT_IMPORT_MAX_IMAGES_PER_MESSAGE",
     "CHAT_IMPORT_MAX_MESSAGES",
     "CHAT_IMPORT_MESSAGE_ID_PATTERN",

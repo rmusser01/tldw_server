@@ -12,21 +12,25 @@ stamped with the time of the import.
 What is refused instead of being dropped or repaired:
 
 * a parent that is not part of the import, a cycle, or a repeated message id;
-* generation metadata outside the allow-list in ``generation_metadata``, or on
-  a message that is not an assistant reply;
+* generation metadata outside the allow-list in ``generation_metadata``, on a
+  message that is not an assistant reply, or with a value the server would
+  store differently from how it was sent (surrounding whitespace);
 * a message with neither text nor an image, because the message store cannot
   hold one;
 * a timestamp without an offset, before 1970, or further in the future than
   the clock-skew allowance. A future timestamp would sort the imported message
-  after every message sent later.
+  after every message sent later;
+* text the database cannot store: NUL, or half of a surrogate pair.
 
 Idempotency
 -----------
 The fingerprint is a SHA-256 over the normalized request, including the
-conversation id. It is stored in the owner-only provenance of every imported
-message (``history_admission_json``), next to the ``parent_graph_v1``
-interpretation that lets a branching import be read as an ordinary parent
-graph. An import repeated by the same owner with the same fingerprint is a
+conversation id, with the messages in the order they are stored. Two requests
+that store the same chat therefore have the same fingerprint, however each
+listed its messages and whether or not it spelled out defaults. It is stored in
+the owner-only provenance of every imported message
+(``history_admission_json``), next to the ``parent_graph_v1`` interpretation
+that lets a branching import be read as an ordinary parent graph. An import repeated by the same owner with the same fingerprint is a
 replay; any other use of the conversation id is a conflict. The comparison is
 with the original request, not with the chat as it is now, so a retry still
 replays after the chat was renamed, edited or continued.
@@ -53,6 +57,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.Chat.generation_metadata import (
+    GENERATION_METADATA_KEYS,
     GenerationMetadataError,
     validate_generation_metadata,
 )
@@ -60,6 +65,8 @@ from tldw_Server_API.app.core.Chat.generation_metadata import (
 IMPORT_FINGERPRINT_SCHEMA_VERSION = 1
 IMPORT_AUTHORITY_VERSION = 1
 DEFAULT_MAX_FUTURE_SKEW_SECONDS = 300
+# The state a conversation gets when none is given; an omitted state is this state.
+DEFAULT_CONVERSATION_STATE = "in-progress"
 
 CHAT_ID_CONFLICT = "chat_id_conflict"
 CHAT_DELETED = "chat_deleted"
@@ -83,10 +90,19 @@ _CONVERSATION_FIELDS = (
     "forked_from_message_id",
 )
 
+# A chat that exists keeps its message ids, in trash too, so a different chat id alone is not enough.
 _REPLAY_MESSAGES = {
-    CHAT_ID_CONFLICT: "This chat id is already in use. Retry with the original request, or use a new id.",
-    CHAT_DELETED: "The chat imported with this id is in trash. Restore it, or import it with a new id.",
+    CHAT_ID_CONFLICT: (
+        "This chat id is already in use. Retry with the original request. To import the chat again, "
+        "the chat and every message need ids that are not in use."
+    ),
+    CHAT_DELETED: (
+        "The chat imported with this id is in trash. Restore it, or delete it permanently before "
+        "importing it again; its messages keep their ids until then."
+    ),
 }
+_MAX_ECHOED_NAMES = 5
+_MAX_ECHOED_NAME_CHARS = 40
 
 
 class ChatImportError(Exception):
@@ -232,7 +248,11 @@ def _timestamp(value: Any, *, field: str, latest: datetime, message_id: str | No
     context = {"field": field, **({"message_id": message_id} if message_id is not None else {})}
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise ChatImportError("invalid_timestamp", 422, "Timestamps need a UTC offset, for example a trailing Z.", **context)
-    moment = value.astimezone(timezone.utc)
+    try:
+        moment = value.astimezone(timezone.utc)
+    except (OverflowError, ValueError):
+        # Year 1 or 9999 with an offset that carries the UTC time out of the supported range.
+        raise ChatImportError("invalid_timestamp", 422, "A timestamp is outside the supported range.", **context) from None
     if moment < _EPOCH:
         raise ChatImportError("invalid_timestamp", 422, "Timestamps before 1970 are not supported.", **context)
     if moment > latest:
@@ -277,6 +297,11 @@ def _decode_image(value: Any, *, max_bytes: int, message_id: str) -> bytes:
     )
     if not isinstance(value, str):
         raise invalid
+    # Whitespace in base64 is tolerated, but the raw text is bounded before any of it is copied.
+    if len(value) > 2 * (((max_bytes + 2) // 3) * 4) + 256:
+        raise ChatImportError(
+            "image_too_large", 413, f"An image is larger than {max_bytes} bytes.", message_id=message_id, limit=max_bytes
+        )
     encoded = value
     if encoded.startswith("data:"):
         header, separator, encoded = encoded.partition(",")
@@ -302,21 +327,36 @@ def _decode_image(value: Any, *, max_bytes: int, message_id: str) -> bytes:
     return data
 
 
+def _echoed_name(value: Any) -> str:
+    """Return a caller-supplied name in a form that is safe to send back: short, plain ASCII."""
+    text = str(value).encode("ascii", "backslashreplace").decode("ascii")
+    return text if len(text) <= _MAX_ECHOED_NAME_CHARS else text[: _MAX_ECHOED_NAME_CHARS - 3] + "..."
+
+
 def _generation_metadata(value: Any, *, role: str, message_id: str) -> dict[str, Any]:
-    """Return allow-listed generation metadata; anything else is refused, never dropped."""
+    """Return allow-listed generation metadata; anything else is refused, never dropped or altered."""
     if value is None or (isinstance(value, Mapping) and not value):
         return {}
-    if role != "assistant":
-        raise ChatImportError(
-            "unsupported_metadata",
-            422,
-            "Generation metadata is only stored for assistant messages.",
-            message_id=message_id,
-        )
+
+    def refused(message: str) -> ChatImportError:
+        return ChatImportError("unsupported_metadata", 422, message, message_id=message_id)
+
+    if role != "assistant" or not isinstance(value, Mapping):
+        raise refused("Generation metadata is only stored for assistant messages.")
+    unknown = sorted(_echoed_name(key) for key in value if key not in GENERATION_METADATA_KEYS)
+    if unknown:
+        named = ", ".join(unknown[:_MAX_ECHOED_NAMES])
+        more = len(unknown) - _MAX_ECHOED_NAMES
+        raise refused(f"Unsupported generation metadata keys: {named}" + (f" and {more} more" if more > 0 else ""))
     try:
-        return validate_generation_metadata(value)
+        normalized = validate_generation_metadata(value)
     except GenerationMetadataError as error:
-        raise ChatImportError("unsupported_metadata", 422, str(error), message_id=message_id) from None
+        # Only allow-listed key names remain, so the validator's message names nothing of the caller's.
+        raise refused(str(error)) from None
+    if normalized != dict(value):
+        # The validator trims text. Storing something other than what was sent would not be lossless.
+        raise refused("Generation metadata values must be sent as they are stored, without surrounding whitespace.")
+    return normalized
 
 
 def _parents_first(messages: Sequence[Mapping[str, Any]]) -> list[int]:
@@ -376,9 +416,9 @@ def chat_import_fingerprint(
     Args:
         conversation_id: The canonical conversation id.
         conversation: Normalized conversation fields (see ``_CONVERSATION_FIELDS``).
-        messages: Normalized messages in the order they were sent, each with
-            ``id``, ``parent_message_id``, ``role``, ``content``, ``timestamp``,
-            ``images`` (digests, not bytes) and ``metadata``.
+        messages: Normalized messages in the order they will be stored, each
+            with ``id``, ``parent_message_id``, ``role``, ``content``,
+            ``timestamp``, ``images`` (digests, not bytes) and ``metadata``.
 
     Returns:
         A 64-character lowercase SHA-256 hex digest.
@@ -507,9 +547,15 @@ def prepare_chat_import(
         # Not sent: the chat was last touched when its newest message was written.
         modified = max(created, newest) if newest is not None else created
 
+    # Messages are stored by timestamp, and equal timestamps keep the order they are written in.
+    # Hashing them in that order makes two requests that store the same chat the same import,
+    # however each listed its messages.
+    written = {index: rank for rank, index in enumerate(order)}
+    stored_order = sorted(order, key=lambda index: (normalized[index]["timestamp"], written[index]))
+
     conversation = {
         "title": title,
-        "state": request.get("state"),
+        "state": request.get("state") or DEFAULT_CONVERSATION_STATE,
         "created_at": _format_timestamp(created),
         "last_modified": _format_timestamp(modified),
         "character_id": request.get("character_id"),
@@ -523,13 +569,16 @@ def prepare_chat_import(
         conversation_id=conversation_id,
         conversation=conversation,
         messages=tuple(normalized[index] for index in order),
-        fingerprint=chat_import_fingerprint(conversation_id, conversation, canonical),
+        fingerprint=chat_import_fingerprint(
+            conversation_id, conversation, [canonical[index] for index in stored_order]
+        ),
     )
 
 
 __all__ = [
     "CHAT_DELETED",
     "CHAT_ID_CONFLICT",
+    "DEFAULT_CONVERSATION_STATE",
     "DEFAULT_MAX_FUTURE_SKEW_SECONDS",
     "MESSAGE_ID_CONFLICT",
     "ChatImportError",
