@@ -42,10 +42,28 @@ def test_duplicate_note_id_is_a_conflict_and_preserves_original(note_owners):
     assert note_owners.bob.get_note_by_id(note_owners.private) is None
 
 
-@pytest.mark.parametrize("operation", ["list", "count", "detail", "deleted", "batch", "search"])
+@pytest.mark.parametrize(
+    "operation",
+    ["list", "count", "detail", "deleted", "batch", "search", "title-search", "wikilink-title", "wikilink-id"],
+)
 def test_note_reads_exclude_foreign_owner(note_owners, operation):
     db = note_owners.bob
-    if operation == "list":
+    if operation == "title-search":
+        # [[wikilink]] autocomplete (NE-02) must only list the owner's titles.
+        assert db.search_note_titles("Citrine") == []
+        assert db.count_note_titles_matching("Citrine") == 0
+        assert [row["id"] for row in db.search_note_titles("Indigo")] == [note_owners.own]
+    elif operation == "wikilink-title":
+        resolved = db.note_graph_projection_store.resolve_wikilink_titles(
+            ["Alice private Citrine", "Bob private Indigo"]
+        )
+        assert resolved["Alice private Citrine"].note_id is None
+        assert resolved["Bob private Indigo"].note_id == note_owners.own
+    elif operation == "wikilink-id":
+        assert db.note_graph_projection_store.get_live_note_titles(
+            [note_owners.private, note_owners.own]
+        ) == {note_owners.own: "Bob private Indigo"}
+    elif operation == "list":
         assert [row["id"] for row in db.list_notes()] == [note_owners.own]
     elif operation == "count":
         assert db.count_notes() == 1

@@ -236,11 +236,7 @@ def test_id_wikilink_projects_outgoing_edge_when_note_is_added(
     assert graph_db.note_graph_projection_store.list_outgoing(SOURCE_ID) == (TARGET_ID,)
 
 
-# NE-02 (#3110): Notes/wikilinks.py:13 only matches [[id:UUID]]; Notes_Graph/wikilink_parser.py:22-26 documents [[Title]] as ignored.
-# When fixed, also drop test_title_style_not_matched in test_wikilink_parser.py (it pins the pre-D2 behaviour).
-@pytest.mark.xfail(
-    strict=True, reason="NE-02 (#3110): [[Title]] wikilinks are ignored; only [[id:UUID]] creates a graph edge"
-)
+# NE-02 (#3110): fixed. The projection resolves [[Title]] to the owner's note by title.
 def test_title_wikilink_projects_outgoing_edge_when_note_is_added(
     graph_db: CharactersRAGDB,
 ) -> None:
