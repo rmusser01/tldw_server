@@ -318,10 +318,19 @@ export const WorkspaceChatPanel = ({
     setDraft(turn.input_text)
     composerRef.current?.focus()
   }, [checkpoint.controller, serverChatId, setDraft, temporaryChat])
-  const historyLoading = serverChatLoadState === "loading" || checkpoint.restoring
+  const checkpointSelection = checkpoint.active ? checkpoint.controller : null
+  const checkpointStatus = checkpointSelection?.status
+  const checkpointPending = checkpointStatus === "loading" ||
+    checkpointStatus === "pending" || checkpointStatus === "pending_unknown"
+  const checkpointLoadError = checkpointStatus &&
+    checkpointStatus !== "idle" && checkpointStatus !== "ready" && !checkpointPending
+    ? checkpointSelection?.error || checkpointStatus
+    : null
+  const historyLoading = serverChatLoadState === "loading" || checkpoint.restoring || checkpointPending
   const historyLoadError =
     serverChatLoadError ||
-    (serverChatLoadState === "failed" ? "Chat history unavailable" : null)
+    (serverChatLoadState === "failed" ? "Chat history unavailable" : null) ||
+    checkpointLoadError
   const sending = isLoading || isProcessing || preparationPending || recoveryPending
   const isSending = streaming || sending
   const historyReady = !historyLoading && !historyLoadError

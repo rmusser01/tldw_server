@@ -15,7 +15,7 @@ The requester approved cleanup and continuation. Chatbook companion PR2968 is
 merged at efea5e45cf2348dd0da50fedac215cd849143822. Its exact final head passed all
 four hosted gates and Qodo with no active findings; actual authenticated GET-only
 scope/history verification passed without mocks. No client release is claimed.
-The server PR remains published at5b6258f909 and current dev is4c4f197f68481664c58d4553bbfbb45dae157e28.
+The server PR is published at2683d4fd28c3b950105c91e02aafe30ca1f7126e and current dev is4c4f197f68481664c58d4553bbfbb45dae157e28.
 Use the clean attached isolated worktree; preserve the original live UAT checkout,
 all protected services/data, historical evidence and the human Change summary.
 
@@ -76,7 +76,33 @@ runner budget and unchanged assertions; production typecheck0, actual four-file
 ESLint0errors/0warnings/0ignored, and fresh fourteen-file production Bandit0.
 Initial failed runs, five-second runner expirations and ignored-path lint are
 preserved. Fresh cookie-aware build and complete live Chrome UAT remain required;
-no current-head acceptance or merge is claimed yet.
+no full acceptance or merge is claimed yet. The fresh cookie-aware build passes
+unchanged token/bundle budgets and binds7225 tracked app files to2683d4f. Actual
+native Settings fresh loaders retain60seconds. One new grounded native send has
+retrieval-only200 and chat200; its original CDP completion collector timed out and
+remains failed. A separate zero-send continuation verifies the actual protected
+input/result pair, citations and restored draft without fabricating raw SSE.
+Desktop/mobile fresh reload and explicit unavailable-workspace Retry pass with
+zero sends. Workspace switching and fresh raw-stream recovery remain required.
+
+The next workstream audit identifies an introduced checkpoint-readiness defect:
+settled restoration rejection can leave the controller unavailable while both
+rails report Ready. TASK-13421.1 covers the bounded corrective edit. Add a failing
+mounted regression, project existing checkpoint status/error into the existing
+history readiness gate, preserve valid empty-chat readiness, and verify retained
+draft/recovery with no automatic send. Missing-model readiness is inherited from
+dev and remains a separate follow-up, not claimed fixed by this correction.
+The bounded correction has expected mounted RED8 and GREEN23; hook/panel163 and
+rail/page/runtime64 pass (250 tests/seven suites total), with actual two-file
+ESLint0errors/0warnings/0ignored. Independent review finds no new actionable
+defect; actual controller publication through both rails remains for native UAT.
+Archived2683 Chrome reproduces false Ready for an invalid native history URL,
+fails the expected-unavailable assertion with0sends, preserves all checkpoint
+rows and restores the original conversation/draft. Four native workspace-switch
+cycles also pass without sends. Production TypeScript exits0. The new correction
+changes only TypeScript; the fourteen-file production Bandit0 scan remains bound
+to unchanged backend source. Fresh production build and native GREEN remain
+required before this correction is accepted.
 
 ### Stage C: Review and Hosted CI
 **Goal**: Publish only a verified integration and address actual final-head review.
@@ -84,7 +110,13 @@ no current-head acceptance or merge is claimed yet.
 document merged companion disposition; fresh exact-head Qodo/CI and all review
 threads are qualified, with no hidden or bypassed failures.
 **Tests**: Per-finding regression/security checks and actual hosted readback.
-**Status**: Not Started
+**Status**: In Progress
+
+Exact-lease publication2683d4f and body readback preserve the human Change summary.
+Qodo's updated dashboard for that exact head has zero active bugs/rule violations/
+cross-repository conflicts; all eight review threads are resolved. Hosted checks
+remain queued as of the latest snapshot. New checkpoint edits require renewed
+publication/review/CI qualification; the2683d4f review does not qualify a later head.
 
 ### Stage D: Protected Merge and Tracker Reconciliation
 **Goal**: Land the qualified server work before starting another workstream.
