@@ -700,7 +700,7 @@ git commit -m "refactor(authnz): complete membership writer migration"
 **Goal**: Validate conflict resolutions and new-dev fixture compatibility.
 **Success Criteria**: Focused profiles, writer, tenant, quota and official PostgreSQL tests pass; CI contracts and Docs pass; touched-scope lint/Bandit and independent review have no new actionable finding.
 **Tests**: UserProfile/Usage tests, writer/context/lock-plan/guard/candidate/tenant tests, official live PostgreSQL WP2 gate, required CI contracts, strict Docs, Ruff/compileall and Bandit baseline comparison.
-**Status**: In Progress
+**Status**: Complete
 
 October 4 evidence: 545 UserProfile/Usage tests passed (two Usage PostgreSQL
 cases skipped for their missing/unreachable configured database), 448 focused
@@ -709,16 +709,17 @@ tests passed without skips. CI contracts and ratchets passed 469 tests; four
 license-fetch cases require Bash >=4 and skip on this host's Bash 3. Publication
 and task-format parity passed 37 tests. Runtime Bandit matches latest dev's 20
 existing findings exactly, with no new findings or scan errors. Independent
-range-diff/runtime/docs/OpenAPI review reported no actionable findings. Strict
-Docs passed 211 tests with one Git timestamp warning for the newly renamed,
-uncommitted ADR060; rerun after committing its Git history before publishing.
-The three fixture corrections retain authorization guards and assertions.
+range-diff/runtime/docs/OpenAPI and fixture reviews reported no actionable
+findings. Strict Docs passed all 212 tests after commit570fb262ac supplied
+Git history for renamed ADR060. The three fixture corrections retain
+authorization guards and assertions; final Ruff/compileall and diff checks
+pass. No runtime guard, required check, or license policy was weakened.
 
 ## Stage 3: Publish and Exact-Head Merge
 **Goal**: Publish the verified rebase and merge only after fresh required gates and review pass.
 **Success Criteria**: Latest authoritative dev is an ancestor; new head is pushed with an explicit lease; Qodo references that exact head with no unresolved feedback; every required gate succeeds; human Change summary remains verbatim; expected-head merge is read back and task tracking finalized.
 **Tests**: Remote ref/PR/review/check readbacks, merge commit verification.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Work Package 3: Typed Pipeline and Effects
 
