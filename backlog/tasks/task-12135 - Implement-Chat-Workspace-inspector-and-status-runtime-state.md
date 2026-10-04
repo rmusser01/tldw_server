@@ -4,12 +4,13 @@ title: Implement Chat Workspace inspector and status runtime state
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-10-04 03:56'
+updated_date: '2026-10-04 04:02'
 labels: []
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/2033'
   - 'https://github.com/rmusser01/tldw_server/issues/1239'
+  - 'https://github.com/rmusser01/tldw_server/pull/3159'
 documentation:
   - >-
     Docs/superpowers/specs/2026-07-13-chat-workspace-hydration-offline-follow-up-design.md
@@ -54,6 +55,10 @@ PR #2600 review remediation after rebase on latest origin/dev: added explicit ha
 2026-10-03 final bounded model follow-up qualification: separate commit db29d8a19c rebased cleanly onto parent PR3071 test-only correction 8c8509b6fe as 9fce2deeeb. Runtime production bytes and all backend/config remain identical to the qualified immutable db29 build; only two inherited parent test files and TASK13421.1 differ. Real isolated production frontend70392:18100 uses unchanged live API38726:18098; existing frontend38406:18099 and old main/Settings tabs are preserved. Production build/token verification and unchanged budgets pass (shared540.4KB/600, heaviest842.9KB/900). Fresh rebased owning regression run273/273 across14suites and actual7-file ESLint0errors/0warnings/0ignored pass. Initial fresh test runner had an incorrect executable path and did not run; corrected absolute executable qualifies. Initial default-heap production tsc exhausted4GB and remains failed; established Node/8GB tsc rerun exits0. No Python changed, Bandit not applicable.
 
 Real no-mock Chrome raw-CDP UAT: natural-empty18100 origin with real authentication, workspace/history/source/model APIs, no interception/injected state/focus or visibility emulation. Seven desktop1440x900/mobile390x844 checks pass for typed-only, staged-only, combined draft/context, both rails and zero-overflow inspector; native Ctrl/Meta Enter preserves draft/staging and dispatches0RAG/completion requests. Original picker runner timed out after these7 steps and remains FAILED. Separate native keyboard continuation with actual foreground Chrome passes4steps: command/model selection, both rails Ready and both sends enabled with draft/context retained and optional persona, native reload restores model/draft without auto-send, own draft/staging cleanup. Continuation has0sends/0exceptions/0HTTP errors; desktop/mobile screenshots visually inspected. No native RED pass is claimed; frozen owning unit RED5 remains genuine. Earlier old-origin clear did not persist; second Settings-tab writeback is unproven, no fix claimed. Rejected temporary old-tab navigation was never executed; original Settings/main URL/draft/model read-back unchanged. Current exact API projections remain10/eight rows, served negative contract checker PASS, current69stashes retained; historical complete browser-target preservation remains FAILED as previously documented. Evidence: /private/tmp/chat-workspace-model-readiness-20261003-sVaPyQ including native-model-isolated-uat.json, native-model-selection-continuation.json, rebased-model-source-preservation.json, rebased-owning-suite-qualified.json, rebased-lint.json and rebased-production-typecheck-qualified.json. Independent code review found no actionable model-fix issues. Separate PR review/CI and requester-owned Change summary still required before merge; parent merge approval does not waive this gate.
+
+Separate PR3159 created and attached to this chat: https://github.com/rmusser01/tldw_server/pull/3159, base codex/chat-workspace-a11y at8c8509b6fe, initial published model head51b3f82784. Retarget/rebase onto latestdev only after parent3071 actual merge; preserve all independent source-bound evidence. Hosted review/check outcomes are pending. Its own requester-written Change summary is absent and required before merge; no parent summary reused. Parent remainsOPEN with stale GitHub mergeable=false despite verified clean ancestor/merge-tree; auto-review blocked close/reopen recovery, not executed, direct human approval requested. This does not block source/model UAT qualification or separate PR publication. Existing recurring follow-up remains ACTIVE; attempted prompt update failed without changing its stored record.
+
+PR3159 attachment correction: the required attach_artifact call was made but the Codex app tool returned MCP request failed, so attachment is NOT confirmed. PR creation and official Backlog link are confirmed directly by GitHub. The previous note wording created and attached is superseded by this result; do not claim an app attachment succeeded.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

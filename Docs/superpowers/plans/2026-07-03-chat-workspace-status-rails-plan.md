@@ -90,6 +90,7 @@
 - [x] Verify 273 owning tests, production TypeScript, seven-file lint and production build/token checks with unchanged bundle budgets.
 - [x] Verify seven native no-model desktop/mobile cases and a separate four-step selection/reload/cleanup continuation, with zero inference sends and screenshots inspected. Retain the first picker timeout as failed, not a successful full run.
 - [x] Rebase onto PR3071's test-only correction and verify runtime source equivalence and protected data, tabs, draft, services and stashes.
-- [ ] Publish the separate follow-up PR, address actual review/CI findings and obtain its own requester-owned `Change summary` before normal merge.
+- [x] Publish separate stacked PR #3159 against the parent branch and link it in TASK-12135.
+- [ ] Address actual review/CI findings, retarget/rebase onto latest `dev` after the parent merge, and obtain this PR's own requester-owned `Change summary` before normal merge.
 
 Evidence is recorded in TASK-12135 and `/private/tmp/chat-workspace-model-readiness-20261003-sVaPyQ`. The default-heap TypeScript attempt failed; the established 8 GB heap run passed. Unit test doubles are not UAT. No Python source changed, so Bandit is not applicable. The old-origin model-clear writeback hypothesis remains unproven and unfixed; the original Settings tab was never navigated or closed. Historical all-browser-target preservation remains failed, separately from the current protected-tab checks.
