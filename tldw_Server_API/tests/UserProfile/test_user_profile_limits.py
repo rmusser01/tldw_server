@@ -7,10 +7,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
+    add_org_member,
     add_team_member,
     create_organization,
     create_team,
+    remove_org_member,
     remove_team_member,
 )
 from tldw_Server_API.app.core.Usage import quota_resolver
@@ -21,6 +27,10 @@ from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import load_user
 from tldw_Server_API.app.main import app
 
 pytestmark = pytest.mark.unit
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 NEW_KEYS = {
     "limits.transcription_minutes_per_month",
@@ -62,7 +72,7 @@ def _user_id(client: TestClient, auth_headers: dict) -> int:
 def test_catalog_has_every_limit_key_platform_admin_only() -> None:
     """All limits.* keys exist, default to null, minimum 0, and only platform admins may edit them."""
     entries = {e.key: e for e in load_user_profile_catalog().entries if e.key.startswith("limits.")}
-    assert NEW_KEYS <= set(entries)
+    assert set(entries) >= NEW_KEYS
     for entry in entries.values():
         assert entry.default is None
         assert list(entry.editable_by) == ["platform_admin"]
@@ -120,17 +130,20 @@ def test_profile_view_shows_most_generous_team_value(auth_headers: dict) -> None
     with TestClient(app) as client:
         user_id = _user_id(client, auth_headers)
         suffix = uuid.uuid4().hex[:8]
+        org_ids: list[int] = []
         team_ids: dict[str, int] = {}
 
         async def _setup() -> dict:
             """Two teams with different values; read the effective profile."""
             org = await create_organization(name=f"Limits Org {suffix}", owner_user_id=None)
+            await add_org_member(org_id=int(org["id"]), user_id=user_id, context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+            org_ids.append(int(org["id"]))
             low = await create_team(org_id=int(org["id"]), name=f"Low {suffix}")
             high = await create_team(org_id=int(org["id"]), name=f"High {suffix}")
             team_ids["low"] = int(low["id"])
             team_ids["high"] = int(high["id"])
-            await add_team_member(team_id=int(low["id"]), user_id=user_id)
-            await add_team_member(team_id=int(high["id"]), user_id=user_id)
+            await add_team_member(team_id=int(low["id"]), user_id=user_id, context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+            await add_team_member(team_id=int(high["id"]), user_id=user_id, context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
             pool = await get_db_pool()
             repo = TeamProfileOverridesRepo(pool)
             await repo.ensure_tables()
@@ -144,7 +157,9 @@ def test_profile_view_shows_most_generous_team_value(auth_headers: dict) -> None
             repo = TeamProfileOverridesRepo(pool)
             for team_id in team_ids.values():
                 await repo.delete_override(team_id=team_id, key="limits.workflows_runs_per_day")
-                await remove_team_member(team_id=team_id, user_id=user_id)
+                await remove_team_member(team_id=team_id, user_id=user_id, context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+            for org_id in org_ids:
+                await remove_org_member(org_id=org_id, user_id=user_id, context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
         try:
             effective = asyncio.run(_setup())

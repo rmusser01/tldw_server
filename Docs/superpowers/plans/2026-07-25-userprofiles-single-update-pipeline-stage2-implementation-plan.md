@@ -10,7 +10,7 @@
 
 **Source design:** `Docs/superpowers/specs/2026-07-20-userprofiles-single-update-pipeline-stage2-design.md`
 
-**ADR check (Work Package 2):** ADR required: yes. ADR path: `Docs/ADR/059-authnz-membership-writer-transaction-and-version-ownership.md`. The approved shared membership writer creates a durable AuthNZ transaction, authorization, lock-order, and profile-version ownership boundary; the ADR backfills that decision without changing the approved Stage 2 scope.
+**ADR check (Work Package 2):** ADR required: yes. ADR path: `Docs/ADR/060-authnz-membership-writer-transaction-and-version-ownership.md`. The approved shared membership writer creates a durable AuthNZ transaction, authorization, lock-order, and profile-version ownership boundary; the ADR backfills that decision without changing the approved Stage 2 scope.
 
 **Planning baseline:** Reconciled against `origin/dev` at `2e0d3f1a2cfcad9798008f5bd249d91bbac43f07`. Before implementation, start a fresh `codex/` worktree from the then-current `origin/dev` and bring this spec and plan onto it. Re-run the inventory tests before editing because the runtime writer set may have grown.
 
@@ -672,7 +672,7 @@ git commit -m "refactor(authnz): complete membership writer migration"
 
 ## Stage 1: Current Dev Rebase and Required Gate Corrections
 **Goal**: Preserve current dev behavior and repair WP2's CI baseline/publication drift.
-**Success Criteria**: Current dev is an ancestor; Jobs ADR058 is preserved; WP2 ADR059 is published; existing tenant predicate baseline matches without new exemptions.
+**Success Criteria**: Current dev is an ancestor; Jobs ADR058 and backlog-py ADR059 are preserved; WP2 ADR060 is published; existing tenant predicate baseline matches without new exemptions.
 **Tests**: Required ratchets, backend unit smoke, profile/writer/tenant/email regression, live PostgreSQL gate, strict docs build after publication commit.
 **Status**: Complete
 
@@ -687,6 +687,38 @@ git commit -m "refactor(authnz): complete membership writer migration"
 **Success Criteria**: Exact-head required CI and Qodo review are successful, current dev is an ancestor, human Change summary remains verbatim, merge commit is read back, TASK-13001.2 is finalized, and the heartbeat is paused.
 **Tests**: Authoritative GitHub PR/ref/check/review readbacks and expected-head merge precondition.
 **Status**: In Progress
+
+### October 4 Latest-Dev Reconciliation
+
+## Stage 1: Rebase and Contract Reconciliation
+**Goal**: Preserve latest dev's quota work and the reviewed WP2 membership writer.
+**Success Criteria**: Authoritative dev75ab224081 is an ancestor; Jobs058 and backlog-py059 remain unchanged; WP2 ADR060 is published; the generated API retains new quota routes and only the approved tenant-role schema difference.
+**Tests**: Range-diff, canonical dev/current OpenAPI exports, Published parity, profile/Usage quota regressions.
+**Status**: Complete
+
+## Stage 2: Fresh Integration Verification
+**Goal**: Validate conflict resolutions and new-dev fixture compatibility.
+**Success Criteria**: Focused profiles, writer, tenant, quota and official PostgreSQL tests pass; CI contracts and Docs pass; touched-scope lint/Bandit and independent review have no new actionable finding.
+**Tests**: UserProfile/Usage tests, writer/context/lock-plan/guard/candidate/tenant tests, official live PostgreSQL WP2 gate, required CI contracts, strict Docs, Ruff/compileall and Bandit baseline comparison.
+**Status**: In Progress
+
+October 4 evidence: 545 UserProfile/Usage tests passed (two Usage PostgreSQL
+cases skipped for their missing/unreachable configured database), 448 focused
+writer/profile/tenant tests passed, and all 48 official live PostgreSQL WP2
+tests passed without skips. CI contracts and ratchets passed 469 tests; four
+license-fetch cases require Bash >=4 and skip on this host's Bash 3. Publication
+and task-format parity passed 37 tests. Runtime Bandit matches latest dev's 20
+existing findings exactly, with no new findings or scan errors. Independent
+range-diff/runtime/docs/OpenAPI review reported no actionable findings. Strict
+Docs passed 211 tests with one Git timestamp warning for the newly renamed,
+uncommitted ADR060; rerun after committing its Git history before publishing.
+The three fixture corrections retain authorization guards and assertions.
+
+## Stage 3: Publish and Exact-Head Merge
+**Goal**: Publish the verified rebase and merge only after fresh required gates and review pass.
+**Success Criteria**: Latest authoritative dev is an ancestor; new head is pushed with an explicit lease; Qodo references that exact head with no unresolved feedback; every required gate succeeds; human Change summary remains verbatim; expected-head merge is read back and task tracking finalized.
+**Tests**: Remote ref/PR/review/check readbacks, merge commit verification.
+**Status**: Not Started
 
 ## Work Package 3: Typed Pipeline and Effects
 

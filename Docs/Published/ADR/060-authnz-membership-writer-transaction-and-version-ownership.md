@@ -1,4 +1,4 @@
-# ADR-059: AuthNZ Membership Writer Transaction and Version Ownership
+# ADR-060: AuthNZ Membership Writer Transaction and Version Ownership
 
 **Status:** Accepted
 **Date:** 2026-10-02
