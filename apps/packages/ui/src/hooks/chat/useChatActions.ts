@@ -6,6 +6,7 @@ import {
 import { historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers"
 import { sendNativeHistoryCharacter } from "./native-history-character-send"
 import { useHistorySelectionContext } from "./useHistorySelection"
+import { resetStaleSelectionForFreshTurn } from "./fresh-chat-selection"
 import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser, isLocalRagDiagnosticInfo } from "@/utils/local-rag-diagnostic"
 import React from "react"
 import { isChatPromotionIncompleteError, waitForChatPromotion } from "@/services/pending-chat-promotion"
@@ -3281,6 +3282,13 @@ export const useChatActions = ({
     historyIdOverride?: string | null
     researchContext?: ChatResearchContext
   }): Promise<ChatSubmitResult> => {
+    // CS-01 (#3106) defence in depth: a turn that addresses no conversation
+    // must not be built from a selection another conversation left behind.
+    // Reset it before the origin fence is taken, so the turn starts clean.
+    resetStaleSelectionForFreshTurn(historySelection, {
+      historyId: historyIdOverride ?? historyId,
+      serverChatId: serverChatIdOverride || serverChatId
+    })
     const historyOriginIsCurrent = historySelection?.fence()
     const lastVisibleMessage = messages.at(-1)
     if (isContinue && lastVisibleMessage && getLocalRagDiagnosticUser(messages, lastVisibleMessage)) {
