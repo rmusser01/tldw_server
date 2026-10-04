@@ -48,6 +48,7 @@ import {
   renameTabConversation,
   restoreServerChatFromTrash
 } from "./tab-conversation-actions"
+import { useSidepanelRecentChats } from "./useSidepanelRecentChats"
 
 const DEFAULT_SIDEBAR_WIDTH = 288
 const SIDEBAR_MIN_WIDTH = 240
@@ -840,6 +841,14 @@ export const SidepanelChatSidebar = ({
     return ids
   }, [tabs])
 
+  // XS-06: past chats are listed without a search, below the open tabs.
+  const recentChats = useSidepanelRecentChats({
+    owner,
+    enabled: open && !hasSearch && !selectionMode,
+    openHistoryIds,
+    openServerChatIds
+  })
+
   const filteredLocalResults = React.useMemo(() => {
     if (!hasSearch || !owner?.isCurrent() || !localSearchCurrent || localSearch.status !== "success") return []
     return localSearch.results.filter((history) => !openHistoryIds.has(history.id))
@@ -1303,6 +1312,37 @@ export const SidepanelChatSidebar = ({
                 </div>
               </div>
             ))}
+
+            {recentChats.length > 0 && (
+              <section
+                aria-label={t("common:chatSidebar.recentChats", "Recent chats")}
+                className={groupSpacing}
+              >
+                <div className="panel-section-label">
+                  {t("common:chatSidebar.recent", "Recent")}
+                </div>
+                <div className={classNames("flex flex-col", groupGap)}>
+                  {recentChats.map((item) =>
+                    renderSearchRow({
+                      key: item.key,
+                      label:
+                        item.title ||
+                        t("common:untitled", { defaultValue: "Untitled" }),
+                      metaLabel:
+                        item.kind === "server"
+                          ? t("common:chatSidebar.serverLabel", "Server")
+                          : t("common:chatSidebar.localLabel", "Local"),
+                      topic: item.kind === "server" ? item.chat.topic_label ?? null : null,
+                      // Each opens in its own tab (XS-01).
+                      onOpen: () =>
+                        item.kind === "server"
+                          ? onOpenServerChat?.(item.chat)
+                          : onOpenLocalHistory?.(item.history.id)
+                    })
+                  )}
+                </div>
+              </section>
+            )}
           </>
         )}
       </div>

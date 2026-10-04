@@ -146,6 +146,19 @@ export class PageAssistDatabase {
     return await db.chatHistories.orderBy('createdAt').reverse().toArray();
   }
 
+  /** The `limit` most recently active histories that pass `filter`, newest first. */
+  async getRecentChatHistories(
+    limit: number,
+    filter: (history: HistoryInfo) => boolean = () => true
+  ): Promise<ChatHistory> {
+    return await db.chatHistories
+      .orderBy('createdAt')
+      .reverse()
+      .filter(filter)
+      .limit(limit)
+      .toArray();
+  }
+
   async fullTextSearchChatHistories(query: string): Promise<ChatHistory> {
     const normalizedQuery = query.toLowerCase().trim();
     if (!normalizedQuery) {
