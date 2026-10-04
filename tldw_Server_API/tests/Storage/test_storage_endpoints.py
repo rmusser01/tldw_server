@@ -222,6 +222,81 @@ class TestUsageEndpoint:
         assert response.json()["quota_used_mb"] == 0.0
 
     @pytest.mark.unit
+    def test_usage_route_zero_quota_is_blocked_not_unlimited(
+        self,
+        mock_storage_service,
+        mock_user,
+        monkeypatch,
+    ):
+        """A limits.storage_quota_mb of 0 reports as blocked (hard limit), never unlimited."""
+        mock_storage_service.get_user_generated_files_usage = AsyncMock(
+            return_value={
+                "total_bytes": 0,
+                "total_mb": 0.0,
+                "by_category": {},
+                "trash_bytes": 0,
+                "trash_mb": 0.0,
+                "quota_mb": 0,
+                "quota_used_mb": 0.0,
+            }
+        )
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            response = client.get("/api/v1/storage/usage")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["quota_mb"] == 0
+        assert payload["available_mb"] == 0
+        assert payload["at_hard_limit"] is True
+        assert payload["at_soft_limit"] is True
+        assert payload["warning"] == "Storage quota exceeded - delete files to continue"
+
+    @pytest.mark.unit
+    def test_usage_route_none_quota_is_unlimited(
+        self,
+        mock_storage_service,
+        mock_user,
+        monkeypatch,
+    ):
+        """No limits.storage_quota_mb override reports null quota fields, not zero."""
+        mock_storage_service.get_user_generated_files_usage = AsyncMock(
+            return_value={
+                "total_bytes": 850 * 1024 * 1024,
+                "total_mb": 850.0,
+                "by_category": {},
+                "trash_bytes": 0,
+                "trash_mb": 0.0,
+                "quota_mb": None,
+                "quota_used_mb": 850.0,
+            }
+        )
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            response = client.get("/api/v1/storage/usage")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["quota_mb"] is None
+        assert payload["available_mb"] is None
+        assert payload["usage_percentage"] is None
+        assert payload["at_soft_limit"] is False
+        assert payload["at_hard_limit"] is False
+        assert payload["warning"] is None
+
+    @pytest.mark.unit
     def test_usage_breakdown_route_returns_folder_totals(
         self,
         mock_storage_service,

@@ -11,7 +11,7 @@ from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
     StorageUsageResponse,
     UsageBreakdownResponse,
 )
-from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
+from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService, quota_view
 
 router = APIRouter()
 
@@ -48,28 +48,41 @@ async def get_storage_usage(
         trash_mb=usage_data.get("trash_mb", 0.0),
     )
 
-    quota_mb = usage_data.get("quota_mb", 0)
+    quota_mb = usage_data.get("quota_mb")
     quota_used_mb = usage_data.get("quota_used_mb")
     if quota_used_mb is None:
         quota_used_mb = usage_data.get("total_mb", 0.0)
-    available_mb = max(0, quota_mb - quota_used_mb) if quota_mb else None
 
-    # Calculate limit status
-    usage_pct = (quota_used_mb / quota_mb * 100) if quota_mb else 0
-    at_soft_limit = usage_pct >= 80
-    at_hard_limit = usage_pct >= 100
-    warning_message = None
-    if at_hard_limit:
+    # A None quota means unlimited (spec 2 section 5); a quota of exactly 0 means
+    # blocked, not unlimited, so it must not be treated as falsy here.
+    view = quota_view(quota_used_mb, quota_mb)
+    available_mb = view["available_mb"]
+    usage_pct = view["usage_percentage"]
+
+    if quota_mb is None:
+        at_soft_limit = False
+        at_hard_limit = False
+        warning_message = None
+    elif quota_mb == 0:
+        at_soft_limit = True
+        at_hard_limit = True
         warning_message = "Storage quota exceeded - delete files to continue"
-    elif at_soft_limit:
-        warning_message = "Approaching storage limit (80%+)"
+    else:
+        at_soft_limit = usage_pct >= 80
+        at_hard_limit = usage_pct >= 100
+        if at_hard_limit:
+            warning_message = "Storage quota exceeded - delete files to continue"
+        elif at_soft_limit:
+            warning_message = "Approaching storage limit (80%+)"
+        else:
+            warning_message = None
 
     return StorageUsageResponse(
         usage=usage,
-        quota_mb=quota_mb if quota_mb else None,
+        quota_mb=quota_mb,
         quota_used_mb=quota_used_mb,
         available_mb=available_mb,
-        usage_percentage=round(usage_pct, 1),
+        usage_percentage=usage_pct,
         at_soft_limit=at_soft_limit,
         at_hard_limit=at_hard_limit,
         warning=warning_message,
