@@ -1464,8 +1464,8 @@ malformed boundary containers, a failed template lookup carrying private
 exception/template values, silent successful setup, and the unchanged empty
 input early return. The warning is fixed text with no input, raw exception, or
 traceback. Preserve the human Change summary verbatim and explain this approved
-diagnostic in the PR technical summary. Verification and publication remain
-pending at the RED checkpoint; latest-head Qodo review and CI remain merge gates.
+diagnostic in the PR technical summary. Publication was pending at the RED
+checkpoint; latest-head Qodo review and CI remain merge gates.
 
 Final diagnostic verification: all 29 span tests pass; full Chunking has
 796 passed, one existing PyThaiNLP skip, 2001 warnings, 47.14s
@@ -1487,3 +1487,22 @@ changing unrelated runtime behavior. Exact-path formatting of the protected
 historical Chunker TASK-13215 record awaits explicit requester authorization;
 no archive or unrelated record change is authorized. Diagnostic publication,
 CI remediation and exact-head review/CI/merge gates remain pending.
+
+The diagnostic is committed separately at
+`63d03374a7` (`fix: warn when hierarchy template boundary setup fails`).
+Publication is blocked: the attempted rebase onto newly inspected `dev`
+`75ab224081bf140ef52017c1a9b0a04f6878d488` was not executed because the app's
+network permission was revoked and automatic approval review could not run.
+Do not bypass this check. The local branch remains based on `c95e41fc62`;
+the scoped source/test diff to `75ab224081` is empty, and all changes are
+committed. Requester must restore permission before remote operations resume.
+
+The exact local CI changed-file mypy invocation reproduces 53 errors across
+10 of 20 checked files (`/tmp/task13422_changed_files_mypy_red.txt`), including
+three new Loguru record annotation mismatches. This step explicitly uses
+`continue-on-error: true` and is informational, not the cause of the failed
+required check. The substantive backend-required and pre-commit failure is
+the task-format ratchet on the exact historical Chunker TASK-13215 record.
+Canonical preview changes only section markers/order, preserving all record
+content and identity. Its mutation remains unapproved; no historical record
+was modified. Do not weaken the ratchet or treat the required check as passed.
