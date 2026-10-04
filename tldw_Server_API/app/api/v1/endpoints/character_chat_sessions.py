@@ -189,6 +189,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets im
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     sanitize_sender_name,
 )
+from tldw_Server_API.app.core.Chat import conversation_import
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     STREAM_CLEANUP_DAEMON_POOL,
     STREAM_DAEMON_POOL,
@@ -204,15 +205,6 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call,
     perform_chat_api_call_async,
     resolve_provider_and_model,
-)
-from tldw_Server_API.app.core.Chat.conversation_import import (
-    MESSAGE_ID_CONFLICT,
-    ChatImportError,
-    ChatImportLimits,
-    PreparedChatImport,
-    chat_id_conflict,
-    prepare_chat_import,
-    resolve_import_replay,
 )
 from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
@@ -4989,6 +4981,9 @@ async def create_chat_session(
 # Local chat import (D7 P8)
 # ========================================================================
 
+ChatImportError = conversation_import.ChatImportError
+PreparedChatImport = conversation_import.PreparedChatImport
+
 # One import may carry as many image bytes as one message page or one history
 # capture can read back, so an imported chat can always be loaded.
 MAX_CHAT_IMPORT_IMAGE_BYTES = MAX_CHAT_ATTACHMENT_READ_BYTES
@@ -5003,9 +4998,9 @@ def _chat_import_setting(name: str, default: int) -> int:
     return configured if configured > 0 else default
 
 
-def _chat_import_limits() -> ChatImportLimits:
+def _chat_import_limits() -> conversation_import.ChatImportLimits:
     """Apply the limits ordinary message creation applies, plus the import image budget."""
-    return ChatImportLimits(
+    return conversation_import.ChatImportLimits(
         max_content_chars=_chat_import_setting("MAX_PERSIST_CONTENT_LENGTH", MAX_PERSIST_CONTENT_LENGTH),
         max_image_bytes=_chat_import_setting("MAX_MESSAGE_IMAGE_BYTES", MAX_MESSAGE_IMAGE_BYTES),
         max_total_image_bytes=MAX_CHAT_IMPORT_IMAGE_BYTES,
@@ -5033,26 +5028,30 @@ def _inspect_chat_import_image(data: bytes) -> str:
     return mime
 
 
-def _find_chat_import_replay(db: CharactersRAGDB, prepared: PreparedChatImport, owner_id: str) -> dict[str, Any] | None:
+def _find_chat_import_replay(
+    db: CharactersRAGDB, prepared: PreparedChatImport, owner_id: str,
+) -> dict[str, Any] | None:
     """Return the caller's matching imported chat, None if the id is free, or raise 409/410."""
     existing, stored_fingerprint = db.chat_imports.get_import_state(prepared.conversation_id)
-    replay = resolve_import_replay(
+    replay = conversation_import.resolve_import_replay(
         existing, owner_id=owner_id, stored_fingerprint=stored_fingerprint, fingerprint=prepared.fingerprint
     )
     return dict(replay) if replay is not None else None
 
 
-def _resolve_chat_import_lineage(db: CharactersRAGDB, prepared: PreparedChatImport, owner_id: str) -> dict[str, Any]:
+def _resolve_chat_import_lineage(
+    db: CharactersRAGDB, prepared: PreparedChatImport, owner_id: str,
+) -> dict[str, Any]:
     """Check the assistant binding and fork lineage against the caller's own data.
 
     A parent that is missing, in trash or owned by someone else is reported the
     same way, so the answer says nothing about other accounts.
     """
     conversation = prepared.conversation
-    if conversation["assistant_kind"] == "persona":
-        if not db.get_persona_profile(conversation["assistant_id"] or "", user_id=owner_id):
-            raise ChatImportError("persona_not_found", 404, "The persona this chat is bound to was not found.")
-    elif conversation["assistant_kind"] == "character" and not db.get_character_card_by_id(conversation["character_id"]):
+    kind = conversation["assistant_kind"]
+    if kind == "persona" and not db.get_persona_profile(conversation["assistant_id"] or "", user_id=owner_id):
+        raise ChatImportError("persona_not_found", 404, "The persona this chat is bound to was not found.")
+    if kind == "character" and not db.get_character_card_by_id(conversation["character_id"]):
         raise ChatImportError("character_not_found", 404, "The character this chat is bound to was not found.")
 
     lineage: dict[str, Any] = {
@@ -5170,7 +5169,7 @@ async def import_chat_session(
                 "Saving a local chat to the server is not supported while Sync v2 is active.",
             )
         prepared = await run_in_threadpool(
-            prepare_chat_import,
+            conversation_import.prepare_chat_import,
             import_data.model_dump(),
             limits=_chat_import_limits(),
             now=datetime.now(timezone.utc),
@@ -5223,7 +5222,7 @@ async def import_chat_session(
         except ConflictError as error:
             if getattr(error, "entity", None) == "messages":
                 raise ChatImportError(
-                    MESSAGE_ID_CONFLICT,
+                    conversation_import.MESSAGE_ID_CONFLICT,
                     409,
                     "A message id in this chat is already in use on the server.",
                     message_id=getattr(error, "entity_id", None),
@@ -5231,7 +5230,7 @@ async def import_chat_session(
             # Another request imported this id after our read, or a chat the caller cannot see
             # holds it. The primary key decided, and this import rolled back.
             if await run_in_threadpool(_find_chat_import_replay, db, prepared, owner_id) is None:
-                raise chat_id_conflict() from None
+                raise conversation_import.chat_id_conflict() from None
             response.status_code = status.HTTP_200_OK
             response.headers["Idempotency-Replayed"] = "true"
             return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id)
