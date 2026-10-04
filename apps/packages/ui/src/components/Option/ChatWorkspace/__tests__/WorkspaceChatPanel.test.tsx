@@ -1492,6 +1492,66 @@ describe("WorkspaceChatPanel", () => {
     )
   })
 
+  it.each(["typed", "staged", "typed-and-staged"] as const)(
+    "blocks %s sends without a model and restores readiness without auto-submit",
+    (kind) => {
+      chatHookState.value.selectedModel = null
+      chatHookState.value.selectedAssistant = null
+      const onClearStagedSources = vi.fn()
+      const onRuntimeStateChange = vi.fn()
+      const props = {
+        workspaceId: "workspace-1",
+        stagedSources: kind === "typed" ? [] : staged,
+        backendAvailable: true,
+        onClearStagedSources,
+        onRuntimeStateChange
+      }
+      const { rerender } = render(<WorkspaceChatPanel {...props} />)
+      const composer = screen.getByRole("textbox", { name: "Chat workspace message" })
+      const draft = kind === "staged" ? "" : "Preserved model-less draft"
+      if (draft) fireEvent.change(composer, { target: { value: draft } })
+
+      expect(composer).toBeEnabled()
+      expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
+      if (kind !== "typed") {
+        expect(screen.getByRole("button", { name: "Send with staged context" })).toBeDisabled()
+        expect(screen.getByText("Operator Notes")).toBeInTheDocument()
+      }
+      fireEvent.keyDown(composer, { key: "Enter", ctrlKey: true })
+      fireEvent.submit(composer.closest("form")!)
+      expect(resolveServicePromptScope).not.toHaveBeenCalled()
+      expect(chatHookState.onSubmit).not.toHaveBeenCalled()
+      expect(composer).toHaveValue(draft)
+      expect(onClearStagedSources).not.toHaveBeenCalled()
+
+      chatHookState.value.selectedModel = "tldw:gemma"
+      rerender(<WorkspaceChatPanel {...props} />)
+      expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled()
+      if (kind !== "typed") {
+        expect(screen.getByRole("button", { name: "Send with staged context" })).toBeEnabled()
+        expect(screen.getByText("Operator Notes")).toBeInTheDocument()
+      }
+      expect(composer).toHaveValue(draft)
+      expect(onClearStagedSources).not.toHaveBeenCalled()
+      expect(resolveServicePromptScope).not.toHaveBeenCalled()
+      expect(chatHookState.onSubmit).not.toHaveBeenCalled()
+      expect(onRuntimeStateChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        hasModelSelected: true,
+        selectedPersonaLabel: null
+      }))
+    }
+  )
+
+  it("keeps explicit Auto server routing selectable without a persona", () => {
+    chatHookState.value.selectedModel = "auto"
+    chatHookState.value.selectedAssistant = null
+    render(<WorkspaceChatPanel workspaceId="workspace-1" stagedSources={staged}
+      backendAvailable onClearStagedSources={vi.fn()} />)
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Send with staged context" })).toBeEnabled()
+    expect(chatHookState.onSubmit).not.toHaveBeenCalled()
+  })
+
   it("inherits the available workspace persona default on first submit", async () => {
     chatHookState.value.selectedAssistant = {
       kind: "persona",

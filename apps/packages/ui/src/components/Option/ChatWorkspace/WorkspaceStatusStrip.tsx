@@ -36,7 +36,8 @@ export const WorkspaceStatusStrip = ({
     sending,
     historyLoading,
     historyLoadError,
-    sendError
+    sendError,
+    hasModelSelected
   })
   const hasPersona =
     Boolean(selectedPersonaLabel) ||
@@ -66,7 +67,7 @@ export const WorkspaceStatusStrip = ({
         {backendAvailable && workspaceReady === false ? (
           <span className={statusPillClass}>Wait for workspace identity</span>
         ) : null}
-        {backendAvailable && workspaceReady && !hasModelSelected ? (
+        {backendAvailable && workspaceReady && !hasModelSelected && runtimeLabel !== "Select a model" ? (
           <span className={statusPillClass}>Select a model</span>
         ) : null}
         {backendAvailable && workspaceReady && !hasPersona ? (

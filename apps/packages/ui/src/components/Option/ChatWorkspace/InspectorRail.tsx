@@ -102,7 +102,8 @@ export const InspectorRail = ({
     sending,
     historyLoading,
     historyLoadError,
-    sendError
+    sendError,
+    hasModelSelected
   }
   const runtimeLabel = getChatWorkspaceRuntimeLabel(runtime)
   const runtimeRecoveryCopy = getRuntimeRecoveryCopy(runtime)

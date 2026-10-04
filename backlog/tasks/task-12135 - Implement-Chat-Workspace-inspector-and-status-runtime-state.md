@@ -4,7 +4,7 @@ title: Implement Chat Workspace inspector and status runtime state
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-10-04 00:59'
+updated_date: '2026-10-04 02:54'
 labels: []
 dependencies: []
 references:
@@ -46,6 +46,10 @@ PR #2600 review remediation after rebase on latest origin/dev: added explicit ha
 2026-07-13 PR #2600 follow-up complete. TDD evidence: the new non-empty-ID/storeHydrated=false page test failed before the readiness fix, then passed after ChatWorkspacePage derived one readiness boolean from hydration plus normalized identity. Added live browser coverage that starts streaming, transitions the real connection store to unreachable, and verifies both rails show server recovery while suppressing stale streaming state. Fresh verification: Chat Workspace Vitest 8 files/75 tests passed; frontend tsc --noEmit passed; live-backend Playwright 5/5 passed; focused ESLint exited 0 with only the pre-existing PERSONA_ID warning; git diff --check passed. Bandit is not applicable because the touched implementation and tests are TypeScript/TSX only.
 
 2026-10-03 workstream re-check: GitHub2033 remains open. Prior hydration/offline work is retained as completed historical scope. New inherited idle no-model readiness gap is verified on latestdev4c4f197f: runtime classifier omits hasModelSelected and WorkspaceChatPanel sendDisabled omits model availability. Reopen this matching workstream task for a bounded follow-up; closedTASK12580 addressed different /chat aggregate-provider behavior. New task creation failed in CLI with Maximum call stack size exceeded; official MCP explicit-ID attempt timed out300s and verified noTASK13421.1.8 file was created. No manual task file edits or further blind create retries. Plan/source edits for this unit will be separate from PR3071 checkpoint correction and follow its qualification. Preserve offline/demo/bypass, hydration/history/error/streaming precedence, optional persona, staged sources/drafts, and no automatic sends; require TDD and no-mock Chrome raw-CDP desktop/mobile validation.
+
+2026-10-03 requester directly approves the bounded missing-model design and recurring parent-PR follow-up. Execute TASK12135 separately on codex/chat-workspace-model-readiness-20261003 from published qualified4ec6b976d7 atop currentdevd7997bc205; PR3071 remains unchanged. Reuse existing normalized useSelectedModel value and shared runtime classifier/send guard; preserve higher-priority offline/demo/bypass/workspace/history/recovery/streaming/sending/error states, optional persona, staged context/drafts, explicit Auto/server routing and no automatic sends. TDD owning rails/panel, production types/lint/build, actual Chrome raw CDP desktop/mobile; no UAT mocks/interception/injected state. Current parent API backend remains unchanged and archived frontend remains separately source-qualified. Implementation proceeds only after this approved tracking checkpoint.
+
+2026-10-03 model-readiness TDD: frozen regression RED5 expected failures/129passes; GREEN134passes in3 owning suites, full Chat Workspace273passes/14suites. Full production frontend tsc --noEmit exits0; actual repo-root scoped ESLint analyzes7files with0errors/0warnings/0ignored. Initial frontend-cwd lint ignores all7 files and is not qualification. Configured8file pre-commit checks pass; UI detector reports no findings. No Python source changes: Bandit is not applicable to this TS-only unit. Minimal4production-file fix forwards required hasModelSelected to shared classifier, retains status precedence, disables typed/context buttons and handler, and avoids duplicate Select-a-model pills; Auto and optional persona remain usable. Browser controls investigation first used wrong /models route (actual404, exact own poller7468 stopped; tab remains), then failed a stale prior-route conversation precondition before navigation. Both remain failed, not UAT passes; corrected source route /settings/model inspection and full native RED/GREEN are still required. No inference send has been performed by this unit. Separate parent3071 publishedhead remains4ec6b976d7 and is not modified by this branch; recurring30minute authorized follow-up is ACTIVE. New criteria and finalization remain unchecked pending native source qualification and PR review.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -56,10 +60,10 @@ Completed issue #2033 and both final PR #2600 review findings. Chat Workspace no
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
+- [ ] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
+- [ ] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
+- [ ] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

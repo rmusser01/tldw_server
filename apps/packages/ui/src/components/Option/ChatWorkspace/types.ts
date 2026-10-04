@@ -29,6 +29,7 @@ export type ChatWorkspaceAssistantSource =
 export type ChatWorkspaceRuntimeStatus = {
   backendAvailable: boolean
   workspaceReady: boolean
+  hasModelSelected: boolean
   connectionMode?: "live" | "demo" | "bypass"
   streaming: boolean
   sending?: boolean
@@ -45,7 +46,8 @@ export const getChatWorkspaceRuntimeLabel = ({
   sending,
   historyLoading,
   historyLoadError,
-  sendError
+  sendError,
+  hasModelSelected
 }: ChatWorkspaceRuntimeStatus): string => {
   if (connectionMode === "demo") return "Demo mode - not live"
   if (connectionMode === "bypass") return "Offline bypass - not verified"
@@ -56,6 +58,7 @@ export const getChatWorkspaceRuntimeLabel = ({
   if (streaming) return "Streaming"
   if (sending) return "Sending"
   if (sendError) return "Send failed"
+  if (!hasModelSelected) return "Select a model"
   return getDesignSystemState("ready").label
 }
 
@@ -64,7 +67,6 @@ export type ChatWorkspaceRuntimeState = Omit<
   "workspaceReady"
 > & {
   selectedModelLabel: string
-  hasModelSelected: boolean
   selectedPersonaLabel: string | null
   assistantSource: ChatWorkspaceAssistantSource
   workspaceAssistantDegradedReason?: WorkspaceAssistantDefaultDegradedReason | null
