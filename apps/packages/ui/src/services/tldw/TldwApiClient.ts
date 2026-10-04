@@ -1686,6 +1686,8 @@ export class TldwApiClientBase {
   private storage: Storage
   private sessionStorage: Storage
   private config: TldwConfig | null = null
+  private configInitialization = 0
+  private completedConfigInitialization = 0
   private baseUrl: string = ''
   private headers: HeadersInit = {}
   characterCache = new BoundedTtlCache<any>()
@@ -1858,8 +1860,10 @@ export class TldwApiClientBase {
     try {
       // getConfig alone may retain a previous server or API-key connection.
       await this.initialize()
-      const config = await this.ensureConfigForRequest(true)
-      if (accountRevision !== domainCacheAccountRevision) {
+      const initializedConfig = this.config
+      const config = await this.ensureConfigForRequest(true, initializedConfig)
+      if (accountRevision !== domainCacheAccountRevision ||
+          !connectionAuthoritiesMatch(initializedConfig, this.config)) {
         throw createServicePromptScopeChangedError()
       }
       if (this.domainCacheAccountRevision !== accountRevision ||
@@ -1910,8 +1914,11 @@ export class TldwApiClientBase {
     return "tldw server API key is still set to a placeholder value. Replace it with your real API key in Settings → tldw server before continuing."
   }
 
-  async ensureConfigForRequest(requireAuth: boolean): Promise<TldwConfig> {
-    const cfg = (await this.getConfig()) || null
+  async ensureConfigForRequest(
+    requireAuth: boolean,
+    resolvedConfig?: TldwConfig | null
+  ): Promise<TldwConfig> {
+    const cfg = (resolvedConfig === undefined ? await this.getConfig() : resolvedConfig) || null
     const hostedMode = isHostedTldwDeployment()
     const runtimeApiKey = !hostedMode
       ? getRuntimeSingleUserApiKeyOverride()
@@ -2108,6 +2115,7 @@ export class TldwApiClientBase {
   }
 
   async initialize(): Promise<void> {
+    const initialization = ++this.configInitialization
     let storedManual = await this.storage.get<TldwConfig>("tldwConfig")
     if (!storedManual) {
       try {
@@ -2227,10 +2235,11 @@ export class TldwApiClientBase {
           }
         : undefined
     )
+    let config: TldwConfig | null
     if (!stored) {
       // True first-run without quickstart auth material: leave config null so
       // callers can distinguish unconfigured from misconfigured/unreachable.
-      this.config = null
+      config = null
     } else {
       const hydrated: TldwConfig = {
         ...stored,
@@ -2246,8 +2255,17 @@ export class TldwApiClientBase {
       } else if (!hydrated.apiKey && envApiKey) {
         hydrated.apiKey = envApiKey
       }
-      this.config = hydrated
+      config = hydrated
     }
+    // An older storage read must not overwrite a newer owner's config or token.
+    if (initialization < this.completedConfigInitialization) {
+      if (!connectionAuthoritiesMatch(config, this.config)) {
+        throw createServicePromptScopeChangedError()
+      }
+      return
+    }
+    this.completedConfigInitialization = initialization
+    this.config = config
     this.applyConfigState()
   }
 
@@ -5080,7 +5098,6 @@ export class TldwApiClientBase {
           "/api/v1/characters/{id}/"
         ])
         const path = this.fillPathParams(template, cid)
-        await this.getDomainCacheRevision()
         this.assertDomainCacheRevision(cacheRevision)
         const value = await bgRequest<any>({
           path,

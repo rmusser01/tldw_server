@@ -9,6 +9,9 @@ const harness = vi.hoisted(() => {
     saved: {} as Record<string, unknown>,
     changes: new Set<(changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, area: string) => void>(),
     values: new Map<string, unknown>(),
+    workerConfig: null as Record<string, unknown> | null,
+    beforeRequest: null as (() => void) | null,
+    authorityReplyGate: null as Promise<unknown> | null,
     listeners: new Set<
       (
         message: unknown,
@@ -50,7 +53,16 @@ vi.mock("wxt/browser", () => {
         getURL: (path: string) => `chrome-extension://extension-id${path}`,
         sendMessage: async (message: unknown) => {
           harness.sent.push(message)
-          return send(message)
+          if ((message as { type?: string }).type === "tldw:request") harness.beforeRequest?.()
+          const previous = harness.values.get("tldwConfig")
+          if (harness.workerConfig) harness.values.set("tldwConfig", harness.workerConfig)
+          try {
+            const result = await send(message)
+            if ((message as { type?: string }).type === "tldw:connection-authority") await harness.authorityReplyGate
+            return result
+          } finally {
+            if (harness.workerConfig) harness.values.set("tldwConfig", previous)
+          }
         },
         onConnect: event(),
         onStartup: event(),
@@ -95,7 +107,7 @@ const json = (value: unknown, status = 200) =>
   })
 
 import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
-const config = { serverUrl: "https://api.example.test/base", authMode: "single-user" as const, authSource: "manual" as const, apiKey: "worker-key", credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "https://api.example.test" }
+const config = { serverUrl: "https://api.example.test/base", authMode: "single-user" as const, authSource: "manual" as const, apiKey: "worker-key", credentialSource: "manual" as const, apiKeyPersistence: "device" as const, apiKeyServerOrigin: "https://api.example.test" }
 const requestScope = { config: { serverUrl: config.serverUrl, authMode: config.authMode, authSource: config.authSource, expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope("single-user", "worker-key")! }, userId: null }
 const batch = { requestScope, entries: [{ id: "private", url: "https://source.test/doc.pdf", type: "pdf" }], files: [], storeRemote: true, processOnly: false }
 const switchConfig = (next: typeof config) => {
@@ -106,14 +118,262 @@ const switchConfig = (next: typeof config) => {
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 
 beforeEach(async () => {
-  vi.resetModules(); harness.listeners.clear(); harness.changes.clear(); harness.values.clear(); harness.sent.length = 0; harness.saved = {}
+  vi.resetModules(); harness.listeners.clear(); harness.changes.clear(); harness.values.clear(); harness.sent.length = 0; harness.saved = {}; harness.workerConfig = null; harness.beforeRequest = null; harness.authorityReplyGate = null
   harness.values.set("tldwConfig", config)
   vi.stubGlobal("window", undefined)
   vi.stubGlobal("chrome", { storage: (await import("wxt/browser")).browser.storage })
   const background = (await import("@/entries/background")).default
   background.main()
 })
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
+
+describe("domain cache extension message authority", () => {
+  it.each(["GET", "POST"] as const)("promptly cancels an unresolved %s authority handshake without dispatch or fallback", async method => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const checked = deferred<unknown>()
+    harness.authorityReplyGate = checked.promise
+    const controller = new AbortController()
+    const added = vi.spyOn(controller.signal, "addEventListener")
+    const removed = vi.spyOn(controller.signal, "removeEventListener")
+    const fetcher = vi.fn(async () => json({ id: 7 }))
+    vi.stubGlobal("fetch", fetcher)
+    vi.useFakeTimers()
+    const timers = vi.getTimerCount()
+    let outcome: unknown
+    const read = bgRequest({ path: "/api/v1/characters/7", method, configSnapshot: config, abortSignal: controller.signal }).catch(error => { outcome = error; return error })
+    expect(harness.sent).toHaveLength(1)
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(outcome).toMatchObject({ name: "AbortError" })
+    expect(vi.getTimerCount()).toBe(timers)
+    expect(removed).toHaveBeenCalledWith("abort", added.mock.calls[0][1])
+    expect(await read).toBe(outcome)
+    checked.resolve(null)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(harness.sent).toHaveLength(1)
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it.each(["before request", "during messaging", "before listener registration"] as const)("does not miss handshake cancellation %s", async timing => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const { browser } = await import("wxt/browser")
+    const controller = new AbortController()
+    const fetcher = vi.fn(async () => json({ id: 7 }))
+    vi.stubGlobal("fetch", fetcher)
+    const sendMessage = vi.spyOn(browser.runtime, "sendMessage").mockImplementation(() => {
+      if (timing === "during messaging") controller.abort()
+      return new Promise(() => {})
+    })
+    if (timing === "before request") controller.abort()
+    if (timing === "before listener registration") {
+      const addListener = controller.signal.addEventListener.bind(controller.signal)
+      vi.spyOn(controller.signal, "addEventListener").mockImplementation((...args) => {
+        controller.abort()
+        addListener(...args)
+      })
+    }
+    vi.useFakeTimers()
+    const timers = vi.getTimerCount()
+    let outcome: unknown
+    const read = bgRequest({ path: "/api/v1/characters/7", configSnapshot: config, abortSignal: controller.signal }).catch(error => { outcome = error; return error })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(outcome).toMatchObject({ name: "AbortError" })
+    expect(await read).toBe(outcome)
+    expect(vi.getTimerCount()).toBe(timers)
+    expect(sendMessage.mock.calls.every(([message]) => (message as unknown as { type?: string }).type === "tldw:connection-authority")).toBe(true)
+    if (timing === "before request") expect(sendMessage).not.toHaveBeenCalled()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it.each(["success", "error", "timeout"] as const)("removes the handshake abort listener and timer after %s", async result => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const { browser } = await import("wxt/browser")
+    const controller = new AbortController()
+    const added = vi.spyOn(controller.signal, "addEventListener")
+    const removed = vi.spyOn(controller.signal, "removeEventListener")
+    const fetcher = vi.fn(async () => json({ id: 7 }))
+    vi.stubGlobal("fetch", fetcher)
+    if (result === "success") {
+      const send = browser.runtime.sendMessage.bind(browser.runtime)
+      vi.spyOn(browser.runtime, "sendMessage").mockImplementation(message => {
+        if ((message as unknown as { type?: string }).type === "tldw:request") {
+          const listener = added.mock.calls[0]?.[1]
+          expect(listener).toBeTypeOf("function")
+          expect(removed).toHaveBeenCalledWith("abort", listener)
+        }
+        return send(message)
+      })
+    }
+    if (result === "error") vi.spyOn(browser.runtime, "sendMessage").mockRejectedValueOnce(new Error("Worker unavailable"))
+    if (result === "timeout") vi.spyOn(browser.runtime, "sendMessage").mockImplementationOnce(() => new Promise(() => {}))
+    vi.useFakeTimers()
+    const timers = vi.getTimerCount()
+    let outcome: unknown
+    const read = bgRequest({ path: "/api/v1/characters/7", configSnapshot: config, abortSignal: controller.signal }).catch(error => error).then(value => { outcome = value; return value })
+    await vi.advanceTimersByTimeAsync(result === "timeout" ? 3000 : 0)
+    expect(await read).toBe(outcome)
+    if (result === "success") expect(outcome).toEqual({ id: 7 })
+    else expect(outcome).toBeInstanceOf(Error)
+    const listener = added.mock.calls[0]?.[1]
+    expect(listener).toBeTypeOf("function")
+    expect(removed).toHaveBeenCalledWith("abort", listener)
+    expect(vi.getTimerCount()).toBe(timers)
+  })
+
+  it("clears the handshake timer and does not dispatch after cancellation during the check", async () => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const checked = deferred<unknown>()
+    harness.authorityReplyGate = checked.promise
+    const controller = new AbortController()
+    const fetcher = vi.fn(async () => json({ id: 7 }))
+    vi.stubGlobal("fetch", fetcher)
+    vi.useFakeTimers()
+    const timers = vi.getTimerCount()
+    const read = bgRequest({ path: "/api/v1/characters/7", configSnapshot: config, abortSignal: controller.signal }).catch(error => error)
+    expect(harness.sent).toHaveLength(1)
+    controller.abort()
+    checked.resolve(null)
+    expect(await read).toMatchObject({ name: "AbortError" })
+    expect(harness.sent).toHaveLength(1)
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(timers)
+  })
+
+  it.each(["error", "timeout", "missing epoch"])("does not fall back to direct transport after a handshake %s", async kind => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const { browser } = await import("wxt/browser")
+    const fetcher = vi.fn(async () => json({ id: 7 }))
+    vi.stubGlobal("fetch", fetcher)
+    const sendMessage = vi.spyOn(browser.runtime, "sendMessage")
+    if (kind === "error") sendMessage.mockRejectedValueOnce(new Error("Worker unavailable"))
+    else if (kind === "missing epoch") sendMessage.mockResolvedValueOnce({ ok: true } as never)
+    else sendMessage.mockImplementationOnce(() => new Promise(() => {}))
+    vi.useFakeTimers()
+    const timers = vi.getTimerCount()
+    const read = bgRequest({ path: "/api/v1/characters/7", configSnapshot: config }).catch(error => error)
+    if (kind === "timeout") await vi.runAllTimersAsync()
+    expect(await read).toBeInstanceOf(Error)
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(timers)
+  })
+
+  it.each(["error", "timeout"])("does not lose the checked worker epoch on a product-message %s", async kind => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const { browser } = await import("wxt/browser")
+    const fetcher = vi.fn(async () => json({ id: 7, name: "Unchecked fallback" }))
+    vi.stubGlobal("fetch", fetcher)
+    const send = browser.runtime.sendMessage.bind(browser.runtime)
+    const sendMessage = vi.spyOn(browser.runtime, "sendMessage").mockImplementationOnce(send)
+    if (kind === "error") sendMessage.mockRejectedValueOnce(new Error("Worker unavailable"))
+    else sendMessage.mockImplementationOnce(() => new Promise(() => {}))
+    vi.useFakeTimers()
+    const read = bgRequest({ path: "/api/v1/characters/7", configSnapshot: config }).catch(error => error)
+    if (kind === "timeout") await vi.runAllTimersAsync()
+    expect(await read).toBeInstanceOf(Error)
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it("rejects an identical cookie-config logout/login roundtrip after checking the worker epoch", async () => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const cookie = { serverUrl: config.serverUrl, authMode: "single-user" as const, authSource: "cookie-session" as const }
+    harness.values.set("tldwConfig", cookie)
+    harness.beforeRequest = () => {
+      for (const listener of harness.changes) {
+        listener({ tldwCookieSessionConfig: { oldValue: cookie, newValue: undefined } }, "local")
+        listener({ tldwCookieSessionConfig: { oldValue: undefined, newValue: cookie } }, "local")
+      }
+    }
+    const fetcher = vi.fn(async () => json({ id: 7, name: "Wrong account" }))
+    vi.stubGlobal("fetch", fetcher)
+    await expect(bgRequest({ path: "/api/v1/characters/7", configSnapshot: cookie, noAuth: true })).rejects.toMatchObject({ status: 412 })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it("rejects a cookie-config epoch change while the worker response is pending", async () => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const cookie = { serverUrl: config.serverUrl, authMode: "single-user" as const, authSource: "cookie-session" as const }
+    harness.values.set("tldwConfig", cookie)
+    const pending = deferred<Response>()
+    const fetcher = vi.fn(() => pending.promise)
+    vi.stubGlobal("fetch", fetcher)
+    const read = bgRequest({ path: "/api/v1/characters/7", configSnapshot: cookie, noAuth: true }).catch(error => error)
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+    for (const listener of harness.changes) listener({ tldwCookieSessionConfig: { oldValue: cookie, newValue: undefined } }, "local")
+    pending.resolve(json({ id: 7, name: "Old account" }))
+    expect(await read).toMatchObject({ status: 412 })
+  })
+
+  it("does not allow a runtime API-key override to replace the fenced worker credential", async () => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const runtime = await import("@/services/tldw/runtime-auth-override")
+    vi.spyOn(runtime, "getRuntimeSingleUserApiKeyOverride").mockReturnValue("different-runtime-key")
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => json({ id: 7, name: "Alice" }))
+    vi.stubGlobal("fetch", fetcher)
+    expect(await bgRequest({ path: "/api/v1/characters/7", configSnapshot: config })).toMatchObject({ name: "Alice" })
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("X-API-Key")).toBe("worker-key")
+    expect(JSON.stringify(harness.sent)).not.toContain("different-runtime-key")
+  })
+
+  it("fails closed for combined snapshot and Service Prompt scopes", async () => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const fetcher = vi.fn(async () => json({ id: 7 }))
+    vi.stubGlobal("fetch", fetcher)
+    await expect(bgRequest({ path: "/api/v1/characters/7", configSnapshot: config, servicePromptConfig: requestScope.config })).rejects.toMatchObject({ status: 412 })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it.each(["public", "base", "domain"] as const)("%s rejects mismatched worker authority without populating shared caches", async adapter => {
+    const { TldwApiClient, TldwApiClientBase } = await import("@/services/tldw/TldwApiClient")
+    const { characterMethods } = await import("@/services/tldw/domains/characters")
+    const { chatRagMethods } = await import("@/services/tldw/domains/chat-rag")
+    const client = new TldwApiClient()
+    vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0] as `/${string}`)
+    harness.workerConfig = { ...config, apiKey: "different-worker-key" }
+    const fetcher = vi.fn(async () => json({ id: 7, name: "Wrong account" }))
+    vi.stubGlobal("fetch", fetcher)
+    const character = adapter === "base" ? TldwApiClientBase.prototype.getCharacter
+      : adapter === "domain" ? characterMethods.getCharacter : client.getCharacter
+    const messages = adapter === "base" ? TldwApiClientBase.prototype.listChatMessages
+      : adapter === "domain" ? chatRagMethods.listChatMessages : client.listChatMessages
+    await expect(character.call(client, 7)).rejects.toMatchObject({ status: 412 })
+    await expect(messages.call(client, "7")).rejects.toMatchObject({ status: 412 })
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(client.characterCache.size).toBe(0)
+    expect(client.chatMessagesCache.size).toBe(0)
+    const wire = JSON.stringify(harness.sent)
+    expect(wire).not.toContain("worker-key")
+    expect(wire).not.toContain("apiKey")
+    expect(wire).not.toContain("accessToken")
+  })
+
+  it.each([
+    ["server", { ...config, serverUrl: "https://other.test" }],
+    ["organization", { ...config, orgId: 2 }],
+    ["source", { ...config, authSource: "env" }],
+    ["removed credential", { ...config, apiKey: undefined }]
+  ])("rejects a worker %s change before fetch", async (_kind, workerConfig) => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    harness.workerConfig = workerConfig
+    const fetcher = vi.fn(async () => json({ id: 7 }))
+    vi.stubGlobal("fetch", fetcher)
+    await expect(bgRequest({ path: "/api/v1/characters/7", configSnapshot: config })).rejects.toMatchObject({ status: 412 })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it("allows a refreshed JWT for the same worker principal without sending credentials", async () => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const jwt = (iat: number) => `test.${btoa(JSON.stringify({ sub: "alice", iat }))}.signature`
+    const checked = { serverUrl: config.serverUrl, authMode: "multi-user" as const, accessToken: jwt(1) }
+    harness.workerConfig = { ...checked, accessToken: jwt(2) }
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => json({ id: 7, name: "Alice" }))
+    vi.stubGlobal("fetch", fetcher)
+    expect(await bgRequest({ path: "/api/v1/characters/7", configSnapshot: checked })).toMatchObject({ name: "Alice" })
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("Authorization")).toBe(`Bearer ${jwt(2)}`)
+    expect(JSON.stringify(harness.sent)).not.toContain(jwt(1))
+    expect(JSON.stringify(harness.sent)).not.toContain(jwt(2))
+  })
+})
 
 describe("native Quick Ingest worker ownership", () => {
   it("keeps processing after the initiating UI message returns and no UI listener remains", async () => {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const io = vi.hoisted(() => ({
   storage: new Map<string, unknown>(),
+  get: vi.fn(),
   request: vi.fn(),
   owner: "Alice",
   extensionListeners: new Set<(changes: Record<string, unknown>, area: string) => void>()
@@ -16,7 +17,7 @@ vi.mock("wxt/browser", () => ({ browser: {
 } }))
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
-    get: async (key: string) => io.storage.get(key) ?? null,
+    get: (key: string) => io.get(key),
     set: async (key: string, value: unknown) => { io.storage.set(key, value) },
     remove: async (key: string) => { io.storage.delete(key) }
   }),
@@ -60,6 +61,7 @@ describe.each(adapters)("%s domain-cache ownership", adapter => {
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "")
     io.owner = "Alice"
     configure(alice)
+    io.get.mockReset().mockImplementation(async (key: string) => io.storage.get(key) ?? null)
     io.request.mockReset().mockImplementation(async ({ path }) => response(path, io.owner))
     client = new TldwApiClient()
     vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0] as `/${string}`)
@@ -77,7 +79,66 @@ describe.each(adapters)("%s domain-cache ownership", adapter => {
     return (await method.call(client, "7"))[0].content
   }
 
+  it("does not overwrite shared config when an older direct initialize finishes last", async () => {
+    configure(deviceKey)
+    const storageRead = deferred()
+    const started = deferred()
+    io.get.mockImplementationOnce(() => { started.resolve(null); return storageRead.promise })
+    const oldInitialize = client.initialize().catch(error => error)
+    await started.promise
+    const bob = { ...deviceKey, apiKey: "synthetic-key-b" }
+    configure(bob)
+    await client.initialize()
+    storageRead.resolve(deviceKey)
+    expect(await oldInitialize).toMatchObject({ status: 412 })
+    expect(await client.getConfig()).toMatchObject(bob)
+  })
+
   describe.each(resources)("%s", resource => {
+    const joinPendingRead = async () => {
+      const reached = deferred()
+      const index = resource === "character" ? client.characterInFlight : client.chatMessagesInFlight
+      const get = index.get.bind(index)
+      vi.spyOn(index, "get").mockImplementationOnce(key => {
+        reached.resolve(null)
+        return get(key)
+      })
+      const joined = read(resource)
+      await reached.promise
+      return { joined }
+    }
+    it.each([
+      ["JWT", alice, { ...alice, accessToken: jwt("bob") }],
+      ["API key", deviceKey, { ...deviceKey, apiKey: "synthetic-key-b" }]
+    ])("rejects an old %s storage read that completes after a newer owner is published", async (_kind, before, after) => {
+      configure(before)
+      const storageRead = deferred()
+      const started = deferred()
+      io.get.mockImplementationOnce(() => {
+        started.resolve(null)
+        return storageRead.promise
+      })
+      const oldRead = read(resource).catch(error => error)
+      await started.promise
+      configure(after)
+      io.owner = "Bob"
+      expect(await read(resource)).toBe("Bob")
+      storageRead.resolve(before)
+      expect(await oldRead).toMatchObject({ status: 412 })
+      expect(await read(resource)).toBe("Bob")
+      expect(io.request).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([alice, deviceKey])("resolves storage once for a cache hit and at most twice for a fetch ($authMode)", async config => {
+      configure(config)
+      expect(await read(resource)).toBe("Alice")
+      expect(io.get.mock.calls.filter(([key]) => key === "tldwConfig").length).toBeLessThanOrEqual(2)
+      expect(io.get.mock.calls.length).toBeLessThanOrEqual(4)
+      io.get.mockClear()
+      expect(await read(resource)).toBe("Alice")
+      expect(io.get.mock.calls.filter(([key]) => key === "tldwConfig").length).toBe(1)
+      expect(io.get.mock.calls.length).toBeLessThanOrEqual(2)
+    })
     it.each([
       ["JWT principal", alice, { ...alice, accessToken: jwt("bob") }],
       ["API key", deviceKey, { ...deviceKey, apiKey: "synthetic-key-b" }],
@@ -115,16 +176,15 @@ describe.each(adapters)("%s domain-cache ownership", adapter => {
     })
 
     it("rejects a boundary after response verification before cache publication", async () => {
-      const capture = client.getDomainCacheRevision
-      const capturesBeforePublication = resource === "character" ? 3 : 2
-      let captures = 0
-      vi.spyOn(client, "getDomainCacheRevision").mockImplementation(async () => {
-        const revision = await capture.call(client)
-        if (++captures === capturesBeforePublication) {
-          queueMicrotask(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
+      const payload = response(resource === "messages" ? "/messages" : "/characters", "Alice")
+      // Payload consumption is the publication milestone, independent of config helper calls.
+      Object.defineProperty(payload, resource === "character" ? "then" : "map", {
+        get: () => {
+          window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+          return resource === "character" ? undefined : Array.prototype.map
         }
-        return revision
       })
+      io.request.mockResolvedValueOnce(payload)
       await expect(read(resource)).rejects.toMatchObject({ status: 412 })
       io.owner = "Bob"
       expect(await read(resource)).toBe("Bob")
@@ -172,10 +232,7 @@ describe.each(adapters)("%s domain-cache ownership", adapter => {
       await vi.waitFor(() => expect(io.request).toHaveBeenCalledTimes(2))
       oldResponse.resolve(response(resource === "messages" ? "/messages" : "/characters", "Alice"))
       expect(await oldRead).toMatchObject({ status: 412 })
-      const joined = read(resource)
-      // Let the join's config reads settle while the replacement is still pending.
-      await new Promise(resolve => setTimeout(resolve, 0))
-      expect(io.request).toHaveBeenCalledTimes(2)
+      const { joined } = await joinPendingRead()
       newResponse.resolve(response(resource === "messages" ? "/messages" : "/characters", "Bob"))
       expect(await Promise.all([newRead, joined])).toEqual(["Bob", "Bob"])
       expect(await read(resource)).toBe("Bob")
@@ -205,7 +262,7 @@ describe.each(adapters)("%s domain-cache ownership", adapter => {
       io.request.mockImplementationOnce(() => oldResponse.promise).mockImplementationOnce(() => newResponse.promise)
       const oldRead = read(resource).catch(error => error)
       await vi.waitFor(() => expect(io.request).toHaveBeenCalledTimes(1))
-      vi.spyOn(client, "initialize").mockImplementationOnce(() => {
+      io.get.mockImplementationOnce(() => {
         checking.resolve(null)
         return failedCheck
       })
@@ -217,11 +274,10 @@ describe.each(adapters)("%s domain-cache ownership", adapter => {
       await vi.waitFor(() => expect(io.request).toHaveBeenCalledTimes(2))
       failCheck(new Error("old configuration read failed"))
       expect(await oldRead).toMatchObject({ message: "old configuration read failed" })
-      const joined = read(resource)
-      await new Promise(resolve => setTimeout(resolve, 0))
-      expect(io.request).toHaveBeenCalledTimes(2)
+      const { joined } = await joinPendingRead()
       newResponse.resolve(response(resource === "messages" ? "/messages" : "/characters", "Bob"))
       expect(await Promise.all([newRead, joined])).toEqual(["Bob", "Bob"])
+      expect(io.request).toHaveBeenCalledTimes(2)
     })
 
     it("never serves a cache hit after credentials are removed", async () => {

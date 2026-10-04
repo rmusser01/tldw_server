@@ -79,7 +79,7 @@ describe("saved Chat profile request authority", () => {
       await vi.waitFor(() => expect(boundary.fetch).toHaveBeenCalledTimes(1))
       current = { ...current, apiKey: "synthetic-key-b" }
       const newRead = read()
-      await new Promise(done => setTimeout(done, 30))
+      await vi.waitFor(() => expect(boundary.fetch).toHaveBeenCalledTimes(2))
       resolveOld(response("Alice"))
       const value = await newRead
       expect(resource === "character" ? value.name : value[0].content).toBe("Bob")

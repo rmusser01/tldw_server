@@ -1,4 +1,4 @@
-import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope";
+import { connectionAuthoritiesMatch, deriveConnectionAuthorityId } from "@/services/chat-surface-scope";
 import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts";
 import { browser } from "wxt/browser";
 import { createSafeStorage } from "@/utils/safe-storage";
@@ -435,6 +435,7 @@ export default defineBackground({
   main() {
     const storage = createSafeStorage({ area: "local" });
     const sessionStorage = createSafeStorage({ area: "session" });
+    let connectionAuthorityEpoch = crypto.randomUUID();
     const getEffectiveConfig = () =>
       resolveEffectiveTldwConfig({
         persistent: storage,
@@ -1696,7 +1697,17 @@ export default defineBackground({
       requestAbortSignal?: AbortSignal,
     ) => {
       const rawServicePromptConfig = payload?.servicePromptConfig;
+      const expectedConnectionAuthority = payload?.expectedConnectionAuthority;
+      const expectedConnectionEpoch = payload?.expectedConnectionEpoch;
+      const hasConnectionFence = expectedConnectionAuthority !== undefined;
+      const assertConnectionEpoch = () => {
+        if (hasConnectionFence && expectedConnectionEpoch !== connectionAuthorityEpoch) {
+          throw createServicePromptScopeChangedError();
+        }
+      };
       const requestPayload = { ...(payload || {}) };
+      delete requestPayload.expectedConnectionAuthority;
+      delete requestPayload.expectedConnectionEpoch;
       delete requestPayload.servicePromptConfig;
       delete requestPayload.requestId;
       delete requestPayload.abortSignal;
@@ -1720,7 +1731,16 @@ export default defineBackground({
       > | undefined;
       let recipeDelivery: RecipeDeliveryReceipt | undefined;
       try {
+        if (servicePromptConfig && hasConnectionFence) {
+          throw createServicePromptScopeChangedError();
+        }
         const response = await tldwRequest(requestPayload, {
+          ...(hasConnectionFence ? {
+            fetchFn: ((input, init) => {
+              assertConnectionEpoch();
+              return fetch(input, init);
+            }) as typeof fetch,
+          } : {}),
           getAuthenticatedPrincipal: getRecipeAuthenticatedPrincipal,
           dispatchAuthority: {
             markDispatched: (id, ownerId) => {
@@ -1743,8 +1763,18 @@ export default defineBackground({
                 originalScopedConfig ??= current;
                 return current;
               }
-            : async () => await getEffectiveConfig(),
-          ...(servicePromptConfig ? { useRuntimeAuthOverride: false } : {}),
+            : async () => {
+                assertConnectionEpoch();
+                const current = await getEffectiveConfig();
+                assertConnectionEpoch();
+                if (hasConnectionFence &&
+                    (typeof expectedConnectionAuthority !== "string" ||
+                     expectedConnectionAuthority !== deriveConnectionAuthorityId(current))) {
+                  throw createServicePromptScopeChangedError();
+                }
+                return current;
+              },
+          ...(servicePromptConfig || hasConnectionFence ? { useRuntimeAuthOverride: false } : {}),
           refreshAuth: servicePromptConfig
             ? () => refreshScopedAuth(
                 servicePromptConfig,
@@ -1763,9 +1793,10 @@ export default defineBackground({
                 await refreshInFlight;
               },
         });
+        assertConnectionEpoch();
         return recipeDelivery ? { ...response, recipeDelivery } : response;
       } catch (error) {
-        if (servicePromptConfig && (error as { status?: unknown })?.status === 412) {
+        if ((servicePromptConfig || hasConnectionFence) && (error as { status?: unknown })?.status === 412) {
           const message =
             "The server or authenticated account changed before the request was sent.";
           return {
@@ -3834,6 +3865,15 @@ export default defineBackground({
           (signal) => handleTldwRequest(message.payload || {}, signal),
         );
       }
+      if (message.type === "tldw:connection-authority") {
+        const epoch = connectionAuthorityEpoch;
+        const current = await getEffectiveConfig();
+        if (epoch !== connectionAuthorityEpoch ||
+            message.payload?.expectedConnectionAuthority !== deriveConnectionAuthorityId(current)) {
+          return { ok: false, status: 412 };
+        }
+        return { ok: true, epoch };
+      }
       if (message.type === "tldw:ingest") {
         try {
           const tabs = await browser.tabs.query({
@@ -3880,6 +3920,10 @@ export default defineBackground({
 
     browser.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== "local") return;
+      if (Object.entries(changes || {}).some(([key, change]) =>
+        (key === "tldwConfig" || key === "tldwCookieSessionConfig") &&
+        (!change.newValue || !connectionAuthoritiesMatch(change.oldValue, change.newValue))
+      )) connectionAuthorityEpoch = crypto.randomUUID();
       if (Object.keys(changes || {}).some(key => key === "tldwConfig" || key === REFRESH_ROTATION_KEY || key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX))) {
         quickIngestCredentialRevision += 1;
         for (const validate of quickIngestAuthorityValidators) void validate().catch(() => {});

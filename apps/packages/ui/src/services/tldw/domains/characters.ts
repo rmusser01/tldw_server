@@ -463,7 +463,6 @@ export const characterMethods = {
           "/api/v1/characters/{id}/"
         ])
         const path = this.fillPathParams(template, cid)
-        await this.getDomainCacheRevision()
         this.assertDomainCacheRevision(cacheRevision)
         const value = await bgRequest<any>({
           path,
