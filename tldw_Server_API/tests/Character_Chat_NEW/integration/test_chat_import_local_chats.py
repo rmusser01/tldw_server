@@ -816,6 +816,33 @@ def test_more_messages_than_a_chat_may_hold_is_refused(db: CharactersRAGDB, monk
     assert allowed.post(PATH, json=_body()).status_code == 201
 
 
+def test_message_limit_is_checked_before_any_message_is_decoded(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An oversized import is refused on its message count alone, without decoding its images."""
+    inspected: list[int] = []
+    real = chats._chat_import_image_inspector
+
+    def counting() -> Any:
+        inspect = real()
+
+        def wrapped(data: bytes) -> str:
+            inspected.append(len(data))
+            return inspect(data)
+
+        return wrapped
+
+    monkeypatch.setattr(chats, "_chat_import_image_inspector", counting)
+    client = _client(db, monkeypatch, limiter=_limiter(max_messages_per_chat=6))
+    response = client.post(PATH, json=_body())
+    assert response.status_code == 403, response.text
+    assert _error(response) == "message_limit_exceeded"
+    assert inspected == []
+    allowed = _client(db, monkeypatch, limiter=_limiter(max_messages_per_chat=7))
+    assert allowed.post(PATH, json=_body()).status_code == 201
+    assert len(inspected) == 2
+
+
 def test_message_count_beyond_the_parse_ceiling_is_422(client: TestClient, db: CharactersRAGDB) -> None:
     from tldw_Server_API.app.api.v1.schemas.chat_import_schemas import CHAT_IMPORT_MAX_MESSAGES
 
@@ -860,6 +887,34 @@ def test_images_over_the_import_image_budget_are_413(
     response = client.post(PATH, json=_body())
     assert response.status_code == 413, response.text
     assert _error(response) == "images_too_large"
+    assert _counts(db) == dict.fromkeys(TABLES, 0)
+
+
+def test_images_over_the_import_pixel_budget_are_413(
+    client: TestClient, db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Decoding work is bounded too: small files can still hold very large pictures."""
+    # The chat has two 3x2 images: 12 pixels in total.
+    monkeypatch.setattr(chats, "MAX_CHAT_IMPORT_IMAGE_PIXELS", 11)
+    response = client.post(PATH, json=_body())
+    assert response.status_code == 413, response.text
+    assert _error(response) == "images_too_large"
+    assert response.json()["detail"]["limit_pixels"] == 11
+    assert _counts(db) == dict.fromkeys(TABLES, 0)
+    monkeypatch.setattr(chats, "MAX_CHAT_IMPORT_IMAGE_PIXELS", 12)
+    assert client.post(PATH, json=_body()).status_code == 201
+
+
+def test_one_picture_over_the_pixel_limit_is_413(client: TestClient, db: CharactersRAGDB) -> None:
+    """A picture larger than the message API will decode is refused like an oversized file."""
+    buffer = io.BytesIO()
+    Image.new("L", (4097, 4096)).save(buffer, format="PNG", optimize=True)
+    huge = buffer.getvalue()
+    assert len(huge) < 100_000
+    response = client.post(PATH, json=_body([_message("pa_q1", None, "user", 0, images=[_data_url(huge)])]))
+    assert response.status_code == 413, response.text
+    assert _error(response) == "image_too_large"
+    assert response.json()["detail"]["message_id"] == "pa_q1"
     assert _counts(db) == dict.fromkeys(TABLES, 0)
 
 

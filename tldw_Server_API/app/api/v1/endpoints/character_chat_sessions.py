@@ -103,6 +103,7 @@ from tldw_Server_API.app.api.v1.utils.chat_message_images import (
     _complete_message_images,
     _detect_image_mime_type,
     format_message_content,
+    message_image_pixel_count,
     read_messages_with_images,
 )
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
@@ -282,6 +283,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.common import parse_boolean
+from tldw_Server_API.app.core.Utils.image_validation import MAX_IMAGE_PIXELS
 from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
 from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
 from tldw_Server_API.app.core.Workspaces.chat_startup import start_workspace_chat
@@ -4987,6 +4989,10 @@ PreparedChatImport = conversation_import.PreparedChatImport
 # One import may carry as many image bytes as one message page or one history
 # capture can read back, so an imported chat can always be loaded.
 MAX_CHAT_IMPORT_IMAGE_BYTES = MAX_CHAT_ATTACHMENT_READ_BYTES
+# Every image is decoded once on import. A small file can hold a very large
+# picture, so the decoding work is bounded as well: 32 pictures of the largest
+# size the message API accepts.
+MAX_CHAT_IMPORT_IMAGE_PIXELS = 32 * MAX_IMAGE_PIXELS
 
 
 def _chat_import_setting(name: str, default: int) -> int:
@@ -5007,25 +5013,41 @@ def _chat_import_limits() -> conversation_import.ChatImportLimits:
     )
 
 
-def _inspect_chat_import_image(data: bytes) -> str:
-    """Return the image type, accepting only an image the message API can serve back.
+def _chat_import_image_inspector() -> Callable[[bytes], str]:
+    """Return a check for one import that accepts only images the message API can serve back.
 
     The message API refuses to return a chat page that holds a damaged image, so
     an import runs the same checks up front: one bad image would otherwise make
-    the saved chat unreadable.
+    the saved chat unreadable. The returned function keeps a running pixel
+    total, read from each header before the picture is decoded.
     """
-    mime = _detect_image_mime_type(data)
-    if mime is None:
-        raise ChatImportError(
-            "invalid_image", 422, "An image is not in a supported format (PNG, JPEG, GIF, WebP, BMP or ICO)."
-        )
-    try:
-        _complete_message_images({"images": [{"image_data": data, "image_mime_type": mime}]})
-    except HTTPException as error:
-        if error.status_code == status.HTTP_413_CONTENT_TOO_LARGE:
-            raise ChatImportError("image_too_large", 413, "An image is larger than the server allows.") from None
-        raise ChatImportError("invalid_image", 422, "An image is damaged or cannot be decoded.") from None
-    return mime
+    pixels = 0
+
+    def inspect(data: bytes) -> str:
+        """Return the image's MIME type, or refuse it."""
+        nonlocal pixels
+        mime = _detect_image_mime_type(data)
+        if mime is None:
+            raise ChatImportError(
+                "invalid_image", 422, "An image is not in a supported format (PNG, JPEG, GIF, WebP, BMP or ICO)."
+            )
+        try:
+            pixels += message_image_pixel_count(data)
+            if pixels > MAX_CHAT_IMPORT_IMAGE_PIXELS:
+                raise ChatImportError(
+                    "images_too_large",
+                    413,
+                    "The pictures in this chat are larger in total than one import may carry.",
+                    limit_pixels=MAX_CHAT_IMPORT_IMAGE_PIXELS,
+                )
+            _complete_message_images({"images": [{"image_data": data, "image_mime_type": mime}]})
+        except HTTPException as error:
+            if error.status_code == status.HTTP_413_CONTENT_TOO_LARGE:
+                raise ChatImportError("image_too_large", 413, "An image is larger than the server allows.") from None
+            raise ChatImportError("invalid_image", 422, "An image is damaged or cannot be decoded.") from None
+        return mime
+
+    return inspect
 
 
 def _find_chat_import_replay(
@@ -5129,10 +5151,12 @@ async def import_chat_session(
 
     * Text, role, per-message size and image limits are the same as
       ``POST /chats/{chat_id}/messages``. Images are additionally decoded once,
-      as the message API does when it returns them.
+      as the message API does when it returns them, and one import is limited
+      in total image bytes and total image pixels.
     * Moderation is not run, as on that route: it applies to generation.
     * One import counts once against the chat-creation rate limit, not once per
-      message. The per-chat message limit and the chat count quota apply.
+      message. The per-chat message limit applies and is checked before
+      anything is decoded; the chat count quota applies to new imports.
     * No greeting is seeded, no auto-tagging is scheduled and no character
       behavior snapshot is taken: the import is exactly the messages sent.
     * Generation metadata is accepted only for assistant messages and only the
@@ -5168,30 +5192,31 @@ async def import_chat_session(
                 409,
                 "Saving a local chat to the server is not supported while Sync v2 is active.",
             )
+        limits = rate_limiter._limits
+        # Checked on the count alone, before any text or image is examined.
+        try:
+            await rate_limiter.check_message_limit(import_data.id, len(import_data.messages))
+        except HTTPException as error:
+            raise ChatImportError(
+                "message_limit_exceeded", error.status_code, str(error.detail), limit=limits.max_messages_per_chat
+            ) from None
         prepared = await run_in_threadpool(
             conversation_import.prepare_chat_import,
             import_data.model_dump(),
             limits=_chat_import_limits(),
             now=datetime.now(timezone.utc),
-            inspect_image=_inspect_chat_import_image,
+            inspect_image=_chat_import_image_inspector(),
             content_length=_content_length_for_guardrails,
         )
         chat_id = prepared.conversation_id
 
-        # A replay is answered before quota checks: it creates nothing.
+        # A replay is answered before the chat quota is checked: it creates nothing.
         if await run_in_threadpool(_find_chat_import_replay, db, prepared, owner_id) is not None:
             response.status_code = status.HTTP_200_OK
             response.headers["Idempotency-Replayed"] = "true"
             logger.debug("Replayed chat import {} for user {}", chat_id, owner_id)
             return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id)
 
-        limits = rate_limiter._limits
-        try:
-            await rate_limiter.check_message_limit(chat_id, len(prepared.messages))
-        except HTTPException as error:
-            raise ChatImportError(
-                "message_limit_exceeded", error.status_code, str(error.detail), limit=limits.max_messages_per_chat
-            ) from None
         try:
             chat_count = await run_in_threadpool(
                 db.count_conversations_for_user, owner_id, scope_type="global", workspace_id=None
