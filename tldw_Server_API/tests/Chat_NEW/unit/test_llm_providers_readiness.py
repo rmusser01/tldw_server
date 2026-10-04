@@ -19,6 +19,24 @@ from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
 from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 
 
+@pytest.fixture(autouse=True)
+def _healthy_provider_override_snapshot():
+    """Supply the healthy empty snapshot normally initialized by app startup."""
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
+
+    with llm_provider_overrides._OVERRIDE_LOCK:
+        original = dict(llm_provider_overrides._OVERRIDE_CACHE)
+        healthy = llm_provider_overrides._OVERRIDE_CACHE_HEALTHY
+        ttl_enabled = not llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+    try:
+        yield
+    finally:
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+            original, healthy=healthy, ttl_enabled=ttl_enabled,
+        )
+
+
 class _EmptyProviderManager:
     """Provider manager stub that reports no provider health state."""
 
