@@ -116,9 +116,21 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     TitleSuggestRequest,
     TitleSuggestResponse,
     WikilinkIdResolution,
+    WikilinkReferrerNote,
+    WikilinkReferrersRequest,
+    WikilinkReferrersResponse,
     WikilinkResolveRequest,
     WikilinkResolveResponse,
+    WikilinkRewriteNoteResult,
+    WikilinkRewriteRequest,
+    WikilinkRewriteResponse,
+    WikilinkRewriteUndoNoteResult,
+    WikilinkRewriteUndoRequest,
+    WikilinkRewriteUndoResponse,
     WikilinkTitleResolution,
+)
+from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
+    WikilinkTokenReplacement as WikilinkTokenReplacementSchema,
 )
 from tldw_Server_API.app.api.v1.schemas.notes_studio import (
     NoteStudioDeriveRequest,
@@ -171,7 +183,19 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
     plan_compound_note,
 )
 from tldw_Server_API.app.core.Notes.studio_service import NotesStudioService
-from tldw_Server_API.app.core.Notes.wikilinks import canonical_wikilink_note_id
+from tldw_Server_API.app.core.Notes.wikilink_rename import (
+    SaveNoteContent,
+    WikilinkRestoreTarget,
+    WikilinkRewriteTarget,
+    plan_renamed_note_link,
+    restore_title_links,
+    rewrite_title_links,
+)
+from tldw_Server_API.app.core.Notes.wikilinks import (
+    WikilinkTokenReplacement,
+    canonical_wikilink_note_id,
+    normalize_wikilink_title,
+)
 from tldw_Server_API.app.core.Notes_Tasks import NotesTaskService, TaskActor
 from tldw_Server_API.app.core.Personalization import (
     build_note_bulk_import_activity,
@@ -2753,6 +2777,267 @@ async def resolve_note_wikilinks(
         raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "wikilink resolution")
+
+
+async def _require_note_rate_limit(rate_limiter: RateLimiter, current_user: User, action: str) -> None:
+    allowed, meta = await _check_note_rate_limit(rate_limiter, current_user, action)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded for {action}",
+            headers={"Retry-After": str(meta.get("retry_after", 60))},
+        )
+
+
+def _wikilink_rename_saver(
+    db: CharactersRAGDB,
+    current_user: User,
+    task_service: NotesTaskService,
+) -> SaveNoteContent:
+    """Save one rewritten note the way ``PUT /notes/{id}`` saves a content edit.
+
+    With Sync v2 active the change is captured as a server-origin mutation;
+    otherwise it is a version-checked update. Either way it is one transaction
+    per note, and the note's task rows are reconciled afterwards.
+    """
+
+    sync_service = _active_notes_sync_service(current_user)
+
+    def save(note: dict[str, Any], content: str) -> dict[str, Any] | None:
+        note_id = str(note["id"])
+        if sync_service is not None:
+            payload = _note_payload_from_row(note)
+            payload["content"] = content
+            capture_server_origin_mutation(
+                sync_service,
+                user_id=str(current_user.id),
+                domain="notes.note",
+                operation="upsert",
+                object_id=note_id,
+                payload=payload,
+                source="server_api",
+            )
+        else:
+            db.update_note(
+                note_id=note_id,
+                update_data={"content": content},
+                expected_version=int(note["version"]),
+            )
+        saved = db.get_note_by_id(note_id=note_id)
+        if saved:
+            _reconcile_note_tasks_after_save(
+                db=db,
+                note_data=saved,
+                current_user=current_user,
+                task_service=task_service,
+            )
+        return saved
+
+    return save
+
+
+@router.post(
+    "/wikilinks/referrers",
+    response_model=WikilinkReferrersResponse,
+    summary="Count the notes that link to a title with [[Title]]",
+    dependencies=[Depends(require_expected_user)],
+    tags=["notes"],
+)
+async def list_note_wikilink_referrers(
+        payload: WikilinkReferrersRequest,
+        db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+        rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+        current_user: User = Depends(get_request_user),
+        _: None = Depends(rbac_rate_limit("notes.search")),
+) -> WikilinkReferrersResponse:
+    """List the current user's live notes whose text holds a ``[[Title]]`` link to ``title``.
+
+    The WebUI calls this after a rename, with the old title and
+    ``unresolved_only``, to offer "Update links": links follow titles, so a
+    rename leaves them unresolved. Notes in the trash are never listed. Pass
+    each note's ``version`` to ``POST /notes/wikilinks/rewrite``.
+    """
+    try:
+        await _require_note_rate_limit(rate_limiter, current_user, "notes.search")
+        page = db.note_graph_projection_store.list_title_referrers(
+            payload.title,
+            exclude_note_id=(payload.exclude_note_id or "").strip() or None,
+            unresolved_only=payload.unresolved_only,
+            after_note_id=(payload.after_note_id or "").strip() or None,
+            limit=payload.limit,
+        )
+        return WikilinkReferrersResponse(
+            title=payload.title,
+            count=page.total,
+            notes=[
+                WikilinkReferrerNote(id=note.note_id, title=note.title, version=note.version)
+                for note in page.notes
+            ],
+            next_after_note_id=page.notes[-1].note_id if page.has_more and page.notes else None,
+        )
+    except HTTPException:
+        raise
+    except _NOTES_NONCRITICAL_EXCEPTIONS as e:
+        handle_db_errors(e, "wikilink referrers")
+
+
+@router.post(
+    "/wikilinks/rewrite",
+    response_model=WikilinkRewriteResponse,
+    summary="Rewrite [[Old title]] links to a renamed note",
+    dependencies=[Depends(require_expected_user)],
+    tags=["notes"],
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": DetailResponse},
+        status.HTTP_404_NOT_FOUND: {"model": DetailResponse},
+    },
+)
+async def rewrite_note_wikilinks(
+        payload: WikilinkRewriteRequest,
+        db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+        rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+        current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
+        _: None = Depends(rbac_rate_limit("notes.update")),
+) -> WikilinkRewriteResponse:
+    """Rewrite ``[[old_title]]`` links in the named notes to point at the renamed note.
+
+    Nothing is rewritten unless this is called. Only whole links to the old
+    title change, matched like the graph matches them (ignoring case and
+    extra whitespace); ``[[id:UUID]]`` links and all other text are untouched.
+    Each note is saved on its own under optimistic locking, so a note edited
+    since ``expected_version`` is skipped and reported, never overwritten.
+
+    The new link is ``[[New title]]``. If another live note shares the new
+    title, that link could resolve to the other note, so the links are written
+    as ``[[id:<UUID>]]`` instead (``link_form`` is ``id``). Each updated note
+    returns ``replacements``: send them to ``/wikilinks/rewrite/undo`` to
+    restore the previous text.
+    """
+    try:
+        await _require_note_rate_limit(rate_limiter, current_user, "notes.update")
+        plan = plan_renamed_note_link(db, payload.note_id.strip())
+        if plan is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+        if normalize_wikilink_title(payload.old_title) == normalize_wikilink_title(plan.new_title):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The note still has this title, so links to it already resolve.",
+            )
+        if plan.replacement is None or plan.link_form is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The note's title cannot be written as a wikilink.",
+            )
+        results = rewrite_title_links(
+            db,
+            old_title=payload.old_title,
+            replacement=plan.replacement,
+            targets=[WikilinkRewriteTarget(note.id.strip(), note.expected_version) for note in payload.notes],
+            save=_wikilink_rename_saver(db, current_user, task_service),
+        )
+        updated_count = sum(1 for result in results if result.status == "updated")
+        logger.info(
+            "User (DB client_id: {}) rewrote wikilinks to note {} in {} of {} notes.",
+            db.client_id,
+            plan.note_id,
+            updated_count,
+            len(results),
+        )
+        return WikilinkRewriteResponse(
+            old_title=payload.old_title,
+            new_title=plan.new_title,
+            link_form=plan.link_form,
+            replacement=plan.replacement,
+            new_title_shared=plan.new_title_shared,
+            updated_count=updated_count,
+            skipped_count=len(results) - updated_count,
+            results=[
+                WikilinkRewriteNoteResult(
+                    id=result.note_id,
+                    title=result.title,
+                    status=result.status,
+                    version=result.version,
+                    replaced_count=len(result.replacements),
+                    replacements=[
+                        WikilinkTokenReplacementSchema(token_index=item.token_index, original=item.original)
+                        for item in result.replacements
+                    ],
+                )
+                for result in results
+            ],
+        )
+    except HTTPException:
+        raise
+    except _NOTES_NONCRITICAL_EXCEPTIONS as e:
+        handle_db_errors(e, "wikilink rewrite")
+
+
+@router.post(
+    "/wikilinks/rewrite/undo",
+    response_model=WikilinkRewriteUndoResponse,
+    summary="Undo a wikilink rewrite",
+    dependencies=[Depends(require_expected_user)],
+    tags=["notes"],
+)
+async def undo_note_wikilink_rewrite(
+        payload: WikilinkRewriteUndoRequest,
+        db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+        rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+        current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
+        _: None = Depends(rbac_rate_limit("notes.update")),
+) -> WikilinkRewriteUndoResponse:
+    """Restore the links ``POST /notes/wikilinks/rewrite`` replaced.
+
+    The server keeps no undo state: send back the rewrite's ``replacement``
+    and each updated note's ``version`` and ``replacements``. A note edited
+    since the rewrite is skipped and reported. Undo can only turn the
+    rewritten links back into links to ``old_title``; no other text changes.
+    """
+    try:
+        await _require_note_rate_limit(rate_limiter, current_user, "notes.update")
+        results = restore_title_links(
+            db,
+            old_title=payload.old_title,
+            replacement=payload.replacement,
+            targets=[
+                WikilinkRestoreTarget(
+                    note.id.strip(),
+                    note.expected_version,
+                    tuple(
+                        WikilinkTokenReplacement(item.token_index, item.original)
+                        for item in note.replacements
+                    ),
+                )
+                for note in payload.notes
+            ],
+            save=_wikilink_rename_saver(db, current_user, task_service),
+        )
+        restored_count = sum(1 for result in results if result.status == "restored")
+        logger.info(
+            "User (DB client_id: {}) undid a wikilink rewrite in {} of {} notes.",
+            db.client_id,
+            restored_count,
+            len(results),
+        )
+        return WikilinkRewriteUndoResponse(
+            restored_count=restored_count,
+            skipped_count=len(results) - restored_count,
+            results=[
+                WikilinkRewriteUndoNoteResult(
+                    id=result.note_id,
+                    title=result.title,
+                    status=result.status,
+                    version=result.version,
+                )
+                for result in results
+            ],
+        )
+    except HTTPException:
+        raise
+    except _NOTES_NONCRITICAL_EXCEPTIONS as e:
+        handle_db_errors(e, "wikilink rewrite undo")
 
 
 @router.get(
