@@ -152,6 +152,11 @@ class NoteStore:
                     projection=projection,
                     conn=transaction_conn,
                 )
+                # [[Title]] links elsewhere may now resolve to this note.
+                self._db.note_graph_projection_store.refresh_title_referrers(
+                    (title.strip(),),
+                    conn=transaction_conn,
+                )
                 logger.info(f"Added note '{title.strip()}' with ID: {final_note_id}.")
                 return final_note_id
 
@@ -339,6 +344,11 @@ class NoteStore:
                     note_id=normalized_note_id,
                     source_version=object_revision,
                     projection=projection,
+                    conn=transaction_conn,
+                )
+                # A synced create, rename or undelete changes which [[Title]] links resolve here.
+                self._db.note_graph_projection_store.refresh_title_referrers(
+                    (previous["title"] if previous is not None else None, exact_title),
                     conn=transaction_conn,
                 )
                 self._advance_studio_lifecycle(
@@ -2107,13 +2117,15 @@ class NoteStore:
         current_content = current_note.get("content", "") if current_note else ""
         next_content = update_data.get("content", current_content)
         projection = parse_wikilinks(str(next_content or ""), source_note_id=note_id)
+        title_changed = (
+            current_note is not None
+            and "title" in update_data
+            and isinstance(update_data["title"], str)
+            and update_data["title"].strip() != current_note.get("title")
+        )
         content_changed = current_note is not None and (
             ("content" in update_data and update_data["content"] != current_note.get("content"))
-            or (
-                "title" in update_data
-                and isinstance(update_data["title"], str)
-                and update_data["title"].strip() != current_note.get("title")
-            )
+            or title_changed
         )
 
         owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
@@ -2186,6 +2198,12 @@ class NoteStore:
                     projection=projection,
                     conn=transaction_conn,
                 )
+                if title_changed and current_note is not None:
+                    # Links are by title: the old title stops resolving here and the new one starts.
+                    self._db.note_graph_projection_store.refresh_title_referrers(
+                        (current_note.get("title"), update_data["title"]),
+                        conn=transaction_conn,
+                    )
                 if content_changed:
                     self._db.note_graph_suggestion_store.invalidate_for_note_change(
                         note_id=note_id,
@@ -2296,9 +2314,13 @@ class NoteStore:
                 cur_ver = int(row["version"])
                 deleted = bool(row["deleted"])
                 if hard_delete:
+                    projection_store = self._db.note_graph_projection_store
+                    deleted_title = projection_store.get_note_title(note_id, conn=conn)
                     self._db._delete_note_clipper_sidecars(note_id, conn=conn)
                     conn.execute("DELETE FROM note_studio_documents WHERE note_id = ?", (note_id,))
                     conn.execute(f"DELETE FROM notes WHERE id = ?{owner_clause}", (note_id,) + owner_params)  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                    # [[Title]] links that resolved here fall back to another note or go unresolved.
+                    projection_store.refresh_title_referrers((deleted_title,), conn=conn)
                     return True
                 if deleted:
                     return True
@@ -2510,6 +2532,63 @@ class NoteStore:
         except CharactersRAGDBError as e:
             logger.error(f"Error searching notes for '{search_term}': {e}")
             raise
+
+    @staticmethod
+    def _escape_like(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    def _title_match_sql(self) -> tuple[str, str, tuple[str, ...]]:
+        """Return the case-insensitive title match operator and the owner filter."""
+
+        # SQLite LIKE ignores ASCII case; PostgreSQL needs ILIKE.
+        operator = "ILIKE" if self._db.backend_type == BackendType.POSTGRESQL else "LIKE"
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        return operator, owner_clause, owner_params
+
+    def search_note_titles(self, search_term: str, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]:
+        """Find live notes whose title contains ``search_term`` (case-insensitive).
+
+        Used for ``[[wikilink]]`` autocomplete across the whole library. Titles
+        that start with the term sort first, then the most recently modified.
+        LIKE wildcards in the term match literally.
+        """
+
+        term = str(search_term or "").strip()
+        if not term:
+            return []
+        operator, owner_clause, owner_params = self._title_match_sql()
+        escaped = self._escape_like(term)
+        query = (
+            f"SELECT * FROM notes WHERE deleted = ? AND title {operator} ? ESCAPE '\\'{owner_clause} "  # nosec B608
+            f"ORDER BY CASE WHEN title {operator} ? ESCAPE '\\' THEN 0 ELSE 1 END, "  # nosec B608
+            "last_modified DESC, id ASC LIMIT ? OFFSET ?"
+        )
+        params = (
+            self._deleted_value(False),
+            f"%{escaped}%",
+            *owner_params,
+            f"{escaped}%",
+            limit,
+            offset,
+        )
+        cursor = self._db.execute_query(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+    def count_note_titles_matching(self, search_term: str) -> int:
+        """Count live notes whose title contains ``search_term`` (case-insensitive)."""
+
+        term = str(search_term or "").strip()
+        if not term:
+            return 0
+        operator, owner_clause, owner_params = self._title_match_sql()
+        query = (
+            f"SELECT COUNT(*) AS cnt FROM notes WHERE deleted = ? AND title {operator} ? ESCAPE '\\'{owner_clause}"  # nosec B608
+        )
+        row = self._db.execute_query(
+            query,
+            (self._deleted_value(False), f"%{self._escape_like(term)}%", *owner_params),
+        ).fetchone()
+        return int(row["cnt"]) if row else 0
 
     def search_notes_with_keywords(
         self,

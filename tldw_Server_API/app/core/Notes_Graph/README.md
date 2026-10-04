@@ -5,7 +5,7 @@ Notes_Graph builds bounded authoritative graph views over notes using manual not
 ## Start Here
 
 - `graph_service.py` builds note graph responses with node, edge, radius, tag, source, and time filters.
-- `wikilink_parser.py` extracts supported note id wikilinks from note content.
+- `wikilink_parser.py` is a compatibility wrapper over `tldw_Server_API/app/core/Notes/wikilinks.py`, which parses `[[id:<UUID>]]` and `[[Title]]` wikilinks from note content.
 - `projection_service.py` maintains persistent owner-scoped wikilink projections and rebuild state.
 - `graph_cache.py` provides a TTL cache for graph responses.
 - `formatters.py` converts graph responses to Cytoscape-compatible JSON.
@@ -21,7 +21,7 @@ Notes_Graph builds bounded authoritative graph views over notes using manual not
 ## Responsibilities
 
 - Read explicit manual links from canonical `notes.link` product/Sync state.
-- Parse `[[id:<UUID>]]` wikilinks from note text into deterministic local projections; backlinks are the reverse view of the same projection.
+- Parse `[[id:<UUID>]]` and `[[Title]]` wikilinks from note text into deterministic local projections; backlinks are the reverse view of the same projection. Titles resolve to the owner's live notes when the projection is written (see "Wikilink Resolution").
 - Build live-only note graph nodes and edges for manual links, wikilinks, backlinks, tag membership, and source membership.
 - Enforce graph caps for node count, edge count, and per-node degree.
 - Support radius-limited graph expansion, neighbor lookups, and revision-bound keyset orphan pages.
@@ -56,10 +56,22 @@ Notes_Graph builds bounded authoritative graph views over notes using manual not
 - Suggestion routes are nested below `/notes/{note_id}/graph/suggestions`. They require `notes.graph.read`, `notes.graph.suggest`, and token scope `notes`; acceptance additionally checks the canonical link or keyword mutation permission required by the suggestion kind.
 - Provider disclosure is authoritative. A boundary of `unknown` is treated as external, and generation requires the disclosed ETag in `If-Match` plus a bounded `Idempotency-Key`.
 
+## Wikilink Resolution
+
+Notes link each other with `[[Title]]` or `[[id:<UUID>]]` (UX review decision D2, NE-02 / #3110). Both forms create a `wikilink` edge and its `backlink`.
+
+- **Id links** name one note by its immutable id. A malformed id is ignored; the `id:` prefix never falls back to a title. An id with no live note is kept as an unresolved target and becomes an edge when that note exists.
+- **Title links** match the owner's live notes after trimming, collapsing whitespace, and lower-casing. Titles may contain single `[` or `]` characters, but not `[[` or a newline. The linking note never matches its own title.
+- **Ambiguous titles** (several live notes share the title) resolve deterministically: an exact, case-sensitive title match wins, then the oldest note (`created_at`), then the lowest note id. "Oldest wins" keeps existing links stable when a duplicate is created later. Use `[[id:<UUID>]]` to link a specific duplicate; the WebUI autocomplete inserts that form for duplicate titles.
+- **Unresolved titles** (no live note has the title) create no edge. The WebUI shows them as "create note" links; creating the note resolves the link.
+- **Renames and lifecycle changes** re-resolve links. Each `[[Title]]` link stores a title reference key beside its edge in `note_wikilink_edges`, so when a note is created, renamed, trashed, restored, or deleted, `NoteGraphProjectionStore.refresh_title_referrers` finds the notes that link to the old or new title and re-projects them in the same transaction. Up to 200 linking notes are re-projected inline; the rest are queued dirty for the maintenance worker. Links follow titles, not notes: after a rename, `[[Old title]]` is unresolved until a note has that title again. Note text is never rewritten.
+- **Existing notes**: `WIKILINK_PARSER_VERSION` is 2, so the maintenance worker rebuilds every owner's projection once and `[[Title]]` links written before this change gain edges. Derived-edge reads return a retryable 503 while that rebuild runs.
+- `POST /api/v1/notes/wikilinks/resolve` applies the same rules for the WebUI preview, and `GET /api/v1/notes/search?title_only=true` searches titles across the whole library for `[[` autocomplete.
+
 ## Extension Points
 
 - Add an edge type in `graph_service.py`, schemas, and endpoint parsing together.
-- Change wikilink syntax in `wikilink_parser.py` and update parser tests.
+- Change wikilink syntax in `tldw_Server_API/app/core/Notes/wikilinks.py`, bump `WIKILINK_PARSER_VERSION`, update the WebUI tokenizer in `apps/packages/ui/src/components/Notes/wikilinks.ts`, and update parser tests.
 - Add response formats in `formatters.py` and route handling in `notes_graph.py`.
 - Enable or tune caching by injecting `GraphCache` where the service is constructed.
 - Adjust graph caps in `graph_service.py` and verify pruning behavior.
@@ -72,7 +84,8 @@ Notes_Graph builds bounded authoritative graph views over notes using manual not
 
 ## Gotchas
 
-- The parser intentionally supports `[[id:<UUID>]]` links, not arbitrary title links.
+- `note_wikilink_edges.target_note_id` holds note ids and `title:<sha256>` reference keys. Reference keys never join a note row, so graph reads skip them; `list_outgoing` filters them out. Don't treat every row as a note id.
+- Renaming a note breaks `[[Title]]` links to its old title (they become unresolved). Rewriting linking notes on rename is not implemented.
 - Manual-only graph reads remain available while a derived projection rebuild is pending; derived-edge and orphan reads return retryable 503 until the projection is current.
 - Trashing a note hides its incident manual and derived edges without deleting canonical link history; restoring the note makes those edges visible again when both endpoints are live.
 - Graph cursors are revision-bound pagination hints, never authorization tokens. Authorization and current revision are resolved before cache or cursor use.

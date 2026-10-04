@@ -41,6 +41,7 @@ import {
   useNotesWikilinks,
 } from "@/components/Notes/hooks"
 import type { NoteListItem } from "@/components/Notes/notes-manager-types"
+import { parseWikilinkHref } from "@/components/Notes/wikilinks"
 import { clearSetting, getSetting } from "@/services/settings/registry"
 import { useFlashcardsGenerateTransfer, useStudyPackTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
 import { buildSourcesNewPath } from "@/routes/route-paths"
@@ -729,7 +730,18 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
   }, [list.data, noteRelations.backlinks, noteRelations.related, ed.selectedId])
 
   // ---- Wikilinks hook ----
+  const wikilinkCreateNoteLabel = React.useCallback(
+    (linkTitle: string) =>
+      t('option:notesSearch.wikilinkCreateNoteTooltip', {
+        defaultValue: 'Create note "{{title}}"',
+        title: linkTitle
+      }),
+    [t]
+  )
   const wl = useNotesWikilinks({
+    isOnline,
+    authorityScope: notesGraphAuthorityScope,
+    createNoteLabel: wikilinkCreateNoteLabel,
     selectedId: ed.selectedId,
     title: ed.title,
     content: ed.content,
@@ -1777,21 +1789,50 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     [ed]
   )
 
-  // Preview link click
+  // An unresolved [[Title]] link offers to create that note: start a draft
+  // with the title filled in. Saving it resolves the link and adds the backlink.
+  const handleCreateNoteFromWikilink = React.useCallback(
+    async (linkTitle: string) => {
+      if (editorDisabled) return
+      const ok = await ed.confirmDiscardIfDirty()
+      if (!ok) return
+      if (list.listMode !== 'active') list.setListMode('active')
+      if (isMobileViewport) setMobileSidebarOpen(false)
+      startDraftSession()
+      ed.setTitle(linkTitle)
+      ed.setIsDirty(true)
+      ed.setSaveIndicator('dirty')
+      if (ed.editorMode === 'preview') ed.setEditorMode('edit')
+      message.info(
+        t('option:notesSearch.wikilinkCreateNoteStarted', {
+          defaultValue: 'New note "{{title}}". Save it to complete the link.',
+          title: linkTitle
+        })
+      )
+      window.setTimeout(() => {
+        ed.contentTextareaRef.current?.focus()
+      }, 0)
+    },
+    [ed, editorDisabled, isMobileViewport, list, message, startDraftSession, t]
+  )
+
+  // Preview link click: open a resolved wikilink, or offer to create a missing note.
   const handlePreviewLinkClick = React.useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       const target = event.target as HTMLElement | null
       if (!target) return
       const anchor = target.closest('a')
       if (!(anchor instanceof HTMLAnchorElement)) return
-      const href = String(anchor.getAttribute('href') || '')
-      if (!href.startsWith('note://')) return
+      const wikilink = parseWikilinkHref(String(anchor.getAttribute('href') || ''))
+      if (!wikilink) return
       event.preventDefault()
-      const noteId = decodeURIComponent(href.slice('note://'.length))
-      if (!noteId) return
-      void ed.handleSelectNote(noteId)
+      if (wikilink.kind === 'create') {
+        void handleCreateNoteFromWikilink(wikilink.title)
+        return
+      }
+      void ed.handleSelectNote(wikilink.noteId)
     },
-    [ed]
+    [ed, handleCreateNoteFromWikilink]
   )
 
   const closeNotesStudioCreateModal = React.useCallback(() => {

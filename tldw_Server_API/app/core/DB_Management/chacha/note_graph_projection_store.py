@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from tldw_Server_API.app.core.Notes.wikilinks import WikilinkProjection
+from tldw_Server_API.app.core.Notes.wikilinks import (
+    WikilinkProjection,
+    WikilinkTitleCandidate,
+    is_wikilink_title_reference_key,
+    normalize_wikilink_title,
+    parse_wikilinks,
+    select_wikilink_title_target,
+    wikilink_title_reference_key,
+)
 
 from ..ChaChaNotes_DB import BackendConnectionWrapper, BackendType
 
@@ -49,8 +58,52 @@ class WikilinkProjectionEdge:
     target_note_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class WikilinkTitleResolution:
+    """How one ``[[Title]]`` link resolves against the owner's live notes."""
+
+    note_id: str | None
+    note_title: str | None
+    candidate_count: int
+
+
+# Titles are matched in batches of LIKE prefilters; the exact rule runs in Python.
+_TITLE_LOOKUP_BATCH = 100
+# Notes re-projected inline when a title changes. Any remainder is queued for
+# the maintenance worker, so one rename can't make a request unbounded.
+MAX_INLINE_TITLE_REFERRER_REFRESH = 200
+
+
+def _title_like_pattern(title_key: str) -> str:
+    """Build a LIKE superset pattern for one normalized title key.
+
+    LIKE wildcards are escaped, whitespace matches any run, and non-ASCII
+    characters match any one character, because SQLite only lower-cases ASCII.
+    """
+
+    parts: list[str] = []
+    for char in title_key:
+        if char in "\\%_":
+            parts.append("\\" + char)
+        elif char == " ":
+            parts.append("%")
+        elif ord(char) > 127:
+            parts.append("_")
+        else:
+            parts.append(char)
+    return "%" + "".join(parts) + "%"
+
+
 class NoteGraphProjectionStore:
-    """Owner-bound projection, dirty-generation, and graph-revision store."""
+    """Owner-bound projection, dirty-generation, and graph-revision store.
+
+    ``note_wikilink_edges`` holds, per source note, its ``[[id:UUID]]`` targets,
+    the note ids its ``[[Title]]`` links resolved to, and one title reference
+    key per ``[[Title]]`` link (``wikilink_title_reference_key``). Reference
+    keys never join a note row, so graph reads ignore them; they let a title
+    change find the notes whose links must be re-resolved
+    (``refresh_title_referrers``).
+    """
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
@@ -105,11 +158,12 @@ class NoteGraphProjectionStore:
         def execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> bool:
             owner_clause = " AND owner_user_id = ?" if self._postgres else ""
             delete_params: tuple[object, ...] = (note_id, self._db.client_id) if self._postgres else (note_id,)
+            projected_targets = self._projected_targets(inner_conn, note_id=note_id, projection=projection)
             inner_conn.execute(
                 f"DELETE FROM note_wikilink_edges WHERE source_note_id = ?{owner_clause}",  # nosec B608
                 delete_params,
             )
-            for target_note_id in projection.target_note_ids:
+            for target_note_id in projected_targets:
                 if self._postgres:
                     inner_conn.execute(
                         "INSERT INTO note_wikilink_edges (owner_user_id, source_note_id, "
@@ -171,6 +225,192 @@ class NoteGraphProjectionStore:
         with self._db.transaction() as transaction_conn:
             return execute(transaction_conn)
 
+    def _projected_targets(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        note_id: str,
+        projection: WikilinkProjection,
+    ) -> tuple[str, ...]:
+        """Return id targets, resolved title targets, and title reference keys."""
+
+        targets = list(projection.target_note_ids)
+        if projection.target_titles:
+            resolved = self.resolve_wikilink_titles(
+                projection.target_titles,
+                exclude_note_id=note_id,
+                conn=conn,
+            )
+            for title in projection.target_titles:
+                match = resolved.get(title)
+                if match is not None and match.note_id is not None:
+                    targets.append(match.note_id)
+            targets.extend(wikilink_title_reference_key(title) for title in projection.target_titles)
+        return tuple(dict.fromkeys(targets))
+
+    def resolve_wikilink_titles(
+        self,
+        titles: Iterable[str],
+        *,
+        exclude_note_id: str | None = None,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> dict[str, WikilinkTitleResolution]:
+        """Resolve ``[[Title]]`` link texts against the owner's live notes.
+
+        Results are keyed by the given title text; blank titles are skipped.
+        ``exclude_note_id`` (the linking note) is never a candidate. Ambiguity
+        follows ``select_wikilink_title_target``: exact title, then the oldest
+        note, then the lowest id.
+        """
+
+        requested = [
+            title
+            for title in dict.fromkeys(str(title) for title in titles)
+            if normalize_wikilink_title(title)
+        ]
+        if not requested:
+            return {}
+        execute = conn.execute if conn is not None else self._db.execute_query
+        candidates = self._title_candidates(
+            execute,
+            [normalize_wikilink_title(title) for title in requested],
+            exclude_note_id=exclude_note_id,
+        )
+        resolutions: dict[str, WikilinkTitleResolution] = {}
+        for title in requested:
+            matches = candidates.get(normalize_wikilink_title(title), [])
+            target = select_wikilink_title_target(title, matches)
+            target_title = next((match.title for match in matches if match.note_id == target), None)
+            resolutions[title] = WikilinkTitleResolution(target, target_title, len(matches))
+        return resolutions
+
+    def _title_candidates(
+        self,
+        execute: Callable[[str, tuple[object, ...]], Any],
+        title_keys: list[str],
+        *,
+        exclude_note_id: str | None,
+    ) -> dict[str, list[WikilinkTitleCandidate]]:
+        ordered_keys = list(dict.fromkeys(title_keys))
+        wanted = set(ordered_keys)
+        by_key: dict[str, list[WikilinkTitleCandidate]] = {}
+        seen_note_ids: set[str] = set()
+        for offset in range(0, len(ordered_keys), _TITLE_LOOKUP_BATCH):
+            batch = ordered_keys[offset : offset + _TITLE_LOOKUP_BATCH]
+            title_clauses = " OR ".join("LOWER(title) LIKE ? ESCAPE '\\'" for _ in batch)
+            query = f"SELECT id, title, created_at FROM notes WHERE deleted = ? AND ({title_clauses})"  # nosec B608
+            params: list[object] = [False if self._postgres else 0]
+            params.extend(_title_like_pattern(key) for key in batch)
+            if self._postgres:
+                query += " AND client_id = ?"
+                params.append(self._db.client_id)
+            if exclude_note_id:
+                query += " AND id <> ?"
+                params.append(exclude_note_id)
+            for row in execute(query, tuple(params)).fetchall():
+                candidate_id = str(row["id"])
+                key = normalize_wikilink_title(row["title"])
+                if candidate_id in seen_note_ids or key not in wanted:
+                    continue
+                seen_note_ids.add(candidate_id)
+                by_key.setdefault(key, []).append(
+                    WikilinkTitleCandidate(
+                        note_id=candidate_id,
+                        title=str(row["title"] or ""),
+                        created_at=row["created_at"],
+                    )
+                )
+        return by_key
+
+    def get_live_note_titles(self, note_ids: Iterable[str]) -> dict[str, str]:
+        """Map each live, owner-bound note id in ``note_ids`` to its title."""
+
+        normalized = tuple(dict.fromkeys(str(note_id) for note_id in note_ids if note_id))
+        if len(normalized) > 1_000:
+            raise ValueError("note title lookup is limited to 1000 note IDs")
+        titles: dict[str, str] = {}
+        for offset in range(0, len(normalized), 400):
+            batch = normalized[offset : offset + 400]
+            placeholders = ",".join("?" for _ in batch)
+            query = f"SELECT id, title FROM notes WHERE id IN ({placeholders}) AND deleted = ?"  # nosec B608
+            params: list[object] = [*batch, False if self._postgres else 0]
+            if self._postgres:
+                query += " AND client_id = ?"
+                params.append(self._db.client_id)
+            for row in self._db.execute_query(query, tuple(params)).fetchall():
+                titles[str(row["id"])] = str(row["title"] or "")
+        return titles
+
+    def get_note_title(
+        self,
+        note_id: str,
+        *,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+    ) -> str | None:
+        """Read one owner-bound note title, live or deleted."""
+
+        query = "SELECT title FROM notes WHERE id = ?"
+        params: tuple[object, ...] = (note_id,)
+        if self._postgres:
+            query += " AND client_id = ?"
+            params += (self._db.client_id,)
+        row = conn.execute(query, params).fetchone()
+        return None if row is None else str(row["title"] or "")
+
+    def refresh_title_referrers(
+        self,
+        titles: Iterable[str | None],
+        *,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+    ) -> int:
+        """Re-resolve the notes whose ``[[Title]]`` links name any of ``titles``.
+
+        Call it in the same transaction after a note with one of these titles
+        is created, renamed, deleted or restored. Up to
+        ``MAX_INLINE_TITLE_REFERRER_REFRESH`` notes are re-projected inline and
+        the rest are queued dirty for the maintenance worker. Returns the
+        number of notes re-projected inline.
+        """
+
+        keys = list(
+            dict.fromkeys(
+                wikilink_title_reference_key(title)
+                for title in titles
+                if normalize_wikilink_title(title)
+            )
+        )
+        if not keys:
+            return 0
+        placeholders = ",".join("?" for _ in keys)
+        query = (
+            "SELECT DISTINCT source_note_id FROM note_wikilink_edges "
+            f"WHERE target_note_id IN ({placeholders})"  # nosec B608
+        )
+        params: list[object] = list(keys)
+        if self._postgres:
+            query += " AND owner_user_id = ?"
+            params.append(self._db.client_id)
+        query += " ORDER BY source_note_id"
+        source_ids = [str(row["source_note_id"]) for row in conn.execute(query, tuple(params)).fetchall()]
+        refreshed = 0
+        for index, source_id in enumerate(source_ids):
+            if index >= MAX_INLINE_TITLE_REFERRER_REFRESH:
+                self._enqueue_dirty(conn, source_id)
+                continue
+            source = self.get_projection_source(source_id, conn=conn)
+            if source is None:
+                continue
+            self.replace_projection(
+                note_id=source.note_id,
+                source_version=source.version,
+                projection=parse_wikilinks(source.content, source_note_id=source.note_id),
+                conn=conn,
+            )
+            refreshed += 1
+        if source_ids:
+            self._bump_revision(conn)
+        return refreshed
+
     def mark_lifecycle(
         self,
         *,
@@ -191,15 +431,23 @@ class NoteGraphProjectionStore:
             )
         if cursor.rowcount > 0:
             self._clear_dirty(conn, note_id=note_id, claimed_generation=None)
+        # Deleting or restoring a note changes which links its title answers.
+        self.refresh_title_referrers((self.get_note_title(note_id, conn=conn),), conn=conn)
 
     def list_outgoing(self, note_id: str) -> tuple[str, ...]:
+        """List projected note-id targets, including unresolved ``[[id:UUID]]`` ones."""
+
         query = "SELECT target_note_id FROM note_wikilink_edges WHERE source_note_id = ?"
         params: tuple[object, ...] = (note_id,)
         if self._postgres:
             query += " AND owner_user_id = ?"
             params += (self._db.client_id,)
         query += " ORDER BY target_note_id"
-        return tuple(str(row["target_note_id"]) for row in self._db.execute_query(query, params).fetchall())
+        return tuple(
+            str(row["target_note_id"])
+            for row in self._db.execute_query(query, params).fetchall()
+            if not is_wikilink_title_reference_key(str(row["target_note_id"]))
+        )
 
     def list_live_outgoing(self, note_id: str) -> tuple[str, ...]:
         query = (
@@ -551,10 +799,12 @@ class NoteGraphProjectionStore:
 
 
 __all__ = [
+    "MAX_INLINE_TITLE_REFERRER_REFRESH",
     "DirtyProjection",
     "NoteGraphProjectionStore",
     "NoteProjectionSource",
     "NoteProjectionState",
     "ProjectionStatus",
     "WikilinkProjectionEdge",
+    "WikilinkTitleResolution",
 ]

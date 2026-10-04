@@ -664,6 +664,69 @@ class TitleSuggestResponse(BaseModel):
     title: str = Field(..., description="Suggested title")
 
 
+MAX_WIKILINK_RESOLVE_ITEMS = 200
+
+
+class WikilinkResolveRequest(BaseModel):
+    """Link texts from one note's ``[[Title]]`` and ``[[id:UUID]]`` wikilinks."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    titles: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_WIKILINK_RESOLVE_ITEMS,
+        description="Link texts from [[Title]] links, as written.",
+    )
+    ids: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_WIKILINK_RESOLVE_ITEMS,
+        description="Note ids from [[id:UUID]] links, as written.",
+    )
+    source_note_id: str | None = Field(
+        None,
+        max_length=200,
+        description="The linking note. It never resolves its own [[Title]] links.",
+    )
+
+    @field_validator("titles", "ids")
+    @classmethod
+    def _bounded_items(cls, values: list[str]) -> list[str]:
+        if any(len(value) > 1024 for value in values):
+            raise ValueError("each wikilink text must be at most 1024 characters")
+        return values
+
+
+class WikilinkTitleResolution(BaseModel):
+    title: str = Field(..., description="The link text, as sent.")
+    note_id: str | None = Field(
+        None,
+        description="The resolved note, or null when no live note has this title.",
+    )
+    note_title: str | None = Field(None, description="The resolved note's title.")
+    candidate_count: int = Field(
+        ...,
+        ge=0,
+        description=(
+            "Live notes whose title matches, ignoring case and extra whitespace. Above 1 the title is "
+            "ambiguous: an exact title match wins, then the oldest note, then the lowest id."
+        ),
+    )
+
+
+class WikilinkIdResolution(BaseModel):
+    id: str = Field(..., description="The note id, as sent.")
+    note_id: str | None = Field(
+        None,
+        description="The canonical note id, or null when it is malformed or no live note has it.",
+    )
+    note_title: str | None = Field(None, description="The linked note's title.")
+
+
+class WikilinkResolveResponse(BaseModel):
+    titles: list[WikilinkTitleResolution] = Field(default_factory=list)
+    ids: list[WikilinkIdResolution] = Field(default_factory=list)
+
+
 # Resolve forward references for nested schemas.
 NoteResponse.model_rebuild()
 KeywordsForNoteResponse.model_rebuild()

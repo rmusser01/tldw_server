@@ -115,6 +115,10 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NoteUpdate,
     TitleSuggestRequest,
     TitleSuggestResponse,
+    WikilinkIdResolution,
+    WikilinkResolveRequest,
+    WikilinkResolveResponse,
+    WikilinkTitleResolution,
 )
 from tldw_Server_API.app.api.v1.schemas.notes_studio import (
     NoteStudioDeriveRequest,
@@ -167,6 +171,7 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
     plan_compound_note,
 )
 from tldw_Server_API.app.core.Notes.studio_service import NotesStudioService
+from tldw_Server_API.app.core.Notes.wikilinks import canonical_wikilink_note_id
 from tldw_Server_API.app.core.Notes_Tasks import NotesTaskService, TaskActor
 from tldw_Server_API.app.core.Personalization import (
     build_note_bulk_import_activity,
@@ -2597,6 +2602,14 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
         limit: int = Query(10, ge=1, le=100, description="Number of results to return"),
         offset: int = Query(0, ge=0, description="Result offset for pagination"),
         include_keywords: bool = Query(False, description="If true, include linked keywords inline per note"),
+        title_only: bool = Query(
+            False,
+            description=(
+                "If true, match the query against note titles only: a case-insensitive substring match with "
+                "titles that start with the query first, then the most recently modified. Used for [[wikilink]] "
+                "autocomplete across the whole library. Ignored when tokens are given."
+            ),
+        ),
         sort_by: Optional[str] = Query(
             None,
             description="Accepted for client compatibility; search results are ordered by relevance and recency.",
@@ -2640,6 +2653,12 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 )
             except _NOTES_NONCRITICAL_EXCEPTIONS:
                 total = offset + len(notes_data)
+        elif title_only:
+            notes_data = db.search_note_titles(search_term=query_term, limit=limit, offset=offset)
+            try:
+                total = db.count_note_titles_matching(query_term)
+            except _NOTES_NONCRITICAL_EXCEPTIONS:
+                total = offset + len(notes_data)
         else:
             notes_data = db.search_notes(search_term=query_term, limit=limit, offset=offset)
             try:
@@ -2670,6 +2689,70 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
         }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "notes search")
+
+
+@router.post(
+    "/wikilinks/resolve",
+    response_model=WikilinkResolveResponse,
+    summary="Resolve [[Title]] and [[id:UUID]] wikilinks for the current user",
+    tags=["notes"],
+)
+async def resolve_note_wikilinks(
+        payload: WikilinkResolveRequest,
+        db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+        rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+        current_user: User = Depends(get_request_user),
+        _: None = Depends(rbac_rate_limit("notes.search")),
+) -> WikilinkResolveResponse:
+    """Resolve wikilink texts the same way the Notes graph projects them.
+
+    ``[[Title]]`` links match the current user's live notes, ignoring case and
+    extra whitespace. The linking note (``source_note_id``) never matches its
+    own title. When several notes share a title, an exact title match wins,
+    then the oldest note, then the lowest id. ``[[id:UUID]]`` links resolve
+    only to a live note with that id. Unresolved links return a null
+    ``note_id``; the WebUI offers to create the note.
+    """
+    try:
+        try:
+            allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.search")
+        except _NOTES_NONCRITICAL_EXCEPTIONS:
+            allowed, meta = True, {}
+        if not allowed:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                                detail="Rate limit exceeded for notes.search",
+                                headers={"Retry-After": str(meta.get("retry_after", 60))})
+        store = db.note_graph_projection_store
+        title_matches = store.resolve_wikilink_titles(
+            payload.titles,
+            exclude_note_id=(payload.source_note_id or "").strip() or None,
+        )
+        titles = [
+            WikilinkTitleResolution(
+                title=title,
+                note_id=title_matches[title].note_id if title in title_matches else None,
+                note_title=title_matches[title].note_title if title in title_matches else None,
+                candidate_count=title_matches[title].candidate_count if title in title_matches else 0,
+            )
+            for title in dict.fromkeys(payload.titles)
+        ]
+        canonical_ids = {raw_id: canonical_wikilink_note_id(raw_id) for raw_id in dict.fromkeys(payload.ids)}
+        live_titles = store.get_live_note_titles(
+            [note_id for note_id in canonical_ids.values() if note_id is not None]
+        )
+        ids = [
+            WikilinkIdResolution(
+                id=raw_id,
+                note_id=note_id if note_id in live_titles else None,
+                note_title=live_titles.get(note_id) if note_id is not None else None,
+            )
+            for raw_id, note_id in canonical_ids.items()
+        ]
+        return WikilinkResolveResponse(titles=titles, ids=ids)
+    except HTTPException:
+        raise
+    except _NOTES_NONCRITICAL_EXCEPTIONS as e:
+        handle_db_errors(e, "wikilink resolution")
 
 
 @router.get(
