@@ -1,18 +1,23 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, expect, it, vi } from "vitest"
 import type { HistoryTurnRecovery } from "@/db/dexie/types"
 import type { useMessageOption } from "@/hooks/useMessageOption"
 import type { Message } from "@/store/option"
 import type { MessageRecoveryAction } from "@/components/Common/Playground/Message"
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import type { ChatWorkspaceRuntimeState, StagedWorkspaceSource } from "../types"
 
 type SubmitPayload = Parameters<ReturnType<typeof useMessageOption>["onSubmit"]>[0]
 
 const uuid = "00000000-0000-4000-8000-000000000001"
 const state = vi.hoisted(() => ({
   onSubmit: vi.fn(), inspectRecovery: vi.fn(), referenceId: "reference-A",
-  ownerKey: "native-A", conversationId: "chat-A", messages: [] as Message[],
-  recoveries: [] as Array<{ turn: HistoryTurnRecovery }>, temporaryChat: false
+  ownerKey: "native-A", conversationId: "chat-A" as string | null, messages: [] as Message[],
+  recoveries: [] as Array<{ turn: HistoryTurnRecovery }>, temporaryChat: false,
+  checkpointActive: true, restoring: false,
+  selectionStatus: "ready" as HistorySelectionController["status"],
+  selectionError: null as string | null
 }))
 const turn: HistoryTurnRecovery = {
   persistence: "server", logical_user_message_id: uuid,
@@ -38,23 +43,23 @@ const finalizedSelection = {
 }
 vi.mock("@/hooks/chat/useWorkspaceChatCheckpoint", () => ({
   useWorkspaceChatCheckpoint: (options: { setDraft: (value: string) => void }) => ({
-    active: true, restoring: false, setDraft: options.setDraft, referenceId: state.referenceId,
+    active: state.checkpointActive, restoring: state.restoring, setDraft: options.setDraft, referenceId: state.referenceId,
     controller: {
-      status: "ready", settingsQualified: true, recoveries: state.recoveries,
+      status: state.selectionStatus, error: state.selectionError, settingsQualified: true, recoveries: state.recoveries,
       inspectRecovery: state.inspectRecovery,
       owner: { kind: "native", owner_key: state.ownerKey, conversation_id: state.conversationId, validate_lease: () => true },
-      getCurrent: () => ({ status: "ready", owner: { kind: "native", validate_lease: () => true } }),
-      getReference: () => ({ owner_key: state.ownerKey, conversation_id: state.conversationId })
+      getCurrent: () => ({ status: state.selectionStatus, error: state.selectionError, owner: { kind: "native", validate_lease: () => true } }),
+      getReference: () => state.conversationId ? { owner_key: state.ownerKey, conversation_id: state.conversationId } : null
     }
   })
 }))
 vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: () => ({
-    messages: state.messages, history: [], historyId: null, serverChatId: "chat-A", temporaryChat: state.temporaryChat,
+    messages: state.messages, history: [], historyId: null, serverChatId: state.conversationId, temporaryChat: state.temporaryChat,
     onSubmit: state.onSubmit, streaming: false, isLoading: false, isProcessing: false,
     selectedModel: "test-model", selectedAssistant: null, selectedAssistantSource: "explicit",
     serverChatAssistantKind: null, serverChatAssistantId: null,
-    serverChatLoadState: "ready", serverChatLoadError: null,
+    serverChatLoadState: state.conversationId ? "ready" : "idle", serverChatLoadError: null,
     setMessages: vi.fn(), stopStreamingRequest: vi.fn()
   })
 }))
@@ -82,6 +87,8 @@ vi.mock("@/components/Common/Playground/Message", () => ({
 }))
 
 import { WorkspaceChatPanel } from "../WorkspaceChatPanel"
+import { InspectorRail } from "../InspectorRail"
+import { WorkspaceStatusStrip } from "../WorkspaceStatusStrip"
 
 beforeEach(() => {
   state.onSubmit.mockReset().mockResolvedValue({ status: "submitted" })
@@ -90,6 +97,10 @@ beforeEach(() => {
   state.conversationId = "chat-A"
   state.messages = []
   state.temporaryChat = false
+  state.checkpointActive = true
+  state.restoring = false
+  state.selectionStatus = "ready"
+  state.selectionError = null
   state.recoveries = [{ turn }]
   state.inspectRecovery.mockReset().mockResolvedValue(undefined)
   turn.input_text = "Original recovered question"
@@ -99,6 +110,108 @@ beforeEach(() => {
   turn.state = "accepted_unsent"
 })
 const props = { workspaceId: "workspace-A", workspaceReady: true, stagedSources: [], backendAvailable: true, onClearStagedSources: () => {} }
+
+const stagedSource: StagedWorkspaceSource = {
+  sourceId: "source-1", mediaId: 101, title: "Operator Notes", type: "document",
+  scopeLabel: "Workspace A", availability: "ready"
+}
+
+function RuntimeSurface({ stagedSources = [] }: { stagedSources?: StagedWorkspaceSource[] }) {
+  const [runtime, setRuntime] = React.useState<ChatWorkspaceRuntimeState>({
+    backendAvailable: true, streaming: false, selectedModelLabel: "test-model",
+    hasModelSelected: true, selectedPersonaLabel: null, assistantSource: "none"
+  })
+  return <>
+    <WorkspaceChatPanel {...props} stagedSources={stagedSources} onRuntimeStateChange={setRuntime} />
+    <InspectorRail {...runtime} workspaceReady scopeLabel="Workspace A"
+      stagedSourceCount={stagedSources.length} stagedSources={stagedSources} />
+    <WorkspaceStatusStrip {...runtime} workspaceReady stagedSourceCount={stagedSources.length} />
+  </>
+}
+
+function expectRailStatus(label: string) {
+  expect(within(screen.getByLabelText("Chat workspace status")).getByRole("status")).toHaveTextContent(label)
+  expect(within(screen.getByRole("complementary", { name: "Chat workspace inspector" })).getByText(label)).toBeInTheDocument()
+}
+
+it.each([
+  ["unsupported_history_capability", "invalid_history_reference"],
+  ["error", "history_selection_failed"],
+  ["legacy_review_required", "legacy_projection_required"],
+  ["stale_selection", "stale_bookmark"],
+  ["invalid_history", null]
+] as const)("checkpoint readiness blocks typed and staged sends for %s after restoration settles", (status, error) => {
+  state.conversationId = null
+  state.recoveries = []
+  state.restoring = true
+  state.selectionStatus = "loading"
+  const surface = render(<RuntimeSurface stagedSources={[stagedSource]} />)
+  fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), { target: { value: "Retained draft" } })
+  expectRailStatus("Loading chat history")
+
+  state.restoring = false
+  state.selectionStatus = status
+  state.selectionError = error
+  surface.rerender(<RuntimeSurface stagedSources={[stagedSource]} />)
+
+  expectRailStatus("Chat history unavailable")
+  expect(screen.queryByText("Ready")).not.toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Send with staged context" })).toBeDisabled()
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+  fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
+  fireEvent.submit(screen.getByRole("textbox", { name: "Chat workspace message" }).closest("form")!)
+  expect(state.onSubmit).not.toHaveBeenCalled()
+  expect(screen.getByRole("textbox", { name: "Chat workspace message" })).toHaveValue("Retained draft")
+
+  state.selectionStatus = "ready"
+  state.selectionError = null
+  state.conversationId = "chat-A"
+  surface.rerender(<RuntimeSurface stagedSources={[stagedSource]} />)
+  expectRailStatus("Ready")
+  expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled()
+  expect(screen.getByRole("button", { name: "Send with staged context" })).toBeEnabled()
+  expect(screen.getByRole("textbox", { name: "Chat workspace message" })).toHaveValue("Retained draft")
+  expect(state.onSubmit).not.toHaveBeenCalled()
+})
+
+it.each(["loading", "pending", "pending_unknown"] as const)("checkpoint readiness waits for active %s even without a server-loader request", (status) => {
+  state.conversationId = null
+  state.recoveries = []
+  state.selectionStatus = status
+  state.selectionError = status === "pending_unknown" ? "confirmation_outcome_unknown" : null
+  render(<RuntimeSurface stagedSources={[stagedSource]} />)
+  fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), { target: { value: "Retained draft" } })
+  expectRailStatus("Loading chat history")
+  expect(screen.queryByText("Ready")).not.toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Send with staged context" })).toBeDisabled()
+  expect(state.onSubmit).not.toHaveBeenCalled()
+})
+
+it("checkpoint readiness preserves Ready for an empty new chat with an idle controller", () => {
+  state.conversationId = null
+  state.recoveries = []
+  state.selectionStatus = "idle"
+  render(<RuntimeSurface stagedSources={[stagedSource]} />)
+  expectRailStatus("Ready")
+  expect(screen.getByRole("button", { name: "Send with staged context" })).toBeEnabled()
+  fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), { target: { value: "New question" } })
+  expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled()
+  expect(state.onSubmit).not.toHaveBeenCalled()
+})
+
+it("checkpoint readiness ignores controller state when the checkpoint is inactive", () => {
+  state.checkpointActive = false
+  state.conversationId = null
+  state.recoveries = []
+  state.selectionStatus = "unsupported_history_capability"
+  state.selectionError = "invalid_history_reference"
+  render(<RuntimeSurface stagedSources={[stagedSource]} />)
+  expectRailStatus("Ready")
+  expect(screen.getByRole("button", { name: "Send with staged context" })).toBeEnabled()
+  expect(state.onSubmit).not.toHaveBeenCalled()
+})
 
 it("keeps retained recovery controls in the transcript scroller outside the composer", () => {
   render(<WorkspaceChatPanel {...props} />)
