@@ -53,12 +53,14 @@ from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.endpoints.chat_import_transport import ChatImportRoute
 from tldw_Server_API.app.api.v1.endpoints.workspace_chat_startup_transport import WorkspaceStartupRoute
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
     ConversationScopeParams,
 )
+from tldw_Server_API.app.api.v1.schemas.chat_import_schemas import ChatImportRequest
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     DEFAULT_LLM_PROVIDER,
 )
@@ -98,6 +100,8 @@ from tldw_Server_API.app.api.v1.schemas.workspace_chat_startup_schemas import (
     WorkspaceChatStartupRequest,
 )
 from tldw_Server_API.app.api.v1.utils.chat_message_images import (
+    _complete_message_images,
+    _detect_image_mime_type,
     format_message_content,
     read_messages_with_images,
 )
@@ -150,6 +154,8 @@ from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
 
 # Import shared constants
 from tldw_Server_API.app.core.Character_Chat.constants import (
+    MAX_MESSAGE_IMAGE_BYTES,
+    MAX_PERSIST_CONTENT_LENGTH,
     MAX_STREAMING_BYTES,
     MAX_STREAMING_CHUNKS,
     MAX_TOOL_CALLS_COUNT,
@@ -170,6 +176,7 @@ from tldw_Server_API.app.core.Character_Chat.emote_directives import (
     resolve_character_emote_completion,
     validate_emote_events_for_text,
 )
+from tldw_Server_API.app.core.Character_Chat.modules.character_chat import _content_length_for_guardrails
 from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
     resolve_character_generation_settings,
 )
@@ -198,6 +205,15 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
     resolve_provider_and_model,
 )
+from tldw_Server_API.app.core.Chat.conversation_import import (
+    MESSAGE_ID_CONFLICT,
+    ChatImportError,
+    ChatImportLimits,
+    PreparedChatImport,
+    chat_id_conflict,
+    prepare_chat_import,
+    resolve_import_replay,
+)
 from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
     evaluate_prompt_cost_guardrails,
@@ -213,7 +229,9 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     sanitized_provider_stream_exception,
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+from tldw_Server_API.app.core.DB_Management.chacha.message_store import MAX_CHAT_ATTACHMENT_READ_BYTES
 from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store import WorkspaceStartupError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -4965,6 +4983,297 @@ async def create_chat_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while creating chat session"
         ) from e
+
+
+# ========================================================================
+# Local chat import (D7 P8)
+# ========================================================================
+
+# One import may carry as many image bytes as one message page or one history
+# capture can read back, so an imported chat can always be loaded.
+MAX_CHAT_IMPORT_IMAGE_BYTES = MAX_CHAT_ATTACHMENT_READ_BYTES
+
+
+def _chat_import_setting(name: str, default: int) -> int:
+    """Read a positive integer limit from settings, falling back to its default."""
+    try:
+        configured = int(app_settings.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return configured if configured > 0 else default
+
+
+def _chat_import_limits() -> ChatImportLimits:
+    """Apply the limits ordinary message creation applies, plus the import image budget."""
+    return ChatImportLimits(
+        max_content_chars=_chat_import_setting("MAX_PERSIST_CONTENT_LENGTH", MAX_PERSIST_CONTENT_LENGTH),
+        max_image_bytes=_chat_import_setting("MAX_MESSAGE_IMAGE_BYTES", MAX_MESSAGE_IMAGE_BYTES),
+        max_total_image_bytes=MAX_CHAT_IMPORT_IMAGE_BYTES,
+    )
+
+
+def _inspect_chat_import_image(data: bytes) -> str:
+    """Return the image type, accepting only an image the message API can serve back.
+
+    The message API refuses to return a chat page that holds a damaged image, so
+    an import runs the same checks up front: one bad image would otherwise make
+    the saved chat unreadable.
+    """
+    mime = _detect_image_mime_type(data)
+    if mime is None:
+        raise ChatImportError(
+            "invalid_image", 422, "An image is not in a supported format (PNG, JPEG, GIF, WebP, BMP or ICO)."
+        )
+    try:
+        _complete_message_images({"images": [{"image_data": data, "image_mime_type": mime}]})
+    except HTTPException as error:
+        if error.status_code == status.HTTP_413_CONTENT_TOO_LARGE:
+            raise ChatImportError("image_too_large", 413, "An image is larger than the server allows.") from None
+        raise ChatImportError("invalid_image", 422, "An image is damaged or cannot be decoded.") from None
+    return mime
+
+
+def _find_chat_import_replay(db: CharactersRAGDB, prepared: PreparedChatImport, owner_id: str) -> dict[str, Any] | None:
+    """Return the caller's matching imported chat, None if the id is free, or raise 409/410."""
+    existing, stored_fingerprint = db.chat_imports.get_import_state(prepared.conversation_id)
+    replay = resolve_import_replay(
+        existing, owner_id=owner_id, stored_fingerprint=stored_fingerprint, fingerprint=prepared.fingerprint
+    )
+    return dict(replay) if replay is not None else None
+
+
+def _resolve_chat_import_lineage(db: CharactersRAGDB, prepared: PreparedChatImport, owner_id: str) -> dict[str, Any]:
+    """Check the assistant binding and fork lineage against the caller's own data.
+
+    A parent that is missing, in trash or owned by someone else is reported the
+    same way, so the answer says nothing about other accounts.
+    """
+    conversation = prepared.conversation
+    if conversation["assistant_kind"] == "persona":
+        if not db.get_persona_profile(conversation["assistant_id"] or "", user_id=owner_id):
+            raise ChatImportError("persona_not_found", 404, "The persona this chat is bound to was not found.")
+    elif conversation["assistant_kind"] == "character" and not db.get_character_card_by_id(conversation["character_id"]):
+        raise ChatImportError("character_not_found", 404, "The character this chat is bound to was not found.")
+
+    lineage: dict[str, Any] = {
+        "root_id": prepared.conversation_id,
+        "parent_conversation_id": None,
+        "forked_from_message_id": None,
+    }
+    parent_id = conversation["parent_conversation_id"]
+    if parent_id is None:
+        return lineage
+    parent = db.get_conversation_by_id(parent_id)
+    if (
+        not parent
+        or str(parent.get("client_id") or "").strip() != owner_id
+        or (parent.get("scope_type") or "global") != "global"
+    ):
+        raise ChatImportError(
+            "parent_conversation_not_found",
+            404,
+            "The chat this one was forked from is not on the server. Save that chat first, or import without it.",
+        )
+    lineage.update(root_id=parent.get("root_id") or parent["id"], parent_conversation_id=parent["id"])
+    fork_message_id = conversation["forked_from_message_id"]
+    if fork_message_id is not None:
+        source = db.get_message_by_id(fork_message_id)
+        if not source or source.get("conversation_id") != parent["id"]:
+            raise ChatImportError(
+                "invalid_fork_source", 422, "forked_from_message_id must be a message of the parent chat."
+            )
+        lineage["forked_from_message_id"] = source["id"]
+    return lineage
+
+
+def _project_imported_chat(db: CharactersRAGDB, conversation_id: str, owner_id: str) -> ChatSessionResponse:
+    """Return the current state of an imported chat."""
+    conversation = db.get_conversation_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve imported chat session",
+        )
+    return _convert_db_conversation_to_response(
+        _attach_conversation_assistant_names(db, dict(conversation), owner_id),
+        resume_state=db.get_roleplay_resume_state(conversation_id),
+        db=db, user_id=owner_id,
+    )
+
+
+async def import_chat_session(
+    import_data: ChatImportRequest,
+    response: Response,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> ChatSessionResponse:
+    """Save a chat that exists only on a device to the signed-in account, losslessly (D7 P8).
+
+    The body is one conversation and its whole message graph. Conversation and
+    message ids, parent links, roles, text, timestamps and images are stored as
+    sent, in one transaction: either the whole chat is imported or nothing is.
+    Timestamps are never replaced with the time of the import. The result is an
+    ordinary server chat that can be read, branched and continued.
+
+    Ownership: the chat always goes to the authenticated account, in the global
+    chat scope. The body has no owner, scope, version or deleted field, and any
+    unknown field is refused.
+
+    Idempotency: the same owner repeating the same import gets the existing
+    chat back with 200 and ``Idempotency-Replayed: true``, even after the chat
+    was renamed, edited or continued. Any other use of the id is 409
+    ``chat_id_conflict``; a repeat after the chat was trashed is 410
+    ``chat_deleted``; a message id already used on the server is 409
+    ``message_id_conflict``.
+
+    Compared with sending the messages one by one:
+
+    * Text, role, per-message size and image limits are the same as
+      ``POST /chats/{chat_id}/messages``. Images are additionally decoded once,
+      as the message API does when it returns them.
+    * Moderation is not run, as on that route: it applies to generation.
+    * One import counts once against the chat-creation rate limit, not once per
+      message. The per-chat message limit and the chat count quota apply.
+    * No greeting is seeded, no auto-tagging is scheduled and no character
+      behavior snapshot is taken: the import is exactly the messages sent.
+    * Generation metadata is accepted only for assistant messages and only the
+      allow-listed keys; an empty message is refused.
+
+    Sync v2: refused with 409 ``sync_chat_import_unsupported`` while a Sync v2
+    profile is active. Sync envelopes are written one mutation at a time and
+    carry no images or generation metadata, so an import through them would be
+    neither atomic nor lossless.
+
+    Args:
+        import_data: The conversation and its messages.
+        response: Receives 200 and the replay header for a repeated import.
+        db: The authenticated owner's ChaCha store.
+        current_user: The authenticated owner of the imported chat.
+
+    Returns:
+        The imported chat, or the existing chat on a replay.
+
+    Raises:
+        HTTPException: 403 for the message or chat quota, 404 for an unknown
+            character, persona or fork parent, 409/410 as above, 413 for a
+            message, image or image total that is too large, 422 for an invalid
+            graph, metadata, timestamp or image, 429 when rate limited.
+    """
+    owner_id = str(current_user.id)
+    rate_limiter = get_character_rate_limiter()
+    await rate_limiter.check_rate_limit(current_user.id, "chat_create")
+    try:
+        if _active_chat_sync_service(current_user, ConversationScopeParams()) is not None:
+            raise ChatImportError(
+                "sync_chat_import_unsupported",
+                409,
+                "Saving a local chat to the server is not supported while Sync v2 is active.",
+            )
+        prepared = await run_in_threadpool(
+            prepare_chat_import,
+            import_data.model_dump(),
+            limits=_chat_import_limits(),
+            now=datetime.now(timezone.utc),
+            inspect_image=_inspect_chat_import_image,
+            content_length=_content_length_for_guardrails,
+        )
+        chat_id = prepared.conversation_id
+
+        # A replay is answered before quota checks: it creates nothing.
+        if await run_in_threadpool(_find_chat_import_replay, db, prepared, owner_id) is not None:
+            response.status_code = status.HTTP_200_OK
+            response.headers["Idempotency-Replayed"] = "true"
+            logger.debug("Replayed chat import {} for user {}", chat_id, owner_id)
+            return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id)
+
+        limits = rate_limiter._limits
+        try:
+            await rate_limiter.check_message_limit(chat_id, len(prepared.messages))
+        except HTTPException as error:
+            raise ChatImportError(
+                "message_limit_exceeded", error.status_code, str(error.detail), limit=limits.max_messages_per_chat
+            ) from None
+        try:
+            chat_count = await run_in_threadpool(
+                db.count_conversations_for_user, owner_id, scope_type="global", workspace_id=None
+            )
+        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as error:
+            # Fail closed: quota enforcement must work to prevent resource exhaustion.
+            logger.error("Chat limit enforcement failed, denying import: {}", error)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Quota enforcement unavailable. Please try again later.",
+            ) from error
+        try:
+            await rate_limiter.check_chat_limit(current_user.id, chat_count)
+        except HTTPException as error:
+            raise ChatImportError(
+                "chat_limit_exceeded", error.status_code, str(error.detail), limit=limits.max_chats_per_user
+            ) from None
+
+        lineage = await run_in_threadpool(_resolve_chat_import_lineage, db, prepared, owner_id)
+        try:
+            await run_in_threadpool(
+                db.chat_imports.import_conversation,
+                {**prepared.conversation, **lineage, "id": chat_id},
+                prepared.messages,
+                owner_client_id=owner_id,
+                request_fingerprint=prepared.fingerprint,
+            )
+        except ConflictError as error:
+            if getattr(error, "entity", None) == "messages":
+                raise ChatImportError(
+                    MESSAGE_ID_CONFLICT,
+                    409,
+                    "A message id in this chat is already in use on the server.",
+                    message_id=getattr(error, "entity_id", None),
+                ) from None
+            # Another request imported this id after our read, or a chat the caller cannot see
+            # holds it. The primary key decided, and this import rolled back.
+            if await run_in_threadpool(_find_chat_import_replay, db, prepared, owner_id) is None:
+                raise chat_id_conflict() from None
+            response.status_code = status.HTTP_200_OK
+            response.headers["Idempotency-Replayed"] = "true"
+            return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id)
+
+        logger.info(
+            "Imported chat session {} with {} messages for user {}", chat_id, len(prepared.messages), owner_id
+        )
+        return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id)
+    except ChatImportError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail()) from None
+    except HTTPException:
+        raise
+    except InputError as e:
+        logger.warning("Invalid chat import input: {}", e)
+        raise map_db_error_to_http(e) from e
+    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
+        logger.error(f"Error importing chat session: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while importing chat session"
+        ) from e
+
+
+router.add_api_route(
+    "/import", import_chat_session, methods=["POST"], response_model=ChatSessionResponse,
+    status_code=status.HTTP_201_CREATED, summary="Import a local chat with its whole message graph",
+    tags=["Chat Sessions"], dependencies=[Depends(require_expected_user)], route_class_override=ChatImportRoute,
+    responses={
+        200: {
+            "description": "Replay: the same owner repeated this import",
+            "model": ChatSessionResponse,
+            "headers": {"Idempotency-Replayed": {"schema": {"type": "string", "enum": ["true"]}}},
+        },
+        403: {"description": "The chat has more messages than a chat may hold, or the chat quota is used up"},
+        404: {"description": "The character, persona or fork parent named by the import was not found"},
+        409: {"description": "The chat id or a message id is already in use, or Sync v2 is active"},
+        410: {"description": "The chat imported with this id is in trash; the id stays taken"},
+        413: {"description": "The body, a message, an image or the images in total are too large"},
+        422: {"description": "The message graph, metadata, a timestamp or an image is not valid"},
+        429: {"description": "Chat creation rate limit exceeded"},
+    },
+)
 
 
 # ========================================================================
