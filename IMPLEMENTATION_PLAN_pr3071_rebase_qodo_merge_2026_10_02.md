@@ -663,3 +663,46 @@ fails on a nonexistent App Router path before tests; correction uses the actual
 Pages Router and the failed preflight is not a successful qualification. Publish
 these four owned files as one normal commit, preserving the exact human summary.
 Fresh-head hosted E2E/Qodo and outstanding native acceptance remain required.
+
+## Stage 12: Intentional Stop Presentation
+**Goal**: Remove misleading send-failure presentation for intentional durable
+cancellation without changing protected recovery, admission or resend behavior.
+**Success Criteria**: Recover first, then reuse the existing neutral cancellation
+result; non-cancellation errors remain failures. Preserve all historical failed
+collectors and keep narrow acceptance distinct from full UAT.
+**Tests**: Unknown/accepted/partial-output cancellation RED/GREEN, owning pipeline
+and workspace regressions, production types/lint/build and independent review.
+**Status**: Complete
+
+The approved single-input native run activates Stop and the API logs client
+disconnect/stream cancellation. Its client-admission timing predicate fails and
+the original collector remains failed. Separate zero-send protected Verify,
+reload and mobile canonical Reprepare pass before the original deadline; all13
+rows, original draft and viewport are unchanged. Independent evidence review
+qualifies that narrow Stop/recovery scope, not full UAT, mobile Stop, partial
+output or provider compute-shutdown latency. The reviewer identifies a P3 UI
+issue: durable cancellation returns failed with raw abort text and generic retry
+guidance. Reuse Request cancelled after unchanged recovery; no new native input
+or automatic resend. Current published618/dev502da Qodo remains clear but current
+hosted CI is queued/running, not qualified. Batch only actual corrective changes.
+
+Expected RED4/18pass and focused GREEN22pass. The initial broader invocation
+passes570 but cannot load one suite's OCR dependency. The existing shared Vitest
+configuration resolves that dependency and exposes a pre-dispatch expired-account
+contract; restrict neutral cancellation to dispatched turns and retain that
+original failure assertion. Fresh owning qualification passes586/0skips across60
+suites. Production TypeScript8GB exits0. Actual shared-file lint has0newfindings:
+production0errors/7inheritedwarnings; test1inheritedrequire-yield/13warnings.
+Initial out-of-base lint is ignored and not qualification. Fresh14production
+Python Bandit0findings/errors and281PR-range hooks pass, without suppressions.
+
+Fresh isolated production build/token/unchanged-budget checks pass. A failed
+snapshot patch-preflight is retained separately; the corrected snapshot preserves
+the diff's final newline and all7225app hashes. Only the owned frontend6233 on
+18102 is replaced by5072; API20850 and all shared/model services are unchanged.
+New-build actual Chrome reload checks pass at1440x900 and390x844CSS/DPR1 with
+protected recovery, exact draft/history checkpoints, all13rows unchanged,
+0sends/0retrievals/0overflow/0exceptions. Screenshot pixels are inspected. This is
+zero-send acceptance, NOT a fresh revised Stop activation or full UAT pass.
+Independent correction review finds no actionable issue. Publish the verified
+correction once; exact new-head hosted gates and review remain required.

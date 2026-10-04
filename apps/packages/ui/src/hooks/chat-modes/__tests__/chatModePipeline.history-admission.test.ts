@@ -328,6 +328,49 @@ describe("selected durable server settlement", () => {
     expect(turn.admission.input_message_id).toBe(inputId)
     expect(turn.recover).toHaveBeenCalledOnce()
   })
+  it.each(["unknown", "accepted", "partial"])(
+    "presents durable Stop as cancellation while preserving %s recovery",
+    async (observation) => {
+      const turn = await nativeTurn(), model = serverModel(turn, false)
+      const controller = new AbortController(), save = vi.fn(), errorSave = vi.fn()
+      model.stream.mockImplementation(async function* (_messages: unknown, options: { preparedRequest: HistoryDurableRequestBodyV1 }) {
+        if (observation !== "unknown") {
+          const history = options.preparedRequest.tldw_turn.history_v1
+          if (history.kind !== "selection") throw new Error("expected_initial_selection")
+          const selection = history.selection
+          model.historyAdmission = validateHistoryDurableAdmission(
+            turn.owner, history, inputId, {
+              version: 1, owner_key: "local-key", conversation_id: "chat",
+              input_message_id: inputId, input_message_revision: "1",
+              selection_digest: selection.selection_digest,
+              messages: selection.messages, originating_selection_revision: 1
+            }
+          )
+          yield { tldw_history_admission_v1: model.historyAdmission }
+        }
+        if (observation === "partial") yield "partial answer"
+        controller.abort()
+        throw new DOMException("signal is aborted without reason", "AbortError")
+      })
+      const result = await invoke(turn, {
+        tldwTurn: { user_message_id: inputId }, userMessageId: inputId,
+        saveMessageOnSuccess: save, saveMessageOnError: errorSave
+      }, mode, controller.signal)
+
+      expect(result).toEqual({ status: "skipped", reason: "Request cancelled" })
+      expect(turn.recover).toHaveBeenCalledWith(
+        expect.objectContaining({ content: observation === "partial" ? "partial answer" : "" }),
+        expect.objectContaining({ name: "AbortError" })
+      )
+      expect(turn.admission?.input_message_id).toBe(observation === "unknown" ? undefined : inputId)
+      expect(turn.dispatched).toBe(true)
+      expect(turn.observedResult).toBeUndefined()
+      expect(turn.complete).not.toHaveBeenCalled()
+      expect(save).not.toHaveBeenCalled()
+      expect(errorSave).not.toHaveBeenCalled()
+      expect(model.stream).toHaveBeenCalledOnce()
+    }
+  )
   it("preserves already projected RAG source metadata in the durable request", async () => {
     const turn = await nativeTurn(), model = serverModel(turn, false)
     const sources = [{ name: "Document", type: "pdf", mode: "rag" as const,
@@ -401,8 +444,9 @@ describe("selected durable server settlement", () => {
         tldwTurn: { user_message_id: inputId }, userMessageId: inputId,
         saveMessageOnSuccess: save, saveMessageOnError: errorSave
       }, mode, controller.signal)
-      expect(result).toMatchObject({ status: "failed", errorMessage:
-        failure === "Stop" ? "Request cancelled after history admission" : failure })
+      expect(result).toEqual(failure === "Stop"
+        ? { status: "skipped", reason: "Request cancelled" }
+        : { status: "failed", errorMessage: failure })
       expect(turn.observedResult).toEqual(model.historyResult)
       const reloaded = read("selected-operation")
       expect(reloaded).toMatchObject({ assistant_id: resultId, observed_result: model.historyResult })

@@ -1171,6 +1171,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   } catch (e) {
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
+    const isAbort = signal.aborted || isAbortLikeError(e)
     if (historyTurn) {
       if (historyTurn.dispatched) {
         // The iterator can fail after transport validation but before yielding the receipt.
@@ -1195,6 +1196,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         await historyTurn.cancelPreparation?.()
         setMessagesWithTransition(messages)
       }
+      if (historyTurn.dispatched && isAbort)
+        return chatSubmitSkipped("Request cancelled")
       return chatSubmitFailed(
         e instanceof Error ? e.message : "History send failed"
       )
@@ -1204,7 +1207,6 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       setHistorySafely(history)
       return chatSubmitSkipped("Request scope changed")
     }
-    const isAbort = signal.aborted || isAbortLikeError(e)
     if (isAbort && params.discardCurrentTurnOnAbort?.() === true) {
       setMessages(messages)
       setHistorySafely(history)
