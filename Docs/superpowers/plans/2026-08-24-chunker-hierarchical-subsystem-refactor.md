@@ -13,12 +13,17 @@
 ## Source References
 
 - Approved spec: `Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md`
-- Completed design task: `TASK-13421`
+- Completed design task: `TASK-13423`
 - Implementation task: `TASK-13422`
 
 Tracking note (2026-10-02): `TASK-13421` and `TASK-13422` replace the
 workstream's colliding design/implementation IDs. Historical records remain
 provenance; forward-looking instructions and commits use only the new IDs.
+
+Tracking note (2026-10-04): the latest `dev` introduces an unrelated Jobs
+`TASK-13421`. The completed design now uses `TASK-13423`; the prior record
+remains unchanged as provenance. `TASK-13422` remains the active implementation
+and PR review task.
 - Current implementation: `tldw_Server_API/app/core/Chunking/chunker.py`
 - Existing process pipeline: `tldw_Server_API/app/core/Chunking/process_text/`
 
@@ -1390,3 +1395,29 @@ If any step cannot be satisfied, document the finding and defer it without chang
 - [x] Full Chunking suite and all static/security gates recorded.
 - [x] Final review findings validated and addressed (SPEC/QUALITY approved; no actionable findings).
 - [x] PR targets `dev`; human-written `Change summary` merge gate remains explicit.
+
+## PR Integration Follow-Up (2026-10-04)
+
+The requester authorized rebasing PR #3095, addressing verified Qodo feedback,
+and merging after current-head review and CI gates pass. Their human-written
+Change summary was posted verbatim and verified in the PR body.
+
+The conflict-free rebase onto `d7997bc2052ac52c77427157fe3c5b2e2ca1843f`
+left Chunking production code and tests byte-identical to the prior head.
+Fresh verification: 777 passed, one existing PyThaiNLP skip, 1963 warnings,
+52.69s; compileall and Ruff pass; scoped Black leaves 15 files unchanged;
+mypy reports no issues in seven source files; Bandit reports zero findings or
+errors across 2822 LOC. Logs: `/tmp/task13422_rebase_chunking.txt` and
+`/tmp/bandit_task13422_rebase.json`.
+
+`dev` advanced again to `bf8f2ad6a42ad6396376020876a5f6a709ec6b34` during
+verification, with no additional Chunking production/test changes. Include
+that base before publishing. Current tracking is TASK-13422, with the completed
+design linked at the exact TASK-13423 record path; historical colliding records
+remain unchanged.
+
+- [x] Human-owned Change summary posted and verified.
+- [x] Rebase verification and tracking reconciliation recorded.
+- [ ] Publish rebased branch and complete latest-head Qodo review/CI.
+- [ ] Validate and address all applicable review findings.
+- [ ] Merge using the verified head without bypassing repository safeguards.
