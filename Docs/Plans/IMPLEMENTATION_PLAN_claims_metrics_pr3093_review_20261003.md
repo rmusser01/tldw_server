@@ -61,4 +61,14 @@
 - [x] Reproduce the new latest-dev pre-commit failure with the official `backlog-py task normalize --check`: the same four PR-touched task records are noncanonical. ADR-059 now requires backlog-py for all task edits.
 - [x] Normalize only TASK-9935.1, TASK-12993.1, TASK-9935.3 and TASK-9935.4 through the official repository CLI; diff review confirms task text, statuses, criteria, frontmatter and history are preserved. The exact scoped format check passes.
 - [x] Verify Backlog format ratchet/tool tests: 149 passed with no skips. Complete PR-scoped pre-commit passes all applicable hooks with the correction staged; its initial unstaged run had stashed and tested the old records. No runtime/test edits, so Bandit is not applicable to this documentation-only correction. Logs: `/tmp/claims-pr3093-backlog-format-20261004.log`, `/tmp/claims-pr3093-precommit-20261004.log`.
-- [ ] Publish the scoped correction and wait for fresh CI/review. The active follow-up now explicitly uses the latest ADR-059 repository task editor for all future task edits.
+- [x] Publish the scoped correction as 91f207b1c4ad2e70be9dbfdf0f1bd5e60d398df6. No runtime/test files changed. The active follow-up uses the latest ADR-059 task editor for all future task edits.
+- [ ] Wait for fresh CI/review on the final published head; dev advanced again before the prior head could satisfy all checks.
+
+### Latest Dev Rebase (2026-10-04 20:54 UTC)
+
+- [x] Rebase all eleven PR commits cleanly onto dev c95e41fc62a07e55fd74052023826c71b2a2c789. This base advance only normalizes unrelated Backlog records. Range-diff confirms every PR commit remains patch-equivalent; production, tests, config, scripts, docs and instructions are identical to the previous head.
+- [x] Rebased local head 35ef7486fce5bf3dd41c3f315dc7124432fbc404 passes 1,286 scoped RUN_JOBS=1 tests with zero skips, including official PostgreSQL fixtures; 324 Config/docs/ratchet tests; and 149 Backlog tool/format-ratchet tests with zero skips. All five PR-touched task records are canonical. Compilation passes for fourteen production files, focused Ruff passes, and Bandit reports zero findings/errors across all fourteen files.
+- [x] Record verification logs: `/tmp/claims-pr3093-scoped-rebase2-20261004.log`, `/tmp/claims-pr3093-config-docs-rebase2-20261004.log`, `/tmp/bandit_claims_pr3093_rebase2_20261004.json`. No new actionable review feedback or unresolved threads; original eight findings remain resolved. ADR-003 and ADR-059 remain governing decisions; no new ADR required.
+- [x] Complete staged PR-scoped pre-commit passes every applicable hook, including canonical Backlog format and Python syntax checks. Log: `/tmp/claims-pr3093-precommit-rebase2-20261004.log`.
+- [ ] Publish using an explicit force-with-lease against fetched remote head 91f207b1c4ad2e70be9dbfdf0f1bd5e60d398df6.
+- [ ] Recheck the final head's required CI, feedback, human summary and latest dev before exact-head merge. Do not cancel CI, bypass hooks, weaken gates or use admin merge.
