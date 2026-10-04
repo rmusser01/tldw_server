@@ -30,12 +30,12 @@ function searchQueryInContent(content: string, query: string): boolean {
   if (!content || !query) {
     return false;
   }
-  
+
   const normalizedContent = content.toLowerCase();
   const normalizedQuery = query.toLowerCase().trim();
-  
+
   const wordBoundaryPattern = new RegExp(`\\b${normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-  
+
   return wordBoundaryPattern.test(normalizedContent);
 }
 
