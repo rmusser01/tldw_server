@@ -1,9 +1,8 @@
 /**
  * UX review 2026-10 contract reproduction XP-02 (#3109).
  *
- * The `it.fails` test asserts the CORRECT behaviour and passes only while the
- * defect exists. When the fix lands it starts failing: convert it to a plain
- * `it(...)` in the same change.
+ * The test asserts the CORRECT behaviour. It started as an `it.fails` marker
+ * while the defect existed and is now a plain `it(...)` regression test.
  */
 import { describe, expect, it, vi } from "vitest"
 import type {
@@ -72,8 +71,8 @@ const buildNativeServerCapture = (): HistorySelectionCaptureV1 => {
 }
 
 describe("formatSelectedHistory UX contract reproductions (#3109)", () => {
-  // XP-02 (#3109): db/dexie/helpers.ts:377-393 builds rows from metadata.local_history (never has serverMessageId), so formatToMessage (helpers.ts:358) drops it.
-  it.fails("XP-02 (#3109): messages loaded from a server chat keep their serverMessageId", () => {
+  // XP-02 (#3109): formatSelectedHistory built rows only from metadata.local_history (never has serverMessageId), so formatToMessage dropped it.
+  it("XP-02 (#3109): messages loaded from a server chat keep their serverMessageId", () => {
     const display = formatSelectedHistory(buildNativeServerCapture())
 
     expect(

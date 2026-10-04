@@ -1,6 +1,7 @@
 import type { LocalHistoryOwnerV1 } from "./history-selection"
 import { ensureLocalProfileId } from "./history-selection"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
+import { isLocalHistoryOwnerKey } from "@/utils/history-selection"
 import {
   type ChatHistory as ChatHistoryType,
   type Message as MessageType,
@@ -376,6 +377,11 @@ export const formatToMessage = (messages: MessageHistory, selectedIds?: readonly
 /** Display projection only. The original capture retains canonical provider roles/content. */
 export const formatSelectedHistory = (capture: import("@/types/history-selection").HistorySelectionCaptureV1) => {
   const content = new Map(capture.selected_content.map(row => [row.id, row]))
+  // A server-owned capture's node ids are its server message ids, which the server-backed
+  // message actions (Save to Notes/Flashcards, feedback, pin) need. node.revision is a
+  // digest, not the message version, so serverMessageVersion stays unset; callers fetch it.
+  const ownerKey = capture.snapshot.owner_key
+  const serverOwned = Boolean(ownerKey) && !isLocalHistoryOwnerKey(ownerKey)
   const rows: MessageHistory = capture.rows.map(node => {
     const selected = content.get(node.id)
     if (!selected) throw new Error("selected_content_mismatch")
@@ -383,6 +389,7 @@ export const formatSelectedHistory = (capture: import("@/types/history-selection
     const local = (metadata.local_history || {}) as Partial<Message>
     return {
       ...local,
+      ...(serverOwned ? { serverMessageId: node.id } : {}),
       id: node.id, history_id: capture.view.conversation_id,
       role: node.role, name: typeof metadata.sender_name === "string" ? metadata.sender_name : node.role === "user" ? "You" : "Assistant",
       content: selected.message, images: [...selected.images], createdAt: 0,
