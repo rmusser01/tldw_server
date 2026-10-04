@@ -11,9 +11,11 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.Chat.history_selection import (
+    HistoryBranchChangedError,
     HistoryFencesV1,
     HistorySelectionError,
     HistorySelectionSnapshotV1,
+    history_branch_leaves,
     resolve_legacy_projection,
     resolve_parent_path,
     snapshot_to_wire,
@@ -697,6 +699,30 @@ class MessageStore:
 
         return MessageStore._history_digest(encode(message))
 
+    @staticmethod
+    def _require_history_tip(
+        snapshot: HistorySelectionSnapshotV1,
+        parent_id: str | None,
+        history_branch: bool | None,
+    ) -> None:
+        """Refuse a "must extend the latest message" admission whose tip already continued.
+
+        Runs under the owner lock against the validated statement snapshot, so live
+        children are exactly the non-deleted rows committed before this admission.
+        `None` (field absent) keeps the unchecked admission; `True` is an explicit
+        branch. Settlement, which adds replies and regenerated variants, never calls this.
+        """
+        if history_branch is not False:
+            return
+        leaves = history_branch_leaves(snapshot.nodes, snapshot.interpretation_status, parent_id)
+        if leaves:
+            raise HistoryBranchChangedError(
+                conversation_id=snapshot.conversation_id,
+                parent_message_id=parent_id,
+                leaf_ids=leaves,
+                history_version=snapshot.fences.history,
+            )
+
     def append_selected_history_input(
         self,
         conversation_id: str,
@@ -706,8 +732,14 @@ class MessageStore:
         owner_client_id: str,
         owner_key: str,
         conn: Any | None = None,
+        history_branch: bool | None = None,
     ) -> dict[str, Any]:
-        """Atomically validate selected history and append one accepted current input."""
+        """Atomically validate selected history and append one accepted current input.
+
+        `history_branch=False` requires the selection's last message to have no live
+        child (see `_require_history_tip`). A replay of an already-admitted message id
+        returns its admission before that check, whatever the flag.
+        """
         body, data = dict(selection), dict(message)
         if (
             body.get("owner_key") != owner_key
@@ -745,6 +777,7 @@ class MessageStore:
             parent = body["messages"][-1]["id"] if body["messages"] else None
             if "parent_message_id" in data and data["parent_message_id"] != parent:
                 raise HistorySelectionError("parent_mismatch")
+            self._require_history_tip(fresh, parent, history_branch)
             data.update(conversation_id=conversation_id, parent_message_id=parent, client_id=owner_client_id)
             mid = self.add_message(data, conn=active)
             if data.get("tool_calls") is not None or data.get("extra_metadata") is not None:
@@ -790,8 +823,13 @@ class MessageStore:
         owner_client_id: str,
         owner_key: str,
         conn: Any | None = None,
+        history_branch: bool | None = None,
     ) -> dict[str, Any]:
-        """Accept a server-owned current-input chain once, under one owner transaction."""
+        """Accept a server-owned current-input chain once, under one owner transaction.
+
+        `history_branch` has the same meaning as for `append_selected_history_input`;
+        a reused selection still fails first with `selection_already_consumed`.
+        """
         body = dict(selection)
         if not messages or any(message.get("sender") not in {"user", "tool"} for message in messages):
             raise HistorySelectionError("invalid_input")
@@ -816,7 +854,7 @@ class MessageStore:
                     and authority.get("admission", {}).get("selection_digest") == body.get("selection_digest")
                 ):
                     raise HistorySelectionError("selection_already_consumed")
-            self.validate_history_selection(
+            fresh, _ = self.validate_history_selection(
                 conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
             )
             scope = dict(
@@ -825,6 +863,7 @@ class MessageStore:
                 ).fetchone()
             )
             parent = body["messages"][-1]["id"] if body["messages"] else None
+            self._require_history_tip(fresh, parent, history_branch)
             chain = []
             for message in messages:
                 data = dict(message)

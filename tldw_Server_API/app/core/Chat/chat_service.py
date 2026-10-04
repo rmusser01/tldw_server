@@ -2770,6 +2770,7 @@ def build_call_params_from_request(
             "stream",
             "save_to_db",
             "tldw_history_selection_v1",
+            "tldw_history_branch",
             "tldw_history_admission_v1",
             "history_message_limit",
             "history_message_order",
@@ -4160,13 +4161,14 @@ async def build_context_and_messages(
                 for item in content:
                     _saved_image_details(item.get("extra_metadata"), len(item["images"]))
                 accepted = chat_db.append_selected_history_inputs(final_conversation_id, selection, history_runtime["history_inputs"],
-                    owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
+                    owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn,
+                    history_branch=getattr(request_data, "tldw_history_branch", None))
                 return snap, content, accepted, state["conversation"], context
         try:
             history_snapshot, selected_content, admission, existing_conversation, context = await asyncio.to_thread(accept_history)
         except HistorySelectionError as exc:
             failure = "unsupported_history_capability" if exc.code.startswith("unsupported_history_context") else "stale_selection"
-            raise HTTPException(409, detail={"status": failure, "code": exc.code}) from exc
+            raise HTTPException(409, detail={"status": failure, "code": exc.code, **exc.details}) from exc
         character_card, character_db_id, assistant_context = context
         for field, value in assistant_context.pop("history_sampling", {}).items():
             if field not in request_data.model_fields_set:

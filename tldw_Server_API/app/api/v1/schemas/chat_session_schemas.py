@@ -7,9 +7,10 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator, model_serializer, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
+    HISTORY_BRANCH_FIELD_DESCRIPTION,
     HistoryAdmissionReferenceV1,
     HistoryAdmissionV1,
     HistorySelectionV1,
@@ -419,10 +420,13 @@ class MessageCreate(BaseModel):
     """Schema for creating a new message."""
     id: str | None = Field(None, min_length=1, max_length=255)
     tldw_history_selection_v1: HistorySelectionV1 | None = None
+    tldw_history_branch: StrictBool | None = Field(None, description=HISTORY_BRANCH_FIELD_DESCRIPTION)
     tldw_history_admission_v1: HistoryAdmissionReferenceV1 | None = None
 
     @model_validator(mode="after")
     def _validate_history_fields(self) -> "MessageCreate":
+        if self.tldw_history_branch is not None and self.tldw_history_selection_v1 is None:
+            raise ValueError("tldw_history_branch requires tldw_history_selection_v1")
         if self.tldw_history_selection_v1 is not None and self.role != "user":
             raise ValueError("Selection requires user role")
         if self.tldw_history_admission_v1 is not None and self.role != "assistant":

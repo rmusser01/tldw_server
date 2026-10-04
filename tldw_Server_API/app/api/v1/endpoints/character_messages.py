@@ -312,7 +312,11 @@ async def send_message(
         Created message details
 
     Raises:
-        HTTPException: 404 if chat not found, 403 if unauthorized, 429 if rate limited
+        HTTPException: 404 if chat not found, 403 if unauthorized, 429 if rate limited.
+            409 `{status, code}` when a versioned admission or settlement is stale. With
+            `tldw_history_branch: false`, a selection whose last message already has a
+            live child is refused with code `history_branch_changed` plus
+            `conversation_id`, `parent_message_id`, `leaf_ids` and `history_version`.
     """
     try:
         scope = _resolve_message_scope(scope_type, workspace_id)
@@ -447,7 +451,8 @@ async def send_message(
                     history_admission = await run_in_threadpool(
                         db.append_selected_history_input, chat_id,
                         message_data.tldw_history_selection_v1.model_dump(mode="json"), data,
-                        owner_client_id=str(current_user.id), owner_key=owner)
+                        owner_client_id=str(current_user.id), owner_key=owner,
+                        history_branch=message_data.tldw_history_branch)
                     created_id = history_admission["input_message_id"]
                 else:
                     created_id = await run_in_threadpool(
@@ -455,7 +460,7 @@ async def send_message(
                         message_data.tldw_history_admission_v1.model_dump(mode="json"), data,
                         owner_client_id=str(current_user.id), owner_key=owner)
             except HistorySelectionError as exc:
-                raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code}) from exc
+                raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code, **exc.details}) from exc
         elif sync_service is not None:
             created_id = server_origin_object_id("chat.message", idempotency_key) or str(uuid.uuid4())
             stable_key = server_origin_stable_key(

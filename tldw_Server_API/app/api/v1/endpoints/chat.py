@@ -3382,7 +3382,14 @@ async def _persist_system_message_if_needed(
         status.HTTP_400_BAD_REQUEST: {"description": "Invalid request (e.g., empty messages, text too long, bad parameters)."},
         status.HTTP_401_UNAUTHORIZED: {"description": "Invalid authentication token."},
         status.HTTP_404_NOT_FOUND: {"description": "Resource not found (e.g., character)."},
-        status.HTTP_409_CONFLICT: {"description": "Data conflict (e.g., version mismatch during DB operation)."},
+        status.HTTP_409_CONFLICT: {
+            "description": (
+                "Data conflict (e.g., version mismatch during DB operation, or a stale "
+                "`tldw_history_selection_v1`). With `tldw_history_branch: false`, a selection whose "
+                "last message already has a live child is refused before any provider call with "
+                "`detail.code` `history_branch_changed` and the current `leaf_ids`."
+            )
+        },
         status.HTTP_413_CONTENT_TOO_LARGE: {"description": "Request payload too large (e.g., too many messages, too many images)."},
         status.HTTP_402_PAYMENT_REQUIRED: {"description": "Billing limit exceeded. Upgrade plan to continue."},
         status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded."},
