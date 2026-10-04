@@ -401,6 +401,7 @@ class ProviderCredentialRuntime:
         "_closed",
         "_closed_event",
         "_close_task",
+        "_lifecycle_tasks",
     )
 
     def __init__(
@@ -470,6 +471,36 @@ class ProviderCredentialRuntime:
         self._closed = False
         self._closed_event = asyncio.Event()
         self._close_task: asyncio.Task[None] | None = None
+        self._lifecycle_tasks: set[asyncio.Task[Any]] = set()
+
+    def _own_lifecycle(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
+        """Retain work from creation through termination, independent of caches."""
+        self._lifecycle_tasks.add(task)
+        task.add_done_callback(self._lifecycle_task_done)
+        return task
+
+    def _lifecycle_task_done(self, task: asyncio.Task[Any]) -> None:
+        """Consume late private failures and release only terminal work."""
+        if not task.cancelled():
+            task.exception()
+        self._lifecycle_tasks.discard(task)
+
+    @property
+    def has_pending_shutdown_work(self) -> bool:
+        """Report live work even after bounded close has scrubbed lookup maps."""
+        return any(not task.done() for task in self._lifecycle_tasks)
+
+    async def wait_for_shutdown_completion(self) -> None:
+        """Drain all lifecycle work without cancelling it or installing shield callbacks."""
+        cancellation = None
+        while pending := {task for task in self._lifecycle_tasks if not task.done()}:
+            try:
+                await asyncio.wait(pending)
+            except asyncio.CancelledError as error:
+                if cancellation is None:
+                    cancellation = error
+        if cancellation is not None:
+            raise cancellation
 
     async def resolve(
         self,
@@ -484,12 +515,14 @@ class ProviderCredentialRuntime:
         if self._authoritative_scope is not None:
             generation = self._generations.get(provider_norm, 0) + 1
             self._generations[provider_norm] = generation
-            task = asyncio.create_task(
-                self._resolve_entry(
-                    provider_norm,
-                    generation=generation,
-                    force_refresh=force_refresh,
-                    override_snapshot=None,
+            task = self._own_lifecycle(
+                asyncio.create_task(
+                    self._resolve_entry(
+                        provider_norm,
+                        generation=generation,
+                        force_refresh=force_refresh,
+                        override_snapshot=None,
+                    )
                 )
             )
             self._authoritative_tasks.add(task)
@@ -524,12 +557,14 @@ class ProviderCredentialRuntime:
                     generation = self._generations.get(provider_norm, 0) + 1
                     self._generations[provider_norm] = generation
                     self._cache.pop(provider_norm, None)
-                task = asyncio.create_task(
-                    self._resolve_entry(
-                        provider_norm,
-                        generation=generation,
-                        force_refresh=False,
-                        override_snapshot=override_snapshot,
+                task = self._own_lifecycle(
+                    asyncio.create_task(
+                        self._resolve_entry(
+                            provider_norm,
+                            generation=generation,
+                            force_refresh=False,
+                            override_snapshot=override_snapshot,
+                        )
                     )
                 )
                 self._inflight[provider_norm] = task
@@ -570,7 +605,7 @@ class ProviderCredentialRuntime:
 
         task = self._usage_tasks.get(entry)
         if task is None:
-            task = asyncio.create_task(self._mark_entry_used(handle.provider, entry))
+            task = self._own_lifecycle(asyncio.create_task(self._mark_entry_used(handle.provider, entry)))
             self._usage_tasks[entry] = task
             task.add_done_callback(
                 lambda completed, owned_entry=entry: self._forget_usage_task(
@@ -592,7 +627,7 @@ class ProviderCredentialRuntime:
                 return
             self._closed = True
             self._closed_event.set()
-            task = asyncio.create_task(self._close_owned())
+            task = self._own_lifecycle(asyncio.create_task(self._close_owned()))
             self._close_task = task
             task.add_done_callback(self._close_task_done)
 
@@ -646,13 +681,15 @@ class ProviderCredentialRuntime:
                         raise RuntimeError(
                             "Provider credential generation is unavailable"
                         )
-                task = asyncio.create_task(
-                    self._resolve_entry(
-                        provider,
-                        generation=generation,
-                        force_refresh=True,
-                        override_snapshot=override_snapshot,
-                        rejected_credential_generation=rejected_credential_generation,
+                task = self._own_lifecycle(
+                    asyncio.create_task(
+                        self._resolve_entry(
+                            provider,
+                            generation=generation,
+                            force_refresh=True,
+                            override_snapshot=override_snapshot,
+                            rejected_credential_generation=rejected_credential_generation,
+                        )
                     )
                 )
                 self._refresh_tasks[provider] = task
@@ -866,7 +903,7 @@ class ProviderCredentialRuntime:
             pass
 
     async def _await_owned(self, task: asyncio.Task[_ResolvedEntry]) -> _ResolvedEntry:
-        closed_waiter = asyncio.create_task(self._closed_event.wait())
+        closed_waiter = self._own_lifecycle(asyncio.create_task(self._closed_event.wait()))
         try:
             done, _pending = await asyncio.wait(
                 {task, closed_waiter},
