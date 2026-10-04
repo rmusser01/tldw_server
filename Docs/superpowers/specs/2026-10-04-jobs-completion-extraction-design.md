@@ -1,7 +1,7 @@
 # Jobs Completion Extraction Design
 
 Date: 2026-10-04
-Status: Ownership option A approved; written specification awaiting human review
+Status: Ownership option A approved; review corrections incorporated; revised specification awaiting human review
 Tracking: TASK-13421 (ownership assessment; implementation tasks are separate)
 Baseline: `origin/dev` at `c95e41fc62a07e55fd74052023826c71b2a2c789`
 
@@ -163,6 +163,26 @@ do not require every metric/trace fact, retry its preparation, or broaden the
 exception tuple. The transformed result's `_truncated` marker remains the
 criterion for its optional metric, even when encryption hides that marker.
 
+Callback-reference binding is also part of preparation, not post-commit dispatch.
+Executor-free facade preparation callbacks capture the current callable at each
+original preparation point in a facade-local, per-attempt binding registry and
+associate it with the corresponding typed effect fact. The database operation
+receives only data and opaque binding identifiers, never those callables or a
+manager reference. Do not bind every observer eagerly at call entry or resolve
+it again after commit. Preserve callback/argument evaluation order and the
+original suppression boundaries, including their partial-preparation behavior.
+
+In particular, a suppressed gauge-binding failure preserves already prepared
+duration/completed metrics but prevents the later trace fact from being prepared;
+completion/SLA processing continues as today. A callback replaced during commit
+does not replace the callable already captured for this attempt. Lifecycle-event
+and SLA-warning bindings retain their own current preparation points and failure
+behavior; do not wrap all binding in the optional metrics suppression boundary.
+Dispatch uses the captured bindings and prepared arguments exactly once, with
+no observer rebinding, payload rebuilding, or resampling of already prepared
+policy facts after commit. Existing dynamic reads inside observer bodies retain
+their current post-commit timing.
+
 Construct and validate applied results before explicit commit. Replay and
 no-transition results are built before implicit context exit. Validation checks
 internal disposition/fact consistency, not new restrictions on accepted caller
@@ -199,7 +219,8 @@ dispatch is mechanical translation of prepared facts with current suppression.
    replay query with the same ID/raw-UUID predicate and replay conditions.
 9. Preserve test-mode diagnostic query/log timing and exact suppression. Prepare
    optional truncation, duration, completed-metric, gauge, and trace facts under
-   their current exception boundaries before counter handling.
+   their current exception boundaries before counter handling, capturing their
+   callback references at the original preparation points in the facade registry.
 10. When enabled, decrement the correct processing, ready, or scheduled counter.
     Reconcile missing counter rows from transaction-local state using unchanged
     helper SQL. Counter failures remain transaction-fatal.
@@ -217,7 +238,8 @@ dispatch is mechanical translation of prepared facts with current suppression.
 14. Run applied effects after explicit commit, before cursor/connection context
     exit: truncation metric, duration observation, completed metric, gauges,
     trace, SLA warning or SLA observer then SLA metric, completion observer.
-    Preserve partial preparation and exact exception suppression/propagation.
+    Use the pre-commit captured bindings, preserving partial preparation and
+    exact exception suppression/propagation.
 15. Exit the original contexts and close in the current `finally` boundary.
     Context-exit failures can still prevent a public result. Cleanup exceptions
     outside the existing suppression tuple retain their current masking behavior.
@@ -255,8 +277,35 @@ recovery/control failure; commit/rollback failure; and dynamic policy timing.
 Test effect presence, cardinality, order, optional preparation failure, and
 callback exceptions inside/outside the exact tuple. Assert explicit commit,
 context exit, and close ordering, including early returns and primary failures.
+Characterize callback replacement during commit and binding failures before
+commit on both backends: the original captured callback still runs, and a
+suppressed gauge-binding failure preserves the metric prefix but omits tracing.
+No observer binding or dispatch runs for replay/no-transition paths. These are
+preservation tests against existing completion, not behavioral corrections.
 Add direct command/result invariant tests without imposing new input validation.
 Use existing real Jobs PostgreSQL fixtures, not a parallel database provisioner.
+
+#### Shared-Helper Verification Matrix
+
+The foundation plan must cover every current caller of each moved helper on its
+affected backend, including branches that only invoke it after an initial
+counter update finds no row. Preserve manager aliases for remaining callers.
+The existing test modules below are starting coverage, not proof that every
+branch has already been characterized; add focused paired coverage where needed.
+All test-module names in this table are under `tldw_Server_API/tests/Jobs/`.
+
+| Moved responsibility | Current callers | Required verification |
+| --- | --- | --- |
+| `_insert_lifecycle_event` | `_stage_completion_sla_breach`; `complete_job`; `fail_job` terminal, retry, and quarantine branches | SQLite and real PostgreSQL event attribution, outbox flag behavior, SLA savepoints, write/commit failures, and observer cardinality; `test_jobs_lifecycle_event_atomicity.py` and `test_jobs_lifecycle_hardening_regressions.py`. |
+| `_reconcile_lifecycle_counter_row` | `complete_job`; `fail_job` terminal branch; `reschedule_jobs`; `retry_now_jobs` | SQLite and real PostgreSQL missing-counter and reconciliation-failure paths; terminal original bucket, reschedule `set_now`/delay branches, and immediate retry failed/queued-scheduled branches. Start with `test_jobs_lifecycle_hardening_regressions.py`, `test_jobs_dependency_acquire_counter_regressions.py`, and `test_jobs_admin_retry_transaction_boundaries.py`. |
+| `_commit_postgres_transaction` | `complete_job`; `fail_job` retry/quarantine and terminal branches | Real PostgreSQL successful commit, INERROR rollback/rejection, commit/rollback failures, and no pre-commit observers; lifecycle atomicity/hardening suites plus direct guard characterization. |
+| `_JOB_NONCRITICAL_EXCEPTIONS` and optional driver construction | Existing manager-wide suppression boundaries and the relocated helpers | Exact ordered exception-class identity/membership and optional-driver import behavior; completion binding/preparation and observer/cleanup failpoints, affected lifecycle/admin suites, and the full non-PG Jobs suite. Do not restrict validation to the completion paths or introduce eager driver imports. |
+
+The plan records exact test selections for this matrix. PostgreSQL lifecycle and
+admin missing-counter cases are mandatory in addition to completion/finalize/
+parity/RLS gates; a completion-only run cannot qualify shared-helper relocation.
+Refresh the caller inventory against the implementation baseline before moving
+helpers, without expanding the extraction into those callers' behavior changes.
 
 ### PR 2: Backend Routing
 
