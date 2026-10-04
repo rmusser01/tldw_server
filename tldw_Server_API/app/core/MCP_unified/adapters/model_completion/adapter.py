@@ -313,13 +313,20 @@ class ModelCompletionAdapter:
         invocation.dispatch_attempted = True
         await self._accounting.mark_dispatched(invocation.reservation)
         self._guard(invocation)
-        normalized = await self._transport.complete(request, credentials)
+
+        def cache_receipt(content: str) -> None:
+            """Capture timely immutable output before transport cleanup can await."""
+            self._guard(invocation)
+            if asyncio.get_running_loop().time() <= invocation.run_deadline and invocation.result is None:
+                invocation.result = ModelCompletionResult(content)
+
+        normalized = await self._transport.complete(request, credentials, on_receipt=cache_receipt)
         self._guard(invocation)
-        if asyncio.get_running_loop().time() > invocation.run_deadline:
+        if invocation.result is None:
+            cache_receipt(normalized.content)
+        if invocation.result is None:
             raise_detached_error(_failure("model_completion_timeout", ModelFailureDomain.REQUEST))
-        result = ModelCompletionResult(normalized.content)
-        # Only this timely certified receipt can survive ancillary teardown failure.
-        invocation.result = result
+        result = invocation.result
         marked = False
         try:
             marked = await runtime.mark_used(credentials) is True

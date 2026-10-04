@@ -251,15 +251,17 @@ class OpenAICompletionTransport:
 
     @property
     def capabilities(self) -> ModelCompletionCapabilities:
-        """Return stable frozen flags, replaced only by the uncertified latch."""
+        """Return frozen flags, latched uncertified on pin or cleanup failure."""
         return self._capabilities
 
     async def complete(
         self,
         request: ModelCompletionRequest,
         credentials: ProviderCallCredentials,
+        *,
+        on_receipt: Callable[[str], None] | None = None,
     ) -> normalization.NormalizedModelCompletion:
-        """Dispatch once, normalize atomically, close owned state, and detach failures."""
+        """Normalize once, notify a trusted synchronous sink, then close owned state."""
         if not self._capabilities.native_async_cancellation:
             _fail("model_transport_uncertified", ModelFailureDomain.SHARED_INFRASTRUCTURE)
         request = snapshot_model_completion_request(request)
@@ -290,6 +292,27 @@ class OpenAICompletionTransport:
         cancellation = None
         result = None
         phase = "client"
+
+        async def close_client() -> None:
+            """Record cleanup failure inside owned work, before cancellation wins."""
+            nonlocal failure
+            try:
+                await client.aclose()
+                # Deliver a native self-cancel even if aclose returned without yielding.
+                await asyncio.sleep(0)
+            except asyncio.CancelledError:
+                # Caller cancellation is not forwarded to this owned close task.
+                self._capabilities = _UNCERTIFIED_CAPABILITIES
+                if failure is None:
+                    raise
+            except Exception:  # noqa: BLE001 - cleanup faults cannot erase a validated paid receipt
+                self._capabilities = _UNCERTIFIED_CAPABILITIES
+                if failure is None and result is None:
+                    failure = ModelCompletionFailure(
+                        "model_response_invalid" if response_received else "model_transport_unavailable",
+                        ModelFailureDomain.REQUEST if response_received else ModelFailureDomain.SHARED_INFRASTRUCTURE,
+                    )
+
         try:
             client = self._client_factory(trust_env=False, timeout=float(self._policy.timeout_seconds))
             if not isinstance(client, httpx.AsyncClient):
@@ -326,6 +349,8 @@ class OpenAICompletionTransport:
             )
             phase = "normalize"
             result = normalization.normalize_model_completion_response(envelope, request)
+            if on_receipt is not None:
+                on_receipt(result.content)
         except asyncio.CancelledError as error:
             cancellation = error
         except EgressPolicyError:
@@ -352,20 +377,10 @@ class OpenAICompletionTransport:
         finally:
             if client is not None:
                 try:
-                    await _await_owned_operation(client.aclose(), cancel_on_cancellation=False)
+                    await _await_owned_operation(close_client(), cancel_on_cancellation=False)
                 except asyncio.CancelledError as error:
                     if cancellation is None:
                         cancellation = error
-                except Exception:  # noqa: BLE001 - cleanup errors must also be detached
-                    if failure is None:
-                        failure = ModelCompletionFailure(
-                            "model_response_invalid" if response_received else "model_transport_unavailable",
-                            (
-                                ModelFailureDomain.REQUEST
-                                if response_received
-                                else ModelFailureDomain.SHARED_INFRASTRUCTURE
-                            ),
-                        )
         if cancellation is not None:
             raise cancellation
         if failure is not None:

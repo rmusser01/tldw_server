@@ -110,8 +110,31 @@ async def reservation_pool(tmp_path, reservation_schema):
     await pool.close()
 
 
-def test_migration_099_registered():
-    assert migrations.get_authnz_migrations()[-1].version == 99
+def test_migration_100_registered():
+    assert migrations.get_authnz_migrations()[-1].version == 100
+
+
+def test_published_user_usage_index_precedes_mcp_reservation_upgrade(tmp_path):
+    path = tmp_path / "published-099.db"
+    migrations.apply_authnz_migrations(path, target_version=99)
+    with sqlite3.connect(path) as conn:
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(llm_usage_log)")}
+        assert "idx_llm_usage_log_user_ts" in indexes
+        assert (
+            conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='provider_usage_reservations'"
+            ).fetchone()
+            is None
+        )
+    migrations.apply_authnz_migrations(path)
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 100
+        assert (
+            conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='provider_usage_reservations'"
+            ).fetchone()[0]
+            == "provider_usage_reservations"
+        )
 
 
 def test_repository_contract_exists():
@@ -128,7 +151,7 @@ def test_migration_additive_idempotent_and_minimal(tmp_path):
         )
     migrations.apply_authnz_migrations(path)
     with sqlite3.connect(path) as conn:
-        migrations.migration_099_create_provider_usage_reservations(conn)
+        migrations.migration_100_create_provider_usage_reservations(conn)
         columns = {row[1] for row in conn.execute("PRAGMA table_info(provider_usage_reservations)")}
         assert columns == {
             "execution_id",
@@ -166,7 +189,7 @@ def test_migration_fails_for_duplicate_canonical_execution_ids(tmp_path):
     with pytest.raises(sqlite3.IntegrityError):
         migrations.apply_authnz_migrations(path)
     with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 98
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 99
         assert "billing_org_id" not in {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_log)")}
 
 

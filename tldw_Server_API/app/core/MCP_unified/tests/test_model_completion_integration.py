@@ -7,6 +7,7 @@ import base64
 import gzip
 import json
 import logging
+import time
 from dataclasses import asdict, replace
 from types import SimpleNamespace
 from uuid import uuid4
@@ -30,7 +31,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
 from tldw_Server_API.app.core.Billing import enforcement
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
-from tldw_Server_API.app.core.MCP_unified.adapters.model_completion import factory
+from tldw_Server_API.app.core.MCP_unified.adapters.model_completion import factory, normalization
 from tldw_Server_API.app.core.MCP_unified.adapters.model_completion.transport import OpenAICompletionTransport
 from tldw_Server_API.app.core.MCP_unified.auth_scope import project_authenticated_execution_scope
 from tldw_Server_API.app.core.MCP_unified.interfaces.model_completion import (
@@ -141,6 +142,7 @@ class FakeProvider:
         self.requests = []
         self.dispatched_rows = []
         self.clients = []
+        self.client_class = httpx.AsyncClient
         self.bodies = []
         self.payload = envelope()
         self.status = 200
@@ -164,7 +166,7 @@ class FakeProvider:
 
     def transport(self, policy):
         def client_factory(**kwargs):
-            client = httpx.AsyncClient(transport=httpx.MockTransport(self.handle), **kwargs)
+            client = self.client_class(transport=httpx.MockTransport(self.handle), **kwargs)
             self.clients.append(client)
             return client
 
@@ -210,9 +212,9 @@ async def composed(reservation_pool, monkeypatch, caplog, asyncio_diagnostics):
     monkeypatch.setattr(hc, "_avalidate_egress_or_raise", validate)
     provider = FakeProvider(pool)
 
-    def build(*, policy=None):
+    def build(*, policy=None, port_settings=None):
         port = factory.build_tldw_model_completion_port(
-            settings(),
+            settings() if port_settings is None else port_settings,
             server_config_snapshot={"openai_api": {"api_key": KEYS["server"], "api_base_url": BASE}},
             operator_policy_snapshot=policy if policy is not None else operator_policy(),
             transport_factory=provider.transport,
@@ -394,6 +396,461 @@ async def drain_call(port, call, gate):
     await asyncio.wait_for(asyncio.gather(call, return_exceptions=True), 5)
     await port.shutdown()
     await asyncio.wait_for(port.wait_for_shutdown_completion(), 5)
+
+
+def fail_client_close(provider, *, gate=None, after_close=True):
+    """Inject only the native client teardown fault, keeping all provider I/O real."""
+    original = httpx.AsyncClient.aclose
+    tasks = []
+
+    class FailingCloseClient(httpx.AsyncClient):
+        async def aclose(self) -> None:
+            tasks.append(asyncio.current_task())
+            if gate is not None:
+                await gate.wait()
+            if after_close:
+                await super().aclose()
+            raise RuntimeError(PRIVATE) from ValueError(PRIVATE)
+
+    provider.client_class = FailingCloseClient
+    return original, tasks
+
+
+@pytest.mark.parametrize("after_close", [True, False])
+async def test_paid_receipt_survives_client_cleanup_error_and_latches_unhealthy(composed, after_close):
+    env = composed
+    await seed_keys(env)
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    original_close, close_tasks = fail_client_close(env.provider, after_close=after_close)
+    port = env.build()
+    assert port.is_healthy()
+    try:
+        result = await port.complete(request(), invocation)
+        assert result.content == CONTENT.replace("\r\n", "\n")
+        assert len(env.provider.requests) == 1
+        assert all(task.done() and not task._log_traceback for task in close_tasks)
+        assert not port.is_healthy()
+        assert port.capabilities.native_async_cancellation is False
+        assert not port._owned
+        assert not port._retained
+        assert not port._accounting._governor._handles
+        row = await ProviderUsageReservationsRepo(env.pool).get(invocation.execution_id)
+        assert (row["state"], row["actual_input_tokens"], row["actual_output_tokens"], row["actual_cost_units"]) == (
+            "reconciled",
+            17,
+            3,
+            43,
+        )
+        usage = await usage_rows(env.pool, invocation.execution_id)
+        assert len(usage) == 1
+        assert (usage[0]["prompt_tokens"], usage[0]["completion_tokens"], usage[0]["estimated"]) == (17, 3, 0)
+        stored = await AuthnzUserProviderSecretsRepo(env.pool).fetch_secret_for_user(env.state["user"], "openai")
+        assert stored["last_used_at"] is not None
+        assert await ProviderUsageReservationsRepo(env.pool).outstanding(BillingScope("org", env.state["org"])) == {
+            "tokens": 0,
+            "cost_units": 0,
+        }
+        for subsequent in (invocation, identity_from_context(env.context())):
+            with pytest.raises(ModelCompletionFailure) as denied:
+                await port.complete(request(), subsequent)
+            assert_failure(denied.value, "model_adapter_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)
+        assert len(env.provider.requests) == len(env.provider.clients) == 1
+    finally:
+        # An unhealthy port cannot certify a client whose native close failed.
+        for client in env.provider.clients:
+            await original_close(client)
+    await assert_safe_surfaces(env, invocation, result=result)
+
+
+@pytest.mark.parametrize(
+    "outcome,code,domain",
+    [
+        ("connection", "model_transport_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE),
+        ("rejected", "model_response_rejected", ModelFailureDomain.REQUEST),
+        ("invalid", "invalid_model_output", ModelFailureDomain.REQUEST),
+    ],
+)
+async def test_client_cleanup_error_before_receipt_preserves_original_failure(composed, outcome, code, domain):
+    env = composed
+    await seed_keys(env)
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    _, close_tasks = fail_client_close(env.provider)
+    if outcome == "connection":
+        env.provider.error = httpx.ConnectError(PRIVATE)
+    elif outcome == "rejected":
+        env.provider.status = 429
+    else:
+        env.provider.payload = envelope(" \r\n ")
+    port = env.build()
+    with pytest.raises(ModelCompletionFailure) as caught:
+        await port.complete(request(), invocation)
+    assert_failure(caught.value, code, domain)
+    assert not port.is_healthy()
+    assert port.capabilities.native_async_cancellation is False
+    assert len(env.provider.requests) == 1
+    assert all(task.done() and not task._log_traceback for task in close_tasks)
+    row = await assert_safe_surfaces(env, invocation)
+    assert row["state"] == "ambiguous"
+    assert await usage_rows(env.pool, invocation.execution_id) == []
+    stored = await AuthnzUserProviderSecretsRepo(env.pool).fetch_secret_for_user(env.state["user"], "openai")
+    assert stored["last_used_at"] is None
+
+
+@pytest.mark.parametrize("outcome", ["cancel", "shutdown"])
+async def test_client_cleanup_error_cannot_publish_receipt_after_cancellation_or_shutdown(composed, outcome):
+    env = composed
+    await seed_keys(env)
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    gate = Gate()
+    _, close_tasks = fail_client_close(env.provider, gate=gate)
+    port = env.build()
+    call = asyncio.create_task(port.complete(request(), invocation))
+    drain = None
+    try:
+        await asyncio.wait_for(gate.entered.wait(), 3)
+        if outcome == "cancel":
+            call.cancel("original-client-close-cancel")
+            await asyncio.sleep(0)
+            call.cancel("repeated-client-close-cancel")
+        else:
+            await port.shutdown()
+        drain = asyncio.create_task(port.wait_for_shutdown_completion())
+        await asyncio.sleep(0)
+        assert not call.done()
+        assert not drain.done()
+        assert all(not task.done() for task in close_tasks)
+        gate.release.set()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await asyncio.wait_for(call, 5)
+        if outcome == "cancel":
+            assert caught.value.args == ("original-client-close-cancel",)
+        assert PRIVATE not in str(caught.value)
+        await asyncio.wait_for(drain, 5)
+        assert not port.is_healthy()
+        assert port.capabilities.native_async_cancellation is False
+        assert all(task.done() and not task._log_traceback for task in close_tasks)
+        assert len(env.provider.requests) == 1
+        row = await assert_safe_surfaces(env, invocation)
+        assert row["state"] == "ambiguous"
+        assert await usage_rows(env.pool, invocation.execution_id) == []
+        assert not port._owned
+        assert not port._retained
+        assert not port._accounting._governor._handles
+    finally:
+        await drain_call(port, call, gate)
+        if drain is not None:
+            await asyncio.wait_for(drain, 5)
+
+
+async def test_client_cleanup_error_after_allowance_remains_owned_and_cannot_recover_health(composed):
+    env = composed
+    await seed_keys(env)
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    gate = Gate()
+    _, close_tasks = fail_client_close(env.provider, gate=gate)
+    port = env.build()
+    call = asyncio.create_task(port.complete(request(), invocation))
+    drain = None
+    try:
+        await asyncio.wait_for(gate.entered.wait(), 3)
+        call.cancel("client-close-allowance-cancel")
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await asyncio.wait_for(call, 5)
+        assert caught.value.args == ("client-close-allowance-cancel",)
+        assert not port.is_healthy()
+        assert port._retained
+        assert all(not task.done() for task in close_tasks)
+        drain = asyncio.create_task(port.wait_for_shutdown_completion())
+        await asyncio.sleep(0)
+        assert not drain.done()
+        gate.release.set()
+        await asyncio.wait_for(drain, 5)
+        assert port.capabilities.native_async_cancellation is False
+        assert not port.is_healthy()
+        assert not port._owned
+        assert not port._retained
+        assert all(task.done() and not task._log_traceback for task in close_tasks)
+        assert len(env.provider.requests) == 1
+        row = await assert_safe_surfaces(env, invocation)
+        assert row["state"] == "ambiguous"
+        assert await usage_rows(env.pool, invocation.execution_id) == []
+        assert not port._accounting._governor._handles
+        with pytest.raises(ModelCompletionFailure) as denied:
+            await port.complete(request(), identity_from_context(env.context()))
+        assert_failure(denied.value, "model_adapter_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)
+    finally:
+        await drain_call(port, call, gate)
+        if drain is not None:
+            await asyncio.wait_for(drain, 5)
+
+
+@pytest.mark.parametrize("cleanup", ["past_run_deadline", "past_cleanup_allowance"])
+async def test_timely_transport_receipt_survives_client_close_past_adapter_deadlines(composed, monkeypatch, cleanup):
+    env = composed
+    await seed_keys(env)
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    gate = Gate()
+    _, close_tasks = fail_client_close(env.provider, gate=gate)
+    loop = asyncio.get_running_loop()
+    receipts = []
+    original_normalize = normalization.normalize_model_completion_response
+
+    def observe_receipt(envelope, bounded):
+        receipt = original_normalize(envelope, bounded)
+        receipts.append((loop.time(), receipt))
+        return receipt
+
+    monkeypatch.setattr(normalization, "normalize_model_completion_response", observe_receipt)
+    port = env.build(port_settings=settings(run_timeout_seconds=1, cancellation_cleanup_seconds=1))
+    call = asyncio.create_task(port.complete(request(), invocation))
+    try:
+        await asyncio.wait_for(gate.entered.wait(), 3)
+        owned_invocation = next(iter(port._invocations))
+        assert len(receipts) == 1
+        assert receipts[0][0] < owned_invocation.run_deadline
+        if cleanup == "past_run_deadline":
+            await asyncio.sleep(max(0, owned_invocation.run_deadline - loop.time()) + 0.05)
+            gate.release.set()
+        result = await asyncio.wait_for(call, 3)
+        assert result.content == receipts[0][1].content == CONTENT.replace("\r\n", "\n")
+        assert not port.is_healthy()
+        if cleanup == "past_cleanup_allowance":
+            assert port._retained
+            assert all(not task.done() for task in close_tasks)
+            drain = asyncio.create_task(port.wait_for_shutdown_completion())
+            await asyncio.sleep(0)
+            assert not drain.done()
+            gate.release.set()
+            await asyncio.wait_for(drain, 5)
+        else:
+            await asyncio.wait_for(port.wait_for_shutdown_completion(), 5)
+        assert port.capabilities.native_async_cancellation is False
+        assert not port.is_healthy()
+        assert all(task.done() and not task._log_traceback for task in close_tasks)
+        assert not port._owned
+        assert not port._retained
+        assert not port._accounting._governor._handles
+        assert len(env.provider.requests) == 1
+        row = await assert_safe_surfaces(env, invocation, result=result)
+        assert row["state"] == "ambiguous"
+        assert await usage_rows(env.pool, invocation.execution_id) == []
+    finally:
+        await drain_call(port, call, gate)
+
+
+async def test_transport_receipt_after_original_deadline_is_not_cached_on_cleanup_error(composed, monkeypatch):
+    env = composed
+    await seed_keys(env)
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    _, close_tasks = fail_client_close(env.provider)
+    original_normalize = normalization.normalize_model_completion_response
+    observed = []
+
+    def late_receipt(envelope, bounded):
+        result = original_normalize(envelope, bounded)
+        time.sleep(1.05)
+        observed.append(next(iter(port._invocations)))
+        return result
+
+    monkeypatch.setattr(normalization, "normalize_model_completion_response", late_receipt)
+    port = env.build(port_settings=settings(run_timeout_seconds=1, cancellation_cleanup_seconds=1))
+    with pytest.raises(ModelCompletionFailure) as caught:
+        await port.complete(request(), invocation)
+    assert_failure(caught.value, "model_completion_timeout", ModelFailureDomain.REQUEST)
+    assert len(observed) == 1
+    assert observed[0].result is None
+    assert not port.is_healthy()
+    assert all(task.done() and not task._log_traceback for task in close_tasks)
+    assert len(env.provider.requests) == 1
+    row = await assert_safe_surfaces(env, invocation)
+    assert row["state"] == "ambiguous"
+    assert await usage_rows(env.pool, invocation.execution_id) == []
+
+
+@pytest.mark.parametrize("cancel_kind", ["task_cancel", "task_cancel_return", "raised_cancel"])
+async def test_native_client_close_self_cancellation_keeps_receipt_but_not_health(composed, cancel_kind):
+    env = composed
+    await seed_keys(env)
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    original_close = httpx.AsyncClient.aclose
+    close_tasks = []
+
+    class SelfCancellingClient(httpx.AsyncClient):
+        async def aclose(self) -> None:
+            close_tasks.append(asyncio.current_task())
+            if cancel_kind != "raised_cancel":
+                asyncio.current_task().cancel(PRIVATE)
+                if cancel_kind == "task_cancel":
+                    await asyncio.sleep(0)
+            else:
+                raise asyncio.CancelledError(PRIVATE)
+
+    env.provider.client_class = SelfCancellingClient
+    port = env.build()
+    try:
+        result = await port.complete(request(), invocation)
+        assert result.content == CONTENT.replace("\r\n", "\n")
+        assert not asyncio.current_task().cancelling()
+        await asyncio.wait_for(port.wait_for_shutdown_completion(), 5)
+        assert not env.provider.clients[0].is_closed
+        assert not port.is_healthy()
+        assert port.capabilities.native_async_cancellation is False
+        assert all(task.done() and task.cancelled() for task in close_tasks)
+        assert len(env.provider.requests) == 1
+        row = await ProviderUsageReservationsRepo(env.pool).get(invocation.execution_id)
+        assert row["state"] == "ambiguous"
+        assert await usage_rows(env.pool, invocation.execution_id) == []
+        with pytest.raises(ModelCompletionFailure) as denied:
+            await port.complete(request(), identity_from_context(env.context()))
+        assert_failure(denied.value, "model_adapter_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)
+    finally:
+        for client in env.provider.clients:
+            await original_close(client)
+    await assert_safe_surfaces(env, invocation, result=result)
+
+
+@pytest.mark.parametrize("cancel_kind", ["task_cancel", "task_cancel_return", "raised_cancel"])
+@pytest.mark.parametrize(
+    "outcome,code,domain",
+    [
+        ("connection", "model_transport_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE),
+        ("rejected", "model_response_rejected", ModelFailureDomain.REQUEST),
+        ("invalid", "invalid_model_output", ModelFailureDomain.REQUEST),
+    ],
+)
+async def test_native_cleanup_cancellation_preserves_known_failure(composed, cancel_kind, outcome, code, domain):
+    env = composed
+    await seed_keys(env)
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    close_tasks = []
+
+    class SelfCancellingClient(httpx.AsyncClient):
+        async def aclose(self):
+            close_tasks.append(asyncio.current_task())
+            if cancel_kind == "raised_cancel":
+                raise asyncio.CancelledError(PRIVATE)
+            asyncio.current_task().cancel(PRIVATE)
+            if cancel_kind == "task_cancel":
+                await asyncio.sleep(0)
+
+    env.provider.client_class = SelfCancellingClient
+    if outcome == "connection":
+        env.provider.error = httpx.ConnectError(PRIVATE)
+    elif outcome == "rejected":
+        env.provider.status = 429
+    else:
+        env.provider.payload = envelope(" \r\n ")
+    port = env.build()
+    try:
+        with pytest.raises(ModelCompletionFailure) as caught:
+            await port.complete(request(), invocation)
+        assert_failure(caught.value, code, domain)
+        assert not asyncio.current_task().cancelling()
+        await asyncio.wait_for(port.wait_for_shutdown_completion(), 5)
+        assert not port.is_healthy()
+        assert port.capabilities.native_async_cancellation is False
+        assert len(env.provider.requests) == len(close_tasks) == 1
+        assert all(task.done() and not task._log_traceback for task in close_tasks)
+        row = await ProviderUsageReservationsRepo(env.pool).get(invocation.execution_id)
+        assert row["state"] == "ambiguous"
+        assert await usage_rows(env.pool, invocation.execution_id) == []
+    finally:
+        for client in env.provider.clients:
+            await httpx.AsyncClient.aclose(client)
+    await assert_safe_surfaces(env, invocation)
+
+
+@pytest.mark.parametrize("outcome", ["connection", "rejected", "invalid"])
+@pytest.mark.parametrize("cancellation", ["caller", "shutdown"])
+async def test_cancellation_wins_known_failure_during_native_close(composed, outcome, cancellation):
+    env = composed
+    await seed_keys(env)
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class SelfCancellingClient(httpx.AsyncClient):
+        async def aclose(self):
+            entered.set()
+            await release.wait()
+            asyncio.current_task().cancel(PRIVATE)
+
+    env.provider.client_class = SelfCancellingClient
+    if outcome == "connection":
+        env.provider.error = httpx.ConnectError(PRIVATE)
+    elif outcome == "rejected":
+        env.provider.status = 429
+    else:
+        env.provider.payload = envelope(" \r\n ")
+    port = env.build()
+    call = asyncio.create_task(port.complete(request(), invocation))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        if cancellation == "caller":
+            call.cancel("original-caller-cancel")
+        else:
+            await port.shutdown()
+        release.set()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await call
+        assert caught.value.args == (("original-caller-cancel",) if cancellation == "caller" else ())
+        await asyncio.wait_for(port.wait_for_shutdown_completion(), 5)
+        assert not port.is_healthy()
+        assert len(env.provider.requests) == 1
+        row = await ProviderUsageReservationsRepo(env.pool).get(invocation.execution_id)
+        assert row["state"] == "ambiguous"
+        assert await usage_rows(env.pool, invocation.execution_id) == []
+    finally:
+        release.set()
+        await asyncio.gather(call, return_exceptions=True)
+        for client in env.provider.clients:
+            await httpx.AsyncClient.aclose(client)
+    await assert_safe_surfaces(env, invocation)
+
+
+async def test_caller_cancel_during_healthy_client_close_does_not_latch_unhealthy(composed):
+    env = composed
+    await seed_keys(env)
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    gate = Gate()
+
+    class GatedCloseClient(httpx.AsyncClient):
+        async def aclose(self) -> None:
+            await gate.wait()
+            await super().aclose()
+
+    env.provider.client_class = GatedCloseClient
+    port = env.build()
+    call = asyncio.create_task(port.complete(request(), invocation))
+    try:
+        await asyncio.wait_for(gate.entered.wait(), 3)
+        call.cancel("healthy-client-close-cancel")
+        await asyncio.sleep(0)
+        assert not call.done()
+        gate.release.set()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await asyncio.wait_for(call, 5)
+        assert caught.value.args == ("healthy-client-close-cancel",)
+        await asyncio.wait_for(port.wait_for_shutdown_completion(), 5)
+        assert port.is_healthy()
+        assert port.capabilities.native_async_cancellation is True
+        assert not port._owned
+        assert not port._retained
+        assert len(env.provider.requests) == 1
+        row = await assert_safe_surfaces(env, invocation)
+        assert row["state"] == "ambiguous"
+        assert await usage_rows(env.pool, invocation.execution_id) == []
+    finally:
+        await drain_call(port, call, gate)
 
 
 @pytest.mark.parametrize(
