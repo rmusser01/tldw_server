@@ -181,7 +181,7 @@ vi.mock("@/components/Notes/NotesListPanel", () => ({
 
 const MARKDOWN_PLACEHOLDER = "Write your note here... (Markdown supported)"
 
-const NOTES: Record<string, { title: string; content: string }> = {
+const INITIAL_NOTES: Record<string, { title: string; content: string }> = {
   "note-a": { title: "Alpha note", content: "Alpha source body" },
   "note-b": { title: "Beta note", content: "Beta source body" }
 }
@@ -221,6 +221,8 @@ describe("NotesManagerPage WYSIWYG typing (NE-01)", { timeout: 60_000 }, () => {
   let innerHtmlSetter: ReturnType<typeof vi.spyOn> | null = null
   let createdNote: { title: string; content: string } | null = null
   let holdCreate: Promise<void> | null = null
+  let serverNotes: Record<string, { title: string; content: string }> = {}
+  let conflictOnPut = false
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -232,6 +234,10 @@ describe("NotesManagerPage WYSIWYG typing (NE-01)", { timeout: 60_000 }, () => {
 
     createdNote = null
     holdCreate = null
+    serverNotes = Object.fromEntries(
+      Object.entries(INITIAL_NOTES).map(([id, note]) => [id, { ...note }])
+    )
+    conflictOnPut = false
 
     mockBgRequest.mockImplementation(
       async (request: {
@@ -260,23 +266,26 @@ describe("NotesManagerPage WYSIWYG typing (NE-01)", { timeout: 60_000 }, () => {
         }
         if (path.startsWith("/api/v1/notes/?")) {
           return {
-            items: Object.entries(NOTES).map(([id, note]) => ({
+            items: Object.entries(serverNotes).map(([id, note]) => ({
               id,
               title: note.title,
               content: note.content,
               metadata: { keywords: [] },
               version: 1
             })),
-            pagination: { total_items: Object.keys(NOTES).length, total_pages: 1 }
+            pagination: { total_items: Object.keys(serverNotes).length, total_pages: 1 }
           }
         }
         const noteMatch = path.match(/^\/api\/v1\/notes\/(note-[ab])$/)
-        if (noteMatch && NOTES[noteMatch[1]]) {
+        if (noteMatch && serverNotes[noteMatch[1]]) {
           const id = noteMatch[1]
+          if (method === "PUT" && conflictOnPut) {
+            throw Object.assign(new Error("version mismatch"), { status: 409 })
+          }
           return {
             id,
-            title: NOTES[id].title,
-            content: method === "PUT" ? String(request.body?.content ?? "") : NOTES[id].content,
+            title: serverNotes[id].title,
+            content: method === "PUT" ? String(request.body?.content ?? "") : serverNotes[id].content,
             metadata: { keywords: [] },
             version: method === "PUT" ? 2 : 1,
             last_modified: "2026-10-03T00:00:00Z"
@@ -366,6 +375,28 @@ describe("NotesManagerPage WYSIWYG typing (NE-01)", { timeout: 60_000 }, () => {
         body: expect.objectContaining({ content: "Alpha source body edited" })
       })
     )
+  })
+
+  it("replaces the WYSIWYG content with the server version on a conflict reload", async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-a"))
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(MARKDOWN_PLACEHOLDER)).toHaveValue("Alpha source body")
+    })
+    const editor = await openWysiwygEditor()
+    await user.click(editor)
+    await user.type(editor, " local")
+
+    conflictOnPut = true
+    serverNotes["note-a"].content = "Server version body"
+    await user.keyboard("{Control>}s{/Control}")
+    fireEvent.click(await screen.findByTestId("notes-save-conflict-reload"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-wysiwyg-editor").textContent).toBe("Server version body")
+    })
   })
 
   it("keeps typed text when the editor remounts in split view", async () => {
