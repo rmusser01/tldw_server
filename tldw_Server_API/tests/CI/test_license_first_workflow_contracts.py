@@ -52,6 +52,14 @@ ORDINARY_WORKFLOW_NAMES = (
     "ui-watchlists-scale-gates.yml",
     "ui-worldbooks-tests.yml",
 )
+# Not ordinary PR workflows. Everything in this file freezes the workflows that run a pull
+# request's own code, so that none of them can hold write credentials or skip the license
+# audit. The merge queue (TASK-13452, ADR-063) is the opposite kind of workflow: it reacts to a
+# PR being armed, disarmed or closed, never to a push of PR code, checks out `dev` only, and
+# exists to hold the write credentials the ordinary workflows must not have.
+# test_queue_control_workflows_never_run_pull_request_code pins exactly that, and
+# test_merge_queue_workflow.py pins the rest of its shape.
+QUEUE_CONTROL_WORKFLOWS = ("merge-queue.yml",)
 DIRECT_TRIGGER_DIGESTS = {
     "actionlint.yml": "d31daa2c3e010b3a70dcbd640ef24f573bea18619228e7548c50992c54df0e99",
     "backend-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
@@ -277,7 +285,7 @@ def _load_ordinary_workflows() -> dict[str, tuple[dict[str, Any], str]]:
         if not isinstance(data, dict):
             continue
         trigger = _trigger(data)
-        if "pull_request" in trigger:
+        if "pull_request" in trigger and path.name not in QUEUE_CONTROL_WORKFLOWS:
             workflows[path.name] = (data, text)
     return workflows
 
@@ -330,6 +338,39 @@ def test_ordinary_pr_workflow_inventory_and_direct_triggers_are_frozen() -> None
         direct_trigger.pop("workflow_run", None)
         encoded = json.dumps(direct_trigger, sort_keys=True, separators=(",", ":")).encode()
         assert hashlib.sha256(encoded).hexdigest() == DIRECT_TRIGGER_DIGESTS[name], name
+
+
+def test_queue_control_workflows_never_run_pull_request_code() -> None:
+    """The exemption above is only sound while these workflows cannot execute PR-controlled code."""
+    assert QUEUE_CONTROL_WORKFLOWS == ("merge-queue.yml",)
+    for name in QUEUE_CONTROL_WORKFLOWS:
+        text = (REPO_ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+        data = yaml.safe_load(text)
+        trigger = _trigger(data)
+        # Arm, disarm and close carry no new PR code; a push to dev is already-merged code.
+        assert trigger == {
+            "pull_request": {
+                "types": ["auto_merge_enabled", "auto_merge_disabled", "closed"],
+                "branches": ["dev"],
+            },
+            "push": {"branches": ["dev"]},
+        }, name
+        assert "${{ secrets." not in text, name
+        assert "write" not in data.get("permissions", {}).values(), name
+        for job_name, job in data["jobs"].items():
+            assert "uses" not in job, (name, job_name)
+            checkouts = [
+                step for step in job["steps"] if str(step.get("uses", "")).startswith("actions/checkout@")
+            ]
+            assert len(checkouts) == 1, (name, job_name)
+            assert checkouts[0]["uses"] == CHECKOUT_ACTION, (name, job_name)
+            assert checkouts[0]["with"] == {"ref": "dev", "persist-credentials": False}, (name, job_name)
+            for step in job["steps"]:
+                # No PR-controlled value may reach a shell or an action input.
+                assert "github.event.pull_request" not in json.dumps(step), (name, job_name, step.get("name"))
+                assert "github.head_ref" not in json.dumps(step), (name, job_name, step.get("name"))
+                if "run" in step:
+                    assert step["run"].strip() == "python3 -m Helper_Scripts.ci.merge_queue", (name, job_name)
 
 
 def test_all_ordinary_workflows_call_exact_inert_admission_gate() -> None:
