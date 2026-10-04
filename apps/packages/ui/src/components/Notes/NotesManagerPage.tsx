@@ -82,6 +82,9 @@ import {
   toNoteVersion,
   markdownToWysiwygHtml,
   wysiwygHtmlToMarkdown,
+  getEditableSelectionBlock,
+  isHeadingElement,
+  unwrapListsFromBlocks,
   LARGE_NOTES_PAGINATION_THRESHOLD,
   TRASH_LOOKUP_PAGE_SIZE,
   TRASH_LOOKUP_MAX_PAGES,
@@ -1489,9 +1492,23 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         }
         if (action === 'bold') execute('bold')
         else if (action === 'italic') execute('italic')
-        else if (action === 'heading') execute('formatBlock', '<h2>')
-        else if (action === 'list') execute('insertUnorderedList')
-        else if (action === 'link') {
+        else if (action === 'heading') {
+          // Toggle: a heading goes back to a paragraph. Leave a list first,
+          // because formatBlock would wrap the whole list in the heading.
+          const block = getEditableSelectionBlock(richEditor)
+          if (isHeadingElement(block)) execute('formatBlock', '<p>')
+          else {
+            if (block?.tagName === 'LI') {
+              execute(block.parentElement?.tagName === 'OL' ? 'insertOrderedList' : 'insertUnorderedList')
+            }
+            execute('formatBlock', '<h2>')
+          }
+        } else if (action === 'list') {
+          // A heading becomes a plain list item, not a list inside a heading.
+          if (isHeadingElement(getEditableSelectionBlock(richEditor))) execute('formatBlock', '<p>')
+          execute('insertUnorderedList')
+          unwrapListsFromBlocks(richEditor)
+        } else if (action === 'link') {
           ;(async () => {
             const savedSelection =
               typeof window !== 'undefined'

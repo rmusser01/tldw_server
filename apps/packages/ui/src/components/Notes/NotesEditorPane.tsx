@@ -53,6 +53,12 @@ import {
 import { NOTES_TITLE_SUGGEST_STRATEGY_SETTING } from '@/services/settings/ui-settings'
 import { setSetting } from '@/services/settings/registry'
 
+// Headings and lists need the typography styles to be visible: Tailwind's
+// preflight resets <h2> to body text and removes list bullets. Matches the
+// Markdown preview (MarkdownPreview size="sm").
+const WYSIWYG_EDITOR_TYPOGRAPHY_CLASS =
+  'prose prose-sm dark:prose-invert max-w-none break-words prose-p:leading-relaxed'
+
 const LazyMarkdownPreview = React.lazy(() =>
   import('@/components/Common/MarkdownPreview').then((module) => ({
     default: module.MarkdownPreview,
@@ -1610,7 +1616,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     aria-multiline="true"
                     contentEditable={!editorDisabled}
                     suppressContentEditableWarning
-                    className="w-full min-h-[220px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus"
+                    className={`w-full min-h-[220px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus ${WYSIWYG_EDITOR_TYPOGRAPHY_CLASS}`}
                     onInput={handleWysiwygInput}
                     onPaste={handleWysiwygPaste}
                     onBlur={() => setEditorCursorIndex(null)}
@@ -1748,7 +1754,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   aria-multiline="true"
                   contentEditable={!editorDisabled}
                   suppressContentEditableWarning
-                  className="w-full min-h-[280px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus"
+                  className={`w-full min-h-[280px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus ${WYSIWYG_EDITOR_TYPOGRAPHY_CLASS}`}
                   onInput={handleWysiwygInput}
                   onPaste={handleWysiwygPaste}
                   onBlur={() => setEditorCursorIndex(null)}

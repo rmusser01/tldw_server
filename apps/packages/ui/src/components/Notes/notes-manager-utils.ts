@@ -1070,6 +1070,68 @@ export const replaceEditableHtml = (root: HTMLElement, html: string): void => {
   if (caretOffset != null) setEditableCaretOffset(root, caretOffset)
 }
 
+const WYSIWYG_BLOCK_TAGS = new Set(['P', 'DIV', 'PRE', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'])
+
+/** The block (paragraph, heading, list item…) holding the selection's start inside `root`, or null. */
+export const getEditableSelectionBlock = (root: HTMLElement): HTMLElement | null => {
+  const selection = root.ownerDocument.defaultView?.getSelection()
+  if (!selection || selection.rangeCount === 0) return null
+  let node: Node | null = selection.getRangeAt(0).startContainer
+  if (!root.contains(node)) return null
+  while (node && node !== root) {
+    if (node instanceof HTMLElement && WYSIWYG_BLOCK_TAGS.has(node.tagName)) return node
+    node = node.parentNode
+  }
+  return null
+}
+
+export const isHeadingElement = (element: Element | null): boolean =>
+  Boolean(element && /^H[1-6]$/.test(element.tagName))
+
+/**
+ * Chrome's insertUnorderedList builds the list inside the paragraph or heading
+ * it came from (`<p><ul><li>…</li></ul></p>`). That is invalid HTML, shows no
+ * list and converts to Markdown without the "- ". Move such lists out to the
+ * top level, splitting the block around them, and keep the selection in place.
+ */
+export const unwrapListsFromBlocks = (root: HTMLElement): void => {
+  const nested = Array.from(root.querySelectorAll('ul, ol')).filter((list) => {
+    const parent = list.parentElement
+    if (!parent || parent === root) return false
+    return isHeadingElement(parent) || parent.tagName === 'P' ||
+      (parent.tagName === 'DIV' && parent.parentElement === root)
+  })
+  if (nested.length === 0) return
+  const selection = root.ownerDocument.defaultView?.getSelection()
+  const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
+  const saved = range && root.contains(range.startContainer)
+    ? {
+        startContainer: range.startContainer,
+        startOffset: range.startOffset,
+        endContainer: range.endContainer,
+        endOffset: range.endOffset
+      }
+    : null
+  for (const list of nested) {
+    const parent = list.parentElement
+    if (!parent) continue
+    const tail = parent.cloneNode(false) as HTMLElement
+    while (list.nextSibling) tail.appendChild(list.nextSibling)
+    parent.after(list)
+    if (tail.textContent?.trim()) list.after(tail)
+    if (!parent.textContent?.trim() && !parent.querySelector('img')) parent.remove()
+  }
+  if (saved && selection && root.contains(saved.startContainer) && root.contains(saved.endContainer)) {
+    const clamp = (node: Node, offset: number) =>
+      Math.min(offset, node.nodeType === Node.TEXT_NODE ? (node.textContent?.length ?? 0) : node.childNodes.length)
+    const restored = root.ownerDocument.createRange()
+    restored.setStart(saved.startContainer, clamp(saved.startContainer, saved.startOffset))
+    restored.setEnd(saved.endContainer, clamp(saved.endContainer, saved.endOffset))
+    selection.removeAllRanges()
+    selection.addRange(restored)
+  }
+}
+
 export const detectImportFormatFromFileName = (fileName: string): ImportFormat => {
   const lower = fileName.toLowerCase()
   if (lower.endsWith('.json')) return 'json'
