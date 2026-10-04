@@ -69,10 +69,10 @@ describe("Playground first-token wait (#3107)", { timeout: 60_000 }, () => {
     })
   })
 
-  // CM-N1 #3107 — TldwChat.ts:568-579 hands the 30 s stream-idle default to the transport, and
-  // background-proxy.ts:1674-1716 arms that idle timer before the first byte, so it fires
-  // ("Stream timeout: no updates received") long before the 120 s startup timer (TldwChat.ts:606-612).
-  it.fails("CM-N1 (#3107): a model whose first token arrives after 60 s still completes (120 s startup timeout)", async () => {
+  // CM-N1 #3107 — the transport's byte-level idle timer is armed before the first token, so
+  // TldwChat hands it max(startup, idle); TldwChat itself enforces the 120 s startup limit
+  // before the first visible token and the stream-idle limit after it.
+  it("CM-N1 (#3107): a model whose first token arrives after 60 s still completes (120 s startup timeout)", async () => {
     const server = createFakeTldwServer()
     server.planCompletion({ reply: "Slow model reply", firstTokenDelayMs: 60_000 })
     const view = await renderPlayground({ server })
