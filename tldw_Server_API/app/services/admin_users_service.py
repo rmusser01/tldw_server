@@ -51,7 +51,10 @@ from tldw_Server_API.app.services.admin_data_ops_service import (
     build_users_json as svc_build_users_json,
 )
 from tldw_Server_API.app.services.admin_guardrails_service import verify_privileged_action
-from tldw_Server_API.app.services.storage_quota_service import STORAGE_QUOTA_KEY
+from tldw_Server_API.app.services.storage_quota_service import (
+    STORAGE_QUOTA_KEY,
+    with_resolved_storage_quota,
+)
 
 
 def _generate_temporary_password(length: int = 20) -> str:
@@ -205,7 +208,7 @@ async def create_user(
                 detail="Failed to load created user",
             )
         logger.info("Admin created user {} (id={})", payload.username, user_info["user_id"])
-        return user
+        return await with_resolved_storage_quota(user)
     except DuplicateUserError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists.") from exc
     except WeakPasswordError as exc:
@@ -262,6 +265,10 @@ async def list_users(
             search=search,
             org_ids=org_ids,
         )
+        # ponytail: up to ~5 resolver queries per user on a cold 60 s cache when quotas are on
+        # (free when off); batch by user ids (one user_config_overrides IN-query plus the
+        # membership queries) if exports pass a few thousand users
+        users = [await with_resolved_storage_quota(u) for u in users]
         return users, total
     except Exception as e:
         logger.error(
@@ -302,6 +309,10 @@ async def export_users(
             search=search,
             org_ids=org_ids,
         )
+        # ponytail: up to ~5 resolver queries per user on a cold 60 s cache when quotas are on
+        # (free when off); batch by user ids (one user_config_overrides IN-query plus the
+        # membership queries) if exports pass a few thousand users
+        users = [await with_resolved_storage_quota(u) for u in users]
         if format == "json":
             content = svc_build_users_json(users, total=total, limit=limit, offset=offset)
             media_type = "application/json"
@@ -335,7 +346,7 @@ async def get_user_details(
         user_dict: dict[str, Any] = dict(user)
         user_dict.pop("password_hash", None)
 
-        return user_dict
+        return await with_resolved_storage_quota(user_dict)
     except UserNotFoundError as err:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

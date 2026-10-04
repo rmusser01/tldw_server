@@ -478,35 +478,42 @@ def test_user_profile_update_default_character_preference_type_validation(
 
 
 def test_admin_profile_update_storage_quota(auth_headers) -> None:
+    from tldw_Server_API.tests.UserProfile._storage_quota_helpers import patch_quota
+
     with TestClient(app) as client:
         user_id = _get_user_id(client, auth_headers)
-        warm_resp = client.get(
-            f"/api/v1/admin/users/{user_id}/profile",
-            params={"sections": "quotas"},
-            headers=auth_headers,
-        )
-        assert warm_resp.status_code == 200
+        try:
+            warm_resp = client.get(
+                f"/api/v1/admin/users/{user_id}/profile",
+                params={"sections": "quotas"},
+                headers=auth_headers,
+            )
+            assert warm_resp.status_code == 200
 
-        resp = client.patch(
-            f"/api/v1/admin/users/{user_id}/profile",
-            headers=auth_headers,
-            json={
-                "updates": [
-                    {"key": "limits.storage_quota_mb", "value": 4096},
-                ]
-            },
-        )
-        assert resp.status_code == 200
-        payload = resp.json()
-        assert "limits.storage_quota_mb" in payload["applied"]
+            resp = client.patch(
+                f"/api/v1/admin/users/{user_id}/profile",
+                headers=auth_headers,
+                json={
+                    "updates": [
+                        {"key": "limits.storage_quota_mb", "value": 4096},
+                    ]
+                },
+            )
+            assert resp.status_code == 200
+            payload = resp.json()
+            assert "limits.storage_quota_mb" in payload["applied"]
 
-        profile_resp = client.get(
-            f"/api/v1/admin/users/{user_id}/profile",
-            params={"sections": "quotas"},
-            headers=auth_headers,
-        )
-        assert profile_resp.status_code == 200
-        profile = profile_resp.json()
+            profile_resp = client.get(
+                f"/api/v1/admin/users/{user_id}/profile",
+                params={"sections": "quotas"},
+                headers=auth_headers,
+            )
+            assert profile_resp.status_code == 200
+            profile = profile_resp.json()
+        finally:
+            # This sets the shared single-user id's override; clear it so later tests
+            # in this worker don't see a stale 4096 quota (spec 2 Sec. 5).
+            patch_quota(client, auth_headers, user_id, None)
 
     assert profile.get("quotas", {}).get("storage_quota_mb") == 4096
 

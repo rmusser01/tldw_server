@@ -222,7 +222,8 @@ async def test_get_system_stats_sqlite_row_objects_use_row_keys() -> None:
     response = await svc.get_system_stats(db)
 
     assert response.users.total == 10
-    assert response.storage.total_quota_mb == 1000.0
+    # total_quota_mb no longer sums the legacy column; it is always null (spec 2 Sec. 5).
+    assert response.storage.total_quota_mb is None
     assert response.sessions.unique_users == 3
 
 

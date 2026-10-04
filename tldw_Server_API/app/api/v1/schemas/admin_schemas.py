@@ -176,7 +176,7 @@ class UserSummary(BaseModel):
     mfa_enabled: bool = False
     created_at: datetime
     last_login: datetime | None = None
-    storage_quota_mb: int
+    storage_quota_mb: int | None
     storage_used_mb: float
 
     model_config = ConfigDict(from_attributes=True)
@@ -453,7 +453,7 @@ class UserStats(BaseModel):
 class StorageStats(BaseModel):
     """Storage statistics"""
     total_used_mb: float
-    total_quota_mb: float
+    total_quota_mb: float | None
     average_used_mb: float
     max_used_mb: float
 

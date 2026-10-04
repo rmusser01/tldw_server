@@ -138,7 +138,7 @@ async def get_security_alert_status() -> SecurityAlertStatusResponse:
 def _empty_system_stats_response() -> SystemStatsResponse:
     return SystemStatsResponse(
         users={"total": 0, "active": 0, "verified": 0, "admins": 0, "new_last_30d": 0},
-        storage={"total_used_mb": 0.0, "total_quota_mb": 0.0, "average_used_mb": 0.0, "max_used_mb": 0.0},
+        storage={"total_used_mb": 0.0, "total_quota_mb": None, "average_used_mb": 0.0, "max_used_mb": 0.0},
         sessions={"active": 0, "unique_users": 0},
     )
 
@@ -175,7 +175,6 @@ async def get_system_stats(db) -> SystemStatsResponse:
                 """
                 SELECT
                     SUM(storage_used_mb) as total_used_mb,
-                    SUM(storage_quota_mb) as total_quota_mb,
                     AVG(storage_used_mb) as avg_used_mb,
                     MAX(storage_used_mb) as max_used_mb
                 FROM users
@@ -212,7 +211,6 @@ async def get_system_stats(db) -> SystemStatsResponse:
                 """
                 SELECT
                     SUM(storage_used_mb) as total_used_mb,
-                    SUM(storage_quota_mb) as total_quota_mb,
                     AVG(storage_used_mb) as avg_used_mb,
                     MAX(storage_used_mb) as max_used_mb
                 FROM users
@@ -294,7 +292,7 @@ async def get_system_stats(db) -> SystemStatsResponse:
             },
             storage={
                 "total_used_mb": float(ss.get("total_used_mb") or 0.0),
-                "total_quota_mb": float(ss.get("total_quota_mb") or 0.0),
+                "total_quota_mb": None,
                 "average_used_mb": float(ss.get("avg_used_mb") or 0.0),
                 "max_used_mb": float(ss.get("max_used_mb") or 0.0),
             },
