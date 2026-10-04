@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 import { NOTE_AUTOSAVE_DELAY_MS } from "../notes-manager-utils"
@@ -248,8 +248,12 @@ const saveFromOtherTab = () => {
 
 const editor = () => screen.getByPlaceholderText(EDITOR_PLACEHOLDER)
 
-/** Open the note in "tab A", edit it, save manually and get the 409 toast. */
-const reachConflictToast = async () => {
+/**
+ * Open the note in "tab A", edit it, save manually and get the 409. The single
+ * conflict panel (NS-03) replaced the toast; its "Use their version" is the
+ * NS-N1 reload path.
+ */
+const reachConflictPanel = async () => {
   renderPage()
   fireEvent.click(screen.getByText("Open shared note"))
   await waitFor(() => expect(editor()).toHaveValue("Original body"))
@@ -263,15 +267,9 @@ const reachConflictToast = async () => {
   fireEvent.click(screen.getByTestId("notes-save-button"))
   await waitFor(() => expect(updateCalls()).toHaveLength(1))
 
-  const toast = await waitFor(() => {
-    const call = mockMessageError.mock.calls.find(
-      ([arg]) => arg && typeof arg === "object" && "content" in arg
-    )
-    expect(call).toBeTruthy()
-    return call?.[0] as { content: React.ReactNode }
-  })
-  render(<>{toast.content}</>)
-  return screen.getByRole("button", { name: "Reload notes" })
+  const panel = await screen.findByTestId("notes-save-issue")
+  expect(panel).toHaveAttribute("data-kind", "conflict")
+  return within(panel).getByTestId("notes-conflict-take-theirs")
 }
 
 const stubClipboard = (writeText: (text: string) => Promise<void>) => {
@@ -309,7 +307,7 @@ describe("NotesManagerPage NS-N1 conflict reload", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const writeText = stubClipboard(async () => undefined)
 
-    const reloadAction = await reachConflictToast()
+    const reloadAction = await reachConflictPanel()
     const putsBeforeReload = updateCalls().length
     fireEvent.click(reloadAction)
 
@@ -343,33 +341,32 @@ describe("NotesManagerPage NS-N1 conflict reload", () => {
     stubClipboard(async () => {
       throw new Error("Write permission denied")
     })
-    // "Keep editing" in the reload confirm; any other confirm (such as
-    // "Save anyway") is accepted.
+    // "Keep editing" in the "use their version" confirm.
     mockConfirmDanger.mockImplementation(
-      async (options: { title?: string }) => options.title !== "Reload server version?"
+      async (options: { title?: string }) => options.title !== "Use their version?"
     )
 
-    const reloadAction = await reachConflictToast()
+    const reloadAction = await reachConflictPanel()
     fireEvent.click(reloadAction)
 
     await waitFor(() =>
       expect(mockConfirmDanger).toHaveBeenCalledWith(
-        expect.objectContaining({ title: "Reload server version?" })
+        expect.objectContaining({
+          title: "Use their version?",
+          content: expect.stringMatching(/could not be copied/i)
+        })
       )
-    )
-    expect(mockMessageWarning).toHaveBeenCalledWith(
-      expect.stringMatching(/could not copy/i)
     )
     await act(async () => {})
     expect(editor()).toHaveValue(STALE_LOCAL_TEXT)
     expect(screen.getByTestId("notes-editor-revision-meta")).toHaveTextContent("Version 1")
-    // Still the failed save's state: the local edits remain unsaved.
-    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "error")
+    // Still in the conflict: the local edits remain unsaved.
+    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "conflict")
 
-    // A later save still sends the old base version, so the server refuses it.
+    // Save never resends the stale base version during a conflict (NS-03).
     fireEvent.click(screen.getByTestId("notes-save-button"))
-    await waitFor(() => expect(updateCalls()).toHaveLength(2))
-    expect(updateCalls().map((request) => request.headers?.["expected-version"])).toEqual(["1", "1"])
+    await act(async () => {})
+    expect(updateCalls()).toHaveLength(1)
     expect(server.content).toBe(OTHER_TAB_TEXT)
   }, PAGE_TEST_TIMEOUT_MS)
 })
