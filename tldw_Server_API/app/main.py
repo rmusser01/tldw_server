@@ -23,16 +23,15 @@ from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from loguru import logger
 from starlette import status as _starlette_status
 from starlette.requests import ClientDisconnect
-from starlette.responses import FileResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.staticfiles import StaticFiles
 
@@ -61,7 +60,6 @@ from tldw_Server_API.app.services.app_lifecycle import (
     mark_lifecycle_startup,  # noqa: F401 - re-exported for lifecycle contract tests.
     get_or_create_lifecycle_state,
 )
-from tldw_Server_API.app.services import readiness_service
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.services import shutdown_coordinated_runtime as _shutdown_coordinated_runtime
@@ -888,7 +886,7 @@ def _caller_allowed_for_loguru_config() -> bool:
 
 # Ensure any subsequent logger.add calls wrap raw streams with SafeStreamWrapper
 _ROOT_LOGGER = logger
-_original_logger_add = _ROOT_LOGGER.add
+_original_logger_add = _unwrap_logger_add(_ROOT_LOGGER.add)
 _original_unwrapped_logger_add = _unwrap_logger_add(_original_logger_add)
 
 
@@ -948,7 +946,7 @@ _install_stderr_redirect()
 if not hasattr(_ROOT_LOGGER, "_tldw_original_remove"):
     _ROOT_LOGGER._tldw_original_remove = _unwrap_loguru_wrapper(_ROOT_LOGGER.remove)  # type: ignore[attr-defined]
 _original_logger_remove = getattr(_ROOT_LOGGER, "_tldw_original_remove", None)
-_root_configure = getattr(_ROOT_LOGGER, "configure", None)
+_root_configure = _unwrap_loguru_wrapper(getattr(_ROOT_LOGGER, "configure", None))
 if callable(_root_configure) and not hasattr(_ROOT_LOGGER, "_tldw_original_configure"):
     _ROOT_LOGGER._tldw_original_configure = _unwrap_loguru_wrapper(_root_configure)  # type: ignore[attr-defined]
 _original_logger_configure = getattr(_ROOT_LOGGER, "_tldw_original_configure", None)
@@ -1035,6 +1033,8 @@ try:
 except _LOGGING_SETUP_EXCEPTIONS:
     logging.getLogger().handlers = [InterceptHandler()]
     logging.getLogger().setLevel(0)
+# A removed handler's class methods retain its retired main module globals.
+_h = None
 
 for _name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     _lg = logging.getLogger(_name)
@@ -1178,11 +1178,19 @@ else:
 
 # Metrics and Telemetry - import directly and fail fast on errors
 # Core helpers - import directly (fail fast if missing)
-from tldw_Server_API.app.core.Metrics import (
-    get_metrics_registry,
-    track_metrics,
+# Stable callbacks do not retain an app-owning main module through FastAPI caches.
+from tldw_Server_API.app.api.v1.endpoints.control_plane import (
+    _set_diagnostics_no_store,
+    api_metrics,
+    favicon,
+    health_check,
+    internal_readiness_check,
+    metrics,
+    readiness_alias,
+    readiness_check,
+    root,
+    serve_setup_page,
 )
-from tldw_Server_API.app.core.Setup.setup_manager import needs_setup
 
 # MCP Unified config validation (fail-fast hardening)
 try:
@@ -1236,7 +1244,6 @@ except _IMPORT_EXCEPTIONS as _e:
 
 
 BASE_DIR = Path(__file__).resolve().parent
-FAVICON_PATH = BASE_DIR / "static" / "favicon.ico"
 
 ############################# TEST DB Handling #####################################
 # --- TEST DB Instance ---
@@ -2791,26 +2798,6 @@ app.add_middleware(ChaChaOperationMiddleware)
 app.add_middleware(DrainGateMiddleware)
 app.add_middleware(RequestIDMiddleware)
 
-# Keep Setup UI HTML outside the static mounts to avoid bypassing the
-# /setup gating via direct file access.
-SETUP_PAGE_PATH = BASE_DIR / "Setup_UI" / "setup.html"
-
-
-async def serve_setup_page():
-    """Serve the first-time setup UI when required."""
-    try:
-        setup_required = needs_setup()
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="Configuration file missing; cannot render setup UI.") from None
-
-    if not setup_required:
-        return RedirectResponse(url="/api/v1/config/quickstart", status_code=307)
-
-    if not SETUP_PAGE_PATH.exists():
-        raise HTTPException(status_code=404, detail="Setup UI assets missing. Reinstall the setup UI bundle.")
-
-    return FileResponse(SETUP_PAGE_PATH)
-
 
 # Register setup UI route conditionally
 try:
@@ -2836,13 +2823,12 @@ else:
 
 
 # Favicon serving
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon():
-    return FileResponse(FAVICON_PATH, media_type="image/x-icon")
+app.get("/favicon.ico", include_in_schema=False)(favicon)
 
 
-@app.get(
+app.get(
     "/",
+    response_model=None,
     openapi_extra={"security": []},
     responses={
         _starlette_status.HTTP_307_TEMPORARY_REDIRECT: {
@@ -2855,42 +2841,7 @@ async def favicon():
             },
         },
     },
-)
-async def root():
-    try:
-        if needs_setup():
-            try:
-                if route_enabled("setup"):
-                    return RedirectResponse(url="/setup", status_code=307)
-            except _REQUEST_GUARD_EXCEPTIONS:
-                pass
-    except FileNotFoundError:
-        logger.warning("config.txt missing while handling root request; serving default message.")
-
-    return {
-        "message": "Welcome to the tldw API; if you're seeing this, the server is running! "
-        "Check out /api/v1/config/quickstart, /docs, or /metrics to get started."
-    }
-
-
-# Metrics endpoint for Prometheus scraping (registered conditionally below)
-async def metrics():
-    from tldw_Server_API.app.api.v1.endpoints.metrics import build_prometheus_metrics_response
-
-    return await build_prometheus_metrics_response()
-
-
-# OpenTelemetry metrics endpoint (if using OTLP) - registered conditionally below
-@track_metrics(labels={"endpoint": "metrics"})
-async def api_metrics():
-    """Get current metrics in JSON format."""
-    registry = get_metrics_registry()
-    return registry.get_all_metrics()
-
-
-async def _set_diagnostics_no_store(response: Response) -> None:
-    """Prevent caching for direct dictionary-based diagnostic aliases."""
-    response.headers["Cache-Control"] = "no-store"
+)(root)
 
 
 # Router for health monitoring endpoints (NEW)
@@ -2954,6 +2905,7 @@ try:
         app.add_api_route(
             f"{API_V1_PREFIX}/metrics",
             api_metrics,
+            response_model=None,
             methods=["GET"],
             tags=["monitoring"],
             dependencies=[
@@ -2974,6 +2926,7 @@ except _STARTUP_GUARD_EXCEPTIONS as _metrics_rt_err:
     app.add_api_route(
         f"{API_V1_PREFIX}/metrics",
         api_metrics,
+        response_model=None,
         methods=["GET"],
         tags=["monitoring"],
         dependencies=[
@@ -2988,42 +2941,6 @@ except _STARTUP_GUARD_EXCEPTIONS as _metrics_rt_err:
 # Router for authentication endpoint
 # app.include_router(auth_router, prefix=f"{API_V1_PREFIX}/auth", tags=["auth"])
 # The docs at http://localhost:8000/docs will show an “Authorize” button. You can log in by calling POST /api/v1/auth/login with a form that includes username and password. The docs interface is automatically aware because we used OAuth2PasswordBearer.
-
-
-# Health check (registered conditionally below)
-_NO_STORE_HEADERS = {"Cache-Control": "no-store"}
-
-
-async def health_check() -> JSONResponse:
-    """Return the immutable public liveness contract."""
-    return JSONResponse({"status": "ok"}, headers=_NO_STORE_HEADERS)
-
-
-async def internal_readiness_check(request: Request) -> JSONResponse:
-    """Serve only loopback, detail-free readiness for local orchestrators."""
-    if not readiness_service.is_loopback_peer(request):
-        return JSONResponse({"detail": "Not Found"}, status_code=404, headers=_NO_STORE_HEADERS)
-    snapshot = await readiness_service.collect_readiness_snapshot(request.app)
-    return JSONResponse(
-        readiness_service.internal_readiness_payload(snapshot),
-        status_code=200 if snapshot.ready else 503,
-        headers=_NO_STORE_HEADERS,
-    )
-
-
-async def readiness_check(request: Request) -> JSONResponse:
-    """Return the authenticated operator readiness projection."""
-    snapshot = await readiness_service.collect_readiness_snapshot(request.app)
-    return JSONResponse(
-        readiness_service.operator_readiness_payload(snapshot),
-        status_code=200 if snapshot.ready else 503,
-        headers=_NO_STORE_HEADERS,
-    )
-
-
-# /health/ready alias for some orchestrators (registered conditionally below)
-async def readiness_alias(request: Request) -> JSONResponse:
-    return await readiness_check(request)
 
 
 def _add_public_control_plane_route(path: str, endpoint: Any) -> None:

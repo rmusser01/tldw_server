@@ -33,9 +33,14 @@ async def audio_postgres(isolated_test_environment, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("minutes_used", [None, 2.5], ids=["no-usage", "existing-usage"])
-async def test_postgres_full_profile_reports_current_day_audio_usage(audio_postgres, minutes_used) -> None:
-    """The default profile must include real audio quotas without a DATE encoding error."""
+async def test_postgres_full_profile_reports_current_day_audio_usage(
+    audio_postgres, minutes_used, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A limited profile must include real audio quotas without a DATE encoding error."""
     from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+    from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
+
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
 
     client, pool = audio_postgres
     connection = await asyncpg.connect(pool.settings.DATABASE_URL)
@@ -51,6 +56,9 @@ async def test_postgres_full_profile_reports_current_day_audio_usage(audio_postg
         )
     finally:
         await connection.close()
+    overrides = UserProfileOverridesRepo(pool)
+    await overrides.ensure_tables()
+    await overrides.upsert_override(user_id=user_id, key="limits.audio_daily_minutes", value=30, updated_by=None)
     await pool.execute(
         """
         INSERT INTO audio_usage_daily (user_id, day, minutes_used)
