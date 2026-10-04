@@ -10,6 +10,8 @@ import pytest
 from tldw_Server_API.app.core.Chunking import Chunker
 from tldw_Server_API.app.core.Chunking import flatten_hierarchical as package_flatten
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(params=["public", "package"])
 def flatten(request: pytest.FixtureRequest) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:

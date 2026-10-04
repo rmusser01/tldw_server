@@ -11,6 +11,8 @@ from loguru import logger
 from tldw_Server_API.app.core.Chunking import regex_safety
 from tldw_Server_API.app.core.Chunking.hierarchical.spans import compute_paragraph_spans
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     ("text", "expected"),

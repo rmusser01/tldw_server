@@ -15,6 +15,8 @@ from tldw_Server_API.app.core.Chunking.hierarchical.models import (
     ResolvedHierarchyOptions,
 )
 
+pytestmark = pytest.mark.unit
+
 Call = tuple[str, str, Any, Any, Any, Any, dict[str, Any]]
 
 
