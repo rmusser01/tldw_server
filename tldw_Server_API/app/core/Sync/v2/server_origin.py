@@ -499,6 +499,8 @@ def delete_unenrolled_server_origin_objects(
             before any delete.
         SyncStoreError: The dataset, a domain or the fence is unavailable. Raised
             before any delete. An error raised by ``delete`` itself propagates as is.
+            A fence that fails to commit after ``delete`` returned is logged and not
+            raised: the rows are deleted and the fence recorded nothing.
     """
 
     targets = list(objects)
@@ -512,14 +514,14 @@ def delete_unenrolled_server_origin_objects(
         if domain not in dataset.domains:
             raise SyncStoreError(f"Sync domain is not enrolled for this dataset: {domain}")
 
-    deleting = False
+    enrolled: list[tuple[SyncDomain, str]] = []
+    unenrolled: list[tuple[SyncDomain, str]] = []
+    phase = "fence"
     try:
         with service.store.projection_fence(dataset.dataset_id, domains) as guarded:
             # A delete that ran before this rule existed may have left its tombstone as the
             # head of one of these objects. Dismissing it first lets the retry go through.
             blocker, _dismissed = _dismiss_stranded_tombstones(service, guarded, dataset, user_id=user_id)
-            enrolled: list[tuple[SyncDomain, str]] = []
-            unenrolled: list[tuple[SyncDomain, str]] = []
             for domain, object_id in targets:
                 has_history = (
                     guarded.get_current_head(dataset.dataset_id, domain, object_id) is not None
@@ -535,22 +537,46 @@ def delete_unenrolled_server_origin_objects(
                     server_sequence=blocker.server_sequence,
                 )
             if unenrolled:
-                deleting = True
+                phase = "delete"
                 delete(unenrolled)
+                phase = "deleted"
     except Exception as exc:
-        if deleting or isinstance(exc, SyncStoreError):
+        if phase == "delete":
+            raise
+        if phase == "deleted":
+            # The rows are deleted in the owner's database. The Sync transaction held only
+            # the fence and, at most, a dismissal that the next write repeats, so its failure
+            # to commit changes nothing the caller relies on.
+            logger.warning(
+                "Sync fence did not commit after a direct delete of objects without Sync history. "
+                "dataset={} objects={} error={}",
+                dataset.dataset_id,
+                unenrolled,
+                type(exc).__name__,
+            )
+            return enrolled
+        if isinstance(exc, SyncStoreError):
             raise
         raise SyncStoreError("Sync projection fence is unavailable") from exc
     return enrolled
 
 
 def _unblock_stranded_dataset(service: SyncV2Service, dataset: SyncDataset, *, user_id: str) -> bool:
-    """Take the dataset fence and dismiss a stranded tombstone; report whether one was dismissed."""
+    """Take the dataset fence and dismiss a stranded tombstone; report whether one was dismissed.
+
+    This runs while a write is being refused because the dataset is blocked, so it
+    never raises: if it cannot help, the caller reports the original refusal.
+    """
 
     try:
         with service.store.conflict_resolution_guard(dataset.dataset_id) as guarded:
             _blocker, dismissed = _dismiss_stranded_tombstones(service, guarded, dataset, user_id=user_id)
-    except SyncStoreError:
+    except Exception as exc:  # noqa: BLE001 - best effort; the caller re-raises the refusal it already has.
+        logger.warning(
+            "Sync could not check a blocked dataset for a stranded server-origin tombstone. dataset={} error={}",
+            dataset.dataset_id,
+            type(exc).__name__,
+        )
         return False
     return dismissed
 

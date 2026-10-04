@@ -19,6 +19,7 @@ The rule under test:
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -841,6 +842,62 @@ def test_helper_reports_an_unavailable_fence_before_any_delete(
         server_origin.delete_unenrolled_server_origin_objects(
             sync_service, user_id=USER, objects=_objects("never-seen"), delete=no_delete,
         )
+
+
+def test_helper_keeps_a_committed_delete_when_the_fence_fails_to_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    """The fence recorded nothing, so a delete that is already committed is not reported as failed."""
+    _send_turn(client)
+    deleted: list[list[tuple[Any, str]]] = []
+    original = SyncDatabase.materialization_transaction
+
+    @contextmanager
+    def failing_commit(self, keys, **kwargs):
+        with original(self, keys, **kwargs) as connection:
+            yield connection
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(SyncDatabase, "materialization_transaction", failing_commit)
+
+    enrolled = server_origin.delete_unenrolled_server_origin_objects(
+        sync_service,
+        user_id=USER,
+        objects=_objects("never-seen", INPUT_ID),
+        delete=lambda objects: deleted.append(list(objects)),
+    )
+
+    assert deleted == [_objects("never-seen")]
+    assert enrolled == _objects(INPUT_ID)
+
+
+def test_a_failed_recovery_reports_the_original_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    """Recovery is best effort: when it cannot run, the write is refused as a blocked dataset, not as a crash."""
+    _legacy_chat(chacha_db, messages=(LEGACY_QUESTION,))
+    _leave_the_old_bug_behind(sync_service, LEGACY_QUESTION, LEGACY_CHAT)
+
+    def unavailable(self, dataset_id):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(SyncDatabase, "conflict_resolution_transaction", unavailable)
+
+    with pytest.raises(SyncMaterializationPredecessorError):
+        capture_server_origin_mutation(
+            sync_service,
+            user_id=USER,
+            domain="chat.conversation",
+            operation="upsert",
+            object_id="chat-after-the-block",
+            payload={"title": "Still blocked"},
+            source="server_api",
+        )
+    assert _blocker(sync_service) is not None
 
 
 def test_helper_refuses_a_client_private_dataset_before_any_delete(
