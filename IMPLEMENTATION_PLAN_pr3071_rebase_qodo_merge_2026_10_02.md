@@ -455,3 +455,35 @@ Protected10/eightrows, served contracts/12negative checks,69stashes and separate
 model branch remain unchanged. Native zero-send collector is initially invoked
 before the new frontend binding exists and exits before acceptance; no passing
 acceptance or inference is attributed to that attempt.
+
+## Stage 8: Hosted PostgreSQL Audio Quota Test Qualification
+**Goal**: Correct the verified stale quota test assumption without changing the
+current unlimited-by-default production policy or weakening DATE usage coverage.
+**Success Criteria**: The official isolated PostgreSQL fixture reproduces both
+original remaining-limit failures. Profile tests cover quotas off, quotas enabled
+without an override, and an explicit 30-minute per-user override, each with no
+usage and existing current-day usage. The quota resolver cache cannot cross
+isolated test databases. Batch the correction with incoming dev e70 CI changes;
+full PR-range hooks, security review and exact-head hosted gates remain required.
+**Tests**: Unchanged original module RED, expanded PostgreSQL module GREEN,
+complete owning auth/admin CI shard, usage quota regressions, scoped Ruff/Bandit,
+incoming CI contracts and full PR-range hooks.
+**Status**: In Progress
+
+At published0ee, hosted auth-integration-admin-auth has2failed/158passed. Both
+failures assume automatic free-tier remaining30/27.5, while current dev's explicit
+quota policy correctly returns None without a configured limit. The unchanged
+module reproduces2failed/2passed locally using official per-test PostgreSQL
+databases and the declared framework environment. The test-only correction seeds
+limits through UserProfileOverridesRepo, retains current-day/previous-day usage
+assertions and isolates the resolver cache. Production code remains unchanged.
+Failed native collectors stay failed; corrected zero-send/Stop approval remains
+pending and no additional Chrome inference is launched.
+
+Expanded module GREEN passes8 with0skips; the complete owning auth/admin shard
+passes164 with0skips in523.00s. Related usage/resolver regressions pass32 with
+0skips. Ruff and diff checks pass. Raw Bandit retains six pre-existing pytest
+assert B101 findings; baseline comparison proves0new findings/0scanner errors
+without suppressions. Evidence remains separate from failed hosted runs and
+native collectors. Latest-dev integration, full-range hooks and new-head hosted
+verification remain pending before publication/merge.

@@ -17,7 +17,7 @@ pytestmark = pytest.mark.integration
 async def audio_postgres(isolated_test_environment, monkeypatch):
     """Use the standard isolated database and a stable UTC quota day."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-    from tldw_Server_API.app.core.Usage import audio_quota
+    from tldw_Server_API.app.core.Usage import audio_quota, quota_resolver
 
     client, _db_name = isolated_test_environment
     pool = await get_db_pool()
@@ -28,22 +28,36 @@ async def audio_postgres(isolated_test_environment, monkeypatch):
         SimpleNamespace(now=lambda _tz: datetime(2026, 9, 10, 12, tzinfo=timezone.utc)),
     )
     monkeypatch.setattr(audio_quota, "_audio_minutes_legacy_backfill_done", False)
-    return client, pool
+    # Per-test databases reuse user IDs, but the resolver cache is process-local.
+    quota_resolver.invalidate_all()
+    try:
+        yield client, pool
+    finally:
+        quota_resolver.invalidate_all()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("minutes_used", [None, 2.5], ids=["no-usage", "existing-usage"])
+@pytest.mark.parametrize(
+    ("quotas_enabled", "daily_limit"),
+    [(False, None), (True, None), (True, 30.0)],
+    ids=["quotas-off", "no-override", "configured-limit"],
+)
 async def test_postgres_full_profile_reports_current_day_audio_usage(
-    audio_postgres, minutes_used, monkeypatch: pytest.MonkeyPatch
+    audio_postgres,
+    monkeypatch: pytest.MonkeyPatch,
+    minutes_used: float | None,
+    quotas_enabled: bool,
+    daily_limit: float | None,
 ) -> None:
-    """A finite profile quota reports real current-day usage without a DATE encoding error."""
+    """Report DATE-backed usage with unlimited or explicitly configured quotas."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
     from tldw_Server_API.app.core.Usage import quota_resolver
     from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 
-    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
     client, pool = audio_postgres
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1" if quotas_enabled else "0")
     connection = await asyncpg.connect(pool.settings.DATABASE_URL)
     try:
         user_id = await connection.fetchval(
@@ -57,6 +71,15 @@ async def test_postgres_full_profile_reports_current_day_audio_usage(
         )
     finally:
         await connection.close()
+    if daily_limit is not None:
+        overrides = UserProfileOverridesRepo(pool)
+        await overrides.ensure_tables()
+        await overrides.upsert_override(
+            user_id=user_id,
+            key="limits.audio_daily_minutes",
+            value=daily_limit,
+            updated_by=user_id,
+        )
     await pool.execute(
         """
         INSERT INTO audio_usage_daily (user_id, day, minutes_used)
@@ -74,11 +97,6 @@ async def test_postgres_full_profile_reports_current_day_audio_usage(
             minutes_used,
         )
 
-    overrides = UserProfileOverridesRepo(pool)
-    await overrides.ensure_tables()
-    await overrides.upsert_override(
-        user_id=user_id, key="limits.audio_daily_minutes", value=30, updated_by=None
-    )
     quota_resolver.invalidate_user(user_id)
     try:
         login = client.post(
@@ -97,14 +115,16 @@ async def test_postgres_full_profile_reports_current_day_audio_usage(
         assert response.status_code == 200
         audio = response.json()["quotas"]["audio"]
         assert audio["daily_minutes_used"] == (0.0 if minutes_used is None else 2.5)
-        assert audio["daily_minutes_remaining"] == (30.0 if minutes_used is None else 27.5)
+        expected_remaining = None if daily_limit is None else daily_limit - (minutes_used or 0.0)
+        assert audio["daily_minutes_remaining"] == expected_remaining
     finally:
         try:
-            cleanup_pool = await get_db_pool()
-            assert cleanup_pool.settings.DATABASE_URL == pool.settings.DATABASE_URL
-            await UserProfileOverridesRepo(cleanup_pool).delete_override(
-                user_id=user_id, key="limits.audio_daily_minutes"
-            )
+            if daily_limit is not None:
+                cleanup_pool = await get_db_pool()
+                assert cleanup_pool.settings.DATABASE_URL == pool.settings.DATABASE_URL
+                await UserProfileOverridesRepo(cleanup_pool).delete_override(
+                    user_id=user_id, key="limits.audio_daily_minutes"
+                )
         finally:
             quota_resolver.invalidate_user(user_id)
 
