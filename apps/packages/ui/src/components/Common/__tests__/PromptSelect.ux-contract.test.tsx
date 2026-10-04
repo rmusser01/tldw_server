@@ -3,9 +3,10 @@
  *
  * The bgRequest mock answers like the real prompts API
  * (tldw_Server_API/app/api/v1/endpoints/prompts.py list_all_prompts returns a
- * PaginatedPromptsResponse of PromptBriefResponse items). The `it.fails` test
- * asserts the CORRECT behaviour and passes only while the defect exists; when
- * the fix lands, convert it to a plain `it(...)` in the same change.
+ * PaginatedPromptsResponse of PromptBriefResponse items). The test asserts the
+ * CORRECT behaviour; it was an `it.fails` reproduction until the fix landed and
+ * now guards against regression (fuller coverage:
+ * PromptSelect.server-library.test.tsx).
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
@@ -178,8 +179,8 @@ describe("PromptSelect UX contract reproductions (#3112)", { timeout: 60_000 }, 
     })
   })
 
-  // CC-05 (#3112): PromptSelect.tsx:327-334 lists prompts only from Dexie getAllPrompts; the server-aware PromptInsertModal.tsx is never mounted.
-  it.fails("CC-05 (#3112): the chat Prompt picker lists the user's server prompts", async () => {
+  // CC-05 (#3112): PromptSelect listed prompts only from Dexie getAllPrompts; it now also pages the server library.
+  it("CC-05 (#3112): the chat Prompt picker lists the user's server prompts", async () => {
     const user = userEvent.setup()
     renderPromptSelect()
 

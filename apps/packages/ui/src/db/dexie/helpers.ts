@@ -611,7 +611,9 @@ export const savePrompt = async ({
   is_system = false,
   tags = [],
   keywords,
-  favorite = false
+  favorite = false,
+  serverLibraryId,
+  serverLibraryUuid
 }: {
   title: string
   name?: string
@@ -634,6 +636,8 @@ export const savePrompt = async ({
   tags?: string[]
   keywords?: string[]
   favorite?: boolean
+  serverLibraryId?: number
+  serverLibraryUuid?: string
 }) => {
   const db = new PageAssistDatabase()
   const id = generateID()
@@ -676,7 +680,10 @@ export const savePrompt = async ({
     serverParentVersionId: serverParentVersionId ?? null,
     // Default sync values for new prompts
     syncStatus: 'local' as const,
-    sourceSystem: 'workspace' as const
+    sourceSystem: 'workspace' as const,
+    ...(serverLibraryUuid
+      ? { serverLibraryId: serverLibraryId ?? null, serverLibraryUuid }
+      : {})
   }
   await db.addPrompt(prompt)
   await savePromptFB(prompt)
@@ -874,6 +881,60 @@ export const getPromptById = async (id: string) => {
     }
     return null
   }
+}
+
+/** A prompt from the user's server library (GET /api/v1/prompts/{id}). */
+export type ServerLibraryPromptCopySource = {
+  id: number
+  uuid: string
+  name: string
+  author?: string | null
+  details?: string | null
+  system_prompt?: string | null
+  user_prompt?: string | null
+  keywords?: string[]
+}
+
+/**
+ * Keep one local copy of a server library prompt, linked by its uuid, so chat
+ * resolves it by local id exactly like any other saved prompt. A prompt with
+ * system text becomes a system prompt, otherwise a quick prompt.
+ */
+export const upsertServerLibraryPromptCopy = async (
+  source: ServerLibraryPromptCopySource
+): Promise<Prompt> => {
+  const systemPrompt = source.system_prompt?.trim()
+    ? source.system_prompt
+    : undefined
+  const userPrompt = source.user_prompt?.trim() ? source.user_prompt : undefined
+  const isSystem = Boolean(systemPrompt)
+  const fields = {
+    title: source.name,
+    name: source.name,
+    content: (isSystem ? systemPrompt : userPrompt) ?? "",
+    is_system: isSystem,
+    system_prompt: systemPrompt,
+    user_prompt: userPrompt,
+    author: source.author ?? undefined,
+    details: source.details ?? undefined,
+    keywords: source.keywords ?? []
+  }
+
+  const existing = source.uuid
+    ? (await getAllPrompts()).find(
+        (prompt) => prompt.serverLibraryUuid === source.uuid
+      )
+    : undefined
+  if (existing) {
+    await updatePrompt({ id: existing.id, ...fields })
+    return (await getPromptById(existing.id)) ?? { ...existing, ...fields }
+  }
+
+  return await savePrompt({
+    ...fields,
+    serverLibraryId: source.id,
+    serverLibraryUuid: source.uuid
+  })
 }
 
 // Webshare Functions
