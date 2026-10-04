@@ -315,3 +315,45 @@ GitHub reports MERGED and its merge commit is verified on dev; task finalized.
 **Tests**: Fresh PR/review/check readback and GitHub merge outcome. Preserve live
 services, profiles, tabs, drafts, databases, unrelated files, and backup refs.
 **Status**: Not Started
+
+## Stage 5: Actual Latest Dev Quota Integration
+**Goal**: Integrate actual dev3700e2d6e7 while preserving parent8c8509b6 and
+separate model PR3159, live services, tabs, data, stashes and backup refs.
+**Success Criteria**: Topology-preserving rebase matches the independently
+reconciled tree except the canonical regenerated OpenAPI fingerprint and scoped
+review corrections. Persistence-only receipts do not inflate monthly estimates;
+rejected selected-durable projections still account for consumed provider tokens
+exactly once, without gaining result authority. Final head passes owning tests,
+security, source-bound no-mock qualification, exact-head Qodo and all seven actual
+dev ruleset gates before normal merge. No close/reopen or bypass is needed.
+**Tests**: Focused quota RED/GREEN HTTP regressions; incoming Usage/UserProfile,
+durable Chat/RAG, official PostgreSQL operation lifecycle and quota repositories;
+OpenAPI drift/types, production frontend verification and touched-scope Bandit.
+**Status**: In Progress
+
+The actual dev ref advances to3700 while PR metadata still reportsd799. A temporary
+source clone isolates this integration from the live model worktree. Rebase
+HEAD54d617eb matches independent tree48e709f5 for all implementation files; only
+fingerprint and our tracking note differ. The canonical 2107-path/3264-schema
+fingerprint293312e270f0 matches a fresh independent export, and ignored generated
+frontend API types are regenerated. Independent review verifies two P2 quota
+interactions above. Initial temporary-path-guard failures and the bare --check
+argument error remain failed artifacts; corrected isolated invocations do not
+change guards. No new-source UAT or hosted merge qualification is claimed yet.
+
+Corrective verification: valid bounded citation fixtures produce2expected402
+failures and2uncited passes before estimator correction. Rejected projection
+tests produce3missing-accounting failures before their correction. Fresh valid
+targeted7pass; full owning498cases finishes497pass/1backend-specific skip with
+ambient credential fallback explicitly absent in isolated real-usage tests.
+Official PostgreSQL68 and legacy history114 pass without skips; actual frontend
+157 plus Research stage3 53 pass. Production typecheck exits0. Incoming26 and
+corrected2production Python paths have Bandit0findings/0errors; changed production
+and regression Ruff checks pass, with26 inherited shared-fixture diagnostics
+verified unchanged. Stable configured hooks pass. Initial invalid source fixtures,
+temporary-path/socket failures, parallel shared-counter interference, cleared
+credential fixture failures, wrong frontend selector and concurrent-task hook
+file-change detection remain separate failed artifacts. Independent final review
+finds no actionable issue in corrected production code or isolated fixture.
+Real19-database snapshots preserve shared originals. Fresh production build,
+Chrome acceptance and exact final-head hosted gates remain required.

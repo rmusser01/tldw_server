@@ -6816,7 +6816,7 @@ async def _execute_non_stream_call_impl(
         model_name: str,
         started_at: float,
     ) -> None:
-        """Record token and durable usage for one validated dict response."""
+        """Record consumed provider usage independently of result persistence."""
 
         choices = response.get("choices")
         usage = response.get("usage")
@@ -7272,8 +7272,6 @@ async def _execute_non_stream_call_impl(
             )
             raise
 
-    if selected_durable_text_only:
-        _validate_selected_durable_provider_result(llm_response)
     if isinstance(llm_response, str) and should_force_normalize_string_responses():
         llm_response = _wrap_raw_string_response(llm_response, model)
 
@@ -7309,7 +7307,12 @@ async def _execute_non_stream_call_impl(
             context=run_first_metric_context,
             outcome="error",
         )
-        raise ChatProviderError(provider=provider, message="Provider unavailable or returned no response", status_code=502)
+        raise ChatProviderError(
+            provider=provider, message="Provider unavailable or returned no response", status_code=502
+        )
+
+    if selected_durable_text_only:
+        _validate_selected_durable_provider_result(llm_response)
 
     # Cache content text for moderation/usage when content is non-string
     content_text_for_usage = _extract_text_from_content(content_to_save)

@@ -4343,11 +4343,16 @@ async def create_chat_completion(
                 finally:
                     await _decrement_active_request(user_id)
 
-            # Token estimate shared by the billing pre-check and the usage-quota
-            # check below: both need the same estimate for this request body.
+            # Durable persistence envelopes never reach the provider and must
+            # not count citation excerpts a second time against inference quotas.
             try:
-                _estimated_request_tokens = (
-                    estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json)) if request_json else 1000
+                inference_request_json = json.dumps(
+                    request_data.model_dump(
+                        exclude={"tldw_turn", "tldw_history_selection_v1", "tldw_history_admission_v1"}
+                    )
+                )
+                _estimated_request_tokens = estimate_tokens_from_json(
+                    _sanitize_json_for_rate_limit(inference_request_json)
                 )
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                 _estimated_request_tokens = 1000

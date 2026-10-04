@@ -36,6 +36,34 @@ def selected_api(credentialed_test_client, populated_chacha_db, auth_headers, mo
         db.close_all_connections()
 
 
+@pytest.fixture
+def isolated_usage_api(selected_api, tmp_path, monkeypatch, test_openai_server_credential_factory):
+    """Keep real AuthNZ usage isolated from other xdist workers' token records."""
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
+
+    client = selected_api[0]
+    with monkeypatch.context() as usage_env:
+        usage_env.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'usage.db'}")
+        usage_env.setenv("OPENAI_API_KEY", "")
+        usage_env.setitem(endpoint.API_KEYS, "openai", None)
+        reset_settings()
+        client.portal.call(reset_db_pool)
+
+        async def seed_owner():
+            pool = await get_db_pool()
+            return await ensure_test_user(pool, "usage-quota-owner")
+
+        try:
+            assert client.portal.call(seed_owner) == 1
+            with test_openai_server_credential_factory():
+                yield selected_api
+        finally:
+            client.portal.call(reset_db_pool)
+    reset_settings()
+
+
 def body_for(client, cid, headers, stream=False, sources=None):
     captured = client.post(
         f"/api/v1/chat/conversations/{cid}/history/selection",
@@ -82,6 +110,121 @@ def frames(response, stream):
         if stream
         else [response.json()]
     )
+
+
+@pytest.mark.parametrize("cited", [False, True])
+@pytest.mark.parametrize("stream", [False, True])
+def test_monthly_token_admission_excludes_persistence_only_sources(selected_api, monkeypatch, cited, stream):
+    """The same inference prompt fits its allowance regardless of citation receipts."""
+    client, db, cid, headers = selected_api
+    sources = (
+        [
+            {
+                "name": "Paper",
+                "type": "pdf",
+                "mode": "rag",
+                "url": "provenance:paper",
+                "pageContent": f"Excerpt {index}: " + "evidence " * 80,
+                "metadata": {"page": 2, "score": -2.5},
+            }
+            for index in range(20)
+        ]
+        if cited
+        else []
+    )
+    body = body_for(client, cid, headers, stream, sources)
+
+    async def allowance(_uid, key):
+        return 3000 if key == "limits.llm_tokens_per_month" else None
+
+    async def unused_month(_uid):
+        return 0
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.user_quota", allowance)
+    monkeypatch.setattr(endpoint, "llm_tokens_this_month", unused_month)
+    provider = endpoint.perform_chat_api_call
+    calls = []
+
+    def record(*args, **kwargs):
+        messages = kwargs.get("messages_payload") if "messages_payload" in kwargs else args[1]
+        assert messages[-1]["content"] == " original {{char}} "
+        assert " frozen <doc id='0'>evidence</doc> " in kwargs["system_message"]
+        assert "tldw_turn" not in kwargs
+        calls.append(True)
+        return provider(*args, **kwargs)
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", record)
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert calls == [True]
+    receipt = next(
+        event["tldw_history_result_v1"] for event in frames(response, stream) if "tldw_history_result_v1" in event
+    )
+    assert receipt["sources"] == sources
+    assert db.count_messages_for_conversation(cid) == 2
+
+
+@pytest.mark.parametrize("invalid", ["text-parts", "image", "tool"])
+def test_rejected_projection_records_consumed_tokens_before_next_quota_check(isolated_usage_api, monkeypatch, invalid):
+    """A rejected result cannot hide provider consumption from the monthly gate."""
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    client, db, cid, headers = isolated_usage_api
+    monkeypatch.setenv("LLM_USAGE_ENABLED", "true")
+    used_before = client.portal.call(endpoint.llm_tokens_this_month, 1)
+
+    async def allowance(_uid, key):
+        return used_before + 5000 if key == "limits.llm_tokens_per_month" else None
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.user_quota", allowance)
+    body = body_for(client, cid, headers)
+    message = {"role": "assistant", "content": "Answer"}
+    if invalid == "text-parts":
+        message["content"] = [{"type": "text", "text": "Answer"}]
+    elif invalid == "image":
+        message["images"] = [{"url": "data:image/png;base64,AA=="}]
+    else:
+        message["tool_calls"] = [
+            {"id": "call-1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
+        ]
+    calls = []
+
+    def provider(*args, **kwargs):
+        calls.append(True)
+        return {
+            "id": "consumed-invalid-projection",
+            "object": "chat.completion",
+            "created": 1,
+            "model": body["model"],
+            "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 750000, "completion_tokens": 250000, "total_tokens": 1000000},
+        }
+
+    recorded_usage = []
+    log_usage = chat_service.log_llm_usage
+
+    async def record_usage(**kwargs):
+        recorded_usage.append(kwargs)
+        await log_usage(**kwargs)
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr(chat_service, "log_llm_usage", record_usage)
+    rejected = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert rejected.status_code == 409, rejected.text
+    assert rejected.json()["detail"]["code"] == "unsupported_history_result_projection"
+    assert db.count_messages_for_conversation(cid) == 1
+    assert len(recorded_usage) == 1
+    assert recorded_usage[0]["total_tokens"] == 1000000
+    assert client.portal.call(endpoint.llm_tokens_this_month, 1) == used_before + 1000000
+
+    next_cid = db.add_conversation({"title": "Quota after rejected projection"})
+    next_body = body_for(client, next_cid, headers)
+    denied = client.post("/api/v1/chat/completions", headers=headers, json=next_body)
+    assert denied.status_code == 402, denied.text
+    assert denied.json()["detail"]["category"] == "llm_tokens_month"
+    assert calls == [True]
+    assert len(recorded_usage) == 1
+    assert db.count_messages_for_conversation(next_cid) == 0
 
 
 @pytest.mark.parametrize("stream", [False, True])
