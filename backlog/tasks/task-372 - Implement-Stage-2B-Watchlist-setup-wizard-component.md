@@ -36,11 +36,11 @@ Build the React setup wizard component for Stage 2 using the Stage 2A model. Sco
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 2B started after Stage 2A commit 35fde767c. Scope remains limited to the setup wizard component, component-local orchestration with injected callbacks, and component tests; no shell integration or service imports in this task.
 
 Stage 2B TDD result: red run failed as expected because ../WatchlistSetupWizard did not exist. Implemented WatchlistSetupWizard.tsx and SetupWizard/index.ts with compact Ant Design modal layout, preset/start-mode controls, objective/scope/source/report/monitor fields, review step, required-name validation, and injected onCreateWatchlist/onCreateSources/onCreateJob/onComplete callbacks. Fixed choice-button accessible names so controls are targetable by their concise labels. Green verification passed: ./node_modules/.bin/vitest run src/components/Option/Watchlists/SetupWizard/__tests__/WatchlistSetupWizard.test.tsx src/components/Option/Watchlists/SetupWizard/__tests__/watchlist-setup-model.test.ts src/components/Option/Watchlists/__tests__/watchlists-stage2-copy-contract.test.ts --maxWorkers=1 --no-file-parallelism --reporter=verbose -> 3 files passed, 12 tests passed. git diff --check passed. Bandit not applicable because this task touched only frontend TypeScript/TSX and Backlog task files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

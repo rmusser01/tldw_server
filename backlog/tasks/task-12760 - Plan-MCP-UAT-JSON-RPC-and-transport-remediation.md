@@ -29,11 +29,11 @@ Create the approved design/spec for a cohesive PR that fixes discovered MCP UAT 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec written at Docs/superpowers/specs/2026-06-19-mcp-uat-jsonrpc-transport-remediation-design.md. Automated spec-review loop ran three passes. Pass 1 found seven gaps; pass 2 found four remaining gaps; pass 3 found five final tightening items. All concrete findings were incorporated into the spec. A fourth reviewer was not dispatched because the brainstorming workflow caps the loop at three iterations. Verification: git diff --check passed for the spec and backlog task. Bandit skipped because this is docs/backlog-only with no code changes.
 
 User-requested design review pass incorporated seven additional constraints: post-auth JSON-RPC authorization status handling, intentional mounted batch contract update, raw envelope id-presence parsing, explicit trusted compatibility metadata names, FastAPI response-model adjustments, exact WebSocket keepalive allowlist, and bounded standalone scope. Focused reviewer pass then found three gaps, followed by two final gaps; all were patched. Final focused review approved the revised spec. Verification: git diff --check passed for the spec and task file. Bandit remains skipped because this revision is docs/backlog-only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

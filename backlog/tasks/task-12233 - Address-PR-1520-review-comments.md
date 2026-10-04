@@ -31,9 +31,9 @@ Resolve the actionable Qodo review findings on PR #1520 for the commercial provi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review findings addressed: long pricing return statements split, PRICING_OVERRIDES test payload moved to json.dumps, and Z.AI free Flash pricing made explicit with catalog notes and regression coverage. Verification: focused pricing tests passed 9 tests; git diff --check passed; JSON parse and compileall passed; Bandit production touched file passed with 0 findings. Full touched Python Bandit scan only reported B101 pytest assert warnings in test files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

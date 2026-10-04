@@ -32,9 +32,11 @@ Address the known TASK-2402 follow-up: installed MCP Unified CLI commands emit a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented warning cleanup with TDD. Red regression: test_snapshot_model_import_is_warning_clean_and_preserves_schema_key failed under -W error::UserWarning because GatewayConfigSnapshot defined a Pydantic field named schema, shadowing BaseModel.schema. Fix: renamed the internal field to snapshot_schema and used validation/serialization aliases plus serialize_by_alias so public snapshots still read/write the schema JSON key. Verification so far: focused snapshot+CLI pytest passed 39 tests; package CLI package-info passed under -W error::UserWarning; py_compile passed for touched module/test; Ruff F/I/UP passed; git diff --check passed; Bandit on production snapshots.py reported zero findings; Bandit on the test file reports only existing low-severity pytest assert baseline after marking the intentional subprocess import/call.
-<!-- SECTION:NOTES:END -->
+
+PR #2537 review follow-up after rebasing on origin/dev: replaced the GatewayConfigSnapshot field configuration with the single Pydantic alias="schema" form requested by review; marked the warning-clean regression with pytest.mark.unit; made the subprocess regression derive package_src from the imported module, fail explicitly if that path is missing, run with cwd=package_src, and use an isolated PYTHONPATH/PYTHONNOUSERSITE environment. Added explicit nosec justification comments for the subprocess import/call. Fresh verification after the review fixes: focused snapshot+CLI pytest passed 39 tests; standalone warning-clean import check passed under -W error::UserWarning; Ruff F/I/UP passed; py_compile passed; git diff --check passed; production Bandit reported zero findings; test-file Bandit reported only existing B101 pytest assert baseline with the intentional subprocess findings skipped.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -51,9 +53,3 @@ Cleaned up the MCP Unified standalone GatewayConfigSnapshot Pydantic warning fro
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR #2537 review follow-up after rebasing on origin/dev: replaced the GatewayConfigSnapshot field configuration with the single Pydantic alias="schema" form requested by review; marked the warning-clean regression with pytest.mark.unit; made the subprocess regression derive package_src from the imported module, fail explicitly if that path is missing, run with cwd=package_src, and use an isolated PYTHONPATH/PYTHONNOUSERSITE environment. Added explicit nosec justification comments for the subprocess import/call. Fresh verification after the review fixes: focused snapshot+CLI pytest passed 39 tests; standalone warning-clean import check passed under -W error::UserWarning; Ruff F/I/UP passed; py_compile passed; git diff --check passed; production Bandit reported zero findings; test-file Bandit reported only existing B101 pytest assert baseline with the intentional subprocess findings skipped.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

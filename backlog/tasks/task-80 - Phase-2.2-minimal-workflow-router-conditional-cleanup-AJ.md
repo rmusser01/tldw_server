@@ -41,13 +41,13 @@ Continue issue #1116 Phase 2.2 after PR #1313. Convert the minimal-test workflow
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after PR #1313 merge was verified at merge commit 4db3d76fca5790a883f35db8ad93d5890bb61ed1. Worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/phase2-2-minimal-workflow-router-conditionals-aj. Branch: codex/phase2-2-minimal-workflow-router-conditionals-aj.
 
 Added focused red-green coverage for the minimal workflow router group. The focused tests failed red against the eager broad try/import block: spec construction imported workflows, chat_workflows, and scheduler_workflows through builtins.__import__, and the old eager RouterSpec entries did not expose named workflow specs for registration-time failure testing.
 
 Converted only workflows, chat_workflows, and scheduler_workflows to ImportedRouterSpec-backed lazy specs while preserving empty prefixes, tags, default route_key behavior, default_stable=True, and broad skip_exceptions=(Exception,) behavior in minimal test mode. Verification passed: focused selection workflow_attr_lookup or workflow_runtime_import_failures passed with 2 tests; full test_router_groups_contract.py passed with 83 tests; test_main_router_contract.py passed with 6 tests; Bandit on minimal.py reported 0 results and 0 errors; git diff --check was clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -28,11 +28,11 @@ Fresh installs should allow outbound inference/provider calls on port 8080 witho
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Changed default egress port set from 80,443 to 80,443,8080 in the evaluator fallback and shipped config. Updated config, ADR, workflow, Docker single-user, and Docker multi-user setup docs including published copies. Verification: stale-default rg returned no hits; evaluator check printed egress-default-ok; Bandit on tldw_Server_API/app/core/Security/egress.py reported 0 results and 0 errors.
 
 Review follow-up: centralized DEFAULT_ALLOWED_PORTS in the egress module, reused it from the Workflows config endpoint, and added regressions for 8080 default allowance, empty/invalid port env fallback, and /workflows/config reported defaults. Verification: focused pytest for security/workflows config defaults passed; stale-default rg returned no hits; Bandit on touched Python files reported 0 results.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

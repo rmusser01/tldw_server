@@ -71,7 +71,7 @@ Implement the #1477 sandbox/workspace readiness slice in the ACP productionizati
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented stable workspace validation error payloads, workspace env propagation through orchestration dispatch, standard runner session env forwarding, and sandbox config/session env merge via ACP_AGENT_ENV_JSON.
 
 Verification so far:
@@ -83,7 +83,7 @@ Verification so far:
 - Full Agent_Client_Protocol directory: 809 passed, 3 failed in test_acp_schedules.py; failures are isolated to #1474 schedules/triggers and did not touch the #1477 paths.
 - Bandit touched backend Python: results=[], loc=6435, output /tmp/bandit_acp_workspace_sandbox_1477.json.
 - git diff --check: clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

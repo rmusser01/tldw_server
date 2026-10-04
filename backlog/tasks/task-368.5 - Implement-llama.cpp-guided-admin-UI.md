@@ -59,7 +59,7 @@ Implement the guided WebUI slice from the implementation plan. Reshape the llama
 <!-- DOD:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 This is a stale tracker closeout after PR #2121 merged. The guided llama.cpp Admin UI is already present on current `origin/dev`; this branch updates the Backlog record to match the shipped frontend.
 
 Implementation provenance:
@@ -82,7 +82,7 @@ Verification commands:
 
 Known skips:
 - Bandit was not run because this closeout branch changes only Backlog metadata and no Python runtime code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:SUMMARY:BEGIN -->

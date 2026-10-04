@@ -53,11 +53,11 @@ Write a backend-first design spec for a computed VN script authoring graph API u
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Created `Docs/superpowers/specs/2026-05-14-vn-script-authoring-graph-design.md`.
 - Scope is backend-only design for computed authoring graph/outline APIs; no runtime code or WebUI implementation in this task.
 - Review pass found and patched spec gaps for encoded IDs, explicit truncation, deterministic ordering, non-mutating live validation, stale preview revision behavior, and published-version validation context.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Verification
 

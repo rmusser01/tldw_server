@@ -36,7 +36,7 @@ Add the next sandbox roadmap slice for prepared-host VZ Linux acceptance evidenc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation notes:
 - Added Docs/Sandbox/vz-linux-prepared-host-evidence.md as the prepared-host evidence packet tracker and gap log.
 - Linked the tracker from the host-gated acceptance policy, macOS operator notes, and sandbox roadmap.
@@ -44,7 +44,7 @@ Implementation notes:
 - Kept the slice docs/test-only; no workflow triggers or runtime behavior changed.
 - PR review follow-up: replaced raw evidence-tracker substring checks with normalized doc-text helpers, section anchors, and targeted failure messages.
 - Verified CodeRabbit's return-type comment against current code; the cited test function already declares `-> None`.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

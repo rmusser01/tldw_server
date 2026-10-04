@@ -22,9 +22,9 @@ User rejected the animation experiments and requested cleanup. Delete only codex
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Branch tip before deletion: f6f469a87e9167fb251ff84d7358f7fb6d34b13b. The surviving branch has an intermediate production plan and historical task plus a Codex ZIP UI change whose behavior already exists in dev. No graphics or later workbook overlay documents were committed on that branch. MCP task search stalled; used official CLI fallback.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

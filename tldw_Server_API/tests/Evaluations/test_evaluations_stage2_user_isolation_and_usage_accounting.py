@@ -108,8 +108,9 @@ def test_ocr_pdf_uses_consistent_endpoint_key_for_check_and_record(monkeypatch):
             is_batch: bool,
             tokens_requested: int,
             estimated_cost: float,
+            evaluations_requested: int = 1,
         ):
-            _ = (is_batch, tokens_requested, estimated_cost)
+            _ = (is_batch, tokens_requested, estimated_cost, evaluations_requested)
             self.checked_endpoints.append(endpoint)
             return True, {"retry_after": 0}
 
@@ -119,7 +120,9 @@ def test_ocr_pdf_uses_consistent_endpoint_key_for_check_and_record(monkeypatch):
             endpoint: str,
             _tokens_used: int,
             _cost: float = 0.0,
+            reserved_tokens: int = 0,
         ):
+            _ = reserved_tokens
             self.recorded_endpoints.append(endpoint)
 
     limiter = _Limiter()

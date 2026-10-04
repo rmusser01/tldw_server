@@ -25,9 +25,9 @@ Address the verified first-run MCP issue where setup saves and validates MCP pac
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: red test failed with [] before fix; focused vitest passed after fix; useMcpTools gating test passed; real browser post-fix check against live backend/frontend showed 146 tools and no "No MCP tools discovered" message. Bandit not applicable: touched TypeScript/frontend and Backlog task only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

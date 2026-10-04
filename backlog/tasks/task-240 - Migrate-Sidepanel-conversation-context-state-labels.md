@@ -31,7 +31,7 @@ Continue the frontend design-system product-state cleanup by replacing Sidepanel
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red: conversation-context-utils test mocked ready and blocked registry labels as 'Ready via registry'/'Blocked via registry' and failed while resolveContextReadiness still returned literal Ready.
 
 Green verification after rebase onto origin/dev: conversation-context-utils focused Vitest passed (1 test); product-state guard unit test passed (52 tests); verify:design-system-state exited 0; git diff --check HEAD~1..HEAD exited 0. Broad bunx tsc still exits 2 with 239 baseline errors, and touched-scope filtering found no conversation-context/baseline/task/MCPHub matches.
@@ -41,7 +41,7 @@ Bandit skipped: touched implementation is TypeScript/TSX/JSON/Backlog only, with
 Addressed PR review feedback for runtime registry label reads. Added regression coverage for mocked design-system label updates after import and moved ready/blocked label lookups into resolveContextReadiness so labels are resolved at call time. Focused Vitest now passes with 2 tests.
 
 Review-fix verification: focused conversation-context-utils Vitest passed with 2 tests, product-state guard passed with 52 tests, verify:design-system-state exited 0, git diff --check exited 0. Broad bunx tsc still exits 2 with 239 known baseline errors; touched-scope filter found no matches for conversation-context-utils, design-system baseline, task-240, MCPHub baseline files, or getDesignSystemState.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

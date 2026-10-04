@@ -44,7 +44,7 @@ Documentation-only child implementation plan for the approved WebUI/extension UX
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Created Docs/superpowers/plans/2026-05-17-webui-settings-models-implementation-plan.md.
 - Reused the approved parent plan and remediation spec as the source of scope.
 - Route rows covered by the plan are /settings, /settings/tldw, /settings/provider-keys, /settings/model, /login, /privileges, /prompts, /prompt-studio, and settings subroutes.
@@ -52,14 +52,12 @@ Documentation-only child implementation plan for the approved WebUI/extension UX
 - The plan preserves ProviderKeysSettings, ModelsBody, AvailableModelsList, ModelSettings, SettingsLayout, and the existing route registry patterns.
 - Verification run for this planning artifact: placeholder-language scan exited 1 with no output; ASCII/trailing-whitespace scan exited 1 with no output; git diff check exited 0; Node coverage check confirmed required route, finding, file, and test tokens are present.
 - Bandit was not run because this task changed only Markdown planning and Backlog task files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Completed the documentation-only child implementation plan for WP5 settings and model/provider remediation. The plan defines route scope, settings grouping, provider-key label repair, configured-first model UX, destructive-action separation, tests, and browser QA gates without changing product code.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

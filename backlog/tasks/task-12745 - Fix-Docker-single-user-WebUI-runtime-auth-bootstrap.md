@@ -68,7 +68,6 @@ Docs/superpowers/plans/2026-06-24-docker-webui-runtime-auth-bootstrap-implementa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-06-24 implementation update: Task 1 runtime config endpoint completed and reviewed. Added WebUI-local /api/_tldw-webui/runtime-config guard path with quickstart-only runtime auth exposure, loopback/Docker-gateway peer handling, forwarded-header rejection, placeholder/short/whitespace API key rejection, and 40 focused Vitest cases. Local verification: bunx vitest run __tests__/pages/api/runtime-config.test.ts passed.
 
@@ -92,7 +91,6 @@ Docs/superpowers/plans/2026-06-24-docker-webui-runtime-auth-bootstrap-implementa
 
 2026-06-24 final verification: bunx vitest run __tests__/pages/api/runtime-config.test.ts __tests__/extension/runtime-bootstrap.test.ts __tests__/app/app-layout.test.tsx __tests__/frontend-quickstart-networking.test.ts __tests__/pr-916-review-followups.test.ts ../packages/ui/src/components/Option/Setup/__tests__/AudioInstallerPanel.test.tsx passed (6 files, 92 tests). source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/MCP_unified/test_packaging_shape.py tldw_Server_API/tests/Security/test_setup_access_guard.py -v passed (5 tests). docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml config >/tmp/tldw_single_webui_runtime_auth_compose.yml exited 0. source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/tests/MCP_unified/test_packaging_shape.py -f json -o /tmp/bandit_docker_webui_runtime_auth.json exited 0 with zero results in the JSON report.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

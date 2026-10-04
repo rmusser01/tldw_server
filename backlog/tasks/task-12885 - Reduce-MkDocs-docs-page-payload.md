@@ -37,11 +37,11 @@ Shrink the published docs payload by replacing oversized docs branding assets, d
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented payload fixes: removed the MkDocs search plugin from Docs/mkdocs.yml; replaced Docs/Logo.png and Docs/Published/assets/logo.png with 128x128 PNGs (~39 KB each); replaced Docs/Published/assets/favicon.png with a 32x32 PNG (~3 KB). Apache cache headers were installed directly in /etc/apache2/sites-enabled/tldwproject-le-ssl.conf because AllowOverride is None; backup: /etc/apache2/sites-enabled/tldwproject-le-ssl.conf.bak-20260704T145642Z. Header verification before redeploy: /server/docs/ returns Cache-Control public max-age=300; /server/docs/assets/logo.png returns public max-age=86400.
 
 Live deploy verification: rebuilt docs with search disabled; deployed /tmp/tldw-server-docs-site-payload-20260704.tar.gz (SHA-256 f46dd9821fe795bb2fae28574250161663aa813e801a3a4d6c6f7ba6daaab8be) to /var/www/tldwproject/public/server/docs. Previous live docs were backed up at /var/www/tldwproject/public/server/docs.bak-20260704T150345Z. Live checks against 134.209.75.12: /server/docs/ returns 200, Content-Length 56296, Cache-Control public max-age=300; /assets/logo.png returns 39679 bytes and max-age=86400; /assets/favicon.png returns 3179 bytes and max-age=86400; /search/search_index.json returns 404; downloaded live index contains no md-search/search_index markers. Bandit skipped: touched repo files are docs config, static image assets, and Backlog task metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

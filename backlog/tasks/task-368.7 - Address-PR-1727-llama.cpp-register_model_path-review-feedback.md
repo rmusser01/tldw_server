@@ -48,7 +48,7 @@ Fix the unresolved PR #1727 review findings on the llama.cpp management API, inc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Live PR sweep for #1727 found one unresolved actionable thread: Gemini's comment on register_model_path persisting paths before allowlist validation. CodeRabbit skipped review, Qodo posted summary/status only, and gh pr checks did not show failing CI.
 
 Implemented fail-closed allowlist validation before register_model_path writes registered_model_paths. Focused inventory test passed (12 passed), broader llama.cpp backend slice passed (124 passed, 6 warnings), git diff --check passed, and Bandit on llamacpp_inventory_service.py reported zero findings. Pytest still emits existing post-success Loguru closed-stream cleanup warnings.
@@ -64,7 +64,7 @@ Rebased the PR branch onto current origin/dev while keeping the diff scoped to t
 Follow-up review finding verified as still valid: /api/v1/llamacpp/logs/tail currently maps ManagedServerNotRunningError to HTTP 503, while the sibling /llamacpp/use-in-chat state-conflict path already maps the same service condition to 409. Proceeding with a focused test-first status-code change only for the log-tail endpoint.
 
 Implemented the minimal follow-up: changed only the log-tail ManagedServerNotRunningError HTTP mapping from 503 to 409 while preserving detail=str(e) and exception chaining. Added a focused regression test for a missing managed handler. Red/green evidence: the new test first failed with 503, then passed after the endpoint change. Validation passed: provider/logs test file (11 passed, 5 warnings), git diff --check, and Bandit on tldw_Server_API/app/api/v1/endpoints/llamacpp.py with zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

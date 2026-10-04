@@ -33,7 +33,7 @@ Docs/superpowers/plans/2026-06-30-local-single-user-webui-guide-implementation-p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented on a clean PR branch based on origin/dev. The current base already included a compact WebUI block under ## Start, so the final guide extends that block with explicit .env.local values, browser-visible API-key guidance, Bun/npm commands, and a WebUI response check instead of adding a duplicate startup section.
 
 Verification:
@@ -52,7 +52,7 @@ Subagent reviews:
 Final review fixes applied: clarified that .env.local must be edited to use the shown local API values, marked execution plan checklist items complete, updated the design spec status to Implemented, aligned plan wording with the final guide, and rebased the task record to TASK-12075 to avoid the existing TASK-12072 on origin/dev.
 
 Review follow-up: corrected the design-spec risk note so it reflects that apps/tldw-frontend/.env.local.example already uses 127.0.0.1; the documented risk is now users mixing localhost and 127.0.0.1 across API/WebUI URLs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

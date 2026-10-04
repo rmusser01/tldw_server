@@ -49,11 +49,11 @@ Stage 1 execution plan:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-12: Implemented Stage 1 route foundation. Focused Vitest route/nav/shortcut tests pass; targeted Playwright moderation-routes workflow passes with mocked health/moderation endpoints. Full tsc --noEmit currently fails on pre-existing unrelated Evaluation/persona/VN type errors outside this slice; no Bandit run because touched implementation is frontend TS/route/test code only.
 
 2026-05-12: Reviewer findings addressed: aligned ModerationReviewShell copy/test expectations, made settings-nav route source assertion cwd-stable, preserved Next legacy redirect params, and migrated persisted header moderation-playground shortcuts to both moderation-review and moderation-rules.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

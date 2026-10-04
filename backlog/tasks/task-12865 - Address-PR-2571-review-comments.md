@@ -31,9 +31,9 @@ IMPLEMENTATION_PLAN_pr2571_review_comments.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented review cleanup batch across release helper, WebSearch logging, Sync blob paths, MCP docs acquisition/import/store/policy, frontend race/lifecycle fixes, CodeQL annotations, and targeted tests. Broad low-priority refactor suggestions were left out because they are not tied to current failing behavior and would broaden release-merge risk. The human-authored PR Change summary remains a requester-owned merge gate.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

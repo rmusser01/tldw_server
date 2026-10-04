@@ -32,7 +32,7 @@ Docs/superpowers/plans/2026-05-16-chat-cockpit-error-degraded-recovery-polish.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Impeccable PRODUCT/DESIGN preflight unavailable in this worktree; proceeding from existing cockpit roadmap/spec and design-system conventions.
 
 Verification: Vitest focused status/cockpit suite passed 24 tests via bun run test:run ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundStatusStrip.first-slice.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx.
@@ -40,7 +40,7 @@ Verification: Vitest focused status/cockpit suite passed 24 tests via bun run te
 Verification: real-server Playwright passed 9/9 via e2e/workflows/chat-cockpit.real-server.spec.ts against http://127.0.0.1:8000 and http://localhost:8080 with no mocked routes.
 
 Verification: git diff --check passed. Targeted ESLint completed with 0 errors and existing warnings in legacy touched files. Bandit not applicable because this slice changes frontend TypeScript and docs only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

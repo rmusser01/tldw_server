@@ -39,11 +39,8 @@ Docs/superpowers/plans/2026-07-02-standalone-mcp-docs-stage4a-source-sync-implem
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

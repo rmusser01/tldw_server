@@ -35,7 +35,7 @@ Implement Stage 6 documentation and final verification for uploaded OpenWebUI we
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Docs/test_chatbook_openwebui_import_docs.py -q failed 5 tests before docs/OpenAPI updates; failures were missing OpenWebUI database, source_format=openwebui_db, selected_openwebui_user_id, published docs, and OpenAPI enum coverage.
 
 GREEN docs: same docs regression command passed with 5 passed and 5 warnings after source and published docs were updated.
@@ -47,7 +47,7 @@ Final frontend: cd apps/packages/ui && ./node_modules/.bin/vitest run src/servic
 Security/diff: Bandit wrote /private/tmp/bandit_openwebui_db_import.json with 0 results; git diff --check produced no output.
 
 Known environment note: this worktree does not contain .venv, so verification used the main checkout venv at /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

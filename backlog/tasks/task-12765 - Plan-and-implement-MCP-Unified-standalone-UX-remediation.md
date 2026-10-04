@@ -52,7 +52,7 @@ Docs/superpowers/plans/2026-06-26-mcp-unified-standalone-ux-remediation.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-06-26: Task 1 complete in worktree `codex/mcp-unified-ux-remediation`. Added docs contract test for embedded-vs-standalone clarity, observed the expected red failure, added current-state banners to primary MCP docs, added PRD status note, and verified the focused test now passes.
 - 2026-06-26: Task 2 complete. Replaced brittle MCP-specific Dockerfile launch assertions with an explicit experimental-status contract, added `tldw_Server_API/app/core/MCP_unified/docker/README.md`, and added a warning to the core MCP README Docker section. Verified Docker contract tests pass.
 - 2026-06-26: Task 3 complete. Added User Guide Golden Path quickstart with supported auth header, initialize, `tools/list`, and read-only `tools/call`; added canonical auth matrix; aligned client snippets with header/subprotocol auth and strict catalog examples; expanded MCP env var docs; linked core README quickstart to the User Guide. Verified docs contract tests pass.
@@ -66,7 +66,7 @@ Docs/superpowers/plans/2026-06-26-mcp-unified-standalone-ux-remediation.md
 - 2026-06-26: Task 8 complete. Added `Docs/MCP/Unified/Operator_Cheatsheet.md` with compact variables, initialize/session reuse, strict catalog tools/list, tools/call, batch, WebSocket auth, status/health/metrics, wizard dry-run/verify, and common failure recovery. Linked it from README and Client Snippets. Verified docs contract tests pass.
 
 - 2026-06-26: Task 9 verification complete. Focused remediation suite passed 48/48. Broader MCP smoke subset passed 48/48. Manual journey review covered discovery/current state, supported embedded launch, auth, tools/list, tools/call, surface/risk tiers, diagnostics, and operator cheatsheet. Bandit touched-scope scan wrote `/tmp/bandit_mcp_unified_ux.json`; full planned scope exited 1 due existing MCP test baseline findings (0 high, 17 medium in unrelated test files). Filtered medium-or-higher results for remediation-touched MCP/API/wizard files were empty (`[]`).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

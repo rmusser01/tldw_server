@@ -33,7 +33,7 @@ Add a narrow read-only operator diagnostics summary for all sandbox runtimes usi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented additive GET /api/v1/sandbox/admin/runtime-diagnostics backed by SandboxService.feature_discovery(), with schema coverage, admin RBAC coverage, startup warning projection, and docs updates. Verification: focused pytest 28 passed; py_compile passed; ruff F/E9 passed; Bandit touched production files produced zero findings; git diff --check passed. Full default Ruff remains blocked by pre-existing file-level I/SIM/B904 findings in touched files.
 
 PR #1328 review follow-up: Qodo posted five actionable findings. Verified against current branch: async handler calls synchronous runtime_diagnostics_summary directly, host_gated/scaffold summary uses implementation_state instead of readiness, new helpers lack docstrings, and new test monkeypatch parameter lacks type annotation.
@@ -47,7 +47,7 @@ PR #1328 CodeRabbit accepted fix: _sandbox_startup_warning_summary now fail-open
 PR #1328 CodeRabbit bucket follow-up: re-verified the second comment and found a still-valid double-count issue in unavailable because it included all non-ready runtimes. Fixing with readiness-based mutually exclusive buckets, not implementation_state-first classification.
 
 PR #1328 final CodeRabbit bucket fix: unavailable now counts only readiness values unavailable/unsupported/not_applicable, making ready/host_gated/scaffold/unavailable mutually exclusive readiness buckets. Regression expectation updated for available host_gated runtime plus host-gated unavailable runtime.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

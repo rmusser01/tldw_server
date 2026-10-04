@@ -36,7 +36,7 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TASK-45.44.6.2 completed on codex/design-system-next-slice-8: migrated TldwConnectionSettings auth notices from AntD Alert to DesignSystemAlert. Baseline evidence: total product-state exceptions 400 -> 398; Settings/account-security exceptions 49 -> 47. PR: https://github.com/rmusser01/tldw_server/pull/1781.
 
 TASK-45.44.6.3 completed locally on codex/integration-policy-alerts-ds at d78018fd9b: migrated IntegrationPolicyPanel policy/pairing alerts from AntD Alert to the shared DS Alert primitive and removed four component baseline entries. Verification included focused IntegrationPolicyPanel DS Alert tests, IntegrationManagementPage tests, scoped product-state guard, TypeScript with 8GB heap, and git diff --check.
@@ -52,7 +52,7 @@ TASK-45.44.6.7 completed locally: migrated Evaluations settings auth/setup/unrea
 TASK-45.44.6.8 completed locally: migrated General settings extension promotion and OCR asset alerts to the design-system Alert primitive, removed the General settings baseline exceptions, and verified focused tests plus scoped guard/TypeScript. Evidence: general-settings.tsx baseline count 0, Settings path count 14, total baseline count 158. Full design-system verifier remains blocked by unrelated WritingPlayground, Notes, and ResearchWorkspace findings.
 
 TASK-45.44.6.9 completed locally: migrated Prompt Studio settings capability, status-error, and unavailable alerts to the design-system Alert primitive, removed the Prompt Studio settings baseline exceptions, and verified focused tests plus scoped guard/TypeScript. Evidence: prompt-studio.tsx baseline count 0, Settings path count 11, total baseline count 154. Full design-system verifier remains blocked by unrelated WritingPlayground, Notes, and ResearchWorkspace findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

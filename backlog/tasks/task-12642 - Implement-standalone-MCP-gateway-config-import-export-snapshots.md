@@ -40,13 +40,9 @@ Docs/superpowers/plans/2026-06-02-mcp-gateway-config-snapshots.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented package-owned gateway config snapshots in mcp_unified/gateway/snapshots.py with versioned Pydantic models, deterministic ordering, secret-key validation, external-server inline secret validation, validate-first import reference checks, dry-run mutation plans, non-destructive upsert import order, best-effort audit events, and explicit partial-write failure reporting. Added config builder wiring and CLI export-config/import-config workflows. Touched files: mcp_unified/gateway/snapshots.py, mcp_unified/gateway/config.py, mcp_unified/gateway/cli.py, tldw_Server_API/app/core/MCP_unified/tests/test_gateway_config_snapshots.py, tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py, Docs/superpowers/plans/2026-06-02-mcp-gateway-config-snapshots.md. Verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_config_snapshots.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py -v -> 100 passed, 5 warnings. Bandit: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r mcp_unified/gateway/snapshots.py mcp_unified/gateway/config.py mcp_unified/gateway/cli.py -f json -o /tmp/bandit_mcp_gateway_config_snapshots.json -> 0 findings. git diff --check -> clean. Known skips/blockers: none.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

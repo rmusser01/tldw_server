@@ -32,7 +32,7 @@ Address review comments on PR 1387 for the Common StatusBadge design-system adap
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reviewed PR #1387 live surfaces with gh pr view, GraphQL review threads, and gh pr checks. Actionable items were Qodo guard bypass via non-call getDesignSystemState identifier reference and Gemini StatusBadge duplicate state lookup. CodeRabbit and Qodo summary comments were informational.
 
 Added a red guard regression for a StatusBadge adapter that returns Badge while only referencing getDesignSystemState without calling it; it failed before implementation with findings [].
@@ -42,7 +42,7 @@ Narrowed design-system state registry owner detection to actual call-expression 
 Fresh verification passed: bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot (46 tests); bunx vitest run src/components/Common/__tests__/StatusBadge.design-system.test.tsx --reporter=dot (3 tests); bun run verify:design-system-state (baseline 515, local-status-badge 9); git diff --check.
 
 Bandit was not run because this review-fix slice only touches TypeScript/TSX/JavaScript and Backlog metadata; no Python files were changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

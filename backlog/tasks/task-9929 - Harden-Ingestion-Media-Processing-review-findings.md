@@ -21,7 +21,7 @@ Verify and address validated code-review findings in tldw_Server_API/app/core/In
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Validated findings and dispositions:
 - PDF empty-analysis crash: validated and fixed with final_summary initialization plus regression coverage.
 - yt-dlp helper egress gaps: validated and fixed by enforcing evaluate_url_policy before helper network calls.
@@ -43,7 +43,7 @@ PR review follow-up:
 - Rebasing PR #2463 onto latest origin/dev exposed review comments for scheme-less URL redaction, audio exception messages, video loop redaction reuse, EML attachment size preservation, and test/module docstrings/type hints.
 - Addressed those comments with follow-up hardening and expanded regression assertions.
 - Review-response verification: py_compile and git diff --check passed; focused ingestion/email pytest passed 15 tests; Bandit passed with /tmp/bandit_ingestion_media_processing_pr_review_final_9929.json.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

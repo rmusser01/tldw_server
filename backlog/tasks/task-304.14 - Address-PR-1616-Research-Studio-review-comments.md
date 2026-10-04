@@ -35,11 +35,11 @@ Address still-actionable review threads and check issues on PR #1616 after live 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented PR review fixes: hosted /research-studio allowlist, portable manual screenshot path, Backlog description split, database-aware source browsing, combined dependency block scanning, stale ChatPane capability refresh, SharedWithMe client navigation, mobile tab persistence, behavioral route alias tests, extension string redirect destination, and no-source Studio regression coverage for existing artifacts plus Quick Notes expansion.
 
 Verification: UI focused Vitest 53 passed; frontend route/network Vitest 16 passed; backend Research Studio capability pytest 15 passed; Bandit touched backend scope reported 0 findings; git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

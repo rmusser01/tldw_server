@@ -10,7 +10,6 @@ Location: tldw_Server_API/app/core/Scheduler/handlers/workflows.py
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import Any
 
 from loguru import logger
@@ -22,7 +21,6 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
 )
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.Scheduler.base.registry import task
-from tldw_Server_API.app.core.Workflows.daily_ledger import record_workflow_run
 from tldw_Server_API.app.core.Workflows.engine import RunMode, WorkflowEngine
 from tldw_Server_API.app.core.Watchlists.briefing_delivery import record_audio_workflow_terminal
 
@@ -106,6 +104,13 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("workflow_run: resume run not found")
         db.update_run_metadata(resume_run_id, metadata)
     else:
+        from tldw_Server_API.app.core.Usage.quota_checks import workflows_runs_consume
+
+        # The check and the daily-ledger write are one atomic operation keyed by
+        # this run's id, so two concurrent scheduled runs cannot both pass
+        # against the same remaining slot.
+        if not (await workflows_runs_consume(user_id, run_id)).allowed:
+            raise RuntimeError("Daily workflow run quota exceeded")
         try:
             db.create_run(
                 run_id=run_id,
@@ -123,12 +128,6 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
         except Exception as e:
             logger.error(f"workflow_run: failed to create run: {e}")
             raise
-
-    # Shadow-write this run into the daily ledger so RG daily caps account for
-    # scheduled runs as well. Fail open if ledger unavailable.
-    if not resume_run_id:
-        with contextlib.suppress(Exception):
-            await record_workflow_run(entity_scope="user", entity_value=str(user_id), run_id=run_id, units=1)
 
     # Inject secrets ephemerally
     secrets = payload.get("secrets")

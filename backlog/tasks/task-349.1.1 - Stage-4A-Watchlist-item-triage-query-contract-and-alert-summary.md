@@ -39,11 +39,11 @@ Implement the backend/API query contract for server-authoritative Watchlist item
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Stage 4A after planning commit 3e29318c1. Scope: backend/API item triage query contract, alert-aware filters, optional alert_summary, tests first.
 
 Implemented validated item sort modes, alert-aware item filters, optional per-item alert summaries, and matching alert-aware smart-count filters. Verification: focused Stage 4A DB/API tests passed (4 passed); broader nearby Watchlists API tests passed (11 passed); Bandit touched scope passed with zero findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

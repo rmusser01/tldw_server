@@ -34,13 +34,13 @@ Write an implementation plan for the approved llama.cpp managed runtime roadmap.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added Docs/superpowers/plans/2026-05-16-llamacpp-managed-runtime-stage1-implementation-plan.md referencing the approved managed runtime design spec.
 
 Reviewed the plan for stale assumptions and patched the approved spec reference. git diff --check passed for the plan and task record.
 
 Bandit was not run because this planning task only changes documentation/task metadata and no Python code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

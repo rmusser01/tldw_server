@@ -28,9 +28,9 @@ Assign the new Explainer pytest files to the PR #2557 CI full-suite shard matrix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: the Shard coverage guard failed in PR #2557 because tldw_Server_API/tests/Explainer/{test_explainer_chatbook_export.py,test_explainer_endpoints.py,test_explainer_jobs.py,test_explainer_repository.py} were not covered by any full-suite shard path. Added a product-explainer shard to each repeated full-suite matrix copy in .github/workflows/ci.yml so the Explainer test directory is explicitly collected instead of ignored or baselined. Bandit skip: touched files are workflow YAML and Backlog task markdown only; no production Python changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

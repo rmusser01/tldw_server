@@ -51,7 +51,7 @@ Replace the newly unbaselined Playground cockpit Ready product-state labels with
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation replaced the three current unbaselined Playground cockpit Ready fallbacks with getDesignSystemState('ready').label in playground-cockpit-summaries.ts, Playground.tsx, and PlaygroundContextRail.tsx.
 
 Verified red before implementation: bun run verify:design-system-state reported three blocked Playground Ready canonical-state-label findings on current origin/dev.
@@ -63,7 +63,7 @@ TypeScript note: bunx tsc --noEmit --pretty false exits 2 on existing package-wi
 Bandit not run: touched runtime scope is UI TypeScript plus JSON baseline and Backlog metadata, with no Python execution path.
 
 PR link: https://github.com/rmusser01/tldw_server/pull/1709
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

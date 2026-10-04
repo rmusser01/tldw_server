@@ -45,7 +45,7 @@ Implement the next Chat/Playground design-system inventory slice after status ch
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red/green cycle complete: the new focused tests first failed because the scoped Playground footers had no ModalFooter markers, then passed after migrating the target action rows to ModalFooter.
 
 Implemented ModalFooter ordered left/right action support plus data-ds-component="ModalFooter" while preserving existing primaryAction, secondaryAction, onCancel and leftContent compatibility.
@@ -55,7 +55,7 @@ Verification: bunx vitest run src/components/Option/Playground/__tests__/Playgro
 Reopened for PR #1323 review feedback. Unresolved threads: standardize ModalFooter action aria label key to aria-label while adapting to the existing Common/Button ariaLabel prop, add variant plumbing to the Playground test Button mock, and make ImageGen submit/refine footer actions respect busy. Keep changes limited to the reviewed files and focused tests.
 
 PR #1323 review feedback addressed: ModalFooterAction now uses the standard aria-label action key while adapting to Common/Button's ariaLabel prop, the Playground footer test Button mock carries variant through data-variant, and ImageGen refine/generate actions respect busy. Verification: focused Playground footer Vitest suite passed 3 files / 8 tests; tsc --noEmit passed; git diff --check passed; targeted ESLint exited 0 with only existing no-explicit-any warnings in PlaygroundImageGenModal.tsx.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

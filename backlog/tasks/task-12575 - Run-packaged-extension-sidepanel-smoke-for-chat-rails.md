@@ -31,13 +31,11 @@ Build or load the packaged browser extension from the chat rails branch and smok
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started from clean post-TASK-533 branch state. Scope is packaged extension sidepanel smoke only: sidepanel chat width/overflow, full-screen /chat handoff, route-only copy, role-play /chat handoff, and absence of CharacterControlRail. Unrelated untracked watchlist templates remain ignored.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Verification recorded: packaged extension sidepanel smoke passed 3 tests with /chat layout, /options.html#/chat handoff, no CharacterControlRail, and send/reply; focused SidepanelHeaderSimple and ControlRow role-play handoff Vitest passed 2 files / 6 tests; git diff --check and evidence JSON parse passed. Bandit skipped because this slice touched TypeScript E2E, Markdown, JSON, and PNG evidence only. During debugging, packaged active role-play state could not be reliably synthesized through extension storage after three variants, so role-play route intent is covered by the focused component contract rather than the packaged smoke.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

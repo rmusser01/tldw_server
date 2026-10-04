@@ -32,7 +32,7 @@ Plan and track the two-PR remediation program from the toy MCP server walkthroug
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created two PR-sized child implementation tasks: TASK-223.1 for live discovery/chat/readiness blockers and TASK-223.2 for setup polish/diagnostics. Drafted approved design spec at Docs/superpowers/specs/2026-05-10-mcp-hub-walkthrough-remediation-design.md.
 
 Spec review loop passed on first review. Reviewer status: Approved. Advisory recommendations: resolve open implementation questions at planning start; make PR 2 setup isolation deliverable explicit as docs, tests, or both; keep E2E verification path relative to apps/tldw-frontend.
@@ -40,7 +40,7 @@ Spec review loop passed on first review. Reviewer status: Approved. Advisory rec
 No blocking spec-review issues found. Human review is the remaining process gate before transitioning to implementation-plan writing.
 
 After human-requested design review, clarified the spec around live MCP runtime resolution via get_mcp_server(), explicit ExternalServerManager.reconcile_servers(), normal chat/raw-preview scope, executable-tool data sources, and PR 2 setup isolation deliverables. Second spec review passed with no blocking issues. Advisory notes for implementation planning: resolve refresh endpoint path and external federation module-id fallback; include delete/disable runtime reconciliation flows; enumerate exact temp-path env/config values for walkthrough isolation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -28,9 +28,9 @@ Workflows run tests (test_events_cursor_pagination, test_malformed_cursor_400, .
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 837b04144e: autouse fixture in tests/Workflows/conftest.py sets WORKFLOWS_DISABLE_QUOTAS=1 and stubs daily_ledger.get_workflows_daily_ledger -> None, so neither the cap check nor record_workflow_run touches users.db. RED on old code: with today's ledger exhausted (1000 units inserted), test_events_cursor_pagination + test_malformed_cursor_400 -> 2 failed (429 == 200). GREEN: same exhausted ledger -> 7 passed; ledger row count unchanged (3 -> 3). Regression test test_workflows_config_defaults.py::test_workflows_tests_do_not_touch_authnz_daily_ledger fails on old conftest (quotas not disabled), passes now. Full tests/Workflows twice in a row with exhausted ledger: 1598 passed, 6 skipped both runs, 0 failures; no workflows_runs rows added. Put the test in an existing file so check_shard_coverage stays OK. Bandit: no findings. Docs: none (WORKFLOWS_DISABLE_QUOTAS already documented in Docs/Design/Workflows.md as the test switch). Observed side finding: tests/Evaluations/unit also writes 'evaluations' rows to the checkout users.db ledger (same class, not fixed here).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

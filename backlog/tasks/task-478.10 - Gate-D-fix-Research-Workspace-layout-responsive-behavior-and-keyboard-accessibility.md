@@ -59,7 +59,7 @@ Plan saved at Docs/superpowers/plans/2026-05-25-research-workspace-layout-access
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented responsive/layout hardening for Research Workspace.
 
 Changes:
@@ -73,7 +73,7 @@ Verification:
 - Live backend/WebUI Playwright/CDP validation passed at desktop 1365x900 and mobile 390x844 with source-backed Advanced filters. Screenshots: /private/tmp/task47810-desktop-source-advanced-after.png and /private/tmp/task47810-mobile-source-advanced-after.png.
 - tsc is blocked by unrelated existing syntax errors in apps/packages/ui/src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx; that file has no diff in this task.
 - Bandit not run because this task touched frontend TypeScript/TSX, tests, backlog, and plan docs only; no Python/backend code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

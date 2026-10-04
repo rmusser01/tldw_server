@@ -42,7 +42,7 @@ Move the minimal-test admin/admin_byok fallback block onto shared optional-route
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline verification before edits: python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "minimal_optional_router_specs and admin" -q passed with 1 passed, 164 deselected, 10 warnings.
 
 RED verification: the new runtime-defect test failed before implementation because the broad admin import catch swallowed RuntimeError and fell through to admin_byok.
@@ -52,7 +52,7 @@ GREEN verification: focused selector python -m pytest tldw_Server_API/tests/Serv
 No documentation change required for this internal router-registration cleanup. No blockers or known skips beyond existing test-suite warnings.
 
 PR review follow-up: addressed Gemini/Qodo review comments by adding a defensive empty candidate guard, switching fallback skip handling to candidate_spec.skip_exceptions, restoring debug logging for skipped fallback candidates, and adding docstrings to the new source helper and tests. Post-review validation: focused selector passed with 3 passed, 164 deselected, 10 warnings; full router group contracts passed with 167 passed, 30 warnings; main router contracts passed with 6 passed, 5 warnings; OpenAPI contracts passed with 69 passed, 24 warnings; Bandit reported 0 results and 0 errors; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

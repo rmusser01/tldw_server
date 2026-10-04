@@ -40,17 +40,15 @@ Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-07-01: Design accepted for implementation. Runtime work moved forward under TASK-12089 with the adapter-first route strategy, Stage 1 protocol boundary, identifier model, auth behavior, capability metadata, and default pipeline integration.
 - 2026-07-01: Bandit is not applicable to this design-only task. Implementation security verification is recorded on TASK-12089.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Original touched-file inventory preserved during official CLI normalization:
 - Docs/superpowers/specs/2026-07-01-openai-realtime-speech-endpoint-design.md
 - Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
 - backlog/tasks/task-12088 - Design-OpenAI-compatible-realtime-speech-endpoint.md
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

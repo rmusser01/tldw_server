@@ -37,9 +37,9 @@ Execute Task2 of Docs/superpowers/plans/2026-09-04-llamacpp-manual-snapshots.md.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented supervisor-owned manual snapshot operations and six admin routes under ADR-043: launch generations, reservations, private working paths, strict compatibility, signed request tokens, durable receipts, bounded single-dispatch native calls, unknown-outcome recovery and shutdown ownership. Task and final whole-branch reviews are clean after fixing admission/shutdown synchronization, verified staging cleanup, source-derived slot parsing, non-loopback native exposure, cross-profile cleanup ledger races and optional POSIX locking imports. Final verification: 213 targeted backend tests passed with 6 baseline warnings; Ruff/format/compileall/Bandit/diff checks passed. The failed-termination regression proves the real ownership fence stays held; Windows absence-of-fcntl is simulated, not a real-host test. Production build allowlist remains empty pending TASK13188 live evidence. ADR043 linked; no broader runtime support claimed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

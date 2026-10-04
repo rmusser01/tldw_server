@@ -38,7 +38,7 @@ Approved design-spec task only. 1. Create a Backlog task before repo edits. 2. W
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created design spec at Docs/superpowers/specs/2026-05-15-chat-worldbook-cache-cost-control-design.md. The spec incorporates the user-approved revision separating billing prompt caches from local inference caches and explicitly includes vLLM and llama.cpp. Verification run so far: git diff --check on the spec, targeted rg coverage for required providers/cache concepts, and ASCII scan with rg -nP "[^\\x00-\\x7F]". Bandit is not applicable because this task only adds documentation.
 
 Final verification: git diff --no-index --check returned no whitespace output for the new spec and TASK-377 Backlog file; targeted rg confirmed OpenAI, Anthropic, Gemini, OpenRouter, vLLM, llama.cpp, BillingPromptCacheIntent, InferencePrefixCacheIntent, world-book, and streaming coverage; ASCII scan returned no matches. No code was changed, so Bandit was documented as not applicable.
@@ -46,7 +46,7 @@ Final verification: git diff --no-index --check returned no whitespace output fo
 Reopened after user requested an additional design review before continuing. Planned updates: patch the existing design spec with review findings around prompt preview/send parity, streaming fallback accounting, output-token multiplier guardrails, raw usage metadata redaction, versioned prompt fingerprints, and passthrough cache-control boundaries.
 
 Applied additional design-review hardening requested by the user. The spec now covers preview/send prompt parity, versioned prompt fingerprint canonicalization, output-token and n-choice multiplier guardrails, reasoning-token risk, stream-disconnect fallback accounting, raw usage metadata redaction/size bounds, and boundaries around raw extra_body/extra_headers passthrough. Verification after patch: git diff --check returned no output, targeted rg confirmed the new concepts, and ASCII scan returned no matches. No code changed, so Bandit remains not applicable.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -2624,6 +2624,7 @@ def migration_015_create_llm_usage_tables(conn: sqlite3.Connection) -> None:
     # Helpful indexes for common queries
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_ts ON llm_usage_log(ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user ON llm_usage_log(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_provider_model ON llm_usage_log(provider, model)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_op_ts ON llm_usage_log(operation, ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_remote_ip_ts ON llm_usage_log(remote_ip, ts)")
@@ -6503,6 +6504,11 @@ def get_authnz_migrations() -> list[Migration]:
             "Add and backfill sessions.last_activity",
             migration_098_add_session_last_activity,
         ),
+        Migration(
+            99,
+            "Add llm_usage_log user_id + ts index",
+            migration_099_add_llm_usage_log_user_ts_index,
+        ),
     ]
 
 
@@ -6550,6 +6556,30 @@ def migration_098_add_session_last_activity(conn: sqlite3.Connection) -> None:
         the migration runner owns the transaction and its commit or rollback.
     """
     ensure_sqlite_session_last_activity(conn)
+
+
+def migration_099_add_llm_usage_log_user_ts_index(conn: sqlite3.Connection) -> None:
+    """Add the (user_id, ts) composite index on llm_usage_log (spec 2 §4) for legacy databases.
+
+    Migration 015 (already applied on existing databases) only indexed
+    user_id and ts separately; per-user monthly token lookups need the
+    composite index too.
+
+    Some synthetic/legacy databases reach this migration without ever having
+    run migration 015 (fixtures that seed ``schema_migrations`` starting at a
+    later version carry no llm_usage_log table at all); skip rather than
+    error for those, instead of suppressing a real failure.
+    """
+    table_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='llm_usage_log'"
+    ).fetchone()
+    if table_exists is None:
+        logger.info("Migration 099: llm_usage_log table not present; skipping index")
+        return
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)"
+    )
+    logger.info("Migration 099: Added llm_usage_log user_id + ts index")
 
 
 def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:

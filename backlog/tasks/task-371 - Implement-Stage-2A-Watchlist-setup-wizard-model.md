@@ -36,14 +36,14 @@ Build the Watchlist setup model for Stage 2. Scope: domain/start-mode types, CTI
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 2 baseline before feature edits:
 - Shell baseline: ./node_modules/.bin/vitest run src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.first-class.test.tsx --maxWorkers=1 --no-file-parallelism --reporter=verbose --testTimeout=30000 --hookTimeout=30000 passed: 1 file, 2 tests.
 - Quick setup helper baseline: ./node_modules/.bin/vitest run src/components/Option/Watchlists/OverviewTab/__tests__/quick-setup.test.ts --maxWorkers=1 --no-file-parallelism --reporter=verbose --testTimeout=30000 --hookTimeout=30000 passed: 1 file, 5 tests.
 - Combined baseline and isolated OverviewTab.quick-setup.test.tsx both fail before Stage 2A changes. Isolated run result: 1 file failed, 11 failed / 6 passed in 560.48s. Combined run result: 2 files passed, OverviewTab.quick-setup.test.tsx failed with 13 failed / 4 passed in that file. Failures are timeouts around guided quick setup/pipeline tests plus a Run immediately label lookup in the pipeline modal. Treat as pre-existing baseline for Stage 2A; this task is limited to setup model/copy tests and should not edit OverviewTab behavior.
 
 Stage 2A TDD result: red run failed as expected on the missing SetupWizard model import and missing setupWizard locale copy. Implemented typed setup presets, source URL normalization, Watchlist/source/job payload builders, and the Stage 2 setup copy contract. Green run passed: ./node_modules/.bin/vitest run src/components/Option/Watchlists/SetupWizard/__tests__/watchlist-setup-model.test.ts src/components/Option/Watchlists/__tests__/watchlists-stage2-copy-contract.test.ts --maxWorkers=1 --no-file-parallelism --reporter=verbose -> 2 files passed, 7 tests passed. git diff --check passed. Bandit not applicable because this task touched only frontend TypeScript and JSON locale files. Pre-existing OverviewTab.quick-setup.test.tsx failures remain documented above and are outside Stage 2A scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

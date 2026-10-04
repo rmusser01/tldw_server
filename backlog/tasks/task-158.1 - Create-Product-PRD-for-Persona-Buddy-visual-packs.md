@@ -34,10 +34,10 @@ Create a durable Docs/Product/WebUI PRD for the Persona Buddy / Persona Live vis
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created durable Product/WebUI PRD at Docs/Product/WebUI/Persona_Live_Visual_Packs_PRD.md. The PRD treats the existing superpowers spec as historical implementation context, records the current merged implementation baseline, captures PR #1412 direct Buddy-to-Visuals workflow, keeps VN/CYOA surfaces out of the primary live assistant path, and documents PR #1135-aligned portability/review assumptions.
 Verification: rg -n "TODO|TBD|FIXME|PLACEHOLDER|\?\?" Docs/Product/WebUI/Persona_Live_Visual_Packs_PRD.md returned no matches. git diff --check passed. Bandit not applicable because this is documentation/Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

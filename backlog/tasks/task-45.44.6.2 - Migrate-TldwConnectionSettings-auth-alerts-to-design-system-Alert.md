@@ -49,11 +49,11 @@ Migrate the remaining TldwConnectionSettings authentication status alerts from A
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented via TDD. Added failing coverage for the login-required and logged-in auth notices to require the shared design-system Alert marker and preserve the logged-in Logout action. Migrated both TldwConnectionSettings auth notices from AntD Alert to DesignSystemAlert with info/success variants and polite status regions. Extended the Alert primitive action contract with an optional Button variant so the logout action can keep danger styling while using the primitive action API. Removed the two TldwConnectionSettings AntD Alert baseline exceptions.
 
 Verification: focused red test failed on missing data-ds-component marker before implementation. After implementation, bunx vitest run src/components/Option/Settings/__tests__/tldw-review-comments.test.tsx src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed 58 tests. bun run verify:design-system-state passed with baseline exceptions reduced from 400 to 398 and Settings exceptions at 47. Baseline JSON parse passed. git diff --check passed. bunx tsc --noEmit --pretty false still exits 2 on existing repo-wide TypeScript debt; filtered output for TldwConnectionSettings, tldw-review-comments, components/ui/primitives/Alert, and the baseline file had no matches after fixing the touched test TFunction import. Bandit not run because this slice touches frontend TypeScript/JSON/backlog files only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

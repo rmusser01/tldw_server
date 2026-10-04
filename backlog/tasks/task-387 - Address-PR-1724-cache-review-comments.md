@@ -30,9 +30,9 @@ Review and address unresolved PR #1724 comments about Anthropic cache breakpoint
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed Gemini review threads by adding Anthropic multi-breakpoint cache marking up to the documented maximum of four eligible text blocks and by preserving nested numeric usage counters under prompt-like metadata keys while redacting free-form prompt strings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

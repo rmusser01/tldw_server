@@ -34,8 +34,10 @@ Fix Watchlists core review findings around unsafe regex filters, tenant-aware eg
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-06-24: Reopened to address PR #2482 review comments after rebasing onto latest origin/dev. Review items: justify new B608 suppressions, move enrichment scheduling out of endpoint, catch regex timeout variants, and route output enrichment through Scheduler with fallback only when unavailable.
+2026-06-24: PR #2482 review remediation completed. Rebased branch onto origin/dev, dropping unrelated Claims commits from the PR diff. Added documented B608 rationale comments, regex timeout variant handling, Scheduler-backed output enrichment submission with in-process fallback, and watchlists_enrich_output Scheduler task coverage.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -52,10 +54,3 @@ Review remediation complete for PR #2482. Branch rebased onto latest origin/dev 
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-2026-06-24: Reopened to address PR #2482 review comments after rebasing onto latest origin/dev. Review items: justify new B608 suppressions, move enrichment scheduling out of endpoint, catch regex timeout variants, and route output enrichment through Scheduler with fallback only when unavailable.
-2026-06-24: PR #2482 review remediation completed. Rebased branch onto origin/dev, dropping unrelated Claims commits from the PR diff. Added documented B608 rationale comments, regex timeout variant handling, Scheduler-backed output enrichment submission with in-process fallback, and watchlists_enrich_output Scheduler task coverage.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

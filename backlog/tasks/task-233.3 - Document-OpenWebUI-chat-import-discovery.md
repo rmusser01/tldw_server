@@ -36,7 +36,7 @@ Add user-facing documentation for the merged OpenWebUI chat JSON import feature 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started docs follow-up in isolated worktree codex/openwebui-chat-import-docs. Main checkout is dirty/diverged, so edits are intentionally isolated.
 
 Updated source docs and selected published mirrors for Chatbook/OpenWebUI discoverability. Added a docs regression test for guide, index, API README, API tag, and published docs coverage.
@@ -56,7 +56,7 @@ Review verification: python -m pytest tldw_Server_API/tests/Docs/test_chatbook_o
 Review verification: python -m bandit -r tldw_Server_API/tests/Docs/test_chatbook_openwebui_import_docs.py -f json -o /tmp/bandit_openwebui_import_docs_review.json (0 findings).
 
 Review verification: git diff --check (clean).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

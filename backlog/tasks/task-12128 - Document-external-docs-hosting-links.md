@@ -36,11 +36,7 @@ Implementation plan: Docs/superpowers/plans/2026-07-04-external-docs-hosting-imp
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Modified README.md, Docs/Website/index.html, Docs/mkdocs.yml, and Docs/Code_Documentation/Docs_Site_Guide.md.
 
 Verification: bash Helper_Scripts/refresh_docs_published.sh exited 0; python3 -m mkdocs build -f Docs/mkdocs.yml exited 0 with existing baseline docs warnings.
@@ -54,7 +50,7 @@ Known skip: broad Docs/Published refresh drift was not committed; CI and externa
 PR: https://github.com/rmusser01/tldw_server/pull/2616
 
 Review follow-up: rebased branch onto origin/dev; fixed Qodo comments by qualifying MkDocs serve/build commands with -f Docs/mkdocs.yml and replacing stale GitHub Pages public links with relative docs links or the tldwproject.com canonical URL. Verification: refresh_docs_published.sh exited 0; python3 -m mkdocs build -f Docs/mkdocs.yml exited 0 with existing baseline warnings; stale GitHub Pages URL grep returned no matches outside ignored Docs/site; unqualified MkDocs command grep returned no matches.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

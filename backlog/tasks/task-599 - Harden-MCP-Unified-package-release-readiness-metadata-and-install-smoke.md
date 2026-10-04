@@ -39,13 +39,9 @@ Docs/superpowers/plans/2026-06-03-mcp-unified-package-release-readiness-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Verification completed: focused red checks failed before implementation for missing package metadata, CLI package-info, and docs release gate; full focused pytest files passed 91 tests; Bandit on touched Python reported zero findings; git diff --check passed. No skips or blockers.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

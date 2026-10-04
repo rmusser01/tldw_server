@@ -36,7 +36,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Verified PR #1641 review threads from Gemini, CodeRabbit, and Qodo before editing.
 - Fixed opcode-shaped snippet previews while keeping public parameter names in `parameters_schema`.
 - Added advisory operation field metadata, previews, forbidden generation routing fields, output compatibility, and notes to the backend-owned catalog.
@@ -44,7 +44,7 @@ priority: medium
 - Moved `VNScriptAuthoringError` to the shared core exceptions module and kept the VN_Scripts import as a compatibility alias.
 - Escaped changed-path labels with bracket notation for labels containing dots or other special characters.
 - Added WebUI support for positional `op_index`, fixed VN error-envelope conflict parsing, and guarded preview/apply loading/state against stale async responses and same-script local edits.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
