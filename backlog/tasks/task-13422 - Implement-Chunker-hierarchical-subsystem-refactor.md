@@ -3,15 +3,15 @@ id: TASK-13422
 title: Implement Chunker hierarchical subsystem refactor
 status: In Progress
 created_date: 2026-10-03 01:30
-dependencies:
-- TASK-13421
+dependencies: []
 labels:
 - chunking
 - refactor
 - implementation
 priority: high
 references:
-- TASK-13421
+- backlog/completed/task-13423 - Design-Chunker-hierarchical-subsystem-refactor.md
+- backlog/completed/task-13421 - Design-Chunker-hierarchical-subsystem-refactor.md
 - backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md
 - https://github.com/rmusser01/tldw_server/pull/3095
 documentation:
@@ -25,7 +25,7 @@ modified_files:
 - tldw_Server_API/tests/Chunking/
 - Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
 - Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md
-updated_date: 2026-10-03 02:15
+updated_date: 2026-10-04 19:15
 ---
 
 ## Description
@@ -41,7 +41,7 @@ Continue the user-approved compatibility-first hierarchical subsystem refactor. 
 - [x] #3 The hierarchical package is extracted with the approved component interfaces and dependency direction while public hierarchy behavior remains compatible
 - [x] #4 The approved private span and header-title helpers are removed and process_text imports the shared span function directly
 - [x] #5 Focused and complete Chunking tests, compileall, Ruff, scoped Black, Bandit, and git diff --check pass with results recorded
-- [ ] #6 The PR remains non-merge-ready until the human requester supplies the required Change summary explaining what changed and why
+- [x] #6 The PR remains non-merge-ready until the human requester supplies the required Change summary explaining what changed and why
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -91,12 +91,14 @@ ae72a4702f1baeeac70f5abb35ec512f769a0152 refactor: clarify hierarchical span ann
 
 Final changed-file inventory: hierarchy package __init__/models/spans/leaves/builder/grouping/flatten/service; public chunker.py; process_text/models.py and dispatch.py; frozen hierarchy/malformed/spans/leaves/builder/grouping/flatten contracts plus narrow process_text component seam migration; approved spec/plan and historical tracking reconciliation provenance. This final pass touches only Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md and backlog/tasks/task-13422 - Implement-Chunker-hierarchical-subsystem-refactor.md. No final behavior correction. Prior b8d015c582 restores exact baseline envelope after extraction regression, not baseline defect correction.
 2026-10-02 Step10 handoff: pushed codex/chunker-hierarchical-refactor-design and created draft PR #3095 against dev: https://github.com/rmusser01/tldw_server/pull/3095. PR includes module/compatibility rationale, focused348pass1skip/full777pass1skip, compile/Ruff/Black/mypy/Bandit evidence, spec/plan links, and explicit human-written Change summary merge blocker. App artifact attached. Code at ae72a4702 and final docs evidence at5225c7fcf; controller independently reran full tests777pass1skip1963warnings48.76s and all static/security checks, Bandit0findings/errors2822LOC. Final specification and quality reviews approved with no remaining actionable code findings. Task stays In Progress; AC6human gate remains unchecked. Historical colliding task records remain preserved pending requester's scoped archive preference, unrelated upstream records untouched. Worktree retained for review; no merge performed.
+2026-10-04 requester authorized rebase of PR #3095 onto latest dev, verification/fixes/replies for all Qodo review comments, and merge after latest-head review and checks pass. Rebase completed without conflicts onto origin/dev d7997bc2052ac52c77427157fe3c5b2e2ca1843f; main checkout untouched. Human requester supplied the Change summary directly; posted verbatim in PR body and verified readback, satisfying AC6/policy. No Qodo review or inline comments existed at preflight. Fresh complete Chunking and static/security gates pending after rebase. Task remains In Progress until latest-head Qodo feedback is addressed, current CI passes, and PR merges. Historical archive exception remains unapproved and old records remain untouched.
+2026-10-04 fresh rebase gates: full Chunking777passed/1existingPyThaiNLPskip/1963warnings52.69s (/tmp/task13422_rebase_chunking.txt). Chunking source/tests byte-identical to pre-rebase2c2bc95a0e. Compileall/Ruff/scopedBlack15files/mypy7sourcefiles pass; Bandit0findings/0errors2822LOC (/tmp/bandit_task13422_rebase.json). Completed design TASK-13423 replaces newly colliding13421; historical and unrelated records untouched. Official MCP rejects completed TASK-13423 as a dependency ('Dependency not found: TASK-13423'), so remove the stale dependency and link the exact completed record path in references instead; completed design is no longer an outstanding dependency. Human requester supplied summary directly and PR readback verifies it; Qodo/current CI/merge remain pending. origin/dev advanced again to bf8f2ad6a42ad6396376020876a5f6a709ec6b34 during checks; additional scoped source/test diff empty. Include this base in rebase before publication.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the approved compatibility-first hierarchy decomposition into passive models/protocols, shared spans, leaf construction, tree building, grouping, flatten traversal, and live-context service coordination. Chunker retains its public signatures and flat composition; process_text uses the shared span function directly. Focused boundaries and direct contracts improve reviewability without changing observed offsets, option precedence, call multiplicity, exception/logging behavior, malformed-input handling, or shallow identities. Type cleanup uses localized annotations, an identity cast and a local rename; b8d015c582 restores the baseline envelope after an extraction regression, not a baseline behavior correction. Both final whole-branch reviews approved. Focused348passed/1optional skip; full777passed/1PyThaiNLPskip; compileall/Ruff/scopedBlack/mypy pass; Bandit0findings/0errors2822LOC; diff checks clean. Draft PR #3095 is open against dev: https://github.com/rmusser01/tldw_server/pull/3095. Worktree preserved. MERGE BLOCKER: the human requester must write their own Change summary explaining what changed and why these boundaries and compatibility choices were selected; this AI technical summary does not satisfy that gate. Task remains In Progress with AC6/overallDoD1 open. Historical colliding records are preserved pending the requester's scoped archive preference; unrelated upstream records untouched.
+Implemented and independently reviewed the approved compatibility-first hierarchy decomposition without changing public contracts. Fresh post-rebase complete Chunking777passed/1existingPyThaiNLPskip and compileall/Ruff/scopedBlack/mypy/Bandit gates pass; Bandit0findings/errors2822LOC. Human-written Change summary supplied directly by requester, posted verbatim and verified on PR #3095. Unique completed design TASK-13423 replaces new upstream collision; exact completed path is a reference because MCP cannot validate completed-task dependencies. Historical records and main checkout remain untouched. Requester authorized rebase, verified review fixes/replies, and merge; latest-head Qodo/current CI/PR merge still pending. Task remains In Progress.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

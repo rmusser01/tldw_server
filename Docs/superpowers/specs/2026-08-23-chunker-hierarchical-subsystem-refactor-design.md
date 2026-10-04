@@ -1,6 +1,6 @@
 # Chunker Hierarchical Subsystem Refactor Design
 
-Backlog design task: `TASK-13421`
+Backlog design task: `TASK-13423`
 
 Backlog implementation task: `TASK-13422`
 
@@ -9,6 +9,11 @@ workstream's colliding `TASK-13112` design and `TASK-13215` implementation
 IDs. The old records retain historical approvals and verification evidence;
 only the new IDs may be used for subsequent task mutations. Unrelated upstream
 records are unchanged. The original approved design and scope remain intact.
+
+Tracking reconciliation on 2026-10-04: the latest `dev` contains an unrelated
+Jobs task with ID `TASK-13421`. The completed Chunker design is now tracked as
+`TASK-13423`; the prior completed record remains unchanged as provenance.
+`TASK-13422` continues to own implementation and PR review follow-up.
 
 ## Purpose
 
@@ -113,14 +118,14 @@ require caller migrations.
 
 ## Delivery Tracking And PR Ownership
 
-`TASK-13421` remains design-only. `TASK-13422` owns the implementation plan,
+`TASK-13423` remains design-only. `TASK-13422` owns the implementation plan,
 production code, tests, verification results, and PR links, and depends on the
 completed design task. No production file is edited until this spec is approved,
-`TASK-13421` is finalized, `TASK-13422` is moved to `In Progress`, and the isolated
+`TASK-13423` is finalized, `TASK-13422` is moved to `In Progress`, and the isolated
 implementation branch passes the baseline reconciliation gate.
 
 The implementation plan is linked from `TASK-13422` and references both tasks and
-this spec. Design-review history remains on `TASK-13421`; implementation findings,
+this spec. Design-review history is linked from `TASK-13423`; implementation findings,
 correction-gate evidence, touched files, and verification results belong on
 `TASK-13422`.
 
@@ -558,7 +563,7 @@ silently excluded.
 
 ## Implementation Staging
 
-1. Confirm `TASK-13421` is complete, move `TASK-13422` to `In Progress`, link the
+1. Confirm `TASK-13423` is complete, move `TASK-13422` to `In Progress`, link the
    approved implementation plan, and reconcile `origin/dev` against the recorded
    baseline. If it advanced,
    update the baseline and rerun the focused suite before production edits.
