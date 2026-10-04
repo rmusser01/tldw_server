@@ -27,6 +27,12 @@ switching to Bob. This work fixes that generic native client behavior only.
   epoch; dispatch and completion reject mismatches without direct fallback.
   The identifier alone does not distinguish identical cookie-session logins.
   Observe native config/cookie storage boundaries to rotate the worker epoch.
+  Refresh-session invalidation also rotates that epoch before dispatch and
+  completion; ordinary same-principal refresh does not. UI and worker observers
+  share decoded manual session-key/metadata comparisons, so a replacement or
+  removal followed by return cannot preserve an earlier UI cache epoch.
+  Client and worker authority derivation use the same build-time key fallback
+  when no persisted effective key exists, without publishing raw keys over IPC.
   Do not let runtime credential overrides replace a checked worker credential;
   reject a request combining snapshot and Service Prompt scopes.
 - Recheck ownership after asynchronous work, including path resolution and

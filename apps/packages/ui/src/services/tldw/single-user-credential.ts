@@ -32,6 +32,32 @@ export const MANUAL_SESSION_KEY = "tldwManualSessionApiKey"
 export const REFRESH_ROTATION_KEY = "tldwRefreshRotation"
 export const REFRESH_SESSION_INVALIDATION_PREFIX = "tldwInvalidRefreshSession:"
 
+export const getBuildTimeApiKey = (): string | null => {
+  try {
+    const env = (import.meta.env || {}) as {
+      VITE_TLDW_API_KEY?: string
+      VITE_TLDW_DEFAULT_API_KEY?: string
+    }
+    const processEnv = typeof process === "undefined" ? {} : process.env || {}
+    const raw = env.VITE_TLDW_API_KEY ?? env.VITE_TLDW_DEFAULT_API_KEY ?? processEnv.NEXT_PUBLIC_X_API_KEY
+    return typeof raw === "string" ? raw.trim() || null : null
+  } catch {
+    return null
+  }
+}
+
+/** Compare decoded session records by the credential and its binding metadata. */
+export const manualSessionCredentialsMatch = (
+  previous: Partial<TldwConfig> | null | undefined,
+  current: Partial<TldwConfig> | null | undefined
+): boolean => {
+  const key = (value: typeof current) => typeof value?.apiKey === "string" ? value.apiKey.trim() : null
+  return key(previous) === key(current) &&
+    previous?.credentialSource === current?.credentialSource &&
+    previous?.apiKeyPersistence === current?.apiKeyPersistence &&
+    previous?.apiKeyServerOrigin === current?.apiKeyServerOrigin
+}
+
 /**
  * A possibly-untrusted request-scope target (e.g. parsed from a runtime
  * message). Fields are `unknown` on purpose: the helpers below only ever

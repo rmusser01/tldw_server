@@ -69,6 +69,7 @@ import type {
 } from "@/services/tldw/single-user-credential"
 import {
   clearManualCredentials,
+  getBuildTimeApiKey,
   hasNewerCurrentAccessToken,
   hasInvalidatedRefreshSession,
   invalidateRefreshSessionIfCurrent,
@@ -1773,22 +1774,6 @@ export class TldwApiClientBase {
     }
   }
 
-  private getEnvApiKey(): string | null {
-    try {
-      const env: any = (import.meta as any)?.env || {}
-      const processEnv: Record<string, string | undefined> =
-        typeof process === "undefined" ? {} : process.env || {}
-      const raw =
-        (env?.VITE_TLDW_API_KEY as string | undefined) ??
-        (env?.VITE_TLDW_DEFAULT_API_KEY as string | undefined) ??
-        processEnv.NEXT_PUBLIC_X_API_KEY
-      const key = (raw || "").trim()
-      return key || null
-    } catch {
-      return null
-    }
-  }
-
   private isDevMode(): boolean {
     try {
       const env: any = (import.meta as any)?.env || {}
@@ -2134,7 +2119,7 @@ export class TldwApiClientBase {
       }
     }
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
-    const envApiKey = quickstartWebUiServerUrl ? null : this.getEnvApiKey()
+    const envApiKey = quickstartWebUiServerUrl ? null : getBuildTimeApiKey()
     const storedCookieSession =
       quickstartWebUiServerUrl && !isCookieSessionConfigInvalidated()
         ? await this.storage

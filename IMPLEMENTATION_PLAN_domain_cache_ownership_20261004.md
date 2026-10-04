@@ -293,3 +293,42 @@ reports **83 baseline / 83 current diagnostics, zero introduced**; this is not
 a full typecheck pass. Final independent source review has no actionable
 findings. Fresh published-head Qodo, CI and merge remain pending; no deployment
 or private hosted readiness is claimed.
+
+### Third-Pass Qodo Corrections
+
+The completed review updated at 20:14Z on `6a50c8fe39` added three findings.
+All three were verified against the native worker, proxy and client paths:
+
+- Refresh-session invalidation marker changes now rotate the worker connection
+  epoch, rejecting already-resolved credentials before fetch and late responses.
+  Ordinary same-principal refresh remains compatible.
+- The UI account watcher now observes decoded session manual-key changes using
+  the same credential/metadata comparison as the worker. Replacement/return and
+  removal/return invalidate cached profiles and messages even without a read
+  between boundaries; identical, whitespace-only and unrelated writes do not.
+- Client and worker share build-time API-key lookup with unchanged precedence.
+  Worker effective-config hydration now includes the fallback key before both
+  handshake and request authority validation, while preserving stored keys and
+  cookie-session isolation. IPC still contains no raw credentials.
+
+RED: the two-file matrix had **17 failures / 201 passes**. Twelve failures
+returned stale cache values across session roundtrips, two accepted invalidated
+worker credentials/responses, and the Next environment key failed the authority
+handshake. The Vite-key cases also exposed the previous nonstandard
+`import.meta` access in the native test transform; the shared lookup now uses
+the standard `import.meta.env` access. GREEN: **218/218** in those two files.
+
+The documented 17-file matrix plus `background.effective-auth.test.ts` passed
+**675/675 tests across 18 files**, zero failed or pending. The quickstart fixture
+now provides a real environment input instead of spying on the extracted private
+lookup. The focused compiler-host comparison to current `origin/dev` reports
+**83 baseline / 83 current diagnostics, zero introduced**, not a full typecheck
+pass. ESLint reports **0 errors / 953 baseline warnings / 950 current warnings**.
+Existing Next pages-location and Node localStorage diagnostics remain visible.
+
+ADR reassessment: no new ADR, authentication or persistence protocol. Bandit
+cannot parse these TypeScript-only paths; manual security review checks opaque
+authority/epoch IPC, checked worker dispatch, cancellation, and no fallback.
+Owner Change Summary waiver remains recorded. Fresh rebased-head native
+verification, published-head Qodo and all seven active required contexts remain
+publication/merge gates; no merge or deployment is claimed at this checkpoint.

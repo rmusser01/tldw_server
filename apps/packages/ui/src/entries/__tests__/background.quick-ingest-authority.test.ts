@@ -146,9 +146,68 @@ beforeEach(async () => {
   const background = (await import("@/entries/background")).default
   background.main()
 })
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers() })
 
 describe("domain cache extension message authority", () => {
+  it.each(["before dispatch", "pending response"])("rejects refresh-session invalidation with a %s", async timing => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const { createSafeStorage } = await import("@/utils/safe-storage")
+    const { refreshSessionInvalidationKey } = await import("@/services/tldw/single-user-credential")
+    const checked = {
+      serverUrl: config.serverUrl, authMode: "multi-user" as const,
+      accessToken: `test.${btoa(JSON.stringify({ sub: "alice" }))}.signature`, refreshToken: "synthetic-refresh"
+    }
+    const persistent = createSafeStorage({ area: "local" })
+    await persistent.set("tldwConfig", checked)
+    const key = refreshSessionInvalidationKey(checked)!
+    const pending = deferred<Response>()
+    const fetcher = vi.fn(() => pending.promise)
+    vi.stubGlobal("fetch", fetcher)
+    // Body serialization happens after credential resolution but before fetch.
+    const body = timing === "before dispatch" ? {
+      toJSON: () => { void persistent.set(key, true); return {} }
+    } : {}
+    const read = bgRequest({ path: "/api/v1/characters/7", method: "POST", body, configSnapshot: checked }).catch(error => error)
+    if (timing === "pending response") {
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+      await persistent.set(key, true)
+    }
+    pending.resolve(json({ id: 7, name: "Invalidated owner" }))
+    expect(await read).toMatchObject({ status: 412 })
+    if (timing === "before dispatch") expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it.each(["VITE_TLDW_API_KEY", "VITE_TLDW_DEFAULT_API_KEY", "NEXT_PUBLIC_X_API_KEY"])("hydrates %s identically for fenced client and worker reads", async env => {
+    vi.stubEnv(env, " synthetic-env-key ")
+    const { TldwApiClient, TldwApiClientBase } = await import("@/services/tldw/TldwApiClient")
+    const { characterMethods } = await import("@/services/tldw/domains/characters")
+    const { chatRagMethods } = await import("@/services/tldw/domains/chat-rag")
+    const { apiKey: _apiKey, ...stored } = config
+    harness.values.set("tldwConfig", stored)
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get("X-API-Key")).toBe("synthetic-env-key")
+      return json(String(input).includes("/messages")
+        ? [{ id: "7", sender: "user", content: "Alice" }]
+        : { id: 7, name: "Alice" })
+    })
+    vi.stubGlobal("fetch", fetcher)
+    for (const adapter of ["public", "base", "domain"]) {
+      const client = new TldwApiClient()
+      vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0] as `/${string}`)
+      const character = adapter === "base" ? TldwApiClientBase.prototype.getCharacter
+        : adapter === "domain" ? characterMethods.getCharacter : client.getCharacter
+      const messages = adapter === "base" ? TldwApiClientBase.prototype.listChatMessages
+        : adapter === "domain" ? chatRagMethods.listChatMessages : client.listChatMessages
+      expect(await character.call(client, 7)).toMatchObject({ name: "Alice" })
+      expect(await messages.call(client, "7")).toMatchObject([{ content: "Alice" }])
+      const dispatches = fetcher.mock.calls.length
+      expect(await character.call(client, 7)).toMatchObject({ name: "Alice" })
+      expect(await messages.call(client, "7")).toMatchObject([{ content: "Alice" }])
+      expect(fetcher).toHaveBeenCalledTimes(dispatches)
+    }
+    expect(JSON.stringify(harness.sent)).not.toContain("synthetic-env-key")
+  })
+
   it.each(["GET", "POST"] as const)("promptly cancels an unresolved %s authority handshake without dispatch or fallback", async method => {
     const { bgRequest } = await import("@/services/background-proxy")
     const checked = deferred<unknown>()

@@ -15,13 +15,13 @@ vi.mock("wxt/browser", () => ({ browser: {
     removeListener: (listener: (changes: Record<string, unknown>, area: string) => void) => io.extensionListeners.delete(listener)
   } }
 } }))
-vi.mock("@/utils/safe-storage", () => ({
+vi.mock("@/utils/safe-storage", async importOriginal => ({
   createSafeStorage: () => ({
     get: (key: string) => io.get(key),
     set: async (key: string, value: unknown) => { io.storage.set(key, value) },
     remove: async (key: string) => { io.storage.delete(key) }
   }),
-  safeStorageSerde: { serializer: (value: unknown) => value, deserializer: (value: unknown) => value }
+  safeStorageSerde: (await importOriginal<typeof import("@/utils/safe-storage")>()).safeStorageSerde
 }))
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: (...args: unknown[]) => io.request(...args),
@@ -31,6 +31,8 @@ vi.mock("@/services/background-proxy", () => ({
 import { TldwApiClient, TldwApiClientBase, type TldwConfig } from "../TldwApiClient"
 import { characterMethods } from "../domains/characters"
 import { chatRagMethods } from "../domains/chat-rag"
+import { MANUAL_SESSION_KEY } from "../single-user-credential"
+import { safeStorageSerde } from "@/utils/safe-storage"
 
 const jwt = (sub: string, iat = 1) => `test.${btoa(JSON.stringify({ sub, iat }))}.signature`
 const alice: TldwConfig = { serverUrl: "https://chat.test", authMode: "multi-user", accessToken: jwt("alice") }
@@ -219,6 +221,42 @@ describe.each(adapters)("%s domain-cache ownership", adapter => {
       }
       io.owner = "Bob"
       expect(await read(resource)).toBe("Bob")
+    })
+
+    it.each(["replacement", "removal"])("invalidates a session-key %s roundtrip between cache reads", async change => {
+      const { apiKey, ...metadata } = { ...deviceKey, apiKeyPersistence: "session" as const }
+      const record = { ...metadata, apiKey }
+      configure(metadata)
+      io.storage.set(MANUAL_SESSION_KEY, record)
+      expect(await read(resource)).toBe("Alice")
+      const intermediate = change === "removal" ? undefined : { ...record, apiKey: "synthetic-key-b" }
+      for (const [oldValue, newValue] of [[record, intermediate], [intermediate, record]]) {
+        io.storage.set(MANUAL_SESSION_KEY, newValue)
+        for (const listener of io.extensionListeners) listener({ [MANUAL_SESSION_KEY]: {
+          oldValue: safeStorageSerde.serializer(oldValue), newValue: safeStorageSerde.serializer(newValue)
+        } }, "session")
+      }
+      io.owner = "Bob"
+      expect(await read(resource)).toBe("Bob")
+      expect(await read(resource)).toBe("Bob")
+    })
+
+    it.each(["identical", "whitespace", "unrelated"])("preserves a cache hit across a %s session write", async change => {
+      const { apiKey, ...metadata } = { ...deviceKey, apiKeyPersistence: "session" as const }
+      const record = { ...metadata, apiKey }
+      configure(metadata)
+      io.storage.set(MANUAL_SESSION_KEY, record)
+      expect(await read(resource)).toBe("Alice")
+      const key = change === "unrelated" ? "other-setting" : MANUAL_SESSION_KEY
+      const newValue = change === "unrelated" ? "value" : {
+        ...record, apiKey: change === "whitespace" ? ` ${apiKey} ` : apiKey
+      }
+      io.storage.set(key, newValue)
+      for (const listener of io.extensionListeners) listener({ [key]: {
+        oldValue: safeStorageSerde.serializer(record), newValue: safeStorageSerde.serializer(newValue)
+      } }, "session")
+      io.owner = "Bob"
+      expect(await read(resource)).toBe("Alice")
     })
 
     it("rejects a late old-owner response without replacing or deleting the newer in-flight read", async () => {

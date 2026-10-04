@@ -23,6 +23,8 @@ import {
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode";
 import {
   MANUAL_SESSION_KEY,
+  getBuildTimeApiKey,
+  manualSessionCredentialsMatch,
   hasNewerCurrentAccessToken,
   invalidateRefreshSessionIfCurrent,
   resolveEffectiveTldwConfig,
@@ -437,11 +439,16 @@ export default defineBackground({
     const storage = createSafeStorage({ area: "local" });
     const sessionStorage = createSafeStorage({ area: "session" });
     let connectionAuthorityEpoch = crypto.randomUUID();
-    const getEffectiveConfig = () =>
-      resolveEffectiveTldwConfig({
+    const getEffectiveConfig = async () => {
+      const config = await resolveEffectiveTldwConfig({
         persistent: storage,
         session: sessionStorage,
       });
+      const envApiKey = getBuildTimeApiKey();
+      return config && config.authSource !== "cookie-session" && !config.apiKey && envApiKey
+        ? { ...config, apiKey: envApiKey }
+        : config;
+    };
     const resolveCurrentServicePromptConfig = async (
       checked: ServicePromptTargetLock,
     ) => {
@@ -3928,13 +3935,7 @@ export default defineBackground({
       if (areaName === "session") {
         const change = changes?.[MANUAL_SESSION_KEY];
         if (change) {
-          const { oldValue, newValue } = change;
-          const oldKey = typeof oldValue?.apiKey === "string" ? oldValue.apiKey.trim() : null;
-          const newKey = typeof newValue?.apiKey === "string" ? newValue.apiKey.trim() : null;
-          if (oldKey !== newKey ||
-              oldValue?.credentialSource !== newValue?.credentialSource ||
-              oldValue?.apiKeyPersistence !== newValue?.apiKeyPersistence ||
-              oldValue?.apiKeyServerOrigin !== newValue?.apiKeyServerOrigin) {
+          if (!manualSessionCredentialsMatch(change.oldValue, change.newValue)) {
             connectionAuthorityEpoch = crypto.randomUUID();
           }
         }
@@ -3942,8 +3943,9 @@ export default defineBackground({
       }
       if (areaName !== "local") return;
       if (Object.entries(changes || {}).some(([key, change]) =>
-        (key === "tldwConfig" || key === "tldwCookieSessionConfig") &&
-        (!change.newValue || !connectionAuthoritiesMatch(change.oldValue, change.newValue))
+        ((key === "tldwConfig" || key === "tldwCookieSessionConfig") &&
+        (!change.newValue || !connectionAuthoritiesMatch(change.oldValue, change.newValue))) ||
+        (key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX) && change.oldValue !== change.newValue)
       )) connectionAuthorityEpoch = crypto.randomUUID();
       if (Object.keys(changes || {}).some(key => key === "tldwConfig" || key === REFRESH_ROTATION_KEY || key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX))) {
         quickIngestCredentialRevision += 1;
