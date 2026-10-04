@@ -1,7 +1,7 @@
 import { connectionAuthoritiesMatch, deriveConnectionAuthorityId } from "@/services/chat-surface-scope";
 import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts";
 import { browser } from "wxt/browser";
-import { createSafeStorage } from "@/utils/safe-storage";
+import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage";
 import { formatErrorMessage } from "@/utils/format-error-message";
 import { sanitizeRagProviderFailure } from "@/services/rag/provider-error-contract";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
@@ -22,6 +22,7 @@ import {
 } from "@/services/recipe-persistence-uncertainty";
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode";
 import {
+  MANUAL_SESSION_KEY,
   hasNewerCurrentAccessToken,
   invalidateRefreshSessionIfCurrent,
   resolveEffectiveTldwConfig,
@@ -3918,7 +3919,27 @@ export default defineBackground({
       return true;
     };
 
-    browser.storage.onChanged.addListener((changes, areaName) => {
+    browser.storage.onChanged.addListener((rawChanges, areaName) => {
+      type StoredConfig = Parameters<typeof connectionAuthoritiesMatch>[0];
+      const changes = Object.fromEntries(Object.entries(rawChanges || {}).map(([key, change]) => [key, {
+        oldValue: safeStorageSerde.deserializer<StoredConfig>(change.oldValue as string),
+        newValue: safeStorageSerde.deserializer<StoredConfig>(change.newValue as string),
+      }]));
+      if (areaName === "session") {
+        const change = changes?.[MANUAL_SESSION_KEY];
+        if (change) {
+          const { oldValue, newValue } = change;
+          const oldKey = typeof oldValue?.apiKey === "string" ? oldValue.apiKey.trim() : null;
+          const newKey = typeof newValue?.apiKey === "string" ? newValue.apiKey.trim() : null;
+          if (oldKey !== newKey ||
+              oldValue?.credentialSource !== newValue?.credentialSource ||
+              oldValue?.apiKeyPersistence !== newValue?.apiKeyPersistence ||
+              oldValue?.apiKeyServerOrigin !== newValue?.apiKeyServerOrigin) {
+            connectionAuthorityEpoch = crypto.randomUUID();
+          }
+        }
+        return;
+      }
       if (areaName !== "local") return;
       if (Object.entries(changes || {}).some(([key, change]) =>
         (key === "tldwConfig" || key === "tldwCookieSessionConfig") &&

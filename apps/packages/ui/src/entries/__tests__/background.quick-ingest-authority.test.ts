@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { getEventListeners } from "node:events"
+import { transferableAbortController } from "node:util"
 
 const harness = vi.hoisted(() => {
   Object.defineProperty(globalThis, "defineBackground", {
@@ -9,9 +11,11 @@ const harness = vi.hoisted(() => {
     saved: {} as Record<string, unknown>,
     changes: new Set<(changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, area: string) => void>(),
     values: new Map<string, unknown>(),
+    sessionValues: new Map<string, unknown>(),
     workerConfig: null as Record<string, unknown> | null,
     beforeRequest: null as (() => void) | null,
     authorityReplyGate: null as Promise<unknown> | null,
+    authorityReplyReady: null as (() => void) | null,
     listeners: new Set<
       (
         message: unknown,
@@ -22,21 +26,35 @@ const harness = vi.hoisted(() => {
     sent: [] as unknown[]
   }
 })
-vi.mock("@/utils/safe-storage", () => ({
-  safeStorageSerde: {
-    serialize: (value: unknown) => value,
-    deserialize: (value: unknown) => value
-  },
-  createSafeStorage: () => ({
-    get: async (key: string) => harness.values.get(key),
-    set: async (key: string, value: unknown) => {
-      harness.values.set(key, value)
-    },
-    remove: async (key: string) => {
-      harness.values.delete(key)
+vi.mock("@/utils/safe-storage", async importOriginal => {
+  const { safeStorageSerde } = await importOriginal<typeof import("@/utils/safe-storage")>()
+  return {
+  safeStorageSerde,
+  createSafeStorage: ({ area = "local" } = {}) => {
+    const values = area === "session" ? harness.sessionValues : harness.values
+    return {
+      get: async (key: string) => values.get(key),
+      set: async (key: string, value: unknown) => {
+        const oldValue = values.get(key)
+        values.set(key, value)
+        for (const listener of harness.changes) listener({ [key]: {
+          oldValue: safeStorageSerde.serializer(oldValue),
+          newValue: safeStorageSerde.serializer(value)
+        } }, area)
+      },
+      remove: async (key: string) => {
+        const oldValue = values.get(key)
+        values.delete(key)
+        if (oldValue !== undefined) {
+          for (const listener of harness.changes) listener({ [key]: {
+            oldValue: safeStorageSerde.serializer(oldValue), newValue: undefined
+          } }, area)
+        }
+      }
     }
-  })
-}))
+  }
+  }
+})
 vi.mock("@/entries/shared/background-init", () => ({
   MODEL_WARM_ALARM_NAME: "warm",
   initBackground: async () => {}
@@ -58,7 +76,10 @@ vi.mock("wxt/browser", () => {
           if (harness.workerConfig) harness.values.set("tldwConfig", harness.workerConfig)
           try {
             const result = await send(message)
-            if ((message as { type?: string }).type === "tldw:connection-authority") await harness.authorityReplyGate
+            if ((message as { type?: string }).type === "tldw:connection-authority") {
+              harness.authorityReplyReady?.()
+              await harness.authorityReplyGate
+            }
             return result
           } finally {
             if (harness.workerConfig) harness.values.set("tldwConfig", previous)
@@ -118,7 +139,7 @@ const switchConfig = (next: typeof config) => {
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 
 beforeEach(async () => {
-  vi.resetModules(); harness.listeners.clear(); harness.changes.clear(); harness.values.clear(); harness.sent.length = 0; harness.saved = {}; harness.workerConfig = null; harness.beforeRequest = null; harness.authorityReplyGate = null
+  vi.resetModules(); harness.listeners.clear(); harness.changes.clear(); harness.values.clear(); harness.sessionValues.clear(); harness.sent.length = 0; harness.saved = {}; harness.workerConfig = null; harness.beforeRequest = null; harness.authorityReplyGate = null; harness.authorityReplyReady = null
   harness.values.set("tldwConfig", config)
   vi.stubGlobal("window", undefined)
   vi.stubGlobal("chrome", { storage: (await import("wxt/browser")).browser.storage })
@@ -132,9 +153,8 @@ describe("domain cache extension message authority", () => {
     const { bgRequest } = await import("@/services/background-proxy")
     const checked = deferred<unknown>()
     harness.authorityReplyGate = checked.promise
-    const controller = new AbortController()
-    const added = vi.spyOn(controller.signal, "addEventListener")
-    const removed = vi.spyOn(controller.signal, "removeEventListener")
+    const controller = transferableAbortController()
+    const listeners = getEventListeners(controller.signal, "abort").length
     const fetcher = vi.fn(async () => json({ id: 7 }))
     vi.stubGlobal("fetch", fetcher)
     vi.useFakeTimers()
@@ -146,7 +166,7 @@ describe("domain cache extension message authority", () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(outcome).toMatchObject({ name: "AbortError" })
     expect(vi.getTimerCount()).toBe(timers)
-    expect(removed).toHaveBeenCalledWith("abort", added.mock.calls[0][1])
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(listeners)
     expect(await read).toBe(outcome)
     checked.resolve(null)
     await vi.advanceTimersByTimeAsync(0)
@@ -185,25 +205,13 @@ describe("domain cache extension message authority", () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 
-  it.each(["success", "error", "timeout"] as const)("removes the handshake abort listener and timer after %s", async result => {
+  it.each(["success", "error", "timeout"] as const)("releases cancellation resources after handshake %s", async result => {
     const { bgRequest } = await import("@/services/background-proxy")
     const { browser } = await import("wxt/browser")
-    const controller = new AbortController()
-    const added = vi.spyOn(controller.signal, "addEventListener")
-    const removed = vi.spyOn(controller.signal, "removeEventListener")
+    const controller = transferableAbortController()
+    const listeners = getEventListeners(controller.signal, "abort").length
     const fetcher = vi.fn(async () => json({ id: 7 }))
     vi.stubGlobal("fetch", fetcher)
-    if (result === "success") {
-      const send = browser.runtime.sendMessage.bind(browser.runtime)
-      vi.spyOn(browser.runtime, "sendMessage").mockImplementation(message => {
-        if ((message as unknown as { type?: string }).type === "tldw:request") {
-          const listener = added.mock.calls[0]?.[1]
-          expect(listener).toBeTypeOf("function")
-          expect(removed).toHaveBeenCalledWith("abort", listener)
-        }
-        return send(message)
-      })
-    }
     if (result === "error") vi.spyOn(browser.runtime, "sendMessage").mockRejectedValueOnce(new Error("Worker unavailable"))
     if (result === "timeout") vi.spyOn(browser.runtime, "sendMessage").mockImplementationOnce(() => new Promise(() => {}))
     vi.useFakeTimers()
@@ -214,10 +222,119 @@ describe("domain cache extension message authority", () => {
     expect(await read).toBe(outcome)
     if (result === "success") expect(outcome).toEqual({ id: 7 })
     else expect(outcome).toBeInstanceOf(Error)
-    const listener = added.mock.calls[0]?.[1]
-    expect(listener).toBeTypeOf("function")
-    expect(removed).toHaveBeenCalledWith("abort", listener)
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(listeners)
     expect(vi.getTimerCount()).toBe(timers)
+    const messages = harness.sent.length
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(harness.sent).toHaveLength(messages)
+    expect(fetcher).toHaveBeenCalledTimes(result === "success" ? 1 : 0)
+  })
+
+  it("classifies an unanswered handshake as a no-fallback timeout rather than a scope change", async () => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const { browser } = await import("wxt/browser")
+    const sendMessage = vi.spyOn(browser.runtime, "sendMessage").mockImplementationOnce(() => new Promise(() => {}))
+    const fetcher = vi.fn()
+    vi.stubGlobal("fetch", fetcher)
+    vi.useFakeTimers()
+    const read = bgRequest({ path: "/api/v1/characters/7", configSnapshot: config }).catch(error => error)
+    await vi.advanceTimersByTimeAsync(3000)
+    const error = await read
+    expect(error).toMatchObject({ message: "Extension messaging timeout", __tldwNoDirectFallback: true, __tldwExtensionTimeout: true })
+    expect(error.status).not.toBe(412)
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  describe("session manual credential authority", () => {
+    const setup = async () => {
+      const { createSafeStorage } = await import("@/utils/safe-storage")
+      const { MANUAL_SESSION_KEY, resolveEffectiveTldwConfig } = await import("@/services/tldw/single-user-credential")
+      const { apiKey, ...metadata } = { ...config, apiKeyPersistence: "session" as const }
+      const persistent = createSafeStorage({ area: "local" })
+      const session = createSafeStorage({ area: "session" })
+      const record = { credentialSource: "manual" as const, apiKeyPersistence: "session" as const, apiKeyServerOrigin: config.apiKeyServerOrigin, apiKey }
+      await persistent.set("tldwConfig", metadata)
+      await session.set(MANUAL_SESSION_KEY, record)
+      const checked = await resolveEffectiveTldwConfig({ persistent, session })
+      expect(checked?.apiKey).toBe("worker-key")
+      expect(harness.values.get("tldwConfig")).not.toHaveProperty("apiKey")
+      return { persistent, session, record, checked, MANUAL_SESSION_KEY, resolveEffectiveTldwConfig }
+    }
+
+    it.each(["replacement", "removal", "remove and restore"] as const)("rejects session-key %s while a worker response is pending", async change => {
+      const { bgRequest } = await import("@/services/background-proxy")
+      const stores = await setup()
+      const pending = deferred<Response>()
+      const fetcher = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => pending.promise)
+      vi.stubGlobal("fetch", fetcher)
+      const read = bgRequest({ path: "/api/v1/characters/7", configSnapshot: stores.checked }).catch(error => error)
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+      expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("X-API-Key")).toBe("worker-key")
+      if (change === "replacement") await stores.session.set(stores.MANUAL_SESSION_KEY, { ...stores.record, apiKey: "different-key" })
+      else {
+        await stores.session.remove(stores.MANUAL_SESSION_KEY)
+        if (change === "remove and restore") await stores.session.set(stores.MANUAL_SESSION_KEY, stores.record)
+      }
+      const current = await stores.resolveEffectiveTldwConfig(stores)
+      expect(current?.apiKey).toBe(change === "replacement" ? "different-key" : change === "removal" ? undefined : "worker-key")
+      pending.resolve(json({ id: 7, name: "Old owner" }))
+      expect(await read).toMatchObject({ status: 412 })
+      expect(fetcher).toHaveBeenCalledTimes(1)
+    })
+
+    it("rejects a session-key remove and restore after the handshake before dispatch", async () => {
+      const { bgRequest } = await import("@/services/background-proxy")
+      const stores = await setup()
+      const gate = deferred<unknown>()
+      const ready = deferred<unknown>()
+      harness.authorityReplyGate = gate.promise
+      harness.authorityReplyReady = () => ready.resolve(null)
+      const fetcher = vi.fn(async () => json({ id: 7, name: "Unfenced owner" }))
+      vi.stubGlobal("fetch", fetcher)
+      const read = bgRequest({ path: "/api/v1/characters/7", configSnapshot: stores.checked }).catch(error => error)
+      await ready.promise
+      await stores.session.remove(stores.MANUAL_SESSION_KEY)
+      await stores.session.set(stores.MANUAL_SESSION_KEY, stores.record)
+      gate.resolve(null)
+      expect(await read).toMatchObject({ status: 412 })
+      expect(fetcher).not.toHaveBeenCalled()
+    })
+
+    it.each(["identical", "whitespace", "unrelated"] as const)("preserves a pending request across a %s session write", async change => {
+      const { bgRequest } = await import("@/services/background-proxy")
+      const stores = await setup()
+      const pending = deferred<Response>()
+      const fetcher = vi.fn(() => pending.promise)
+      vi.stubGlobal("fetch", fetcher)
+      const read = bgRequest({ path: "/api/v1/characters/7", configSnapshot: stores.checked })
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+      if (change === "unrelated") await stores.session.set("unrelated-setting", "value")
+      else await stores.session.set(stores.MANUAL_SESSION_KEY, { ...stores.record, apiKey: change === "whitespace" ? " worker-key " : stores.record.apiKey })
+      expect((await stores.resolveEffectiveTldwConfig(stores))?.apiKey).toBe("worker-key")
+      pending.resolve(json({ id: 7, name: "Current owner" }))
+      expect(await read).toMatchObject({ name: "Current owner" })
+      expect(fetcher).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("preserves a pending request across a same-principal JWT storage refresh", async () => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    const { createSafeStorage } = await import("@/utils/safe-storage")
+    const persistent = createSafeStorage({ area: "local" })
+    const jwt = (iat: number) => `test.${btoa(JSON.stringify({ sub: "alice", iat }))}.signature`
+    const checked = { serverUrl: config.serverUrl, authMode: "multi-user" as const, accessToken: jwt(1) }
+    await persistent.set("tldwConfig", checked)
+    const pending = deferred<Response>()
+    const fetcher = vi.fn(() => pending.promise)
+    vi.stubGlobal("fetch", fetcher)
+    const read = bgRequest({ path: "/api/v1/characters/7", configSnapshot: checked })
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+    await persistent.set("tldwConfig", { ...checked, accessToken: jwt(2) })
+    pending.resolve(json({ id: 7, name: "Alice" }))
+    expect(await read).toMatchObject({ name: "Alice" })
+    expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
   it("clears the handshake timer and does not dispatch after cancellation during the check", async () => {

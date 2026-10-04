@@ -141,17 +141,25 @@ node node_modules/vitest/vitest.mjs run \
   --maxWorkers=1 --no-file-parallelism
 ```
 
-RED commands used `/Users/macbook-dev/.bun/bin/bun run test` with the ownership
-file and `-t 'old.*storage read|resolves storage'`, or the worker file and
+Historical RED runs used a locally installed Bun executable. Portable invocations
+use `bun run test` with the ownership file and
+`-t 'old.*storage read|resolves storage'`, or the worker file and
 `-t 'domain cache extension'`, `-t 'cookie-config'`, `-t 'runtime API-key'`,
 and `-t 'combined snapshot|runtime API-key|cookie-config'`. Direct initialization
 mutation used the ownership file with `-t 'older direct initialize'`.
 The product-message fallback RED used the worker file with `-t 'product-message'`.
 
-Typecheck: `node --max-old-space-size=8192 --expose-gc --input-type=module`,
-TypeScript compiler API, existing external focused config
-`/private/tmp/domain-cache-ownership-typecheck-20261004.json` plus all changed
-`.ts` paths as root names. Baseline compiler-host reads substitute
+Historical typecheck: `node --max-old-space-size=8192 --expose-gc --input-type=module`
+with the TypeScript compiler API and a disposable external focused config, not
+a checked-in verification script. The config extended
+`apps/packages/ui/tsconfig.json`, set `incremental: false` and `noEmit: true`,
+and cleared `include`. Its explicit root files were the frontend Node type
+declarations and `vite-env.d.ts`, UI `src/ambient.d.ts`, `TldwApiClient.ts`,
+the `characters.ts` and `chat-rag.ts` domain mixins, and the ownership,
+request-scope, and saved-profile test files named above. Resolve these paths
+against the current checkout and add all changed `.ts` paths as root names to
+reconstruct the focused comparison; the original external config is not a
+repository artifact. Baseline compiler-host reads substitute
 `git show a3881455da:<path>` for each changed source, without changing checkout
 files. Compare diagnostic multisets by file/code/message.
 Lint: native ESM ESLint API, `apps/tldw-frontend/eslint.config.mjs`, `lintText`
@@ -261,3 +269,27 @@ Task history is appended with backlog-py CLI, not manually edited. ADR assessmen
 no new ADR; restore existing native cancellation semantics without auth or IPC
 protocol changes. Owner Change Summary waiver remains in force. No full-suite,
 publication, merge, deployment, or private hosted readiness claim is made here.
+
+### Second-Pass Qodo Corrections
+
+- Observe session `MANUAL_SESSION_KEY` replacement, removal and removal/return
+  as worker epoch boundaries. Compare trimmed effective keys and exact credential
+  metadata; identical keys, whitespace-only writes and unrelated session writes
+  preserve pending work.
+- Decode raw local/session storage changes once with the existing
+  `safeStorageSerde`. Independent review reproduced the serialized-event gap;
+  the fixture now imports the actual serde and emits its serialized values.
+- Report only an actual handshake timer expiry as an extension timeout with
+  the existing no-fallback marker. Scope mismatches still reject as `412`.
+- Assert cancellation resource counts and late-abort behavior instead of a
+  specific listener identity or pre-dispatch listener-removal order.
+- Use portable verification instructions and update the task's current summary
+  while retaining historical checkpoints and the owner's Change Summary waiver.
+
+Parent reproduced five failing session-key/timeout cases before correction.
+Final native ESM verification of the 17 files listed above passed **589 tests**,
+zero failed or pending. Focused TypeScript comparison against `bc2e816161`
+reports **83 baseline / 83 current diagnostics, zero introduced**; this is not
+a full typecheck pass. Final independent source review has no actionable
+findings. Fresh published-head Qodo, CI and merge remain pending; no deployment
+or private hosted readiness is claimed.

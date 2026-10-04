@@ -1320,7 +1320,9 @@ async function bgRequestImpl<
               onCheckAbort()
               return
             }
-            checkTimeout = setTimeout(() => resolve(null), runtimeMessageTimeoutMs)
+            checkTimeout = setTimeout(() => reject(markNoFallbackError(
+              new Error("Extension messaging timeout"), { timeout: true }
+            )), runtimeMessageTimeoutMs)
             browser.runtime.sendMessage({
               type: "tldw:connection-authority",
               payload: { expectedConnectionAuthority }
