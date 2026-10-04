@@ -388,6 +388,11 @@ async def enforce_rag_query_limit_for_org_context(
     if units <= 0:
         return
 
+    from tldw_Server_API.app.core.Usage.quota_checks import rag_queries_decision
+
+    if not (await rag_queries_decision(getattr(current_user, "id", None), units)).allowed:
+        raise PermissionError("Daily RAG query limit reached")
+
     from tldw_Server_API.app.core.Billing.enforcement import (
         LimitCategory,
         billing_checks_active,
@@ -422,10 +427,6 @@ async def log_rag_queries_for_org_context(
     if units <= 0:
         return
     try:
-        org_id = await resolve_org_id_for_rag_context(request_like=request_like, current_user=current_user)
-        if org_id is None:
-            return
-
         from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import (
             LedgerEntry,
             ResourceDailyLedger,
@@ -433,16 +434,31 @@ async def log_rag_queries_for_org_context(
 
         ledger = ResourceDailyLedger()
         await ledger.initialize()
-        await ledger.add(
-            LedgerEntry(  # type: ignore[call-arg]
-                entity_scope="org",
-                entity_value=str(org_id),
-                category="rag_queries",
-                units=int(units),
-                op_id=f"rag:{org_id}:{uuid4()}",
-                occurred_at=datetime.now(timezone.utc),
+        now = datetime.now(timezone.utc)
+        user_id = getattr(current_user, "id", None)
+        if user_id is not None:
+            await ledger.add(
+                LedgerEntry(  # type: ignore[call-arg]
+                    entity_scope="user",
+                    entity_value=str(user_id),
+                    category="rag_queries",
+                    units=int(units),
+                    op_id=f"rag:user:{user_id}:{uuid4()}",
+                    occurred_at=now,
+                )
             )
-        )
+        org_id = await resolve_org_id_for_rag_context(request_like=request_like, current_user=current_user)
+        if org_id is not None:
+            await ledger.add(
+                LedgerEntry(  # type: ignore[call-arg]
+                    entity_scope="org",
+                    entity_value=str(org_id),
+                    category="rag_queries",
+                    units=int(units),
+                    op_id=f"rag:{org_id}:{uuid4()}",
+                    occurred_at=now,
+                )
+            )
     except Exception:  # noqa: BLE001 - ledger failures must not impact callers.
         logger.debug("RAG query logging failed; continuing without usage record", exc_info=True)
 

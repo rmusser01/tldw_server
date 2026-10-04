@@ -562,7 +562,7 @@ tldw_Server_API = [
 # Tools - Tests
 ###########################
 [tool.pytest.ini_options]
-pythonpath = ["apps/mcp-unified/src", "packages/tldw_profile_core/src"]
+pythonpath = ["apps/mcp-unified/src", "packages/tldw_profile_core/src", "tools/backlog-py/src"]
 filterwarnings = [
     "ignore::DeprecationWarning:pkg_resources:",
     "ignore::DeprecationWarning:speechbrain.pretrained:",
