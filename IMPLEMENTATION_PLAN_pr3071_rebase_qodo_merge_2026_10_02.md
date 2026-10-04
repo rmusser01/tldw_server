@@ -527,3 +527,78 @@ verified Stage8 test correction and e70 integration, keeping fresh-head hosted
 owning media and native acceptance as blockers. Protected services/Chrome remain
 running, all69stashes match ordered hashes and model head remains a7a0d8c. The
 owned18102 page returns HTTP200; that check alone is not browser acceptance.
+
+The explicitly approved Linux/Python3.12 diagnostic now reproduces the original
+case:1passed/1teardownerror in10.34s. Metadata preflight failed before pytest on
+the cached PCRE image; retain that failure. Prepared backend derivative provides
+FastAPI0.142.2/Pydantic2.13.5/pytest9.0.3; stale installed distribution constraints
+mean complete CI dependency equivalence is not claimed. Exactly one actual test
+runs within the approved10-minute window with networknone and fresh storage.
+Unmodified guard profiler identifies Redis connection from migration-lock ping
+at distributed_lock.py:313, caught by test-mode file-lock fallback. Minimal
+fixture correction clears inherited REDIS_URL, matching authenticated_email;
+production, assertions and the offline tripwire remain unchanged. Owning GREEN,
+security/hooks, batching and new-head hosted qualification remain required.
+
+Linux owning GREEN completes exit0:237passed/3skipped in546.46s, with5479
+framework/deprecation warnings. Conditional inherited skips cover two audio
+transcript persistence cases and rollback-to-current conflict. This is not
+complete CI dependency equivalence or a new-head hosted PASS. Ruff passes; raw
+fixture Bandit retains40existing B101 assertions, structured archived-file
+comparison proves0new findings/0scanner errors/no suppressions. An earlier stdin
+scan has an internal scanner error and remains unqualified. Original RED,
+missing-dependency preflight and prior Mac diagnostic failures remain distinct.
+
+## Stage 10: Incoming Quota Guard Registry Snapshot
+**Goal**: Align the existing privilege registry fixture with the intentional
+RAG/text2sql quota guards added by incoming dev, without altering production
+authorization or weakening the snapshot assertion.
+**Success Criteria**: The original single assertion reproduces RED. Canonical
+regeneration adds only usage_quota_deps._check to the two guarded POST routes in
+their scope and shared any entries. All existing scopes, routes, dependencies
+and metadata remain exact. Scoped privilege and quota regressions, security and
+configured hooks pass before batching publication and exact-head hosted review.
+**Tests**: Original snapshot assertion, structured four-entry delta proof, full
+Privileges tests, owning usage/quota regressions, scoped Bandit and PR-range hooks.
+**Status**: In Progress
+
+Hosted ec8 db-privileges has1failed/2925passed/14skipped: the snapshot assertion
+omits guards introduced by incoming dev commit4b3ad3ced4. The unchanged focused
+assertion reproduces1failed locally in15.59s using the declared framework
+environment. Production guards and original assertions stay unchanged. The
+separate offline Redis diagnostic and native UAT retry remain approval-pending;
+no fourth diagnostic or browser collector is launched by this snapshot work.
+
+Canonical helper regeneration exits0. Structured JSON proof requires exactly
+four guard additions and all other metadata across83scopes unchanged. Complete
+Privileges and focused quota/policy regressions pass58 with0skips in69.61s;
+existing framework/deprecation warnings remain reported. Helper Bandit reports
+0findings/0errors with no suppressions. Configured hooks across278tracked
+PR-range and working files pass. This is local scoped qualification, not a
+passing hosted db-privileges shard or full UAT. Keep snapshot/plan/task changes
+unpublished for batching; owning hosted qualification and independent native
+acceptance remain outstanding. No production source or existing assertion changed.
+
+The latest human approval permits bounded continuation. Corrected zero-send
+native Chrome acceptance passes at actual1440x900 and390x844CSS/DPR1, with visible
+Ready footer, original draft/history checkpoints,0sends/0retrievals and0overflow.
+It is scoped reload acceptance, not full UAT. A Stop preparation collector times
+out before dispatch: native mouse interaction opens source preview instead of
+staging. Preserve its failed artifact with0sends/0retrievals. A separate keyboard
+continuation is bounded by the original20-minute/one-new-input allowance and
+refuses any run after an existing dispatch; no accepted input is resent.
+
+That continuation sends1new input and1retrieval, then fails the native focus
+assertion before activating Stop. Its accepted logical input is
+aec4e96c-3e27-41d6-a2cd-336286296458; never resend it. Provider finishes naturally,
+and the original unsent draft is restored with actual keyboard input. Both failed
+collectors remain failed, Stop/recovery/fullUAT remain unqualified, and no further
+inference is authorized by this exhausted one-input allowance. Read-only focus
+diagnostic confirms document.hasFocus=true, not a proven focus root cause.
+
+Actual dev advances to502da5bf0ccd1bc3aa4323e0d0fc430f36821a78 viaPR3162:
+2271backlog task files only, no application/test/config changes. Rebase once,
+preserving official task content, and batch the two qualified fixture corrections.
+Before publication require source-equivalence proof, full PR-range hooks and
+exact lease on published ec8. New-head owning media/database CI, seven ruleset
+gates and Qodo remain required; no normal merge or cleanup has occurred.

@@ -101,6 +101,7 @@ def offline_client(tmp_path, monkeypatch):
 
     monkeypatch.setattr(storage_quota_service, "get_storage_quota_service", _UnlimitedQuota)
     monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("REDIS_URL", "")
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
     monkeypatch.setitem(persistence.settings, "EMAIL_NATIVE_PERSIST_ENABLED", True)
     monkeypatch.setitem(email_endpoint.settings, "EMAIL_OPERATOR_SEARCH_ENABLED", True)
