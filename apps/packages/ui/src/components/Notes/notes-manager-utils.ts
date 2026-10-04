@@ -98,6 +98,43 @@ export const extractKeywords = (note: NoteWithKeywords | any): string[] => {
     .filter((s): s is string => !!s && s.trim().length > 0)
 }
 
+/**
+ * Trim tags, drop blanks and de-duplicate case-insensitively, keeping the
+ * first spelling and the original order (matches the server's keyword
+ * normalization in notes_schemas.normalized_keywords).
+ */
+export const normalizeTagList = (tags: readonly unknown[]): string[] => {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const tag of tags) {
+    if (typeof tag !== 'string') continue
+    const text = tag.trim()
+    if (!text) continue
+    const key = text.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(text)
+  }
+  return out
+}
+
+/** Union of `existing` and `additions`; existing tags keep their order and spelling. */
+export const mergeTagLists = (
+  existing: readonly string[],
+  additions: readonly string[]
+): string[] => normalizeTagList([...existing, ...additions])
+
+/** True when both lists hold the same tags, ignoring case, order and duplicates. */
+export const tagSetsMatch = (a: readonly string[], b: readonly string[]): boolean => {
+  const left = new Set(normalizeTagList(a).map((tag) => tag.toLowerCase()))
+  const right = new Set(normalizeTagList(b).map((tag) => tag.toLowerCase()))
+  if (left.size !== right.size) return false
+  for (const tag of left) {
+    if (!right.has(tag)) return false
+  }
+  return true
+}
+
 // Extract version from note object. Checks multiple candidate fields in order:
 // 1. note.version (primary)
 // 2. note.expected_version (fallback)

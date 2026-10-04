@@ -16,6 +16,8 @@ import { useServerCapabilities } from '@/hooks/useServerCapabilities'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { tldwAuth } from '@/services/tldw/TldwAuth'
 import { useAntdMessage } from '@/hooks/useAntdMessage'
+import { useAntdModal } from '@/hooks/useAntdModal'
+import { useUndoNotification } from '@/hooks/useUndoNotification'
 import { useStoreMessageOption, type Message as ChatMessage } from "@/store/option"
 import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { useTutorialStore } from "@/store/tutorials"
@@ -29,6 +31,7 @@ import { fetchAllServerChatMessages, mapServerChatMessagesToPlaygroundMessages, 
 import NotesEditorPane from "@/components/Notes/NotesEditorPane"
 import NotesGraphWorkspace from "@/components/Notes/NotesGraphWorkspace"
 import NotesStudioCreateModal from "@/components/Notes/NotesStudioCreateModal"
+import { promptBulkAddTags } from "@/components/Notes/NotesBulkAddTagsPrompt"
 import NotesSidebar from "@/components/Notes/NotesSidebar"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { createNotesGraphAuthorityScope, useNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
@@ -80,6 +83,11 @@ import {
   NOTE_TEMPLATES,
   toSortableTimestamp,
   toNoteVersion,
+  extractKeywords,
+  normalizeTagList,
+  mergeTagLists,
+  tagSetsMatch,
+  toKeywordSyncWarning,
   markdownToWysiwygHtml,
   wysiwygHtmlToMarkdown,
   LARGE_NOTES_PAGINATION_THRESHOLD,
@@ -126,6 +134,51 @@ const hasUnsavedChatWork = (row: ChatMessage): boolean => {
     !(row.isBot && (!row.role || row.role === "assistant") && decodeChatErrorPayload(row.message)))
 }
 
+/** What bulk "Add tags" changed on one note, so Undo can put it back. */
+type BulkTagUndoSnapshot = {
+  noteId: string
+  label: string
+  previousTags: string[]
+  appliedTags: string[]
+  appliedVersion: number
+}
+
+type NotePath = `/api/v1/notes/${string}`
+
+const notePath = (noteId: string): NotePath => `/api/v1/notes/${encodeURIComponent(noteId)}`
+
+const fetchNote = (noteId: string) => bgRequest<unknown>({ path: notePath(noteId), method: 'GET' })
+
+/** Replace a note's tags, guarded by its version (the server returns 409 on mismatch). */
+const patchNoteTags = (noteId: string, expectedVersion: number, tags: string[]) =>
+  bgRequest<unknown>({
+    path: `${notePath(noteId)}?expected_version=${expectedVersion}`,
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'expected-version': String(expectedVersion)
+    },
+    body: { keywords: tags }
+  })
+
+const toBulkNoteLabel = (note: { id: string | number; title?: string }) =>
+  String(note.title || '').trim() || `Note ${String(note.id)}`
+
+const formatBulkNoteLabels = (labels: readonly string[]) => {
+  const shown = labels.slice(0, 3).map((label) => `"${label}"`).join(', ')
+  return labels.length > 3 ? `${shown} and ${labels.length - 3} more` : shown
+}
+
+const formatNoteCount = (count: number) => `${count} note${count === 1 ? '' : 's'}`
+
+const formatTagSummary = (tags: readonly string[]) =>
+  tags.length > 3 ? `${tags.slice(0, 3).join(', ')} +${tags.length - 3} more` : tags.join(', ')
+
+const hasInlineKeywords = (note: unknown) => {
+  const record = (note ?? {}) as { keywords?: unknown; metadata?: { keywords?: unknown } }
+  return Array.isArray(record.keywords) || Array.isArray(record.metadata?.keywords)
+}
+
 const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNoteId = null }) => {
   const transferFlashcards = useFlashcardsGenerateTransfer()
   const transferStudyPack = useStudyPackTransfer()
@@ -146,6 +199,8 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     loading: canonicalAuthorityLoading ?? canonicalConnectionLoading,
   })
   const message = useAntdMessage()
+  const modal = useAntdModal()
+  const { showUndoNotification } = useUndoNotification()
   const rawConfirmDanger = useConfirmDanger()
   const confirmDanger = React.useCallback((options: ConfirmDangerOptions) => {
     useTutorialStore.getState().endTutorial()
@@ -1382,68 +1437,158 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     }
   }, [confirmDanger, ed, list, message])
 
-  const assignKeywordsToSelectedBulk = React.useCallback(async () => {
-    if (list.selectedBulkNotes.length === 0) {
+  // Undo runs from a toast after later renders, so read the live editor/list.
+  const latestEditorRef = React.useRef(ed)
+  latestEditorRef.current = ed
+  const latestListRef = React.useRef(list)
+  latestListRef.current = list
+
+  const refreshAfterBulkTagChange = React.useCallback(async (noteIds: readonly string[]) => {
+    await latestListRef.current.refetch()
+    const editor = latestEditorRef.current
+    if (
+      editor.selectedId != null &&
+      !editor.isDirty &&
+      noteIds.includes(String(editor.selectedId))
+    ) {
+      await editor.loadDetail(editor.selectedId)
+    }
+  }, [])
+
+  const undoBulkTagAdd = React.useCallback(
+    async (snapshots: readonly BulkTagUndoSnapshot[]) => {
+      const restoredIds: string[] = []
+      const skipped: string[] = []
+      const failed: string[] = []
+      for (const snapshot of snapshots) {
+        const editor = latestEditorRef.current
+        if (editor.isDirty && editor.selectedId != null && String(editor.selectedId) === snapshot.noteId) {
+          // The open note's next save would re-apply the editor's tags.
+          skipped.push(snapshot.label)
+          continue
+        }
+        try {
+          const current = await fetchNote(snapshot.noteId)
+          // Content edits bump the version; tag-only edits do not, so compare tags too.
+          if (
+            toNoteVersion(current) !== snapshot.appliedVersion ||
+            !tagSetsMatch(extractKeywords(current), snapshot.appliedTags)
+          ) {
+            skipped.push(snapshot.label)
+            continue
+          }
+          await patchNoteTags(snapshot.noteId, snapshot.appliedVersion, snapshot.previousTags)
+          restoredIds.push(snapshot.noteId)
+        } catch (error) {
+          if (latestEditorRef.current.isVersionConflictError(error)) skipped.push(snapshot.label)
+          else failed.push(snapshot.label)
+        }
+      }
+      if (restoredIds.length > 0) await refreshAfterBulkTagChange(restoredIds)
+      if (skipped.length > 0 || failed.length > 0) {
+        // useUndoNotification reports a thrown error as the undo outcome.
+        const parts = [`Restored tags on ${formatNoteCount(restoredIds.length)}.`]
+        if (skipped.length > 0) {
+          parts.push(`Skipped ${formatBulkNoteLabels(skipped)}: changed after the tags were added.`)
+        }
+        if (failed.length > 0) parts.push(`Could not restore ${formatBulkNoteLabels(failed)}.`)
+        throw new Error(parts.join(' '))
+      }
+    },
+    [refreshAfterBulkTagChange]
+  )
+
+  const addTagsToSelectedBulk = React.useCallback(async () => {
+    const targets = list.selectedBulkNotes
+    if (targets.length === 0) {
       message.info('No selected notes to update')
       return
     }
     const okToLeave = await ed.confirmDiscardIfDirty()
     if (!okToLeave) return
-    const suggested = kw.keywordTokens.join(', ')
-    const rawInput = await promptModal({
-      title: 'Assign tags to selected notes',
-      label: 'Enter tag names separated by commas.',
-      defaultValue: suggested,
-      placeholder: 'tag1, tag2, tag3',
-      okText: 'Assign',
+    const picked = await promptBulkAddTags(modal, {
+      noteCount: targets.length,
+      suggestions: kw.availableKeywords,
+      renderSuggestionLabel: (tag) =>
+        kw.renderKeywordLabelWithFrequency(tag, {
+          includeCount: true,
+          testIdPrefix: 'notes-bulk-add-tags-option-label'
+        }),
+      t
     })
-    if (rawInput == null) return
-    const keywords = rawInput.split(',').map((entry) => entry.trim()).filter(Boolean)
-    if (keywords.length === 0) {
-      message.warning('Enter at least one tag to assign')
+    if (picked == null) return
+    const additions = normalizeTagList(picked)
+    if (additions.length === 0) {
+      message.warning('Choose at least one tag to add')
       return
     }
-    const confirmed = await confirmDanger({
-      title: 'Apply tags to selected notes?',
-      content: `Apply ${keywords.join(', ')} to ${list.selectedBulkNotes.length} selected notes?`,
-      okText: 'Apply tags',
-      cancelText: 'Cancel'
-    })
-    if (!confirmed) return
 
-    let updated = 0
-    let failed = 0
-    for (const note of list.selectedBulkNotes) {
+    const snapshots: BulkTagUndoSnapshot[] = []
+    const alreadyTagged: string[] = []
+    const conflicted: string[] = []
+    const failed: string[] = []
+    const partiallyTagged: string[] = []
+    for (const note of targets) {
       const noteId = String(note.id)
-      const expectedVersion = await ed.getExpectedVersionForNoteId(noteId)
-      if (expectedVersion == null) { failed += 1; continue }
+      const label = toBulkNoteLabel(note)
       try {
-        await bgRequest<any>({
-          path: `/api/v1/notes/${encodeURIComponent(noteId)}?expected_version=${encodeURIComponent(
-            String(expectedVersion)
-          )}` as any,
-          method: 'PATCH' as any,
-          headers: {
-            'Content-Type': 'application/json',
-            'expected-version': String(expectedVersion)
-          },
-          body: { keywords }
+        // List rows can be stale and tag-only edits keep the note version, so
+        // merge with the server's current tags rather than the cached row.
+        const current = await fetchNote(noteId)
+        const version = toNoteVersion(current)
+        if (version == null) {
+          failed.push(label)
+          continue
+        }
+        const previousTags = normalizeTagList(extractKeywords(current))
+        const nextTags = mergeTagLists(previousTags, additions)
+        if (nextTags.length === previousTags.length) {
+          alreadyTagged.push(label)
+          continue
+        }
+        const updated = await patchNoteTags(noteId, version, nextTags)
+        snapshots.push({
+          noteId,
+          label,
+          previousTags,
+          appliedTags: hasInlineKeywords(updated) ? normalizeTagList(extractKeywords(updated)) : nextTags,
+          appliedVersion: toNoteVersion(updated) ?? version
         })
-        updated += 1
-      } catch { failed += 1 }
-    }
-
-    if (updated > 0) {
-      message.success(`Updated tags on ${updated} selected note${updated === 1 ? '' : 's'}`)
-      await list.refetch()
-      if (ed.selectedId != null && list.selectedBulkNotes.some((note) => String(note.id) === String(ed.selectedId))) {
-        await ed.loadDetail(ed.selectedId)
+        if (toKeywordSyncWarning(updated)) partiallyTagged.push(label)
+      } catch (error) {
+        if (ed.isVersionConflictError(error)) conflicted.push(label)
+        else failed.push(label)
       }
     }
-    if (failed > 0) {
-      message.warning(`${failed} selected note${failed === 1 ? '' : 's'} failed tag update`)
+
+    if (snapshots.length > 0) {
+      await refreshAfterBulkTagChange(snapshots.map((snapshot) => snapshot.noteId))
+      showUndoNotification({
+        title: `Added ${formatTagSummary(additions)} to ${formatNoteCount(snapshots.length)}`,
+        description: 'Existing tags were kept.',
+        duration: 10,
+        onUndo: () => undoBulkTagAdd(snapshots)
+      })
     }
-  }, [confirmDanger, ed, kw.keywordTokens, list, message])
+    if (alreadyTagged.length > 0) {
+      message.info(
+        `${alreadyTagged.length} selected note${alreadyTagged.length === 1 ? '' : 's'} already had ${
+          additions.length === 1 ? 'this tag' : 'these tags'
+        }`
+      )
+    }
+    const problems: string[] = []
+    if (conflicted.length > 0) {
+      problems.push(
+        `Tags were not added to ${formatBulkNoteLabels(conflicted)}: changed on the server. Refresh and try again.`
+      )
+    }
+    if (failed.length > 0) problems.push(`Could not add tags to ${formatBulkNoteLabels(failed)}.`)
+    if (partiallyTagged.length > 0) {
+      problems.push(`Some tags could not be attached to ${formatBulkNoteLabels(partiallyTagged)}.`)
+    }
+    if (problems.length > 0) message.warning(problems.join(' '))
+  }, [ed, kw, list, message, modal, refreshAfterBulkTagChange, showUndoNotification, t, undoBulkTagAdd])
 
   // Editor input handlers
   const handleEditorChange = React.useCallback(
@@ -2458,7 +2603,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         deleteMoodboard={list.deleteMoodboard}
         clearBulkSelection={list.clearBulkSelection}
         exportSelectedBulk={exp.exportSelectedBulk}
-        assignKeywordsToSelectedBulk={assignKeywordsToSelectedBulk}
+        addTagsToSelectedBulk={addTagsToSelectedBulk}
         deleteSelectedBulk={deleteSelectedBulk}
         toggleNotePinned={ed.toggleNotePinned}
         restoreNote={restoreNote}
