@@ -23,6 +23,7 @@ import type {
 import {
   bindSelectedHistoryContent,
   HistorySelectionError,
+  LOCAL_HISTORY_OWNER_KEY_PREFIX,
   resolveHistorySelection,
   resolveParentPath,
   selectionDigest
@@ -111,7 +112,7 @@ export const ensureLocalProfileId = async (): Promise<string> =>
     })
     return profile
   })
-const localKey = (profile: string) => `local-history-v1:${profile}`
+const localKey = (profile: string) => `${LOCAL_HISTORY_OWNER_KEY_PREFIX}${profile}`
 export const getLocalHistoryOwner = async (
   conversation_id: string
 ): Promise<LocalHistoryOwnerV1> => {

@@ -12,6 +12,12 @@ export class HistorySelectionError extends Error {
   }
 }
 
+/** Owner keys minted by this client's local H1 authority (db/dexie/history-selection.ts). */
+export const LOCAL_HISTORY_OWNER_KEY_PREFIX = "local-history-v1:"
+/** Any other owner key belongs to a server (native) conversation, whose node ids are its message ids. */
+export const isLocalHistoryOwnerKey = (ownerKey: string): boolean =>
+  ownerKey.startsWith(LOCAL_HISTORY_OWNER_KEY_PREFIX)
+
 const indexNodes = (nodes: readonly HistoryNodeV1[], validateGraph = false): Map<string, HistoryNodeV1> => {
   const byId = new Map<string, HistoryNodeV1>()
   let conversationId: string | undefined
