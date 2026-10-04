@@ -55,6 +55,7 @@ def compute_paragraph_spans(
                 logger.warning(f"Ignoring invalid boundary rule: {e}")
     except _CHUNKER_NONCRITICAL_EXCEPTIONS:
         template_patterns = []
+        logger.warning("Template boundary setup failed; using built-in paragraph detection")
 
     lines = text.splitlines(keepends=True)
     offsets: list[tuple[int, int, str]] = []

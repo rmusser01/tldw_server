@@ -81,6 +81,73 @@ def test_invalid_template_flags_fall_back_to_no_flags() -> None:
     assert compute_paragraph_spans("custom\n", template) == [(0, 7, "paragraph")]
 
 
+@pytest.mark.parametrize("boundaries", [1, {"private_template": "secret-template-value"}])
+def test_template_boundary_setup_failure_warns_and_preserves_builtin_spans(boundaries: object) -> None:
+    text = "# Title\nsecret-document-value\n\n- item\n"
+    expected = [(0, 8, "header_atx"), (8, 30, "paragraph"), (30, 31, "blank"), (31, 38, "list_unordered")]
+    records: list[dict[str, Any]] = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        spans = compute_paragraph_spans(text, {"boundaries": boundaries})
+    finally:
+        logger.remove(sink_id)
+
+    assert spans == expected
+    assert [record["message"] for record in records] == [
+        "Template boundary setup failed; using built-in paragraph detection"
+    ]
+    assert records[0]["level"].name == "WARNING"
+    assert records[0]["exception"] is None
+    assert "secret-" not in repr(records[0]["extra"])
+
+
+def test_template_boundary_setup_warning_omits_exception_details() -> None:
+    class FailingTemplate(dict[str, Any]):
+        """Model a template provider that fails before individual rules are read."""
+
+        def get(self, key: str, default: Any = None) -> Any:
+            raise RuntimeError("secret-exception-value")
+
+    records: list[dict[str, Any]] = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        spans = compute_paragraph_spans("ordinary\n", FailingTemplate(boundaries=["secret-template-value"]))
+    finally:
+        logger.remove(sink_id)
+
+    assert spans == [(0, 9, "paragraph")]
+    assert [record["message"] for record in records] == [
+        "Template boundary setup failed; using built-in paragraph detection"
+    ]
+    assert records[0]["exception"] is None
+    assert "secret-" not in repr(records[0]["extra"])
+
+
+@pytest.mark.parametrize(
+    ("text", "template", "expected"),
+    [
+        ("ordinary\n", None, [(0, 9, "paragraph")]),
+        ("ordinary\n", {"boundaries": []}, [(0, 9, "paragraph")]),
+        ("CUSTOM\n", {"boundaries": [{"kind": "custom", "pattern": "^CUSTOM"}]}, [(0, 7, "custom")]),
+        ("", {"boundaries": 1}, []),
+    ],
+)
+def test_successful_or_empty_template_setup_does_not_warn(
+    text: str,
+    template: dict[str, Any] | None,
+    expected: list[tuple[int, int, str]],
+) -> None:
+    records: list[dict[str, Any]] = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        spans = compute_paragraph_spans(text, template)
+    finally:
+        logger.remove(sink_id)
+
+    assert spans == expected
+    assert records == []
+
+
 def test_invalid_template_rule_warnings_have_stable_level_and_text() -> None:
     records: list[dict[str, Any]] = []
     sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")

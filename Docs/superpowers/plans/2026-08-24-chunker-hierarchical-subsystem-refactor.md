@@ -1437,6 +1437,53 @@ static-contract RED/GREEN results in memory.
 
 The sixth finding concerns the inherited silent template-boundary setup
 fallback, present on latest `dev` in `chunker.py` lines 435-436. `spans.py`
-remains unchanged. The requester was asked to choose preserving logging with
-a tracked follow-up or a separately tested diagnostic correction in this PR.
-This decision, latest-head Qodo review, and CI remain merge blockers.
+was initially unchanged while the requester chose between preserving logging
+with a tracked follow-up and a separately tested diagnostic correction.
+
+### Approved Boundary-Setup Diagnostic (2026-10-04)
+
+The requester answered yes to adding a safe warning in this PR and resuming
+the review/merge follow-up. This explicitly approves the local logging
+correction; it does not authorize other behavior changes or historical task
+archiving. The branch was rebased without conflicts onto live `dev`
+`c95e41fc62a07e55fd74052023826c71b2a2c789`; intervening Chunking source/tests
+were unchanged.
+
+- [x] Record explicit approval and rationale in TASK-13422 before production edits.
+- [x] Reproduce RED on the current span function and exact pre-refactor method.
+- [x] Add the single fixed WARNING while preserving catches and fallback output.
+- [x] Run focused/full Chunking and static/security gates; independent review.
+- [ ] Commit separately, push, reply with evidence and resolve the original thread.
+- [ ] Complete exact-head Qodo review and live required CI before guarded merge.
+
+RED evidence: three missing-warning failures and four successful/empty cases
+passing on both versions. Fallback-span assertions already pass. Logs:
+`/tmp/task13422_boundary_setup_red.txt` and
+`/tmp/task13422_boundary_setup_baseline_red.txt`. Regression coverage includes
+malformed boundary containers, a failed template lookup carrying private
+exception/template values, silent successful setup, and the unchanged empty
+input early return. The warning is fixed text with no input, raw exception, or
+traceback. Preserve the human Change summary verbatim and explain this approved
+diagnostic in the PR technical summary. Verification and publication remain
+pending at the RED checkpoint; latest-head Qodo review and CI remain merge gates.
+
+Final diagnostic verification: all 29 span tests pass; full Chunking has
+796 passed, one existing PyThaiNLP skip, 2001 warnings, 47.14s
+(`/tmp/task13422_boundary_setup_full_green_final.txt`). Final-version baseline
+replay still has three missing-warning failures and four passes
+(`/tmp/task13422_boundary_setup_baseline_red_final.txt`). Ruff, scoped Black
+(17 unchanged files), compileall, and hierarchy-only mypy (seven files) pass.
+Bandit has zero findings/errors across 2869 LOC
+(`/tmp/bandit_task13422_boundary_setup.json`). Independent review found no
+actionable issues, confirmed the warning is the only production change and
+reran all 29 span tests. The initial full run exposed over-strict new assertions
+requiring no existing Loguru context; these now check for private sentinel
+leakage while preserving normal context fields. No existing assertion changed.
+
+Current published-head CI separately revealed broader changed-file mypy errors
+and one noncanonical historical task record. These were not covered by the
+earlier hierarchy-only mypy gate. Investigate without weakening checks or
+changing unrelated runtime behavior. Exact-path formatting of the protected
+historical Chunker TASK-13215 record awaits explicit requester authorization;
+no archive or unrelated record change is authorized. Diagnostic publication,
+CI remediation and exact-head review/CI/merge gates remain pending.

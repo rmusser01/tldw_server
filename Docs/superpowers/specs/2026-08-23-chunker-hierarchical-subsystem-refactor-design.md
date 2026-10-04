@@ -500,6 +500,26 @@ not classified as pre-existing corrections.
 No behavior corrections are approved at design time. Removal of the two private
 helpers is an explicit architectural decision, not a defect correction.
 
+### Approved Diagnostic Correction (2026-10-04)
+
+During PR #3095 review, Qodo identified the inherited silent outer
+template-boundary setup fallback. The requester explicitly approved adding a
+warning in this PR after being offered preservation as a separate alternative.
+Focused tests reproduce the missing warning against the unmodified
+pre-refactor method at `c95e41fc62a07e55fd74052023826c71b2a2c789` and the
+extracted span function. Built-in fallback spans already match the expected
+output on both versions.
+
+The sole approved logging change is one fixed WARNING when outer setup fails:
+`Template boundary setup failed; using built-in paragraph detection`.
+Do not include template or source contents, raw exception details, or traceback.
+Keep the exception policy, empty-input early return, per-rule warnings, pattern
+discarding, and subsequent built-in detection unchanged. Successful setup must
+not emit this warning. Record verification in TASK-13422 and PR technical
+summary inputs, preserve the human Change summary verbatim, and commit the
+diagnostic separately from structural extraction. Other corrections remain
+subject to the gate above.
+
 ## Testing Strategy
 
 Add frozen characterization outputs before moving production logic. Expected
