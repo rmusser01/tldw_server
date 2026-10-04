@@ -68,7 +68,7 @@ export default defineConfig({
     {
       name: 'chromium',
       testDir: 'e2e',
-      testIgnore: ['**/workflows/tier-*/**', '**/workflows/journeys/**'],
+      testIgnore: ['**/workflows/tier-*/**', '**/workflows/journeys/**', '**/ux-regression/**'],
       use: { ...devices['Desktop Chrome'] },
     },
     {
