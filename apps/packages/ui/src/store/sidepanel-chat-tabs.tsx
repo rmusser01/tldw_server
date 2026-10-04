@@ -72,6 +72,12 @@ export type SidepanelChatSnapshot = {
   serverChatClusterId: string | null
   serverChatSource: string | null
   serverChatExternalRef: string | null
+  /**
+   * The server chat's latest message when this tab last matched the server
+   * (XP-08). A newer latest message means the chat changed elsewhere; an
+   * unchanged one means the tab's earlier position was chosen on purpose.
+   */
+  serverChatLatestSeenId?: string | null
   queuedMessages: QueuedRequest[]
   modelSettings: ChatModelSettingsSnapshot
 }
