@@ -268,9 +268,11 @@ from tldw_Server_API.app.core.Research.service import ResearchService
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
+    AppliedServerOriginObject,
     SyncServerOriginIdempotencyConflictError,
     SyncServerOriginMaterializationError,
     SyncServerOriginMutationNotSupportedError,
+    capture_applied_server_origin_write,
     capture_server_origin_mutation,
     get_active_server_origin_sync_service_for_user,
     server_origin_object_id,
@@ -4639,15 +4641,61 @@ def _client_chat_id_http_error(code: str, status_code: int) -> HTTPException:
     )
 
 
-def _sync_client_chat_id_unsupported_error() -> HTTPException:
-    """Sync v2 creates chats through its own envelopes, which do not take a client id yet."""
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={
-            "error_code": "sync_client_chat_id_unsupported",
-            "message": "Client-supplied chat ids are not supported while Sync v2 is active. Omit id to create the chat.",
-        },
+def _applied_conversation_object(db: CharactersRAGDB, chat_id: str) -> AppliedServerOriginObject:
+    """Describe a stored chat as the ``chat.conversation`` upsert other devices receive."""
+    row = db.get_conversation_by_id(chat_id)
+    if row is None:
+        raise CharactersRAGDBError(f"Chat session {chat_id} is unavailable for Sync capture.")
+    return AppliedServerOriginObject(
+        domain="chat.conversation",
+        operation="upsert",
+        object_id=chat_id,
+        payload=_conversation_sync_payload(row),
     )
+
+
+def _publish_client_chat(
+    sync_service: SyncV2Service,
+    db: CharactersRAGDB,
+    *,
+    owner_id: str,
+    chat_id: str,
+    create: Callable[[], str],
+) -> str:
+    """Run a client-id chat create inside the Sync projection fence and publish the chat.
+
+    The conversation INSERT stays the single place that claims the id and stores
+    the create fingerprint, so replay, 409 and 410 mean the same with and without
+    Sync v2. The stored chat then reaches other devices as an applied
+    ``chat.conversation`` upsert. A chat that is already published is left alone.
+    """
+    return capture_applied_server_origin_write(
+        sync_service,
+        user_id=owner_id,
+        source="server_api",
+        claims=[("chat.conversation", chat_id)],
+        write=create,
+        describe=lambda created_id: [_applied_conversation_object(db, created_id)],
+    )
+
+
+async def _replay_client_chat(
+    db: CharactersRAGDB,
+    sync_service: SyncV2Service | None,
+    conversation: dict[str, Any],
+    owner_id: str,
+    response: Response,
+) -> ChatSessionResponse:
+    """Answer a repeated client-id create, first publishing a chat whose Sync capture was lost."""
+    if sync_service is not None:
+        chat_id = str(conversation["id"])
+        try:
+            await run_in_threadpool(
+                _publish_client_chat, sync_service, db, owner_id=owner_id, chat_id=chat_id, create=lambda: chat_id,
+            )
+        except SyncStoreError as sync_exc:
+            raise _chat_sync_http_error(sync_exc) from sync_exc
+    return _client_chat_replay_response(db, conversation, owner_id, response)
 
 
 def _find_client_chat_replay(
@@ -4685,7 +4733,7 @@ def _client_chat_replay_response(
                      "model": ChatSessionResponse,
                      "headers": {"Idempotency-Replayed": {"schema": {"type": "string", "enum": ["true"]}}},
                  },
-                 409: {"description": "The client id is taken by a different request or chat, or Sync v2 is active"},
+                 409: {"description": "The client id is taken by a different request or chat"},
                  410: {"description": "The chat created with this client id is in trash; the id stays taken"},
              })
 async def create_chat_session(
@@ -4716,7 +4764,8 @@ async def create_chat_session(
         seeding query options) gets the existing chat back with 200 and
         ``Idempotency-Replayed: true``; any other use of the id is 409, and a
         repeat after the chat was trashed is 410. The conversation primary key
-        keeps concurrent duplicates to one chat.
+        keeps concurrent duplicates to one chat. With an active Sync v2 profile
+        the same rules hold, and the new chat is published to the other devices.
 
     Returns:
         Created chat session details
@@ -4728,6 +4777,7 @@ async def create_chat_session(
     owner_id = str(current_user.id)
     client_chat_id = session_data.id
     create_fingerprint: str | None = None
+    sync_service: SyncV2Service | None = None
     try:
         scope = _resolve_chat_scope(session_data.scope_type, session_data.workspace_id)
         from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
@@ -4743,8 +4793,6 @@ async def create_chat_session(
         await rate_limiter.check_rate_limit(current_user.id, "chat_create")
         sync_service = _active_chat_sync_service(current_user, scope)
         if client_chat_id is not None:
-            if sync_service is not None:
-                raise _sync_client_chat_id_unsupported_error()
             create_fingerprint = conversation_create_fingerprint(
                 session_data.model_dump(mode="json", exclude_unset=True, exclude={"id"}),
                 {
@@ -4756,7 +4804,7 @@ async def create_chat_session(
             # A replay is answered before quota checks: it creates nothing.
             existing = _find_client_chat_replay(db, client_chat_id, owner_id, create_fingerprint)
             if existing is not None:
-                return _client_chat_replay_response(db, existing, owner_id, response)
+                return await _replay_client_chat(db, sync_service, existing, owner_id, response)
         # Enforce per-user chat count limit (approximate by scanning conversations per character)
         try:
             # Use DB-layer count for efficiency/accuracy. The helper expects
@@ -4881,7 +4929,27 @@ async def create_chat_session(
 
         created_with_factory = False
         seed_status: Optional[str] = None
-        if sync_service is not None:
+        if sync_service is not None and create_fingerprint is not None:
+            # A client id is claimed by the conversation INSERT, which also stores the
+            # fingerprint. The Sync materializer cannot do either, so the row is
+            # written here, inside the Sync fence, and published as an applied envelope.
+            def _create_client_chat() -> str:
+                native_id = db.add_conversation(conv_data, create_request_fingerprint=create_fingerprint)
+                if not native_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to create chat session"
+                    )
+                return native_id
+
+            try:
+                created_id = await run_in_threadpool(
+                    _publish_client_chat, sync_service, db,
+                    owner_id=owner_id, chat_id=chat_id, create=_create_client_chat,
+                )
+            except SyncStoreError as sync_exc:
+                raise _chat_sync_http_error(sync_exc) from sync_exc
+        elif sync_service is not None:
             try:
                 capture_server_origin_mutation(
                     sync_service,
@@ -5068,7 +5136,7 @@ async def create_chat_session(
         if existing is None:
             # Taken by a row the caller cannot see, such as another owner's under PostgreSQL RLS.
             raise _client_chat_id_http_error(CHAT_ID_CONFLICT, status.HTTP_409_CONFLICT) from None
-        return _client_chat_replay_response(db, existing, owner_id, response)
+        return await _replay_client_chat(db, sync_service, existing, owner_id, response)
     except InputError as e:
         logger.warning("Invalid chat-session creation input: {}", e)
         raise map_db_error_to_http(e) from e

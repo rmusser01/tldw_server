@@ -64,7 +64,12 @@ class ChatConversationMaterializer:
         object_hash = envelope.payload_hash or ""
         try:
             if envelope.operation == "upsert":
-                payload = _conversation_payload(envelope.payload)
+                payload = _conversation_payload(
+                    envelope.payload,
+                    keep_plain=_is_plain_conversation(
+                        self.note_db.get_conversation_by_id(envelope.object_id, include_deleted=True)
+                    ),
+                )
                 self.note_db.upsert_conversation_from_sync(
                     conversation_id=envelope.object_id,
                     title=payload.get("title"),
@@ -463,14 +468,27 @@ def _conflict_result(
     )
 
 
-def _conversation_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def _conversation_payload(payload: dict[str, Any], *, keep_plain: bool = False) -> dict[str, Any]:
+    """Fill in the Sync placeholder assistant for a payload that names none.
+
+    ``keep_plain`` is set when the projection already holds this conversation
+    without an assistant. Such a chat stays as it is: an upsert that names no
+    assistant (a rename, for example) must not turn it into a persona chat.
+    """
     assistant_kind = payload.get("assistant_kind")
     assistant_id = payload.get("assistant_id")
     character_id = payload.get("character_id")
-    if assistant_kind is None and assistant_id is None and character_id is None:
+    if assistant_kind is None and assistant_id is None and character_id is None and not keep_plain:
         assistant_kind = "persona"
         assistant_id = "sync-v2"
     return {**payload, "assistant_kind": assistant_kind, "assistant_id": assistant_id}
+
+
+def _is_plain_conversation(row: Any) -> bool:
+    """Return whether an existing conversation row has no assistant identity."""
+    return row is not None and all(
+        row.get(field) is None for field in ("assistant_kind", "assistant_id", "character_id")
+    )
 
 
 def _message_payload(payload: dict[str, Any]) -> dict[str, Any]:
