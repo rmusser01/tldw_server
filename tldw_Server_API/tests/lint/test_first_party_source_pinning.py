@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -49,10 +51,12 @@ def test_task_editor_source_is_part_of_first_party_pinning() -> None:
 
 
 @pytest.mark.parametrize("name", ["cli.main", "core.repository", "markdown.task_parser", "mcp.tools"])
-def test_task_editor_modules_resolve_to_this_checkout(name: str, record_property) -> None:
+def test_task_editor_modules_resolve_to_this_checkout(
+    name: str, record_property: Callable[[str, str], None],
+) -> None:
     """Record the actual worker's editor source, not just the package version."""
     module = importlib.import_module("backlog_py." + name)
-    origin = Path(module.__file__).resolve()
+    origin = Path(cast(str, module.__file__)).resolve()
     expected = REPO_ROOT / "tools/backlog-py/src/backlog_py" / (name.replace(".", "/") + ".py")
     assert origin == expected.resolve()
     record_property("editor_source", str(origin))
@@ -77,7 +81,7 @@ def test_pytest_pythonpath_lists_every_src_layout_package() -> None:
 def test_first_party_packages_resolve_inside_this_checkout(package: str, src: Path) -> None:
     """Live check: in a worktree this is what fails if the pinning regresses."""
     module = importlib.import_module(package)
-    origin = Path(module.__file__).resolve()
+    origin = Path(cast(str, module.__file__)).resolve()
 
     assert origin.is_relative_to(src.resolve()), (
         f"{package} imported from {origin}, not from this checkout's {src}"
