@@ -231,7 +231,7 @@ async def get_system_stats(db) -> SystemStatsResponse:
             session_stats = await cursor.fetchone()
 
         user_keys = ["total_users", "active_users", "verified_users", "admin_users", "new_users_30d"]
-        storage_keys = ["total_used_mb", "total_quota_mb", "avg_used_mb", "max_used_mb"]
+        storage_keys = ["total_used_mb", "avg_used_mb", "max_used_mb"]
         session_keys = ["active_sessions", "unique_users"]
         us = _row_to_dict(user_stats, user_keys)
         ss = _row_to_dict(storage_stats, storage_keys)

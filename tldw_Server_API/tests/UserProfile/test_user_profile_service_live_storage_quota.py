@@ -113,10 +113,12 @@ async def test_build_quotas_falls_back_to_user_values_when_live_storage_fails(
         _fake_resolved_storage_quota_mb,
     )
 
+    # The raw dict carries a stale legacy-column value (5120); the resolver stub returns a
+    # different value (777). Only a resolver-seeded result can land on 777.
     quotas = await service._build_quotas(
         {
             "id": 1,
-            "storage_quota_mb": 777,
+            "storage_quota_mb": 5120,
             "storage_used_mb": 12.5,
         }
     )
