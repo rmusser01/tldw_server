@@ -49,7 +49,7 @@ import { SidePanelBody } from "~/components/Sidepanel/Chat/body"
 import { SidepanelForm } from "~/components/Sidepanel/Chat/form"
 import { SidepanelHeaderSimple } from "~/components/Sidepanel/Chat/SidepanelHeaderSimple"
 import { ConnectionBanner } from "~/components/Sidepanel/Chat/ConnectionBanner"
-import { renameTabConversation } from "~/components/Sidepanel/Chat/tab-conversation-actions"
+import { readTabConversationTitle, renameTabConversation } from "~/components/Sidepanel/Chat/tab-conversation-actions"
 import { useMessage } from "~/hooks/useMessage"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
@@ -1159,6 +1159,14 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
     newChatLabel,
     truncateTabLabel
   ])
+
+  // The header shows the truncated tab label; a rename starts from the full title.
+  const loadActiveTabTitle = React.useCallback(async () => {
+    const store = useSidepanelChatTabsStore.getState()
+    const tab = store.tabs.find((item) => item.id === store.activeTabId)
+    if (!tab || !owner.isCurrent()) return null
+    return readTabConversationTitle(tab, owner.snapshot.requestScope)
+  }, [owner])
 
   const handleRenameActiveTab = React.useCallback(
     (nextLabel: string) => {
@@ -2324,6 +2332,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
             setSidebarOpen={setSidebarOpen}
             activeTitle={activeTabLabel}
             onRenameTitle={handleRenameActiveTab}
+            loadEditableTitle={loadActiveTabTitle}
           />
           {messages.length > 0 ? <ConnectionBanner className="pt-12" /> : null}
         </div>

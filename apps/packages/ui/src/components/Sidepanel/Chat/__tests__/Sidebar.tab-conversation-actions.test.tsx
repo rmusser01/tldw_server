@@ -16,6 +16,8 @@ const io = vi.hoisted(() => ({
   deleteChat: vi.fn(),
   updateChat: vi.fn(),
   restoreChat: vi.fn(),
+  getChat: vi.fn(),
+  getTitleById: vi.fn(),
   removeServerChatMirror: vi.fn(),
   updateHistory: vi.fn(),
   renameTab: vi.fn(),
@@ -50,14 +52,16 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     searchConversationsWithMeta: async () => ({ chats: [], total: 0 }),
     deleteChat: (...args: unknown[]) => io.deleteChat(...args),
     updateChat: (...args: unknown[]) => io.updateChat(...args),
-    restoreChat: (...args: unknown[]) => io.restoreChat(...args)
+    restoreChat: (...args: unknown[]) => io.restoreChat(...args),
+    getChat: (...args: unknown[]) => io.getChat(...args)
   }
 }))
 vi.mock("@/db/dexie/server-chat-mirror", () => ({
   removeServerChatMirror: (...args: unknown[]) => io.removeServerChatMirror(...args)
 }))
 vi.mock("@/db/dexie/helpers", () => ({
-  updateHistory: (...args: unknown[]) => io.updateHistory(...args)
+  updateHistory: (...args: unknown[]) => io.updateHistory(...args),
+  getTitleById: (...args: unknown[]) => io.getTitleById(...args)
 }))
 vi.mock("@/db/dexie/chat", () => ({
   PageAssistDatabase: vi.fn(function MockPageAssistDatabase(this: Record<string, unknown>) {
@@ -117,6 +121,19 @@ const serverTab: SidepanelChatTab = {
   serverChatTopic: null,
   updatedAt: Date.now()
 }
+/** A chat whose title is longer than the 40 characters a tab label keeps. */
+const fullTitle = "Quarterly planning review for the northern region sales team"
+const longTab: SidepanelChatTab = {
+  id: "tab-long",
+  label: `${fullTitle.slice(0, 40)}...`,
+  labelSource: "auto",
+  historyId: "mirror-long",
+  serverChatId: "chat-long",
+  serverChatTopic: null,
+  updatedAt: Date.now()
+}
+const serverTitles: Record<string, string> = { "chat-1": "Quarterly plan", "chat-long": fullTitle }
+const localTitles: Record<string, string> = { "mirror-1": "Quarterly plan", "mirror-long": fullTitle, "local-1": "Scratch notes" }
 const localTab: SidepanelChatTab = {
   id: "tab-local",
   label: "Scratch notes",
@@ -157,11 +174,28 @@ const chooseTabMenuItem = async (label: string, item: string) => {
   fireEvent.click(await screen.findByRole("menuitem", { name: item }))
 }
 
+/**
+ * Whether antd has started closing a dialog. jsdom never finishes the close
+ * animation, so a closed dialog stays in the document in its leave state.
+ */
+const isClosing = (dialog: HTMLElement) => /-leave\b/.test(dialog.className)
+
+/** Open a tab's Rename dialog and wait until its title field is ready to edit. */
+const openRenameDialog = async (label: string) => {
+  await chooseTabMenuItem(label, "Rename")
+  const dialog = await screen.findByRole("dialog", { name: "Rename conversation" })
+  const textbox = within(dialog).getByRole("textbox")
+  await waitFor(() => expect(textbox).toBeEnabled())
+  return { dialog, textbox }
+}
+
 describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
   beforeEach(() => {
     io.deleteChat.mockReset().mockResolvedValue(undefined)
     io.updateChat.mockReset().mockImplementation(async (_id: string, data: { title: string }) => ({ id: "chat-1", title: data.title, version: 3 }))
     io.restoreChat.mockReset().mockResolvedValue({ id: "chat-1", title: "Quarterly plan", created_at: "2026-10-01T00:00:00Z" })
+    io.getChat.mockReset().mockImplementation(async (id: string) => ({ id, title: serverTitles[id] }))
+    io.getTitleById.mockReset().mockImplementation(async (id: string) => localTitles[id] ?? "")
     io.removeServerChatMirror.mockReset().mockResolvedValue(["mirror-1"])
     io.updateHistory.mockReset().mockResolvedValue(undefined)
     io.renameTab.mockReset()
@@ -206,7 +240,7 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
     expect(props.onCloseTab).not.toHaveBeenCalled()
     expect(io.removeServerChatMirror).not.toHaveBeenCalled()
     expect(io.showUndoNotification).not.toHaveBeenCalled()
-    expect(screen.getByRole("dialog", { name: "Delete conversation" })).toBeInTheDocument()
+    expect(isClosing(screen.getByRole("dialog", { name: "Delete conversation" }))).toBe(false)
   })
 
   it("offers 'Close tab' rather than 'Delete' for a tab with no server chat", async () => {
@@ -223,9 +257,8 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
 
   it("renames the server chat, its local copy and the tab", async () => {
     renderSidebar()
-    await chooseTabMenuItem("Quarterly plan", "Rename")
-    const dialog = await screen.findByRole("dialog", { name: "Rename conversation" })
-    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Q4 plan" } })
+    const { dialog, textbox } = await openRenameDialog("Quarterly plan")
+    fireEvent.change(textbox, { target: { value: "Q4 plan" } })
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }))
 
     await waitFor(() => expect(io.renameTab).toHaveBeenCalledWith("tab-server", "Q4 plan"))
@@ -236,26 +269,60 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
   it("keeps the old name when the server rename fails", async () => {
     io.updateChat.mockRejectedValue(new Error("HTTP 409"))
     renderSidebar()
-    await chooseTabMenuItem("Quarterly plan", "Rename")
-    const dialog = await screen.findByRole("dialog", { name: "Rename conversation" })
-    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Q4 plan" } })
+    const { dialog, textbox } = await openRenameDialog("Quarterly plan")
+    fireEvent.change(textbox, { target: { value: "Q4 plan" } })
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }))
 
     await waitFor(() => expect(io.messageError).toHaveBeenCalled())
     expect(io.renameTab).not.toHaveBeenCalled()
     expect(io.updateHistory).not.toHaveBeenCalled()
-    expect(screen.getByRole("dialog", { name: "Rename conversation" })).toBeInTheDocument()
+    expect(isClosing(screen.getByRole("dialog", { name: "Rename conversation" }))).toBe(false)
   })
 
   it("renames a local-only conversation's saved history and its tab", async () => {
     renderSidebar()
-    await chooseTabMenuItem("Scratch notes", "Rename")
-    const dialog = await screen.findByRole("dialog", { name: "Rename conversation" })
-    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Ideas" } })
+    const { dialog, textbox } = await openRenameDialog("Scratch notes")
+    fireEvent.change(textbox, { target: { value: "Ideas" } })
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }))
 
     await waitFor(() => expect(io.renameTab).toHaveBeenCalledWith("tab-local", "Ideas"))
     expect(io.updateHistory).toHaveBeenCalledWith("local-1", "Ideas")
     expect(io.updateChat).not.toHaveBeenCalled()
+  })
+
+  it("prefills Rename with the chat's full title, not its truncated tab label", async () => {
+    renderSidebar({ tabs: [longTab, localTab], activeTabId: longTab.id })
+    const { dialog, textbox } = await openRenameDialog(longTab.label)
+    expect(textbox).toHaveValue(fullTitle)
+    fireEvent.change(textbox, { target: { value: `${(textbox as HTMLInputElement).value} v2` } })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(io.updateChat).toHaveBeenCalled())
+    expect(io.updateChat).toHaveBeenCalledWith(
+      "chat-long",
+      { title: `${fullTitle} v2` },
+      { requestScope: owner.snapshot.requestScope }
+    )
+    expect(io.getChat).toHaveBeenCalledWith("chat-long", { requestScope: owner.snapshot.requestScope })
+  })
+
+  it("does nothing when the full title is saved unchanged", async () => {
+    renderSidebar({ tabs: [longTab, localTab], activeTabId: longTab.id })
+    const { dialog, textbox } = await openRenameDialog(longTab.label)
+    expect(textbox).toHaveValue(fullTitle)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(isClosing(dialog)).toBe(true))
+    expect(io.updateChat).not.toHaveBeenCalled()
+    expect(io.renameTab).not.toHaveBeenCalled()
+    expect(io.updateHistory).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the local copy's full title when the server can't be read", async () => {
+    io.getChat.mockRejectedValue(new Error("offline"))
+    renderSidebar({ tabs: [longTab, localTab], activeTabId: longTab.id })
+    const { textbox } = await openRenameDialog(longTab.label)
+    expect(textbox).toHaveValue(fullTitle)
+    expect(io.getTitleById).toHaveBeenCalledWith("mirror-long")
   })
 })

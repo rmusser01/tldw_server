@@ -5,10 +5,39 @@
  * local history renames that history.
  */
 import { removeServerChatMirror } from "@/db/dexie/server-chat-mirror"
-import { updateHistory } from "@/db/dexie/helpers"
+import { getTitleById, updateHistory } from "@/db/dexie/helpers"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { SidepanelChatTab } from "@/store/sidepanel-chat-tabs"
+
+/**
+ * The full title of the conversation a tab shows, for a rename to start from:
+ * its server chat's title, else its local history's title. A tab label is cut
+ * to 40 characters for display, so it is only the caller's last resort, and
+ * null means no full title is known.
+ */
+export async function readTabConversationTitle(
+  tab: Pick<SidepanelChatTab, "historyId" | "serverChatId">,
+  requestScope?: ServicePromptRequestScope
+): Promise<string | null> {
+  if (tab.serverChatId && requestScope) {
+    try {
+      const chat = await tldwClient.getChat(tab.serverChatId, { requestScope })
+      if (chat?.title?.trim()) return chat.title
+    } catch (error) {
+      console.warn("[sidepanel] Could not read a chat's title from the server; using its local copy", error)
+    }
+  }
+  if (tab.historyId) {
+    try {
+      const title = await getTitleById(tab.historyId)
+      if (title?.trim()) return title
+    } catch (error) {
+      console.warn("[sidepanel] Could not read the local title of a chat", error)
+    }
+  }
+  return null
+}
 
 /**
  * Rename the conversation a tab shows: its server chat when it has one, then

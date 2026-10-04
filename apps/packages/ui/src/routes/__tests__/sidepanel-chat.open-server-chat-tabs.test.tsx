@@ -27,7 +27,9 @@ const io = vi.hoisted(() => ({
   data: new Map<string, unknown>(),
   server: vi.fn(),
   updateChat: vi.fn(),
+  getChat: vi.fn(),
   updateHistory: vi.fn(),
+  loadedTitle: undefined as string | null | undefined,
   failCapture: new Set<string>()
 }))
 
@@ -258,8 +260,21 @@ vi.mock("@/components/Sidepanel/Chat/form", () => ({
   SidepanelForm: () => null
 }))
 vi.mock("@/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({
-  SidepanelHeaderSimple: (props: { onRenameTitle?: (title: string) => void }) => (
-    <button onClick={() => props.onRenameTitle?.("Renamed in header")}>Rename from header</button>
+  SidepanelHeaderSimple: (props: {
+    onRenameTitle?: (title: string) => void
+    loadEditableTitle?: () => Promise<string | null>
+  }) => (
+    <>
+      <button onClick={() => props.onRenameTitle?.("Renamed in header")}>Rename from header</button>
+      <button
+        onClick={() => {
+          void props.loadEditableTitle?.().then((title) => {
+            io.loadedTitle = title
+          })
+        }}>
+        Load header title
+      </button>
+    </>
   )
 }))
 vi.mock("@/components/Sidepanel/Chat/ConnectionBanner", () => ({
@@ -312,6 +327,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     initialize: async () => {},
     listChatMessages: (...args: unknown[]) => io.server(...args),
     updateChat: (...args: unknown[]) => io.updateChat(...args),
+    getChat: (...args: unknown[]) => io.getChat(...args),
     ensureConfigForRequest: async () => ({
       serverUrl: "http://chat.test",
       authMode: "multi-user"
@@ -554,6 +570,8 @@ describe("side-panel header rename (XS-07)", () => {
     io.server.mockReset().mockImplementation(async (chatId: string) => serverMessages(chatId))
     io.updateChat.mockReset().mockImplementation(async (_id: string, data: { title: string }) => ({ title: data.title }))
     io.updateHistory.mockReset().mockResolvedValue(undefined)
+    io.getChat.mockReset()
+    io.loadedTitle = undefined
     window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
     useSidepanelChatTabsStore.getState().clear()
     useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: null })
@@ -586,5 +604,17 @@ describe("side-panel header rename (XS-07)", () => {
     await act(async () => {})
     expect(useSidepanelChatTabsStore.getState().tabs.find((tab) => tab.id === "tab-a")?.label).toBe("Title chat-1")
     expect(io.updateHistory).not.toHaveBeenCalled()
+  })
+
+  it("gives the header the active chat's full title to edit", async () => {
+    const fullTitle = "Quarterly planning review for the northern region sales team"
+    io.getChat.mockResolvedValue({ id: "chat-1", title: fullTitle })
+    render(<SidepanelChat />)
+    await screen.findByText("chat-1 answer")
+    fireEvent.click(screen.getByRole("button", { name: "Load header title" }))
+    await waitFor(() => expect(io.loadedTitle).toBe(fullTitle))
+    expect(io.getChat).toHaveBeenCalledWith("chat-1", {
+      requestScope: expect.objectContaining({ userId: "alice" })
+    })
   })
 })

@@ -1,6 +1,6 @@
 import React from "react"
 import { Dropdown, Input, Modal } from "antd"
-import type { MenuProps } from "antd"
+import type { InputRef, MenuProps } from "antd"
 import {
   Pencil,
   Pin,
@@ -33,6 +33,12 @@ export type ConversationContextMenuProps = {
   tab: SidepanelChatTab
   children: React.ReactNode
   onRename: (tabId: string, newLabel: string) => DialogAction
+  /**
+   * The conversation's full title for the Rename dialog to start from. The
+   * tab label is truncated for display, so it is used only when this is
+   * missing or resolves to null.
+   */
+  loadRenameTitle?: (tabId: string) => Promise<string | null>
   onTogglePin: (tabId: string) => void
   onSetStatus: (tabId: string, status: ConversationStatus) => void
   onAddToFolder: (tabId: string) => void
@@ -51,6 +57,7 @@ export const ConversationContextMenu: React.FC<
   tab,
   children,
   onRename,
+  loadRenameTitle,
   onTogglePin,
   onSetStatus,
   onAddToFolder,
@@ -63,15 +70,51 @@ export const ConversationContextMenu: React.FC<
   const { t } = useTranslation(["common", "sidepanel"])
   const [renameModalOpen, setRenameModalOpen] = React.useState(false)
   const [renameValue, setRenameValue] = React.useState(tab.label)
+  // The title the dialog started from; saving it unchanged renames nothing.
+  const [renameBaseline, setRenameBaseline] = React.useState(tab.label)
+  const [renameTitleLoading, setRenameTitleLoading] = React.useState(false)
+  const renameRequestRef = React.useRef(0)
+  const renameInputRef = React.useRef<InputRef>(null)
   const [renaming, setRenaming] = React.useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
   const deletesServerChat = Boolean(tab.serverChatId)
 
+  const openRenameDialog = () => {
+    const request = ++renameRequestRef.current
+    setRenameValue(tab.label)
+    setRenameBaseline(tab.label)
+    setRenameModalOpen(true)
+    if (!loadRenameTitle) return
+    setRenameTitleLoading(true)
+    loadRenameTitle(tab.id)
+      .then((title) => {
+        if (request !== renameRequestRef.current || !title?.trim()) return
+        setRenameValue(title)
+        setRenameBaseline(title)
+      })
+      .catch((error) => {
+        console.warn("[sidepanel] Could not load the chat's title to rename", error)
+      })
+      .finally(() => {
+        if (request === renameRequestRef.current) setRenameTitleLoading(false)
+      })
+  }
+
+  const closeRenameDialog = () => {
+    renameRequestRef.current++
+    setRenameTitleLoading(false)
+    setRenameModalOpen(false)
+  }
+
+  React.useEffect(() => {
+    if (renameModalOpen && !renameTitleLoading) renameInputRef.current?.focus()
+  }, [renameModalOpen, renameTitleLoading])
+
   const handleRenameSubmit = async () => {
-    if (renaming) return
+    if (renaming || renameTitleLoading) return
     const nextLabel = renameValue.trim()
-    if (!nextLabel || nextLabel === tab.label) {
+    if (!nextLabel || nextLabel === renameBaseline.trim()) {
       setRenameModalOpen(false)
       return
     }
@@ -146,10 +189,7 @@ export const ConversationContextMenu: React.FC<
       key: "rename",
       icon: <Pencil className="size-3" />,
       label: t("sidepanel:contextMenu.rename", "Rename"),
-      onClick: () => {
-        setRenameValue(tab.label)
-        setRenameModalOpen(true)
-      }
+      onClick: openRenameDialog
     },
     {
       key: "pin",
@@ -215,17 +255,19 @@ export const ConversationContextMenu: React.FC<
         open={renameModalOpen}
         title={t("sidepanel:contextMenu.renameTitle", "Rename conversation")}
         onOk={() => void handleRenameSubmit()}
-        onCancel={() => setRenameModalOpen(false)}
+        onCancel={closeRenameDialog}
         okText={t("common:save", "Save")}
         cancelText={t("common:cancel", "Cancel")}
         confirmLoading={renaming}
+        okButtonProps={{ disabled: renameTitleLoading }}
         destroyOnHidden
       >
         <Input
+          ref={renameInputRef}
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
           onPressEnter={() => void handleRenameSubmit()}
-          autoFocus
+          disabled={renameTitleLoading}
           placeholder={t(
             "sidepanel:contextMenu.renamePlaceholder",
             "Enter conversation name"

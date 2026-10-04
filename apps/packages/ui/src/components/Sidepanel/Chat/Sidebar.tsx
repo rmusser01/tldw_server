@@ -43,6 +43,7 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
 import {
   moveServerChatToTrash,
+  readTabConversationTitle,
   removeLocalCopyOfServerChat,
   renameTabConversation,
   restoreServerChatFromTrash
@@ -339,6 +340,18 @@ export const SidepanelChatSidebar = ({
   const unverifiedAccountMessage = t(
     "sidepanel:contextMenu.accountUnverified",
     "This conversation can't be changed until your account is verified."
+  )
+
+  const handleLoadRenameTitle = React.useCallback(
+    async (tabId: string): Promise<string | null> => {
+      const tab = tabs.find((item) => item.id === tabId)
+      if (!tab) return null
+      return readTabConversationTitle(
+        tab,
+        owner?.isCurrent() ? owner.snapshot.requestScope : undefined
+      )
+    },
+    [owner, tabs]
   )
 
   const handleRename = React.useCallback(
@@ -721,6 +734,7 @@ export const SidepanelChatSidebar = ({
           key={tab.id}
           tab={tab}
           onRename={handleRename}
+          loadRenameTitle={handleLoadRenameTitle}
           onTogglePin={togglePinned}
           onSetStatus={handleSetStatus}
           onAddToFolder={handleAddToFolder}
@@ -746,6 +760,7 @@ export const SidepanelChatSidebar = ({
       onCloseTab,
       handleDeleteTab,
       handleRename,
+      handleLoadRenameTitle,
       handleSetStatus,
       handleAddToFolder,
       handleExportJSON,
