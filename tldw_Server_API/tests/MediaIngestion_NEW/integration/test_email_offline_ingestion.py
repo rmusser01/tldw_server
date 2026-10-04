@@ -9,9 +9,11 @@ import mailbox
 import socket
 import sys
 import zipfile
+from collections.abc import Callable
 from email.message import EmailMessage
 from io import BytesIO
 from types import SimpleNamespace
+from typing import NoReturn
 from unittest.mock import AsyncMock
 
 import pytest
@@ -53,9 +55,25 @@ def offline_client(tmp_path, monkeypatch):
     calls = []
     original_connect = socket.socket.connect
 
-    def forbidden(*_args, **_kwargs):
-        calls.append("model, background job, or outbound request")
-        raise AssertionError("Offline email validation forbids model work and outbound requests")
+    def forbidden(boundary: str) -> Callable[..., NoReturn]:
+        """Create a rejecting callback that identifies its guarded boundary."""
+
+        def reject(*_args: object, **_kwargs: object) -> NoReturn:
+            # Record code locations only, never arguments, locals or source text.
+            callers = []
+            frame = sys._getframe(1)
+            try:
+                while frame is not None and len(callers) < 24:
+                    callers.append(f"{frame.f_globals.get('__name__', '?')}.{frame.f_code.co_name}:{frame.f_lineno}")
+                    frame = frame.f_back
+            finally:
+                del frame
+            calls.append({"boundary": boundary, "callers": callers})
+            raise AssertionError(f"Offline email validation forbids model work and outbound requests: {boundary}")
+
+        return reject
+
+    blocked_connect = forbidden("socket.connect")
 
     def offline_connect(sock, address):
         # Windows' socketpair fallback connects to its own IPv4 loopback listener.
@@ -66,13 +84,13 @@ def offline_client(tmp_path, monkeypatch):
             and sys._getframe(1).f_code is socket._fallback_socketpair.__code__
         ):
             return original_connect(sock, address)
-        return forbidden()
+        return blocked_connect()
 
-    monkeypatch.setattr(Summarization_General_Lib, "analyze", forbidden)
-    monkeypatch.setattr(claims_utils, "extract_claims_for_chunks", forbidden)
-    monkeypatch.setattr(ChatAutoChunkBoundaryAssistant, "refine", forbidden)
-    monkeypatch.setattr(EmbeddingsJobsAdapter, "create_job", forbidden)
-    monkeypatch.setattr(BackgroundTasks, "add_task", forbidden)
+    monkeypatch.setattr(Summarization_General_Lib, "analyze", forbidden("Summarization_General_Lib.analyze"))
+    monkeypatch.setattr(claims_utils, "extract_claims_for_chunks", forbidden("claims_utils.extract_claims_for_chunks"))
+    monkeypatch.setattr(ChatAutoChunkBoundaryAssistant, "refine", forbidden("ChatAutoChunkBoundaryAssistant.refine"))
+    monkeypatch.setattr(EmbeddingsJobsAdapter, "create_job", forbidden("EmbeddingsJobsAdapter.create_job"))
+    monkeypatch.setattr(BackgroundTasks, "add_task", forbidden("BackgroundTasks.add_task"))
     for name in (
         "fetch",
         "afetch",
@@ -85,10 +103,10 @@ def offline_client(tmp_path, monkeypatch):
         "astream_sse",
         "stream_response",
     ):
-        monkeypatch.setattr(http_client, name, forbidden)
+        monkeypatch.setattr(http_client, name, forbidden(f"http_client.{name}"))
     monkeypatch.setattr(socket.socket, "connect", offline_connect)
-    monkeypatch.setattr(socket.socket, "connect_ex", forbidden)
-    monkeypatch.setattr(socket, "getaddrinfo", forbidden)
+    monkeypatch.setattr(socket.socket, "connect_ex", forbidden("socket.connect_ex"))
+    monkeypatch.setattr(socket, "getaddrinfo", forbidden("socket.getaddrinfo"))
 
     class _UnlimitedQuota:
         """Quota is outside this harness; the synthetic user has no AuthNZ row."""
@@ -156,6 +174,67 @@ def test_offline_client_allows_windows_socketpair_fallback_and_blocks_remote_con
             client.connect_ex(("192.0.2.1", 9))
     assert len(offline_client.app.state.offline_forbidden_calls) == 3
     offline_client.app.state.offline_forbidden_calls.clear()
+
+
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        "socket.getaddrinfo",
+        "socket.connect_ex",
+        "Summarization_General_Lib.analyze",
+        "claims_utils.extract_claims_for_chunks",
+        "ChatAutoChunkBoundaryAssistant.refine",
+        "EmbeddingsJobsAdapter.create_job",
+        "BackgroundTasks.add_task",
+        *[
+            f"http_client.{name}"
+            for name in (
+                "fetch",
+                "afetch",
+                "apost",
+                "fetch_json",
+                "afetch_json",
+                "download",
+                "adownload",
+                "astream_bytes",
+                "astream_sse",
+                "stream_response",
+            )
+        ],
+    ],
+)
+def test_offline_guard_reports_boundary_and_caller_without_arguments(offline_client, boundary):
+    """Keep swallowed forbidden attempts actionable without retaining inputs."""
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Chunking.auto_boundary_assistant import ChatAutoChunkBoundaryAssistant
+    from tldw_Server_API.app.core.Claims_Extraction import claims_utils
+    from tldw_Server_API.app.core.Embeddings.jobs_adapter import EmbeddingsJobsAdapter
+    from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib
+
+    targets = {
+        "socket.getaddrinfo": socket.getaddrinfo,
+        "socket.connect_ex": socket.socket.connect_ex,
+        "Summarization_General_Lib.analyze": Summarization_General_Lib.analyze,
+        "claims_utils.extract_claims_for_chunks": claims_utils.extract_claims_for_chunks,
+        "ChatAutoChunkBoundaryAssistant.refine": ChatAutoChunkBoundaryAssistant.refine,
+        "EmbeddingsJobsAdapter.create_job": EmbeddingsJobsAdapter.create_job,
+        "BackgroundTasks.add_task": BackgroundTasks.add_task,
+    }
+    if boundary.startswith("http_client."):
+        target = getattr(http_client, boundary.split(".", 1)[1])
+    else:
+        target = targets[boundary]
+    private_input = "synthetic-private-input.example.test"
+    with pytest.raises(AssertionError, match="Offline email validation forbids"):
+        target(offline_probe=private_input)
+    attempts = list(offline_client.app.state.offline_forbidden_calls)
+    # This test deliberately probes the tripwire, as the socketpair test does.
+    offline_client.app.state.offline_forbidden_calls.clear()
+    assert len(attempts) == 1  # nosec B101 - pytest rejects extra forbidden calls during the deliberate probe.
+    diagnostic = repr(attempts)
+    assert boundary in diagnostic  # nosec B101 - pytest verifies forbidden-boundary attribution.
+    assert "test_offline_guard_reports_boundary_and_caller_without_arguments" in diagnostic  # nosec B101 - pytest verifies caller attribution.
+    assert private_input not in diagnostic  # nosec B101 - pytest verifies input privacy.
 
 
 def synthetic_message(number: int, *, html_only: bool = False, same_body: bool = False) -> EmailMessage:
