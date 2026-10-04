@@ -237,7 +237,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     q: string,
     toks: string[],
     fetchPage: number,
-    fetchPageSize: number
+    fetchPageSize: number,
+    signal?: AbortSignal
   ): Promise<{ items: any[]; total: number }> => {
     const requestOwner = authorityOwner
     if (!isCurrentAuthority(requestOwner)) {
@@ -264,7 +265,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
 
     const abs = await bgRequest<any>({
       path: `/api/v1/notes/search/?${params.toString()}` as any,
-      method: 'GET' as any
+      method: 'GET' as any,
+      abortSignal: signal
     })
     if (!isCurrentAuthority(requestOwner)) {
       return { items: [], total: 0 }

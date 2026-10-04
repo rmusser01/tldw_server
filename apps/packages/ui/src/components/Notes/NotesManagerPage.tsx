@@ -2425,6 +2425,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         conversationLabelById={conversationLabelById}
         importSubmitting={imp.importSubmitting}
         exportProgress={exp.exportProgress}
+        cancelExport={exp.cancelExport}
         setMobileSidebarOpen={setMobileSidebarOpen}
         setListViewMode={list.setListViewMode}
         setPage={list.setPage}
