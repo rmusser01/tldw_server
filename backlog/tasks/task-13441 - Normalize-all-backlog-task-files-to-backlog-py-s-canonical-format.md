@@ -15,7 +15,7 @@ Follow-up to TASK-13440: run 'backlog-py task normalize' over backlog/tasks in a
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Peer sessions were pinged before the PR opened, and no open PR's task-file edits conflict at merge
-- [x] #2 Every task file not touched by an open PR is canonical (2,269 normalized) and a second normalize run changes nothing; the 39 files open PRs touch are left to those PRs, which the backend-required format check already requires to be canonical
+- [x] #2 Every task file not touched by an open PR is canonical (2,269 normalized) and a second normalize run changes nothing; the 39 skipped files are tracked in TASK-13443
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -28,12 +28,13 @@ Verification:
 - test_backlog_task_format_ratchet.py (diffing the whole PR against origin/dev), test_licensing_policy.py and tools/backlog-py/tests: 164 passed.
 - The peer session was pinged before the PR opened. Before merge, re-check open PRs for overlap and restore any newly overlapping file to dev's version.
 - Bandit: not applicable (task files only).
+Review (#3162, Qodo): the skipped files are not guaranteed to be normalized by their PRs, because backend-required's format check runs only on backend changes and run-pre-commit is not required. AC2 no longer claims that; the 39 files are tracked as open work in TASK-13443.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Normalized 2,269 backlog task files to backlog-py's canonical format (one IMPLEMENTATION_NOTES block, one BEGIN/END pair per section) with no text lost. 39 non-canonical files touched by open PRs were skipped to avoid conflicts; the per-PR format check makes those PRs normalize them. Skip: Bandit (task files only).
+Normalized 2,269 backlog task files to backlog-py's canonical format (one IMPLEMENTATION_NOTES block, one BEGIN/END pair per section) with no text lost. 39 non-canonical files that open PRs were editing were skipped to avoid conflicts; TASK-13443 normalizes them once those PRs land. Skip: Bandit (task files only).
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
