@@ -7717,6 +7717,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.character_store import (
             CharacterStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.chat_import_store import ChatImportStore
         from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
             ConversationResumeStore,
         )
@@ -7761,6 +7762,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.native_assets = NativeChatAssetStore(self)
         self.conversation_resume_store = ConversationResumeStore(self)
         self.message_store = MessageStore(self)
+        self.chat_imports = ChatImportStore(self)
         self.note_store = NoteStore(self)
         self.moodboard_sync_store = MoodboardSyncStore(self)
         self.note_attachment_store = NoteAttachmentStore(self)
