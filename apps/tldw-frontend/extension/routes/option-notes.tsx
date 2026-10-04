@@ -1,12 +1,13 @@
 import OptionLayout from "@web/components/layout/WebLayout"
 import NotesManagerPage from "@/components/Notes/NotesManagerPage"
+import { RouteLeaveGuard } from "@/entries/shared/route-leave-guard"
 import { useLocation } from "react-router-dom"
 
 const OptionNotes = () => {
   const { search } = useLocation()
   return (
     <OptionLayout>
-      <NotesManagerPage sourceNoteId={new URLSearchParams(search).get("source_ref_id")} />
+      <NotesManagerPage sourceNoteId={new URLSearchParams(search).get("source_ref_id")} LeaveGuard={RouteLeaveGuard} />
     </OptionLayout>
   )
 }

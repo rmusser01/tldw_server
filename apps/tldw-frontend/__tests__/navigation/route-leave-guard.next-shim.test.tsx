@@ -7,17 +7,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 // rail) until the Notes leave flush finishes (#3102 NS-01).
 
 const { mockRouter, routerEventHandlers } = vi.hoisted(() => {
-  const handlers = new Map<string, Set<(...args: any[]) => void>>()
+  const handlers = new Map<string, Set<(...args: unknown[]) => void>>()
   const events = {
-    on: (name: string, handler: (...args: any[]) => void) => {
+    on: (name: string, handler: (...args: unknown[]) => void) => {
       const set = handlers.get(name) ?? new Set()
       set.add(handler)
       handlers.set(name, set)
     },
-    off: (name: string, handler: (...args: any[]) => void) => {
+    off: (name: string, handler: (...args: unknown[]) => void) => {
       handlers.get(name)?.delete(handler)
     },
-    emit: (name: string, ...args: any[]) => {
+    emit: (name: string, ...args: unknown[]) => {
       for (const handler of [...(handlers.get(name) ?? [])]) handler(...args)
     }
   }

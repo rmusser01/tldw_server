@@ -92,7 +92,9 @@ describe("notes option route identity", () => {
       expect(optionModule).toContain(
         'import NotesManagerPage from "@/components/Notes/NotesManagerPage"'
       )
-      expect(optionModule).toContain('<NotesManagerPage sourceNoteId={new URLSearchParams(search).get("source_ref_id")} />')
+      // The route supplies the router-aware leave guard (#3102 NS-01).
+      expect(optionModule).toContain('<NotesManagerPage sourceNoteId={new URLSearchParams(search).get("source_ref_id")} LeaveGuard={RouteLeaveGuard} />')
+      expect(optionModule).toContain('import { RouteLeaveGuard } from "@/entries/shared/route-leave-guard"')
       expect(optionModule).not.toMatch(/components\/Notes\/(?!NotesManagerPage)/)
     }
   })

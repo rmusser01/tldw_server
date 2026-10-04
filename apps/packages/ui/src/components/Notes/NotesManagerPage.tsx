@@ -40,6 +40,7 @@ import {
   useNotesImport,
   useNotesWikilinks,
 } from "@/components/Notes/hooks"
+import type { NotesLeaveGuardState } from "@/components/Notes/hooks/useNotesEditorState"
 import type { NoteListItem } from "@/components/Notes/notes-manager-types"
 import { clearSetting, getSetting } from "@/services/settings/registry"
 import { useFlashcardsGenerateTransfer, useStudyPackTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
@@ -126,7 +127,17 @@ const hasUnsavedChatWork = (row: ChatMessage): boolean => {
     !(row.isBot && (!row.role || row.role === "assistant") && decodeChatErrorPayload(row.message)))
 }
 
-const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNoteId = null }) => {
+type NotesManagerPageProps = {
+  sourceNoteId?: string | null
+  /**
+   * Router-aware guard that holds in-app navigation while unsaved edits are
+   * flushed (NS-01). The route supplies it (RouteLeaveGuard) so the page stays
+   * independent of the router; without it only the unmount backstop applies.
+   */
+  LeaveGuard?: React.ComponentType<NotesLeaveGuardState>
+}
+
+const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null, LeaveGuard }) => {
   const transferFlashcards = useFlashcardsGenerateTransfer()
   const transferStudyPack = useStudyPackTransfer()
   const { t } = useTranslation(['option', 'common'])
@@ -2361,6 +2372,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
 
   return (
     <div className="relative flex h-full w-full bg-bg p-2 sm:p-4 mt-16">
+      {LeaveGuard ? <LeaveGuard when={ed.leaveGuard.when} onLeave={ed.leaveGuard.onLeave} /> : null}
       <a href={`#${NOTES_LIST_REGION_ID}`} onClick={handleSkipLinkActivate(NOTES_LIST_REGION_ID)} className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-border focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text focus:shadow">
         {t('option:notesSearch.skipToNotesList', { defaultValue: 'Skip to notes list' })}
       </a>
@@ -2540,12 +2552,11 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         editorKeywords={kw.editorKeywords}
         keywordOptions={kw.keywordOptions}
         saveIndicator={ed.saveIndicator}
-        saveIndicatorText={ed.saveIndicatorText}
-        saveRecoveryNotice={ed.saveRecoveryNotice}
+        saveIssue={ed.saveIssue}
+        saveStatusDetail={ed.saveStatusDetail}
         selectedLastSavedAt={ed.selectedLastSavedAt}
         offlineStatusText={ed.offlineStatusText}
         currentOfflineDraft={ed.currentOfflineDraft}
-        remoteVersionInfo={ed.remoteVersionInfo}
         monitoringNotice={ed.monitoringNotice}
         monitoringNoticeClasses={ed.monitoringNoticeClasses}
         noteTasks={ed.noteTasks}
@@ -2587,7 +2598,6 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         wikilinkSuggestionDisplayCounts={wl.wikilinkSuggestionDisplayCounts}
         wikilinkSelectionIndex={wl.wikilinkSelectionIndex}
         metricSummaryText={ed.metricSummaryText}
-        revisionSummaryText={ed.revisionSummaryText}
         provenanceSummaryText={ed.provenanceSummaryText}
         queuedOfflineDraftCount={ed.queuedOfflineDraftCount}
         titleInputRef={ed.titleInputRef}
@@ -2619,7 +2629,11 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         handleOpenNotesStudio={handleOpenNotesStudio}
         exportSelected={exp.exportSelected}
         saveNote={ed.saveNote}
-        reloadSelectedNoteAfterConflict={ed.reloadSelectedNoteAfterConflict}
+        retrySave={ed.retrySave}
+        keepMyVersion={ed.keepMyVersion}
+        takeTheirVersion={ed.takeTheirVersion}
+        copyMyText={ed.copyMyText}
+        loadLatestVersion={ed.loadLatestVersion}
         saveAndStartNew={saveAndStartNew}
         deleteNote={async () => {
           await deleteNote()

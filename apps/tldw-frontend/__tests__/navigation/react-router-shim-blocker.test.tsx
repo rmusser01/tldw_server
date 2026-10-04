@@ -1,4 +1,3 @@
-import React from "react"
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useBlocker } from "@web/extension/shims/react-router-dom"
@@ -7,17 +6,17 @@ import { useBlocker } from "@web/extension/shims/react-router-dom"
 // it finishes async work (the Notes leave flush, #3102 NS-01), like
 // react-router's data-router blocker does in the extension.
 
-const routerEventHandlers = new Map<string, Set<(...args: any[]) => void>>()
+const routerEventHandlers = new Map<string, Set<(...args: unknown[]) => void>>()
 const mockRouterEvents = {
-  on: vi.fn((name: string, handler: (...args: any[]) => void) => {
+  on: vi.fn((name: string, handler: (...args: unknown[]) => void) => {
     const handlers = routerEventHandlers.get(name) ?? new Set()
     handlers.add(handler)
     routerEventHandlers.set(name, handlers)
   }),
-  off: vi.fn((name: string, handler: (...args: any[]) => void) => {
+  off: vi.fn((name: string, handler: (...args: unknown[]) => void) => {
     routerEventHandlers.get(name)?.delete(handler)
   }),
-  emit: vi.fn((name: string, ...args: any[]) => {
+  emit: vi.fn((name: string, ...args: unknown[]) => {
     for (const handler of [...(routerEventHandlers.get(name) ?? [])]) handler(...args)
   })
 }

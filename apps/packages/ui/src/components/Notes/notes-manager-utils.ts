@@ -386,9 +386,25 @@ export const calculateSidebarHeight = () => {
 
 export type SaveNoteOptions = {
   showSuccessMessage?: boolean
+  /** Who asked for the save; see NoteSaveTrigger in notes-save-machine.ts. */
+  trigger?: 'auto' | 'manual' | 'retry' | 'leave' | 'switch' | 'keep-mine'
+  /** Overwrite this server version (only for an explicit "keep my version"). */
+  expectedVersion?: number
 }
 
-export type SaveIndicatorState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
+/**
+ * The one save status the editor shows (NS-06). Derived from the save state
+ * machine: "saved" only after an acknowledged (2xx) save or load.
+ */
+export type SaveIndicatorState =
+  | 'idle'
+  | 'dirty'
+  | 'saving'
+  | 'saved'
+  | 'error'
+  | 'retrying'
+  | 'conflict'
+  | 'offline'
 export type SaveRecoveryNotice = {
   kind: 'error' | 'conflict'
   message: string
