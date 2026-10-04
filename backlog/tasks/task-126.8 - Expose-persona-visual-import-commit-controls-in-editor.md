@@ -41,7 +41,7 @@ Plan: Docs/superpowers/plans/2026-05-09-persona-visual-import-commit-controls-pl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan at Docs/superpowers/plans/2026-05-09-persona-visual-import-commit-controls-plan.md.
 
 RED: bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx first hit missing fresh-worktree dependencies; after bun install, the test failed as intended because persona-visual-import-commit-button was absent after a completed import preview.
@@ -57,7 +57,7 @@ BANDIT: not applicable; touched production code is frontend TypeScript plus plan
 No known blockers. Bandit skipped as non-applicable for frontend TypeScript-only production changes.
 
 TSC: bunx tsc --noEmit --pretty false still exits 2 on existing repo-wide diagnostics; filtered /tmp/persona-visual-import-tsc.log shows no diagnostics for the touched VisualPackEditor, VisualPackEditor test, persona-visuals service, or persona-visuals types files after the ArrayBufferView BlobPart copy fix.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

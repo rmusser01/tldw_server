@@ -32,11 +32,11 @@ Narrow the remaining minimal optional router skip semantics for Kanban, study, a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red/green evidence: focused selector 'minimal_optional_router_specs and (kanban or study or writing_email)' failed before production changes with 9 expected failures for raw skip_exceptions and swallowed ImportError/AttributeError defects, then passed after removing the raw skip overrides (15 passed, 121 deselected).
 
 Validation: router group contracts 136 passed; main router contracts 6 passed; OpenAPI contracts 69 passed; Bandit on tldw_Server_API/app/api/v1/router_groups/minimal.py wrote /tmp/bandit_phase2_2_minimal_learning_kanban_skip_semantics_ba.json with results [] and errors []; git diff --check clean; no remaining skip_exceptions=(ImportError, AttributeError) or skip_exceptions=(Exception) matches in router_groups.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -35,13 +35,13 @@ Address unresolved Gemini review threads on PR #1737 for the cache-cost v2 imple
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented docs review fixes in Docs/superpowers/plans/2026-05-16-chat-cache-cost-v2-implementation-plan.md: added explicit debug prompt-envelope retention pruning service/test coverage and switched local_prefill_latency_ms schema guidance to INTEGER with integer-storage test expectations.
 
 Verification: git diff --check passed; targeted rg confirmed retention pruning and local_prefill_latency_ms INTEGER content; ASCII scan returned no matches. Bandit is not applicable because this change only edits docs and Backlog metadata.
 
 PR review threads replied to and resolved on GitHub after pushing 7c9ccdfec.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

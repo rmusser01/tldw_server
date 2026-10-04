@@ -25,7 +25,7 @@ priority: high
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created because TASK-12076 has duplicate task files and the Backlog CLI resolves the numeric id to the wrong legacy task. This task tracks the PR #2564 rebase/review follow-up work.
 
 Rebased PR #2564 onto latest origin/dev, then addressed review threads covering notification redaction whitespace, persisted frontend history redaction migration, task metadata casefold indexing, navigation title cleanup, MCP path normalization failure handling, generated-file symlink outputs roots, RAG exemplar tenant/user roots, Local LLM wildcard probe handling, WebSearch log formatting, and dead safe_join branches.
@@ -37,7 +37,7 @@ Bandit: touched app-source run wrote /tmp/bandit_codeql_review.json and reports 
 Follow-up after push: refreshed PR review threads showed additional CodeRabbit comments on the pre-fix commit. Reopening this task to address the remaining unresolved PR threads before finalizing.
 
 Second follow-up addressed the remaining CodeRabbit threads: runtime/config credential scrubbing now removes legacy apiBearer and refreshToken, directory creation rejects existing symlinked directories, metric and companion log hashes use deployment-provided env secrets with process-local fallback warnings, RAG exemplar sinks reject dot-only tenant/user ids, skill import preview preserves public File messages while filtering traceback frames, and wildcard port probe docs now spell out loopback proxy semantics. Verification after follow-up: bun run test:run hooks/__tests__/useConfig.networking.test.tsx lib/__tests__/history.test.ts; bun install --frozen-lockfile followed by bun run test:run __tests__/extension/runtime-bootstrap.test.ts; python -m pytest -q tldw_Server_API/tests/DB_Management/test_db_path_utils.py tldw_Server_API/tests/Metrics/test_sensitive_label_hashing.py tldw_Server_API/tests/Personalization/test_companion_activity_adapters.py tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars.py tldw_Server_API/tests/Skills/unit/test_skills_service.py; previous focused backend suite rerun with 110 passed; py_compile passed for touched app files; git diff --check passed; Bandit app-source wrote /tmp/bandit_pr2564_app.json and now reports only the pre-existing WebSearch_APIs.py baseline findings (B311 lines 576/2803, B101 line 2144). Test Bandit wrote /tmp/bandit_pr2564_tests.json; findings are pre-existing fixture strings in test code, not new touched lines.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

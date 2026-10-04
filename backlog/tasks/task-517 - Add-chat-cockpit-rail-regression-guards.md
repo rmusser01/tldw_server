@@ -38,7 +38,6 @@ Add focused regression coverage that proves the main /chat cockpit shell, contex
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 2 implementation notes - 2026-05-27:
 - Added `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts` as a source-level guard using `import.meta.url`, `fileURLToPath`, and `path.resolve` to read `../Playground.tsx` and `../PlaygroundCockpitShell.tsx`.
@@ -62,7 +61,6 @@ DoD notes:
 - AC #4 is complete for this Task 2 slice.
 - Bandit is not applicable for this TypeScript test and Backlog-only slice; no Python code was touched.
 - The prior existing rail-suite blocker is resolved; no new production-code changes were made.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Task 3 implementation notes - 2026-05-27:
 - Added `assertNoHorizontalOverflow(page)` to `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`; it evaluates `window.innerWidth`, `document.documentElement.scrollWidth`, and `document.body.scrollWidth`, then expects document/body scroll width to stay within `innerWidth + 1`.
@@ -81,7 +79,7 @@ DoD notes for Task 3:
 - AC #3 is complete: evidence JSON exists and the required `/chat` screenshot artifacts are present in the review asset directory.
 - Documentation was updated in the audit and evidence JSON.
 - Bandit remains not applicable for this TypeScript/evidence-only slice; no Python code was touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

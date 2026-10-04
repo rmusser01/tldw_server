@@ -31,7 +31,7 @@ Verify and remediate validated StudyPacks review findings around provenance inte
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Manual Backlog task file fallback approved by the user after the Backlog MCP workflow was unavailable and repeated non-interactive `backlog task create` attempts hung without output.
 
 Implemented validated fixes:
@@ -53,7 +53,7 @@ Modified files:
 - `tldw_Server_API/tests/StudyPacks/test_study_pack_jobs.py`
 - `tldw_Server_API/tests/StudyPacks/test_generation_service_imports.py`
 - `tldw_Server_API/tests/StudyPacks/test_study_pack_endpoints_api.py`
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

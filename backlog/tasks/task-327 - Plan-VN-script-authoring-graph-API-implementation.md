@@ -52,11 +52,11 @@ Create a detailed implementation plan from the approved VN script authoring grap
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Planning is being done on branch `codex/vn-script-authoring-graph-design` after the design spec commit.
 - Created `Docs/superpowers/plans/2026-05-14-vn-script-authoring-graph-api-implementation-plan.md`.
 - Review pass corrected the label ID encoding helper example and the published-version service test shape to match current `publish_script()` return data.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Verification
 

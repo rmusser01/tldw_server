@@ -47,12 +47,12 @@ Implement Stage 2 of the approved chat/world-book cache cost-control plan. This 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red run recorded: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py -q failed during collection because world_book_prompt_context did not exist.
 Green verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py::TestWorldBookService::test_process_context_diagnostics_include_static_or_pinned_hint tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py::test_world_book_process_endpoint_returns_diagnostics_payload tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py -q passed with 6 passed and 1 existing environment-guarded skip.
 Security/format verification: git diff --check passed. Bandit command passed with zero findings: python -m bandit -r tldw_Server_API/app/core/Character_Chat/world_book_prompt_context.py tldw_Server_API/app/core/Character_Chat/world_book_manager.py tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py -f json -o /tmp/bandit_task380.json.
 Known notes: this slice centralizes world-book prompt assembly and diagnostics only. It does not change provider cache behavior, usage persistence, or the world-book schema.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

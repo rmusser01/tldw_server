@@ -33,7 +33,7 @@ Stage 1 implementation for the main /chat role-play preset plan: reproduce or re
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Setup before implementation:
 - Dedicated branch/worktree: codex/chat-role-play-preset-remediation at .worktrees/chat-role-play-preset-remediation, based on dev plus role-play spec/plan commits.
 - Dependency setup: `bun install` hung after partial resolution and was stopped; `bun install --ignore-scripts` completed and left no tracked file changes.
@@ -61,7 +61,7 @@ Quality review follow-up:
 Review status:
 - Spec compliance review: PASS_WITH_NOTES; non-blocking plan Step 10 tracking note was addressed.
 - Code-quality review: initial FAIL for stale greeting metadata and brittle starter coverage; fixed both. Re-review: PASS_WITH_NOTES with no blocking findings. The remaining note is that the toolbar ownership guard is source-text based and could be strengthened later by rendering the real toolbar path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

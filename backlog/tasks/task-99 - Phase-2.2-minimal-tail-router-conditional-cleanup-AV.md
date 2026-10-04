@@ -39,7 +39,7 @@ Convert the minimal-test agent_orchestration setup metrics and authnz_debug opti
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD RED selector failed as expected before the implementation: 3 new tail tests failed against eager imports while an existing content-tail test passed.
 
 GREEN and broader validation passed: router groups 119 passed, lifecycle 54 passed, OpenAPI 69 passed, Bandit results 0, git diff --check clean.
@@ -47,7 +47,7 @@ GREEN and broader validation passed: router groups 119 passed, lifecycle 54 pass
 No docs update was required for this internal router registration cleanup. No known blockers remain.
 
 Opened PR https://github.com/rmusser01/tldw_server/pull/1347 against dev for this slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

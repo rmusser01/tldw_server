@@ -41,11 +41,11 @@ Write the implementation plan for creating the remaining design-system work trac
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan review pass completed locally. Issues fixed before closeout: added duplicate GitHub issue search before public creation; replaced ambiguous child issue title placeholders with an exact title table; moved Backlog parent creation immediately after the epic; added Backlog MCP preference with CLI fallback arguments; removed incorrect closure of TASK-45.41 from the future tracker execution plan and replaced it with a PR-body artifact step.
 
 Verification: rebased branch onto current origin/dev; confirmed product-state baseline still totals 500 entries with 481 antd-product-state-import and 19 canonical-state-label entries; git diff --cached --check passed for the plan and task files. Bandit skipped because this slice changes Markdown planning and Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

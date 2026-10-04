@@ -35,7 +35,7 @@ Continue TASK-530 Safe Operations after TASK-530.11 by preserving Skills export 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Updated `workspaceApiMethods.exportSkill()` to preserve binary response metadata by requesting the full response wrapper and returning `{ blob, filename }`.
 - Added safe filename resolution from `Content-Disposition`, preferring RFC 5987 `filename*` over plain `filename`, with fallback to a safe `<skill>.zip` name.
 - Added a missing-payload guard so an otherwise successful export response without binary data reports an error instead of starting an empty download.
@@ -83,7 +83,7 @@ Additional PR #2546 CodeRabbit follow-up:
 Additional review verification:
 - `bunx vitest run src/services/tldw/domains/__tests__/workspace-api.skills.test.ts src/components/Option/Skills/__tests__/Manager.test.tsx src/services/__tests__/background-proxy.test.ts --reporter=dot` - 3 files passed, 99 tests passed.
 - `git diff --check` - passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

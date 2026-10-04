@@ -44,9 +44,9 @@ Move the Watchlists SourceSeenDrawer load error UI off AntD Alert and onto the c
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red/green completed. Added a failing SourceSeenDrawer error-state assertion requiring the load-error callout to be wrapped by the canonical data-ds-component Alert marker; the initial focused run failed because the AntD Alert mock rendered only the error text. Replaced the SourceSeenDrawer AntD Alert import/usage with the shared design-system Alert primitive while preserving the existing error title and spacing, and removed the stale SourceSeenDrawer Alert baseline entry.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

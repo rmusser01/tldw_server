@@ -37,9 +37,9 @@ Continue the tldw_server WebUI design-system migration by replacing the legacy C
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: bunx vitest run src/design-system/__tests__/product-state-guard.test.ts src/components/Common/__tests__/UnifiedLoadingState.test.tsx --reporter=dot passed with 43 tests. bun run verify:design-system-state passed and reports 519 baseline exceptions with local-loading-state down to 3. git diff --check passed. bunx tsc --noEmit --pretty false was attempted but still fails on pre-existing package-wide test/type errors outside this slice; no reported errors referenced the touched files. Bandit skipped because this slice only touches frontend TypeScript/JavaScript and JSON.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

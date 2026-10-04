@@ -39,11 +39,11 @@ Keep this as a gated follow-up. Start with backend failing tests for the apply e
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 User replied continue after the preview/copy-config V1 completion summary, which I treated as explicit approval to proceed with the gated live RAG/embeddings config mutation slice. Implemented POST /api/v1/evaluations/recipe-runs/{run_id}/apply behind EVALS_MANAGE. Live apply calls preview first, requires confirmed provider/model to match the server preview, writes only [Embeddings] embedding_provider and embedding_model through setup_manager.update_config(create_backup=True), refuses env overrides from EMBEDDINGS_DEFAULT_PROVIDER, EMBEDDINGS_PROVIDER, EMBEDDINGS_DEFAULT_MODEL, and EMBEDDINGS_MODEL, and records embedding_recipe_apply_audit metadata on the recipe run. Audit metadata is persisted before config mutation as pending, finalized as applied on success, and marked failed on config errors so config mutation does not happen without a durable audit trail. Preview apply availability is now permission-aware: read-only eval users can still preview/copy config but see apply_available=false and the apply endpoint remains 403. Frontend service/hook and modal action show Apply to RAG config only when apply_available=true and post the confirmation payload.
 
 Verification: backend focused pytest passed 39 tests with 5 warnings; frontend focused Vitest passed 33 tests; bun run verify:openapi passed with 259 ClientPath entries and existing 10 reviewed exceptions; Bandit on touched backend source wrote /tmp/bandit_embeddings_live_apply.json with results 0/errors 0/skipped 0; git diff --check passed after task-note refresh. Known note: RecipesTab launch test suite is slow, so the test file sets a 60s per-test timeout.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

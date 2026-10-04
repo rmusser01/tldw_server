@@ -41,9 +41,9 @@ See Docs/superpowers/plans/2026-06-07-knowledge-results-evidence-export-plan.md.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented TASK-528.6 results/evidence/export hardening. Export Markdown/PDF/Notes generation now includes citation mappings, safe settings snapshot context, preset, and search details when requested. Search details now explains absent telemetry instead of rendering N/A rows. No-results recovery gained focused component coverage. WebUI empty-recovery E2E selectors were hardened after Playwright strict-mode ambiguity.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

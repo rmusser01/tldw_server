@@ -49,7 +49,7 @@ Execute the character-chat mode sequencing work package so Chat's character mode
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: two character-mode entry points opened Scene Director before character selection. Header.startCharacterChat dispatched tldw:open-actor-settings when no character was selected, and the Playground empty-state character starter called setOpenActorSettings(true).
 
 Red tests added first: Header.character-mode.test.tsx failed because the header dispatched actor settings; AssistantSelect.behavior.test.tsx failed because AssistantSelect ignored the character-selection event; PlaygroundForm.signals.guard.test.ts failed because the character starter did not use dispatchOpenAssistantSelect and still opened Actor settings.
@@ -65,7 +65,7 @@ Typecheck: from apps/packages/ui, ../../tldw-frontend/node_modules/.bin/tsc --no
 Diff hygiene: git diff --check exited 0 with no whitespace errors.
 
 Bandit skipped because this package touched frontend TypeScript/tests, docs, and Backlog tracking only; no Python/backend code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

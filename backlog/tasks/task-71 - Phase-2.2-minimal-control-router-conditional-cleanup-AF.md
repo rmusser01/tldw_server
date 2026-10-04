@@ -41,7 +41,7 @@ Continue issue #1116 Phase 2.2 by converting the next minimal-test optional sing
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the minimal control/support router tranche. Added red/green coverage proving integrations_control_plane, scheduled_tasks_control_plane, notifications, and chatbooks defer module import and router attr lookup until ImportedRouterSpec resolution. Converted only those four eager try/import blocks in minimal.py and centralized the shared skip_context value.
 
 Reopened after PR #1305 review feedback. Live unresolved threads: Gemini requested deduplicating the repeated minimal skip context string; CodeRabbit requested default_stable assertions for the four converted specs. Verified existing RouterSpec/ImportedRouterSpec defaults and previous eager blocks preserve default_stable=True for all four converted specs.
@@ -49,7 +49,7 @@ Reopened after PR #1305 review feedback. Live unresolved threads: Gemini request
 Review feedback addressed: minimal.py now uses one minimal_skip_context for the recent data/resource and control/support ImportedRouterSpec blocks; the control/support lazy-import contract test now asserts default_stable=True for integrations_control_plane, scheduled_tasks_control_plane, notifications, and chatbooks.
 
 Review-fix verification: focused control/support lazy-import contract test passed; full test_router_groups_contract.py passed; Bandit on tldw_Server_API/app/api/v1/router_groups/minimal.py reported 0 results and 0 errors; git diff --check was clean before commit.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

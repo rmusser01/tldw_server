@@ -26,7 +26,7 @@ Track rebase of PR #2699 onto latest dev, review of PR comments/checks, and any 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased codex/chatbooks-backup-all-ui onto origin/dev. Resolved one ChatbooksPlaygroundPage.tsx conflict by keeping the Backup all export-mode selector and preserving the media-quality aria label from dev. Queried PR #2699 issue comments, formal reviews, raw PR comments, and GraphQL review threads; no actionable comments or threads were present. Visible PR checks were CodeRabbit pass/skipped review status and Cubic skipping.
 
 Verification: focused Chatbooks frontend Vitest passed 27 tests; focused backend Chatbooks pytest passed 103 tests; Bandit on touched backend Chatbooks/API/worker paths reported 0 findings; git diff --check passed.
@@ -36,7 +36,7 @@ New Qodo review threads arrived after the initial push: docstrings/type hints, a
 Addressed Qodo review threads: added inventory module/class/method docstrings; annotated _import_job_response and get_chatbook_export_scope; offloaded export scope computation with asyncio.to_thread; moved Chatbooks scope count and ID-list SQL into DB_Management helpers; added pytest module markers; removed duplicate ImportStatusData.metadata.
 
 Verification after Qodo fixes: focused Chatbooks backend pytest passed 103 tests; Bandit on touched backend Chatbooks/API/DB/worker paths reported 0 findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

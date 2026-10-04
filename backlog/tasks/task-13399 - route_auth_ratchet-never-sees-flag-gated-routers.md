@@ -25,7 +25,7 @@ Helper_Scripts/ci/route_auth_ratchet.py sets ROUTE_POLICY_ENV to force-enable be
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed: Helper_Scripts/ci/route_auth_ratchet.py's load_app() cleared PYTEST_CURRENT_TEST/TEST_MODE/TLDW_TEST_MODE before import, which made config.py's _route_toggle_policy() ignore the ROUTES_ENABLE/ROUTES_STABLE_ONLY env vars it sets (those are only honored under explicit pytest or test-mode runtime). So the force-enable for benchmarks/connectors/personalization (and the other 11 keys in ROUTE_POLICY_ENV) was inert, and those default_stable=False routers were never mounted in the app the ratchet inspects.
 
 Fix: added _ratchet_config_dir() to route_auth_ratchet.py. It copies the real Config_Files directory to a temp dir, adds ROUTE_POLICY_ENV's route keys to the copy's config.txt [API-Routes] enable list (config.txt is read unconditionally by _route_toggle_policy, in every runtime), and points TLDW_CONFIG_DIR at the copy for load_app()'s subprocess only -- the same lever an operator already has via config.txt, never the real repo file, and no change to config.py's production route-gating logic. rg_route_map_lint.py shares load_app(), so it benefits too in principle (see concern below).
@@ -67,7 +67,7 @@ PR #3079 Qodo findings fixed, same branch:
 (2)-(4): tldw_Server_API/tests/Evaluations/test_benchmark_api_auth.py -- added `pytestmark = pytest.mark.unit` (matching sibling Evaluations test files), `-> None`/`-> str`/`-> User` return annotations on every function including the nested override closures, and a one-line docstring on every function (_make_app, _override_user and its two nested overrides, and all 5 test functions).
 
 Final verification: tldw_Server_API/tests/lint -n 4 -> 72 passed, 1 skipped (pre-existing, unrelated), 0 failed. test_benchmark_api_auth.py -> 5 passed. ruff check clean on both touched files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

@@ -40,7 +40,7 @@ Fix validated review findings in `tldw_Server_API/app/core/Templating`: harden r
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added regression tests for renderer runtime arithmetic/range failures, expensive string multiplication, arbitrary method-call blocking, timezone defaults, and removed API surface.
 - Added template AST call/operator guardrails in the renderer and dictionary validator.
 - Added an explicit safe-callable sandbox and marked only renderer helpers, seeded random helpers, `user()`, and the regex match facade as callable from templates.
@@ -48,7 +48,7 @@ Fix validated review findings in `tldw_Server_API/app/core/Templating`: harden r
 - Updated runtime/user docs to remove the stale external-call option and describe the stricter safe-call behavior.
 - Added narrow Bandit suppressions for existing non-cryptographic random selection/helper paths.
 - Addressed PR review comments by adding module/sandbox docstrings, marking touched unit tests, typing new test helper methods, narrowing arithmetic fallback handling to render-time only, and avoiding per-call safe-method set allocation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Verification
 

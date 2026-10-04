@@ -35,7 +35,7 @@ Source: synthesis F13
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ALREADY FIXED - verified 2026-09-22, no action needed from this task.
 
 Fixed in commit 9061081c0c "fix(rag,evals): restore PostgreSQL notes retrieval and stop alias keys inflating scores" (2026-09-21 22:07), which is an ancestor of HEAD. rag_evaluator._calculate_overall_score:1065-1073 now filters alias keys whose canonical twin is present, with a comment stating the exact defect.
@@ -43,7 +43,7 @@ Fixed in commit 9061081c0c "fix(rag,evals): restore PostgreSQL notes retrieval a
 Behaviour re-verified at runtime: metrics {relevance: 1.0, context_relevance: 0.0} now scores 0.5 both with and without the answer_relevance alias present. Previously 0.667 with the alias.
 
 Closing as already-addressed rather than implementing. Synthesis F13 is stale as written.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

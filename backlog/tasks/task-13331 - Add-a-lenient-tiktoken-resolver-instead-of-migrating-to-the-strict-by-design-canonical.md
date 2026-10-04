@@ -40,13 +40,13 @@ Source: synthesis F31
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 REGRESSION CONFIRMED CLEAN: 331 passed / 0 failed across the 7 test files that actually import tokenizer_resolver, TokenCounter, run_token_count_adapter or run_context_window_check_adapter. 1m55s.
 
 The earlier unscoped attempt (whole tests/Workflows + tests/RAG) ran ~5 hours without producing output and was stopped; it was killed BEFORE its git stash fired, so no state was left behind (verified: stash list empty, all four changed files intact). Scoping the regression to importers is both faster and a better signal.
 
 2026-09-23 reconciliation: AC1 met - resolve_tiktoken_encoding_or_default added beside the strict resolver in LLM_Calls/tokenizer_resolver.py:944-971, memoized via lru_cache on _resolve_tiktoken_encoding_or_default_cached (strict twin already lru_cached) (commit 8c1a637a2d). AC2 met - nlp.py:484, eval.py:462 and RAG/rag_service/utils.py:29 all call the lenient resolver; tests/LLM_Calls/test_tiktoken_lenient_resolver.py 9 passed (covers None/123/''/whitespace, TokenCounter(model=None), run_token_count_adapter model=None); eval.py run_context_window_check_adapter has no test, verified by direct probe: {'model': None, 'text': 'hello world'} -> token_count 2, no crash. AC3 met - 8c1a637a2d diff to tokenizer_resolver.py is purely additive; test_strict_twin_is_unchanged asserts TokenizerUnavailable still raised; strict callers (Sharing/shared_workspace_chat_service.py:985, tokenizer_resolver.py:976/1716/1730) untouched. Bandit (uvx bandit on the 4 touched files): 1 Low B110 try/except/pass at tokenizer_resolver.py:952 - the intended fallback-to-cl100k_base, annotated noqa BLE001. Known scope note: only the 3 KeyError-only sites were migrated; the other 8 hand-rolled fallbacks remain (not required by any AC).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

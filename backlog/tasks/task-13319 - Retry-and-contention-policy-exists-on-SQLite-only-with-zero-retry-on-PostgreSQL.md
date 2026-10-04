@@ -40,11 +40,11 @@ Source: synthesis F21
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-23 (12125df6ab): TransientContentionError raised by both SQL backends (SQLite 'database is locked'; PG SQLSTATE 40001/40P01/55P03), class-only, redaction intact. core/DB_Management/retry_policy.py: is_retryable_contention (walks cause chain) + run_with_contention_retry (ADR-047 capped exponential; jitter and locked predicate from core/Utils/backoff.py, defined once => AC3). Used by Prompt Studio repositories as aggregates move (TASK-13318). AC1/AC2 complete for moved aggregates; the remaining inline SQLite loops and PG job-queue paths go with Stage 4-6. Bandit clean on new modules.
 
 2026-09-23: AC1/AC2 met - every Prompt Studio write and read now goes through retry_policy on both backends (all 28 inline SQLite loops removed with their aggregates; PostgreSQL 40001/40P01/55P03 retried, including job queue paths).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

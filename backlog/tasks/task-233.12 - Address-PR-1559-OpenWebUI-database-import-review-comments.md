@@ -35,7 +35,7 @@ Evaluate and address actionable review comments on PR #1559 for OpenWebUI databa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review fixes implemented:
 - Folder collection disambiguation and folder keyword hashes now exclude chat-specific metadata and use folder-level source fields.
 - OpenWebUI DB read-only connection now builds file URIs with Path.as_uri().
@@ -49,7 +49,7 @@ Verification:
 - git diff --check -> clean.
 
 Known skips or blockers: none.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

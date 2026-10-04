@@ -35,7 +35,7 @@ PR #2679 current-head CI follow-up after the 0.1.38 release. Current failures fo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Current-head PR #2679 failures investigated: UX Smoke Gate still saw the desktop right-rail restore button detach during click retries and mobile tab aria-controls referenced a missing generated id; root cause is shell nodes/ids changing during cockpit state transitions. Fix keeps mobile cockpit ids deterministic and keeps desktop restore controls mounted while toggling hidden state. Guardian full-suite gap-verified-7 failed test_generic_notify_adds_timestamp because notify_generic added ts only to the recorded copy, while the test and prior behavior expect the caller payload to be mutated. Fix restores in-place payload timestamping before copying/sanitizing. OpenAPI contract drift gate reported current CI fingerprint sha256=2276c3777b96d19e6359719464ede2a4f0843e6efa7cbc3f86dbaa0d41d4c5fa, paths=1963, schemas=2828; local Python 3.12 regeneration was blocked by uv dependency solving for optional tts-chatterbox-lang/russian-text-stresser, so the checked fingerprint was updated from the exact CI-reported values. Verification run before staging: cockpit vitest 3 files / 20 tests passed; apps/tldw-frontend bun run typecheck passed; Guardian targeted pytest passed; Bandit on notification_service.py reported zero findings; git diff --check passed.
 
 Fresh current-head UX Smoke Gate failure after push ecc0818e65b3c6ed0a2bf9ab00c14ce7fa97407f: run 28882830983, job 85675276972. The focused real-server cockpit spec caught restore-control clicks retrying against detached button nodes while tooltip aria-describedby IDs changed across retries; the mobile retry also hit a transient non-measurable mobile rails target before the artifact snapshot showed the rails visible. Follow-up fix stabilizes cockpit shell sibling keys, assigns deterministic tooltip IDs to the desktop restore buttons, and removes the button-level hidden attribute so only the wrapper controls visibility. Fresh verification before staging: bunx vitest run Playground.cockpit-rail-restore/shell/maturity passed 3 files / 54 tests; apps/tldw-frontend bun run typecheck passed; git diff --check passed. Bandit is not applicable for this follow-up because only frontend TS/TSX files changed.
@@ -45,26 +45,7 @@ Current-head run 28961605832/job 85934269000 failed UX Smoke Gate after head c5f
 Current-head run 28963435481/job 85940472084 failed UX Smoke Gate after head ac5021d53e768a38a44cd2c92449b165c1159569. Desktop retry artifacts show cockpit rails hidden with visible restore controls, but restoreDesktopCockpitRail used document.querySelector plus native click and kept reading hidden or missing control, consistent with a mismatched shell/control or uncommitted React update. Mobile retry artifacts show the context tabpanel rendered in the current mobile rails while assertNoVerticalOverlap repeatedly measured a stale/non-measurable panel locator rooted under a remounted rails container. Follow-up fix is spec-only: reacquire and click the currently visible restore control with a rail-attribute wait, and measure a freshly reacquired visible mobile tabpanel for the overlap check. Verification before staging: apps/tldw-frontend bun run typecheck passed; bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --grep "uses the running server and keeps cockpit/focus controls working|keeps mobile cockpit tabs" --list passed with the expected Node DEP0205 warning; git diff --check passed. Bandit is not applicable because this follow-up only changes TypeScript test code and Backlog task metadata.
 
 Current-head run 28970930872/job 85966143809 failed UX Smoke Gate after head 88db972fd67ce55f620a4b62ccec10ec998cd5b1. Desktop logs show Playwright click actionability never reaches the restore button because it detaches during scroll/click retry; screenshots show the restore handles are visible and the shell still reports cockpit rails hidden. Mobile logs show the test scopes the context rails root with :has(#playground-cockpit-mobile-context-panel), then expects runtime panel descendants under that same context-only root, so retries alternate between missing summary, stale non-measurable panel, and missing runtime panel. Follow-up remains spec-only: dispatch the restore click in page context against the visible control inside the current cockpit shell, return the visible mobile rails root, and stop requiring hidden runtime panels under the context mobile rails root. Verification before staging: apps/tldw-frontend bun run typecheck passed; bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --grep "uses the running server and keeps cockpit/focus controls working|keeps mobile cockpit tabs" --list passed with the expected Node DEP0205 warning; git diff --check passed. Bandit is not applicable because this follow-up only changes TypeScript test code and Backlog task metadata.
-<!-- SECTION:NOTES:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Follow-up fix for run 28893776631 keeps the real-server spec from racing React/layout churn: desktop cockpit restoration now drives the current restore DOM node and waits for shell data-left/data-right rail attributes plus visible rails, while the mobile overlap helper polls until both targets are measurable and non-overlapping. Verification before staging: apps/tldw-frontend bun run typecheck passed; apps/packages/ui cockpit vitest 3 files / 54 tests passed; git diff --check passed. Bandit is not applicable because this follow-up only changes TypeScript test code.
 
 Current-head run 28905103978/job 85750361808 failed the real-server cockpit gate after head 17ef16a088dae56a34e3812039805b0f6e98a3d4: the shared cockpit mode switch was still trying to restore desktop rails on the mobile viewport, where the desktop restore handles are responsive-hidden, and the mobile overlap assertion could poll before both targets had measurable boxes. Follow-up fix makes desktop rail restoration viewport-aware and non-fatal during mode switching, centralizes required desktop rail restoration in the explicit desktop helper, and waits for overlap targets to become visible before polling bounding boxes. Verification before staging: apps/tldw-frontend bun run typecheck passed; bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --grep "keeps mobile cockpit tabs" --list passed with the expected Node DEP0205 warning; git diff --check passed. Bandit is not applicable because this follow-up only changes TypeScript test code and a Backlog task note.
@@ -83,3 +64,18 @@ Follow-up fix for run 28982254868/job 86003470363 is spec-only: after the deskto
 Current-head run 28983245209/job 86006553228 failed UX Smoke Gate after head da64a78cda82794a7ee5ac79804ddb821aa57b8e. Desktop test passed; only the mobile context overlap check failed. Error context shows the cockpit context panel and composer both visible, while Playwright boundingBox on the remount-prone :visible locator repeatedly returned null. Root cause is the spec measuring layout through stale/remounting locator resolution, not a visible app overlap. Minimal spec fix: measure the current mobile cockpit panel and composer in one page.evaluate query against the active DOM root instead of separate Playwright locator boundingBox calls.
 Follow-up fix for run 28983245209/job 86006553228 is spec-only: mobile cockpit context/runtime overlap checks now measure the current visible mobile rails panel and composer together inside one page.evaluate DOM query, avoiding stale Playwright locator boundingBox reads across remounts while preserving the overlap and panel-height assertions. Verification before staging: apps/tldw-frontend bun run typecheck passed; bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --grep "uses the running server and keeps cockpit/focus controls working|keeps mobile cockpit tabs" --list passed with the expected Node DEP0205 warning; git diff --check passed. Bandit is not applicable because this follow-up only changes TypeScript test code and Backlog task metadata.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

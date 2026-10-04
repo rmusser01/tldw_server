@@ -30,9 +30,9 @@ Address the /chat F4 first-time UX issue where a setup-blocked page shows provid
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented setup recovery focus for /chat: PlaygroundChat hides PlaygroundEmpty when no-provider or no-model recovery is visible; Playground computes first-run setupRecoveryMode for no_models and provider_unconfigured blockers and passes it to context/runtime rails; rails keep primary context/runtime/model route visible while secondary prompt/search/session/assistant/tools/run sections start collapsed. Verification: RED tests failed as expected before implementation; focused Vitest suite passed 98 tests; git diff --check and git diff --cached --check passed; tsc remains blocked by known unrelated CharacterListContent GalleryCardDensity baseline; Bandit skipped because touched files are TS/TSX only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

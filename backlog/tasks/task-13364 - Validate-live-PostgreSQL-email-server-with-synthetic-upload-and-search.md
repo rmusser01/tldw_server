@@ -24,11 +24,11 @@ After SQLite validation and metric fix, run the full local HTTP server with isol
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Using existing local postgres:18 test service at loopback port 5434, with separate temporary AuthNZ/content databases and a non-superuser role. Full app runs outside test mode; a /tmp probe blocks non-loopback/model calls. Plan: IMPLEMENTATION_PLAN_email_live_postgres_13364.md.
 
 Full Uvicorn loopback probe outside test mode passed with separate PostgreSQL AuthNZ/content databases, synthetic two-org upload/search/detail/media search, forced RLS Alice 1/Bob 0, zero outbound/model attempts, clean shutdown. Report: Docs/Operations/Email_Live_PostgreSQL_Validation_2026-09-25.md. 27 focused unit tests passed; Bandit 0 findings; fatal Ruff clean. Limits: one worker/message; scale, TLS/reverse proxy, production parity open.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

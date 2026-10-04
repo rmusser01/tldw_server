@@ -53,7 +53,7 @@ Found by the comprehensive core-module review; the MRO and subclass relationship
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 SCOPE CORRECTION during Stage 0: the defect is systemic, not 3 files. An AST sweep found asyncio.CancelledError in 39 *_NONCRITICAL_EXCEPTIONS tuples across 39 files (19 under api/v1/endpoints, 20 under core). 16 of those files ALREADY contain an explicit "except asyncio.CancelledError: raise" handler, proving the authors knew it must propagate and that the tuple membership is a mistake.
 
 Done: all 39 removed; new AST ratchet at tldw_Server_API/tests/lint/test_noncritical_exception_tuples.py (red before, green after) bans CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit and BaseException from any *_NONCRITICAL_EXCEPTIONS tuple. All 39 files parse and app.main imports.
@@ -91,7 +91,7 @@ Notes from the other branch (merged 2026-09-27):
 Re-checked on dev 2026-09-27: the CancelledError fix and its AST ratchet are in place (#2982). Stays open for AC #4 (HTTPException in the tuple), deferred as recorded above.
 
 Correction 2026-09-28: the 2026-09-27 note above ('stays open for AC #4') used the pre-reconciliation numbering and is wrong. Current AC3 ('removed from the tuple, or every suppress site that must not swallow it is narrowed') is met by the 'except HTTPException: raise' guards ahead of both 413 raises, as the final summary records. The task is correctly Done.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

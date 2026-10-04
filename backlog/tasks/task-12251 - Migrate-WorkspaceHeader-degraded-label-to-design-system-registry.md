@@ -28,7 +28,7 @@ Replace the remaining hardcoded WorkspaceHeader degraded product-state label wit
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Replaced WorkspaceHeader's degraded connection label with `getDesignSystemState("degraded").label`.
 - Added a registry-mock regression test that fails while the telemetry path uses the hardcoded degraded label.
 - Removed the WorkspaceHeader `canonical-state-label` exception from the product-state baseline.
@@ -47,7 +47,7 @@ Replace the remaining hardcoded WorkspaceHeader degraded product-state label wit
 PR #1612 review fix: split WorkspaceHeader connection display labels from stable telemetry status values, so registry/localized display copy no longer changes the connectivity_state_changed.to payload. Added defensive degraded-state fallback through DESIGN_SYSTEM_STATES.degraded.label when getDesignSystemState("degraded") is unavailable, preserving canonical design-system ownership without adding a local hardcoded state label.
 
 Review verification: bunx vitest run src/components/Option/WorkspacePlayground/__tests__/WorkspaceHeader.test.tsx --reporter=dot passed 25 tests; bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed 52 tests; bun run verify:design-system-state passed with 507 baseline exceptions; git diff --check passed; touched-path TypeScript filter returned no WorkspaceHeader or baseline diagnostics.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -31,7 +31,7 @@ The ACP release-signoff run for GitHub issue #1505 found that the Agent Registry
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Reproduced the live Agent Registry race with the seeded backend: the focused `should show agent cards or empty state` test failed before the agent list left its loading state.
 - Added explicit health-card and agent-list settled waits to the Agent Registry E2E page object.
 - Removed an existing unused `expect` import from the touched page object so the focused lint check is clean.
@@ -46,7 +46,7 @@ The ACP release-signoff run for GitHub issue #1505 found that the Agent Registry
 - Focused lint: `bunx eslint e2e/utils/page-objects/AgentRegistryPage.ts` passed with no warnings.
 
 Review follow-up for PR #1507: replaced swallowed health-settle waits with an observable getHealthState() helper and updated the health-status spec to read loaded/unavailable state after one settle wait. Added explicit parent #1500 evidence URL to the final summary for auditability.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

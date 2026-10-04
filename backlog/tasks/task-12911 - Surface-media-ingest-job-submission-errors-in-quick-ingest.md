@@ -35,7 +35,7 @@ Investigate reported PDF ingest failure where quick ingest reports a generic inv
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Red test confirmed prior behavior: backend errors were present in the mocked submit response but the quick-ingest result showed only "Ingest job submission returned no job IDs."
 - Verification: bunx vitest run src/services/__tests__/quick-ingest-batch.test.ts -t "surfaces backend ingest job submit errors when no jobs are created" passed after the fix.
 - Verification: bunx vitest run src/services/__tests__/ingest-jobs-orchestrator.test.ts passed.
@@ -44,7 +44,7 @@ Investigate reported PDF ingest failure where quick ingest reports a generic inv
 - Attempted package typecheck with NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit; it failed on pre-existing unrelated baseline errors across tests/background typing. Initial no-heap run hit Node OOM.
 - git diff --check scoped to touched frontend files passed. Full git diff --check is blocked by an unrelated existing whitespace issue in Docs/Design/Tool-Calling.md.
 - Bandit not run because no Python source was changed; frontend TypeScript and tests only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

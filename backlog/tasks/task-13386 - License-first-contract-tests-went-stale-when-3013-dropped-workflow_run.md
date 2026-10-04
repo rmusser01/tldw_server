@@ -33,11 +33,11 @@ These are the contract that keeps a runner root from bypassing license admission
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-27: both stale contract tests were fixed independently on each line: in the 0.1.44 release on main, and by #2817 on dev. The v0.1.45 sync (#3035) resolves them to dev's version, which also pins the await_license job shape; test_license_first_workflow_contracts.py passes on the merged tree. AC #1 is done. AC #2 (a deliberate bypass must fail) and AC #3 (why the gap-verified-12 shard did not block #3013) are still open.
 
 Closed 2026-09-28. AC2: test_a_deliberate_license_bypass_fails_the_contract mutates backend-required.yml two ways, with a gate job dropping await_license from its needs and with the await_license job removed; the runner-roots contract rejects both and the exact-gate contract also rejects the removal. AC3, why gap-verified-12 did not block #3013: test_license_first_workflow_contracts.py ran only in ci.yml's full-suite shard, which is not a required check and is skipped on most PRs, while backend-required's fixed ratchet list never included it. Fixed: backend-required gains an 'Enforce CI gate contracts' step running it and test_frontend_license_gate_workflow.py. Workflow edits are backend_changed per path_classifier.BACKEND_GLOBS, so a PR like #3013 now has to keep them green. tests/CI: 427 passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

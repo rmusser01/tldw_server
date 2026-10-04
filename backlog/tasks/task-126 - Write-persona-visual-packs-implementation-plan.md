@@ -45,7 +45,7 @@ Implementation decisions resolved for planning: per-user persona_visuals filesys
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan at Docs/superpowers/plans/2026-05-08-persona-visual-packs-implementation-plan.md.
 
 Verification: checked the plan for TODO/TBD/FIXME/placeholder markers and ellipsis placeholders with rg; no matches. Ran git diff --check on the plan and TASK-126; no whitespace errors.
@@ -69,7 +69,7 @@ Patched Docs/superpowers/plans/2026-05-08-persona-visual-packs-implementation-pl
 Review loop has reached three plan-document-reviewer iterations. No fourth reviewer was dispatched; next step needs user direction to either accept the patched plan or explicitly run another review despite the loop cap.
 
 Implementation branch published as draft PR #1393: https://github.com/rmusser01/tldw_server/pull/1393. The PR contains the staged persona visual packs implementation and PR #1135-aligned portability/import commit flow.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

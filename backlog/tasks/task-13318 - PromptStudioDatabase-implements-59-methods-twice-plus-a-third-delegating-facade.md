@@ -42,7 +42,7 @@ Source: synthesis F20
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 AC2 done in 0205612478 (signature-parity ratchet, 7 known mismatches frozen, verified to bite). AC1 done: Docs/Design/2026-09-23-prompt-studio-db-consolidation-design.md + ADR-051 (Proposed). AC3 (logic exists once) is the multi-stage refactor the design stages; not started, pending the owner's choice of option. Notable finding: _BackendPromptStudioDatabase already branches on backend_type and could run on a SQLite DatabaseBackend -- a faster but riskier route, documented as Option A.
 
 2026-09-23: decision 3 done — four latent public signature mismatches aligned (get_prompt include_deleted, create_bulk_test_cases client_id on SQLite; delete_signature hard_delete and list_evaluations filters keyword-only on both). Parity drift list down to 3 private entries. prompt_studio suite 1145 passed. Next: Stage 1 package skeleton.
@@ -56,7 +56,7 @@ AC2 done in 0205612478 (signature-parity ratchet, 7 known mismatches frozen, ver
 2026-09-23: AC3 met. Stages 5-6 + helpers: 32c01e4105 test cases, dee169a794 optimizations, 689fb6d072 jobs (+ SQLite transaction() override that never issued BEGIN, found by the multiprocess acquisition test), 87e1cb21a2 sync-log/idempotency once. PromptStudioDatabase.py 7426 -> ~1700 lines; the two classes hold only connection/schema/execution/row-decoding infrastructure. ADR-051 Accepted. Open: Stage 7 typed facade (facade still forwards *args/**kwargs to repositories) - ergonomics, not correctness, since nothing is duplicated to drift.
 
 2026-09-23: Stage 7 done (typed facade, signatures pinned to repositories). All stages complete.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

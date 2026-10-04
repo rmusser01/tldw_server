@@ -34,14 +34,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task522-tsc-final.txt`: package `tsc` reported two diagnostics in `src/components/Option/Playground/__tests__/research-chat-context.test.ts` where `as const` made nested `outline` arrays readonly and incompatible with `AttachedResearchContext`.
 - Root cause was test fixture inference only. The helpers expect mutable `AttachedResearchContext` arrays from the API client type, while two inline fixtures were frozen as readonly literals.
 - Typed the affected inline `active` and `baseline` fixtures as `AttachedResearchContext` and removed `as const`, preserving fixture values and assertions.
 - Focused verification: `bunx vitest run src/components/Option/Playground/__tests__/research-chat-context.test.ts` passed: 16 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task523-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 53 in `/tmp/task522-tsc-final.txt` to 51 in `/tmp/task523-tsc-final.txt`; searching for `research-chat-context.test.ts` in `/tmp/task523-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

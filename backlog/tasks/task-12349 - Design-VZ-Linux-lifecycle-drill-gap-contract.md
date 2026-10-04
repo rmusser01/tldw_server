@@ -36,10 +36,8 @@ Write the approved design/spec for the remaining vz_linux lifecycle drill gaps: 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved design direction: create a docs/spec slice first, then use it to guide later manual drill implementation. No runtime behavior or workflow triggers should change in this slice.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Implemented approved design/spec slice:
 - Added Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md.
@@ -51,7 +49,7 @@ PR review follow-up:
 - Added roadmap and lifecycle drill spec path constants to the doc-contract tests.
 - Added targeted doc existence assertions before normalized text reads.
 - Wrapped long lifecycle drill spec assertions for PEP 8/readability.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

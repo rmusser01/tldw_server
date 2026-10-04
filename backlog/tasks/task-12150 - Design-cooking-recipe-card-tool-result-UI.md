@@ -31,7 +31,7 @@ Implementation plan written at Docs/superpowers/plans/2026-07-05-cooking-recipe-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented on branch codex/cooking-recipe-card-tool-ui.
 
 Files changed:
@@ -43,7 +43,7 @@ Files changed:
 - Tool rendering/replay guard: apps/packages/ui/src/components/Sidepanel/Chat/ToolCallBlock.tsx; apps/packages/ui/src/components/Sidepanel/Chat/__tests__/ToolCallBlock.recipe-card.test.tsx; apps/packages/ui/src/components/Common/Playground/__tests__/tool-results-replay.guard.test.ts
 
 Key decisions kept from the approved spec: domain-specific read-only MCP tool only; no OpenUI changes; no frontend prose detection; no persistent recipe database; no timers/notifications beyond inline cooking-mode display.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

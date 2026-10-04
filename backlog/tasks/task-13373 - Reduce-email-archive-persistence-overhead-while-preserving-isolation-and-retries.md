@@ -27,11 +27,11 @@ Profile guarded synthetic archive ingestion on SQLite then PostgreSQL to locate 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Worker profiles: SQLite configure connections 1.66/3.26s; PostgreSQL factory/schema 25.75/37.97s. Real archive reuse regression failed with 3 handles instead of 1 before implementation. Focused real SQLite/persistence suite 21 passed; repository PostgreSQL sequence/FTS suite 3 passed (2 live PG). Guarded authenticated probes SQLite then PG both passed300 messages,100 retry, isolation and zero model/network attempts. SQLite56.46 msg/s; PG33.67 vs previous6.92. Design: Docs/Design/Email_Archive_Worker_Reuse_2026-09-25.md; active plan IMPLEMENTATION_PLAN_email_archive_worker_reuse_13373.md. Bandit production scope0 findings; Ruff13 inherited unrelated findings,0 new (typing import fixes remove original annotation errors). Independent code review pending.
 
 Final verification: 22 focused SQLite/archive/persistence tests passed; 3 sequence/FTS cases passed,2 live PostgreSQL. Independent review P2 repeated cancellation blocked event loop; new red-green regression failed observed [True] vs [False], asynchronous retained-close cleanup now passes and reviewer confirmed resolved. Final production Bandit0 findings/errors; test Bandit0 with B101 excluded only for assertions. Ruff0 new findings,13 inherited unrelated findings vs24 starting revision. New test file formatted and Ruff-clean; git diff whitespace clean. Removed4 synthetic roots; helper catalog checks removed both generated PG role/database sets and both0600 manifests. Shared fixture container preserved. Completed task-specific plan removed as required. Evidence JSON and report committed with this task.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

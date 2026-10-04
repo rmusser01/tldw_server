@@ -25,9 +25,9 @@ Prevent analysis/summarization requests with a missing api_name from surfacing `
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Shared analyzer guard normalizes api_name and rejects None, blank, and 'none' before dispatch. Regression covers all missing-provider aliases.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

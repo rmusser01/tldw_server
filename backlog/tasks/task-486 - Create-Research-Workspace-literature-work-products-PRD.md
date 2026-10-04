@@ -30,7 +30,7 @@ Create an umbrella PRD and staged implementation plan for four Research Workspac
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created docs-only product/spec artifacts.
 
 Implementation notes:
@@ -56,7 +56,7 @@ Verification:
 
 Known skip:
 - Formal reviewer subagent dispatch was not run because the available multi-agent tool requires explicit user authorization for sub-agents in this environment.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
