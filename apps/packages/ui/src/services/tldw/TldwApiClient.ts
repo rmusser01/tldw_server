@@ -1034,9 +1034,13 @@ export interface ResearchRunResponse {
   chat_id?: string | null
 }
 
+export interface ChatTurnIdentity {
+  user_message_id: string
+}
+
 export interface ChatCompletionRequest {
   tldw_history_selection_v1?: import("@/types/history-selection").HistorySelectionV1
-  messages: ChatMessage[]
+  messages: readonly ChatMessage[]
   model: string
   routing?: {
     strategy?: "llm_router" | "rules_router"
@@ -1058,6 +1062,10 @@ export interface ChatCompletionRequest {
   tools?: Record<string, unknown>[]
   save_to_db?: boolean
   conversation_id?: string
+  tldw_turn?: ChatTurnIdentity & {
+    result_v1?: import("@/types/history-durable-turn").HistoryDurableResultV1
+    history_v1?: import("@/types/history-durable-turn").HistoryDurableEnvelopeV1
+  }
   history_message_limit?: number
   history_message_order?: string
   slash_command_injection_mode?: string
@@ -3401,8 +3409,9 @@ export class TldwApiClientBase {
     options?: ChatCompletionRequestOptions
   ): Promise<Response> {
     // Non-stream request via background
+    const path = `/api/v1/chat/completions${options?.scope ? this.buildQuery(toChatScopeParams(options.scope)) : ""}` as const
     captureChatRequestDebugSnapshot({
-      endpoint: "/api/v1/chat/completions",
+      endpoint: path,
       method: "POST",
       mode: "non-stream",
       body: request,
@@ -3410,7 +3419,7 @@ export class TldwApiClientBase {
     })
     const scopeFields = requestScopeFields(options?.requestScope)
     const res = await bgRequest<Response>({
-      path: '/api/v1/chat/completions',
+      path,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
       body: request,
@@ -5751,8 +5760,6 @@ export class TldwApiClientBase {
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
-      ...scopeFields,
-      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(`/api/v1/chats/${cid}`, query),
       method: "GET",
       headers: scopeFields.headers,

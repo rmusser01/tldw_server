@@ -403,6 +403,33 @@ describe("useChatActions Compare service prompt snapshot", () => {
     });
   });
 
+  it("retains an explicit captured owner for a temporary image turn without service prompts", async () => {
+    const options = {
+      ...createHookOptions({ webSearch: false }),
+      temporaryChat: true,
+      compareModeActive: false,
+    };
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0]),
+    );
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Draw this",
+        image: "",
+        imageBackendOverride: "comfyui",
+        requestOverrides: { requestScope: snapshot.requestScope },
+      });
+    });
+
+    expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith([], {
+      signal: expect.any(AbortSignal),
+      requestScope: snapshot.requestScope,
+    });
+    expect(normalChatModeMock.mock.calls[0]?.[6].servicePromptSnapshot).toBe(snapshot);
+    expect(releaseSnapshotMock).toHaveBeenCalledTimes(1);
+  });
+
   it.each([false, true])("stamps a new persisted Compare with its captured owner (webSearch=%s)", async webSearch => {
     const options = createHookOptions({ webSearch });
     const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]));

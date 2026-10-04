@@ -2,6 +2,20 @@ import { describe, expect, it } from "vitest"
 import { buildQuickChatPageTutorialEntries } from "../QuickChatGuidesPanel"
 
 describe("quick chat per-page tutorials", () => {
+  it.each([
+    "/chat-workspace",
+    "chrome-extension://example/options.html#/chat-workspace"
+  ])("offers the workspace chat tour from %s", (route) => {
+    const entries = buildQuickChatPageTutorialEntries(route, [])
+
+    expect(entries).toEqual([
+      expect.objectContaining({
+        tutorial: expect.objectContaining({ id: "chat-workspace-basics" }),
+        isLocked: false
+      })
+    ])
+  })
+
   it("returns page tutorials for canonical /chat route", () => {
     const entries = buildQuickChatPageTutorialEntries("/chat", [])
 

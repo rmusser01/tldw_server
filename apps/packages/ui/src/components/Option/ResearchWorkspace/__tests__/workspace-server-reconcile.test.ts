@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   buildResearchWorkspaceServerSourceSignature,
+  matchesHydratedWorkspaceBaseline,
   reconcileResearchWorkspaceServerState
 } from "../workspace-server-reconcile"
 import type { WorkspaceSource } from "@/types/workspace"
+import { hydrateWorkspaceFromServer } from "@/store/workspace-api"
+import { useWorkspaceStore } from "@/store/workspace"
+import { serverWorkspacePayload } from "@/store/__tests__/workspace-activation.fixtures"
 
 const makeSource = (
   overrides: Partial<WorkspaceSource> = {}
@@ -35,6 +39,30 @@ const makeClient = (existingSources: Array<Record<string, unknown>> = []) => ({
 })
 
 describe("research workspace server reconciliation", () => {
+  it("recognizes a fully hydrated baseline without initiating initial writes", async () => {
+    useWorkspaceStore.getState().reset()
+    const hydrated = await hydrateWorkspaceFromServer("server-research", { fetch: async () => serverWorkspacePayload() })
+    useWorkspaceStore.getState().installServerWorkspace(hydrated, { scopeKey: "owner-a", expectedWorkspaceId: useWorkspaceStore.getState().workspaceId })
+    const state = useWorkspaceStore.getState()
+    const input = { workspaceId: state.workspaceId, workspaceName: state.workspaceName,
+      studyMaterialsPolicy: state.studyMaterialsPolicy,
+      sourceSignature: buildResearchWorkspaceServerSourceSignature(state.sources),
+      selectedSourceSignature: state.selectedSourceIds.join("|"), baseline: state.serverWorkspace }
+    expect(matchesHydratedWorkspaceBaseline(input)).toBe(true)
+    expect(matchesHydratedWorkspaceBaseline({ ...input, workspaceName: "Changed" })).toBe(false)
+    expect(matchesHydratedWorkspaceBaseline({ ...input, selectedSourceSignature: "server-source" })).toBe(false)
+    expect(matchesHydratedWorkspaceBaseline({ ...input, studyMaterialsPolicy: "workspace" })).toBe(false)
+  })
+  it("keeps fetched general policy when a hydrated workspace is renamed (unit double)", async () => {
+    const client = makeClient()
+    await reconcileResearchWorkspaceServerState({
+      client, workspaceId: "workspace-1", workspaceName: "Renamed", sources: [],
+      studyMaterialsPolicy: "general"
+    })
+    expect(client.upsertWorkspace).toHaveBeenCalledWith("workspace-1", {
+      name: "Renamed", study_materials_policy: "general"
+    })
+  })
   it("upserts the workspace and adds missing local sources with valid media ids", async () => {
     const client = makeClient()
     const sources = [

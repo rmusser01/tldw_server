@@ -618,6 +618,8 @@ export const DEFAULT_AUDIO_SETTINGS: AudioGenerationSettings = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface WorkspaceNote {
+  serverWorkspaceId?: string
+  serverScopeKey?: string
   id?: number // undefined = new note, number = existing note
   title: string
   content: string

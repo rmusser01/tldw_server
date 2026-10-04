@@ -1317,6 +1317,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
+              tldw_Server_API/tests/Character_Chat/unit/test_lorebook_diagnostics_scope_api.py
           - name: chat-character-db-core
             paths: >-
               tldw_Server_API/tests/Characters/test_ccv3_parser.py
@@ -2967,6 +2968,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
+              tldw_Server_API/tests/Character_Chat/unit/test_lorebook_diagnostics_scope_api.py
           - name: chat-character-db-core
             paths: >-
               tldw_Server_API/tests/Characters/test_ccv3_parser.py
@@ -4455,6 +4457,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
+              tldw_Server_API/tests/Character_Chat/unit/test_lorebook_diagnostics_scope_api.py
           - name: chat-character-db-core
             paths: >-
               tldw_Server_API/tests/Characters/test_ccv3_parser.py
@@ -5854,6 +5857,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
+              tldw_Server_API/tests/Character_Chat/unit/test_lorebook_diagnostics_scope_api.py
           - name: chat-character-db-core
             paths: >-
               tldw_Server_API/tests/Characters/test_ccv3_parser.py
@@ -7244,6 +7248,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
+              tldw_Server_API/tests/Character_Chat/unit/test_lorebook_diagnostics_scope_api.py
           - name: chat-character-db-core
             paths: >-
               tldw_Server_API/tests/Characters/test_ccv3_parser.py

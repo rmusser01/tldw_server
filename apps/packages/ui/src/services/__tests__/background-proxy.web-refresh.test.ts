@@ -301,6 +301,45 @@ describe("background proxy web token refresh", () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  it.each(["unchanged", "server", "account", "cancelled"] as const)("guards conversation GET at the real dispatch boundary (%s)", async (change) => {
+    mocks.store.tldwConfig = {
+      serverUrl: change === "server" ? "https://other.example.com" : "https://api.example.com",
+      authMode: "multi-user",
+      accessToken: jwtForUser(change === "account" ? 84 : 42)
+    }
+    const controller = new AbortController()
+    if (change === "cancelled") controller.abort()
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw new DOMException("Request aborted", "AbortError")
+      return new Response(JSON.stringify({ id: "chat-1" }), {
+        status: 200, headers: { "content-type": "application/json" }
+      })
+    })
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgRequest } = await importProxy()
+    const request = bgRequest({
+      path: "/api/v1/chats/chat-1?scope_type=workspace&workspace_id=workspace-1",
+      method: "GET",
+      headers: { "X-TLDW-Expected-User-ID": "42" },
+      abortSignal: controller.signal,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com", authMode: "multi-user", expectedUserId: 42
+      }
+    })
+    if (change === "unchanged") {
+      await expect(request).resolves.toEqual({ id: "chat-1" })
+      expect(fetchSpy.mock.calls[0][0]).toBe("https://api.example.com/api/v1/chats/chat-1?scope_type=workspace&workspace_id=workspace-1")
+      expect(new Headers(fetchSpy.mock.calls[0][1].headers).get("Authorization")).toBe(`Bearer ${jwtForUser(42)}`)
+    } else {
+      await expect(request).rejects.toMatchObject(change === "cancelled" ? { name: "AbortError" } : { status: 412 })
+      if (change === "cancelled") {
+        expect(fetchSpy.mock.calls[0][1]?.signal?.aborted).toBe(true)
+      } else {
+        expect(fetchSpy).not.toHaveBeenCalled()
+      }
+    }
+  })
+
   it.each([
     "/api/v1/writing/manuscripts/scenes/scene-a",
     "/api/v1/writing/manuscripts/projects/project-a/characters?role=protagonist",

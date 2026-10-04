@@ -1301,6 +1301,34 @@ def test_first_run_first_chat_endpoint_records_success_on_ready_response(
     assert state.first_chat.response_id == "chatcmpl-first-run"
 
 
+@pytest.mark.parametrize("model", ["/models/gemma/model.gguf", r"C:\models\gemma.gguf"])
+def test_first_run_first_chat_preserves_local_model_identifier(
+    monkeypatch, tmp_path, setup_client, model,
+):
+    async def resolve_principal(request):
+        return SimpleNamespace(permissions=["system.configure"])
+
+    monkeypatch.setattr(setup_endpoint, "get_auth_principal", resolve_principal)
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    async def verify_model(*, provider, model, prompt):
+        return {"status": "ready", "provider": provider, "model": model,
+                "response_id": "chatcmpl-local", "response_text": "Hello."}
+
+    monkeypatch.setattr(setup_endpoint, "verify_first_chat", verify_model)
+    response = setup_client.post(
+        "/api/v1/setup/first-run/first-chat",
+        json={"provider": "llamacpp", "model": model},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["model"] == model
+    restored = setup_client.get("/api/v1/setup/first-run/state")
+    assert restored.json()["first_chat"]["model"] == model
+
+
 def test_first_run_first_chat_endpoint_failure_does_not_record_or_echo_raw_details(
     monkeypatch,
     tmp_path,
@@ -1343,6 +1371,7 @@ def test_first_run_first_chat_endpoint_failure_does_not_record_or_echo_raw_detai
         {"provider": "sk-secret-token", "model": "gpt-4.1-mini"},
         {"provider": "openai", "model": "/Users/me/.env"},
         {"provider": "llamacpp", "model": "/opt/models/sk-secret-model.gguf"},
+        {"provider": "llamacpp", "model": "/models/sk-secret-token/gemma.gguf"},
     ],
 )
 def test_first_run_first_chat_endpoint_rejects_unsafe_provider_or_model_before_verify(
@@ -2841,6 +2870,51 @@ def test_first_run_state_persists_allowed_public_step_data(
     assert providers_data["default_model"] == "gpt-4.1-mini"
 
 
+@pytest.mark.parametrize("model", ["/models/gemma/model.gguf", r"C:\models\gemma.gguf", "llama//models/gemma.gguf"])
+def test_first_run_provider_progress_preserves_local_model_identifier(
+    monkeypatch, tmp_path, setup_client, model,
+):
+    async def resolve_principal(request):
+        return SimpleNamespace(permissions=["system.configure"])
+
+    monkeypatch.setattr(setup_endpoint, "get_auth_principal", resolve_principal)
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={"step": "providers", "data": {
+            "acknowledged": True, "default_provider": "llamacpp", "default_model": model,
+        }},
+    )
+
+    assert response.status_code == 200
+    assert model not in response.text
+    restored = setup_client.get("/api/v1/setup/first-run/state")
+    assert restored.json()["step_data"]["providers"]["default_model"] == model
+
+
+@pytest.mark.parametrize("data", [
+    {"default_model": "/models/sk-secret-token/gemma.gguf"},
+    {"default_model": "hf_abcdef1234567890"},
+    {"default_provider": "/private/provider/config"},
+    {"default_model": "/Users/me/.env"},
+])
+def test_first_run_provider_progress_rejects_secrets_and_other_paths(
+    monkeypatch, tmp_path, setup_client, data,
+):
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", tmp_path / "first_run_state.json", raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={"step": "providers", "data": {"acknowledged": True, **data}},
+    )
+
+    assert response.status_code == 400
+
+
 def test_first_run_state_persists_provider_credential_configured_marker(
     monkeypatch,
     tmp_path,
@@ -2995,10 +3069,12 @@ def test_first_run_state_get_filters_huggingface_token_like_allowed_public_step_
     assert "hf_abcdef1234567890" not in str(body)
 
 
+@pytest.mark.parametrize("model", ["/Users/me/.env", "/models/sk-secret-token/gemma.gguf"])
 def test_first_run_state_get_filters_unsafe_first_chat_metadata(
     monkeypatch,
     tmp_path,
     setup_client,
+    model,
 ):
     state_path = tmp_path / "first_run_state.json"
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
@@ -3011,7 +3087,7 @@ def test_first_run_state_get_filters_unsafe_first_chat_metadata(
     payload["first_chat"].update(
         {
             "provider": "sk-secret-token",
-            "model": "/Users/me/.env",
+            "model": model,
             "response_id": "hf_abcdef1234567890",
         }
     )
@@ -3027,7 +3103,7 @@ def test_first_run_state_get_filters_unsafe_first_chat_metadata(
     assert body["first_chat"]["response_id"] is None
     rendered_body = str(body)
     assert "sk-secret-token" not in rendered_body
-    assert "/Users/me/.env" not in rendered_body
+    assert model not in rendered_body
     assert "hf_abcdef1234567890" not in rendered_body
 
 

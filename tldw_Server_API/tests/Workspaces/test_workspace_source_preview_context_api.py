@@ -3,14 +3,15 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -222,6 +223,65 @@ def _media_db() -> _MediaPreviewDB:
             ]
         },
     )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "suffix",
+    ["", "/sources", "/artifacts", "/notes", "/sources/src-ready/preview"],
+)
+@pytest.mark.parametrize("expected_user_id", ["2", " "])
+def test_workspace_content_reads_reject_stale_expected_user(
+    workspace_preview_app,
+    workspace_preview_db,
+    suffix: str,
+    expected_user_id: str,
+):
+    _install_overrides(workspace_preview_app, workspace_preview_db, _media_db())
+    try:
+        with (
+            patch.object(
+                workspace_preview_db,
+                "get_workspace",
+                wraps=workspace_preview_db.get_workspace,
+            ) as workspace_read,
+            TestClient(workspace_preview_app) as client,
+        ):
+            response = client.get(
+                f"/api/v1/workspaces/ws-preview{suffix}",
+                headers={"X-TLDW-Expected-User-ID": expected_user_id},
+            )
+        assert response.status_code == 412
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json()["detail"]["code"] == "request_config_scope_changed"
+        workspace_read.assert_not_called()
+    finally:
+        _clear_overrides(workspace_preview_app)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "suffix",
+    ["", "/sources", "/artifacts", "/notes", "/sources/src-ready/preview"],
+)
+@pytest.mark.parametrize("expected_user_id", [None, "1"])
+def test_workspace_content_reads_accept_current_or_unasserted_user(
+    workspace_preview_app,
+    workspace_preview_db,
+    suffix: str,
+    expected_user_id: str | None,
+):
+    _install_overrides(workspace_preview_app, workspace_preview_db, _media_db())
+    try:
+        with TestClient(workspace_preview_app) as client:
+            response = client.get(
+                f"/api/v1/workspaces/ws-preview{suffix}",
+                headers={"X-TLDW-Expected-User-ID": expected_user_id}
+                if expected_user_id is not None else {},
+            )
+        assert response.status_code == 200, response.text
+    finally:
+        _clear_overrides(workspace_preview_app)
 
 
 @pytest.mark.integration

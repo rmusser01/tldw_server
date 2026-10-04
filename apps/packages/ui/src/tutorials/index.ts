@@ -25,6 +25,7 @@ export {
 
 // Tutorial definitions (for direct access if needed)
 export { playgroundTutorials } from "./definitions/playground"
+export { chatWorkspaceTutorials } from "./definitions/chat-workspace"
 export { researchWorkspaceTutorials } from "./definitions/research-workspace"
 export { mediaTutorials } from "./definitions/media"
 export { knowledgeTutorials } from "./definitions/knowledge"

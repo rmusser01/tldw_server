@@ -5,6 +5,7 @@ import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
+import type { HistorySendTurn } from "@/types/chat-modes"
 
 const {
   addChatMessageMock,
@@ -13,6 +14,7 @@ const {
   streamCharacterChatCompletionMock,
   persistCharacterCompletionMock,
   normalChatModeMock,
+  ragModeMock,
   resolveVisualIdentityBindingMock
 } = vi.hoisted(() => ({
   addChatMessageMock: vi.fn<(...args: any[]) => Promise<any>>(async () => ({
@@ -27,6 +29,7 @@ const {
     version: 1
   })),
   normalChatModeMock: vi.fn(),
+  ragModeMock: vi.fn(),
   resolveVisualIdentityBindingMock: vi.fn(async () => ({
     actor_kind: "character",
     actor_id: 12,
@@ -63,7 +66,7 @@ vi.mock("@/hooks/chat-modes/continueChatMode", () => ({
 }))
 
 vi.mock("@/hooks/chat-modes/ragMode", () => ({
-  ragMode: vi.fn()
+  ragMode: (...args: any[]) => ragModeMock(...args)
 }))
 
 vi.mock("@/hooks/chat-modes/tabChatMode", () => ({
@@ -107,6 +110,7 @@ vi.mock("@/db/dexie/helpers", async (original) => ({
 
 vi.mock("@/db/dexie/server-chat-mirror", async (original) => ({
   ...(await original<any>()),
+  linkServerChatMirror: (...args: any[]) => h1.mirror(...args),
   removeAcknowledgedServerMirrorMessage: vi.fn(async () => undefined)
 }))
 
@@ -155,7 +159,8 @@ vi.mock("@/store/option", () => ({
 }))
 
 vi.mock("@/services/tldw/server-capabilities", () => ({
-  getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))
+  getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false })),
+  getSelectedDurableTurnSupport: vi.fn(async () => true)
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -279,6 +284,7 @@ const h1 = vi.hoisted(() => ({
   recover: vi.fn(),
   dismiss: vi.fn(),
   saveHistory: vi.fn(),
+  mirror: vi.fn(),
   localCapture: vi.fn(),
   localAppend: vi.fn(),
   localSettle: vi.fn(),
@@ -446,6 +452,7 @@ beforeEach(async () => {
   messageStoreState.value.selectedModel = "deepseek-chat"
   messageStoreState.value.toolChoice = "auto"
   h1.auth = new AbortController()
+  h1.mirror.mockImplementation((await vi.importActual<any>("@/db/dexie/server-chat-mirror")).linkServerChatMirror)
   const actual = await vi.importActual<any>("@/hooks/chat-modes/normalChatMode")
   normalChatModeMock.mockImplementation(actual.normalChatMode)
   h1.controller = makeController()
@@ -472,6 +479,82 @@ beforeEach(async () => {
   h1.wire.mockImplementation(async function* () {
     yield { choices: [{ delta: { content: "new answer" } }] }
   })
+})
+
+it.each([[false, false], [true, false], [false, true], [true, true]])("first nested workspace send verifies its owner before real mirror linking (RAG=%s, receipt navigation=%s)", async (rag, navigateAfterReceipt) => {
+  const { useServerChatHistoryId } = await import("../useServerChatHistoryId")
+  const { captureNormalHistoryTurn } = await vi.importActual<typeof import("@/hooks/chat-modes/normalChatMode")>("@/hooks/chat-modes/normalChatMode")
+  const workspace = { type: "workspace" as const, workspaceId: "workspace-first" }
+  const ready = makeController().getCurrent()
+  ready.owner.scope = workspace
+  ready.view.cursor = { kind: "empty" }
+  ready.capture = captureFor(ready.view)
+  let current: ReturnType<ReturnType<typeof makeController>["getCurrent"]> = { status: "idle", owner: null, view: null }
+  let epoch = 0
+  const load = vi.fn(async (_target, _reference, onLoaded) => {
+    epoch++
+    current = ready
+    onLoaded({ owner: ready.owner, view: ready.view })
+    if (navigateAfterReceipt) queueMicrotask(() => { epoch++ })
+    return true
+  })
+  h1.controller = { getCurrent: () => current, recoveries: [], loadConversation: load,
+    fence: () => { const captured = epoch; return () => captured === epoch }, refreshRecovery: vi.fn() }
+  const options = { ...ordinaryOptions(), messages: [], history: [], historyId: null as string | null,
+    serverChatId: null, scope: workspace, ragMediaIds: rag ? [1] : null }
+  options.setHistoryId.mockImplementation((id: string) => { options.historyId = id })
+  createChatMock.mockResolvedValue({ id: "tracked-chat-1" })
+  h1.mirror.mockResolvedValue("history-first")
+  const mirror = renderHook(() => useServerChatHistoryId({ serverChatId: null, historyId: null,
+    setHistoryId: options.setHistoryId, temporaryChat: false, t: options.t }))
+  options.ensureServerChatHistoryId = mirror.result.current.ensureServerChatHistoryId
+  let turn: HistorySendTurn | undefined
+  const mode = vi.fn(async (...[message, _image, _regen, _messages, _history, signal, params]: Parameters<typeof import("@/hooks/chat-modes/normalChatMode").normalChatMode>) => {
+    turn = await captureNormalHistoryTurn(params, message, params.servicePromptSnapshot!, signal)
+    return { status: "submitted" as const }
+  })
+  normalChatModeMock.mockImplementation(mode)
+  ragModeMock.mockImplementation(mode)
+  const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+  const uuid = crypto.randomUUID()
+  await act(async () => { await result.current.onSubmit({ message: "first", image: "",
+    requestOverrides: { tldwTurn: { user_message_id: uuid } } }) })
+  expect(load).toHaveBeenCalledOnce()
+  expect(createChatMock).toHaveBeenCalledOnce()
+  if (navigateAfterReceipt) {
+    expect(h1.mirror).not.toHaveBeenCalled()
+    expect(options.setServerChatId).not.toHaveBeenCalled()
+    expect(mode).not.toHaveBeenCalled()
+    expect(options.notification.error).toHaveBeenCalled()
+    return
+  }
+  expect(h1.mirror).toHaveBeenCalledOnce()
+  expect(mode).toHaveBeenCalledOnce()
+  expect(mode.mock.calls[0][6].tldwTurn!.user_message_id).toBe(uuid)
+  expect(turn?.serverOwned).toBe(true)
+  expect(turn?.capture.rows).toEqual([])
+  expect(options.notification.error).not.toHaveBeenCalled()
+  expect(addChatMessageMock).not.toHaveBeenCalled()
+})
+
+it.each(["image", "files", "document", "persona", "continue"])("idle nested workspace excludes %s before alternate side effects", async excluded => {
+  h1.controller = { getCurrent: () => ({ status: "idle", owner: null, view: null }), fence: () => () => true }
+  const options = { ...ordinaryOptions(), messages: [], history: [], historyId: null,
+    serverChatId: null, scope: { type: "workspace", workspaceId: "workspace-first" },
+    contextFiles: excluded === "files" ? [{ id: "file", filename: "x.txt" }] : [],
+    documentContext: excluded === "document" ? [{ id: "doc", title: "Document" }] : null,
+    selectedAssistant: excluded === "persona" ? { kind: "persona", id: "7", metadata: { selectionMode: "tracked" } } : null }
+  const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+  normalChatModeMock.mockClear()
+  ragModeMock.mockClear()
+  await act(async () => { await result.current.onSubmit({ message: "excluded", image: "",
+    imageBackendOverride: excluded === "image" ? "comfyui" : undefined,
+    isContinue: excluded === "continue", requestOverrides: { tldwTurn: { user_message_id: crypto.randomUUID() } } }) })
+  expect(options.notification.error).toHaveBeenCalled()
+  expect(createChatMock).not.toHaveBeenCalled()
+  expect(normalChatModeMock).not.toHaveBeenCalled()
+  expect(ragModeMock).not.toHaveBeenCalled()
+  expect(addChatMessageMock).not.toHaveBeenCalled()
 })
 const ordinaryOptions = () => ({
   ...createHookOptions(),
@@ -816,7 +899,7 @@ it("first durable ordinary send creates its local owner and admits before infere
   })
   const { result } = renderHook(() => useChatActions(options as any))
   await act(async () => {
-    await result.current.onSubmit({ message: "first", image: "" })
+    expect(await result.current.onSubmit({ message: "first", image: "" })).toEqual({ status: "submitted" })
   })
   expect(h1.localSettle).toHaveBeenCalledOnce()
   expect(h1.localSettle.mock.calls[0][2]).toMatchObject({

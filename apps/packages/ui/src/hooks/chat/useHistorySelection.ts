@@ -22,6 +22,7 @@ import {
   ensureLocalProfileId,
   loadHistoryTurnRecoveries,
   dismissHistoryTurnRecovery,
+  saveHistoryTurnRecovery,
   loadHistoryBookmark,
   saveHistoryBookmark
 } from "@/db/dexie/history-selection"
@@ -36,6 +37,7 @@ import {
   confirmLegacyHistoryProjection,
   type HistoryOwnerV1
 } from "@/services/chat-history-selection"
+import { inspectHistoryDurableRecovery } from "@/services/history-durable-turn"
 import type {
   HistoryCaptureRequestV1,
   HistoryCaptureResultV1,
@@ -1193,6 +1195,31 @@ export function useHistorySelection(
     },
     [refreshRecovery]
   )
+  const inspectRecovery = useCallback(async (entry: { scope: HistoryBookmarkScope; turn: HistoryTurnRecovery }) => {
+    const current = live.current
+    const owner = current.owner
+    if (!current.view || !current.bookmarkScope || owner?.kind !== "native" ||
+        !current.settingsQualified || !owner.validate_lease() || entry.turn.persistence !== "server" ||
+        current.bookmarkScope.profile_id !== entry.scope.profile_id ||
+        current.view.owner_key !== entry.turn.owner_key || current.view.conversation_id !== entry.turn.conversation_id)
+      return
+    const token = epoch.current
+    const stillCurrent = () => mounted.current && token === epoch.current && live.current.owner === owner &&
+      sameView(live.current.view, current.view) && live.current.settingsQualified && owner.validate_lease()
+    try {
+      const inspected = await inspectHistoryDurableRecovery(
+        { ...owner, owner_key: current.view.owner_key }, entry.turn, request.current?.signal
+      )
+      if (!stillCurrent()) return
+      await saveHistoryTurnRecovery(entry.scope, entry.turn.origin_view, inspected)
+      if (!stillCurrent()) return
+      if (inspected.persistence === "server" && inspected.observed_result)
+        await dismissHistoryTurnRecovery(entry.scope, entry.turn.origin_view, entry.turn.operation_id, "completed")
+      if (stillCurrent()) await refreshRecovery()
+    } catch (error) {
+      if (stillCurrent()) setRecoveryError(errorCode(error))
+    }
+  }, [refreshRecovery])
   const getCurrent = useCallback(() => live.current, [])
   const reference: HistorySelectionReference | null =
     state.view && state.bookmarkScope
@@ -1216,6 +1243,7 @@ export function useHistorySelection(
     recoveryError,
     refreshRecovery,
     dismissRecovery,
+    inspectRecovery,
     reference,
     getReference,
     getStoredReference,

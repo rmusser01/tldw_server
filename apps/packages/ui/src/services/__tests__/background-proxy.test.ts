@@ -363,6 +363,34 @@ describe("background proxy fallback safety", () => {
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
+  it.each([false, true])("keeps scoped OpenAPI discovery bound to its server (changed=%s)", async (changed) => {
+    mocks.runtimeId = null
+    const config = {
+      serverUrl: changed ? "https://other.example.com" : "https://api.example.com",
+      authMode: "single-user", apiKey: "scope-test-key", authSource: "manual",
+      credentialSource: "manual", apiKeyPersistence: "device",
+      apiKeyServerOrigin: changed ? "https://other.example.com" : "https://api.example.com"
+    }
+    mocks.storageGet.mockImplementation(async (key: string) => key === "tldwConfig" ? config : null)
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { paths: {} } })
+    const { bgRequest } = await importProxy()
+    const pending = bgRequest({
+      path: "/openapi.json", method: "GET",
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com", authMode: "single-user", authSource: "manual",
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope("single-user", "scope-test-key")
+      }
+    })
+    if (changed) {
+      await expect(pending).rejects.toMatchObject({ status: 412 })
+      expect(mocks.tldwRequest).not.toHaveBeenCalled()
+    } else {
+      await expect(pending).resolves.toEqual({ paths: {} })
+      const [, runtime] = mocks.tldwRequest.mock.calls[0]
+      await expect(runtime.getConfig()).resolves.toMatchObject(config)
+    }
+  })
+
   it("does not replay a scoped POST when the response port closes ambiguously", async () => {
     mocks.sendMessage.mockRejectedValue(
       new Error("The message port closed before a response was received.")
@@ -2968,90 +2996,85 @@ describe("background proxy fallback safety", () => {
     }
   })
 
-  it("classifies direct stream aborts as AbortError", async () => {
-    mocks.sendMessage.mockResolvedValue({ ok: false })
-    mocks.storageGet.mockImplementation(async (key: string) => {
-      if (key === "tldwConfig") {
-        return {
-          serverUrl: "http://127.0.0.1:8000",
-          authMode: "single-user",
-          apiKey: "test-key-not-placeholder",
-          credentialSource: "manual",
-          apiKeyPersistence: "device",
-          apiKeyServerOrigin: "http://127.0.0.1:8000"
-        }
-      }
-      return null
-    })
-
-    let activeSignal: AbortSignal | null = null
-    let resolveReadStarted: (() => void) | null = null
-    const readStarted = new Promise<void>((resolve) => {
-      resolveReadStarted = resolve
-    })
-    const reader = {
-      read: vi.fn(() => {
-        resolveReadStarted?.()
-        return new Promise<never>((_, reject) => {
-          const signal = activeSignal
-          if (!signal) {
-            reject(new Error("Missing abort signal"))
-            return
+  it.each(["caller abort", "body failure"])(
+    "handles native reader cleanup rejection while preserving %s",
+    async (failure) => {
+      mocks.runtimeId = null
+      mocks.storageGet.mockImplementation(async (key: string) => {
+        if (key === "tldwConfig") {
+          return {
+            serverUrl: "http://127.0.0.1:8000",
+            authMode: "single-user",
+            apiKey: "test-key-not-placeholder",
+            credentialSource: "manual",
+            apiKeyPersistence: "device",
+            apiKeyServerOrigin: "http://127.0.0.1:8000"
           }
-          const onAbort = () => {
-            signal.removeEventListener("abort", onAbort)
-            const abortError = new Error("The operation was aborted.")
-            abortError.name = "AbortError"
-            reject(abortError)
-          }
-          signal.addEventListener("abort", onAbort, { once: true })
-        })
-      }),
-      cancel: vi.fn()
-    }
-    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      activeSignal = (init?.signal as AbortSignal | undefined) || null
-      return {
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => reader
         }
-      } as unknown as Response
-    })
-    vi.stubGlobal("fetch", fetchSpy as any)
-
-    const { bgStream } = await importProxy()
-    const controller = new AbortController()
-    const consume = async () => {
-      for await (const _chunk of bgStream({
-        path: "/api/v1/chat/completions",
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: { stream: true, messages: [] },
-        abortSignal: controller.signal
-      })) {
-        // no-op
-      }
-    }
-
-    const pending = consume()
-
-    try {
-      await readStarted
-      controller.abort()
-
-      await expect(pending).rejects.toMatchObject({
-        name: "AbortError",
-        status: 0,
-        code: "REQUEST_ABORTED"
+        return null
       })
-      expect(fetchSpy).toHaveBeenCalledTimes(1)
-      expect(reader.cancel).toHaveBeenCalledTimes(1)
-    } finally {
-      vi.unstubAllGlobals()
+
+      let notifyOpen!: () => void
+      const opened = new Promise<void>((resolve) => {
+        notifyOpen = resolve
+      })
+      let failBody!: (error: Error) => void
+      const transportError = new Error("Connection interrupted while reading")
+      const fetchSpy = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(streamController) {
+            failBody = (error) => streamController.error(error)
+            init?.signal?.addEventListener(
+              "abort",
+              () => streamController.error(
+                new DOMException("BodyStreamBuffer was aborted", "AbortError")
+              ),
+              { once: true }
+            )
+          }
+        })
+        return new Response(body, { headers: { "Content-Type": "text/event-stream" } })
+      })
+      vi.stubGlobal("fetch", fetchSpy)
+
+      const { bgStream } = await importProxy()
+      const controller = new AbortController()
+      const consume = async () => {
+        for await (const _chunk of bgStream({
+          path: "/api/v1/chat/completions",
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: { stream: true, messages: [] },
+          abortSignal: controller.signal,
+          onOpen: notifyOpen
+        })) {
+          // no-op
+        }
+      }
+
+      const pending = consume()
+
+      try {
+        await opened
+        if (failure === "caller abort") {
+          controller.abort()
+          await expect(pending).rejects.toMatchObject({
+            name: "AbortError",
+            status: 0,
+            code: "REQUEST_ABORTED"
+          })
+        } else {
+          failBody(transportError)
+          await expect(pending).rejects.toBe(transportError)
+        }
+        // Let Vitest observe any unhandled rejection from native reader.cancel().
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(fetchSpy).toHaveBeenCalledTimes(1)
+      } finally {
+        vi.unstubAllGlobals()
+      }
     }
-  })
+  )
 
   it("treats post-first-chunk transport disconnect as graceful end", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: true })

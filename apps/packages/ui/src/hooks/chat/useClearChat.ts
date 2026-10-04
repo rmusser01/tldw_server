@@ -1,5 +1,5 @@
 import React from "react"
-import { useNavigate } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 import { Modal } from "antd"
 import { shallow } from "zustand/shallow"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -13,6 +13,8 @@ import { cleanupAntOverlays } from "@/utils/cleanup-ant-overlays"
 import { requestSettingsNavigation } from "@/utils/settings-return"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent"
+import { generateWorkspaceId, useWorkspaceStore } from "@/store/workspace"
+import { CHAT_WORKSPACE_PATH, RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 
 type UseClearChatOptions = {
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>
@@ -33,6 +35,7 @@ type ResettableChatBase = {
 
 export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   const navigate = useNavigate()
+  const { pathname } = useLocation()
   const currentChatModelSettings = useStoreChatModelSettings()
   const [defaultInternetSearchOn] = useStorage("defaultInternetSearchOn", false)
 
@@ -92,6 +95,10 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
 
   return React.useCallback(() => {
     const destination = resolveClearChatPath()
+    const workspace = pathname === CHAT_WORKSPACE_PATH || pathname === RESEARCH_WORKSPACE_PATH
+      ? useWorkspaceStore.getState() : null
+    const workspaceId = workspace?.workspaceId
+    const referenceId = workspace?.workspaceChatReferenceId
     if (!requestSettingsNavigation(destination)) return false
     const current = useStoreMessageOption.getState()
     dispatchChatRouteReplacement({
@@ -104,6 +111,10 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
       cleanupAntOverlays()
     }
     navigate(destination)
+    if (workspaceId && referenceId) {
+      useWorkspaceStore.setState(state => state.workspaceId === workspaceId && state.workspaceChatReferenceId === referenceId
+        ? { workspaceChatReferenceId: generateWorkspaceId() } : state)
+    }
     const resetBaseState = (base: ResettableChatBase) => {
       base.setMessages([])
       base.setHistory([])
@@ -154,6 +165,7 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     currentChatModelSettings,
     defaultInternetSearchOn,
     navigate,
+    pathname,
     resolveClearChatPath,
     setActionInfo,
     setCompareMode,

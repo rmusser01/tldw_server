@@ -21,6 +21,48 @@ vi.mock("@/design-system", async (importActual) => {
 })
 
 describe("WorkspaceStatusStrip", () => {
+  it.each([
+    [{ connectionMode: "demo" }, "Demo mode - not live"],
+    [{ connectionMode: "bypass" }, "Offline bypass - not verified"],
+    [{ historyLoading: true }, "Loading chat history"],
+    [{ historyLoadError: "History unavailable" }, "Chat history unavailable"],
+    [{ sending: true }, "Sending"]
+  ] as const)("does not announce Ready for %j", (runtime, label) => {
+    render(
+      <WorkspaceStatusStrip
+        backendAvailable
+        workspaceReady
+        streaming={false}
+        stagedSourceCount={0}
+        hasModelSelected
+        {...runtime}
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent(label)
+    expect(screen.queryByText("Ready via registry")).not.toBeInTheDocument()
+  })
+
+  it("announces offline transitions and staged source counts", () => {
+    const props = {
+      backendAvailable: true,
+      workspaceReady: true,
+      streaming: false,
+      stagedSourceCount: 0,
+      hasModelSelected: true
+    }
+    const { rerender } = render(<WorkspaceStatusStrip {...props} />)
+    expect(screen.getByRole("status")).toHaveTextContent("0 sources staged")
+    rerender(
+      <WorkspaceStatusStrip
+        {...props}
+        backendAvailable={false}
+        stagedSourceCount={2}
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("Server unavailable")
+    expect(screen.getByRole("status")).toHaveTextContent("2 sources staged")
+  })
+
   it("renders ready and keyboard hint state", () => {
     render(
       <WorkspaceStatusStrip

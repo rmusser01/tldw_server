@@ -1,5 +1,7 @@
+import { generateID } from "@/utils/generate-id"
 import type { LocalHistoryOwnerV1 } from "./history-selection"
 import { ensureLocalProfileId } from "./history-selection"
+import { historyResultV1ToMessageSources } from "@/utils/history-durable-sources"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import {
   type ChatHistory as ChatHistoryType,
@@ -39,13 +41,7 @@ import { ModelNickname } from "./nickname"
 import { ModelDb } from "./models"
 import { clearRecipePersistenceScoped, resolveRecipePersistenceOwnerView } from "@/services/recipe-persistence-uncertainty"
 
-// Helper function to generate IDs (keeping the same format)
-export const generateID = () => {
-  return "pa_xxxx-xxxx-xxx-xxxx".replace(/[x]/g, () => {
-    const r = Math.floor(Math.random() * 16)
-    return r.toString(16)
-  })
-}
+export { generateID }
 
 // Chat History Functions
 export const saveHistory = async (
@@ -401,6 +397,9 @@ export const formatSelectedHistory = (capture: import("@/types/history-selection
   }
   for (const message of messages) {
     const node = nodesById.get(message.id!)!
+    const resultMetadata = content.get(node.id)?.extra_metadata?.history_result_v1
+    if (node.role === "assistant" && resultMetadata !== undefined)
+      message.sources = [...historyResultV1ToMessageSources(resultMetadata)]
     if (node.role !== "assistant" || !node.parent_id) continue
     const alternatives = alternativesByParent.get(node.parent_id) || []
     if (alternatives.length < 2) continue
