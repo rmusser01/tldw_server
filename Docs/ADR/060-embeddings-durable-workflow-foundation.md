@@ -1,11 +1,11 @@
 # ADR-060: Dormant Jobs-Rooted Embeddings Durability
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-02
 **Revised:** 2026-10-04
 **Backfilled from:** not backfilled
-**Decision owner:** repository requester; consolidated record awaiting written review
-**Related task:** TASK-13421
+**Decision owner:** repository requester; written approval on 2026-10-04
+**Related task:** TASK-13450 (replaces this branch's colliding TASK-13421)
 **Related spec/plan:** [Stage 3 design](../superpowers/specs/2026-10-02-embeddings-workflow-stage3-durable-store-jobs-runner-design.md)
 
 ## Decision
@@ -88,8 +88,8 @@ retry-neutral infrastructure recovery needs explicit, replay-validated controls.
 
 ## Follow-up
 
-Obtain approval of the consolidated written spec and this Proposed record before
-implementation planning. Deliver separate reviewable Jobs capability, repository,
+The requester approved the consolidated written spec and this record on 2026-10-04.
+Deliver separate reviewable Jobs capability, repository,
 coordinator/adapter, and certification units. Real adapters and production migration
 remain later workstream stages; acceptance of this record is not activation approval.
 Repository planning must select and test an atomic global capacity reservation
