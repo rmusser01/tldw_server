@@ -357,3 +357,39 @@ file-change detection remain separate failed artifacts. Independent final review
 finds no actionable issue in corrected production code or isolated fixture.
 Real19-database snapshots preserve shared originals. Fresh production build,
 Chrome acceptance and exact final-head hosted gates remain required.
+
+Published ba3498a/tree645698 passes fresh immutable production build, token sync
+and unchanged bundle budgets. Native Chrome grounded send, exact canonical
+input/result/citations, draft and conversation reload, desktop/mobile layout,
+five settled workspace transitions, canonical source previews and individual
+unstage/text-only insertion pass with actual auth/databases/Gemma/embeddings.
+Protected-read rejection projects unavailable through the actual checkpoint and
+both rails, disables sends and restores the original checkpoint without sending.
+All original protected rows/tabs/drafts and69stashes are verified unchanged.
+Three independent Stop collectors remain failed; none is relabeled. One bounded
+corrected keyboard diagnostic is awaiting direct approval after the three-attempt
+limit. All four distinct accepted inputs have one canonical input/result and are
+never resent. Hosted CI is incomplete; Qodo exact-head counts are zero and all
+eight existing threads resolved. Parent is not merged.
+
+## Stage 6: Latest Dev Backlog-Py Cutover
+**Goal**: Integrate dev52ab6d1eb0f810382b9e50640b59f901cb464348 without changing
+qualified chat runtime behavior or disturbing healthy CI unnecessarily.
+**Success Criteria**: Preserve current head, working verification notes, runtime
+services and separate model branch. Adopt ADR-059's official backlog-py editor;
+normalize only task records added/edited by this PR, preserving their content and
+criteria/status semantics. Topology-preserving rebase matches independent expected
+integration plus declared lossless tracking normalization. Required CI contracts,
+normalizer tests, hooks and touched-scope security pass; exact runtime-source
+equivalence and final-head Qodo/CI are requalified before normal merge.
+**Tests**: Per-PR task-format RED/GREEN, backlog-py parser/normalizer/mutation tests,
+license/workflow/path-classifier ratchets, doc parity and full configured hooks.
+**Status**: In Progress
+
+The new32-file delta changes task tooling, CI, instructions and ADR-059 only;
+no frontend or production API/config file changes are introduced. Independent
+read-only review is in progress. Current Node-edited parent task visibly contains
+nested NOTES/IMPLEMENTATION_NOTES and duplicated final-summary end markers. Do
+not hand-edit them or normalize the whole repository. Preserve the exact working
+file before the official scoped normalizer runs. Current source-bound UAT and
+failed collector evidence retain their original head, not a fabricated new head.
