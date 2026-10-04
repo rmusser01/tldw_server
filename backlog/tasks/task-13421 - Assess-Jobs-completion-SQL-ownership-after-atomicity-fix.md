@@ -20,7 +20,7 @@ Review Qodo PR #3092 finding dd3ff113-e31c-4ca9-a49d-48c73a4273eb against the ex
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Inventory existing completion SQL ownership and approved strict-extraction boundaries before proposing changes.
-- [ ] #2 Propose an explicit transaction/RLS-preserving ownership decision with risks and verification gates, for separate human approval.
+- [x] #2 Propose an explicit transaction/RLS-preserving ownership decision with risks and verification gates, for separate human approval.
 - [x] #3 Keep behavior changes, caller migration and historical repair separate from extraction.
 <!-- AC:END -->
 
@@ -40,6 +40,9 @@ Review Qodo PR #3092 finding dd3ff113-e31c-4ca9-a49d-48c73a4273eb against the ex
 - Fresh baseline: activated shared project venv; RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest -q on completion_row_identity_atomicity, lifecycle_event_atomicity, completion_idempotent_sqlite/postgres and rls_postgres: 86 passed, 227 warnings, no skips, exit 0. XML /tmp/task13421_completion_baseline.xml. No source/test edits; Bandit not applicable to tracking-only checkpoint.
 - Current repository task-editor cutover ADR-059/AGENTS reviewed; use backlog-py for canonical task updates, not legacy Node/MCP writes. TASK-13421 uniquely resolves to this assessment; obsolete foundation TASK-13112 collides with unrelated live work and will not be reused.
 Brainstorming checklist: context exploration complete; visual companion not needed for text-only boundary choice; existing intent/constraints established; approaches prepared for human selection; architecture approval pending; written spec, spec self-review, human file review and implementation plan remain pending. Task stays In Progress, with no completion claim.
+2026-10-04 human approved ownership option A: completion-specific atomic operations/contracts/SQL helpers under DB_Management, preserving facade-owned connection/RLS contexts and post-commit dispatch. Fresh live dev c95e41fc62a07e55fd74052023826c71b2a2c789 advances only 21 unrelated task-normalization files from bf8f2ad6; single assessment commit rebased cleanly, no Jobs/DB/ADR/source changes. Open PR ADR paths checked: next available number 060. Writing refreshed spec Docs/superpowers/specs/2026-10-04-jobs-completion-extraction-design.md and complementary ADR-060; ADR-058 remains governing and unchanged. Written-spec review is still pending, no implementation plan or runtime edits authorized by this checkpoint.
+Written artifacts: Docs/superpowers/specs/2026-10-04-jobs-completion-extraction-design.md and accepted complementary Docs/ADR/060-jobs-completion-persistence-boundary.md, with canonical/public ADR indices updated through the existing refresh script. Written spec remains pending human file review; no implementation plan or runtime edits. Self-review checked placeholders, consistency, two-PR scope and ambiguity against current code; clarified the existing separate read-only _get_sla_policy connection/RLS cursor, optional/partial effect preparation, no new DB-to-Jobs imports, exact final serialization and safe dependency-order rollback. ADR-058 unchanged. Post-rebase existing completion/atomicity/event/RLS baseline: 86 passed, 227 warnings, no skips, exit 0; XML /tmp/task13421_completion_design_baseline.xml. Canonical/generated ADR and index byte parity, whitespace and public/private boundary checks passed. Full Docs/strict MkDocs verification remains in progress; Bandit/Ruff/compile are not applicable to Markdown/task-only edits. Architecture proposal/risks/gates acceptance criterion is satisfied by the approved written option A; task remains In Progress pending written-spec review.
+Written-design verification complete on exact staged tree 7753c0e8e14ca40464ba4eb22ea2a4a130cb394a, committed only in temporary local candidate clone as bc2ef95b2f: 212 Docs tests passed, 438 existing project warnings, no skips/failures, including zero-warning strict MkDocs, using existing /tmp/task13215-mkdocs toolchain without changing shared venv/dependencies. XML /tmp/task13421_docs_candidate.xml. Initial candidate checkout was still running when tree materialization was attempted (index lock); waited for natural checkout completion rather than deleting the active lock, completed the unintended pre-candidate baseline (212 pass; /tmp/task13421_docs_pre_candidate_baseline.xml, not candidate evidence), then materialized/committed the staged tree and reran candidate verification. No source or documentation test failure occurred. Repeat canonical refresh has no unstaged publication changes; public/private boundary, exact ADR/index byte parity, placeholder/self-review scan, task canonical check and staged whitespace pass. Runtime/test/DB source diff versus live c95e41fc is empty. Bandit/Ruff/compile N/A because scope is Markdown/task-only. Actual design-branch commit and final-head Docs rerun follow; human written-spec approval remains pending and no implementation plan/runtime work proceeds yet.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -51,9 +54,9 @@ Brainstorming checklist: context exploration complete; visual companion not need
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
