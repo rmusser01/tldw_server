@@ -16,13 +16,32 @@ backend with fresh databases, the mock OpenAI-compatible LLM and the web UI on
 reserved ports, runs the `ux-regression` Playwright project with zero retries,
 fails on skipped tests, and writes `test-results/live-tier-uat/<run-id>/`.
 
+Before it starts any service, the runner builds the browser extension
+(`bun run build:chrome:prod` in `apps/extension`, about two minutes) for the
+side-panel specs. The build prints to the runner's output; a failed build
+stops the run and leaves its log in `extension-build.log`. (Playwright clears
+`test-results/` when it starts, so logs written before the tests, this one
+included, do not survive a run that gets that far.) To iterate locally without
+rebuilding, point `TLDW_UXR_EXTENSION_DIR` at an existing production build,
+for example `apps/extension/.output/chrome-mv3`. A missing or dev-server build
+fails the side-panel specs; they never skip.
+
+The side-panel specs (`sidepanel-p0.spec.ts`) load that build into Chromium
+through `e2e/utils/extension-sidepanel.ts`: a fresh profile per test, the
+full Chromium build in new headless mode (the default headless shell cannot
+load extensions), the runner's backend and API key in
+`chrome.storage.local`, and `sidepanel.html#/chat` opened in a 420 px wide
+page. A real side panel keeps its chat state under a global storage key, and
+the helper makes the page behave the same way.
+
 In CI:
 
 - **Pull requests.** The `ux-regression` job ("E2E UX Regression
   (notes/chat)") in `.github/workflows/frontend-e2e-tiers.yml` runs the suite
-  when a PR to `dev` or `main` changes the notes/chat UI, the shared UI
-  layers under it (`components/Common`, `hooks`, `services`, `db`, `store`),
-  the notes/chat endpoints, `DB_Management`, or this harness. Other PRs skip
+  when a PR to `dev` or `main` changes the notes/chat UI, the extension side
+  panel or the extension itself, the shared UI layers under them
+  (`components/Common`, `hooks`, `services`, `db`, `store`), the notes/chat
+  endpoints, `DB_Management`, or this harness. Other PRs skip
   the run after a quick diff. The path list is in the job's
   `Detect notes/chat UX changes` step. The job is advisory: it is not a
   required check. On failure it uploads `test-results/` as
@@ -52,6 +71,12 @@ backend, not the smoke route mocks.
    copy or layout.
 5. Control timing that `next dev` would otherwise decide, for example by
    compiling a route before a scenario that depends on fast navigation.
+6. For the extension side panel, use `test` and `SidePanelChat` from
+   `e2e/utils/extension-sidepanel.ts`. Seed server chats with
+   `createChatWithMessages`, which links each message to the previous one as
+   the chat UI does; the side panel cannot load a chat of unlinked messages.
+   Read the outcome from the panel's saved tabs (`readTabs`) and from the
+   server (`e2e/utils/chat-api.ts`).
 
 ## When a defect is fixed
 
@@ -123,6 +148,10 @@ Determinism:
 | NS-N1 "Reload notes" after a save conflict overwrites the other tab | #3102 | `notes-p0.spec.ts` |
 | NE-04 Print / Save as PDF always fails with a pop-up error | #3117 | `notes-p0.spec.ts` |
 | CS-02 chat history search ignores message content | #3108 | `chat-p0.spec.ts` |
+| XS-01 opening a past chat from side-panel search overwrites the current tab | #3105 | `sidepanel-p0.spec.ts` |
+| XS-07 side-panel "Delete" only closes the tab | #3105 | `sidepanel-p0.spec.ts` |
+| XS-07 side-panel "Rename" only relabels the tab | #3105 | `sidepanel-p0.spec.ts` |
+| XP-08 a reopened side panel never refreshes its chat from the server | #3105 | `sidepanel-p0.spec.ts` |
 
 Chat reproductions here seed saved chats through the API
 (`createCharacter`, `createChatWithMessages`) and never send from the
@@ -132,3 +161,8 @@ be reproduced deterministically here yet. CS-01, CS-03 and others live in
 the Playground integration harness instead. CS-04 (reply lost on reload
 mid-stream, #3104) is left out of this harness: it needs a reply in flight,
 which only a send can start.
+
+The side-panel specs never send either. XP-08 adds the other client's turn
+through the API and checks what the reopened panel shows. The silent fork the
+review saw when the stale panel then sent a message needs a send from the
+panel, so it is left out until a browser send is reliable.

@@ -1,8 +1,9 @@
 name: UX Regression Nightly
 
 # Red-first reproductions of verified /notes and /chat UX defects (#3125).
-# The live-tier runner starts an isolated backend, the mock LLM and the web UI
-# itself, so this job only installs dependencies and runs one command.
+# The live-tier runner builds the browser extension (for the side-panel specs)
+# and starts an isolated backend, the mock LLM and the web UI itself, so this
+# job only installs dependencies and runs one command.
 #
 # Pull requests are covered by the path-scoped `ux-regression` job in
 # frontend-e2e-tiers.yml. GitHub runs a scheduled workflow only from the

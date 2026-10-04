@@ -121,6 +121,41 @@ function playwrightProjectArgs(projects) {
   return projects.map((project) => `--project=${project}`)
 }
 
+const baseEnvKeys = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "PYTHONPATH", "VIRTUAL_ENV"]
+
+/** Where the ux-regression side-panel specs find the unpacked Chrome extension. */
+export const EXTENSION_DIR_ENV = "TLDW_UXR_EXTENSION_DIR"
+
+/**
+ * The ux-regression project's side-panel specs load the built browser
+ * extension. A run that includes the project builds it first (production
+ * profile, as the extension's own CI does). Setting TLDW_UXR_EXTENSION_DIR to
+ * an existing build skips that step for local iteration; the specs still fail,
+ * never skip, if the directory holds no usable build.
+ *
+ * @returns {{ dir: string, command: { name: string, command: string, args: string[], cwd: string, env: Record<string, string> } | null } | null}
+ */
+export function resolveExtensionBuild({
+  frontendRoot = frontendRootDefault,
+  projects,
+  baseEnv = process.env,
+}) {
+  if (!projects.includes("ux-regression")) return null
+  const extensionRoot = path.resolve(frontendRoot, "../extension")
+  const prebuilt = baseEnv[EXTENSION_DIR_ENV]
+  if (prebuilt) return { dir: path.resolve(prebuilt), command: null }
+  return {
+    dir: path.join(extensionRoot, ".output/chrome-mv3"),
+    command: {
+      name: "extension-build",
+      command: "bun",
+      args: ["run", "build:chrome:prod"],
+      cwd: extensionRoot,
+      env: safeEnv(baseEnv, baseEnvKeys),
+    },
+  }
+}
+
 export function buildCommands({
   repoRoot = repoRootDefault,
   frontendRoot = frontendRootDefault,
@@ -144,9 +179,11 @@ export function buildCommands({
   }
   const nextDistDir = `.next-live-tier-${runId}`
   const nextDistPath = path.join(frontendRoot, nextDistDir)
-  const baseKeys = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "PYTHONPATH", "VIRTUAL_ENV"]
+  const baseKeys = baseEnvKeys
+  const extension = resolveExtensionBuild({ frontendRoot, projects, baseEnv })
   const sharedFrontendEnv = {
     ...safeEnv(baseEnv, baseKeys),
+    ...(extension ? { [EXTENSION_DIR_ENV]: extension.dir } : {}),
     NEXT_PUBLIC_API_URL: backendUrl,
     NEXT_PUBLIC_API_VERSION: "v1",
     NEXT_PUBLIC_X_API_KEY: apiKey,
@@ -541,6 +578,7 @@ export async function runLiveTierUat({
   const profileRoot = path.join(tmpdir(), `tldw-onboarding-uat-${runId}`)
   const nextDistPath = path.join(frontendRoot, `.next-live-tier-${runId}`)
   const logs = {
+    extensionBuild: path.join(artifactRoot, "extension-build.log"),
     mock: path.join(artifactRoot, "mock-openai.log"),
     backend: path.join(artifactRoot, "backend.log"),
     frontend: path.join(artifactRoot, "frontend.log"),
@@ -570,9 +608,19 @@ export async function runLiveTierUat({
   try {
     assertFreshRunTargets([artifactRoot, profileRoot, nextDistPath])
     ownsGeneratedTargets = true
-    ports = await reservePorts(["backend", "web", "mock"])
     mkdirSync(artifactRoot, { recursive: true })
     ownsArtifactRoot = true
+    // Build before reserving ports, so a slow build cannot outlive the
+    // reservation and a broken one fails before any service starts.
+    const extensionBuild = resolveExtensionBuild({ frontendRoot, projects: options.projects, baseEnv })?.command
+    if (extensionBuild) {
+      const build = await runCommand(extensionBuild, logs.extensionBuild, { signal })
+      signal?.throwIfAborted()
+      if (build.code !== 0) {
+        throw new Error(`Extension build failed with exit code ${build.code}; see ${logs.extensionBuild}`)
+      }
+    }
+    ports = await reservePorts(["backend", "web", "mock"])
     const pythonCommand = resolvePythonCommand({ repoRoot, baseEnv })
     profile = buildLiveTierProfile({
       repoRoot,
