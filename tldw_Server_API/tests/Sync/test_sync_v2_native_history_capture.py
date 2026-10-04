@@ -31,6 +31,7 @@ from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import (
@@ -1018,11 +1019,11 @@ def test_rename_through_sync_keeps_a_plain_chat_plain(
     assert [row["id"] for row in next_selection["messages"]] == [INPUT_ID, REPLY_ID]
 
 
-def test_device_upsert_without_an_assistant_still_gets_the_sync_placeholder_on_a_new_chat(
+def test_device_upsert_without_an_assistant_creates_a_plain_chat(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
 ) -> None:
-    """Only an existing plain chat is kept plain; a chat first seen through Sync is projected as before."""
+    """A chat first seen through Sync with no assistant is stored with none, like a chat created here (#3182)."""
     pushed = sync_service.push(
         user_id=USER,
         dataset_id=_dataset_id(sync_service),
@@ -1046,7 +1047,7 @@ def test_device_upsert_without_an_assistant_still_gets_the_sync_placeholder_on_a
 
     assert [item.apply_status for item in pushed.accepted] == ["applied"]
     row = chacha_db.get_conversation_by_id("device-plain-chat")
-    assert (row["assistant_kind"], row["assistant_id"]) == ("persona", "sync-v2")
+    assert (row["assistant_kind"], row["assistant_id"], row["character_id"]) == (None, None, None)
 
 
 def test_client_id_with_a_different_request_is_409_and_changes_nothing(
@@ -1255,8 +1256,13 @@ def test_create_without_a_client_id_still_goes_through_the_sync_materializer(
     assert response.status_code == 201, response.text
     chat_id = response.json()["id"]
     assert chat_id != CHAT_ID
-    assert chacha_db.get_conversation_by_id(chat_id)["create_request_fingerprint"] is None
+    row = chacha_db.get_conversation_by_id(chat_id)
+    assert row["create_request_fingerprint"] is None
     assert _log(sync_service) == [("chat.conversation", "upsert", chat_id, "applied")]
+    # No assistant was asked for, so none is stored: the chat is plain, as with a client id (#3182).
+    assert (response.json()["assistant_kind"], response.json()["assistant_id"]) == (None, None)
+    assert (row["assistant_kind"], row["assistant_id"], row["character_id"]) == (None, None, None)
+    assert require_current_persona(chacha_db, owner_id=chacha_db.owner_user_id, conversation=row) is None
 
 
 # ---------------------------------------------------------------------------

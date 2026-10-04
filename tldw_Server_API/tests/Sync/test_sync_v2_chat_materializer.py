@@ -9,6 +9,7 @@ import pytest
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, encode_assistant_startup
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Persona.conversation_admission import PersonaAdmissionError, require_current_persona
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.materializers.chat import (
     ChatConversationMaterializer,
@@ -171,7 +172,10 @@ def test_sync_forged_origin_cannot_create_or_restore_local_authority(
     row = chacha_db.get_conversation_by_id("conv-1")
     assert row["title"] == "Remote"
     assert row["assistant_startup_json"] == (raw if complete_identity else None)
-    assert row["assistant_id"] == ("sync-assistant" if complete_identity else "sync-v2")
+    # A payload that names no assistant is stored as no assistant, never as a placeholder.
+    assert (row["assistant_kind"], row["assistant_id"]) == (
+        ("persona", "sync-assistant") if complete_identity else (None, None)
+    )
     replay = _push_one(sync_service, _conversation_envelope(payload=payload))
     assert not replay.conflicts
     assert chacha_db.get_conversation_by_id("conv-1")["assistant_startup_json"] == (raw if complete_identity else None)
@@ -180,13 +184,64 @@ def test_sync_forged_origin_cannot_create_or_restore_local_authority(
 def test_upsert_without_an_assistant_keeps_an_existing_plain_conversation_plain(
     sync_service: SyncV2Service, chacha_db: CharactersRAGDB,
 ) -> None:
-    """The placeholder persona is for a chat first seen through Sync, not for a rename of a plain chat."""
+    """A rename that names no assistant leaves a plain chat plain."""
     chacha_db.add_conversation({"id": "conv-1", "character_id": None, "title": "Plain"})
     result = _push_one(sync_service, _conversation_envelope(payload={"title": "Renamed remotely"}))
     assert len(result.accepted) == 1
     row = chacha_db.get_conversation_by_id("conv-1")
     assert row["title"] == "Renamed remotely"
     assert (row["assistant_kind"], row["assistant_id"], row["character_id"]) == (None, None, None)
+
+
+def test_upsert_without_an_assistant_creates_a_plain_conversation(
+    sync_service: SyncV2Service, chacha_db: CharactersRAGDB,
+) -> None:
+    """A chat first seen through Sync with no assistant is a plain chat, not persona ``sync-v2`` (#3182).
+
+    The placeholder named a persona that does not exist, so every request that
+    checks the chat's persona answered 404 ``persona_not_found``.
+    """
+    result = _push_one(sync_service, _conversation_envelope(payload={"title": "From the laptop"}))
+
+    assert [item.apply_status for item in result.accepted] == ["applied"]
+    row = chacha_db.get_conversation_by_id("conv-1")
+    assert (row["assistant_kind"], row["assistant_id"], row["character_id"]) == (None, None, None)
+    assert row["persona_memory_mode"] is None
+    assert require_current_persona(chacha_db, owner_id=chacha_db.owner_user_id, conversation=row) is None
+
+
+def test_upsert_without_an_assistant_clears_a_placeholder_an_older_server_stored(
+    sync_service: SyncV2Service, chacha_db: CharactersRAGDB,
+) -> None:
+    """A row that already holds the old placeholder becomes plain on its next upsert that names no assistant."""
+    chacha_db.add_conversation({"id": "conv-1", "assistant_kind": "persona", "assistant_id": "sync-v2", "title": "Old"})
+    with pytest.raises(PersonaAdmissionError) as stuck:
+        require_current_persona(
+            chacha_db, owner_id=chacha_db.owner_user_id, conversation=chacha_db.get_conversation_by_id("conv-1"),
+        )
+    assert stuck.value.code == "persona_not_found"
+
+    result = _push_one(sync_service, _conversation_envelope(payload={"title": "Renamed remotely"}))
+
+    assert [item.apply_status for item in result.accepted] == ["applied"]
+    row = chacha_db.get_conversation_by_id("conv-1")
+    assert row["title"] == "Renamed remotely"
+    assert (row["assistant_kind"], row["assistant_id"], row["character_id"]) == (None, None, None)
+    assert require_current_persona(chacha_db, owner_id=chacha_db.owner_user_id, conversation=row) is None
+
+
+def test_upsert_that_names_an_assistant_is_stored_as_named(
+    sync_service: SyncV2Service, chacha_db: CharactersRAGDB,
+) -> None:
+    """Only a payload with no identity is plain: a named persona, even an unknown one, is kept as sent."""
+    result = _push_one(
+        sync_service,
+        _conversation_envelope(payload={"title": "Named", "assistant_kind": "persona", "assistant_id": "sync-v2"}),
+    )
+
+    assert [item.apply_status for item in result.accepted] == ["applied"]
+    row = chacha_db.get_conversation_by_id("conv-1")
+    assert (row["assistant_kind"], row["assistant_id"]) == ("persona", "sync-v2")
 
 
 def _push_one_through_materializer_conflict(
