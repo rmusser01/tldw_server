@@ -25,10 +25,7 @@ Machine-readable inventory: `Docs/Design/web_scraping_refactor_import_inventory.
 | --- | ---: | --- |
 | `tldw_Server_API/app/core/Watchlists/fetchers.py` | 385 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.is_content_page` |
 | `tldw_Server_API/app/services/enhanced_web_scraping_service.py` | 37 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.is_content_page` |
-| `tldw_Server_API/app/services/web_scraping_service.py` | 38 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.recursive_scrape` |
-| `tldw_Server_API/app/services/web_scraping_service.py` | 38 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_and_summarize_multiple` |
-| `tldw_Server_API/app/services/web_scraping_service.py` | 38 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_by_url_level` |
-| `tldw_Server_API/app/services/web_scraping_service.py` | 38 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_from_sitemap` |
+| `tldw_Server_API/app/services/web_scraping_service.py` | 21 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_from_sitemap` |
 | `tldw_Server_API/tests/DB_Management/test_media_db_api_imports.py` | 96 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
 | `tldw_Server_API/tests/Media/test_web_summary_service_prompt.py` | 23 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
 | `tldw_Server_API/tests/WebScraping/test_clustering_fallback.py` | 1 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.clear_extraction_caches` |
@@ -73,7 +70,6 @@ Machine-readable inventory: `Docs/Design/web_scraping_refactor_import_inventory.
 | `tldw_Server_API/tests/Web_Scraping/test_phase4_architecture.py` | 540 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
 | `tldw_Server_API/tests/Web_Scraping/test_phase4_article_compatibility.py` | 8 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
 | `tldw_Server_API/tests/Web_Scraping/test_phase4_article_orchestration.py` | 1225 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
-| `tldw_Server_API/tests/Web_Scraping/test_phase4_consumer_imports.py` | 11 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_and_summarize_multiple` |
 | `tldw_Server_API/tests/Web_Scraping/test_phase4_content.py` | 17 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
 | `tldw_Server_API/tests/Web_Scraping/test_phase4_extraction_contracts.py` | 15 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
 | `tldw_Server_API/tests/Web_Scraping/test_phase4_extraction_failures.py` | 20 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
@@ -152,10 +148,11 @@ Machine-readable inventory: `Docs/Design/web_scraping_refactor_import_inventory.
 | `tldw_Server_API/tests/WebSearch/unit/test_parsers_extended.py` | 347 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs` |
 | `tldw_Server_API/tests/WebSearch/unit/test_parsers_extended.py` | 414 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs` |
 | `tldw_Server_API/tests/WebSearch/unit/test_parsers_extended.py` | 465 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs` |
-| `tldw_Server_API/tests/Web_Scraping/test_phase3_3_sanitizers.py` | 3 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs` |
+| `tldw_Server_API/tests/Web_Scraping/test_phase3_3_sanitizers.py` | 4 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs` |
 | `tldw_Server_API/tests/Web_Scraping/test_websearch_circuit_breaker_shim_removed.py` | 1 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs` |
 | `tldw_Server_API/tests/Web_Scraping/test_websearch_headers.py` | 1 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs._websearch_browser_headers` |
 | `tldw_Server_API/tests/Web_Scraping/test_websearch_searx_json.py` | 3 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs` |
+| `tldw_Server_API/tests/Web_Scraping/test_websearch_smoke.py` | 21 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs` |
 
 ### enhanced_web_scraping
 

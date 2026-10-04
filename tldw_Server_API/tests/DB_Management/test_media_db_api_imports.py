@@ -133,7 +133,6 @@ from tldw_Server_API.app.services import media_ingest_jobs_worker
 from tldw_Server_API.app.services import outputs_purge_scheduler
 from tldw_Server_API.app.services import storage_cleanup_service
 from tldw_Server_API.app.services import tts_history_cleanup_service
-from tldw_Server_API.app.services import web_scraping_service
 
 
 class _LazyLegacyMediaDBProxy(ModuleType):
@@ -2027,11 +2026,6 @@ def test_book_processing_lib_no_longer_imports_add_media_with_keywords_from_db_m
         "from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords"
         not in source
     )
-
-
-def test_web_scraping_service_imports_managed_media_database_from_media_db_api():
-    module = importlib.reload(web_scraping_service)
-    assert module.managed_media_database is media_db_api.managed_media_database
 
 
 def test_media_files_cleanup_service_imports_managed_media_database_from_media_db_api():

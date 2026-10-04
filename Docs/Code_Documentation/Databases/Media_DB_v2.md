@@ -467,9 +467,6 @@ These functions require a `MediaDatabase` instance to be passed as the `db_insta
     *   **Returns**: `(processed_count, remaining_in_trash_count)`.
     *   **Raises**: `TypeError`, `ValueError`, `DatabaseError` (can be from `soft_delete_media`).
 
-*   **`check_media_and_whisper_model(*args, **kwargs)`**:
-    Deprecated function, logs a warning.
-
 *   **`get_unprocessed_media(db_instance: MediaDatabase) -> List[Dict]`**:
     Retrieves active, non-trashed media items with `vector_processing = 0`.
     *   **Returns**: List of dicts (`id`, `uuid`, `content`, `type`, `title`).

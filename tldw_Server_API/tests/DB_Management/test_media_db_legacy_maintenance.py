@@ -1,6 +1,6 @@
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.media_db import legacy_maintenance
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_maintenance import (
-    check_media_and_whisper_model,
     empty_trash,
     permanently_delete_item,
 )
@@ -63,6 +63,6 @@ def test_legacy_maintenance_permanent_delete_removes_media_and_keyword_links() -
         assert media_row["total"] == 0
         assert keyword_row is not None
         assert keyword_row["total"] == 0
-        assert check_media_and_whisper_model() == (True, "Deprecated")
+        assert not hasattr(legacy_maintenance, "check_media_and_whisper_model")
     finally:
         db.close_connection()
