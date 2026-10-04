@@ -80,6 +80,11 @@ from tldw_Server_API.app.core.Chat.chat_logging import (
 )
 from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
 from tldw_Server_API.app.core.Chat.completion_pipeline import ChatCompletionPipeline
+from tldw_Server_API.app.core.Chat.generation_metadata import (
+    GENERATION_STATUS_COMPLETE,
+    GENERATION_STATUS_LENGTH,
+    build_generation_metadata,
+)
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.Chat.moderation_pipeline import (
     OutputModerationRuntime,
@@ -3530,6 +3535,7 @@ def _build_assistant_message_payload(
     content: Any | None,
     tool_calls: Any | None,
     function_call: Any | None,
+    generation_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compatibility wrapper for tests/imports that use the old local helper."""
 
@@ -3539,6 +3545,30 @@ def _build_assistant_message_payload(
         content=content,
         tool_calls=tool_calls,
         function_call=function_call,
+        generation_metadata=generation_metadata,
+    )
+
+
+def _nonstream_generation_metadata(
+    *,
+    llm_response: Any,
+    choice: NonStreamChoice | None,
+    model: str,
+    provider: str,
+) -> dict[str, Any]:
+    """Describe how a non-streamed reply was produced, for settlement (D7 P2)."""
+
+    raw_choice = choice.choice if choice is not None else None
+    finish_reason = raw_choice.get("finish_reason") if isinstance(raw_choice, dict) else None
+    usage = llm_response.get("usage") if isinstance(llm_response, dict) else None
+    return build_generation_metadata(
+        generation_status=(
+            GENERATION_STATUS_LENGTH if finish_reason == "length" else GENERATION_STATUS_COMPLETE
+        ),
+        model_id=model,
+        provider=provider,
+        finish_reason=finish_reason,
+        usage=usage,
     )
 
 
@@ -5715,16 +5745,15 @@ async def execute_streaming_call(
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         loop_compat_enabled = False
 
-    async def save_callback(
-        full_reply: str,
-        tool_calls: list[dict[str, Any]] | None,
-        function_call: dict[str, Any] | None,
-    ):
-        nonlocal stream_metrics_recorded
-        saved_message_id: str | None = None
-        tool_execution_payload: list[dict[str, Any]] | None = None
-        structured_events: list[dict[str, Any]] = []
-        full_reply_to_save = full_reply
+    async def _apply_stream_output_policies(full_reply: str) -> tuple[str | None, bool]:
+        """Run self-monitoring and output moderation on a reply before it is saved.
+
+        Shared by complete and partial settlement so both store the same text.
+
+        Returns:
+            The text to save (None when blocked) and whether the reply was blocked.
+        """
+        full_reply_to_save: str | None = full_reply
         post_stream_blocked = False
 
         # Self-monitoring output check (streaming)
@@ -5906,6 +5935,67 @@ async def execute_streaming_call(
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
 
+        return full_reply_to_save, post_stream_blocked
+
+    def _stream_generation_metadata(generation: dict[str, Any] | None) -> dict[str, Any]:
+        """Combine what the stream observed with the model and provider that produced it."""
+        observed = generation if isinstance(generation, dict) else {}
+        return build_generation_metadata(
+            generation_status=observed.get("generation_status", GENERATION_STATUS_COMPLETE),
+            model_id=model,
+            provider=selected_provider,
+            finish_reason=observed.get("finish_reason"),
+            usage=observed.get("usage"),
+        )
+
+    # Partial replies are kept only for turns admitted through native history
+    # selection, where the server owns settlement. Other save_to_db clients
+    # retry an unanswered turn with tldw_retry_failed_turn, and that contract
+    # needs the failed turn to have no saved reply.
+    keep_partial_replies = bool(should_persist and history_persistence_ack)
+
+    async def partial_save_callback(full_reply: str, *, generation: dict[str, Any]) -> str | None:
+        """Keep an unfinished reply after a disconnect, stop or provider failure (D7 S3-1).
+
+        Only the text is kept: partial tool calls are incomplete, and tool
+        execution, success accounting and audit success belong to complete
+        replies. A reply blocked by output policy is never saved.
+        """
+        if not keep_partial_replies or not final_conversation_id:
+            return None
+        if stream_mod_state.get("pending_stop_error") is not None:
+            return None
+        full_reply_to_save, post_stream_blocked = await _apply_stream_output_policies(full_reply)
+        if post_stream_blocked or not isinstance(full_reply_to_save, str) or not full_reply_to_save.strip():
+            return None
+        message_payload = build_assistant_message_payload(
+            character_card_for_context=character_card_for_context,
+            assistant_parent_message_id=assistant_parent_message_id,
+            content=full_reply_to_save,
+            tool_calls=None,
+            function_call=None,
+            generation_metadata=_stream_generation_metadata(generation),
+        )
+        return await save_assistant_message(
+            chat_db=chat_db,
+            conversation_id=final_conversation_id,
+            save_message_fn=save_message_fn,
+            payload=message_payload,
+        )
+
+    async def save_callback(
+        full_reply: str,
+        tool_calls: list[dict[str, Any]] | None,
+        function_call: dict[str, Any] | None,
+        *,
+        generation: dict[str, Any] | None = None,
+    ):
+        nonlocal stream_metrics_recorded
+        saved_message_id: str | None = None
+        tool_execution_payload: list[dict[str, Any]] | None = None
+        structured_events: list[dict[str, Any]] = []
+        full_reply_to_save, post_stream_blocked = await _apply_stream_output_policies(full_reply)
+
         if structured_request_context is not None:
             try:
                 structured_metadata = validate_structured_response(
@@ -5972,6 +6062,7 @@ async def execute_streaming_call(
                 content=full_reply_to_save,
                 tool_calls=tool_calls,
                 function_call=function_call,
+                generation_metadata=_stream_generation_metadata(generation),
             )
             saved_message_id = await save_assistant_message(
                 chat_db=chat_db,
@@ -6421,6 +6512,7 @@ async def execute_streaming_call(
                     conversation_id=final_conversation_id,
                     model_name=model,
                     save_callback=save_callback,
+                    partial_save_callback=partial_save_callback if keep_partial_replies else None,
                     finalize_callback=_finalize_stream,
                     on_first_output=_record_provider_output_once,
                     idle_timeout=CHAT_IDLE_TIMEOUT,
@@ -7195,6 +7287,12 @@ async def _execute_non_stream_call_impl(
             content=content_to_save,
             tool_calls=tool_calls_to_save,
             function_call=function_call_to_save,
+            generation_metadata=_nonstream_generation_metadata(
+                llm_response=llm_response,
+                choice=first_choice,
+                model=model,
+                provider=selected_provider,
+            ),
         )
         assistant_message_id = await save_assistant_message(
             chat_db=chat_db,
@@ -7209,6 +7307,12 @@ async def _execute_non_stream_call_impl(
             content=content_to_save,
             tool_calls=tool_calls_to_save,
             function_call=function_call_to_save,
+            generation_metadata=_nonstream_generation_metadata(
+                llm_response=llm_response,
+                choice=first_choice,
+                model=model,
+                provider=selected_provider,
+            ),
         )
 
     if should_run_legacy_tool_autoexec(cleaned_args) and isinstance(tool_calls_to_save, list) and tool_calls_to_save:
@@ -7412,6 +7516,12 @@ async def _execute_non_stream_call_impl(
                                 content=content_to_save,
                                 tool_calls=tool_calls_to_save,
                                 function_call=function_call_to_save,
+                                generation_metadata=_nonstream_generation_metadata(
+                                    llm_response=llm_response,
+                                    choice=first_choice,
+                                    model=model,
+                                    provider=selected_provider,
+                                ),
                             )
                             continuation_message_id = await save_assistant_message(
                                 chat_db=chat_db,

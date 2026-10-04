@@ -204,7 +204,10 @@ from tldw_Server_API.app.core.Chat.knowledge_save import (
     KnowledgeFlashcardError,
     resolve_knowledge_flashcard,
 )
-from tldw_Server_API.app.core.Chat.persistence_service import save_workspace_chat_model_selection
+from tldw_Server_API.app.core.Chat.persistence_service import (
+    assistant_generation_extra,
+    save_workspace_chat_model_selection,
+)
 
 # Backward-compatible re-exports for legacy tests patching these symbols on the endpoint module.
 from tldw_Server_API.app.core.Chat.prompt_template_manager import (  # noqa: F401
@@ -3171,6 +3174,12 @@ async def _save_message_turn_to_db(
             serialized_extra = {}
         serialized_extra.update(sender_meta)
 
+    generation_extra = assistant_generation_extra(message_obj)
+    if generation_extra:
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra.update(generation_extra)
+
     if serialized_extra is not None and not serialized_extra:
         serialized_extra = None
 
@@ -4658,6 +4667,7 @@ async def create_chat_completion(
                         if payload.get("role") == "system":
                             return None
                         prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync)
+                        prepared["extra_metadata"].update(assistant_generation_extra(payload))
                         prepared["id"] = str(uuid.uuid4())
                         prepared["parent_message_id"] = reference["input_message_id"]
                         try:
