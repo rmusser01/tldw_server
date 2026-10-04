@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from collections import deque
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from functools import lru_cache, partial
 from types import SimpleNamespace
@@ -274,6 +274,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
     SyncServerOriginMutationNotSupportedError,
     capture_applied_server_origin_write,
     capture_server_origin_mutation,
+    delete_unenrolled_server_origin_objects,
     get_active_server_origin_sync_service_for_user,
     server_origin_object_id,
     server_origin_stable_key,
@@ -8122,9 +8123,40 @@ async def delete_chat_session(
                         break
                     fetch_offset += fetch_limit
 
-                for message in child_messages:
-                    message_id = str(message.get("id") or "")
-                    if not message_id:
+                # Rows Sync never saw (the chat predates the profile, or a message was saved
+                # by a path that publishes nothing) are deleted directly, as without a
+                # profile. A tombstone for one would be rejected, and for a message it
+                # would block the dataset (#3181). Published rows are tombstoned as before:
+                # every message first, then the chat.
+                message_versions = {
+                    str(message["id"]): message.get("version", 1) for message in child_messages if message.get("id")
+                }
+                chat_object = ("chat.conversation", chat_id)
+
+                def delete_messages_directly(unpublished: Sequence[tuple[str, str]]) -> None:
+                    # The chat is in the list when it is unpublished too. It goes last, below.
+                    with db.transaction() as conn:
+                        for domain, message_id in unpublished:
+                            if domain == "chat.message":
+                                db.soft_delete_message(message_id, message_versions[message_id], conn=conn)
+
+                def delete_chat_directly(_unpublished: Sequence[tuple[str, str]]) -> None:
+                    db.soft_delete_conversation(
+                        chat_id,
+                        expected_version if expected_version is not None else conversation.get('version', 1),
+                    )
+
+                # One check covers the whole chat, so a dataset that cannot take a needed
+                # tombstone refuses the request before anything is deleted.
+                published = await run_in_threadpool(
+                    delete_unenrolled_server_origin_objects,
+                    sync_service,
+                    user_id=str(current_user.id),
+                    objects=[*(("chat.message", message_id) for message_id in message_versions), chat_object],
+                    delete=delete_messages_directly,
+                )
+                for domain, message_id in published:
+                    if domain != "chat.message":
                         continue
                     capture_server_origin_mutation(
                         sync_service,
@@ -8142,20 +8174,37 @@ async def delete_chat_session(
                         },
                         source="server_api",
                     )
-                capture_server_origin_mutation(
-                    sync_service,
-                    user_id=str(current_user.id),
-                    domain="chat.conversation",
-                    operation="tombstone",
-                    object_id=chat_id,
-                    payload={
-                        "id": chat_id,
-                        "deleted": True,
-                        "client_id": str(current_user.id),
-                        "owner_user_id": str(current_user.id),
-                    },
-                    source="server_api",
-                )
+                chat_is_published = chat_object in published
+                if not chat_is_published:
+                    # Checked again under the fence: the chat is deleted directly only if it
+                    # still has no Sync history.
+                    chat_is_published = bool(
+                        await run_in_threadpool(
+                            delete_unenrolled_server_origin_objects,
+                            sync_service,
+                            user_id=str(current_user.id),
+                            objects=[chat_object],
+                            delete=delete_chat_directly,
+                        )
+                    )
+                if chat_is_published:
+                    capture_server_origin_mutation(
+                        sync_service,
+                        user_id=str(current_user.id),
+                        domain="chat.conversation",
+                        operation="tombstone",
+                        object_id=chat_id,
+                        payload={
+                            "id": chat_id,
+                            "deleted": True,
+                            "client_id": str(current_user.id),
+                            "owner_user_id": str(current_user.id),
+                        },
+                        source="server_api",
+                    )
+            except (ConflictError, CharactersRAGDBError):
+                # A refused direct delete is the owner database's answer, not a Sync failure.
+                raise
             except Exception as sync_exc:
                 raise _chat_sync_http_error(sync_exc) from sync_exc
             logger.info(f"Soft deleted chat session {chat_id} by user {current_user.id}")

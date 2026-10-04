@@ -23,6 +23,7 @@ from .models import (
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE,
     DEFAULT_M1_ENCRYPTION_POLICY,
+    SyncConflict,
     SyncDataset,
     SyncDomain,
     SyncEnvelope,
@@ -38,6 +39,12 @@ from .store import SyncV2Store
 SERVER_ORIGIN_DEVICE_ID = "server-origin"
 _APPLIED_CAPTURE_ADAPTER_VERSION = 1
 _APPLIED_CAPTURE_OPERATIONS: frozenset[SyncOperation] = frozenset({"upsert", "append"})
+# Recorded on a conflict this module dismisses itself, so the dismissal can be told
+# apart from a reviewer's.
+STRANDED_TOMBSTONE_RESOLUTION_NOTE = "server_origin_tombstone_of_object_without_sync_history"
+# A dataset holds at most one such conflict at a time (it blocks the next append), so
+# this only bounds the loop against a resolution that does not take effect.
+_MAX_STRANDED_TOMBSTONE_DISMISSALS = 8
 
 _WriteResult = TypeVar("_WriteResult")
 
@@ -127,13 +134,59 @@ def capture_server_origin_mutation(
     stable_key: str | None = None,
     routing_metadata: Mapping[str, object] | None = None,
 ) -> ServerOriginCaptureResult:
-    """Append and materialize one trusted server-origin Sync v2 mutation."""
+    """Append and materialize one trusted server-origin Sync v2 mutation.
+
+    A dataset that refuses the append because of the conflict an earlier delete of
+    an object without Sync history left behind (see
+    ``delete_unenrolled_server_origin_objects``) is unblocked first, and the append
+    is tried once more. Every other unresolved conflict still refuses it.
+    """
 
     dataset = _active_default_personal_dataset(service, user_id)
     if domain not in dataset.domains:
         raise SyncStoreError(f"Sync domain is not enrolled for this dataset: {domain}")
     if not server_frontend_mutation_enabled_for_policy(dataset.encryption_policy):
         raise SyncServerOriginMutationNotSupportedError(dataset, domain)
+
+    def append() -> ServerOriginCaptureResult:
+        return _append_server_origin_mutation(
+            service,
+            dataset,
+            user_id=user_id,
+            domain=domain,
+            operation=operation,
+            object_id=object_id,
+            payload=payload,
+            source=source,
+            parent_id=parent_id,
+            stable_key=stable_key,
+            routing_metadata=routing_metadata,
+        )
+
+    try:
+        return append()
+    except SyncMaterializationPredecessorError:
+        # The refusal comes from the envelope insert, so nothing was appended.
+        if not _unblock_stranded_dataset(service, dataset, user_id=user_id):
+            raise
+    return append()
+
+
+def _append_server_origin_mutation(
+    service: SyncV2Service,
+    dataset: SyncDataset,
+    *,
+    user_id: str,
+    domain: SyncDomain,
+    operation: SyncOperation,
+    object_id: str,
+    payload: dict[str, object],
+    source: str,
+    parent_id: str | None,
+    stable_key: str | None,
+    routing_metadata: Mapping[str, object] | None,
+) -> ServerOriginCaptureResult:
+    """Append one server-origin envelope to ``dataset`` and require its projection."""
 
     payload_hash, payload_size = canonical_payload_hash(payload)
     if stable_key:
@@ -315,7 +368,7 @@ def capture_applied_server_origin_write(
     phase = "fence"
     try:
         with service.store.projection_fence(dataset.dataset_id, domains) as guarded:
-            _require_claims_publishable(guarded, dataset, claims)
+            _require_claims_publishable(service, guarded, dataset, claims, user_id=user_id)
             phase = "write"
             result = write()
             phase = "record"
@@ -358,28 +411,250 @@ def capture_applied_server_origin_write(
 
 
 def _require_claims_publishable(
+    service: SyncV2Service,
     guarded: SyncV2Store,
     dataset: SyncDataset,
     claims: Sequence[tuple[SyncDomain, str]],
+    *,
+    user_id: str,
 ) -> None:
     """Refuse, before the product write, a claim the dataset could not accept afterwards."""
 
-    heads = [guarded.get_current_head(dataset.dataset_id, domain, object_id) for domain, object_id in claims]
+    def current_heads() -> list[SyncEnvelope | None]:
+        return [guarded.get_current_head(dataset.dataset_id, domain, object_id) for domain, object_id in claims]
+
+    heads = current_heads()
+    # A pure replay publishes nothing, so it keeps working whatever blocks the dataset.
+    if all(head is not None and head.apply_status == "applied" for head in heads):
+        return
+    # A dataset blocked by a projection conflict accepts no new history. The conflict a
+    # delete of an object without Sync history left behind is dismissed here; any other
+    # one refuses the write.
+    blocker, dismissed = _dismiss_stranded_tombstones(service, guarded, dataset, user_id=user_id)
+    if dismissed:
+        heads = current_heads()
     for head in heads:
         if head is not None and head.apply_status != "applied":
             raise SyncServerOriginMaterializationError(head)
-    # A dataset blocked by a projection conflict accepts no new history. That only
-    # matters when something is still unpublished: a pure replay must keep working.
-    if any(head is None for head in heads):
-        blocker = guarded.get_unresolved_materialization_conflict(dataset.dataset_id)
-        if blocker is not None:
-            raise SyncMaterializationPredecessorError(
-                apply_status="conflict",
-                conflict_id=blocker.conflict_id,
-                domain=blocker.domain,
-                entity_id=blocker.entity_id,
-                server_sequence=blocker.server_sequence,
+    if blocker is not None and any(head is None for head in heads):
+        raise SyncMaterializationPredecessorError(
+            apply_status="conflict",
+            conflict_id=blocker.conflict_id,
+            domain=blocker.domain,
+            entity_id=blocker.entity_id,
+            server_sequence=blocker.server_sequence,
+        )
+
+
+def delete_unenrolled_server_origin_objects(
+    service: SyncV2Service,
+    *,
+    user_id: str,
+    objects: Sequence[tuple[SyncDomain, str]],
+    delete: Callable[[Sequence[tuple[SyncDomain, str]]], None],
+) -> list[tuple[SyncDomain, str]]:
+    """Delete, outside the log, the objects the dataset has never held, and return the rest.
+
+    An object is enrolled when the dataset holds Sync history for it: a current
+    head or object state. A chat that predates the profile, a row written by a
+    path that publishes nothing, and a row whose capture was lost have neither.
+    Deleting such a row must not append a tombstone:
+
+    * no device received the row through this dataset, so no device can apply
+      the tombstone;
+    * the ``chat.message`` materializer rejects a tombstone without a base as a
+      projection conflict, and an unresolved projection conflict refuses every
+      later append in the dataset.
+
+    So ``delete`` is called with those objects and removes them from the owner's
+    database, the same write the route makes when no profile is active. Nothing
+    is recorded in the log, and no row is published only to be deleted.
+
+    The check and ``delete`` run inside the dataset projection fence, so no
+    envelope for one of these ids can be accepted or projected in between. An
+    object whose history is accepted but not applied yet is not "never seen" (a
+    device may already have pulled it); it is returned with the enrolled ones and
+    the tombstone append then settles or refuses it.
+
+    A request that names both kinds is refused as a whole when the dataset cannot
+    take the tombstones: nothing is deleted directly if an unresolved conflict
+    blocks the dataset and an enrolled object is among ``objects``.
+
+    Args:
+        service: The owner's active Sync service.
+        user_id: The authenticated owner.
+        objects: The ``(domain, object_id)`` pairs the route is about to delete.
+        delete: Removes the given objects from the owner's database. Called at
+            most once, with the objects that have no Sync history, in order.
+
+    Returns:
+        The objects that have Sync history, in the given order. The caller
+        tombstones them through ``capture_server_origin_mutation``.
+
+    Raises:
+        SyncServerOriginMutationNotSupportedError: The dataset policy does not
+            allow server-origin writes. Raised before any delete.
+        SyncMaterializationPredecessorError: An enrolled object needs a tombstone
+            and an unresolved projection conflict blocks the dataset. Raised
+            before any delete.
+        SyncStoreError: The dataset, a domain or the fence is unavailable. Raised
+            before any delete. An error raised by ``delete`` itself propagates as is.
+    """
+
+    targets = list(objects)
+    domains = list(dict.fromkeys(domain for domain, _object_id in targets))
+    if not domains:
+        return []
+    dataset = _active_default_personal_dataset(service, user_id)
+    if not server_frontend_mutation_enabled_for_policy(dataset.encryption_policy):
+        raise SyncServerOriginMutationNotSupportedError(dataset, domains[0])
+    for domain in domains:
+        if domain not in dataset.domains:
+            raise SyncStoreError(f"Sync domain is not enrolled for this dataset: {domain}")
+
+    deleting = False
+    try:
+        with service.store.projection_fence(dataset.dataset_id, domains) as guarded:
+            # A delete that ran before this rule existed may have left its tombstone as the
+            # head of one of these objects. Dismissing it first lets the retry go through.
+            blocker, _dismissed = _dismiss_stranded_tombstones(service, guarded, dataset, user_id=user_id)
+            enrolled: list[tuple[SyncDomain, str]] = []
+            unenrolled: list[tuple[SyncDomain, str]] = []
+            for domain, object_id in targets:
+                has_history = (
+                    guarded.get_current_head(dataset.dataset_id, domain, object_id) is not None
+                    or guarded.get_object_state(dataset.dataset_id, domain, object_id) is not None
+                )
+                (enrolled if has_history else unenrolled).append((domain, object_id))
+            if enrolled and blocker is not None:
+                raise SyncMaterializationPredecessorError(
+                    apply_status="conflict",
+                    conflict_id=blocker.conflict_id,
+                    domain=blocker.domain,
+                    entity_id=blocker.entity_id,
+                    server_sequence=blocker.server_sequence,
+                )
+            if unenrolled:
+                deleting = True
+                delete(unenrolled)
+    except Exception as exc:
+        if deleting or isinstance(exc, SyncStoreError):
+            raise
+        raise SyncStoreError("Sync projection fence is unavailable") from exc
+    return enrolled
+
+
+def _unblock_stranded_dataset(service: SyncV2Service, dataset: SyncDataset, *, user_id: str) -> bool:
+    """Take the dataset fence and dismiss a stranded tombstone; report whether one was dismissed."""
+
+    try:
+        with service.store.conflict_resolution_guard(dataset.dataset_id) as guarded:
+            _blocker, dismissed = _dismiss_stranded_tombstones(service, guarded, dataset, user_id=user_id)
+    except SyncStoreError:
+        return False
+    return dismissed
+
+
+def _dismiss_stranded_tombstones(
+    service: SyncV2Service,
+    guarded: SyncV2Store,
+    dataset: SyncDataset,
+    *,
+    user_id: str,
+) -> tuple[SyncConflict | None, bool]:
+    """Unblock a dataset that an earlier delete of an object without Sync history blocked.
+
+    Before ``delete_unenrolled_server_origin_objects`` existed, such a delete
+    appended a tombstone the ``chat.message`` materializer rejected, and the
+    unresolved conflict refused every later append in the dataset. That conflict
+    is resolved here with ``skip``, which marks the tombstone superseded and
+    restores the object's head. This loses nothing:
+
+    * the tombstone was never delivered: a pull withholds conflicted and
+      superseded envelopes and stops at the blocking one;
+    * nothing was projected from it, and the row it named is untouched;
+    * it is the server's own write, and its request answered 503, so no client
+      was told the delete happened.
+
+    Any other conflict, including a device's tombstone of an unknown message, is
+    left for review.
+
+    Args:
+        service: The owner's active Sync service.
+        guarded: A store that holds the dataset fence. The dismissal commits or
+            rolls back with the caller's transaction, and a dismissal that fails
+            part-way is rolled back on its own.
+        dataset: The dataset server-origin writes are routed to.
+        user_id: The authenticated owner.
+
+    Returns:
+        The conflict that still blocks the dataset, if any, and whether a stranded
+        tombstone was dismissed.
+    """
+
+    dismissed = False
+    blocker = guarded.get_unresolved_materialization_conflict(dataset.dataset_id)
+    for _attempt in range(_MAX_STRANDED_TOMBSTONE_DISMISSALS):
+        if blocker is None or not _is_stranded_tombstone(guarded, dataset, blocker):
+            break
+        try:
+            with guarded.conflict_resolution_savepoint():
+                service.resolve_conflict(
+                    user_id=user_id,
+                    dataset_id=dataset.dataset_id,
+                    conflict_id=blocker.conflict_id,
+                    action="skip",
+                    notes=STRANDED_TOMBSTONE_RESOLUTION_NOTE,
+                    _conflict=blocker,
+                    _store=guarded,
+                )
+        except SyncStoreError as exc:
+            logger.warning(
+                "Sync could not dismiss a stranded server-origin tombstone. dataset={} conflict={} error={}",
+                dataset.dataset_id,
+                blocker.conflict_id,
+                type(exc).__name__,
             )
+            break
+        dismissed = True
+        logger.warning(
+            "Sync dismissed a server-origin tombstone of an object without Sync history. "
+            "dataset={} conflict={} domain={} object={}",
+            dataset.dataset_id,
+            blocker.conflict_id,
+            blocker.domain,
+            blocker.object_id,
+        )
+        blocker = guarded.get_unresolved_materialization_conflict(dataset.dataset_id)
+    return blocker, dismissed
+
+
+def _is_stranded_tombstone(store: SyncV2Store, dataset: SyncDataset, conflict: SyncConflict) -> bool:
+    """Return whether a conflict is the server's own tombstone of an object without Sync state."""
+
+    if (
+        conflict.domain != "chat.message"
+        or conflict.conflict_type != "message_base_conflict"
+        or conflict.metadata.get("reason") != "missing_server_message"
+        or conflict.server_sequence is None
+    ):
+        return False
+    source = store.get_envelope_by_server_cursor(conflict.server_sequence)
+    return (
+        source is not None
+        and source.dataset_id == dataset.dataset_id
+        and source.client_envelope_id == conflict.local_envelope_id
+        and source.domain == conflict.domain
+        and source.object_id == conflict.object_id
+        and source.operation == "tombstone"
+        and source.device_id == SERVER_ORIGIN_DEVICE_ID
+        and source.status == "accepted"
+        and source.apply_status == "conflict"
+        and source.base_server_cursor is None
+        and source.base_object_revision is None
+        and source.base_object_hash is None
+        and store.get_object_state(dataset.dataset_id, source.domain, source.object_id) is None
+    )
 
 
 def _record_applied_object(
@@ -620,6 +895,7 @@ def _active_default_personal_dataset(service: SyncV2Service, user_id: str) -> Sy
 
 __all__ = [
     "SERVER_ORIGIN_DEVICE_ID",
+    "STRANDED_TOMBSTONE_RESOLUTION_NOTE",
     "AppliedServerOriginObject",
     "ServerOriginCaptureResult",
     "CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE",
@@ -632,5 +908,6 @@ __all__ = [
     "capture_applied_server_origin_write",
     "capture_server_origin_note_restore",
     "capture_server_origin_mutation",
+    "delete_unenrolled_server_origin_objects",
     "get_active_server_origin_sync_service_for_user",
 ]
