@@ -669,7 +669,9 @@ def test_service_prompt_override_content_change_uses_cas_and_new_uuid(memory_db)
     assert memory_db.get_service_prompt_override("chat.rag.answer") == updated
 
 
-@pytest.mark.parametrize("expected_revision", [None, str(uuid.uuid4())])
+@pytest.mark.parametrize(
+    "expected_revision", [None, str(uuid.uuid4())], ids=["missing-revision", "stale-revision"]
+)
 @pytest.mark.integration
 def test_service_prompt_override_changed_save_conflicts_with_current_revision(
     memory_db,
