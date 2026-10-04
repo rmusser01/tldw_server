@@ -6,6 +6,7 @@
 **Architecture:** Claims keeps aggregation ownership; shared Jobs owns execution and admission. Reuse one successfully initialized Jobs manager per callback, retain legacy date parsing, and preserve metadata-only diagnostic logging.
 **Tech Stack:** Python, pytest/Hypothesis, APScheduler, Loguru, SQLite/PostgreSQL, shared Jobs, GitHub CLI.
 **Backlog:** TASK-9935.4
+**ADR Check:** No new ADR required. This review and rebase preserve the Jobs ownership boundary governed by `Docs/ADR/003-jobs-vs-scheduler-default.md` without changing durable architecture rules.
 
 ## Stage 1: Validate and Reproduce
 **Goal:** Account for eight Qodo findings and existing CI failures.
@@ -41,7 +42,15 @@
 
 - [x] Run scoped regressions and Bandit using the project virtual environment: 1,286 integrated scoped tests passed with zero skips; 255 Config tests, 69 docs/ratchet tests, 86 additional CI gate tests and 65 separate shared Jobs tests passed; 37 integration tests collected by marker; all 14 production files compiled and Bandit reported zero findings/errors. Corrected source/test Ruff scopes and whitespace checks passed.
 - [x] Independently review the corrections and address validated findings. The new stop-during-manager-initialization regression failed red and passed after adding the stop check before admission. Reviewer independently confirmed zero admissions after stop, 540 focused tests passed, and no remaining actionable findings.
-- [ ] Commit scoped changes with TASK-9935.4; push with an explicit lease matching the originally fetched PR head da6b00903ea4ac309b09e08ddbbef0261e606b9b.
-- [ ] Reply within each inline review thread and resolve addressed findings. Recheck for new Qodo comments and required checks on the final head.
+- [x] Commit scoped corrections as fda51e5d1ae03a763b74b95e4ea7292bd883f2b5 with TASK-9935.4; push with an explicit lease matching the originally fetched PR head da6b00903ea4ac309b09e08ddbbef0261e606b9b.
+- [x] Reply within all eight inline review threads and resolve addressed findings. Qodo's refreshed report on that published head has zero active findings; all seven required checks passed. Recheck feedback and gates again after rebasing.
 - [ ] Preserve the user-supplied Change summary; merge only the verified head after current dev and merge gates are satisfied.
 - [ ] Record merge evidence, complete Backlog, and remove only this completed plan. If external checks require a later continuation, keep the plan/task active and schedule a quiet thread follow-up.
+
+### 2026-10-04 Reverification
+
+- [x] Rebase all nine PR commits cleanly onto latest fetched dev bf8f2ad6a42ad6396376020876a5f6a709ec6b34. Range-diff confirms each rebased commit is patch-equivalent to its original.
+- [x] Rebased production head d395457272151acf143a4035c2adf1abc423a995: 1,286 scoped tests passed with zero skips, including official PostgreSQL fixtures. All 14 changed production files compiled; Bandit reported zero findings and zero errors.
+- [x] Reverify full Config and docs/ratchets: 324 passed (255 Config and 69 docs/ratchet cases), including strict docs compilation and published-snapshot contracts. Focused corrected-source/test Ruff passed; whitespace checks passed before publication. Verification logs: `/tmp/claims-pr3093-scoped-20261004.log`, `/tmp/claims-pr3093-config-docs-20261004.log`, `/tmp/bandit_claims_pr3093_20261004.json`.
+- [ ] Publish the rebased branch using an explicit lease against remote head fda51e5d1ae03a763b74b95e4ea7292bd883f2b5; wait for required checks and refreshed review on the new head.
+- [x] User explicitly approved automatic follow-up. The 10-minute thread heartbeat `claims-metrics-pr-3093-follow-up` is active, remains quiet on unchanged state, and stops after verified merge. No CI cancellation, hook bypass or admin merge is authorized.
