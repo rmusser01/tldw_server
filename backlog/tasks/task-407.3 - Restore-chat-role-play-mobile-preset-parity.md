@@ -33,11 +33,11 @@ Stage 3 implementation for the main /chat role-play preset plan: expose behavior
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 3 started after Stage 2 commit 0e2203094. Scope remains limited to mobile/casual access for main /chat role-play behavior templates, generation style, and active role-play recovery controls.
 
 Stage 3 implementation completed in the dedicated chat role-play remediation worktree. Mobile overflow now exposes System prompts and Generation style actions, routes them through reusable role-play action callbacks, and carries an optional Role-play setup callback for Stage 4. Active role-play chips remain visible and actionable on mobile without relying on desktop-only advanced controls. Verification: focused Stage 3 Vitest suite passed (4 files, 31 tests); locale JSON parse check passed; git diff --check passed. Full tsc still fails on existing unrelated baseline files. Browser verification for 127.0.0.1:3001/chat remains blocked by the in-app browser security policy; CDP was not used because the policy explicitly prohibited routing around the blocked target. Bandit is not applicable because this stage only touches frontend TypeScript/React/locale files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

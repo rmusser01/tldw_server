@@ -8926,6 +8926,50 @@ class SyncDatabase:
             raise SyncStoreError(f"Sync envelope not found for server cursor: {server_cursor}")
         return _envelope_from_row(row)
 
+    def has_pending_personal_context_authority(
+        self,
+        dataset_id: str,
+        *,
+        profile_id: str,
+        connection: Any | None = None,
+    ) -> bool:
+        """Return whether a staged home-authority row of the profile awaits finalization.
+
+        Args:
+            dataset_id: Sync dataset bound to the profile.
+            profile_id: Canonical profile whose relayed authority rows count.
+            connection: Optional open connection, so a caller already inside a
+                Sync transaction reads its own state; the caller keeps
+                ownership. Without one, the backend runs this single read on
+                a connection of its own.
+
+        Returns:
+            True when an accepted server-origin home-authority envelope for the
+            profile is still ``pending``; False otherwise.
+        """
+
+        rows = self.execute(
+            """SELECT routing_metadata_json FROM sync_envelopes
+                WHERE dataset_id = ? AND device_id = 'server-origin'
+                  AND status = 'accepted' AND apply_status = 'pending'""",
+            (dataset_id,),
+            connection=connection,
+        ).rows
+        for row in rows or []:
+            routing = decode_json(row.get("routing_metadata_json"), default={})
+            authority = (
+                routing.get("personal_context_authority")
+                if isinstance(routing, dict)
+                else None
+            )
+            if (
+                isinstance(authority, dict)
+                and authority.get("role") == "home_authority"
+                and routing.get("profile_id") == profile_id
+            ):
+                return True
+        return False
+
     def discard_pending_personal_context_authority(
         self,
         *,

@@ -31,11 +31,13 @@ Verify and address validated Chatbooks module review findings: v1.1 manifest pat
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Chatbooks fixes for v1.1 explicit import paths, cancellation propagation, OpenWebUI JSON/SQLite import bounds, async quota admission, and safe legacy cleanup. Async Chatbooks export/import now checks tier quota and inserts the pending Chatbooks job row inside one database transaction; endpoint preflight remains for fast feedback. Updated stale v1.1 async test from the removed Prompt Studio path to the current core Jobs payload path.
 
 Documentation update not required: changes harden existing Chatbooks behavior and are covered by regression tests/task notes without changing public request or response schemas.
-<!-- SECTION:NOTES:END -->
+
+Post-PR review comments addressed on rebased dev: synchronous export/import now run service-level Chatbooks quota admission; quota rejections surface as structured QuotaExceededError instead of endpoint string matching; PostgreSQL count-and-insert admission takes a per-user advisory transaction lock; manifest import file resolution uses a single explicit-path index for the import; async export accepts content_selections=None as an empty selection.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -52,9 +54,3 @@ Validated and addressed the Chatbooks review findings and follow-up PR comments.
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Post-PR review comments addressed on rebased dev: synchronous export/import now run service-level Chatbooks quota admission; quota rejections surface as structured QuotaExceededError instead of endpoint string matching; PostgreSQL count-and-insert admission takes a per-user advisory transaction lock; manifest import file resolution uses a single explicit-path index for the import; async export accepts content_selections=None as an empty selection.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

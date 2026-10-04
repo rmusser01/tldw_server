@@ -34,20 +34,14 @@ The broad Discord-to-Jobs verification slice stops in the Embeddings property te
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Added the existing Hypothesis function-scoped fixture health-check suppression to the cache TTL property test that uses monkeypatch.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed the Embeddings cache TTL property test by adding the same HealthCheck.function_scoped_fixture suppression already used by neighboring fixture-backed property tests. Verification: focused cache TTL property test passed (1 passed); focused touched-scope command passed (44 passed); Discord-to-Jobs slice passed (3247 passed, 156 skipped); git diff --check passed; Bandit on touched tests reported no findings.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

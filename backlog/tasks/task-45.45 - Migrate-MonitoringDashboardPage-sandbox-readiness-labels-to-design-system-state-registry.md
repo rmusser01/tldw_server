@@ -50,7 +50,7 @@ Replace the admin MonitoringDashboardPage sandbox runtime summary labels for rea
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the MonitoringDashboardPage readiness summary through getDesignSystemState for ready and unavailable. The RED Vitest failed on the mocked registry labels before implementation, then passed after wiring the labels through the registry. The product-state verifier also required removing hardcoded fallback literals and refreshing existing MonitoringDashboardPage AntD Alert baseline IDs that changed due to line movement; no AntD Alert migration was included in this slice.
 
 PR review follow-up: Gemini flagged empty-string state-label fallbacks as confusing if the registry lookup fails. Reopened the task to change the fallback to descriptive lowercase keys and add focused coverage for missing registry entries.
@@ -58,7 +58,7 @@ PR review follow-up: Gemini flagged empty-string state-label fallbacks as confus
 Review follow-up implemented: ready/unavailable fallbacks now use descriptive lowercase state keys instead of empty strings, with focused coverage for missing registry entries.
 
 Second PR review follow-up implemented: moved readiness label lookups to module-scope constants and tightened readiness count assertions so each count is checked inside its matching design-system label container.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

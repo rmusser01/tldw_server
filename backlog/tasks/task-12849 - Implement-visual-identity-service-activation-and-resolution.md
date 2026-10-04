@@ -33,8 +33,6 @@ priority: high
 Stage 4 service activation and resolution for visual identity expression packs: pack shell creation, atomic draft activation into immutable versions, optional character/persona binding, actor ownership validation, deterministic expression resolution, legacy mood fallback, and service/repository regression coverage.
 <!-- SECTION:DESCRIPTION:END -->
 
-<!-- SECTION:DESCRIPTION:END -->
-
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 <!-- AC:END -->
@@ -47,7 +45,6 @@ Stage 4: add VisualIdentityService for pack creation, draft activation into immu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - TDD RED captured before production implementation:
   - `test_visual_identity_service.py` failed collection with `ModuleNotFoundError: No module named 'tldw_Server_API.app.core.Visual_Identities.service'`.
@@ -63,12 +60,11 @@ Stage 4: add VisualIdentityService for pack creation, draft activation into immu
 - Added legacy character mood fallback before placeholder for character cards using supported mood image maps in `extensions.tldw.mood_images`, `extensions.tldw.moodImages`, extension-root `mood_images`/`moodImages`, and top-level card `mood_images`/`moodImages`.
 - Updated neutral alias fallback to check raw stored `default` and `normal` asset keys as well as normalized `neutral`.
 - Follow-up verification recorded: focused service pytest, full Visual_Identities pytest, Bandit JSON report with no findings, and range diff whitespace check.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Quality review follow-up: preserved existing pack title, description, source kind, and source context during existing-pack draft activation unless replacement values are explicitly supplied; new-pack activation still derives metadata from the draft.
 
 Quality review follow-up: legacy character mood fallback now checks manual override before requested, mood, and default expressions.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

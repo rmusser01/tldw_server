@@ -109,6 +109,8 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/share-links$/.test(pathname)) return requestMethod === "POST"
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/share-links\/[^/]+$/.test(pathname)) return requestMethod === "DELETE"
   if (requestMethod === "GET" && (
+    /^\/api\/v1\/workspaces\/?$/.test(pathname) ||
+    /^\/api\/v1\/workspaces\/[^/]+\/(?:context|artifacts|notes)$/.test(pathname) ||
     /^\/api\/v1\/characters\/[^/]+\/?$/.test(pathname) ||
     /^\/api\/v1\/persona\/profiles\/[^/]+$/.test(pathname) ||
     /^\/api\/v1\/characters(?:\/search)?\/?$/.test(pathname) ||

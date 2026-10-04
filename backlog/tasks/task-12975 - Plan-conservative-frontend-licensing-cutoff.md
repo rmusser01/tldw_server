@@ -35,9 +35,9 @@ Create the execution-ready pre-counsel implementation plan for the approved Peri
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased planning artifacts onto latest origin/dev, re-verified public refs on 2026-07-20, and corrected colliding task IDs before execution. Bandit is not applicable to Markdown-only planning work.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

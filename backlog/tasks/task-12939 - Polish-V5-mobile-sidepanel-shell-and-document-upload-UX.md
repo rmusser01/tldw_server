@@ -33,9 +33,9 @@ Docs/superpowers/plans/2026-07-09-v5-mobile-sidepanel-polish.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Removed the WebUI shell chrome from the sidepanel debug route, trimmed redundant healthy connected empty-state copy, reduced compact V5 composer chrome, made V5 document attachment explicit via the existing context file picker, and added regression coverage for the sidepanel/mobile rendering behavior.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

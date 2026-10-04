@@ -43,7 +43,7 @@ Source: synthesis F37
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed in c49b56c281. Design record: Docs/ADR/048-mcp-admin-claims.md.
 
 AC1: one predicate, protocol_types.metadata_has_admin_claims, reached by modules through BaseModule.caller_is_admin. media, notes, kanban and sandbox lost their own definitions entirely; mcp_discovery keeps its user_roles table lookup as a fallback but its claims half is now the shared predicate -- discovery is the only site that can fall back to a stored role assignment when the request carries no admin claim, so that half is genuinely its own.
@@ -59,7 +59,7 @@ BREAKING CHANGE: an API key whose only admin-ish claim is system.configure loses
 Follow-up filed as TASK-13345: _PLATFORM_ADMIN_ROLES is still spelled out identically in AuthNZ/auth_principal_resolver.py, AuthNZ/byok_helpers.py and Claims_Extraction/claims_service.py. MCP imports the first rather than making a fourth copy, but three independent definitions remain -- the same divergence risk one level up.
 
 Verification: MCP_unified in-app 13 failed / 3328 passed vs baseline 13 / 3281, identical failure set. tests/MCP + MCP_Hub + MCP_unified 4 failed, unchanged (the one new failure was the over-grant test above, then updated). tests/AuthNZ_Unit/test_auth_principal_resolver.py and tests/Agent_Client_Protocol/test_acp_endpoints.py both pass, 38 tests. Bandit clean over all seven touched files (run via uvx; bandit is CI-only, not a declared local dependency).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -36,7 +36,7 @@ Re-check PR 2332 after the latest dev changes, rebase the scheduled tasks Phase 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebase complete: codex/scheduled-tasks-phase4-api-contract was rebased onto latest origin/dev.
 Resolved scheduled task create/results panel conflicts while preserving the latest dev design-system primitives and PR copy.
 Validated outstanding review feedback after rebase: Qodo defensive-copy and router-link comments were still applicable.
@@ -46,7 +46,7 @@ Push: force-pushed with lease to origin/codex/scheduled-tasks-phase4-api-contrac
 PR comments: Qodo review threads PRRT_kwDOL1aGf86IQvNY and PRRT_kwDOL1aGf86IQvNd resolved via GitHub API; follow-up GraphQL audit showed all review threads resolved.
 PR checks: post-push gh pr checks still reports new checks pending/queued and CodeRabbit pass; no new failing job logs are available to fix yet.
 Bandit: not run for this follow-up because touched source is TypeScript/UI plus Backlog metadata, not Python backend code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

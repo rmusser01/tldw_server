@@ -41,12 +41,12 @@ Docs/superpowers/plans/2026-05-31-mcp-unified-stage4n-external-lifecycle-runtime
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added GatewayExternalRuntimeManager with injected transport, credential broker, and installer contracts.
 - Added FastAPI in-process lifecycle routes; durable CLI control remains deferred by design.
 - Addressed PR review feedback after rebasing on origin/dev: runtime routes now use Pydantic response models; external execute enforces server/tool policy before transport calls; credential broker calls no longer deep-copy noncopyable policy/context objects; health-check failures produce unhealthy status rows instead of crashing; unknown virtual tools map to a 404-style reason; transport call failures are wrapped in structured runtime errors; lifecycle/install/broker/execute paths no longer hold the manager lock across external I/O; route-reserved external server ids are rejected.
 - Updated verification: focused pytest suite passed (144 tests), expanded MCP pytest suite passed (228 tests), Ruff passed, Bandit JSON has zero results at /tmp/bandit_mcp_stage4n_external_runtime.json, and git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

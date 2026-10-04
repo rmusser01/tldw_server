@@ -13,6 +13,44 @@ from math import isfinite
 from typing import Any
 
 
+def supports_saved_character_extensions(extensions: Any) -> bool:
+    """Accept only prompt presets and recognized generation metadata in saved context.
+
+    Generation values are carried for provenance; normalized snapshot sampling
+    remains authoritative and is never recomputed from this metadata.
+
+    Args:
+        extensions: Saved character extension dictionary. Top-level prompt
+            presets and a ``tldw`` dictionary containing prompt presets or a
+            generation dictionary with recognized sampling keys are supported.
+
+    Returns:
+        True when all extension carriers and keys are supported; False for
+        unknown keys or invalid carrier types. Generation values are not
+        normalized or used to replace authoritative snapshot sampling.
+    """
+    if not isinstance(extensions, dict) or set(extensions) - {"prompt_preset", "promptPreset", "tldw"}:
+        return False
+    tldw = extensions.get("tldw", {})
+    if not isinstance(tldw, dict) or set(tldw) - {"prompt_preset", "promptPreset", "generation"}:
+        return False
+    if "generation" not in tldw:
+        return True
+    generation = tldw["generation"]
+    return isinstance(generation, dict) and not set(generation) - {
+        "temperature",
+        "top_p",
+        "topP",
+        "repetition_penalty",
+        "repetitionPenalty",
+        "stop",
+        "stop_strings",
+        "stopStrings",
+        "stop_sequences",
+        "stopSequences",
+    }
+
+
 def _coerce_float(value: Any, *, minimum: float, maximum: float) -> float | None:
     if isinstance(value, bool):
         return None
@@ -147,4 +185,3 @@ def resolve_character_generation_settings(
         resolved["stop"] = stop
 
     return resolved
-

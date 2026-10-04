@@ -52,7 +52,7 @@ PR review follow-up plan for #1427:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented native Kanban due-date editing with a local helper module. CardDetailPanel now stores the datetime-local string plus an explicit touched flag so unchanged existing due dates are not rewritten when saving unrelated card fields. Changed due dates are parsed as local datetime-local values and emitted as ISO strings; cleared values emit null.
 
 PR review follow-up: verified the stale touched-state finding by adding a regression test that first failed because a due-date save followed by a title save in the same open drawer resent due_date. Fixed it by allowing CardDetailPanel.onSave to return a promise, awaiting the parent update, resetting dueDateTouched only after save success, and having BoardView use mutateAsync plus setSelectedCard(updatedCard) so the open panel receives the saved card. Also replaced numeric Drawer size with the repo's AntD 6 pixel-width pattern, styles.wrapper.width, preserving the 400px drawer width without using the deprecated width prop.
@@ -68,7 +68,7 @@ bun run lint from apps/tldw-frontend exited 0 with the existing 131-warning base
 Bandit skipped for this task because the touched scope is TypeScript, tests, documentation, and Backlog metadata only; no Python files changed.
 
 Final review-fix verification: focused Kanban Vitest passed 2 files and 9 tests; git diff --check exited 0; exact dayjs import scan still reports only the 5 deferred Media/ReadingList/Items lines; bun run lint exited 0 with the existing 131-warning baseline; filtered TypeScript diagnostics for CardDetailPanel, BoardView, kanbanDateTime, and KanbanPlayground returned no matches. The WebUI compile was run after the code fixes and exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

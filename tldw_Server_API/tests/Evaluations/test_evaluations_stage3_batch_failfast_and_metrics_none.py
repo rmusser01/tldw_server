@@ -265,8 +265,9 @@ def test_batch_parallel_strict_fail_fast_cancels_remaining(monkeypatch):
             is_batch: bool,
             tokens_requested: int,
             estimated_cost: float,
+            evaluations_requested: int = 1,
         ):
-            _ = (endpoint, is_batch, tokens_requested, estimated_cost)
+            _ = (endpoint, is_batch, tokens_requested, estimated_cost, evaluations_requested)
             return True, {"retry_after": 0}
 
     started_items: list[int] = []
@@ -378,8 +379,9 @@ def test_batch_parallel_sanitizes_item_failure(monkeypatch):
             is_batch: bool,
             tokens_requested: int,
             estimated_cost: float,
+            evaluations_requested: int = 1,
         ):
-            _ = (endpoint, is_batch, tokens_requested, estimated_cost)
+            _ = (endpoint, is_batch, tokens_requested, estimated_cost, evaluations_requested)
             return True, {"retry_after": 0}
 
     class _Service:

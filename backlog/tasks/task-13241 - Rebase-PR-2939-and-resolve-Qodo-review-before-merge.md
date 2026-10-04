@@ -36,7 +36,7 @@ User requests rebasing PR2939 onto latest dev, addressing all Qodo issues/commen
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased original remote head 5065421d801490bd45a35d355b7eaa6f00e44b7f onto dev 9da94ebcb41ba45d279ab707ec92a285d31ba5c7, 17 commits ahead of the prior base. All nine patches remained identical by range-diff. Qodo posted seven findings: queued macro defaults, silent configuration fallback, DB-layer ownership, migration/test documentation, test annotations, and private array mechanics. Each has a verified repair or supported disposition in Docs/Reviews/PR_2939_QODO_REBASE_2026_09_10.md.
 
 Macro RED: 16 failures and 6 explicit-model passes; GREEN: 28 macro tests. Configuration diagnostics RED: 2 failures; GREEN: 30 target tests. Removing the production array wrapper triggers the two intended mutation failures; clean array tests pass. Session SQL is now DB-owned and retains caller transaction boundaries. CI shard omission and inherited media/character/workspace assignment drift repaired; all 57 workflow contracts pass.
@@ -54,7 +54,7 @@ Webhook compatibility follow-up complete: only admin-ui/lib/api-client.ts and it
 Verified merge into dev as 50c1f689575b1bc21ed3e78cdb193b03fe968cdd at 2026-09-10 13:19 UTC, using exact reviewed head c26b30c5cb652cf47e139231923eabdb465fbac5 and the allowed merge-commit method without admin bypass. All seven required checks passed and Qodo reported zero bugs/rule violations with all threads resolved. The requester explicitly overrode the separate human-written-summary blocker and directed immediate merge; that override is recorded in the PR.
 
 Post-merge cleanup requested by the user: local dev fast-forwarded to the verified merge; the clean PR worktree and its generated dependencies/builds were removed; the merged local/remote feature branch and temporary pre-rebase backup were removed. All eight backup patches were verified equivalent to merged patches before deleting the backup. The completed follow-up automation was deleted. Original UAT and review evidence remain tracked; PR evidence links use the immutable reviewed commit. This closeout touches documentation/tracking only, so Python tests and Bandit need no repeat; whitespace and state checks verify the cleanup.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

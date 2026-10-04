@@ -36,7 +36,7 @@ Implement the first #1479 slice: define and enforce a structured ACP orchestrati
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented tldw_Server_API/app/core/Agent_Orchestration/completion_signals.py to validate ACP task completion signals from direct taskCompletion/completionSignal fields or explicit <acp-task-completion>{...}</acp-task-completion> output markers.
 
 Updated dispatch_run in tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py to inject the required completion marker instructions into task prompts, reject returned prompts without a valid accepted signal, fail the run with a visible validation error, and move invalid runs to triage instead of review/complete.
@@ -50,7 +50,7 @@ Verification: source .venv/bin/activate && python -m pytest tldw_Server_API/test
 Posted GitHub issue #1479 progress comment: https://github.com/rmusser01/tldw_server/issues/1479#issuecomment-4414134268
 
 Known remaining integration note: GitHub issue #1479 is not closed locally because these changes have not been committed, pushed, or merged yet.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

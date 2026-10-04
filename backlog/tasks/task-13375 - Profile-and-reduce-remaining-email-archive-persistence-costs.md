@@ -25,9 +25,9 @@ Continue authorized synthetic email ingestion work after TASK-13373 worker reuse
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design: Docs/Design/Email_Archive_Native_Transaction_2026-09-26.md. Completed task-specific implementation plan removed. Measured optimized worker profiles before and after: SQLite configuration calls 1814 to 1214; PostgreSQL scope/connection calls 1200 to 600 across 300 initial messages. Diagnostic timing excludes factory and retries and is not a reference throughput result. Red/green real SQLite shared-connection and late-failure tests failed before implementation; two PostgreSQL late Python/SQL cases failed with committed graph 1 instead of 0. Final focused SQLite/archive/chunk/native-graph suite 25 passed; sequence/FTS/native rollback suite 5 passed,4 live PostgreSQL. Native failure rolls back graph while Media remains committed; declined overwrite, retry IDs, metadata fallback, scope, thread and repeated cancellation regressions passed. Independent code review found no important issues. Guarded baseline/after and diagnostic HTTP passes ran SQLite then PG: all 300 child/search IDs, detail subjects,100 retry IDs, other-user search/detail denial and zero model/network attempts passed. Direct PG forced RLS owner 300/other 0 with non-superuser/non-bypass role. Unprofiled SQLite baseline 70.46/after 59.44; PG 20.28/39.94. No causal SQLite speedup or sustained target claim. Production Bandit 0 findings/errors without exclusions; touched tests 0 with B 101 excluded for assertions only. Touched test Ruff clean; source 13 inherited findings,0 new vsHEAD; new/extended tests formatted. Whitespace clean. Four generated PG database/role rounds removed using helper catalog checks; private manifest absent; eight synthetic roots removed after shutdown. Shared fixture postgres 18 service remains running with no CPU/memory limit. Five JSON evidence artifacts and Ops report capture results. Commit this completed task with its implementation and evidence.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

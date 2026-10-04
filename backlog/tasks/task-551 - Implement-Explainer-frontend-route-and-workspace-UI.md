@@ -35,9 +35,9 @@ Implement Task 4 from Docs/superpowers/plans/2026-06-09-explainer-workspace-impl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Task 4 from the Explainer workspace plan: typed frontend client and OpenAPI guard paths, shared and hosted route wrappers, extension navigation, route metadata, explicit Goal/Sources tabs, source picker/search, selected-source management, tree/detail UI, generation job polling, and Chatbook export action. Self-review removed unwired secondary detail actions and made source removal key by source type plus source id.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -31,9 +31,9 @@ Docs/superpowers/plans/2026-06-03-mcp-default-profile-tooling-presets-implementa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: extended the gateway CLI list-presets package test to run `python -m mcp_unified.gateway.cli list-presets`; focused pytest failed for the intended reason with `KeyError: 'tooling'`. GREEN: added compact preset tooling summary in `mcp_unified/gateway/cli.py` and documented profile tooling discovery/progressive disclosure in package docs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -17,6 +17,9 @@ from tldw_Server_API.app.core.Infrastructure.distributed_lock import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 # ======================================================================
 # FileLock tests
 # ======================================================================
@@ -86,6 +89,7 @@ class TestFileLockAcquireRelease:
             lock_calls = 0
 
             def _contended_once(fd: int) -> None:
+                """Refuse the reacquire's first lock attempt, then lock for real."""
                 nonlocal lock_calls
                 lock_calls += 1
                 if lock_calls == 1:

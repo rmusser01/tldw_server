@@ -31,9 +31,9 @@ Task 9 slice from the unified onboarding plan. Align Getting Started docs, profi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Closed as fulfilled by replacement docs/startup task TASK-498. TASK-498 aligned source and published Getting Started docs, onboarding manifest parity, Makefile/start messaging, and CLI profile verification around WebUI first-chat completion and multi-user operator exit.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

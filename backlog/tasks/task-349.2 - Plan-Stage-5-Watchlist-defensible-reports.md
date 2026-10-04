@@ -37,9 +37,9 @@ Create the implementation plan for Stage 5 of first-class Watchlists: turn gener
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Stage 5 implementation plan at Docs/superpowers/plans/2026-05-15-first-class-watchlists-stage5-defensible-reports-plan.md. Created child tasks TASK-349.2.1 through TASK-349.2.5 for backend evidence contract, output snapshot APIs, frontend contract, Reports tab builder, and presets/docs/real-server QA. Verification: git diff --check passed. Bandit not applicable because this planning slice changes docs/task files only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

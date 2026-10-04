@@ -28,13 +28,13 @@ dependencies: []
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Log evidence (#3063 backend-required job 110569371819): the update went past the azure mirror (Ign after 20s), fetched archive.ubuntu.com backports and security InRelease, then stalled from 20:40:25 until the 21:09:43 cancel. The data trickled, so Acquire::https::Timeout=20 never fired. Fix in .github/actions/setup-ffmpeg/action.yml: apt_bounded() runs each apt-get update/install under timeout --kill-after=15s 300, 3 attempts, dpkg --configure -a between attempts, and ::error:: after the last one. install now gets the same Acquire options, plus Acquire::Languages=none. Verified locally with a timeout(1) shim and a stub apt-get: a hung attempt is killed at the bound and the retry succeeds (rc 0); a persistent failure stops after 3 attempts with the error (rc 1). The YAML parses and the script passes bash -n. A container test against real apt couldn't run because the local Docker daemon was unresponsive. Bandit and docs not applicable (CI YAML only).
 
 Follow-up on #3075: the bounded helper now lives in .github/actions/apt-bounded.sh and is sourced by setup-ffmpeg and wait-for-postgres, which had the same unbounded apt-get update. test_required_workflow_contracts.py asserts the new shape, and the new tests/CI/test_apt_bounded_helper.py runs the real helper with stubs (2 passed). CI contract file: 52 passed locally; test_critical_e2e_budget... fails only because this Mac has no python binary.
 
 Qodo on #3075: retries could add up past the job timeouts, and the dpkg recovery between attempts had no bound. apt-bounded.sh now shares one deadline across update and install (APT_TOTAL_SECONDS default 600, below the shortest 15-minute job), caps each attempt at min(240s, remaining) and dpkg --configure -a at min(60s, remaining). New behavior tests cover the deadline stopping retries and a hanging dpkg being cut off. test_apt_bounded_helper.py plus the 3 contract tests: 7 passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

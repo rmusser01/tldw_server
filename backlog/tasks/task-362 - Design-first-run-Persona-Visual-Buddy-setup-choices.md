@@ -47,7 +47,7 @@ Create the design/spec for GitHub issue #1695. The approved direction is a reusa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Design decisions captured: reusable setup-choice component in Visuals and wizard; setup-needed means no active visual pack; default path copies recommended starter first with optional picker; copied defaults remain inactive drafts and are selected for review; wizard card is optional and route-oriented; blank/import route to existing controls.
 - Spec artifact: `Docs/superpowers/specs/2026-05-15-persona-visual-buddy-setup-choices-design.md`
 - Spec review iteration 1 found four ambiguities: recommended starter field assumptions, wizard unknown-state behavior, compact component handler boundaries, and service/type test coverage. Patched the spec to use catalog order for V1 recommendation, route-only compact wizard behavior when state is unknown, optional mutation handlers only for editor use, and focused service tests.
@@ -55,7 +55,7 @@ Create the design/spec for GitHub issue #1695. The approved direction is a reusa
 - Verification: `git diff --check` passed in `.worktrees/persona-visual-setup-choices`. Bandit not applicable because this task changes Markdown/Backlog documentation only.
 - Additional human-requested design critique before planning found three implementation risks and patched the spec: avoid relying on `loadPacks()` old-selection preference after starter copy, avoid adding a new route focus query for V1, and keep the wizard generic when active visual state is unknown instead of adding duplicate visual-pack loading.
 - Second human-requested design critique found one blocking route-integration issue: while assistant setup is required, `sidepanel-persona.tsx` renders `AssistantSetupWizard` instead of `PersonaGardenTabs`, so a wizard action that only changes `tab=visuals` would not reveal `VisualPackEditor`. Patched the spec to require a route-level visual setup detour modeled on existing setup detours, plus tests for detour entry/return.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

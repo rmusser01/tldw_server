@@ -57,7 +57,7 @@ Remediate TASK-13161 by routing every Personal Context pull shape through one ex
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Review round 8 corrects the narrow home-authority finalizer's backend representation check. PostgreSQL `BOOLEAN` rows may supply exact native `bool` values while SQLite supplies exact integer `0`/`1`; both are now normalized once to `bool` before the transactional projection write. Strings, floats, `Decimal`, NumPy scalars, `None`, and coercible objects remain rejected without changing receipt, authority-tag, current-head, rollback, or idempotent-retry behavior.
 - Round-8 RED was `2 failed, 8 passed`: only native PostgreSQL `False` and `True` reached the existing `personal_context_authority_finalize_raced` rejection, while SQLite integers and all malformed/coercible values already behaved as required. GREEN verification passed the focused backend matrix `10`, authority identity plus complete recovery budget `184`, transport/relay recovery/relay compatibility `55`, and Sync service `165`. Scoped Ruff passed; Bandit exited 0 with only its existing comment-parser and accepted `nosec B608` warnings; `git diff --check` passed. The separately proven baseline PostgreSQL link-binding fake remains excluded because it fails before this finalization seam. No general lesson, schema, migration, dependency, protocol, activation, or ADR change was warranted; ADR-002 remains governing.
 - Reopened for review round 8 after the narrow authority finalizer was found to assume SQLite's integer representation for `deleted`. Psycopg returns PostgreSQL `BOOLEAN` columns as native `bool`, so an authenticated PostgreSQL authority row could reach finalization and still fail as raced before projection. The scoped remediation normalizes only exact `bool` or exact integer `0`/`1`; coercible and malformed values remain fail-closed.
@@ -89,7 +89,7 @@ Remediate TASK-13161 by routing every Personal Context pull shape through one ex
 Reopened for review round 9 after PostgreSQL binding analysis showed the normalized authority deletion flag was converted back to integer 0/1 at both the staged sync_envelopes INSERT and sync_object_state projection UPSERT. PostgreSQL BOOLEAN rejects those bound integers and rolls back otherwise valid authority stage/finalize transactions; round 9 will reproduce the actual translated parameter seam before normalizing both writes to native bool without changing the strict read gate.
 
 Review round 9 binds the existing boolean deleted fields directly at the staged sync_envelopes INSERT and finalized sync_object_state UPSERT. Exact RED was 4 failures at prepared PostgreSQL parameters 32 and 6 for live/tombstone; GREEN passed 14 focused decoder/stage/finalize cases, 4 SQLite object-state cases, 184 authority/budget, 55 transport/relay, and 165 service tests. Ruff, Bandit, and diff checks passed. The strict read gate, rollback/idempotency checks, and all authority proofs are unchanged. ADR-002 remains governing; no schema, protocol, dependency, activation, or general lesson change was needed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

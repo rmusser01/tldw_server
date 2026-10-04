@@ -35,9 +35,9 @@ Design a proper rag.* MCP module that exposes existing RAG functionality through
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Code review requested via superpowers:requesting-code-review for range 5ec7168b10ad7ec4556bede67dec687505fb6721..c030227ef4d82115061f4bc587042b7485923976. Review found blockers around source authorization and unsupported scoped retrieval, plus important fixes for search-agent default suppression, /tools/execute wrapper compatibility, task metadata, current enabled module inventory, and SQL source-health semantics. Updated the design spec to add per-source authorization/module enablement requirements, fail-closed unsupported item-scope behavior, forced-off external/search-agent defaults, SQL Stage 1 deferral, current template module inventory, /tools/execute compatibility wording, and expanded testing/acceptance coverage. This is documentation-only work; Bandit is not applicable and is recorded as a non-code skip.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

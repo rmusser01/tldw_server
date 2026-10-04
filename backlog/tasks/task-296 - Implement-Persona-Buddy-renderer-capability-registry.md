@@ -43,7 +43,7 @@ Implementation completed from the reviewed staged plan. The transient plan file 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Worktree: <local_worktree_path_redacted>
 
 Branch: codex/persona-buddy-renderer-capability-spec
@@ -67,7 +67,7 @@ Task 5 plan: add BuddyShellHost regressions first; move pure visual asset helper
 Task 5 verification: focused frontend Vitest command passed with 4 files and 42 tests, then 43 tests after preserving supported-renderer onVisualRenderError callback behavior. git diff --check passed. Bandit not run for this slice because Task 5 touched only frontend TypeScript/React and Backlog notes, no backend production Python files. Red phase note: the added BuddyShellHost live2d and malformed sprite regression tests passed before production changes because current visible behavior already fell back and published diagnostics; the production change still replaces the weaker dock predicate with registry renderability semantics. Rebased commit is b1783dd07.
 
 Final verification after rebasing onto origin/dev: backend Persona visual tests passed with 63 passed and 5 warnings; focused frontend Vitest passed with 5 files and 45 tests, with the existing react-i18next test warning in BuddyShellHost; Bandit on touched backend production files wrote /tmp/bandit_persona_visual_renderer_capabilities.json with zero errors and zero findings; git diff --check origin/dev..HEAD passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

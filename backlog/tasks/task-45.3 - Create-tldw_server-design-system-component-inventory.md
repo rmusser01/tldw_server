@@ -47,7 +47,7 @@ Create the Stage 2 lightweight design-system inventory from the tldw WebUI desig
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after PR #1272 merged into dev at merge commit 5aa53a31d277a0b4126161aa8053fd8c322e5316. Work is isolated in .worktrees/tldw-design-system-inventory on branch codex/tldw-design-system-inventory from origin/dev.
 
 Created Docs/Design/tldw_web_design_system_inventory.md. The inventory records canonical owners, near-duplicates, proof-surface consumers, migration targets, non-goals, and the first Chat/Playground migration queue. Updated Docs/Design/tldw_web_design_system_contract.md to link the inventory from Stage 2.
@@ -55,7 +55,7 @@ Created Docs/Design/tldw_web_design_system_inventory.md. The inventory records c
 Verification: rg checks confirmed all required inventory categories and the contract link. awk line-length scan reported no lines over 120 characters in the inventory. git diff --check passed. Bandit skipped because this task touched documentation and Backlog metadata only; no Python code was touched.
 
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1286
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

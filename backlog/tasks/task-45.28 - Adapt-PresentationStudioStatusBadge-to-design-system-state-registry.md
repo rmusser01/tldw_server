@@ -36,9 +36,9 @@ Migrate the Presentation Studio asset status badge from direct variant mapping t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented with TDD: added a failing adapter test proving PresentationStudioStatusBadge calls getDesignSystemState for missing/ready/stale/generating/failed/nullish statuses, then routed the component through getBadgeVariantForDesignSystemSeverity while preserving Badge dot, sm size, className, and visible labels. Verification: focused PresentationStudioStatusBadge test passed; product-state guard unit test passed; verify:design-system-state passed; git diff --check passed. Repo-wide tsc remains red on unrelated existing UI type debt and produced no diagnostics for PresentationStudioStatusBadge or its new test. Bandit skipped because touched implementation is TS/TSX/JSON/Backlog only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

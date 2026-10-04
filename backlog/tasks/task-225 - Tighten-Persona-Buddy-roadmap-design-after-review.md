@@ -51,7 +51,7 @@ Patch the approved Persona/Buddy assistant maturity roadmap spec with the self-r
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Patched `Docs/superpowers/specs/2026-05-10-persona-buddy-assistant-maturity-roadmap-design.md` with stronger Stage 0 contract/evidence deliverables and a minimum report shape.
 - Clarified Stage 1 as reliability diagnostics, recovery, copy, and tests only; new runtime triggers, renderer work, and Persona Chat intelligence stay out of the first implementation slice.
 - Revised issue guidance so only the epic plus Stage 0 audit issue are immediate; candidate child issues are created only after audit evidence identifies concrete gaps.
@@ -60,7 +60,7 @@ Patch the approved Persona/Buddy assistant maturity roadmap spec with the self-r
 - Added human error analysis and representative traces before Stage 2 optional LLM judges/eval recipes.
 - Verification: `git diff --check` passed; targeted `rg` checks confirmed the new design gates are present.
 - Bandit: skipped because this is a docs/backlog-only follow-up with no touched Python code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

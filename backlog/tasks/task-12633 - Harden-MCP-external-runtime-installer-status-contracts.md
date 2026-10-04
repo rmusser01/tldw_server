@@ -37,9 +37,9 @@ Docs/superpowers/plans/2026-06-01-mcp-external-runtime-installer-status-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design approved by user on 2026-06-01. Real third-party install/update execution, durable lifecycle CLI controls, frontend changes, and WebSocket upstream transport are out of scope. PR #2209 review follow-up addressed Qodo/cubic secret-logging feedback, Qodo helper-docstring feedback, and Qodo installer-status timeout feedback after rebasing on latest dev.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

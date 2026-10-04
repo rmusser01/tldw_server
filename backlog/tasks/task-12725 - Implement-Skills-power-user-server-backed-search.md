@@ -49,13 +49,9 @@ Docs/Plans/IMPLEMENTATION_PLAN_skills_power_user_server_search_TASK_2342.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Review follow-up: Gemini requested debouncing Skills search input and moving page reset from onChange to a debounced-query effect. Reopened TASK-2342 for the PR review fix.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

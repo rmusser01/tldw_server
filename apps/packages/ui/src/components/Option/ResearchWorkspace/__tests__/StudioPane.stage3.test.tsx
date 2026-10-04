@@ -1335,7 +1335,7 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     renderExpandedStudioPane()
 
     await waitFor(() => {
-      expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("kitten_tts")
+      expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("kitten_tts", undefined)
       expect(mockSetAudioSettings).toHaveBeenCalledWith(
         expect.objectContaining({ voice: "Bella" })
       )
@@ -1356,7 +1356,7 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     renderExpandedStudioPane()
     await Promise.resolve()
 
-    expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("kitten_tts")
+    expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("kitten_tts", undefined)
     expect(mockSetAudioSettings).not.toHaveBeenCalled()
   })
 
@@ -1431,12 +1431,12 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     }
     expect(searchModeInput).toBeDisabled()
 
-    const enableGenerationRow = screen.getByText("Enable generation").closest("div")
-    const generationSwitch = enableGenerationRow?.querySelector(
-      "button[role='switch']"
-    ) as HTMLButtonElement | null
-    expect(generationSwitch).toBeTruthy()
-    expect(generationSwitch).toBeDisabled()
+    expect(screen.queryByText("Enable generation")).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Studio outputs generate an answer using the selected model and generation settings."
+      )
+    ).toBeInTheDocument()
 
     const enableCitationsRow = screen.getByText("Enable citations").closest("div")
     const citationsSwitch = enableCitationsRow?.querySelector(

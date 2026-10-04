@@ -284,13 +284,17 @@ vi.mock("@/hooks/chat/useChatBaseState", () => ({
 
 vi.mock("@/hooks/chat/useSelectedModel", () => ({
   useSelectedModel: () => ({
-    selectedModel: "model-1",
+    selectedModel: mocks.storeState.selectedModel,
     setSelectedModel: vi.fn()
   })
 }))
 
 vi.mock("@/store/model", () => {
-  const state = { apiProvider: "provider-1", reset: vi.fn() }
+  const state = {
+    apiProvider: "provider-1", reset: vi.fn(),
+    activeSettingsScope: "global",
+    getEffectiveSettings: () => ({ apiProvider: "provider-1" })
+  }
   return {
     useStoreChatModelSettings: Object.assign(() => state, {
       getState: () => state
@@ -363,8 +367,10 @@ vi.mock("@/services/model-settings", () => ({
 vi.mock("@/models", async () => {
   const { ChatTldw } = await import("@/models/ChatTldw")
   return {
-    pageAssistModel: async (options: any) =>
-      new ChatTldw({ ...options, temperature: 0.23 })
+    pageAssistModel: async (options: any) => {
+      await h1.beforeModel()
+      return new ChatTldw({ ...options, temperature: 0.23 })
+    }
   }
 })
 
@@ -460,7 +466,8 @@ const h1 = vi.hoisted(() => ({
   append: vi.fn(),
   wire: vi.fn(),
   recover: vi.fn(),
-  dismiss: vi.fn()
+  dismiss: vi.fn(),
+  beforeModel: vi.fn()
 }))
 vi.mock("@/hooks/chat/useHistorySelection", async (original) => ({
   ...(await original<any>()),
@@ -574,6 +581,7 @@ beforeEach(async () => {
   h1.auth = new AbortController()
   h1.native = false
   h1.persona = false
+  h1.beforeModel.mockReset()
   mocks.chatBaseState.historyId = "history-1"
   mocks.storeState.temporaryChat = false
   mocks.storeState.serverChatCharacterId = null
@@ -584,6 +592,7 @@ beforeEach(async () => {
   mocks.chatBaseState.selectedSystemPrompt = ""
   mocks.storeState.fileRetrievalEnabled = false
   mocks.storeState.toolChoice = "auto"
+  mocks.storeState.selectedModel = "model-1"
   mocks.storeState.serverChatId = "tracked-chat-1"
   mocks.chatBaseState.history = [
     { role: "user", content: "old question" },
@@ -694,6 +703,38 @@ it("mounted sidepanel normal submit uses canonical A1 selection and pre-admits i
     user.tldw_history_selection_v1.messages.map((row: any) => row.id)
   ).toEqual(["u-old", "a1"])
   expect(assistant.tldw_history_admission_v1.input_message_id).toBe(user.id)
+  expect(h1.append).toHaveBeenCalledTimes(2)
+})
+
+it.each(["model", "tools"])("rejects an ordinary sidepanel send after its global %s selector changes during preparation", async changed => {
+  const { result } = renderHook(() => useMessage())
+  h1.beforeModel.mockImplementation(() => {
+    if (changed === "model") mocks.storeState.selectedModel = "changed-model"
+    else mocks.storeState.toolChoice = "none"
+  })
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(h1.append).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+})
+
+it.each(["model", "tools"])("keeps an explicit sidepanel %s override after its unrelated global selector changes", async overridden => {
+  const { result } = renderHook(() => useMessage())
+  h1.beforeModel.mockImplementation(() => {
+    if (overridden === "model") mocks.storeState.selectedModel = "changed-model"
+    else mocks.storeState.toolChoice = "required"
+  })
+  await act(async () => {
+    await result.current.onSubmit({
+      message: "next", image: "",
+      requestOverrides: overridden === "model"
+        ? { selectedModel: "fixed-model" }
+        : { toolChoice: "none" }
+    })
+  })
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.wire.mock.calls[0][0].model).toBe(overridden === "model" ? "fixed-model" : "model-1")
   expect(h1.append).toHaveBeenCalledTimes(2)
 })
 

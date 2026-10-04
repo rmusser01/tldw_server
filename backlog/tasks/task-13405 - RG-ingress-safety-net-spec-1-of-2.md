@@ -27,7 +27,7 @@ Implements Docs/Design/2026-09-29-rg-ingress-safety-net-design.md in three PRs (
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR A (relief) implemented on fix/rg-safety-net-relief:
 - shared policy_eval (unknown policy → default → built-in default; requests inheritance; scope_pairs always keeps the caller's own bucket; token clamp);
 - memory and Redis backends never deny forever, resize buckets on reload, and memory evicts idle buckets;
@@ -71,7 +71,7 @@ Known skips and follow-ups:
 - TASK-13404: replay fixture breadth.
 
 Spec 2 (usage-quota posture) is next.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

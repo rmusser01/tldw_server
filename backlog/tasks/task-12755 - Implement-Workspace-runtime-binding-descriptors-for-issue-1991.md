@@ -37,7 +37,7 @@ Docs/superpowers/plans/2026-06-18-workspace-runtime-bindings.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan: Docs/superpowers/plans/2026-06-18-workspace-runtime-bindings.md
 
 Implemented runtime binding descriptor vocabulary and secret-safe normalizer, durable ChaChaNotes workspace_runtime_bindings persistence, Workspaces API schemas/routes, focused tests, and README documentation.
@@ -46,7 +46,7 @@ Verification:
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings_api.py tldw_Server_API/tests/Workspaces/test_workspace_project_roots_db.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -q -> 110 passed, 6 warnings
 - python -m bandit -r touched backend files -f json -o /tmp/bandit_workspace_runtime_bindings.json -> 0 results, 0 errors
 - git diff --check -> clean
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

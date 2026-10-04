@@ -37,7 +37,7 @@ modified_files:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 User approved text-only brainstorming direction: broad creative writing, proposed edits first, comments/annotations later. Scope is design/spec only; no implementation edits yet.
 
 Created Docs/superpowers/specs/2026-05-22-writing-playground-document-first-revisions-design.md.
@@ -51,7 +51,7 @@ Spec review loop:
 
 Verification: git diff --check and ASCII scan passed for the spec. Bandit is not applicable because this task only changes Markdown/backlog documentation.
 Post-approval design hardening review applied before implementation planning. Findings patched into the spec: status updated to approved-for-planning, advisory/non-mutating proposals separated from text-changing insert/replace proposals, raw/advisory proposal shape clarified, structured edit generation constrained to non-streaming or complete-response validation, proposal-only persistence explicitly tied to the current dirty/save path and expected-version conflict handling, and Stage 1 split into small implementation commits. Verification repeated: git diff --check and ASCII scan passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

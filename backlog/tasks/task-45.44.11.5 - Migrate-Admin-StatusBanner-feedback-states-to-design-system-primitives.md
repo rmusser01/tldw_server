@@ -34,7 +34,7 @@ Migrate Admin StatusBanner's product-state AntD Alert and Spin usages to canonic
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red: StatusBanner focused Vitest failed because the loading branch lacked a data-ds-component="LoadingState" ancestor and the error branch lacked a data-ds-component="Alert" ancestor.
 
 Green: replaced the AntD Spin loading branch with the design-system LoadingState primitive and replaced the AntD Alert error branch with the design-system Alert primitive while preserving sanitized error text and Retry callback behavior. Removed the two matching StatusBanner product-state baseline exceptions.
@@ -62,7 +62,7 @@ Review-fix verification:
 - bun run verify:design-system-state still exits 1 on unrelated current-dev IntegrationPolicyPanel/WritingActionBar/Notes/ResearchWorkspace drift; rg -n "StatusBanner" /tmp/design-system-status-banner-rebased.log returned no output.
 - NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false with touched-path filter for StatusBanner/baseline/task => exit 0 with no touched-path output.
 - git diff --check => exit 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

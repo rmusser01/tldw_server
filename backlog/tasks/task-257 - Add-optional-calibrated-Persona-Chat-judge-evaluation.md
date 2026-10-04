@@ -44,7 +44,7 @@ Implement the next Persona Chat Stage 2 slice from GitHub issue #1566. Add an op
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red/green: test_persona_chat_judge.py first failed with ModuleNotFoundError for persona_chat_judge, then passed after adding the helper. A second red/green pass tightened calibration so missing predictions are required only for dimensions represented by predictions or fixture labels. Verification: python -m pytest tldw_Server_API/tests/Evaluations/test_persona_chat_judge.py tldw_Server_API/tests/Persona/test_persona_chat_quality_fixtures.py -v passed with 11 tests; python -m bandit -r tldw_Server_API/app/core/Evaluations/persona_chat_judge.py reported no issues; git diff --check passed.
 
 Self-review fix: prompt generation now excludes fixture labels so calibration ground truth is not leaked to a judge. The regression test first failed on fixture_labels appearing in the prompt, then passed after removing that field; focused pytest, Bandit, and git diff --check were rerun successfully.
@@ -62,7 +62,7 @@ Additional review follow-up: added a focused regression test proving calibrate_p
 Reopened on 2026-05-12 because #1566 remains open for the next PR-sized optional judge execution slice. New subtask TASK-257.3 tracks GitHub issue #1591 for the offline executable adapter boundary.
 
 Stage 2 closeout update: issue #1566 and tracker #1543 were closed after PR #1603 merged the offline artifact CLI slice. TASK-257 remains the parent Backlog record for the optional Persona Chat judge V1 and now reflects the closed GitHub tracker state; later judge persistence/review surfaces should use new tasks/issues.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -24,11 +24,7 @@ Stabilize the current PR #2692 CI failures observed after cancelling old queued 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Root cause evidence:
 - Frontend Characters Harness failed on PR #2692 current head 8691b68f21 with two Manager.first-use.test.tsx route-focus expression tests timing out at their 10s per-test budget after the large harness had already run for several minutes. The same tests pass locally but take ~9s and ~7s in isolation, so the 10s budget was too tight under CI load.
 - UX Smoke Gate failed in chat-cockpit.real-server.spec.ts on the mobile cockpit test. Retries showed stale/remounted mobile rail DOM: tabpanel locator resolved to 0, Hide context rail detached during click, and a one-shot panel measurement saw an unmeasurable context panel.
@@ -44,16 +40,11 @@ Verification:
 - apps/tldw-frontend: bun run typecheck passed.
 - git diff --check passed.
 - Bandit not applicable: touched files are TypeScript tests and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

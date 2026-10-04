@@ -39,7 +39,7 @@ Create the approved brainstorming design spec for a conversation-first context w
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: reviewed the full markdown spec, checked terminology against the approved conversation-first model, confirmed key evidence and diagnostics coverage with rg, and ran git diff --check successfully. Bandit skipped because the touched scope is documentation and Backlog metadata only. Spec-review subagent was not dispatched because this session only permits subagents when the user explicitly asks for delegated agent work; performed local self-review instead.
 
 Reopened for a requested design review pass before implementation planning. Review found the spec should more explicitly guard against UI-computed context, undefined scope precedence, character-only preview reuse, and insufficient multi-scope validation scenarios.
@@ -49,7 +49,7 @@ Design review amendments added: backend source-of-truth requirement, non-charact
 User approved the reviewed design with one diff comment: prefer a popover that replaces or evolves the existing chat-composer character picker for the initial Conversation Context Panel placement. Reopened briefly to capture that design decision in the spec before implementation planning.
 
 Captured user diff comment in the spec: the preferred initial UI placement is a chat-composer Conversation Context popover that replaces or evolves the existing character picker. Verification: reviewed the amended open-question section and ran git diff --check successfully.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

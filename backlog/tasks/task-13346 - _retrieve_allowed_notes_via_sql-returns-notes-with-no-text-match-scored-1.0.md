@@ -32,7 +32,7 @@ Source: found while fixing TASK-13315 / synthesis F16.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Done in 4a20c4b23d.
 
 SCOPE CORRECTION: the task named only _retrieve_allowed_notes_via_sql, but its ChaChaNotes sibling _retrieve_allowed_notes_via_chacha had the identical defect, and that is the one actually used whenever chacha_db is configured -- i.e. the common deployment. Fixing only the named path would have left the live one broken.
@@ -48,7 +48,7 @@ DESIGN POINTS worth keeping:
 - An empty query scores every row equally at 1.0. There is no relevance to measure, and claiming a difference would be worse than claiming none.
 
 Verification: 8 new tests in tests/RAG_NEW/unit/test_notes_include_list_relevance.py, covering the four score combinations, the empty-query case, relevance reordering away from the database's last_modified order, the zero-scored row still being returned, and both include-list paths agreeing. RAG + RAG_NEW 12 failed / 2028 passed -- the same 12 pre-existing failures as before the change. test_restricted_postgres_media_retrieval.py hangs without a local Postgres and was excluded from both runs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

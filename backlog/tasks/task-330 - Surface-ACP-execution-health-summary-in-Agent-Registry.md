@@ -37,11 +37,11 @@ Expose the ACP execution-health summary contract from issue #1537 in the Agent R
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD checkpoint: added failing Agent Registry coverage for the admin ACP execution-health summary transport/rendering and unavailable-summary behavior; implemented the summary fetch/UI; focused Vitest is now green.
 
 Verification: ./node_modules/.bin/vitest run src/components/Option/AgentRegistry/__tests__/AgentRegistryPage.connection.test.tsx --maxWorkers=1 --no-file-parallelism passed; bun run verify:design-system-state passed; git diff --check passed. Full package tsc --noEmit -p tsconfig.json still fails on existing repo-wide TypeScript baseline errors outside this slice; no Python touched, so Bandit is not applicable.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

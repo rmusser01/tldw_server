@@ -33,11 +33,11 @@ Resolve actionable review feedback on PR #1582 for the /chat cockpit focus-mode 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR marked draft. Fixed reviewed items: cockpit i18n strings and status/session labels, model popover callback dependencies, provider-qualified model selection, provider configured usability fields, scoped setting canonicalization, direct backend metadata assignments, and line-length cleanup. Verification so far: focused Vitest cockpit/model tests pass; backend llm model filter tests pass; Bandit on llm_providers.py reports zero findings; git diff --check clean. Full UI package tsc still fails on existing unrelated baseline test/type errors outside the touched scope.
 
 Follow-up provider-qualified routing fix added after rechecking Qodo/CodeRabbit ambiguous-provider comments: provider:model selections now parse into a request model id plus provider override at chat action and chat pipeline boundaries, with resolve-api-provider regression coverage.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

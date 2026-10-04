@@ -38,9 +38,9 @@ Continue issue #1116 Phase 2.2 by converting the minimal-test app RAG optional r
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red: pytest test_router_groups_contract.py -k minimal_optional_router_specs_defers_rag_attr_lookup failed because rag_unified.router and rag_health.router were resolved during iter_minimal_optional_router_specs(). Green: focused test passed after converting those two specs. Full touched gates passed: router_groups_contract 69 passed; main_router_contract 6 passed; openapi_contracts 69 passed; Bandit minimal.py results=0 errors=0; git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

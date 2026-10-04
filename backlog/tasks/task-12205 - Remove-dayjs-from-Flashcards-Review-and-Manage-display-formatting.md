@@ -51,7 +51,7 @@ Continue GitHub issue #1346 after PR #1411 by replacing the remaining display-on
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR #1411 was verified merged into dev at 2026-05-09T15:29:29Z. Current origin/dev audit shows 11 remaining shared UI dayjs import lines: ReviewTab and ManageTab display formatting plus Ant Design Dayjs value/type surfaces in Media, ReadingList, Items, DataTables, and Kanban. This task targets only the remaining Flashcards display-only imports.
 
 RED verified with `bunx vitest run src/components/Flashcards/utils/__tests__/date-display.test.ts` from `apps/packages/ui`: 5 failures because `formatFlashcardLongDateTime` and `isFlashcardTimestampBefore` were missing.
@@ -79,7 +79,7 @@ PR #1417 review pass: Gemini left two inline comments on `date-display.ts` askin
 PR #1417 review fix implemented: replaced the manual long-date weekday/month arrays and 12-hour assembly with `Intl.DateTimeFormat`, with deterministic `en-US` test coverage for the prior display label.
 
 Post-review verification: focused Flashcards Vitest command passed again with 49 tests; exact Flashcards tabs `dayjs` scan returned no matches; broader shared UI `dayjs` scan remains 7 Ant Design value-contract surfaces; `git diff --check` passed; `bun run lint` still exits 0 with the existing 131-warning baseline; package TypeScript still exits 2 on existing repo-wide baseline errors outside this slice with no touched-file errors observed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

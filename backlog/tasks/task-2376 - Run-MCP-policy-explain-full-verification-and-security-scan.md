@@ -33,10 +33,8 @@ Implement Task 7 from the MCP effective permission explain implementation plan: 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Task 7 final verification. This task is verification-only unless the focused suite exposes a still-valid defect.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Final verification completed with no blockers.
 
@@ -55,7 +53,7 @@ Supplemental verification for the explicit plan Task 7 steps also passed:
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py tldw_Server_API/tests/MCP_unified/test_mcp_config_sanitization.py -v -> 22 passed, 3 warnings. The command emitted expected test telemetry for invalid media.search requests while tests passed.
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python import smoke for from mcp_unified.gateway import GatewayPolicyExplainService, PolicyExplainRequest -> printed GatewayPolicyExplainService PolicyExplainRequest.
 - git status --short remained clean before appending this verification note.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

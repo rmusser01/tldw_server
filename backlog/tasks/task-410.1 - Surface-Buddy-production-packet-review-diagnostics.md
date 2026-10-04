@@ -37,11 +37,11 @@ Implement the Persona Garden review surface for Buddy animation pipeline packet 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a Persona Garden import-preview diagnostics panel for recognized Buddy production packet asset groups. The panel reads the existing bundle_summary asset diagnostics, distinguishes source material from runtime outputs, shows manifest references, and ignores unknown/null asset groups. Import commit and activation behavior are unchanged.
 
 PR #1802 review fix sweep: verified and fixed the zero-dimension rendering guard, collision-safe diagnostic row keys, and exhaustive Buddy asset-kind classification map. Qodo/CodeRabbit findings were still valid against the PR code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

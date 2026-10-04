@@ -43,7 +43,7 @@ Source: synthesis F11
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PARTIAL. AC#1 done: _mlx_model_cache is now a dict keyed on (model_path or default, cache_dir); read, write and the unload path all updated. Three test cache-resets updated from "= None" to "= {}" (the reset idiom for the new representation - assertions unchanged, nothing disabled) and a discrimination regression test added. 26 passed.
 STILL OPEN: AC#2 - Audio_Transcription_Nemo._model_cache and Audio_Transcription_Parakeet_ONNX._onnx_model_cache are keyed but UNLOCKED (check-then-act); they still need a module lock with the re-check inside, per the Qwen3ASR:269-315 pattern.
 
@@ -65,7 +65,7 @@ Bandit: uvx bandit -q -ll on the three touched source files reported no issues (
 Docs: no user-facing behaviour change, so no doc update needed.
 
 2026-09-23 follow-up ef819cbc1f: the MLX cache left unlocked in the close-out now has _mlx_model_cache_lock with re-check; test_mlx_loader_concurrent_same_key_loads_once red on HEAD (2 loads), green now; test_parakeet_mlx.py 28 passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

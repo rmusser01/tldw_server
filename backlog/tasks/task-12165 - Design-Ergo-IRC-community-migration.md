@@ -32,11 +32,9 @@ Create a reviewed design spec for migrating tldw community communications from D
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec drafted and review-hardened with the selected IRC-first Ergo architecture, Matterbridge compatibility, public #support archive, Discord policy considerations, retention/redaction controls, bridge flood controls, restricted #announcements write access, Discord-origin archive tagging, deploy-time domain placeholders, default archive route, and launch checks. Spec reviewer pass 1 found announcement write-access and archive origin-label gaps; both were patched. Spec reviewer pass 2 approved with no blocking issues.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

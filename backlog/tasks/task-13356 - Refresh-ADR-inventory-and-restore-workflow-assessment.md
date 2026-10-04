@@ -36,13 +36,13 @@ Recheck the June ADR inventory against current dev, reconcile proposed records a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR check: ADR required: no new workflow ADR. ADR-001 already governs ADR adoption; this task corrects guidance, index, and inventory only. TASK-13357 owns ADR-047 for the separate implemented audio preset decision.
 
 Verification 2026-09-25: ADR index has 47 ordered rows with matching source statuses and valid local links; source/published ADR README and June/September inventories compare byte-for-byte; git diff --check passed. Docs/process-only changes, so pytest and Bandit are not applicable; no .venv exists in the isolated worktree. Unrelated tokenizer published-doc drift from refresh was removed.
 
 PR: https://github.com/rmusser01/tldw_server/pull/3014. Merge gate remains: requester must provide a human-written Change summary.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

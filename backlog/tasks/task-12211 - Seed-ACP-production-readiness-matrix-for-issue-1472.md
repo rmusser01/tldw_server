@@ -36,7 +36,7 @@ Create the initial ACP production readiness verification matrix and release chec
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/Development/ACP_Production_Readiness.md with the seeded ACP readiness matrix, issue map, verification command catalog, optional-runtime caveats, evidence template, and final closeout checklist.
 
 Linked the readiness matrix from Docs/Development/Agent_Client_Protocol.md under a new Production Readiness Tracking section.
@@ -46,7 +46,7 @@ Verification so far: git diff --check passed; trailing-whitespace scan over the 
 Posted GitHub issue #1472 progress comment: https://github.com/rmusser01/tldw_server/issues/1472#issuecomment-4414110759
 
 No blockers for the seed task. Remaining readiness closeout stays tracked by #1472 and the child ACP workstream issues.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

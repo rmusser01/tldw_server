@@ -36,7 +36,7 @@ Address actionable PR #1403 review comments on the Watchlists StatusTag shared B
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review surface inspected on PR #1403. Actionable unresolved threads: PersonaGarden module-level loading fallback should move into render/t(), candidate Refresh should be localized, StatusTag running should avoid retrying semantics, and StatusTag small-size test should avoid Badge internal Tailwind class assertions. CI was pending at inspection time.
 
 Red evidence: StatusTag focused test failed on missing data-ds-variant/data-ds-size attributes and VisualPackEditor focused test failed because candidate loading used the static Loading fallback instead of the localized loading label.
@@ -48,7 +48,7 @@ Verification: bunx vitest run src/components/Option/Watchlists/shared/__tests__/
 TypeScript caveat: bunx tsc --noEmit --pretty false still fails on existing repo-wide frontend baseline errors, but filtering the output for StatusTag, VisualPackEditor, Badge, and their focused tests returned no touched-file errors.
 
 Bandit: skipped because this review pass only changes TypeScript/TSX and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

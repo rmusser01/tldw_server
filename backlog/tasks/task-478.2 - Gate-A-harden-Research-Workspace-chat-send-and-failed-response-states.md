@@ -48,14 +48,14 @@ Parallelization: can be implemented immediately after model catalog behavior is 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Historical UAT finding before this task: `Ollama / gemma3:1b` returned HTTP 200 with an empty stream and the UI displayed `No response text was returned`.
 - Implemented missing-model preflight blocking, recoverable failed-submit draft restoration, and empty-stream conversion into a friendly chat error payload.
 - Live CDP validation against backend `http://127.0.0.1:8000` and WebUI `http://localhost:3000/research-workspace`: missing-model send sent zero chat completion requests and preserved the draft; invalid provider returned 503 and rendered a recoverable error card with draft restored; intercepted empty stream rendered `No response was returned.` and restored the draft.
 - OpenAPI warning audit: active client path uses configured-origin absolute `/openapi.json` through request normalization; focused request-core and connection-sync tests cover this path. No `/workspace-playground` alias or redirect added.
 - Verification: focused Vitest suite passed, `git diff --check` passed, full UI typecheck remains blocked by pre-existing Watchlists JSX syntax errors in `WatchlistsPlaygroundPage.tsx`.
 - Bandit: not applicable because TASK-478.2 touched frontend TypeScript/tests and Backlog metadata only; no Python files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

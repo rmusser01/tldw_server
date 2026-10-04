@@ -52,7 +52,7 @@ Reason: Establishes the public notes.note payload, restore-intent semantics, and
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added one discoverable, validated `notes.note` version-1 payload for exact title/content plus nullable conversation/message backlinks, and documented the ownership boundary in ADR-031 and the public Sync v2 API guides.
 - Wired the production Notes adapter and materializer to enforce canonical payloads, current-tombstone-only restore intent, whole-object stale conflicts, idempotency, and server/client-origin parity while preserving the existing keyword-write block.
 - Preserved accepted Markdown and title bytes in ChaChaNotes, included `message_id` in batch reads, and added focused SQLite plus PostgreSQL contract coverage for the complete mutation lifecycle.
@@ -63,7 +63,7 @@ Review: PR #2775 targets dev from codex/task-13002-notes-core-contract.
 Review remediation: validating PR #2775 restore-path feedback before merge.
 
 Review remediation: moved active-Sync note restore validation/capture into the reusable server-origin coordinator; active-note and stale-version restore attempts now return a stable 409 without appending an envelope; all restore-path database calls now run through the async thread helper. Evidence: focused active/inactive restore tests passed (2/2), the complete server-origin capture file passed (28/28), Ruff passed for the new/reworked core and test files, compileall and git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

@@ -35,9 +35,9 @@ Add stricter dataset encryption policies and key rotation workflows while preser
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Closed by encryption and key-rotation subtasks TASK-490.13.13 through TASK-490.13.17. Policy metadata, key epoch storage, rotation preview/commit APIs, review hardening, and client-private server-front-end mutation gates are implemented and documented.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

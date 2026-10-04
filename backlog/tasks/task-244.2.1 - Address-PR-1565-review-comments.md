@@ -32,12 +32,12 @@ Verify and address all actionable Qodo and CodeRabbit review comments on PR #156
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review findings addressed on PR #1565:
 - Qodo: replaced stdlib logging in milestones with Loguru, added _project return typing, added storage config docstrings, rejected unterminated/invalid frontmatter with structured parser errors, and fixed MCP boolean coercion.
 - CodeRabbit: normalized task metadata docs path casing, forwarded CLI task edit --description, allowed same-slug milestone renames with rollback, preserved checklist CRLF endings, added strict oracle manifest type validation, returned refreshed config after DoD writes, anchored matrix tests to __file__, strengthened matrix inventory/row checks, widened traversal side-effect snapshots, tightened inventory ordering and oracle pin tests.
 - Verification: focused red run failed on 11 new assertions before implementation. After implementation, focused pytest subset passed 51 tests. Full verification passed: python -m pytest tools/backlog-py/tests -v reported 101 passed; Bandit wrote /tmp/bandit_backlog_py_pr1565.json with zero findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

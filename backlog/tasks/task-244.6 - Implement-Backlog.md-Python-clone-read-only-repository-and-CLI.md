@@ -47,7 +47,7 @@ Implement Task 5 from the Backlog.md Python compatibility clone implementation p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Controller verification 2026-05-10:
 - Re-ran focused read-only repository/CLI tests: 12 passed before controller regression, then added explicit BACKLOG_CWD isolation coverage.
 - Added a red regression test proving ReadOnlyRepository.from_path was incorrectly redirected by BACKLOG_CWD; it failed with TASK-99 instead of fixture TASK-1.
@@ -62,7 +62,13 @@ Controller verification 2026-05-10:
 Review closeout 2026-05-10:
 - Spec-compliance review approved with no missing Task 5 requirements or extra scope.
 - Code-quality review approved with no blockers. Deferred non-blocking polish: add explicit _project return type, translate missing task KeyError to a ClickException, and consider avoiding duplicate list_tasks parsing in board() if repo size becomes noticeable.
-<!-- SECTION:NOTES:END -->
+
+- 2026-05-10: Wrote red repository/CLI tests first. Initial focused run failed on missing `backlog_py.core.repository`, then implementation made the focused tests pass.
+- 2026-05-10: Live smoke found dotted task ID sorting failure (`TASK-244.6` mixed sort key). Added regression test `test_repository_sorts_dotted_task_ids`, verified it failed, fixed the sort key, and reran verification.
+- 2026-05-10: Verification passed: focused read-only tests 12 passed; accumulated focused suite 31 passed; package-local read-only tests 12 passed; Bandit `/tmp/bandit_backlog_py_task5.json` reported 0 results; `git diff --check` exited 0.
+- 2026-05-10: Live read-only smoke used this worktree with `task list --plain`, `task TASK-244.2 --plain`, `search "Backlog.md" --plain`, and `config list`; before/after `git status --short -- backlog` snapshots matched exactly.
+- 2026-05-10: Known skip: no commit created, per controller instruction. Final summary intentionally left unchecked for controller finalization.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -79,13 +85,3 @@ Implemented the read-only repository and CLI slice for the Backlog.md Python com
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Notes
-
-<!-- SECTION:NOTES:BEGIN -->
-- 2026-05-10: Wrote red repository/CLI tests first. Initial focused run failed on missing `backlog_py.core.repository`, then implementation made the focused tests pass.
-- 2026-05-10: Live smoke found dotted task ID sorting failure (`TASK-244.6` mixed sort key). Added regression test `test_repository_sorts_dotted_task_ids`, verified it failed, fixed the sort key, and reran verification.
-- 2026-05-10: Verification passed: focused read-only tests 12 passed; accumulated focused suite 31 passed; package-local read-only tests 12 passed; Bandit `/tmp/bandit_backlog_py_task5.json` reported 0 results; `git diff --check` exited 0.
-- 2026-05-10: Live read-only smoke used this worktree with `task list --plain`, `task TASK-244.2 --plain`, `search "Backlog.md" --plain`, and `config list`; before/after `git status --short -- backlog` snapshots matched exactly.
-- 2026-05-10: Known skip: no commit created, per controller instruction. Final summary intentionally left unchecked for controller finalization.
-<!-- SECTION:NOTES:END -->

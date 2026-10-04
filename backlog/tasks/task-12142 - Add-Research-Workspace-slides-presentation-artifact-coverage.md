@@ -28,9 +28,9 @@ Add focused coverage for Research Workspace generated slides/presentation artifa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added a focused Research Workspace StudioPane regression test for generated Slides artifacts. The test verifies a completed slides run preserves the server presentation id/version and content on the generated artifact. This covers the presentation artifact handoff shape; unlike flashcards, slides do not currently flow through a workspace-scoped deck/list filter.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
