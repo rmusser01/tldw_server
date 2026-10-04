@@ -1,7 +1,7 @@
 # Embeddings Stage 3: Durable Store And Jobs Runner
 
 Date: 2026-10-02
-Revised: 2026-10-03
+Revised: 2026-10-04
 Task: TASK-13421
 Status: Design sections approved; consolidated written spec awaiting requester review.
 Predecessor: TASK-12973, completed through merged PR #2790.
@@ -41,7 +41,7 @@ must not create its tables, admit roots, start workers, or resolve content.
 
 ADR required: yes. This establishes durable persistence and execution/recovery
 ownership rules. Proposed governing record:
-[ADR-059](../../ADR/059-embeddings-durable-workflow-foundation.md).
+[ADR-060](../../ADR/060-embeddings-durable-workflow-foundation.md).
 
 [ADR-003](../../ADR/003-jobs-vs-scheduler-default.md) governs Jobs selection;
 [ADR-022](../../ADR/022-embeddings-api-and-media-pipeline.md) remains governing for
@@ -93,6 +93,16 @@ Every persisted row carries a nonblank, exact `owner_user_id`. Root identity is
 the immutable Jobs UUID plus owner, domain, queue, job type, idempotency key, and
 exact payload. Integer Jobs IDs are lookup hints only. A previously bound root
 must never be replaced, recreated, or reassigned during resume.
+
+Admission explicitly selects `ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT` for this new
+root scope. Persist the selected expiry policy, retry/quarantine controls, and
+no-progress limit as immutable admission facts. Validate the stored controls on
+idempotent admission replay, binding, and resume, as well as the root identity.
+A matching payload or idempotency key with different controls is a typed conflict,
+not a reusable root.
+Do not inherit `admit_job`'s `CONSUME_RETRY` default, silently repair an existing
+root, or copy Admin Webhook origin/identity to obtain retry-neutral expiry. Legacy
+Jobs defaults, existing roots, and Admin Webhook restrictions remain unchanged.
 
 The manifest is ordered and immutable: `(item_index, source_kind,
 source_reference, source_revision)`. References are server-issued opaque handles
@@ -151,6 +161,12 @@ progress: `admitting`, `ready`, `executing`, `finalizing`, and `settled`. Phases
 forward; failure/cancellation may skip phases, and fallback remains in `executing`.
 Terminal intent is `none`, `complete`, `fail`, or `cancel`; reconciliation health
 is `clean`, `pending`, or `exhausted`, independent of the root's terminal status.
+These are private durable-store vocabularies, not additions to
+`EmbeddingWorkflowPhase` or the inline trace status literals. Stage 3C planning
+must specify an exhaustive mapping to the existing closed trace contracts and
+tests for every durable phase and terminal outcome. Never pass `admitting`,
+`ready`, or `settled` directly into the inline trace DTOs or infer completion from
+a private phase before Jobs acknowledgement.
 
 Generation states are `building`, `sealed`, `completed`, `superseded`, `cancelled`,
 and `failed`. Only an exact Jobs completion acknowledgement can promote the
@@ -291,10 +307,42 @@ or dereferences source text.
 Use fixed reason codes and immutable allowlisted facts. Retry only known transient
 failures with finite budgets, using ADR-051's existing contention/HTTP policies as
 appropriate. Normal continuation, binding waits, and receipt-only recovery do not
-increment provider attempts or failure retries. Provider retry decisions and Jobs
-retry application must share one durable intent so an acknowledgement loss does
-not spend the same failure budget twice. Exhaustion is inspectable reconciliation
-health, not a separate domain DLQ; Jobs remains the sole durable quarantine owner.
+increment provider attempts or failure retries. Lease expiry is infrastructure
+recovery, not evidence of another provider call: both acquisition-time reclaim and
+the integrity sweep must preserve Jobs `retry_count` and failure streak under the
+pinned `REQUEUE_NO_ATTEMPT` policy. Reconcile dispatch intent and accepted receipts
+before deciding whether a new provider attempt is needed. Provider retry decisions
+and Jobs retry application must share one durable intent so an acknowledgement
+loss does not spend the same failure budget twice.
+
+### No-Progress Exhaustion
+
+Retry-neutral expiry must not permit unlimited automatic cycling. Admission pins
+a separate no-progress limit: default and maximum 5 consecutive acquisitions
+ending in yield or expiry without semantic progress. Trusted construction may
+lower this limit. The neutral Jobs capability owns durable episode accounting by
+exact root/acquisition identity, including expiry before the domain handler starts;
+both reclaim paths must honor it. Replayed expiry evidence counts once, and process
+restart or admission replay cannot reset the limit. This support state is Jobs-owned,
+not a seventh Embeddings table or an Embeddings query in generic Jobs code.
+
+Only acknowledged root binding, newly accepted output evidence, a committed cursor
+advance, or a newly acknowledged required accounting/sink lifecycle operation may
+establish semantic progress and reset the consecutive count. The reset requires an
+exact, retained progress proof, fenced with the domain transition; replaying that
+proof cannot reset a later count. Lease renewal, a new delivery claim/claim epoch,
+Jobs continuation/deferral acknowledgement, proof-release bookkeeping, or elapsed
+time is not progress. Provider attempts and operation deliveries retain their own
+limits.
+
+On the fifth no-progress episode, stop new paid work and record typed
+`no_progress_exhausted` evidence. Jobs alone applies the root's non-retryable failure
+or its existing quarantine policy under locked current authority, with retained
+acknowledgement proof; exhaustion does not manufacture a provider attempt or spend
+a provider retry. Cancellation or an already terminal root wins over this pending
+disposition. Receipt-only recovery may still settle existing obligations within
+its finite operation budgets. Exhausted reconciliation health is inspectable and
+retains obligations/capacity, not a separate domain DLQ or automatic root revival.
 
 ## Cancellation And Accounting Settlement
 
@@ -405,6 +453,7 @@ manifest even when each individual field fits.
 | Domain operation rows | Maximum 32,768 per workflow, including acknowledgement/cleanup operations |
 | Retained workflows / unresolved rows | Maximum 32 retained workflows per owner; 100,000 owner rows and 500,000 global domain rows |
 | Concurrent roots | Maximum 4 per owner and 32 globally; Jobs may impose stricter limits |
+| Consecutive no-progress acquisitions | Maximum 5, pinned at admission; yield/expiry evidence counts once independently of provider retries |
 | Operation delivery / scan | Maximum 5 automatic deliveries; scan maximum 100 rows |
 | Batch resolver / provider / batch sink / accounting call | 10 / 120 / 10 / 10 seconds; lookup and write limits cover the full batch |
 | Normal batch calls | Maximum 1 resolver, 1 receipt lookup, 1 write, 1 provider; at most 9 non-provider port calls including first/final-batch lifecycle and Jobs proof delivery |
@@ -438,9 +487,10 @@ Before dispatch, reserve the provider's full selected deadline plus the remainin
 critical-path call/local budgets and cancellation grace. An undersized remaining
 quantum must not be turned into a predictably truncated paid attempt. Repeated
 pre-dispatch quantum exhaustion without durable progress is a typed certification
-or policy failure, not unbounded budget-neutral continuation. Tests use a virtual
-monotonic clock, not long sleeps, to prove the normal plan and reject the original
-64-times-6-second serial-resolution counterexample before provider dispatch.
+or policy failure, subject to the separate no-progress limit rather than unbounded
+budget-neutral continuation. Tests use a virtual monotonic clock, not long sleeps,
+to prove the normal plan and reject the original 64-times-6-second serial-resolution
+counterexample before provider dispatch.
 
 Admission reserves a conservative upper bound for future domain rows, accounting
 for items, all permitted generations/attempts, output receipts, operations, and
@@ -449,6 +499,14 @@ cannot oversubscribe owner/global budgets. Recovering or exhausted records count
 against these limits until safely released; a cancelled Jobs root does not make
 its unsettled state free. Test every maximum and one-over boundary, including
 multibyte identifiers, framing overhead, partial batches, and combined bounds.
+
+Stage 3B planning must select a concrete atomic global-reservation primitive that
+works with FORCE RLS and non-bypass, owner-scoped runtime roles. Summing visible
+workflow rows under one owner's scope cannot enforce the global cap. The primitive
+must serialize owner/global reservations and safe release without exposing other
+owners' rows or requiring a runtime RLS bypass. Include concurrent cross-owner
+admission, crash/replay, and exhausted-obligation retention in backend tests; a
+per-owner-only test is not global-capacity certification.
 
 Adapters must enforce bounded reads/decoding and respond to deadlines. Merely
 wrapping blocking synchronous work in an async timeout is not certification.
@@ -511,15 +569,16 @@ skips, and skips leave backend certification incomplete until CI supplies eviden
 | Area | Required Evidence |
 | --- | --- |
 | State machine | Closed vocabularies and monotonic phases; property-based acquire/renew/expire/retry/fallback/cancel/replay sequences; cursor prefix, generation isolation, immutable manifests, and terminal non-revival even after admin requeue |
-| Admission | Duplicate creates; crash after manifest, Jobs admission, and binding; definitive rejection versus unknown outcome; early acquisition; exact owner/UUID/payload conflicts; atomic aggregate capacity limits |
+| Admission | Duplicate creates; crash after manifest, Jobs admission, and binding; definitive rejection versus unknown outcome; early acquisition; exact owner/UUID/payload and persisted expiry/retry/quarantine/no-progress control conflicts; atomic cross-owner global reservations under non-bypass RLS |
 | Concurrency | Same-version checkpoints; cancellation between validation and write; expired execution/recovery claims; fixed lock ordering on real SQLite/PostgreSQL transactions |
 | Provider/sink | Partial receipt recovery; no recomputation of accepted output; writer-authoritative absence after lost acknowledgement; lagging visibility returns unavailable and blocks new paid work; same-identity competing vectors preserve the original winner and settle both attempts; identity conflicts; space changes; close/delete versus late writes; permit expiry |
 | Accounting | Crash before/after reservation and dispatch intent; known/unknown outcomes; cancellation and timeout; terminal release before delayed first reserve; reserve replay after settlement; absorbing terminal proof and expired-delivery rejection after pruning; conflicting settlement rejection; no duplicate reserve/terminal effects |
 | Jobs intents | Applied-but-unacknowledged transitions; stale unapplied commands under a new lease; obsolete intent supersession; replay after a later transition and after archival; exact retained proofs |
+| Expiry/no-progress | Crash before handler start/dispatch and after receipt acceptance/checkpoint; acquisition reclaim and integrity sweep preserve retry/failure counters; fifth no-progress episode stops automatic execution through Jobs; exact progress proof resets once, stale proof/replay/restart/deferral acknowledgements cannot reset; cancellation/terminal state cannot revive |
 | Retention | Missing/error/conflicting root lookup; prune before acknowledgement; exhausted operations retain obligations/capacity; completed output survives domain pruning; scoped cleanup only |
 | Migration/security | Fresh/upgrade/repeat/interrupted migration; missing schema; all six RLS tables; denied missing/cross-owner CRUD and cleanup; foreign-key mismatches; connection reuse isolation |
 | Bounds/deadlines | Every limit and one-over case; native/postprocessed bounds and malformed/oversized responses before materialization; full 64-item bulk path checkpoints within the 295-second timing plan; reject 64 serial 6-second resolutions and undersized pre-dispatch budget; cumulative call deadlines within one quantum; hanging/cancellation-resistant adapters; no lease revival or hidden retry multiplication |
-| Compatibility/dormancy | Inline flag on/off endpoint parity; legacy media/storage path unchanged; Admin Webhook prepared regression; no startup migration/worker/admission/adapter calls |
+| Compatibility/dormancy | Inline flag on/off endpoint parity; exhaustive private durable-phase/terminal mapping to unchanged trace literals; legacy media/storage and Jobs expiry defaults unchanged; Admin Webhook prepared regression; no startup migration/worker/admission/adapter calls |
 
 Implementation completion requires both backend integration/parity evidence,
 focused endpoint regression, changed-scope lint/format/compile checks,
@@ -550,7 +609,19 @@ writer-authoritative sink absence, and ADR renumbering. Read-only countermodels
 demonstrated the missing ordering, serial-timeout, and lagging-lookup guarantees;
 these were requirements gaps, not observed production failures. ADR-058 is now
 the accepted Jobs completion row-identity decision in `origin/dev`; this proposal
-is ADR-059. Recheck numbering before integration and preserve accepted ADR-058.
+was renumbered to ADR-059 in that revision.
+
+The 2026-10-04 written-spec review corrected admission policy: generic Jobs
+admission defaults to retry-consuming lease expiry, so the retry-neutral promise
+requires explicit `REQUEUE_NO_ATTEMPT` admission and stored-control validation.
+Finite no-progress episode accounting bounds infrastructure recovery independently
+from provider retry accounting. Stage 3B/3C planning must also resolve the concrete
+RLS-compatible global reservation primitive and the exhaustive private-phase trace
+mapping. Existing Jobs lease-budget tests establish the underlying expiry-policy
+behavior; they do not certify the new neutral capability or its no-progress budget.
+The upstream ADR inventory has since accepted ADR-059 for the backlog-py task
+editor cutover. This proposal is now ADR-060, with active references updated.
+Recheck numbering before integration and preserve accepted ADR-058 and ADR-059.
 
 ## Delivery And Approval Gates
 
