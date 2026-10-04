@@ -2351,11 +2351,15 @@ def create_character_conversation(
     fallback_greeting: Mapping[str, Any] | None = None,
     conversation_settings: Mapping[str, Any] | None = None,
     max_snapshot_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES,
+    create_request_fingerprint: str | None = None,
 ) -> str:
     """Create conversation, settings, messages, snapshot and trusted origin atomically.
 
     Provenance is a separate internal keyword; ordinary callers remain unknown.
     World-book schema preflight must stay outside the creation transaction.
+    ``create_request_fingerprint`` marks a client-id create (D7 P3) and is
+    written by the conversation INSERT; a taken id raises ``ConflictError``
+    and rolls the whole creation back.
     """
     owner_user_id = str(getattr(db, "client_id", "") or "").strip()
     if not owner_user_id:
@@ -2495,6 +2499,7 @@ def create_character_conversation(
 
                 conversation_id = db.add_conversation(
                     conversation_payload, conn=conn, assistant_startup=assistant_startup,
+                    create_request_fingerprint=create_request_fingerprint,
                 )
                 if not conversation_id:
                     raise InputError("Failed to create character conversation.")

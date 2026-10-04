@@ -198,6 +198,13 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
     resolve_provider_and_model,
 )
+from tldw_Server_API.app.core.Chat.conversation_create_idempotency import (
+    CHAT_DELETED,
+    CHAT_ID_CONFLICT,
+    ClientChatIdError,
+    conversation_create_fingerprint,
+    resolve_client_chat_replay,
+)
 from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
     evaluate_prompt_cost_guardrails,
@@ -4618,9 +4625,69 @@ router.add_api_route(
 )
 
 
+_CLIENT_CHAT_ID_MESSAGES = {
+    CHAT_ID_CONFLICT: "This chat id is already in use. Retry with the original request, or use a new id.",
+    CHAT_DELETED: "The chat created with this id is in trash. Restore it, or start a new chat with a new id.",
+}
+
+
+def _client_chat_id_http_error(code: str, status_code: int) -> HTTPException:
+    """Describe a refused client chat id without any detail of the existing chat."""
+    return HTTPException(
+        status_code=status_code,
+        detail={"error_code": code, "message": _CLIENT_CHAT_ID_MESSAGES[code]},
+    )
+
+
+def _sync_client_chat_id_unsupported_error() -> HTTPException:
+    """Sync v2 creates chats through its own envelopes, which do not take a client id yet."""
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "error_code": "sync_client_chat_id_unsupported",
+            "message": "Client-supplied chat ids are not supported while Sync v2 is active. Omit id to create the chat.",
+        },
+    )
+
+
+def _find_client_chat_replay(
+    db: CharactersRAGDB, chat_id: str, owner_id: str, fingerprint: str,
+) -> dict[str, Any] | None:
+    """Return the caller's matching chat for this client id, None if the id is free, or raise 409/410."""
+    existing = db.get_conversation_by_id(chat_id, include_deleted=True)
+    try:
+        replay = resolve_client_chat_replay(existing, owner_id=owner_id, fingerprint=fingerprint)
+    except ClientChatIdError as error:
+        raise _client_chat_id_http_error(error.code, error.status_code) from None
+    return dict(replay) if replay is not None else None
+
+
+def _client_chat_replay_response(
+    db: CharactersRAGDB, conversation: dict[str, Any], owner_id: str, response: Response,
+) -> ChatSessionResponse:
+    """Return the current state of an already created chat as a 200 replay."""
+    response.status_code = status.HTTP_200_OK
+    response.headers["Idempotency-Replayed"] = "true"
+    logger.debug("Replayed chat session {} for user {}", conversation["id"], owner_id)
+    return _convert_db_conversation_to_response(
+        _attach_conversation_assistant_names(db, conversation, owner_id),
+        resume_state=db.get_roleplay_resume_state(conversation["id"]),
+        db=db, user_id=owner_id,
+    )
+
+
 @router.post("/", response_model=ChatSessionResponse, status_code=status.HTTP_201_CREATED,
              summary="Create a new chat session", tags=["Chat Sessions"],
-             dependencies=[Depends(require_expected_user)])
+             dependencies=[Depends(require_expected_user)],
+             responses={
+                 200: {
+                     "description": "Replay: the same owner repeated a create with this client id and request",
+                     "model": ChatSessionResponse,
+                     "headers": {"Idempotency-Replayed": {"schema": {"type": "string", "enum": ["true"]}}},
+                 },
+                 409: {"description": "The client id is taken by a different request or chat, or Sync v2 is active"},
+                 410: {"description": "The chat created with this client id is in trash; the id stays taken"},
+             })
 async def create_chat_session(
     session_data: ChatSessionCreate,
     response: Response,
@@ -4644,12 +4711,23 @@ async def create_chat_session(
         should POST a first user/assistant message after chat creation. The library
         helper `start_new_chat_session` can seed a first message when used directly.
 
+        With a client ``id`` (D7 P3) the chat is created under that id. The
+        same owner repeating the same request (body fields as sent, plus the
+        seeding query options) gets the existing chat back with 200 and
+        ``Idempotency-Replayed: true``; any other use of the id is 409, and a
+        repeat after the chat was trashed is 410. The conversation primary key
+        keeps concurrent duplicates to one chat.
+
     Returns:
         Created chat session details
 
     Raises:
-        HTTPException: 404 if character not found, 429 if rate limited
+        HTTPException: 404 if character not found, 409/410 for an unavailable
+            client id, 429 if rate limited
     """
+    owner_id = str(current_user.id)
+    client_chat_id = session_data.id
+    create_fingerprint: str | None = None
     try:
         scope = _resolve_chat_scope(session_data.scope_type, session_data.workspace_id)
         from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
@@ -4663,6 +4741,22 @@ async def create_chat_session(
         # Check rate limits
         rate_limiter = get_character_rate_limiter()
         await rate_limiter.check_rate_limit(current_user.id, "chat_create")
+        sync_service = _active_chat_sync_service(current_user, scope)
+        if client_chat_id is not None:
+            if sync_service is not None:
+                raise _sync_client_chat_id_unsupported_error()
+            create_fingerprint = conversation_create_fingerprint(
+                session_data.model_dump(mode="json", exclude_unset=True, exclude={"id"}),
+                {
+                    "seed_first_message": seed_first_message,
+                    "greeting_strategy": greeting_strategy,
+                    "alternate_index": alternate_index,
+                },
+            )
+            # A replay is answered before quota checks: it creates nothing.
+            existing = _find_client_chat_replay(db, client_chat_id, owner_id, create_fingerprint)
+            if existing is not None:
+                return _client_chat_replay_response(db, existing, owner_id, response)
         # Enforce per-user chat count limit (approximate by scanning conversations per character)
         try:
             # Use DB-layer count for efficiency/accuracy. The helper expects
@@ -4740,7 +4834,6 @@ async def create_chat_session(
                 source_message.get("id") or session_data.forked_from_message_id
             )
 
-        sync_service = _active_chat_sync_service(current_user, scope)
         stable_key = server_origin_stable_key(
             source="server_api",
             domain="chat.conversation",
@@ -4749,7 +4842,7 @@ async def create_chat_session(
         )
 
         # Generate chat ID and title
-        chat_id = (
+        chat_id = client_chat_id or (
             server_origin_object_id("chat.conversation", idempotency_key)
             if sync_service is not None
             else None
@@ -4829,6 +4922,7 @@ async def create_chat_session(
                 **({"assistant_startup": AssistantStartup(
                     source="fork" if validated_parent_id else "explicit",
                 )} if scope.scope_type == "workspace" else {}),
+                create_request_fingerprint=create_fingerprint,
             )
             if seed_first_message:
                 created_state = db.get_roleplay_resume_state(created_id)
@@ -4852,10 +4946,11 @@ async def create_chat_session(
             created_id = create_workspace_persona_conversation(
                 db, user_id=str(current_user.id), request=session_data,
                 conversation_data=conv_data, title_timestamp=timestamp,
+                create_request_fingerprint=create_fingerprint,
             )
         else:
             # Add to database
-            created_id = db.add_conversation(conv_data)
+            created_id = db.add_conversation(conv_data, create_request_fingerprint=create_fingerprint)
             if not created_id:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -4956,6 +5051,24 @@ async def create_chat_session(
 
     except HTTPException:
         raise
+    except ConflictError as e:
+        if (
+            create_fingerprint is None
+            or getattr(e, "entity", None) != "conversations"
+            or getattr(e, "entity_id", None) != client_chat_id
+        ):
+            logger.error(f"Error creating chat session: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An unexpected error occurred while creating chat session"
+            ) from e
+        # Another request inserted this id after our read. The primary key decided the
+        # winner and this creation rolled back, so answer as a replay or a conflict.
+        existing = _find_client_chat_replay(db, client_chat_id, owner_id, create_fingerprint)
+        if existing is None:
+            # Taken by a row the caller cannot see, such as another owner's under PostgreSQL RLS.
+            raise _client_chat_id_http_error(CHAT_ID_CONFLICT, status.HTTP_409_CONFLICT) from None
+        return _client_chat_replay_response(db, existing, owner_id, response)
     except InputError as e:
         logger.warning("Invalid chat-session creation input: {}", e)
         raise map_db_error_to_http(e) from e

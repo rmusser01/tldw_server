@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, encode_assistant_startup
+from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     _CHACHA_NONCRITICAL_EXCEPTIONS,
     BackendType,
@@ -27,6 +28,14 @@ if TYPE_CHECKING:
 
 class _ReceiptAdmissionChanged(ConflictError):
     """A stale preflight may retry only after its independently owned rollback."""
+
+
+_SHA256_HEX_CHARS = frozenset("0123456789abcdef")
+
+
+def _is_sha256_hex(value: Any) -> bool:
+    """Return True for a 64-character lowercase hexadecimal string."""
+    return isinstance(value, str) and len(value) == 64 and set(value) <= _SHA256_HEX_CHARS
 
 
 class ConversationStore:
@@ -419,10 +428,25 @@ class ConversationStore:
         *,
         conn: Any | None = None,
         assistant_startup: AssistantStartup | None = None,
+        create_request_fingerprint: str | None = None,
     ) -> str | None:
-        """Insert identity and optional trusted local provenance in the same transaction."""
+        """Insert identity and optional trusted local provenance in the same transaction.
+
+        Args:
+            conv_data: Conversation fields. A ``create_request_fingerprint`` key in
+                it is ignored, so copied or imported rows never carry one.
+            conn: Caller-owned connection whose transaction covers the insert.
+            assistant_startup: Trusted local startup provenance.
+            create_request_fingerprint: SHA-256 hex digest of a client-id create
+                request (D7 P3), stored by the same INSERT.
+
+        Raises:
+            ConflictError: The conversation id already exists, on either backend.
+        """
         if {"assistant_startup", "assistant_startup_json"}.intersection(conv_data):
             raise InputError("Conversation startup fields are reserved for internal creation.")
+        if create_request_fingerprint is not None and not _is_sha256_hex(create_request_fingerprint):
+            raise InputError("create_request_fingerprint must be a lowercase SHA-256 hex digest.")
         startup_json = encode_assistant_startup(assistant_startup) if assistant_startup is not None else None
         conv_id = conv_data.get("id") or self._db._generate_uuid()
         root_id = conv_data.get("root_id") or conv_id
@@ -452,14 +476,17 @@ class ConversationStore:
         )
 
         now = self._db._get_current_utc_timestamp_iso()
-        query = """
+        # Only client-id creates name the fingerprint column, so ordinary inserts are unchanged.
+        fingerprint_column = ", create_request_fingerprint" if create_request_fingerprint is not None else ""
+        fingerprint_placeholder = ", ?" if create_request_fingerprint is not None else ""
+        query = f"""
                 INSERT INTO conversations (id, root_id, forked_from_message_id, parent_conversation_id, \
                                            character_id, assistant_kind, assistant_id, persona_memory_mode, \
                                            title, state, topic_label, cluster_id, source, external_ref, rating, \
                                            created_at, last_modified, client_id, version, deleted, \
-                                           scope_type, workspace_id, assistant_startup_json) \
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
-                """
+                                           scope_type, workspace_id, assistant_startup_json{fingerprint_column}) \
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{fingerprint_placeholder}) \
+                """  # nosec B608 - fixed column names, values are bound parameters
         if self._db.backend_type == BackendType.POSTGRESQL:
             params = (
                 conv_id,
@@ -512,6 +539,8 @@ class ConversationStore:
                 workspace_id,
                 startup_json,
             )
+        if create_request_fingerprint is not None:
+            params = (*params, create_request_fingerprint)
         try:
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
@@ -526,6 +555,13 @@ class ConversationStore:
                     entity_id=conv_id,
                 ) from exc  # noqa: TRY003
             raise CharactersRAGDBError(f"Database integrity error adding conversation: {exc}") from exc  # noqa: TRY003
+        except UniqueConstraintError as exc:
+            # PostgreSQL reports the primary key without detail; it is the only unique key on this table.
+            raise ConflictError(
+                f"Conversation with ID '{conv_id}' already exists.",
+                entity="conversations",
+                entity_id=conv_id,
+            ) from exc  # noqa: TRY003
         except CharactersRAGDBError:
             raise
         return None

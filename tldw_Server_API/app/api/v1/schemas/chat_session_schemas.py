@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, reject_assistant_startup_input
+from tldw_Server_API.app.core.Chat.conversation_create_idempotency import normalize_client_conversation_id
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 from tldw_Server_API.app.core.Workspaces.chat_startup_schemas import (
     ALLOWED_CONVERSATION_STATES as ALLOWED_CONVERSATION_STATES,
@@ -138,6 +139,17 @@ class AssistantOverlaySettings(BaseModel):
 
 class ChatSessionCreate(BaseModel):
     """Schema for creating a new chat session."""
+    id: str | None = Field(
+        None,
+        description=(
+            "Optional client-generated chat id: a UUID in 8-4-4-4-12 form, stored lowercase. "
+            "The chat is created with this id. Repeating the same request returns the existing chat "
+            "with 200 and `Idempotency-Replayed: true`. Reusing the id for a different request, or an id "
+            "that is not available to the caller, returns 409 `chat_id_conflict`; repeating the request "
+            "after the chat was moved to trash returns 410 `chat_deleted`. Omit it for a server-generated id."
+        ),
+        json_schema_extra={"format": "uuid"},
+    )
     character_id: int | None = Field(None, description="ID of the character for this chat", gt=0)
     assistant_kind: Literal["character", "persona"] | None = Field(
         None,
@@ -185,6 +197,12 @@ class ChatSessionCreate(BaseModel):
             "title": "Evening Chat with Assistant"
         }
     }}
+
+    @field_validator("id")
+    @classmethod
+    def _validate_client_chat_id(cls, value: Optional[str]) -> Optional[str]:
+        """Accept only a canonical UUID so the client and server hold the same id."""
+        return None if value is None else normalize_client_conversation_id(value)
 
     @field_validator("state")
     @classmethod
