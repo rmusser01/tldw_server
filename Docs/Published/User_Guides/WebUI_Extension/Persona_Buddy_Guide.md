@@ -206,7 +206,7 @@ Parakeet ONNX recognition, DeepSeek chat, and local Kokoro speech.
   animation and clear audible reply. Direct browser observation captured
   **thinking → speaking → idle** with loaded artwork throughout. The notebook
   phrase was committed once and received the matching reply. See the
-  [recorded acceptance evidence](https://github.com/rmusser01/tldw_server/blob/codex/buddy-preserve-closed-draft/Docs/Reviews/assets/buddy-voice-uat-2026-10-03/human-acceptance.json).
+  [recorded acceptance evidence](https://github.com/rmusser01/tldw_server/blob/5de9f73564a7c36a7afd3e71a8610489692189df/Docs/Reviews/assets/buddy-voice-uat-2026-10-03/human-acceptance.json).
 - Effect replay and compact-pane visibility repairs passed 128 targeted frontend
   tests and actual browser checks. TASK-13211 retains the unresolved attribution
   of the original September 6 repeated-request trigger.
