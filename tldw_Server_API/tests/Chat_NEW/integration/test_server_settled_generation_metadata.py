@@ -221,6 +221,50 @@ def test_client_disconnect_saves_moderation_holdback_tail(settled_api, monkeypat
     assert _extra(db, reply["id"])["generation_status"] == "interrupted"
 
 
+def test_stop_signal_mid_stream_saves_partial_as_stopped(settled_api, monkeypatch):
+    """A stop signal (``request_stop``) settles the partial as ``stopped``, not ``interrupted``.
+
+    No endpoint raises the signal yet (that is D7 P12's cancel route), so the
+    test reaches the request's stream handler directly.
+    """
+    from tldw_Server_API.app.core.Chat import streaming_utils
+
+    client, db, cid, headers = settled_api
+    monkeypatch.setenv("MODERATION_STREAM_BUFFER_CHARS", "0")
+    handlers: list[streaming_utils.StreamingResponseHandler] = []
+
+    class RecordingHandler(streaming_utils.StreamingResponseHandler):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            handlers.append(self)
+
+    monkeypatch.setattr(streaming_utils, "StreamingResponseHandler", RecordingHandler)
+
+    async def provider() -> AsyncIterator[str]:
+        yield _content("Stopped ")
+        yield _content("here")
+        handlers[-1].request_stop()
+        yield _content(" and never saved")
+
+    _install_provider(monkeypatch, provider)
+    selection = _selection(client, cid, headers, "stop")
+
+    response = client.post(
+        "/api/v1/chat/completions",
+        headers=headers,
+        json=_completion_body(cid, versioned_selection=selection),
+    )
+    assert response.status_code == 200, response.text
+    assert "never saved" not in response.text
+
+    reply = _wait_for_assistant(db, cid)
+    assert reply["content"] == "Stopped here"
+    extra = _extra(db, reply["id"])
+    assert extra["generation_status"] == "stopped"
+    assert extra["model_id"] == "gpt-4o-mini"
+    assert extra["provider"] == "openai"
+
+
 def _frames(response) -> list[dict[str, Any]]:
     frames = []
     for line in response.text.splitlines():
