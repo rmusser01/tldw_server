@@ -1,7 +1,7 @@
 ---
 id: TASK-13443
 title: Normalize the task files TASK-13441 skipped because open PRs touched them
-status: To Do
+status: In Progress
 labels:
 - backlog
 - chore
@@ -24,6 +24,7 @@ TASK-13441 normalized 2,269 task files but skipped 39 non-canonical ones that op
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-10-04, partial pass after #3162 (dev 502da5bf0c): 20 of the 39 skipped files no longer had an open PR touching them, so they were normalized: TASK-13260.270, TASK-13260.277 and TASK-13260.277.1-.16, .26, .37. Verified for each file: frontmatter parses equal, content lines preserved (0 dropped, 0 added), and a second normalize --check is clean. Still skipped (19): 18 files held by 15 open Codex PRs (#2421, #2843, #2855, #2869, #2952, #2957, #2958, #2959, #2961, #2966, #3055, #3060, #3071, #3093, #3159), plus TASK-13434, which the peer session's spec 2 PR C normalizes. Re-run when a holding PR merges or closes.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
