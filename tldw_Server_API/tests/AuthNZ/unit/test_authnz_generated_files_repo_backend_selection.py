@@ -53,6 +53,14 @@ class _SqliteCursor:
         self.description = description or []
         self.rowcount = rowcount
 
+    async def __aenter__(self) -> _SqliteCursor:
+        """Expose the cursor through the production query's async lifecycle."""
+        return self
+
+    async def __aexit__(self, *_args: object) -> bool:
+        """End the resource-free double's scope without suppressing failures."""
+        return False
+
     async def fetchone(self) -> Any:
         return self._row
 

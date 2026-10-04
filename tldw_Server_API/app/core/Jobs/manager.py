@@ -4578,13 +4578,13 @@ class JobManager:
 
         Jobs owns the clock and lease interpretation. This point-in-time read
         does not renew, reconcile or requeue anything; expired processing rows
-        remain for normal Jobs maintenance. Missing, terminal, cancellation-
-        requested or malformed/unheld leases return False.
+        remain for normal Jobs maintenance; missing, terminal, cancel-requested or
+        malformed/unheld leases return False. Invalid identity raises BadRequestError (ValueError).
         """
         if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
-            raise ValueError("Jobs lease health requires a positive job ID")
+            raise BadRequestError("Jobs lease health requires a positive job ID")
         if not isinstance(owner_user_id, str) or not owner_user_id.strip():
-            raise ValueError("Jobs lease health requires an owner")
+            raise BadRequestError("Jobs lease health requires an owner")
         row = self.get_job(job_id, owner_user_id=owner_user_id)
         if (
             row is None or row.get("status") != "processing"

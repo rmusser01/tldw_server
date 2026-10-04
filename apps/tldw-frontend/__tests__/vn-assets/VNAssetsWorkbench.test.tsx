@@ -80,6 +80,9 @@ const reconciliationCases: Array<{
     expected: 'Could not reconcile the pending generation request (pack 7, kind retry, slot 13).',
   },
 ];
+const scope = { server: 'http://localhost:8000/api/v1', principal: '1' };
+const otherScope = { ...scope, principal: '2' };
+
 configure({ asyncUtilTimeout: 5000 });
 
 describe('VNAssetsWorkbench', () => {
@@ -141,6 +144,283 @@ describe('VNAssetsWorkbench', () => {
     });
   }
 
+  describe('Task69 scoped legacy recovery', () => {
+    const receiptKey = 'vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1:7';
+    const selectionKey = 'vn-assets:selected-pack:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1';
+    const serverB = { ...scope, server: 'http://other-server:8000/api/v1' };
+
+    beforeEach(() => {
+      existingFailedPack();
+      mocks.listVNAssetPacks.mockResolvedValue([
+        { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+        { id: 8, owner_user_id: 1, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+      ]);
+    });
+
+    it.each(['http://other-server:8000/api/v1', 'http://localhost:8000/tenant/api/v1'])(
+      'does not restore A receipts or selection on base %s with identical IDs', async (base) => {
+        sessionStorage.setItem(selectionKey, '8');
+        writePendingVNAssetGeneration(scope, 8, { kind: 'start', key: 'server-a-selected-key' });
+        const raw = sessionStorage.getItem(receiptKey.replace(':1:7', ':1:8'));
+        mocks.apiBaseUrl.mockReturnValue(base);
+        const user = userEvent.setup();
+        render(<VNAssetsWorkbench />);
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+        await user.click(screen.getByRole('button', { name: 'Start generation' }));
+        await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1));
+        expect(mocks.startVNAssetGeneration.mock.calls[0][0]).toBe(7);
+        expect(mocks.startVNAssetGeneration.mock.calls[0][1].idempotency_key).not.toBe('server-a-selected-key');
+        expect(sessionStorage.getItem(selectionKey)).toBe('8');
+        expect(sessionStorage.getItem(receiptKey.replace(':1:7', ':1:8'))).toBe(raw);
+      },
+    );
+
+    it.each(['http://LOCALHOST:8000/api/v1///', 'http://localhost:8000/api/v1'])(
+      'restores scoped selection and receipt on canonical equivalent base %s', async (base) => {
+        sessionStorage.setItem(selectionKey, '8');
+        writePendingVNAssetGeneration(scope, 8, { kind: 'start', key: 'canonical-selected-key' });
+        mocks.apiBaseUrl.mockReturnValue(base);
+        render(<VNAssetsWorkbench />);
+        await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1));
+        expect(mocks.startVNAssetGeneration).toHaveBeenCalledWith(8, { idempotency_key: 'canonical-selected-key' });
+        await waitFor(() => expect(readPendingVNAssetGeneration(scope, 8)).toBeNull());
+      },
+    );
+
+    it('never assigns, selects, replays or deletes literal unscoped v1 entries', async () => {
+      const oldSelection = 'vn-assets:selected-pack:v1:1';
+      const oldReceipt = 'vn-assets:pending-generation:v1:1:8';
+      const raw = '{ "kind": "retry", "slotId": 12, "key": "literal-old-key" }';
+      sessionStorage.setItem(oldSelection, '8');
+      sessionStorage.setItem(oldReceipt, raw);
+      const user = userEvent.setup();
+      const first = render(<VNAssetsWorkbench />);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+      expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+      await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+      expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+      await user.click(screen.getByRole('button', { name: 'Start generation' }));
+      await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1));
+      expect(mocks.startVNAssetGeneration.mock.calls[0][0]).toBe(7);
+      expect(sessionStorage.getItem(oldSelection)).toBe('8');
+      expect(sessionStorage.getItem(oldReceipt)).toBe(raw);
+      first.unmount();
+      render(<VNAssetsWorkbench />);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+      expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1);
+      expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem(oldReceipt)).toBe(raw);
+    });
+
+    it('does not load or persist a selection before fresh profile authority and keeps lists stable on focus', async () => {
+      let profile!: (value: unknown) => void;
+      mocks.profile.mockImplementationOnce(() => new Promise((resolve) => { profile = resolve; }));
+      sessionStorage.setItem(selectionKey, '8');
+      render(<VNAssetsWorkbench />);
+      expect(mocks.listVNAssetPacks).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem(selectionKey)).toBe('8');
+      await act(async () => profile({ user: { id: 1, is_active: true } }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+      expect(mocks.listVNAssetPacks).toHaveBeenCalledTimes(1);
+      const reads = mocks.getVNAssetGeneration.mock.calls.length;
+      act(() => window.dispatchEvent(new Event('focus')));
+      await waitFor(() => expect(mocks.getVNAssetGeneration).toHaveBeenCalledTimes(reads + 1));
+      expect(mocks.listVNAssetPacks).toHaveBeenCalledTimes(1);
+      expect(mocks.getStarterMatrices).toHaveBeenCalledTimes(1);
+      expect(sessionStorage.getItem(selectionKey)).toBe('8');
+    });
+
+    it('ignores old-server list results after a verified base change', async () => {
+      let oldList!: (value: unknown) => void;
+      mocks.listVNAssetPacks.mockImplementationOnce(() => new Promise((resolve) => { oldList = resolve; }));
+      render(<VNAssetsWorkbench />);
+      await waitFor(() => expect(mocks.listVNAssetPacks).toHaveBeenCalledTimes(1));
+      mocks.apiBaseUrl.mockReturnValue(serverB.server);
+      act(() => window.dispatchEvent(new Event('tldw:config-updated')));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+      await act(async () => oldList([{ id: 99, owner_user_id: 1, title: 'Stale server pack', status: 'draft' }]));
+      expect(screen.queryByText('Stale server pack')).not.toBeInTheDocument();
+      expect(mocks.listVNAssetPacks).toHaveBeenCalledTimes(2);
+    });
+
+    it('restores scoped selection when initial lists finish during same-account revalidation', async () => {
+      let list!: (value: unknown) => void;
+      mocks.listVNAssetPacks.mockImplementationOnce(() => new Promise((resolve) => { list = resolve; }));
+      sessionStorage.setItem(selectionKey, '8');
+      const user = userEvent.setup();
+      render(<VNAssetsWorkbench />);
+      await waitFor(() => expect(mocks.listVNAssetPacks).toHaveBeenCalledTimes(1));
+      let profile!: (value: unknown) => void;
+      mocks.profile.mockImplementationOnce(() => new Promise((resolve) => { profile = resolve; }));
+      act(() => window.dispatchEvent(new Event('focus')));
+      await act(async () => list([
+        { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+        { id: 8, owner_user_id: 1, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+      ]));
+      expect(sessionStorage.getItem(selectionKey)).toBe('8');
+      await act(async () => profile({ user: { id: 1, is_active: true } }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+      await user.click(screen.getByRole('button', { name: 'Start generation' }));
+      await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1));
+      expect(mocks.startVNAssetGeneration.mock.calls[0][0]).toBe(8);
+      expect(sessionStorage.getItem(selectionKey)).toBe('8');
+      expect(mocks.listVNAssetPacks).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['start', 'retry'].flatMap((kind) => [
+      { status: 403 }, { status: 404 }, { status: 422 },
+      ...['vn_asset_recipe_unavailable', 'vn_asset_recipe_invalid', 'vn_asset_recipe_slot_mismatch',
+        'vn_asset_retry_source_unavailable', 'vn_asset_retry_source_active', 'vn_asset_retry_override_conflict',
+        'vn_asset_execution_recipe_invalid'].map((errorCode) => ({ status: 409, errorCode })),
+    ].map((error) => ({ kind, ...error }))))(
+      'clears only the matching scoped $kind receipt on definitive $status/$errorCode and permits fresh Start after reload',
+      async ({ kind, status, ...codes }) => {
+        const pending = { kind: kind as 'start' | 'retry', ...(kind === 'retry' ? { slotId: 12 } : {}), key: 'rejected-scoped-key' };
+        writePendingVNAssetGeneration(scope, 7, pending);
+        writePendingVNAssetGeneration(scope, 8, { kind: 'start', key: 'other-pack-key' });
+        writePendingVNAssetGeneration(serverB, 7, { kind: 'start', key: 'other-server-key' });
+        const send = kind === 'start' ? mocks.startVNAssetGeneration : mocks.retryVNAssetSlot;
+        send.mockRejectedValueOnce(Object.assign(new Error('Definitive rejection'), { status, ...codes }));
+        const user = userEvent.setup();
+        const first = render(<VNAssetsWorkbench />);
+        await screen.findByText('Definitive rejection');
+        expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
+        expect(readPendingVNAssetGeneration(scope, 8)?.key).toBe('other-pack-key');
+        expect(readPendingVNAssetGeneration(serverB, 7)?.key).toBe('other-server-key');
+        first.unmount();
+        render(<VNAssetsWorkbench />);
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+        expect(send).toHaveBeenCalledTimes(1);
+        await user.click(screen.getByRole('button', { name: 'Start generation' }));
+        await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(kind === 'start' ? 2 : 1));
+        expect(mocks.startVNAssetGeneration.mock.lastCall![1].idempotency_key).not.toBe(pending.key);
+      },
+    );
+
+    it.each(['start', 'retry'].flatMap((kind) => [
+      new Error('Network failure'), 'non-Error rejection',
+      ...[400, 401, 408, 429, 500, 503].map((status) => Object.assign(new Error('Transient failure'), { status })),
+      ...['unknown_conflict', 'idempotency_key_in_progress'].map((errorCode) => Object.assign(new Error('Pending conflict'), { status: 409, errorCode })),
+    ].map((failure, index) => ({ kind, failure, index }))))(
+      'retains the exact scoped $kind receipt for ambiguous response $index and reuses it on Refresh', async ({ kind, failure }) => {
+        const pending = { kind: kind as 'start' | 'retry', ...(kind === 'retry' ? { slotId: 12 } : {}), key: 'negative-matrix-key' };
+        writePendingVNAssetGeneration(scope, 7, pending);
+        const raw = sessionStorage.getItem(receiptKey);
+        const send = kind === 'start' ? mocks.startVNAssetGeneration : mocks.retryVNAssetSlot;
+        send.mockRejectedValueOnce(failure);
+        const user = userEvent.setup();
+        render(<VNAssetsWorkbench />);
+        await screen.findByRole('alert');
+        expect(sessionStorage.getItem(receiptKey)).toBe(raw);
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh generation status' })).toBeEnabled());
+        await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+        await waitFor(() => expect(readPendingVNAssetGeneration(scope, 7)).toBeNull());
+        expect(send.mock.calls[1]).toEqual(kind === 'start' ? [7, { idempotency_key: pending.key }] : [7, 12, { idempotency_key: pending.key }]);
+      },
+    );
+
+    it.each(['success', 'rejection'])('compare-clears only the original key on late legacy %s', async (outcome) => {
+      let resolve!: (value: unknown) => void;
+      let reject!: (value: unknown) => void;
+      writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'old-key' });
+      mocks.retryVNAssetSlot.mockImplementationOnce(() => new Promise((accept, fail) => { resolve = accept; reject = fail; }));
+      const user = userEvent.setup();
+      render(<VNAssetsWorkbench />);
+      await waitFor(() => expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1));
+      writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'replacement-key' });
+      mocks.retryVNAssetSlot.mockRejectedValueOnce(new Error('Replacement response lost'));
+      await act(async () => {
+        if (outcome === 'success') resolve({ status: 'failed' });
+        else reject(Object.assign(new Error('Old rejected'), { status: 409, errorCode: 'vn_asset_retry_source_unavailable' }));
+      });
+      await screen.findByText('Replacement response lost');
+      expect(readPendingVNAssetGeneration(scope, 7)?.key).toBe('replacement-key');
+      await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+      await waitFor(() => expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(3));
+      expect(mocks.retryVNAssetSlot.mock.calls[1]).toEqual([7, 12, { idempotency_key: 'replacement-key' }]);
+      expect(mocks.retryVNAssetSlot.mock.calls[2]).toEqual([7, 12, { idempotency_key: 'replacement-key' }]);
+    });
+
+    it.each(['account', 'server'])('does not POST a scoped receipt when %s changes during profile await', async (change) => {
+      writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'old-await-key' });
+      let oldProfile!: (value: unknown) => void;
+      mocks.profile.mockResolvedValueOnce({ user: { id: 1, is_active: true } })
+        .mockImplementationOnce(() => new Promise((resolve) => { oldProfile = resolve; }));
+      render(<VNAssetsWorkbench />);
+      await waitFor(() => expect(mocks.profile).toHaveBeenCalledTimes(2));
+      const raw = sessionStorage.getItem(receiptKey);
+      if (change === 'server') mocks.apiBaseUrl.mockReturnValue(serverB.server);
+      else mocks.profile.mockResolvedValue({ user: { id: 2, is_active: true } });
+      act(() => window.dispatchEvent(new Event(change === 'server' ? 'tldw:config-updated' : 'focus')));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+      await act(async () => oldProfile({ user: { id: 1, is_active: true } }));
+      expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+      expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem(receiptKey)).toBe(raw);
+      expect(screen.queryByText(/verification was interrupted/)).not.toBeInTheDocument();
+    });
+
+    it.each(['account', 'server'].flatMap((change) => ['success', 'rejection'].map((outcome) => ({ change, outcome }))))(
+      'keeps current work locked after old $change POST completion ($outcome)', async ({ change, outcome }) => {
+        writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'old-post-key' });
+        let resolve!: (value: unknown) => void;
+        let reject!: (value: unknown) => void;
+        mocks.retryVNAssetSlot.mockImplementationOnce(() => new Promise((accept, fail) => { resolve = accept; reject = fail; }));
+        const user = userEvent.setup();
+        render(<VNAssetsWorkbench />);
+        await waitFor(() => expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1));
+        const raw = sessionStorage.getItem(receiptKey);
+        if (change === 'server') mocks.apiBaseUrl.mockReturnValue(serverB.server);
+        else mocks.profile.mockResolvedValue({ user: { id: 2, is_active: true } });
+        act(() => window.dispatchEvent(new Event(change === 'server' ? 'tldw:config-updated' : 'focus')));
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+        let currentResponse!: (value: unknown) => void;
+        mocks.startVNAssetGeneration.mockImplementationOnce(() => new Promise((accept) => { currentResponse = accept; }));
+        await user.click(screen.getByRole('button', { name: 'Start generation' }));
+        await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1));
+        const currentRaw = sessionStorage.getItem('tldw:vn-generation:pending:v1');
+        await act(async () => {
+          if (outcome === 'success') resolve({ status: 'queued', batch_id: 999 });
+          else reject(Object.assign(new Error('Stale definitive rejection'), { status: 422 }));
+        });
+        expect(sessionStorage.getItem(receiptKey)).toBe(raw);
+        expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBe(currentRaw);
+        expect(screen.getByRole('button', { name: 'Recover pending request' })).toBeDisabled();
+        expect(screen.getByLabelText('Generation status')).toHaveTextContent('failed');
+        expect(screen.queryByText('Stale definitive rejection')).not.toBeInTheDocument();
+        await act(async () => currentResponse({ status: 'queued' }));
+      },
+    );
+
+    it.each(['account', 'server'])('does not reuse a trusted memory receipt after storage recovers on another %s', async (change) => {
+      writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'old-memory-key' });
+      mocks.retryVNAssetSlot.mockRejectedValueOnce(new Error('Original transport lost'));
+      const user = userEvent.setup();
+      render(<VNAssetsWorkbench />);
+      await screen.findByText('Original transport lost');
+      sessionStorage.removeItem(receiptKey);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Storage disabled'); });
+      await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+      await screen.findByText(/Recovery storage is unavailable/);
+      expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1);
+      read.mockRestore();
+      expect(warn).toHaveBeenCalled();
+      for (const call of warn.mock.calls) {
+        expect(call).toEqual(['[vn-assets] Could not read pending generation receipt: session storage unavailable.']);
+      }
+      warn.mockRestore();
+      if (change === 'server') mocks.apiBaseUrl.mockReturnValue(serverB.server);
+      else mocks.profile.mockResolvedValue({ user: { id: 2, is_active: true } });
+      act(() => window.dispatchEvent(new Event(change === 'server' ? 'tldw:config-updated' : 'focus')));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+      await user.click(screen.getByRole('button', { name: 'Start generation' }));
+      await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1));
+      expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1);
+      expect(mocks.startVNAssetGeneration.mock.calls[0][1].idempotency_key).not.toBe('old-memory-key');
+    });
+  });
+
   /** Old parent receipts retain cancellation without weakening new-command journaling. */
   async function ambiguousCancelableStart(): Promise<{
     user: ReturnType<typeof userEvent.setup>;
@@ -152,13 +432,13 @@ describe('VNAssetsWorkbench', () => {
       { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
       { id: 8, owner_user_id: 1, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
     ]);
-    writePendingVNAssetGeneration(1, 7, { kind: 'start', key: 'legacy-ambiguous-start' });
+    writePendingVNAssetGeneration(scope, 7, { kind: 'start', key: 'legacy-ambiguous-start' });
     mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Ambiguous start'))
       .mockRejectedValueOnce(new Error('Reconciliation offline'));
     const user = userEvent.setup();
     const view = render(<VNAssetsWorkbench />);
     await screen.findByText('Ambiguous start');
-    const key = readPendingVNAssetGeneration(1, 7)!.key;
+    const key = readPendingVNAssetGeneration(scope, 7)!.key;
     mocks.getVNAssetGeneration.mockResolvedValue({ status: 'queued' });
     await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
     await screen.findByText('Reconciliation offline');
@@ -172,7 +452,7 @@ describe('VNAssetsWorkbench', () => {
     mocks.getVNAssetGeneration.mockResolvedValue({ status: 'cancelled' });
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('cancelled'));
-    expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
+    expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
     if (reload) {
       view.unmount();
       render(<VNAssetsWorkbench />);
@@ -189,7 +469,7 @@ describe('VNAssetsWorkbench', () => {
     mocks.cancelVNAssetGeneration.mockRejectedValue(new Error('Cancel offline'));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await screen.findByText('Cancel offline');
-    expect(readPendingVNAssetGeneration(1, 7)?.key).toBe(key);
+    expect(readPendingVNAssetGeneration(scope, 7)?.key).toBe(key);
     view.unmount();
     render(<VNAssetsWorkbench />);
     await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(3));
@@ -201,18 +481,18 @@ describe('VNAssetsWorkbench', () => {
     let finishCancel!: (value: unknown) => void;
     mocks.cancelVNAssetGeneration.mockImplementation(() => new Promise((resolve) => { finishCancel = resolve; }));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    writePendingVNAssetGeneration(1, 7, { kind: 'retry', slotId: 12, key: 'newer-receipt' });
-    writePendingVNAssetGeneration(2, 7, { kind: 'start', key: 'other-owner' });
+    writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'newer-receipt' });
+    writePendingVNAssetGeneration(otherScope, 7, { kind: 'start', key: 'other-owner' });
     mocks.getVNAssetGeneration.mockResolvedValue({ status: 'failed' });
     mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('New pack offline'));
-    writePendingVNAssetGeneration(1, 8, { kind: 'start', key: 'other-pack-receipt' });
+    writePendingVNAssetGeneration(scope, 8, { kind: 'start', key: 'other-pack-receipt' });
     await user.click(screen.getByText('Moon Archive'));
     await screen.findByText('New pack offline');
-    const otherPack = readPendingVNAssetGeneration(1, 8);
+    const otherPack = readPendingVNAssetGeneration(scope, 8);
     await act(async () => { finishCancel({ status: 'cancelled' }); });
-    expect(readPendingVNAssetGeneration(1, 7)?.key).toBe('newer-receipt');
-    expect(readPendingVNAssetGeneration(2, 7)?.key).toBe('other-owner');
-    expect(readPendingVNAssetGeneration(1, 8)).toEqual(otherPack);
+    expect(readPendingVNAssetGeneration(scope, 7)?.key).toBe('newer-receipt');
+    expect(readPendingVNAssetGeneration(otherScope, 7)?.key).toBe('other-owner');
+    expect(readPendingVNAssetGeneration(scope, 8)).toEqual(otherPack);
     expect(screen.getByRole('status')).toHaveTextContent('failed');
     await user.click(screen.getByRole('button', { name: 'Start generation' }));
     await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(4));
@@ -221,7 +501,7 @@ describe('VNAssetsWorkbench', () => {
 
   it('cancellation clears the matching memory key even when session storage is unavailable', async () => {
     const { user, key } = await ambiguousCancelableStart();
-    sessionStorage.removeItem('vn-assets:pending-generation:v1:1:7');
+    sessionStorage.removeItem('vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1:7');
     const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage disabled'); });
     mocks.cancelVNAssetGeneration.mockResolvedValue({ status: 'cancelled' });
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -250,7 +530,7 @@ describe('VNAssetsWorkbench', () => {
     mocks.listVNAssetPacks.mockResolvedValue([
       { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
     ]);
-    const storageKey = 'vn-assets:pending-generation:v1:1:7';
+    const storageKey = 'vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1:7';
     window.sessionStorage.setItem(storageKey, JSON.stringify({ kind: 'retry', slotId, key: 'invalid-retry-key' }));
 
     const first = render(<VNAssetsWorkbench />);
@@ -270,13 +550,13 @@ describe('VNAssetsWorkbench', () => {
     mocks.listVNAssetPacks.mockResolvedValue([
       { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
     ]);
-    writePendingVNAssetGeneration(1, 7, { kind: 'retry', slotId: 12, key: 'legacy-memory-retry' });
+    writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'legacy-memory-retry' });
     mocks.retryVNAssetSlot.mockRejectedValueOnce(new Error('Connection lost'));
     const user = userEvent.setup();
     render(<VNAssetsWorkbench />);
     await screen.findByText('Connection lost');
     const originalRequest = mocks.retryVNAssetSlot.mock.calls[0][2];
-    sessionStorage.removeItem('vn-assets:pending-generation:v1:1:7');
+    sessionStorage.removeItem('vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1:7');
     const storage = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
       throw new DOMException('Storage disabled', 'SecurityError');
     });
@@ -306,7 +586,7 @@ describe('VNAssetsWorkbench', () => {
     const first = render(<VNAssetsWorkbench />);
     await user.click(await screen.findByRole('button', { name: 'Retry sprite_neutral' }));
     await screen.findByText('slot_not_found');
-    expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
+    expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
     expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1);
     first.unmount();
@@ -325,11 +605,11 @@ describe('VNAssetsWorkbench', () => {
     mocks.listVNAssetPacks.mockResolvedValue([
       { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
     ]);
-    writePendingVNAssetGeneration(1, 7, { kind: 'retry', slotId: 12, key: 'missing-slot-receipt' });
+    writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'missing-slot-receipt' });
     mocks.retryVNAssetSlot.mockRejectedValue(new ApiError('slot_not_found', { status: 404, detail: 'slot_not_found' }));
     const first = render(<VNAssetsWorkbench />);
     await screen.findByText('slot_not_found');
-    await waitFor(() => expect(readPendingVNAssetGeneration(1, 7)).toBeNull());
+    await waitFor(() => expect(readPendingVNAssetGeneration(scope, 7)).toBeNull());
     first.unmount();
     render(<VNAssetsWorkbench />);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
@@ -351,8 +631,8 @@ describe('VNAssetsWorkbench', () => {
         { id: 13, pack_id: 7, asset_type: 'sprite', slot_key: 'sprite_happy', variant_count: 1, status: 'approved' },
       ]);
       const receipt = { kind, ...(slotId === undefined ? {} : { slotId }), key: `${label}-receipt-key-secret` };
-      writePendingVNAssetGeneration(1, 7, receipt);
-      const storedReceipt = window.sessionStorage.getItem('vn-assets:pending-generation:v1:1:7');
+      writePendingVNAssetGeneration(scope, 7, receipt);
+      const storedReceipt = window.sessionStorage.getItem('vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1:7');
       const api = kind === 'start' ? mocks.startVNAssetGeneration : mocks.retryVNAssetSlot;
       api.mockRejectedValue(errorKind === 'Error' ? new Error('Reconciliation offline') : rejection);
       const message = errorKind === 'Error' ? 'Reconciliation offline' : expected;
@@ -363,8 +643,8 @@ describe('VNAssetsWorkbench', () => {
       const alert = await screen.findByRole('alert');
       expect(alert.textContent).toBe(message);
       expect(screen.getByRole('alert').textContent).not.toMatch(/receipt-key-secret|raw-rejection-secret|payload-secret|owner-secret/);
-      expect(readPendingVNAssetGeneration(1, 7)).toEqual(receipt);
-      expect(window.sessionStorage.getItem('vn-assets:pending-generation:v1:1:7')).toBe(storedReceipt);
+      expect(readPendingVNAssetGeneration(scope, 7)).toEqual(receipt);
+      expect(window.sessionStorage.getItem('vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1:7')).toBe(storedReceipt);
       await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh generation status' })).toBeEnabled());
       expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled();
       expect(api).toHaveBeenCalledExactlyOnceWith(...requestArgs);
@@ -374,7 +654,7 @@ describe('VNAssetsWorkbench', () => {
       await screen.findByText(message);
       expect(api).toHaveBeenCalledTimes(2);
       expect(api).toHaveBeenLastCalledWith(...requestArgs);
-      expect(readPendingVNAssetGeneration(1, 7)).toEqual(receipt);
+      expect(readPendingVNAssetGeneration(scope, 7)).toEqual(receipt);
       await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh generation status' })).toBeEnabled());
 
       api.mockResolvedValue({ status: 'completed' });
@@ -383,7 +663,7 @@ describe('VNAssetsWorkbench', () => {
       await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('completed'));
       expect(api).toHaveBeenCalledTimes(3);
       expect(api).toHaveBeenLastCalledWith(...requestArgs);
-      expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
+      expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled();
     });
@@ -399,7 +679,7 @@ describe('VNAssetsWorkbench', () => {
       { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
     ]);
     const receipt = { kind: 'start', key: 'start-receipt-key-secret', slotId: slotContent };
-    const storageKey = 'vn-assets:pending-generation:v1:1:7';
+    const storageKey = 'vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1:7';
     const storedReceipt = JSON.stringify(receipt);
     window.sessionStorage.setItem(storageKey, storedReceipt);
     mocks.startVNAssetGeneration.mockRejectedValue({ payload: 'RAW_REJECTION_PAYLOAD' });
@@ -409,7 +689,7 @@ describe('VNAssetsWorkbench', () => {
     expect((await screen.findByRole('alert')).textContent).toBe(message);
     expect(screen.getByRole('alert').textContent).not.toMatch(/PRIVATE_RECEIPT_SLOT_PAYLOAD|RAW_REJECTION_PAYLOAD|receipt-key-secret|object Object/);
     expect(window.sessionStorage.getItem(storageKey)).toBe(storedReceipt);
-    expect(readPendingVNAssetGeneration(1, 7)).toEqual(receipt);
+    expect(readPendingVNAssetGeneration(scope, 7)).toEqual(receipt);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
     expect(mocks.startVNAssetGeneration).toHaveBeenCalledExactlyOnceWith(7, { idempotency_key: receipt.key });
     expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
@@ -428,7 +708,7 @@ describe('VNAssetsWorkbench', () => {
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('completed'));
     expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(3);
     expect(mocks.startVNAssetGeneration).toHaveBeenLastCalledWith(7, { idempotency_key: receipt.key });
-    expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
+    expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
   });
@@ -439,14 +719,14 @@ describe('VNAssetsWorkbench', () => {
       { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
     ]);
     mocks.retryVNAssetSlot.mockRejectedValueOnce(new ApiError('Try again', { status }));
-    writePendingVNAssetGeneration(1, 7, { kind: 'retry', slotId: 12, key: 'legacy-http-retry' });
+    writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'legacy-http-retry' });
     const user = userEvent.setup();
     render(<VNAssetsWorkbench />);
     await screen.findByText('Try again');
-    const pending = readPendingVNAssetGeneration(1, 7);
+    const pending = readPendingVNAssetGeneration(scope, 7);
     expect(pending).not.toBeNull();
     await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
-    await waitFor(() => expect(readPendingVNAssetGeneration(1, 7)).toBeNull());
+    await waitFor(() => expect(readPendingVNAssetGeneration(scope, 7)).toBeNull());
     expect(mocks.retryVNAssetSlot).toHaveBeenLastCalledWith(7, 12, { idempotency_key: pending!.key });
   });
 
@@ -514,7 +794,7 @@ describe('VNAssetsWorkbench', () => {
       status: mocks.startVNAssetGeneration.mock.calls.length > 1 ? 'queued' : 'failed',
     }));
     mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Connection lost'));
-    writePendingVNAssetGeneration(1, 7, { kind: 'start', key: 'legacy-reload-start' });
+    writePendingVNAssetGeneration(scope, 7, { kind: 'start', key: 'legacy-reload-start' });
     const first = render(<VNAssetsWorkbench />);
     await screen.findByText('Connection lost');
     const originalRequest = mocks.startVNAssetGeneration.mock.calls[0][1];
@@ -523,7 +803,7 @@ describe('VNAssetsWorkbench', () => {
     render(<VNAssetsWorkbench />);
     await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(2));
     expect(mocks.startVNAssetGeneration.mock.calls[1]).toEqual([7, originalRequest]);
-    await waitFor(() => expect(readPendingVNAssetGeneration(1, 7)).toBeNull());
+    await waitFor(() => expect(readPendingVNAssetGeneration(scope, 7)).toBeNull());
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('queued'));
   });
 
@@ -533,7 +813,7 @@ describe('VNAssetsWorkbench', () => {
       { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
     ]);
     mocks.retryVNAssetSlot.mockRejectedValueOnce(new Error('Connection lost'));
-    writePendingVNAssetGeneration(1, 7, { kind: 'retry', slotId: 12, key: 'legacy-reload-retry' });
+    writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'legacy-reload-retry' });
     const first = render(<VNAssetsWorkbench />);
     await screen.findByText('Connection lost');
     const originalRequest = mocks.retryVNAssetSlot.mock.calls[0][2];
@@ -542,7 +822,7 @@ describe('VNAssetsWorkbench', () => {
     render(<VNAssetsWorkbench />);
     await waitFor(() => expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(2));
     expect(mocks.retryVNAssetSlot.mock.calls[1]).toEqual([7, 12, originalRequest]);
-    await waitFor(() => expect(readPendingVNAssetGeneration(1, 7)).toBeNull());
+    await waitFor(() => expect(readPendingVNAssetGeneration(scope, 7)).toBeNull());
   });
 
   it("does not replay another owner's pending generation after reload", async () => {
@@ -575,7 +855,7 @@ describe('VNAssetsWorkbench', () => {
       : []);
     mocks.getVNAssetGeneration.mockResolvedValue({ status: 'failed' });
     mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Connection lost'));
-    writePendingVNAssetGeneration(1, 8, { kind: 'start', key: 'legacy-selected-pack' });
+    writePendingVNAssetGeneration(scope, 8, { kind: 'start', key: 'legacy-selected-pack' });
     const user = userEvent.setup();
     const first = render(<VNAssetsWorkbench />);
     await user.click(await screen.findByText('Second Pack'));
@@ -594,7 +874,7 @@ describe('VNAssetsWorkbench', () => {
     mocks.listVNAssetPacks.mockResolvedValue([
       { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
     ]);
-    writePendingVNAssetGeneration(1, 7, { kind: 'start', key: 'legacy-stale-replay' });
+    writePendingVNAssetGeneration(scope, 7, { kind: 'start', key: 'legacy-stale-replay' });
     let resolve!: (value: unknown) => void;
     let reject!: (error: Error) => void;
     if (trigger === 'refresh') mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Legacy initial response lost'));
@@ -621,7 +901,7 @@ describe('VNAssetsWorkbench', () => {
     });
     expect(mocks.getVNAssetGeneration).toHaveBeenCalledTimes(reads + 1);
     expect(screen.getByLabelText('Generation status')).toHaveTextContent('failed');
-    expect(readPendingVNAssetGeneration(1, 7)?.key).toBe('legacy-stale-replay');
+    expect(readPendingVNAssetGeneration(scope, 7)?.key).toBe('legacy-stale-replay');
     expect(screen.queryByText('Old legacy response')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Start generation' }));
     await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(sends + 1));
@@ -633,7 +913,7 @@ describe('VNAssetsWorkbench', () => {
     mocks.listVNAssetPacks.mockResolvedValue([
       { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
     ]);
-    writePendingVNAssetGeneration(1, 7, { kind: 'retry', slotId: 12, key: 'legacy-original-key' });
+    writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'legacy-original-key' });
     const command = { packId: 7, slotId: 12, request: { idempotency_key: 'vn-generation-dev-original-key', source_batch_id: 41 } };
     sessionStorage.setItem('tldw:vn-generation:pending:v1', JSON.stringify({
       version: 1, scope: { server: 'http://localhost:8000/api/v1', principal: '1' }, commands: [command],
@@ -646,9 +926,9 @@ describe('VNAssetsWorkbench', () => {
     await user.click(recover);
     await waitFor(() => expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBeNull());
     expect(mocks.retryVNAssetSlot).toHaveBeenCalledExactlyOnceWith(7, 12, command.request);
-    expect(readPendingVNAssetGeneration(1, 7)?.key).toBe('legacy-original-key');
+    expect(readPendingVNAssetGeneration(scope, 7)?.key).toBe('legacy-original-key');
     await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
-    await waitFor(() => expect(readPendingVNAssetGeneration(1, 7)).toBeNull());
+    await waitFor(() => expect(readPendingVNAssetGeneration(scope, 7)).toBeNull());
     expect(mocks.retryVNAssetSlot.mock.calls[1]).toEqual([7, 12, { idempotency_key: 'legacy-original-key' }]);
   });
 
@@ -665,19 +945,19 @@ describe('VNAssetsWorkbench', () => {
     let profile!: (value: unknown) => void;
     const awaitProfile = () => new Promise((resolve) => { profile = resolve; });
     if (trigger === 'automatic') {
-      writePendingVNAssetGeneration(1, 7, legacy);
+      writePendingVNAssetGeneration(scope, 7, legacy);
       mocks.profile.mockResolvedValueOnce({ user: { id: 1, is_active: true } }).mockImplementationOnce(awaitProfile);
     }
     const user = userEvent.setup();
     render(<VNAssetsWorkbench />);
     if (trigger === 'refresh') {
       await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
-      writePendingVNAssetGeneration(1, 7, legacy);
+      writePendingVNAssetGeneration(scope, 7, legacy);
       mocks.profile.mockImplementationOnce(awaitProfile);
       await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
     }
     await waitFor(() => expect(mocks.profile).toHaveBeenCalledTimes(2));
-    const legacyKey = 'vn-assets:pending-generation:v1:1:7';
+    const legacyKey = 'vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1:7';
     const legacyRaw = sessionStorage.getItem(legacyKey);
     const command = {
       packId: 7, slotId: 12,
@@ -711,12 +991,12 @@ describe('VNAssetsWorkbench', () => {
     mocks.listVNAssetPacks.mockResolvedValue([
       { id: 7, owner_user_id: 2, title: 'Other Library', primary_character_id: 42, status: 'draft' },
     ]);
-    writePendingVNAssetGeneration(2, 7, { kind: 'start', key: 'legacy-other-account' });
+    writePendingVNAssetGeneration(otherScope, 7, { kind: 'start', key: 'legacy-other-account' });
     render(<VNAssetsWorkbench />);
-    await waitFor(() => expect(mocks.profile).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(mocks.profile).toHaveBeenCalledTimes(1);
     expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
-    expect(readPendingVNAssetGeneration(2, 7)?.key).toBe('legacy-other-account');
+    expect(readPendingVNAssetGeneration(otherScope, 7)?.key).toBe('legacy-other-account');
   });
 
   it.each(['start', 'retry'])('blocks a new %s when a legacy receipt appears during pre-send verification', async (kind) => {
@@ -732,15 +1012,15 @@ describe('VNAssetsWorkbench', () => {
     mocks.profile.mockImplementationOnce(() => new Promise((resolve) => { profile = resolve; }));
     await user.click(button);
     const receipt = { kind: 'retry' as const, slotId: 12, key: 'legacy-restored-before-send' };
-    writePendingVNAssetGeneration(1, 7, receipt);
+    writePendingVNAssetGeneration(scope, 7, receipt);
     await act(async () => profile({ user: { id: 1, is_active: true } }));
     expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
     expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
     expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBeNull();
-    expect(readPendingVNAssetGeneration(1, 7)).toEqual(receipt);
+    expect(readPendingVNAssetGeneration(scope, 7)).toEqual(receipt);
     expect(screen.getByText('Finish the previous generation request with Refresh before starting another.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
-    await waitFor(() => expect(readPendingVNAssetGeneration(1, 7)).toBeNull());
+    await waitFor(() => expect(readPendingVNAssetGeneration(scope, 7)).toBeNull());
     expect(mocks.retryVNAssetSlot).toHaveBeenCalledExactlyOnceWith(7, 12, { idempotency_key: receipt.key });
   });
 

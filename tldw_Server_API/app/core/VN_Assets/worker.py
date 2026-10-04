@@ -1161,12 +1161,13 @@ class VNAssetGenerationWorker:
                     await self.repo.run_worker_replay_operation(
                         partial(self._require_current_job_lease, job, user_id=user_id)
                     )
-                item = self.repo.complete_variant(
+                item = await self.repo.run_worker_replay_operation(partial(
+                    self.repo.complete_variant,
                     batch_id=batch_id, slot_id=slot_id,
                     variant_index=variant_index, item_id=item_id,
                     attempt_token=attempt_token,
                     validate_authority=(lambda: self._require_current_job_lease(job, user_id=user_id)) if job else None,
-                )
+                ))
             except VNAssetGenerationError:
                 await self._cleanup_cancelled_variant_storage(
                     batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,

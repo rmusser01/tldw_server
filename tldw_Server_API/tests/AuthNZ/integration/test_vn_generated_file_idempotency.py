@@ -345,9 +345,16 @@ asyncio.run(main())
 '''
 
 
-def _storage_result(tmp_path: Path, request: pytest.FixtureRequest, backend: str, case: str) -> dict:
+def _storage_result(
+    tmp_path: Path, request: pytest.FixtureRequest, backend: str, case: str,
+    *, quota_policy: str | None = "on",
+) -> dict[str, object]:
     """Run against the shared isolated PostgreSQL fixture or a private SQLite file."""
     env = _vn_runtime_env(tmp_path, request, backend)
+    env.pop("USAGE_QUOTAS_ENABLED", None)
+    env.pop("LIMIT_ENFORCEMENT_ENABLED", None)
+    if quota_policy is not None:
+        env["USAGE_QUOTAS_ENABLED"] = "true" if quota_policy == "on" else "false"
     env["VN_STORAGE_CASE"] = case
     return _run_runtime(tmp_path, env, STORAGE_SCRIPT)
 

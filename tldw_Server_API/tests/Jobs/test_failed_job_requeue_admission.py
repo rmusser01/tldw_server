@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import retry_failed_job_admission
+from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.operations.contracts import CreateJobCommand
 from tldw_Server_API.app.core.Jobs.operations.postgres import admission as pg_admission
@@ -388,8 +389,53 @@ def test_processing_lease_health_is_owner_scoped_and_read_only(
         assert jobs.has_live_processing_lease(job["id"], owner_user_id="42") is False
 
 
-@pytest.mark.parametrize("facts", [{"job_id": True, "owner_user_id": "42"}, {"job_id": 1, "owner_user_id": ""}])
-def test_processing_lease_health_never_widens_invalid_identity(jobs: JobManager, facts: dict[str, Any]) -> None:
+@pytest.mark.parametrize("facts", [
+    {"job_id": value, "owner_user_id": "42"} for value in (True, False, 0, -1, "1", 1.5, None)
+] + [
+    {"job_id": 1, "owner_user_id": value} for value in (None, True, 42, "", " ", "\t\n")
+])
+def test_processing_lease_health_never_widens_invalid_identity(
+    jobs: JobManager, facts: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An invalid ID or blank owner cannot become an unscoped read."""
-    with pytest.raises(ValueError):
-        jobs.has_live_processing_lease(**facts)
+    job = failed_job(jobs)
+    before = snapshot(jobs, job)
+    lookups: list[tuple[int, dict[str, Any]]] = []
+    original = jobs.get_job
+
+    def observe_lookup(job_id: int, **kwargs: Any) -> dict[str, Any] | None:
+        """Record any read performed before caller identity is validated."""
+        lookups.append((job_id, kwargs))
+        return original(job_id, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(jobs, "get_job", observe_lookup)
+        with pytest.raises(ValueError) as raised:
+            jobs.has_live_processing_lease(**facts)
+        assert isinstance(raised.value, BadRequestError)
+        assert lookups == []
+    assert jobs.get_job(job["id"], owner_user_id="42") == job
+    assert snapshot(jobs, job) == before
+
+
+@pytest.mark.parametrize("error", [ValueError("native read failure"), sqlite3.OperationalError("driver unavailable")])
+def test_processing_lease_health_propagates_unrelated_read_errors(
+    jobs: JobManager, monkeypatch: pytest.MonkeyPatch, error: Exception,
+) -> None:
+    """Valid identity preserves the original read error without caller-error wrapping."""
+    job = failed_job(jobs)
+    before = snapshot(jobs, job)
+
+    def fail_read(job_id: int, *, owner_user_id: str) -> dict[str, Any] | None:
+        """Fail an exact owner-scoped read with the supplied original error."""
+        assert (job_id, owner_user_id) == (job["id"], "42")
+        raise error
+
+    with monkeypatch.context() as patch:
+        patch.setattr(jobs, "get_job", fail_read)
+        with pytest.raises(type(error)) as raised:
+            jobs.has_live_processing_lease(job["id"], owner_user_id="42")
+        assert raised.value is error
+        assert not isinstance(raised.value, BadRequestError)
+    assert jobs.get_job(job["id"], owner_user_id="42") == job
+    assert snapshot(jobs, job) == before

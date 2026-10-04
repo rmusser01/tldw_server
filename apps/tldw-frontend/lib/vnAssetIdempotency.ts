@@ -1,3 +1,5 @@
+import { createVNCommandScope, sameVNCommandScope, type VNCommandScope } from '@web/lib/vnGenerationRecovery';
+
 export function createVNAssetIdempotencyKey(prefix: string): string {
   const uuid = globalThis.crypto?.randomUUID?.();
   return `${prefix}-${uuid ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
@@ -9,16 +11,21 @@ export interface PendingVNAssetGeneration {
   key: string;
 }
 
-function generationStorageKey(ownerUserId: number | undefined, packId: number): string | null {
-  if (!Number.isSafeInteger(ownerUserId) || !Number.isSafeInteger(packId)) return null;
-  return `vn-assets:pending-generation:v1:${ownerUserId}:${packId}`;
+function generationStorageKey(scope: VNCommandScope | null, packId: number): string | null {
+  if (!scope || !Number.isSafeInteger(packId) || packId <= 0 || typeof window === 'undefined') return null;
+  try {
+    if (!sameVNCommandScope(scope, createVNCommandScope(scope.server, Number(scope.principal)))) return null;
+    return `vn-assets:pending-generation:v2:${encodeURIComponent(scope.server)}:${encodeURIComponent(scope.principal)}:${packId}`;
+  } catch {
+    return null;
+  }
 }
 
-/** Read an owner/pack receipt without interrupting retries when tab storage fails. */
+/** Read only a canonical, verified server/account receipt; unscoped v1 bytes stay inert. */
 export function readPendingVNAssetGeneration(
-  ownerUserId: number | undefined, packId: number
+  scope: VNCommandScope | null, packId: number
 ): PendingVNAssetGeneration | null {
-  const storageKey = generationStorageKey(ownerUserId, packId);
+  const storageKey = generationStorageKey(scope, packId);
   if (!storageKey || typeof window === 'undefined') return null;
   let storage: Storage;
   let raw: string | null;
@@ -55,9 +62,9 @@ export function readPendingVNAssetGeneration(
 }
 
 export function writePendingVNAssetGeneration(
-  ownerUserId: number | undefined, packId: number, pending: PendingVNAssetGeneration
+  scope: VNCommandScope | null, packId: number, pending: PendingVNAssetGeneration
 ): void {
-  const storageKey = generationStorageKey(ownerUserId, packId);
+  const storageKey = generationStorageKey(scope, packId);
   if (!storageKey || typeof window === 'undefined') return;
   try {
     window.sessionStorage.setItem(storageKey, JSON.stringify(pending));
@@ -67,12 +74,12 @@ export function writePendingVNAssetGeneration(
 }
 
 export function clearPendingVNAssetGeneration(
-  ownerUserId: number | undefined, packId: number, key: string
+  scope: VNCommandScope | null, packId: number, key: string
 ): void {
-  const storageKey = generationStorageKey(ownerUserId, packId);
+  const storageKey = generationStorageKey(scope, packId);
   if (!storageKey || typeof window === 'undefined') return;
   try {
-    if (readPendingVNAssetGeneration(ownerUserId, packId)?.key === key) {
+    if (readPendingVNAssetGeneration(scope, packId)?.key === key) {
       window.sessionStorage.removeItem(storageKey);
     }
   } catch {

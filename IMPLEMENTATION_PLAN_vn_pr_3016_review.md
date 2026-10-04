@@ -6,18 +6,37 @@ Designs: Docs/Design/2026-09-25-vn-pr-3016-review.md and
 Docs/Design/2026-10-02-vn-pr-3067-review-tests.md.
 
 ## Current State
+The latest direct human instruction authorizes rebasing PR3016 onto latest dev,
+addressing all PR findings/comments and normal gated merge. The previously
+presented Task69 four-source-fix and two CI-test-double designs are now approved
+for execution under original TASK-13369. Local merge-preserving rebase onto
+actualdev4c4f197 completed at2f3d3e09c0. At that checkpoint all production/test/configuration bytes
+matched the preserved current-dev union tree c3342dca64; only this plan drifted
+while replaying historical merges, and its qualified checkpoint text is restored
+below. The approved source/CI fixes and independent reviews are complete locally;
+current-dev quota controls, publication and fresh exact-head review/CI remain
+In Progress. No old-head result transfers to the new head.
+Incoming mixed-version RG TTL disposition is separate. Child merge/body rewrite
+are not authorized; all frozen evidence and existing backups remain preserved.
+
 The human explicitly approved the presented engineering fixes, publication,
 safe current-dev parent integration and fresh exact-head review/CI.
 Tasks64/65/67 and Task66 are published on child
-6909f5f7c4c501de191faf8d5d5ef558ba15f4e9; its 15 current checks completed
-without failures. This is not parent or required-dev-context green.
-Parent GitHub head remains68861f5a229365c867db8deb3432028207cd8848,
-OPEN/unmerged with the known old-head Jobs SQLite failure.
-Local parent branch is on reviewed393c365796434e717edae072fbb9802c7f256181
-with an uncommitted merge of actualdev86e287fee7bfa1a1588639232e35db3666851ded.
-New actualdev1c8491ff341053468afb9ffde9b379707c9e3bad is fetched but not yet
-integrated. Seven reproduced conflicts are textually resolved; behavioral
-integration verification and publication remain in progress.
+6909f5f7c4c501de191faf8d5d5ef558ba15f4e9; its prepublication snapshot had15
+completed checks without failures. This is not parent/required-dev green.
+Parent prepublication baseline68861f5a229365c867db8deb3432028207cd8848 was
+OPEN/unmerged with the old-head Jobs SQLite failure. Latest published-head and
+external-gate state belongs to the live SDD ledger, not that historical baseline.
+Local parent checkpoint bdf99343019a95a53785cedb32eec6e0f4b37431 commits the
+reviewed86e integration and preserves393c and published68861 ancestry. New
+actualdev1c8491ff341053468afb9ffde9b379707c9e3bad is normally merged without
+conflicts. All16 frozen VN Python files are unchanged. Prepared native Sandbox
+shard r2 passed95/no failures/errors/skips,6warnings85.99s; explicit Bash wrapper
+recorded pytest_rc0 and session87721 exited0/reaped,42 frozen inputs unchanged.
+R1's95 test outcomes remain qualified by post-pytest zsh wrapper exit1; its
+frozen report/log/XML are preserved. Existing fixture/application startup
+mutated checkout default DB/logs; no isolation/unchanged-runtime-state claim.
+Integration publication and exact-head external gates remain in progress.
 Frontend and Main service/storage slices have independent scoped review PASS.
 DB D1 flat-only V1 precedence correction is independently SPEC/QUALITY PASS;
 the complete DB file passed100 native cases. Complete VN v5 then stopped with
@@ -173,9 +192,79 @@ requires its separately prepared native shard and unchanged-owned-hash proof.
 seven required dev contexts pass, strict actual-dev integration and human gate.
 **Tests**: Fresh complete GitHub arrays and independent MERGED verification.
 **Status**: In Progress
-Local86e integration verified; checkpoint commit and normal1c integration next.
+Local86e checkpoint bdf9934301 committed; normal1c merge has no conflicts and
+no owned VN hash drift. Sandbox r2 passed95/no skips and captured exit0/reaped;
+r1 wrapper failure remains qualified. Independent publication checkpoint reply/
+evidence review PASS; r2 harness evidence is recorded separately. Latest commit,
+publication and gate reads belong to the live ledger; no tracking-only push.
 Exact-head GitHub review/required CI, strict actual-dev and normal merge pending.
 
 Child PR3067 has its own human-written summary/base/review/CI gates and is not
 auto-merged. Parent Change summary remains verbatim; separate Verification-only
 body approval remains pending. No bypass, tracking-only push or cleanup.
+
+## Task69: Requested Rebase And Remaining Findings
+
+2026-10-04 requester explicitly directed immediate publication and again
+requested latest-dev rebase, exact-head Qodo follow-up and normal merge.
+Publish the independently reviewed source/CI repairs and explicit quota opt-in
+for existing enforcement tests. Preserve the new NOT-GREEN quota matrix in
+the ignored publication archive and restore it locally after rebase/publication;
+it is not passing evidence or part of this publication. No production quota/RG
+change, integration waiver, child action or merge-gate bypass is inferred.
+Current actual dev is e70e0abb129ea8010f8096d1080b8ea23570f442.
+
+### Stage 1: Preserve And Rebase
+**Goal**: Rebase onto actual current dev without losing reviewed union repairs.
+**Success Criteria**: Published-head backup, merge topology and exact union bytes.
+**Tests**: Actual branch endpoints, merge-tree comparison and ancestry checks.
+**Status**: Complete
+Backup codex/vn3016-before-rebase-76a8-20261003 retains published76a8. Local
+merge-preserving rebase2f3d3e09c0 contains actualdev4c4f197; source/tests/config
+matched the preserved union before new repairs. Complete r77 still verifies
+unchanged dev4c, parent76a8 OPEN and child6909 OPEN. No new head is published.
+
+### Stage 2: Approved Source And CI Repairs
+**Goal**: Address four source findings and two diagnosed CI test-double failures.
+**Success Criteria**: Bounded RED/GREEN, preserved contracts, independent review.
+**Tests**: Native publication/drain and typed-health controls, nine-file frontend
+suite, cursor-lifecycle and migration-driver companions, touched-scope Bandit.
+**Status**: Complete
+Backend R1:97 passed/48 unavailable-PG skips; SPEC PASS, QUALITY identified one
+new docstring line shifting the scope baseline. A line-neutral correction is
+implemented without relocating baseline entries. Final health48 passed/48 PG
+skips, existing four-file CI ratchet51 passed; R2 SPEC/QUALITY PASS. A docword
+changed during ratchet startup; no whole-run input-equality claim is made.
+Frontend R1:365 passes and scoped lint/types; independent SPEC/QUALITY PASS.
+Its P3 expected-warning capture is corrected with final two-case passes and
+clean scoped static checks; R2 SPEC/QUALITY PASS. The365 outcome remains
+prior-test-hash evidence, not a final365 rerun.
+CI doubles:3 driver cases and34 backend/boundary cases pass; independent
+SPEC/QUALITY PASS. No real-PG, native CI or supported-runtime credit inferred.
+
+### Stage 3: Current-Dev Integration Controls
+**Goal**: Verify incoming Jobs completion and quota policy against VN contracts.
+**Success Criteria**: Exact Jobs identity/transaction behavior, quota default/off/on
+first publication/replay/accounting and applicable user/team/org admission.
+**Tests**: Existing completion controls, native quota matrix, required ratchets.
+**Status**: In Progress
+Jobs completion controls:51 passed/14 PG cases deselected, input hashes stable.
+Existing quota enforcement tests reproduce incoming default-off expectations;
+their private runtime now explicitly opts in without weakening assertions.
+New native quota controls expose an inherited three-argument call to the
+two-argument QuotaExceededError constructor. The source mismatch exists at
+published76a8, actualdev4c and rebasedHEAD; narrow correction approval was
+requested once and remains pending. Current quota verification is NOT green.
+Separate mixed-version RG TTL disposition is also pending; no risk waiver.
+
+### Stage 4: Publish, Review And Normal Merge
+**Goal**: Publish the reviewed rebase/fixes, obtain exact-head Qodo and CI, merge.
+**Success Criteria**: Guarded exact-remote-head rewrite; full new-head Qodo with
+no actionable findings; all seven required contexts; strict actual current dev
+and requester Change summary; independently verified GitHub MERGED.
+**Tests**: Complete paginated external arrays and actual branch endpoints.
+**Status**: In Progress
+No old-head CI/review result transfers. No admin/autoqueue/bypass, body PATCH,
+child merge or cleanup. Original TASK-13369 association remains; ambiguous
+duplicate task records and unknown task creation are untouched. AC5/AC6/DoD
+remain pending real external gates. NEW evidence is task-69-approved-rebase-20261003-r1.
