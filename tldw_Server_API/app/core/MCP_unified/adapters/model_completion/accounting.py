@@ -106,6 +106,11 @@ class ModelCompletionAccounting:
         self._governor = governor
         self._owner = object()
 
+    @property
+    def policy(self) -> CompletionAccountingPolicy:
+        """Expose the frozen policy for adapter composition validation."""
+        return self._policy
+
     def _handle(self, handle: AccountingReservation) -> ProviderUsageReservation:
         if type(handle) is not AccountingReservation or handle._owner is not self._owner:
             raise ModelCompletionFailure("invalid_accounting_handle", ModelFailureDomain.REQUEST)

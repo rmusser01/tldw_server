@@ -258,7 +258,9 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Tests:** Egress pinning, decompressed limit-plus-one, no retry/redirect/fallback, cancellation, output normalization property tests, retained child and shutdown, sanitized failure provenance.
 
-**Status:** In Progress
+**Status:** Complete
+
+**Checkpoint (2026-10-03):** Tasks 4.1 through 4.4 are complete. Independent specification and quality reviews approved the final lifecycle repairs. The final parent gate passed `4,084` MCP core tests with three existing optional-parser skips, `1,083` completion/HTTP/credential/provider boundary tests, and `39` authentication tests. All `135` adapter cases pass with `97%` branch-aware coverage. Ruff, Black on new files and touched ranges, compilation, whitespace checks, and production Bandit pass; Bandit reports zero findings/errors across 2,160 lines. Verification used macOS CPython 3.14.3 with mocked provider I/O; live-provider execution and other event loops/Python versions remain unverified. Stage 5 remains Not Started pending checkpoint acceptance.
 
 **Rebase/revalidation (2026-10-03):** Rebasing all eight local commits onto `origin/dev` at `4c4f197f68` changed no production patch; the sole conflict preserved both ADR index additions. Upstream owns ADR-058 for Jobs, so the unmerged MCP credential/accounting ADRs are renumbered to ADR-059/060 without changing their decisions. The new hosted-only Billing activation contract is being revalidated before transport composition; explicit MCP operator limits and durable recording remain separate from implicit OSS free-plan enforcement.
 
@@ -336,9 +338,31 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 ### Task 4.4: Implement adapter ownership, timeout, and health
 
+**Status:** Complete
+
+**Final review (2026-10-03):** The actual-runtime ownership gap, post-close API failure/premature-drain gap, cancellation-interrupted hot loop, terminal ancillary cancellation leak, and post-success owned-task cancellation provenance were independently reproduced and repaired with red/green tests. The final specification re-review passed 26 targeted cases; the independent quality repair review passed nine additional bounded probes, including real credential-runtime usage writers, caller/shutdown priority, and no-receipt provider cancellation. No validated Task 4.4 findings remain. Paid output survives only through its original timely receipt; bookkeeping is never retried and caller cancellation is never cleared.
+
+**Initialization boundary:** Revalidate and snapshot the exact settings, request, and invocation identity before the first admission await. Enforce the run/cleanup hard ceilings of 120/15 seconds and require matching frozen provider/model policies in accounting and transport. A read-only accounting policy property supports this check without exposing mutable services or private state.
+
+**Native-runtime review repair (2026-10-03):** The shared credential runtime's legacy `close()` is bounded and may return with cancellation-resistant resolver or usage tasks still running. Add a truthful public pending-work/drain boundary, retaining every native task from creation through termination even when its active-map entry was removed by an earlier bounded drain. Preserve legacy bounded close semantics. The adapter owns the drain operation, refuses new dispatch while retained work exists, and shutdown cannot report completion before that work terminates.
+
+**Lifecycle API fault containment (2026-10-03):** Admission-time API validation does not certify later cleanup. An owned supervisor revalidates the public pending boolean and async drain operation after close and requires positive empty-work confirmation before releasing ownership. Getter/drain errors, malformed post-close state, and premature drain completion retain ownership and health false. Rechecks use a short nonbusy delay and at most one fixed degradation warning per invocation; this is lifecycle supervision, never a provider or network retry. A timely paid receipt still survives these ancillary failures, while caller cancellation and shutdown suppress publication. Fault-injection tests restore the API and release native work before final teardown.
+
+**Cancellation-safe supervision delay (2026-10-03):** A faulty drain may request cancellation of its current task and return immediately. Backoff must wait until a monotonic retry deadline despite cancellation; skipping or restarting the delay permits a hot loop or indefinite deadline extension. The public run and cleanup deadlines remain unchanged. Tests use actual `Task.cancel()`, not only a raised `CancelledError`, and bound observed retry counts.
+
+**Terminal cancellation provenance (2026-10-03):** A drain can also request cancellation after native work terminates and return before cancellation is delivered. Both positive-empty paths use an owned cancellation checkpoint before normal supervisor completion, containing ancillary task cancellation and its private argument. Otherwise the task may finish cancelled and incorrectly replace a timely paid receipt. Genuine cancellation of the separate public caller and shutdown remain authoritative; the repair never clears the caller's cancellation state.
+
+**Completed-invocation provenance (2026-10-03):** Internal usage marking or reconciliation can cancel the owned invocation after transport has succeeded. Cancellation of that completed owned task is not proof that the separate public caller was cancelled. After the existing invocation/shutdown guard, a narrow `CancelledError` catch around `invocation.task.result()` may return only the existing timely validated receipt, with a fixed degradation warning. The genuine public-cancellation branch remains authoritative, and without a receipt provider-native cancellation stays native. Cleanup ownership and conservative fencing must already have completed; no bookkeeping operation is retried and no caller cancellation state is cleared.
+
+**Post-success precedence clarification (2026-10-03):** Cache immutable validated content immediately after the certified transport returns and before post-success persistence awaits, only when received before the original monotonic run deadline and before cancellation/abandonment. Caller cancellation and shutdown always suppress publication. A timely receipt survives ancillary bookkeeping or cleanup failure, including a cleanup-allowance miss: retain all unfinished work, latch health false, fence settlement conservatively, discard the child's eventual result, and publish only the earlier receipt. Without a timely receipt, terminating cleanup yields request-local timeout and incomplete cleanup yields shared unavailability. This narrow clarification preserves the spec's paid-result rule without accepting late provider content. False credential-use or reconciliation outcomes emit fixed, bounded degradation warnings.
+
 **Files:**
 - Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/adapter.py`
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_adapter.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/accounting.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_accounting.py`
+- Modify: `tldw_Server_API/app/core/AuthNZ/provider_credential_runtime.py`
+- Modify: `tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py`
 
 1. Write failing tests for success, credential-scope rejection, pre-dispatch cancellation, timeout after dispatch, caller cancellation, child cancellation that completes, child cancellation that is swallowed, late success/error, repeated cancellation, shutdown, and post-shutdown calls.
 2. In `complete`, validate immutable identity/request bounds, resolve credentials authoritatively, reserve accounting, create exactly one named child task, transition to dispatched immediately before that child enters the transport, and wait with a distinct run timeout and cleanup allowance.

@@ -124,6 +124,18 @@ def accounting():
     return SimpleNamespace(service=service, repo=repo, usage=usage, governor=governor, events=events)
 
 
+def test_policy_is_frozen_and_read_only(accounting):
+    from dataclasses import FrozenInstanceError
+
+    policy = accounting.service.policy
+    assert (policy.provider, policy.model) == ("openai", "fixed")
+    assert accounting.service.policy is policy
+    with pytest.raises(FrozenInstanceError):
+        policy.model = "other"
+    with pytest.raises(AttributeError):
+        accounting.service.policy = policy
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("team,org,kind,value", [(None, None, "user", 7), (11, None, "team", 11), (11, 13, "org", 13)])
 async def test_reserves_worst_case_before_governor_with_exact_scope(accounting, team, org, kind, value):

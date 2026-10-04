@@ -88,6 +88,137 @@ def _runtime(resolver, **overrides) -> ProviderCredentialRuntime:
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["inflight", "refresh", "authoritative"])
+async def test_lifecycle_retains_resolution_after_legacy_bounded_close(monkeypatch, phase):
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "RESOLUTION_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS", 0.01)
+    started, cancelled, finish = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    initial = phase == "refresh"
+
+    async def resolver(provider, **kwargs):
+        nonlocal initial
+        if initial:
+            initial = False
+            return _resolution(provider)
+        started.set()
+        try:
+            await finish.wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await finish.wait()
+        raise RuntimeError(SECRET)
+
+    if phase == "authoritative":
+        monkeypatch.setattr(runtime_module, "resolve_byok_credentials", resolver)
+        runtime = ProviderCredentialRuntime(
+            user_id=41,
+            team_ids=[],
+            org_ids=[],
+            trusted_base_url_override=False,
+            authoritative_scope=runtime_module.AuthoritativeProviderScope(41),
+            server_config_snapshot={},
+        )
+    else:
+        runtime = _runtime(resolver)
+    if phase == "refresh":
+        await runtime.resolve("openai")
+    call = asyncio.create_task(runtime.resolve("openai", force_refresh=phase == "refresh"))
+    await started.wait()
+    drain = None
+    try:
+        await asyncio.wait_for(runtime.close(), 0.2)
+        assert cancelled.is_set()
+        assert runtime.has_pending_shutdown_work is True
+        drain = asyncio.create_task(runtime.wait_for_shutdown_completion())
+        await asyncio.sleep(0)
+        assert not drain.done()
+        finish.set()
+        await drain
+        assert runtime.has_pending_shutdown_work is False
+    finally:
+        finish.set()
+        await asyncio.gather(call, return_exceptions=True)
+        if drain is not None:
+            await drain
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_retains_usage_popped_before_close_and_preserves_drain_cancel(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "USAGE_TASK_DRAIN_TIMEOUT_SECONDS", 0.01)
+    started, cancelled, finish = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def touch():
+        started.set()
+        try:
+            await finish.wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await finish.wait()
+        raise RuntimeError(SECRET)
+
+    async def resolver(provider, **kwargs):
+        return _resolution(provider, touch=touch)
+
+    runtime = _runtime(resolver)
+    handle = await runtime.resolve("openai")
+    usage = asyncio.create_task(runtime.mark_used(handle))
+    await started.wait()
+    usage.cancel("usage-cancel")
+    drain = None
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await usage
+        assert cancelled.is_set()
+        await asyncio.wait_for(runtime.close(), 0.2)
+        assert runtime.has_pending_shutdown_work is True
+        drain = asyncio.create_task(runtime.wait_for_shutdown_completion())
+        await asyncio.sleep(0)
+        drain.cancel("first-drain-cancel")
+        await asyncio.sleep(0)
+        drain.cancel("second-drain-cancel")
+        await asyncio.sleep(0)
+        assert not drain.done()
+        finish.set()
+        with pytest.raises(asyncio.CancelledError, match="first-drain-cancel"):
+            await drain
+        assert runtime.has_pending_shutdown_work is False
+    finally:
+        finish.set()
+        await asyncio.gather(usage, *(() if drain is None else (drain,)), return_exceptions=True)
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_pending_includes_legacy_close_task(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+
+    entered, finish = asyncio.Event(), asyncio.Event()
+
+    async def resolver(provider, **kwargs):
+        return _resolution(provider)
+
+    async def close_owned(self):
+        entered.set()
+        await finish.wait()
+
+    monkeypatch.setattr(runtime_module.ProviderCredentialRuntime, "_close_owned", close_owned)
+    runtime = _runtime(resolver)
+    close = asyncio.create_task(runtime.close())
+    await entered.wait()
+    try:
+        assert runtime.has_pending_shutdown_work is True
+    finally:
+        finish.set()
+        await close
+    await runtime.wait_for_shutdown_completion()
+    assert runtime.has_pending_shutdown_work is False
+
+
 def test_default_runtime_rejects_dynamic_fallback_resolver() -> None:
     """Production resolution cannot combine a frozen snapshot with live fallback reads."""
     with pytest.raises(
