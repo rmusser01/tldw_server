@@ -106,11 +106,16 @@ def projection_db(chacha_db: CharactersRAGDB) -> Iterator[CharactersRAGDB]:
 @pytest.fixture()
 def sync_service(tmp_path: Path, projection_db: CharactersRAGDB) -> SyncV2Service:
     """An active Sync v2 profile: the server front end plus one registered Chatbook device."""
+    return _active_profile(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db"), projection_db)
+
+
+def _active_profile(sync_database: SyncDatabase, projection_db: CharactersRAGDB) -> SyncV2Service:
+    """Bootstrap the profile on the given Sync store, projecting into ``projection_db``."""
     registry = SyncAdapterRegistry(
         [StaticSyncAdapter(domain=domain, supported_adapter_versions={1}) for domain in M1_SYNC_DOMAINS]
     )
     service = SyncV2Service(
-        store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db")),
+        store=SyncV2Store(sync_database),
         adapters=registry,
         materializers={
             "chat.conversation": ChatConversationMaterializer(projection_db),
