@@ -53,7 +53,7 @@ Bandit pass; actual Chrome raw-CDP acceptance uses live authenticated services,
 databases, Gemma and embeddings without mocks or automatic resends.
 **Tests**: Durable chat, RAG/history/prompt recovery, Research hydration and
 workspace switching, desktop/mobile send/stream/stop/reload/source handling.
-**Status**: In Progress
+**Status**: Complete
 
 Incoming backend485pass/5backend-specific skips includes all57 PostgreSQL HTTP
 lifecycle cases unskipped. Owning527pass/1inheritedskip includes six durable
@@ -127,6 +127,25 @@ unchecked. CLI task creation overflows twice; official MCP explicit-ID creation
 times out300seconds and creates no record. No further blind retries or manual
 Backlog file edits. The bounded next-item design is presented for approval; no
 missing-model implementation is bundled into this checkpoint correction.
+
+Final d799 rebase finishes at78207b2965/treeaf6ef2ee, exactly equal to the
+independent expected integration tree. Application tree27a5b022 is byte-identical
+to the qualifiedcb6 build; all3817 backend/config and7225 app files verify before
+API restart. The historical replay briefly exposes older intermediate files;
+only ownAPI22401 is stopped during that replay and replaced by38726 after final
+verification. Pre-existing services remain untouched. Fresh actual workflow
+contracts83pass/4warnings. Desktop/mobile reload and four native workspace-switch
+cycles pass with0sends. Original10/eight protected rows, served contracts including
+12negative controls, and all69original stashes pass read-only preservation.
+Canonical workspace-notes GET200 returns an actual empty list; nonempty note body
+mapping is unit/integration coverage, not claimed as native UAT.
+
+The original browser-target preservation check fails: baseline18092page is absent
+and Chromium browser-ui IDs have changed; no tab-close command is issued in this
+continuation. Both own18099tabs remain. A separate data/contracts/stash check passes
+and explicitly retains false target-preservation status; it does not relabel the
+original failed browser check. Final publication, Qodo/CI and protected merge remain
+unfinished. Subsequent evidence-only edits must retain this exact application tree.
 
 ### Stage C: Review and Hosted CI
 **Goal**: Publish only a verified integration and address actual final-head review.
