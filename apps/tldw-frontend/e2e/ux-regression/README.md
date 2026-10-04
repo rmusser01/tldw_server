@@ -59,6 +59,61 @@ The reproduction starts failing with "`<id>` no longer reproduces". Replace
 `expectKnownDefect(...)` with the plain assertion in the fix PR. The test then
 guards the fix as an ordinary regression test.
 
+## Ratchets: accessibility and request budget
+
+Some problems are too many to fix in one PR but must not grow. For those,
+`a11y.spec.ts` and `request-budget.spec.ts` compare what they observe with a
+committed baseline in `baselines/`. Each baseline entry names the review id
+and GitHub issue that tracks its fix, plus a note.
+
+| Spec | Measures | Baseline |
+|---|---|---|
+| `a11y.spec.ts` | Serious and critical axe violations (WCAG 2.0-2.2 A/AA plus best practices, including `color-contrast` and `target-size`), node count per rule, in five states: /notes empty, populated (25 notes) and with a note in the editor; /chat on a fresh load and with the model picker open. Light theme, 1280x720. | `baselines/a11y.json` |
+| `request-budget.spec.ts` | API requests started in the first `windowMs` after loading warm /notes and /chat: the total, duplicate GETs (same path and query within `duplicateWindowMs`) and polling (an endpoint hit `pollingMinHits`+ times after `idleFromMs`). | `baselines/request-budget.json` |
+
+The comparison (`e2e/utils/ratchet.ts`) fails in both directions:
+
+- **A new problem fails.** An axe rule, duplicate GET or polling endpoint that
+  is not in the baseline, or a count above its baseline plus `tolerance`, is
+  a regression. Fix it. Add it to the baseline only if it is a known review
+  finding, with its review id and issue.
+- **A fixed problem fails too**, with "no longer present, remove it from the
+  baseline" (or "improved … Lower its count" when only some nodes or requests
+  went away). Delete the entry, or lower its count, in the fix PR. The ratchet
+  then guards the fix, as `expectKnownDefect` does for reproductions.
+
+### Updating a baseline when you fix an issue
+
+1. Run `bun run e2e:ux-regression -- --grep "ratchet"` (both specs) or
+   `--grep "Accessibility ratchet"` / `--grep "Request budget ratchet"`.
+2. The failure lists every difference. Each test also attaches what it
+   observed: `a11y-<state>.json` (every node, with its markup) or
+   `request-budget-<page>.json` (counts and a request timeline). The runner's
+   `test-results/live-tier-uat/<run-id>/playwright-results.json` embeds them.
+3. Remove or lower only the entries your change fixed. Never raise a count
+   or add an entry to make a regression pass.
+4. `tolerance` absorbs measured run-to-run noise only. Keep it as small as
+   the noise allows and say why in the entry's note. A tolerance that reaches
+   0 lets a race-dependent offender be absent (the /chat `config/providers`
+   duplicate appears in about 1 of 4 loads); such an entry cannot report its
+   own fix, so delete it by hand when you fix it.
+
+Determinism:
+
+- Every test warms the backend (`warmBackendOnce`) and then loads /notes and
+  /chat once in its own page (`primeUxRoutes` in `ux-routes.ts`) before it
+  measures. That keeps `next dev` compile time out of the measurement and
+  puts the browser's cached responses in the same state on every run; a
+  context's first visit requests more than later visits.
+- The specs never send chat messages (#3106).
+- The library size is fixed: the empty-library scan asserts 0 notes and the
+  populated scan exactly 25. Both rely on the fresh backend the runner
+  starts, on its single worker, and on `a11y.spec.ts` sorting first.
+- Request counts come from `next dev`, where React StrictMode runs effects
+  twice; the baseline notes which duplicates look dev-only. The request
+  budget requires the page to be ready before `idleFromMs`, so a slow
+  environment fails clearly instead of looking like polling.
+
 ## Current reproductions
 
 | Id | Issue | Spec |

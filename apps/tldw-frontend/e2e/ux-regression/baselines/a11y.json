@@ -1,0 +1,113 @@
+{
+  "$comment": "Accessibility ratchet baseline for a11y.spec.ts: serious and critical axe violations per page state and rule, light theme, 1280x720. A new rule or a higher node count fails; so does a lower count or a missing rule, until this file is updated. See e2e/ux-regression/README.md.",
+  "entries": [
+    {
+      "state": "notes-empty",
+      "rule": "color-contrast",
+      "impact": "serious",
+      "nodes": 8,
+      "reviewIds": ["AX-07"],
+      "issue": 3124,
+      "note": "Token-level contrast: selected 'Notes' and 'List' view buttons, 'Edit' and 'Markdown' mode buttons, 'Create note', the 'Search tips' link and the 'Filter by tag' / 'Tags' placeholders."
+    },
+    {
+      "state": "notes-empty",
+      "rule": "target-size",
+      "impact": "serious",
+      "nodes": 1,
+      "reviewIds": ["AX-16"],
+      "issue": 3124,
+      "note": "The 'Tags help' icon button in the notes sidebar is below 24x24 px."
+    },
+    {
+      "state": "notes-populated",
+      "rule": "color-contrast",
+      "impact": "serious",
+      "nodes": 8,
+      "reviewIds": ["AX-07"],
+      "issue": 3124,
+      "note": "Same eight nodes as the empty library; list rows add none."
+    },
+    {
+      "state": "notes-populated",
+      "rule": "target-size",
+      "impact": "serious",
+      "nodes": 1,
+      "reviewIds": ["AX-16"],
+      "issue": 3124,
+      "note": "The 'Tags help' icon button. The row checkbox and pin pass through axe's spacing exception."
+    },
+    {
+      "state": "notes-editor",
+      "rule": "color-contrast",
+      "impact": "serious",
+      "nodes": 9,
+      "reviewIds": ["AX-07"],
+      "issue": 3124,
+      "note": "The empty-library nodes, with 'Save' and 'Create study pack' in place of 'Create note'."
+    },
+    {
+      "state": "notes-editor",
+      "rule": "target-size",
+      "impact": "serious",
+      "nodes": 1,
+      "reviewIds": ["AX-16"],
+      "issue": 3124,
+      "note": "The 'Tags help' icon button."
+    },
+    {
+      "state": "chat-fresh",
+      "rule": "aria-allowed-attr",
+      "impact": "critical",
+      "nodes": 1,
+      "reviewIds": ["AX-13"],
+      "issue": 3123,
+      "note": "#textarea-message carries aria-expanded, bound to the composer's collapse state."
+    },
+    {
+      "state": "chat-fresh",
+      "rule": "color-contrast",
+      "impact": "serious",
+      "nodes": 1,
+      "reviewIds": ["AX-07"],
+      "issue": 3124,
+      "note": "The bg-primary send button (white on the primary token)."
+    },
+    {
+      "state": "chat-model-picker",
+      "rule": "aria-allowed-attr",
+      "impact": "critical",
+      "nodes": 1,
+      "reviewIds": ["AX-13"],
+      "issue": 3123,
+      "note": "#textarea-message aria-expanded, as on a fresh load."
+    },
+    {
+      "state": "chat-model-picker",
+      "rule": "color-contrast",
+      "impact": "serious",
+      "nodes": 3,
+      "reviewIds": ["AX-07"],
+      "issue": 3124,
+      "note": "The send button, the 'Current' menu group title and the 'Help me choose a model' link."
+    },
+    {
+      "state": "chat-model-picker",
+      "rule": "label",
+      "impact": "critical",
+      "nodes": 1,
+      "reviewIds": ["AX-01"],
+      "issue": 3122,
+      "note": "The model picker's antd sort Select has no accessible name ('Sort models')."
+    },
+    {
+      "state": "chat-model-picker",
+      "rule": "target-size",
+      "impact": "serious",
+      "nodes": 1,
+      "reviewIds": ["AX-16"],
+      "issue": 3124,
+      "note": "The persona/character-select icon button in the composer is below 24x24 px."
+    }
+  ]
+}
