@@ -49,11 +49,11 @@ Docs/superpowers/plans/2026-06-07-research-mermaid-artifact-preview-unification-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented via the existing shared MermaidDiagramBlock path in MindMapArtifactViewer. Valid Research Workspace Mermaid mind-map artifact modal content delegates preview, copy, and SVG-download controls to the shared block with enableArtifactAction=false. The raw fallback branch for invalid or non-Mermaid output is unchanged, and no user-message markdown rendering paths were changed. Verification recorded: RED focused Vitest failed before implementation on missing research-shared-mermaid-block, Research Workspace mind map focused Vitest passed 4 tests, full StudioPane.stage2 passed 26 tests, shared Mermaid tests passed 27 tests, git diff --check passed, higher-heap tsc failed only on existing unrelated KnowledgeQA fixture errors, and Bandit is not applicable for frontend-only TypeScript docs and Backlog changes.
 
 PR review follow-up: rebased PR #2293 onto latest origin/dev after PR #2294 merged. Addressed CodeRabbit's prop-contract comment by removing the now-unused title prop from MindMapArtifactViewer and the corresponding title prop at the modal call site. Verification after the review fix: Research Workspace mind map focused Vitest passed 4 tests, shared Mermaid tests passed 27 tests, git diff --check passed, and higher-heap UI type-check still fails only on existing unrelated KnowledgeQA fixture errors with no diagnostics in touched files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -34,9 +34,9 @@ Create a detailed implementation plan for the approved standalone MCP docs Stage
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Planning completed for approved Stage 4A source sync design. Plan path: Docs/superpowers/plans/2026-07-02-standalone-mcp-docs-stage4a-source-sync-implementation-plan.md. Scope is Stage 4A.1 slices 1-5 plus host exposure; optional sitemap registration/sync remains isolated from the first implementation PR. Self-review verification: git diff --check passed; placeholder scan with word-boundary patterns returned no matches; positive coverage scan confirmed source registry, source population, docs.sync_source, query persistence, metadata merge, dry-run, sitemap isolation, host boundary, and Bandit command coverage. Bandit was skipped for this planning task because only documentation and Backlog metadata changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

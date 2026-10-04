@@ -101,35 +101,11 @@ Execute the 12 tasks in Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-an
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete at 10aee095ac: Media DB schema v24, migration parity, interrupted-migration recovery, 83 focused tests, Bandit clean, reviews approved. Task 2 complete at a15f053d24: owner-scoped artifacts, ready invariants, strict Job IDs, conservative retention, chunked deletion, keyset event pages; 71 focused tests, reviews approved. Task 3 complete at de7a800cd4: scoped active/archive Jobs reads, exact batch lookup, legacy repair, verified SQLite/PostgreSQL archive indexes; independent Jobs verification 72 passed with 2 crypto-backend skips, PostgreSQL fixture unavailable, reviews approved.
 
 Task 4 complete at aecf18e29d: canonical request normalization, fixed snapshot semantics, bounded keyset scanning, deterministic JSON/CSV, spreadsheet safety, UTF-8 byte limits, keyset progress validation, and PostgreSQL timestamp portability. Independent verification: 113 passed; Ruff/compile/Bandit clean; reviews approved.
-<!-- SECTION:NOTES:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Claims analytics exports on the shared Jobs control plane behind opt-in producer flags while preserving the synchronous HTTP 200 fallback. Claims owns request normalization, bounded deterministic rendering, owner-scoped artifacts, read-only Jobs projection, conservative reconciliation/retention, and downloads; Jobs remains the sole owner of queue admission, leases, retries, cancellation, quarantine, status, and administrative controls. The design uses strict ID-only Job payloads and conservative dual-store repair because Claims and Jobs cannot share one transaction. Resource ceilings, snapshot fencing, ready-state monotonicity, owner routing, SQLite/PostgreSQL parity, and legacy-row compatibility are covered by focused, integration, property, migration, and security tests.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 5 complete at 8d94ca2cd6 with review fixes 7127cc38d9, 60ec088543, and 74ebc0d8a8: retry-safe artifact creation/processing, ready-monotonic race recovery, real JobManager row compatibility, one-call status hydration, exact owner-scoped reconciliation, conservative lifecycle-aware cleanup, SQL-filtered maintenance candidates, and rotating bounded failed-artifact scans. Independent verification: 226 focused tests passed; Ruff, compile, diff checks, and Bandit (zero findings) passed; specification and quality reviews approved.
 Task 6 complete at fbb072326f with review fix b0386083a0: strict three-field analytics export payload, dual producer flags, exact Jobs admission metadata, direct create-result return without refresh, and retry settings constrained to the Jobs schema range. Verification: 116 Claims Jobs contract/producer/handler/worker tests passed; Ruff, compile, diff checks, and Bandit passed; specification and quality reviews approved.
 Task 7 complete at b7933c2c0a with review fixes cb1e445d7c and ae44be3aab: strict owner/payload/Job-ID validation, owner-scoped threaded export dispatch, safe domain translation, cause-chain retry classification for explicit SQLite/PostgreSQL/OS transient signals, terminal redaction for unclassified failures, and sanitized diagnostics. Verification: 63 handler and Claims worker-service tests passed; Ruff, formatting, compile, diff checks, and Bandit passed; specification and quality reviews approved.
@@ -155,3 +131,19 @@ PR integration update (2026-08-13): rebased all 73 feature commits without confl
 2026-08-13 PR #2789 review-fix verification: the validated limiter fix now delegates through a typed Claims wrapper so the shared ingress guard is enforced without exposing the legacy rate_limiter hook as a public query parameter. Focused Stage 2A verification passed 630 tests with 5 fixture/environment skips. Ruff check, py_compile, CI shard coverage (0 new uncovered), git diff --check, and Bandit (0 findings/0 errors across 4,996 touched production lines) passed. Frontend API types were regenerated; the checked-in 2,936-schema OpenAPI fingerprint uses the required Python 3.12 CI value (39141ca5480d...).
 Final independent review of 9bc0a680..3c4900d0 reported no actionable P0-P3 findings. origin/dev is already an ancestor of the branch; the explicit rebase check completed with the branch up to date.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented Claims analytics exports on the shared Jobs control plane behind opt-in producer flags while preserving the synchronous HTTP 200 fallback. Claims owns request normalization, bounded deterministic rendering, owner-scoped artifacts, read-only Jobs projection, conservative reconciliation/retention, and downloads; Jobs remains the sole owner of queue admission, leases, retries, cancellation, quarantine, status, and administrative controls. The design uses strict ID-only Job payloads and conservative dual-store repair because Claims and Jobs cannot share one transaction. Resource ceilings, snapshot fencing, ready-state monotonicity, owner routing, SQLite/PostgreSQL parity, and legacy-row compatibility are covered by focused, integration, property, migration, and security tests.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

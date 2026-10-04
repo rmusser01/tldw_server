@@ -44,7 +44,7 @@ Replace the hardcoded ready source-status label in WorkspacePlayground SourcesPa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Red test first: `bunx vitest run src/components/Option/WorkspacePlayground/__tests__/SourcesPane.design-system.test.tsx --reporter=dot` failed because the source row still rendered `Ready` instead of the mocked registry label `Registry Ready`.
 - The ready status badge now reads the label from the design-system state registry; processing and error status labels remain on their existing translated text paths.
 - Removed the `canonical-state-label:src/components/Option/WorkspacePlayground/SourcesPane/index.tsx:Ready` baseline entry.
@@ -52,7 +52,7 @@ Replace the hardcoded ready source-status label in WorkspacePlayground SourcesPa
 - Review disposition: did not apply optional chaining to `readyState.label` because `getDesignSystemState("ready")` is a typed lookup into the static design-system state registry; a missing `ready` key would violate the registry contract and should fail loudly instead of rendering an undefined badge.
 - Broad `SourcesPane` TypeScript filtering surfaced an existing unrelated error in `SourcesPane.stage5.transfer.test.tsx`; an exact touched-path filter for `SourcesPane/index.tsx`, `SourcesPane.design-system.test.tsx`, and the baseline file returned no output.
 - Bandit skipped: touched implementation is frontend TypeScript/test JSON only, with no Python code path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

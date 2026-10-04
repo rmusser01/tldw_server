@@ -30,7 +30,7 @@ Docs/superpowers/plans/2026-06-01-api-boundary-remediation-implementation-plan.m
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a public PrototypeWorkspaceService.review_promotion_request(...) method that owns promotion request lookup, workspace lookup, promoter authorization, rejection state transitions, and approval delegation through promote_candidate(...). The prototype promotion review endpoint now delegates the whole decision to the service and only maps PermissionError/ValueError to HTTP responses.
 
 Verification so far:
@@ -42,7 +42,7 @@ Verification so far:
 - Smoke: rg -n "_is_promoter|repo\.update_promotion_request" tldw_Server_API/app/api/v1/endpoints/prototype_workspaces.py => no matches.
 - Bandit: python -m bandit -r service.py prototype_workspaces.py -f json -o /tmp/bandit_api_boundary_stage5.json => results [].
 - git diff --check => clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

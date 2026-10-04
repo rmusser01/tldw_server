@@ -30,11 +30,11 @@ Continue #1116 Phase 2.2 by deferring remaining small core identity/config/sync 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Starting from stacked branch codex/phase2-2-core-auth-router-conditionals-q at PR #1267 commit 4e5d09361f; this branch will be rebased/PR'd after #1267 lands or kept stacked until then.
 
 Verification: baseline full router group contract passed 57 before edits. Red focused identity/config/sync laziness test failed before implementation because scoped router attrs were eagerly resolved. Green focused rerun passed 1 selected; full router group contract passed 58; main router contract passed 6; OpenAPI contract suite passed 69; Bandit core router group source reported 0 results and 0 errors; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

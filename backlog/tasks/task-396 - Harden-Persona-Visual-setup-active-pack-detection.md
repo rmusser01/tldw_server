@@ -33,7 +33,7 @@ Address the still-valid Persona Visual setup review finding from closed PR #1730
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Triaged closed PR #1730 review comments against current origin/dev: setup error gating and draft-title helper coupling are obsolete in the superseding PR #1725 implementation; active_pack returned separately from packs remained valid and is fixed in this follow-up.
 
 Verification: added red regression for active_pack outside packs; initial focused file run failed on the new test as expected. After the fix, targeted regression passed, full VisualPackEditor suite passed with --testTimeout=20000, git diff --check passed, and bun run lint exited 0 with existing warnings only.
@@ -43,7 +43,7 @@ Bandit skipped because the touched implementation is frontend TypeScript plus Ba
 Follow-up draft PR opened: https://github.com/rmusser01/tldw_server/pull/1735
 
 Addressed PR #1735 CodeRabbit test-coverage comment by asserting the separate active_pack response is rendered with active status before asserting the setup card is absent. Validation: targeted regression passed, git diff --check passed, and bun run lint exited 0 with existing warnings only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -50,7 +50,7 @@ Reason: This is a bounded correctness fix and capability attestation for an exis
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 1 complete. Baseline: existing list selection passed. RED evidence: controlled writer produced total 21 with rows beginning at newly committed ID 22; connection test observed None for count/page/tag; PostgreSQL-mode test observed no repeatable-read request. GREEN evidence: all 4 list/snapshot-focused tests pass after reusing the existing transaction, passing one connection through count/page/tag hydration, and requesting REPEATABLE READ READ ONLY for PostgreSQL. Plan correction: generic PostgreSQL transactions are READ COMMITTED, so the focused isolation statement was required before the capability can truthfully be server-wide.
 
 Stage 2 complete. RED: the focused docs-info test failed with KeyError for hasReadingSnapshotPagesV1. GREEN: one literal capability entry now appears identically in capabilities, supported_features, and the endpoint response; the exact test passes, all 17 docs-info capability tests pass, and the 4 list/snapshot tests remain green. No endpoint or response shape changed.
@@ -64,7 +64,7 @@ Final PostgreSQL lifecycle review found that Psycopg could still emit a plain im
 The downstream TASK-18919 live walkthrough then exposed a separate SQLite bootstrap problem: the Collections schema-memo verifier treated SQLiteBackend mapping rows as positional rows, raised `KeyError`, and replayed the full schema on every adapter construction. A focused regression reproduced the extra bootstrap; reading the existing named `name` field makes the second adapter reuse the memo. The two-test bootstrap gate and scoped Ruff/diff checks pass. This bounded integration correction does not change the ADR determination or public API.
 
 Post-rebase review verified and corrected two additional boundary cases. A list read nested inside a caller-owned SQLite write transaction now reuses that transaction without beginning or rolling it back, and docs-info derives the Reading snapshot flag from the enabled route while publishing dynamic capabilities atomically. The concurrent-writer regression explicitly establishes WAL, lifecycle cleanup is exercised through the public listing API, and the new tests carry the required unit classification, annotations, and docstrings. The complete three-file review gate passes 51 tests; changed tests and production rules outside documented `dev` baselines pass scoped Ruff and diff checks.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

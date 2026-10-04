@@ -37,7 +37,7 @@ Implement the next bounded Chat/Playground migration slice from the design-syste
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Migrated the bounded Chat/Playground product status slice to the shared Badge primitive: StatusDot, SaveStatusIcon, ResearchRunStatusStack, VoiceChatIndicator, PlaygroundUserMessage system/message-type chips, plus a Badge data-ds-component marker for testable design-system ownership.
 
 Added focused design-system tests for Chat status badges, Playground research/voice status badges, and Playground user-message chips. Verified red first before implementation, then green after migration.
@@ -51,7 +51,7 @@ Verification: git diff --check exited 0.
 Bandit skipped: frontend-only TypeScript/React changes, no Python touched. Full package tsc is not a useful gate in this worktree because it currently fails on unrelated pre-existing package-wide test/type errors outside this slice.
 
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1315
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

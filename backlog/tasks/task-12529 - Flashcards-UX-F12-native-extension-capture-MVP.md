@@ -36,11 +36,11 @@ Docs/superpowers/plans/2026-05-26-flashcards-extension-native-capture-mvp-plan.m
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented native sidepanel selected-text capture with deck picker, editable Front/Back draft fields, one-card save, manual page URL provenance, no-deck guard, no-selection validation, save-failure recovery, and full Flashcards continuation. Updated tests, master UX checklist, extension feature docs, and WebUI study guide copies. Non-goals remain generated drafts, templates, bulk editing, repeat capture queues, and in-extension review.
 
 PR #2073 review-fix pass: addressed Gemini/Qodo/CodeRabbit findings by clearing stale drafts on new capture attempts, clearing drafts after successful save while keeping success status visible outside the draft section, differentiating deck loading/error/unavailable states from true empty decks, and replacing stale active-tab generate wording with capture wording. Added regression coverage for each behavior.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

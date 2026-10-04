@@ -48,9 +48,9 @@ Define the product and UX contract for moving Scheduled Tasks Watch for new item
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created the Phase 2B Watch/Ingest product contract spec. The spec defines source-agnostic Watch and Ingest intents, preserves Watchlists as the deep workspace, and lists capability health, preview, duplicate detection, creation response, deep-link, failure, result-destination, handoff, extension, and accessibility contracts required before the templates can become available from /scheduled-tasks.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

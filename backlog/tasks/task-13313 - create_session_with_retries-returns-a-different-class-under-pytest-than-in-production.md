@@ -54,7 +54,7 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Duplicate of TASK-13316 (filed twice during the 2026-09-22 review). Work and status are tracked there.
 
 
@@ -75,7 +75,7 @@ Verification: LLM_Adapters + LLM_Calls on this branch = 18 failed / 1230 passed.
 
 Notes from the other branch (merged 2026-09-27):
 Re-verified on dev 2026-09-27: no PYTEST_CURRENT_TEST branch in chat_calls.py or any provider adapter (#2983). All ACs met.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

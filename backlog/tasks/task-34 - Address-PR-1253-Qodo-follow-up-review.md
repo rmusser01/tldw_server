@@ -34,7 +34,7 @@ Address post-merge Qodo review findings from PR #1253 on a follow-up branch agai
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified PR #1253 is merged. Open follow-up branch codex/codegraph-qodo-followup from origin/dev to address Qodo findings on merged CodeGraph code.
 
 Implemented Qodo follow-up fixes: Python AST parsing catches ValueError; indexer converts extractor ValueError into per-file extraction_failed rows; codegraph.files limit is clamped by max_search_results; inventory-only files use a binary probe and streaming file hash instead of full read_bytes; extractor package now has a module docstring; test policy helpers have type hints.
@@ -42,7 +42,7 @@ Implemented Qodo follow-up fixes: Python AST parsing catches ValueError; indexer
 Verification: focused CodeGraph/MCP suite passed with 51 passed and 5 warnings; Ruff check on touched files passed; Bandit touched scope wrote /tmp/bandit_codegraph_qodo_followup.json with 0 results and 0 errors; git diff --check passed.
 
 Opened draft follow-up PR #1258 against dev for the Qodo review fixes. PR remains draft pending a human-authored Change summary.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

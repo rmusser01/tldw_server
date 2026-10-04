@@ -42,7 +42,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented work-product-first Studio IA by filtering the end-user work product chooser to actionable templates only, adding an Other outputs label before raw output buttons, and preserving the existing More outputs expansion for secondary raw outputs.
 
 TDD red evidence: focused Vitest run failed before production changes because Research Dossier remained visible, Planned copy was present, and Other outputs was missing from StudioPane.
@@ -50,7 +50,7 @@ TDD red evidence: focused Vitest run failed before production changes because Re
 Verification: bunx vitest run src/components/Option/WorkspacePlayground/__tests__/WorkProductTemplateChooser.test.tsx src/components/Option/WorkspacePlayground/__tests__/StudioPane.stage1.test.tsx passed with 39 tests. CDP smoke against http://127.0.0.1:3002/research-studio?tab=studio passed after seeding local single-user config: Executive Brief visible, Research Dossier absent, Planned occurrences 0, Other outputs visible, Summary and Slides reachable, and Work Products precedes Other outputs. git diff --check passed.
 
 Bandit: skipped because touched files are frontend TypeScript/TSX and Backlog task metadata only; no Python code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

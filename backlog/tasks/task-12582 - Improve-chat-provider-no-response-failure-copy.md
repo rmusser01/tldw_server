@@ -30,7 +30,6 @@ Implement the remaining /chat UX follow-up for richer response failure copy when
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: the runtime rail empty-assistant-response status used generic copy ('No response text returned') even when /chat knew the active provider/model route. That made provider no-response cases less actionable than other model/provider readiness states.
 
@@ -53,7 +52,6 @@ Review-fix verification:
 
 PR check review: Full Suite failures inspected from run 26583264296 are backend/Python failures outside this TypeScript UI PR surface. Ubuntu 3.11 reported failing modules Audio and Audit, including Audit test_audit_db_deps.py::test_schedule_service_stop_clears_flag_on_failure; the job log also showed unrelated PostgreSQL COALESCE(boolean, integer) AuthNZ query errors. Frontend lint/build/playground checks had passed on the PR run.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

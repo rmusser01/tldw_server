@@ -37,7 +37,7 @@ Reposition the existing Overview Quick Setup after the Stage 2 shell setup wizar
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Stage 2D in worktree codex/watchlists-stage1a. Inspecting Overview quick setup behavior, selected Watchlist scoping, and existing tests before edits.
 
 Implemented Stage 2D Overview repositioning. Verification passed: quick setup helper/copy contracts (7 tests), selected-scope static contract (8 tests), targeted Overview UI checks for no-Watchlist fallback and selected-Watchlist initial collection copy (2 tests). git diff --check passed. CDP/Playwright constrained viewport smoke was attempted against Next dev on ports 3027 (Turbopack) and 3028 (webpack) with mocked Watchlists API routes; both servers stayed at 'Compiling /watchlists' until page.goto timed out and were stopped cleanly. No screenshot was produced. This is recorded as a smoke blocker rather than a product-code failure.
@@ -45,7 +45,7 @@ Implemented Stage 2D Overview repositioning. Verification passed: quick setup he
 Bandit skipped: touched code is frontend TypeScript/JSON only.
 
 Stage 2E retry cleared the earlier CDP blocker: Playwright/CDP loaded /watchlists from the current worktree, dismissed the first-run gate, exercised desktop source-backed setup and 390x844 topic-only setup, captured screenshots in /tmp, and confirmed source/job payloads carried watchlist_id. Computer Use was not used.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

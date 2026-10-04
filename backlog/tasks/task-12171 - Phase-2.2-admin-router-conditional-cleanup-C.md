@@ -37,9 +37,16 @@ Move only covered single-router admin specs onto the shared lazy ImportedRouterS
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-03 PR #1246 review follow-up: hardened test_iter_admin_router_specs_defers_selected_router_attr_lookup so sandbox must be stubbed in sys.modules before iter_admin_router_specs() runs. Added an importlib guard that fails if the test would import the real sandbox endpoint module during spec registration.
-<!-- SECTION:NOTES:END -->
+
+- Red check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "admin_router_specs_defers_selected" -q` failed before implementation because selected admin router attributes were resolved during spec construction.
+- Green focused check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "admin_router_specs_defers_selected or admin_router_specs_populates_expected" -q` passed with `2 passed`.
+- Green full/adjacent checks: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -q` passed with `42 passed`; `python -m pytest tldw_Server_API/tests/Services/test_main_router_contract.py -q` passed with `6 passed`; `python -m pytest tldw_Server_API/tests/Services/test_openapi_contracts.py -q` passed with `69 passed`.
+- Security and hygiene: `python -m bandit -r tldw_Server_API/app/api/v1/router_groups/admin.py -f json -o /tmp/bandit_phase2_2_admin_router_conditionals_c.json` reported `0 results` and `0 errors`; `git diff --check` passed.
+- Documentation: no user-facing docs required for this internal router registration refactor.
+- Known skips or blockers: none.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -56,14 +63,3 @@ Moved the covered single-router admin registrations to the shared lazy `Imported
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Notes
-
-<!-- SECTION:NOTES:BEGIN -->
-- Red check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "admin_router_specs_defers_selected" -q` failed before implementation because selected admin router attributes were resolved during spec construction.
-- Green focused check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "admin_router_specs_defers_selected or admin_router_specs_populates_expected" -q` passed with `2 passed`.
-- Green full/adjacent checks: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -q` passed with `42 passed`; `python -m pytest tldw_Server_API/tests/Services/test_main_router_contract.py -q` passed with `6 passed`; `python -m pytest tldw_Server_API/tests/Services/test_openapi_contracts.py -q` passed with `69 passed`.
-- Security and hygiene: `python -m bandit -r tldw_Server_API/app/api/v1/router_groups/admin.py -f json -o /tmp/bandit_phase2_2_admin_router_conditionals_c.json` reported `0 results` and `0 errors`; `git diff --check` passed.
-- Documentation: no user-facing docs required for this internal router registration refactor.
-- Known skips or blockers: none.
-<!-- SECTION:NOTES:END -->

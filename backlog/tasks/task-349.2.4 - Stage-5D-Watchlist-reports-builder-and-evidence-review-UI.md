@@ -38,11 +38,11 @@ Build the Stage 5 Reports tab UX for creating defensible reports from queued Upd
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Stage 5D in worktree .worktrees/watchlists-stage1a. Scope is Reports tab UI for builder, evidence review, preview/table integration, focused Vitest coverage, and preservation of existing preview/download/regenerate/delivery workflows.
 
 Implemented Stage 5D Reports UI: ReportBuilderDrawer, ReportEvidencePanel, Reports table readiness/evidence metadata, preview evidence integration, copy, and focused regression coverage. Verification: Vitest report/output regression set passed 9 files / 30 tests; git diff --check passed; Watchlists locale JSON parsed; TypeScript full check remains repo-wide baseline with no Stage 5D touched-path matches. Bandit skipped because this slice touched frontend TypeScript/JSON/Markdown only and no Python code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

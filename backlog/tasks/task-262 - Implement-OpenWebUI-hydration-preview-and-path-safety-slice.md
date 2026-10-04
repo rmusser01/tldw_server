@@ -40,11 +40,11 @@ Follow Stage 2 of the implementation plan locally because subagent execution is 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-11: Completed Stage 2 locally because subagent execution is blocked by account quota. Red run failed because openwebui_hydration.py did not exist; implementation added preview dataclasses, allowed-root validation, safe file-path resolution, basic byte classification, metadata reference extraction, and chat_file fallback using metadata.row_id only.
 
 Verification: combined pytest for hydration path/service/db-helper/OpenWebUI DB adapter returned 29 passed; git diff --check clean; Bandit on openwebui_hydration.py wrote /tmp/bandit_openwebui_hydration_preview_service.json with zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

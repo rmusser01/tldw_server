@@ -30,11 +30,11 @@ The broad pytest slice stops in tldw_Server_API/tests/CI/test_pypi_workflow_cont
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: TASK-12123 intentionally added push-to-main PyPI auto-publishing for new pyproject.toml versions, but test_pypi_workflow_contracts.py still asserted that publish-pypi.yml was workflow_dispatch-only. Reverting the workflow would lose the intended auto-publish behavior, so the contract test now asserts both preserved manual dispatch and the new safety gates: push limited to main/pyproject.toml, build gated by detect-version should_publish, TestPyPI manual-only, and PyPI publishing allowed only for manual target=pypi or push with should_publish=true.
 
 Verification: focused PyPI workflow contract file passed: 3 passed, 12 warnings. Bandit on test_pypi_workflow_contracts.py with B101 skipped exited 0 with zero findings. git diff --check exited 0. Full CI directory retry moved past the PyPI contract tests and stopped at an unrelated shard coverage failure in test_required_workflow_contracts.py.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

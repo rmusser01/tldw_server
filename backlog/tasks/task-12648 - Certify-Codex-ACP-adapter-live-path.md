@@ -35,13 +35,13 @@ Validate the live Codex ACP adapter path after the first-slice implementation. S
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Local prerequisite discovery: codex resolved to /opt/homebrew/bin/codex and codex --version reported codex-cli 0.128.0. codex-acp was not on PATH, so live Codex ACP certification is blocked by adapter_missing.
 
 Fixed two certification-helper issues found during the blocked run: profile manifests now preserve registry support/verification state plus pinned adapter metadata, and blocked live-agent manifests refuse with exit 2 instead of returning a false green.
 
 Verification: focused red-green regressions passed, full helper suite passed with 39 tests, Codex manifest JSON validated, actual Codex profile run refused with exit 2 on adapter_missing, git diff --check passed, and Bandit on acp_certification_smoke.py passed with no findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

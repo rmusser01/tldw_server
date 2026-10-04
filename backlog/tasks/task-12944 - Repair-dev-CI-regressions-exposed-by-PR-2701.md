@@ -35,11 +35,11 @@ Fix the latest dev baseline regressions surfaced by PR 2701: smoke auth no longe
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root causes: fecb7e4b22 moved smoke credentials out of persistent storage without routing them through runtime-config, and hardened research artifact storage while leaving clear-text path assertions behind. Verification: Stage 6 Playwright 6/6; critical deep-research E2E 1/1; research worker tests 21/21; frontend ESLint and TypeScript noEmit; Python Ruff; git diff --check. Bandit: touched Python test files scanned with B101 excluded; 0 findings. The unfiltered scan reported only expected B101 pytest assertions (278 low, 0 medium/high). Docs: no user-facing documentation change required. Blockers: none.
 
 Independent final-diff review found that manifest-backed assertions should also prove storage-path confinement. Updated both research test helpers to require each resolved artifact path to remain under the configured research output root; focused E2E and worker suites were rerun successfully.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

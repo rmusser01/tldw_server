@@ -29,7 +29,7 @@ tests/Sync/test_sync_v2_endpoints.py::test_personal_context_endpoints_use_real_f
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause (product liveness bug, not the pull budget). This test freezes the pull clock (_recovery_clock_ns = lambda: 0), so the pull's 100 ms budget never expires here. The stranded row comes from the relay inside prepare_personal_context_activation, which uses the real monotonic clock. _relay_owned checked the deadline after every step of a row, including right after stage_authority had committed the hidden home-authority envelope to Sync. On a slow host it abandoned the row there: the Sync envelope stayed apply_status=pending and record_staged_row never ran. Normally a later relay re-stages and finishes such a row, but the activation install then marks every batch up to its watermark covered_by_activation, so no relay ever revisits that batch. The pending envelope stays forever. Effects: (1) require_materialization_predecessors_applied rejects every later projection in the dataset (push returns apply_status=pending, sync_projection_predecessor_unresolved). (2) The PC pull scan stops at the unapplied ingress, so every pull returns envelopes=[], next_cursor='0', has_more=true, with relay state 'complete'. That is the CI symptom. Reproduced deterministically with a temporary 60 ms sleep before stage_authority (3/3 failures); instrumentation showed the manifest staged at cursor 2 and abandoned when the post-stage deadline check failed.
 
 Fix (tldw_Server_API/app/core/Sync/v2/personal_context_relay.py): the deadline now stops a row only before its Sync write. Once the current attempt has staged a row, the later _renewed_current checks for that row run without the deadline (fence=None), so the row is recorded, acknowledged and finalized and at most one row overruns the budget. These still stop at the deadline as before: the next row, carried-over staged/acknowledged rows, batch completion, and the record-failure compensation path.
@@ -39,7 +39,7 @@ Tests: added test_relay_finishes_a_row_whose_staging_crossed_the_deadline in tes
 Known gap, not changed: failure paths (acknowledge_row/finalize_authority raising, or uncertain record after the deadline) can still leave a staged row hidden and unfinalized. A later relay retries it unless an activation covers the batch first; covered_by_activation batches have no orphan cleanup (only purge_terminal batches do). Docs: no documentation change needed (DoD #3 not applicable).
 
 Landing: the relay fix itself reached dev through the release-0.1.46 sync PR #3088 (commit 3b5051d9fb), which reused #3078's repair after hitting the same handshake failure. #3078 then merged with only this task's close-out. Qodo's docstring findings on #3078 (the deadline_open helper and the regression test's stage/finalize callbacks) were addressed in the follow-up PR chore/followups-13410-13416. The remaining gap (a staged row orphaned when acknowledge_row/finalize_authority raises and an activation covers its batch) is TASK-13431.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

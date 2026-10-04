@@ -25,13 +25,13 @@ A real PostgreSQL email upload reaches CollectionsDatabase.ensure_schema and fai
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Real HTTP upload stack identifies first failure at CollectionsDatabase.ensure_schema ALTER TABLE output_templates ADD COLUMN metadata_json on PostgreSQL. Existing _table_columns uses backend.get_table_info, but ensure_schema populates its initial column sets only for SQLite. Prior TASK-12910 covered a separate SQLite content_items timing issue.
 
 Diagnostic full-app probe also found INSERT INTO content_items_fts from the second PostgreSQL Collections adapter. Constructor initializes _fts_available=True, but cached bootstrap skips ensure_schema, which normally resets it to False. This is part of the same PostgreSQL Collections readiness unit.
 
 PostgreSQL Collections backfills use backend column introspection; cached adapters disable SQLite FTS5 writes. Real PostgreSQL round-trip passed; three schema unit tests passed; final live probe had zero PostgreSQL query failures. Bandit 0 findings; fatal Ruff clean. Skip: no scale test.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

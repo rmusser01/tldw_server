@@ -32,14 +32,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task512-tsc-final.txt`: package `tsc` reported two diagnostics in `src/components/Option/WritingPlayground/WritingActionBar.tsx` where structural ref objects were not assignable to Ant Design `TextAreaRef` and `InputRef` legacy refs.
 - Root cause was Ant Design ref typing only. The component was already reading the same DOM nodes from `resizableTextArea.textArea` and `input`; the ref declarations were just structural approximations rather than the component ref types.
 - Imported `InputRef` from `antd` and `TextAreaRef` from `antd/es/input/TextArea`, then typed `customInputRef` and `toneInputRef` as those refs while preserving existing value fallback behavior.
 - Focused verification attempted with `bunx vitest run src/components/Option/WritingPlayground/__tests__/WritingActionBar.test.tsx`; it failed before assertions with `SecurityError: localStorage is not available for opaque origins`, and all 8 tests were skipped. This matches the pre-existing opaque-origin JSDOM setup issue seen in nearby WritingPlayground focused tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task513-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 73 in `/tmp/task512-tsc-final.txt` to 71 in `/tmp/task513-tsc-final.txt`; `rg -n 'WritingActionBar\.tsx' /tmp/task513-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

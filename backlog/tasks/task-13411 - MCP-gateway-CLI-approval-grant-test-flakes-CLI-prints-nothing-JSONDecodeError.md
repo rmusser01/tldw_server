@@ -28,11 +28,11 @@ tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py::test_gat
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Mechanism: secrets.token_urlsafe grant ids start with '-' about 1 time in 64. The failing CI commit d2aff91b86 predates 874139d2be and called 'revoke-approval-grant <id> --config <path>', so argparse read a dash-leading id as an option. The CLI wrote {"error": "the following arguments are required: grant_id"} to stderr and exited 2, and the test parsed the empty stdout before checking the exit code. CI evidence: the captured log has 4 'asyncio: Using selector' lines (create and list, two asyncio.run calls each; a full lifecycle logs 8 locally), so revoke never got past argument parsing. Rejected: an argparse change between 3.12.11 and 3.12.14 (argparse.py is identical), and sqlite or config races (3,000-run in-process lifecycle fuzz: 0 failures). The CLI is correct: it exits non-zero with a JSON error on stderr. Fix (test only): parametrize the approval lifecycle with plain, '-' and '--' leading ids, and add _run_cli_json, which asserts exit 0 with stderr and stdout in the message before parsing. Verification: RED with the old argv order gives 2 failed with 'CLI revoke-approval-grant exited 2; stderr=...required: grant_id'. GREEN: test_gateway_cli_package.py 99 passed, 30/30 loop. 50k random ids parsed after '--': 0 failures. Ruff clean; Bandit -ll: no Medium or High findings (test file only; no product files touched). No docs change needed. PR #3076.
 
 Qodo follow-up on PR #3076 (commit 484d23af8e). Marked the approval and path grant lifecycle tests, both new or modified here, as @pytest.mark.unit, matching the per-test unit marks in sibling gateway tests. They run the CLI in-process against a temporary sqlite store. Wrapped the token_id parametrize decorators and the list helper calls. The project ruff and black limit is 120, which no line exceeded; the file keeps lines to 88 or fewer (max 92), and the changed lines now match. Verification: test_gateway_cli_package.py 99 passed and passed 30/30 in a loop; -m unit selects the 6 lifecycle cases; ruff clean; Bandit -ll: no Medium or High findings. Test-only change.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -36,11 +36,11 @@ Expose nested content alert rule and alert inbox endpoints for selected Watchlis
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Stage 3B after Stage 3A commit aebb3e4a6. Proceeding API test-first for nested content alert rule and alert inbox endpoints.
 
 RED: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Watchlists/test_watchlist_content_alerts_api.py -q failed with 404 for missing nested content-alert routes. GREEN: API test file passed. Regression: 40 focused backend tests passed across content alert API/DB/matcher, first-class Watchlists, existing run-stat alert rules, and Topic Monitoring. Docs grep confirmed content-alert routes, health issue boundary, Topic Monitoring boundary, and watchlist_content terms. Verification: git diff --check passed. Bandit: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/DB_Management/Watchlists_DB.py tldw_Server_API/app/core/Watchlists/content_alerts.py tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py -f json -o /tmp/bandit_watchlists_stage3b_content_alerts_api.json passed with zero results.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -30,9 +30,9 @@ Migrate the WizardShell workflow error banner from AntD Alert to the canonical d
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented test-first: the new WizardShell regression failed on the missing canonical Alert marker, then passed after replacing the AntD error banner with the design-system Alert and preserving setError(null) dismissal.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

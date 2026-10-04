@@ -44,9 +44,9 @@ Address still-valid PR #1640 review comments for the Persona Buddy sprite atlas 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified all five unresolved review threads against current code and patched only still-valid issues. Qodo: added docstrings for the new atlas pytest cases, documented preview_frame as a zero-based index with backend bounds semantics, and normalized SpriteFrameRenderer region offsets so zero coordinates serialize as 0px instead of -0px. Gemini: renamed the atlas activation dict-comprehension variable from state to animation_id and removed redundant nested buildPack() calls in renderability tests. Focused verification passed: pytest test_persona_visuals_core.py -q (27 passed, 5 warnings); targeted Persona Buddy Vitest suite (5 files passed, 52 tests passed, existing react-i18next NO_I18NEXT_INSTANCE warning observed); Bandit B101-skipped run wrote /tmp/bandit_pr1640_review_fixes.json; git diff --check exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -32,13 +32,13 @@ On 2026-09-27, sqlglot 30.20.0 (released 16:35Z) broke every SQLite AuthNZ start
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 AC #1 and AC #2 done on fix/authnz-surface-startup-causes: new app/core/exceptions.exception_type_chain() walks __cause__/__context__ (sees through 'from None'), types only, bounded and cycle-safe. Users_DB._log_storage_failure and AuthNZ database._transaction_context now put the chain in the message text; the bound extras stayed invisible in CI. The outage shape now logs 'cause=TransactionError <- ProfileUserWriteRejected'. Messages are deliberately not logged: a PostgreSQL unique-violation detail carries the email. Tests: tests/AuthNZ/unit/test_users_db_startup_failure_cause.py (4); the startup test was red before the log change. AC #3 (sqlglot upper bound) stays open as an owner decision.
 
 AC amended 2026-09-28 (Qodo on #3047): the original wording asked for type *and message*. Messages are deliberately not logged, because a PostgreSQL unique-violation detail carries the email address; the type chain alone diagnosed the 2026-09-27 outage. Also per Qodo: the PostgreSQL path raises its TransactionError outside any except block, so the chain cannot be recovered downstream; its own log line now carries 'cause=<type chain>', pinned by test_postgres_transaction_execute_failure_log_omits_raw_exception (probed red without the change) alongside the existing no-leak assertions.
 
 2026-09-29, owner decision (AC #2): leave sqlglot uncapped ("leave sqlglots version uncapped"). pyproject keeps sqlglot>=25.0.0. The protection is the canonical-DDL test from #3030 (_bootstrap_simple_constraint_is_canonical plus its positive test), which fails loudly on a release that changes what the profile-user write guard accepts, and the type-chain logging from #3047, which names the cause in CI. Accepted risk: a breaking sqlglot minor still fails every PR at once until fixed, as on 2026-09-27; the fix is a code change like #3030, not a pin. DoD: tests recorded in the notes above (#3030, #3047); no docs change (the decision lives here); bandit N/A, no code in this closure; no skips or blockers. Final summary: causes now reach the CI log on SQLite and PostgreSQL, and sqlglot stays unbounded by owner decision.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

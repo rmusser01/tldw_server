@@ -37,11 +37,9 @@ Design the next unified solo onboarding follow-up PR: manual provider validation
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ['Design spec written and marked ready for user review.', 'Local review completed against approved sequence: provider validation, readiness panel, first-chat recovery, first-source milestone.', 'Subagent spec review not run because available subagent tooling is restricted to explicit user-requested delegation in this session.', 'Verification: git diff --cached --check passed for staged documentation/task changes.', 'Bandit: skipped because this commit changes only documentation and Backlog task metadata.', 'Follow-up review found and addressed validation-gate deadlock for syntax-only hosted providers by distinguishing ready vs accepted validation results.', 'Follow-up review found and addressed first-source readiness risk by requiring queryable/source readiness before offering a grounded question.', 'Follow-up review narrowed provider save semantics so persistence status is not overloaded with validation status.', 'Implementation plan written with four staged commits, exact touched files, TDD steps, focused verification commands, UAT checklist, and cleanup requirements.', 'Plan review subagent not run because available subagent tooling requires explicit user-requested delegation in this session.', 'Local plan review adjusted execution details: validate-first happy path preserves validation across safe key clearing, first-source ask action must not overclaim readiness, and exact verification commands now keep venv/workdir requirements explicit.']
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

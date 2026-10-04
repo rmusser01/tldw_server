@@ -42,7 +42,7 @@ Add the first implementation seam for external MCP-compatible Persona Visual pac
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a pure Persona Visual provider envelope normalizer under tldw_Server_API/app/core/Persona/visual_portability/provider_envelope.py. The helper normalizes bounded review metadata, preserves structured provider blockers and warnings, and fails closed with machine-readable blockers for invalid contract version, unsupported result type, missing review_required, activation_allowed=true, missing portable-archive import preview, malformed diagnostics, unsupported archive media type, and unsafe metadata or payload strings.
 
 Confirmed this slice has no provider execution, no MCP resource retrieval, no asset writes, no job enqueueing, no persistence, no runtime activation, and no Persona Garden UI changes.
@@ -54,7 +54,7 @@ Review fixes addressed the Gemini sanitizer hardening comments on PR #1691: over
 Follow-up review fixes addressed the CodeRabbit archive payload and contract version findings on PR #1691: blocked portable-archive status without actual blockers no longer bypasses missing payload validation, and contract_version now accepts only true integers or exact bounded integer strings. Added regression tests for both paths. Updated validation passed: pytest tldw_Server_API/tests/Persona/test_persona_visual_provider_envelope.py -q passed with 25 tests; py_compile passed; git diff --check passed; Bandit wrote /tmp/bandit_persona_visual_provider_envelope_review2.json with no results and no errors.
 
 Additional Qodo follow-up replaced the numeric metadata type check with tuple-form isinstance for compatibility, tightened URI screening to reject any non-mcp:// scheme, and updated the provider contract docs with the mcp:// allowlist rule. Added ftp, s3, and ws URI regression cases. Updated validation passed: pytest tldw_Server_API/tests/Persona/test_persona_visual_provider_envelope.py -q passed with 28 tests; py_compile passed; git diff --check passed; Bandit wrote /tmp/bandit_persona_visual_provider_envelope_review3.json with no results and no errors.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

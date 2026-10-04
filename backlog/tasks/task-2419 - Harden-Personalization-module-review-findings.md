@@ -37,7 +37,7 @@ Verify and fix validated Personalization companion module review findings. Scope
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Validated and fixed inconsistent text user ID storage resolution across companion activity capture, context loading, API dependency creation, reflection jobs, lifecycle-compatible helpers, and personalization consolidation.
 - Validated and fixed raw free-text retention for reading item notes and reading highlight quote/note metadata by storing bounded previews, character counts, digests, and truncation flags.
 - Validated and fixed reflection job cadence handling by normalizing supported cadences before slot/dedupe generation and rejecting unknown cadences.
@@ -46,7 +46,12 @@ Verify and fix validated Personalization companion module review findings. Scope
 - Addressed PR review feedback by adding structured activity-capture log context, sanitized traceback frame summaries, and event/user/dedupe references without logging raw exception messages or paths.
 - Addressed PR review feedback by adding legacy text-user storage ID candidates and a read-only existing-DB resolver so older personalization DBs remain discoverable without creating new directories during lookup.
 - Reviewed the broad adapter-file P3 concern and lifecycle no-op scopes as maintainability/iteration items rather than correctness or security defects for this fix. No broad split was done in this task.
-<!-- SECTION:NOTES:END -->
+
+- Addressed latest PR review feedback by opening the companion reflection job Collections DB with the storage-safe user ID.
+- Addressed latest PR review feedback by validating that an existing legacy companion personalization DB contains a matching logical profile before using its legacy storage ID.
+- Addressed latest PR review feedback by pairing consolidation storage directories with logical profile IDs from the personalization DB, so DB access uses storage IDs while event/card operations use logical user IDs.
+- Latest verification after rebasing on dev: focused Personalization suite 54 passed; derivations/dependency/lifecycle tests 9 passed; Collections bridge 3 passed; Bandit on touched Personalization/API dependency/consolidation paths reported 0 findings and 0 errors in /tmp/bandit_personalization_review_latest.json.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Verification
 
@@ -72,12 +77,3 @@ Hardened the Personalization companion module by centralizing storage ID resolut
 - [x] #4 Final summary added
 - [x] #5 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-- Addressed latest PR review feedback by opening the companion reflection job Collections DB with the storage-safe user ID.
-- Addressed latest PR review feedback by validating that an existing legacy companion personalization DB contains a matching logical profile before using its legacy storage ID.
-- Addressed latest PR review feedback by pairing consolidation storage directories with logical profile IDs from the personalization DB, so DB access uses storage IDs while event/card operations use logical user IDs.
-- Latest verification after rebasing on dev: focused Personalization suite 54 passed; derivations/dependency/lifecycle tests 9 passed; Collections bridge 3 passed; Bandit on touched Personalization/API dependency/consolidation paths reported 0 findings and 0 errors in /tmp/bandit_personalization_review_latest.json.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

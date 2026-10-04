@@ -50,9 +50,9 @@ ADR required: no new ADR. Existing backlog/decisions/002-personal-context-profil
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Completed Fix Round 1: exported cleanup acknowledgement and proof-bearing version-one conflict-list response; enforced exact bounded exchange/digest values; rejected reserved home-authority spoofing and Personal Context conflict claims against non-Personal-Context stored conflicts. Verification: 264 targeted tests passed; Ruff, Bandit, artifact reproducibility, and diff hygiene passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

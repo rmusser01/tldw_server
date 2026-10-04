@@ -34,16 +34,14 @@ Review GitHub threads on PR #2064, verify each against the current branch, patch
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified the two PR #2064 inline review comments against the current branch. Patched the keyboard e2e to wait specifically for review completion, updated the create-drawer failure regression to model pending and rejection separately, and added explicit disabled state to the create submit buttons so the pending state is semantically testable. Verification: focused Playwright keyboard shortcut grep passed; FlashcardCreateDrawer deck-reference Vitest passed; git diff --check passed. Bandit not run because only TypeScript/Playwright test files and a TSX component were touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Addressed both PR #2064 review comments with scoped test hardening and create-drawer pending-state semantics. No backend or Python code changed.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

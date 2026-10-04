@@ -36,11 +36,11 @@ Search the implementation plan for user-specific absolute paths, replace verific
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Replaced hardcoded /Users/macbook-dev verification command paths in Docs/superpowers/plans/2026-05-09-embeddings-rag-recipe-webui-implementation-plan.md with repo-relative source .venv/bin/activate examples. Verification: rg -n "/Users/macbook-dev" on the plan returned no matches; git diff --check on the plan and task file passed. Bandit not applicable because this review fix only changes markdown/task tracking.
 
 Pushed commit 13520b0a1 to origin/codex/embeddings-rag-recipe-design for PR #1421.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

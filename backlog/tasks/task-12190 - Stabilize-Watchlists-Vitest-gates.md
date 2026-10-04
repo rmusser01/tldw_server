@@ -31,7 +31,7 @@ Fix the next tldw-frontend local test slice after PR #1318 by stabilizing Watchl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline: tsc was clean. Watchlists Vitest initially failed 10 tests across stale Modal mock, stale output-link test IDs, obsolete snapshot assertions, a renamed cron help aria label, and timeout-only heavy interaction tests under the full 96-file run.
 
 Fix: replaced brittle Watchlists external snapshots with explicit copy/ARIA contracts, updated output relationship jump expectations to current test IDs and status-filter reset, added Modal.confirm to the JobsTab delete mock, and gave known heavy Watchlists interaction tests targeted larger timeouts.
@@ -39,7 +39,7 @@ Fix: replaced brittle Watchlists external snapshots with explicit copy/ARIA cont
 Verification: bunx vitest run ../packages/ui/src/components/Option/Watchlists --reporter=verbose passed 96 files / 423 tests; node node_modules/typescript/bin/tsc --noEmit --pretty false -p tsconfig.json passed; git diff --check passed. Bandit skipped because only frontend TS/TSX test files and Backlog task metadata changed.
 
 PR: https://github.com/rmusser01/tldw_server/pull/1321
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

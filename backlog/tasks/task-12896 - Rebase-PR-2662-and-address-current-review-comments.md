@@ -30,9 +30,9 @@ Rebase Research Workspace NotebookLM WP3 PR 2662 on latest dev and address curre
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Final verification: combined focused Vitest run passed 67 tests across agent-task-handoff, WebClipperPanel save flow, and ResearchWorkspace stage2 responsive. git diff --check passed. TypeScript check still exits 2 only on known unrelated baseline files outside this touched scope: ChatGreetingPicker, MCPHub first-run status, background-session-store, useSetupOnboarding, TldwChat.abort, and character-export SSRF tests. Bandit skipped because this pass touched frontend TypeScript/tests and Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

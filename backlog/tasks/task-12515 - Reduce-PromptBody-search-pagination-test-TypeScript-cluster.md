@@ -33,7 +33,7 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task510-tsc-final.txt`: package `tsc` reported three diagnostics in `src/components/Option/Prompt/__tests__/PromptBody.search-pagination.test.tsx` at the prompt sync mock result overrides and clipboard mock call access.
 - Root cause was test mock typing only. `pushToStudio` was inferred from its initial `{ success: true }` implementation, so later test cases adding `syncStatus` were rejected even though the mocked service path returns sync metadata.
 - Added a small `PromptSyncMockResult` test type and used it for the `pushToStudio` mock return promise so later mock resolutions can include `syncStatus`, `localId`, or `error` without changing behavior.
@@ -41,7 +41,7 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 - Focused verification: `bunx vitest run src/components/Option/Prompt/__tests__/PromptBody.search-pagination.test.tsx` passed: 58 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task511-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 79 in `/tmp/task510-tsc-final.txt` to 76 in `/tmp/task511-tsc-final.txt`; `rg -n 'PromptBody\.search-pagination\.test\.tsx' /tmp/task511-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

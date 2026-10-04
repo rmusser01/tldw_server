@@ -42,7 +42,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Sync v2 service layer with adapter registry/protocol result types, private payload validation/redaction helpers, deterministic service hooks, push/pull orchestration, and restore manifest metadata inventory. Added DB/store read helpers for user datasets/devices and made Sync v2 package store export lazy to avoid an import cycle with Sync_DB.
 
 Verification:
@@ -113,7 +113,7 @@ Final review verification:
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 28 passed, 5 warnings.
 - git diff --check: passed.
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sync/v2/service.py -f json -o /tmp/bandit_sync_v2_conflict_idempotency.json: 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -41,7 +41,7 @@ Docs/superpowers/plans/2026-06-17-workspace-membership-adapters-implementation-p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Workspace membership adapters for prompt, workflow, watchlist, acp_session, and sandbox_session.
 
 Optional Prompts/Workflows/Watchlists DB handles now flow through forward and reverse membership API routes. Workflow resolution receives tenant/admin request metadata.
@@ -64,7 +64,7 @@ Review-pass verification:
 - compileall on touched modules passed.
 - git diff --check passed.
 - Bandit touched scope: 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

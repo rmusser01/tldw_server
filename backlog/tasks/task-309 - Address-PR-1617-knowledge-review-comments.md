@@ -31,11 +31,11 @@ Resolve the still-actionable review findings on PR #1617 for the /knowledge QA s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented review fixes for PR #1617: localized knowledge/sidebar source picker strings and source labels, restored source picker item IDs, hardened saved profile ID validation/dependencies, preserved streaming source_status diagnostics, added extension import error context, wired prompts DB across stream/batch/resume endpoints, made new retrievers avoid blocking sync DB calls, centralized full source db path mapping, scoped cache namespace by workspace, and reapplied workspace artifact filtering/source_status after PRF/decomposition/final document mutation.
 
 Verification passed: focused RAG review tests, compileall on touched Python files, UI Vitest package tests for KnowledgeContextBar/KnowledgeQAProvider/KnowledgePanelTabRouting/sourceMetadata, tldw-frontend knowledge route parity test, extension copilot entrypoint unit test, git diff --check, and Bandit on touched Python production files. The branch was force-pushed as a single amended commit and the addressed current PR review threads were resolved.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

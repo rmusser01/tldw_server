@@ -38,13 +38,13 @@ Continue the local tldw-frontend test stabilization series after PR #1316 merged
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fresh worktree: /private/tmp/tldw-frontend-recent-study-gates on branch codex/tldw-frontend-recent-study-gates from origin/dev ef19f72f8, the PR #1316 merge commit. Dependency setup: bun install from apps completed. Baseline TypeScript passed with node node_modules/typescript/bin/tsc --noEmit --pretty false -p tsconfig.json. Focused Vitest command failed only in ReviewTab.create-cta snapshots: the received topbar includes the current flashcards-review-prompt-side-toggle segmented control with Front first / Back first options. RecentStudySessions and ReviewTab.study-suggestions passed in the same focused run.
 
 Fix implemented: refreshed only the two stale ReviewTab.create-cta topbar snapshots. The diff adds the current flashcards-review-prompt-side-toggle segmented control to the active review and caught-up completion topbar snapshots. Verification after update: focused RecentStudySessions/ReviewTab Vitest command passed 3 files / 20 tests; tldw-frontend TypeScript passed; git diff --check passed. Bandit skipped because touched source is frontend TypeScript snapshot/test metadata only.
 
 Opened PR #1318: https://github.com/rmusser01/tldw_server/pull/1318.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

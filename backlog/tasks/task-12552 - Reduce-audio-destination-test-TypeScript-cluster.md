@@ -33,14 +33,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task523-tsc-final.txt`: package `tsc` reported two diagnostics where `{ kind: "destination" }` partial audio mocks were cast directly to `AudioDestinationNode`.
 - Root cause was partial DOM test mocks only. The mock only needs to stand in for the `destination` target used by the hook wiring, not implement the full Web Audio destination node surface.
 - Updated both mock `AudioContext.destination` properties to cast through `unknown` before `AudioDestinationNode`, matching the existing partial mock style used elsewhere in the same files.
 - Focused verification: `bunx vitest run src/hooks/__tests__/audioCaptureCoordinator.low-level.test.tsx src/hooks/__tests__/useMicStream.test.tsx` passed: 4 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task524-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 51 in `/tmp/task523-tsc-final.txt` to 49 in `/tmp/task524-tsc-final.txt`; searching for the two audio test paths and `AudioDestinationNode` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

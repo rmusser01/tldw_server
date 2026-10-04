@@ -68,13 +68,13 @@ Implement the #1474 ACP schedules, triggers, and background runs workstream in t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause for the initial #1474 red state: _load_all() and _rescan_once() call _list_registered_schedules(); that helper only calls list_all_schedules(). The failing tests and older/fake DB handles expose list_schedules(), so schedule discovery returns no rows and both ACP and workflow job registration are silently skipped. Targeted reproduction: 3 failed in test_acp_schedules.py schedule routing cases.
 
 Implemented #1474 schedule routing compatibility and operator-visible state. _list_registered_schedules() now falls back from list_all_schedules() to list_schedules() for older/test DB handles; disabled stale schedules record skipped_disabled; ACP schedule responses expose next_run_at, concurrency_mode, misfire_grace_sec, and coalesce; create/update validate and pass concurrency controls. Documentation now records APScheduler -> Scheduler acp_run ownership, schedule states, concurrency behavior, and webhook trigger security boundaries.
 
 Verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_schedules.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_triggers_endpoint.py tldw_Server_API/tests/Agent_Client_Protocol/test_webhook_triggers.py -q => 54 passed, 5 warnings. Full ACP suite: python -m pytest tldw_Server_API/tests/Agent_Client_Protocol -q => 818 passed, 18 warnings. Bandit touched backend Python => /tmp/bandit_acp_schedules_triggers_1474.json results=0 errors=0 loc=1607. git diff --check => clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

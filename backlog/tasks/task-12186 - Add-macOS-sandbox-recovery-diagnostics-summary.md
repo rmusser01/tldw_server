@@ -43,11 +43,11 @@ Add a narrow, additive operator-facing recovery_summary block to macOS sandbox d
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added `summarize_recovery()` as a pure projection over already-collected macOS diagnostics blocks.
 - Added `SandboxAdminMacOSRecoverySummary` and wired `recovery_summary` into macOS diagnostics responses.
 - Updated sandbox README, runtime capability inventory, and macOS operator notes to document read-only recovery-summary semantics.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

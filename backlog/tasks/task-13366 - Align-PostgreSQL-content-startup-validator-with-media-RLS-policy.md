@@ -24,11 +24,11 @@ Fresh PostgreSQL content schema v26 creates and forces RLS with media_visibility
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Direct isolated PostgreSQL inspection after schema v26 migration: media RLS enabled and forced, only media_visibility_access exists; sync_log retains four scope policies. Runtime validator still checks retired media_scope_* names. Regression will assert the current exact policy contract.
 
 Validator now requires schema v26 media_visibility_access and retains four sync_log policies. Focused tests: 14 passed. Full live PostgreSQL startup and direct forced RLS check passed. Bandit 0 findings; fatal Ruff clean. Skip: no production topology tested.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

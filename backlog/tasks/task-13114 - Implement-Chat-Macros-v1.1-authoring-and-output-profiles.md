@@ -43,7 +43,6 @@ Detailed TDD plan: Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-08-23 baseline: backend Chat_Macros suite passed 134 tests with 2 warnings. ChatMacrosSettings frontend component suite passed 4 tests. The frontend service suite could not collect in this isolated worktree because wxt/browser was unresolved across the monorepo dependency roots; stop-after-three-attempts rule applied and the plan requires a complete workspace dependency layout before Task 2.
 
@@ -76,7 +75,6 @@ Heading follow-up verified: 16 new validation/legacy-read regressions failed bef
 Root cause confirmed: isolated CI dependency overlay reproduces CI fingerprint7a9fc91443c4cfca4e929fafb9c54cc5daab78d00cea3b1085011a39bc60e83e exactly. Schema diff has no changed paths or Chat Macros schemas; Pydantic2.13.5 combines equivalent OscePatientContext-Input/-Output into OscePatientContext, updating references in three OSCE models. Updating only generated fingerprint (types regenerated locally, gitignored). No backend behavior change or shared-venv modification.
 Fingerprint correction verification: regenerated OpenAPI JSON+TypeScript using CI-matched dependency overlay; a separate fresh exporter --check passes with expected7a9fc914 fingerprint. Package-wide bun run typecheck exits0; git diff --check passes. Only tracked changes are fingerprint and task record, no application code; prior security scan remains applicable.
 2026-09-26 rebased onto dev3f909e133b (ADR inventory documentation update), cleanly. git range-diff shows all24 PR commits patch-equivalent; application/frontend/helper trees are identical to prior da6c9dfa9e. New AGENTS ADR assessment requirement: ADR required:no new ADR; governed by Docs/ADR/003-jobs-vs-scheduler-default.md. This v1.1 authoring/profile UI and validation follow-up retains v1 per-user YAML storage, database records and Jobs ownership; no durable architecture decision changes. Recording same assessment in implementation plan and PR. Rechecking CI-matched OpenAPI contract before publication.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-09-26 follow-up rebase: dev advanced to 59bd584503 (PR2996 MCP sanitizer changes, no Chat Macros overlap). Rebased all25 PR commits cleanly; git range-diff confirms every commit patch-equivalent. Fresh CI-matched OpenAPI contract check passes using /tmp/pr2951-openapi-ci-deps. No new application edits or security findings introduced by this rebase. Publishing with an exact lease against2445e67792; required CI and any new review feedback remain merge gates.
 
@@ -93,7 +91,7 @@ Fingerprint correction verification: regenerated OpenAPI JSON+TypeScript using C
 2026-09-27 08:15 UTC: all CI checks on e43b467b0d passed, but dev advanced to8b25dc729c (PR3013 license-first CI ordering). Rebased all31 prior commits cleanly and patch-equivalently; apps, backend and Helper_Scripts unchanged. Fresh CI-matched OpenAPI contract and full PR whitespace checks pass. No new Qodo feedback. Publish with exact lease againste43b467b0d and await fresh required CI under updated workflows. No new authored application code or additional Bandit scope.
 
 2026-09-27 09:00 UTC: all seven required checks passed on efc1c36f24, but dev advanced to bfa343a608 (PR3015 VN recipe snapshots), creating a generated fingerprint conflict. Rebased all32 commits; range-diff differs only in fingerprint hunks of two historical commits. Macro backend/frontend/test files are unchanged. Regenerated combined fingerprint with CI Pydantic2.13.5: b5210f8ed4c83d9385414965b13f9e04777cdfc2130dddf205420f944f92bb51 (2098 paths/3210 schemas). Compared prior CI schema: no changed paths, only VNAssetGenerationRequest and VNAssetGenerationStatusResponse changed. Fresh exporter --check, regenerated OpenAPI TypeScript, package-wide frontend typecheck, and full PR whitespace check pass. All11 review threads resolved; no new comments. Human Change Summary verified. Publish exact lease against efc1c36f24; fresh CI required. No newly authored Python changes or additional Bandit scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

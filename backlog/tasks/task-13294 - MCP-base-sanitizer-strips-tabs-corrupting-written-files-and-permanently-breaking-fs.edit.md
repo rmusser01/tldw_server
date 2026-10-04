@@ -62,7 +62,7 @@ Found by the comprehensive core-module review; the tab-stripping behaviour indep
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed in 475bdfb929 and 6a16f76e48.
 
 Root cause was two layers, not one. BaseModule.sanitize_input stripped every character below U+0020 except "\n", but fixing that alone changed nothing for the reported path: filesystem_module carried its own sanitize_input override with the same defect (`ch >= " " or ch == "\n"`), which shadowed the base. run_command, sandbox and web_tool_base had near-identical overrides too, each drifted to a different whitespace class, all existing only to escape the SQL denylist. All four deleted; the base is now the one implementation and strips CONTROL_CHARS_RE = [\x00-\x08\x0b\x0c\x0e-\x1f\x7f], preserving tab, newline and carriage return.
@@ -148,7 +148,7 @@ Notes from the other branch (merged 2026-09-27):
 Re-checked on dev 2026-09-27: ACs 1-5 are in place (#2980, #2996). Stays open for AC #6, the unreachable exemption table in filesystem_module, which needs tool_name threaded through sanitize_input as recorded above.
 
 AC6 done 2026-09-28 by making the exemption table reachable, without threading tool_name through all 22 modules. BaseModule.verbatim_argument_keys(tool_name) returns frozenset() by default; FilesystemModule returns its _VERBATIM_ARGS entry. ToolExecutionSecurity.harden_and_sanitize_tool_arguments now takes tool_name (both call sites pass it) and leaves str values under the declared keys byte-exact. Non-str values under those keys are still fully sanitised (depth guard included), and the ownership-override strip still runs first. Duck-typed modules without the hook default to nothing verbatim. Tests: MCP_unified/tests/test_verbatim_argument_keys.py (9) covers form-feed content surviving for fs.write/fs.edit/notebook.edit_cell, per-key scope, non-str fallback, other tools and modules unchanged, and the override strip. MCP trees: the 5 remaining failures are identical on dev; one parallel-run failure passes alone and with its file.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

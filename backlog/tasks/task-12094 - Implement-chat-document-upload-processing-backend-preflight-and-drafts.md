@@ -25,13 +25,9 @@ Execute Task 1 from the approved plan: add backend document upload preflight sch
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented Task 1 backend preflight/draft seam. Verification: watched new tests fail before implementation because document_upload_processing module/routes were missing. Passing checks after implementation: pytest tldw_Server_API/tests/Media/test_document_upload_processing.py -q (7 passed), pytest tldw_Server_API/tests/Media/test_media_router_resilient_imports.py -q (2 passed), Bandit on new schema/endpoint wrote /tmp/bandit_chat_document_upload_processing_task1.json with zero findings, and git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -83,7 +83,7 @@ Source: TASK-13344 triage, corrected while working the fix.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 AC1 DONE in c09e47c98e -- Family A's shared cause resolved; it was TWO bugs, not one. tests/Sync 14 failures to 8. AC2 and AC3 remain.
 
 Both bugs sat on the path bootstrap_personal_context -> _bind_personal_context_dataset -> prepare_notes_suggestion_authority, and both surfaced as "personal_context_snapshot_unavailable" because profile.py:552 maps any other SyncStoreError to it. That mapping is why this looked like a snapshot problem for so long.
@@ -152,7 +152,7 @@ AC2 -- both classified as test drift against deliberate product changes:
   pre-receipt state.
 
 Whole directory now 5 failed / 2995 passed: the three exchange-gate fixtures (TASK-13349), the registry inconsistency that is correctly failing (TASK-13350), and one known regex drift.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

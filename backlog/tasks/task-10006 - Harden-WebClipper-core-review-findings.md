@@ -29,7 +29,7 @@ Fix the current-code WebClipper core review findings: prevent client `clip_id` c
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan file: `IMPLEMENTATION_PLAN_webclipper_review_hardening_10006.md`
 
 Initial scope:
@@ -64,7 +64,7 @@ Verification:
   - Final Black check on touched Python files -> 4 files unchanged.
   - Final Bandit report `/tmp/bandit_webclipper_2496_final.json` -> 0 results, 0 errors, 0 skipped.
   - Final diff hygiene: `git diff --check` and `git diff --check origin/dev...HEAD` passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

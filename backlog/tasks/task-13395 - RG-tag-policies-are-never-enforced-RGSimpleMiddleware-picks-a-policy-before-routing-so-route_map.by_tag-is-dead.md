@@ -42,7 +42,7 @@ Recommendation: (a), because the policy file states the intent that these routes
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Owner decision 2026-09-29: option (a). The resolver enforces by_tag before routing, using a served-route index: path first, then the innermost tag, then default. Both audits call the same resolver.
 - Request-level test: test_middleware_tag_enforcement.py (tag-only route through nested includes).
 - Also in PR B: ingress charges the validated principal (tenant keeps precedence); unvalidated credentials no longer mint buckets; route-map lint in CI; WebUI replay test with zero 429s (min headroom 6.8x).
@@ -50,7 +50,7 @@ Owner decision 2026-09-29: option (a). The resolver enforces by_tag before routi
 - Bandit -ll on touched files: clean.
 - Follow-ups: TASK-13399 (route-auth ratchet blind to flag-gated routers).
 Spec: Docs/Design/2026-09-29-rg-ingress-safety-net-design.md.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

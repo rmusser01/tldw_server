@@ -30,11 +30,9 @@ Rebase PR #2562 on latest dev and address reviewer feedback about brittle source
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased PR #2562 from 80dd8040a2 onto origin/dev 866ca40fe1. Addressed review feedback by replacing new source-file rail assertions with rendered DOM/imported-constant checks, restoring real close-button coverage in the desktop Playwright path with store fallback only for medium/mobile cleanup where header shortcuts intercept the button, and removing duplicated FINAL_SUMMARY end markers from TASK-12079. Verification: focused Vitest WebUI/shared suite passed 16 tests; extension Vitest guard passed 2 tests; ESLint and Prettier touched scopes passed; Playwright rail-collapse spec passed 3 tests; extension production build passed with runtime smoke skipped because no service worker target appeared; built extension bundle contains expected rail classes/test IDs; Bandit had 0 findings with TS/TSX/Markdown parse errors documented.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

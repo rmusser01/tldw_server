@@ -42,11 +42,7 @@ Implement the Task 3 WebUI/extension UX remediation slice for first-run setup, h
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Task 1 connection state matrix: baseline focused tests passed after installing UI dependencies in the clean worktree. Added pure deriveConnectionUxState matrix coverage in src/types/__tests__/connection.test.ts while preserving existing store-side onboarding action coverage in src/store/__tests__/connection.test.ts. Verification: bunx vitest run src/types/__tests__/connection.test.ts src/store/__tests__/connection.test.ts passed 2 files / 27 tests.
 
 Task 2 / resolver behavior: added src/routes/__tests__/option-index.setup-flow.test.tsx to lock hosted home, first-run onboarding, character-chat return intent, completed-first-run companion home, automatic beginOnboarding for unconfigured first-run users, and checkOnce refresh for completed users. Existing option-index implementation satisfied the matrix, so no product route code changed. Verification: bunx vitest run src/routes/__tests__/option-index.setup-flow.test.tsx src/routes/__tests__/core-route-identity.test.tsx passed 2 files / 13 tests.
@@ -64,7 +60,7 @@ Task 6 browser QA: added e2e/workflows/setup-connection-flow.spec.ts covering / 
 Final verification gate: package UI focused unit gate passed (bunx vitest run src/types/__tests__/connection.test.ts src/store/__tests__/connection.test.ts src/routes/__tests__/option-index.setup-flow.test.tsx src/components/Option/Onboarding/__tests__/OnboardingConnectForm.design-system.test.tsx src/routes/__tests__/core-route-identity.test.tsx, 5 files / 44 tests; existing react-i18next warning only). Frontend focused unit gate passed (bunx vitest run __tests__/app/app-layout.test.tsx __tests__/navigation/login-page.test.tsx __tests__/navigation/hosted-placeholder-pages.test.tsx __tests__/navigation/route-placeholder-component.test.tsx __tests__/navigation/route-redirect-component.test.tsx __tests__/navigation/not-found-page.test.tsx, 6 files / 45 tests). Playwright browser gate passed after selector fixes (bunx playwright test e2e/login.spec.ts e2e/workflows/setup-connection-flow.spec.ts e2e/workflows/hosted-placeholder-routes.spec.ts --reporter=line, 14 tests). git diff --check passed. Scope check: no backend APIs, backend auth code, route renames, or broad visual redesign included. Bandit is not applicable to this frontend-only touched scope; no Python backend files were modified.
 
 Final known skips/blockers: none for the touched frontend scope. Bandit was documented as not applicable because no Python backend files were changed. Playwright needed escalated local dev-server binding after sandbox EPERM on port 8080; the rerun passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -31,7 +31,7 @@ Add the deferred Jobs-backed execution path for native CodeGraph indexing so lar
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan at Docs/superpowers/plans/2026-05-05-native-codegraph-jobs-indexing-implementation-plan.md. Scope is limited to Jobs payload helpers, MCP job/background enqueue mode, and a CodeGraph Jobs worker entrypoint; no file watching, Scheduler integration, or automatic worker startup in this slice.
 
 Implemented CodeGraph Jobs payload helpers, a non-retryable validation worker handler, and MCP job/background mode enqueueing for codegraph.index and codegraph.sync. The worker validates job_type, operation, payload shape, workspace key, settings, language filters, max_files, and index_db_path containment before opening the CodeGraph repository. Foreground mode remains unchanged and still offloads blocking repository work through asyncio.to_thread.
@@ -73,7 +73,7 @@ Review-fix verification passed:
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check tldw_Server_API/app/core/exceptions.py tldw_Server_API/app/core/CodeGraph/jobs.py tldw_Server_API/app/core/CodeGraph/jobs_worker.py tldw_Server_API/app/core/CodeGraph/workspace.py tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py tldw_Server_API/tests/CodeGraph/test_codegraph_jobs.py tldw_Server_API/tests/CodeGraph/test_codegraph_jobs_worker.py tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/exceptions.py tldw_Server_API/app/core/CodeGraph/jobs.py tldw_Server_API/app/core/CodeGraph/jobs_worker.py tldw_Server_API/app/core/CodeGraph/workspace.py tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py -f json -o /tmp/bandit_codegraph_jobs_review_fixes.json (0 findings)
 - git diff --check
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

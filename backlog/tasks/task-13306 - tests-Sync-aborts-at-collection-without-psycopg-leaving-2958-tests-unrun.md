@@ -41,7 +41,7 @@ Source: synthesis F8
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 REVISED 2026-09-22 after a full tests/Sync run completed (3h 01m).
 
 ATTRIBUTION: the importorskip edit in the working tree is MINE, applied under this task in Stage 0 - not "a concurrent session" as the review ledger initially recorded.
@@ -57,7 +57,7 @@ AC#4 REVISED - "assign tests/Sync to a CI shard" is WRONG AS WRITTEN. The direct
 2026-09-23 reconciliation: AC1 met - both postgres_contract files have pytest.importorskip("psycopg") at :10 before the psycopg import (commit 7c348a05ae). AC2 met for collection - with psycopg/psycopg_pool forced to None in sys.modules, pytest --collect-only tests/Sync reports '2997 tests collected' with the two files SKIPPED and no collection errors (previously 'Interrupted: 2 errors'). Full run not repeated here (3h); the earlier note records a completed run. AC3 met - test_sync_v2_store.py::test_postgres_personal_context_receipt_locks_binding_before_upsert passes (1 passed); fixture fixed across 4cccc56a8a/95689eb714/d389329118. AC4 NOT checked - premise is off: tests/Sync has been in ci.yml shard 'gap-verified-2' since 5e5c6664d2 (2026-06-21), i.e. before the review. But that shard is in ci.yml (not backend-required/coverage-required), path-filter gated, with timeout-minutes: 60 against a ~3h directory runtime, so it is not an effective gate. Remaining: a gate-able scoped subset of tests/Sync in a required workflow plus the full directory on a nightly (or pytest-split it), then re-word/check AC4. DoD4 bandit skipped: only test files + a logging change were touched for this task.
 
 2026-09-23: AC4 reworded - the original premise (unassigned to any shard) was wrong; tests/Sync was in ci.yml gap-verified-2, but that shard never completed: run 35828110624 cancelled it at the 60-min timeout (log: personal_context_conflicts 07:43->08:01, exchange_gate 08:01->08:18, cancelled at 08:20 while on ingress_repair), and every other recent PR run skipped the full suite before admission. Fix 3e28f586b0: Sync split into sync-core (dir, --ignore-glob personal_context), sync-pc-conflicts, sync-pc-exchange-gate, sync-pc-transport, sync-pc-rest (glob + --deselect of the three, so new PC files land there). Collection partition verified: 2371+71+95+17+448 = 3002 = whole directory. Shard coverage guard OK (also assigned 4 branch-added test files it flagged). Not yet observed in CI: the first admitted run of this branch confirms each shard's wall time. Follow-up worth a look: why PC tests are 10-80x slower on Postgres (likely per-test DB provisioning).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

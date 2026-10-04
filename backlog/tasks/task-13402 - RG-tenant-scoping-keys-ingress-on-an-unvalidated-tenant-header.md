@@ -25,7 +25,7 @@ With tenant scoping enabled, deps.derive_entity_key returns tenant:<X-TLDW-Tenan
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 R-T implemented: an RG tenant entity now comes only from a validated principal.
 - tenant.get_tenant_id(member_of=...): the tenant header is honored only when it names one of the validated principal's tenants (org ids); otherwise the validated claim is used. An unvalidated header never names a bucket.
 - deps.derive_entity_key passes member_of from request state (org_ids, auth.principal.org_ids, tenant/org claims), so endpoint-level reservations (chat, embeddings, workflows) get the same rule.
@@ -42,7 +42,7 @@ Review follow-up: approved with no Critical or Important issues; minors folded i
 Final summary: the RG tenant entity comes only from a validated principal (the header only selects among its orgs; anonymous callers pay their IP), at ingress and at endpoint reservations, with one shared own-tenant order.
 Verification: RG + AuthNZ_Unit (-n 4, TLDW_TEST_NO_DOCKER=1): 1581 passed, 6 skipped, 2 xfailed. Bandit (uvx bandit -ll) on all touched source: no findings.
 Known skips: Postgres-backed tests skip locally (no reachable Postgres; with Docker auto-start they hang to the timeout identically on origin/dev). Unrelated failures seen in the symbol-hit sweep (workspace_activity_index x4, docling PDF x2, e2e chatbook_sync_v2 x6, Telegram xdist flakes) reproduce on an archive of origin/dev.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
