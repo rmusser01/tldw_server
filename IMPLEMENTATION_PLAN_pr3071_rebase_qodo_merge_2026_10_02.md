@@ -487,3 +487,43 @@ assert B101 findings; baseline comparison proves0new findings/0scanner errors
 without suppressions. Evidence remains separate from failed hosted runs and
 native collectors. Latest-dev integration, full-range hooks and new-head hosted
 verification remain pending before publication/merge.
+
+Local candidate4aabbb2131 rebases onto e70 and exactly matches independent
+integration tree3e56d31e1a5b243de542d6e709adc47e95647cb8. At the historical merge,
+only five conflicted files required original recorded resolution; the complete
+index matched independently computed intermediate treed38c5cdda8c282007232c0af3bd2ca2bcfabd04c.
+All incoming five-file CI-only changes match dev exactly. Production roots and
+7225app/3821backend source entries remain byte-identical to qualified artifacts.
+Fresh incoming workflow contracts pass31; full PR-range hooks pass with the
+existing project hook interpreter. An initial invocation in the framework-only
+environment lacked pre-commit and is retained as a failed tooling invocation.
+
+## Stage 9: Hosted Offline Email Sentinel Investigation
+**Goal**: Identify the new media-ingestion CI teardown error before changing
+production behavior or weakening the offline email harness.
+**Success Criteria**: Inspect actual hosted log and source, reproduce with scoped
+or complete owning tests, and identify the forbidden call site. Apply only a
+verified actionable correction, then rerun relevant tests/security/hooks. Batch
+with Stage8 when feasible; exact-head hosted gates and native acceptance remain.
+**Tests**: Original isolated case, fresh isolated SQLite database case, complete
+owning media-ingestion-new-integration shard with read-only call-stack capture.
+**Status**: In Progress
+
+Published0ee's new hosted shard has239passed/1inherited skip/1teardown error in
+the first nested-email upload case. Its offline sentinel reports one caught
+model/background/outbound call without identifying which boundary. Both local
+isolated and fresh-database cases pass, so there is not yet a reproduced cause.
+The complete owning shard is running with a separate diagnostic-only profiler
+which records forbidden-call stack metadata without changing application behavior,
+fixtures or assertions. Publication is held to batch any verified correction.
+No new native collector or accepted-input resend is performed.
+
+The complete owning diagnostic finishes exit1:235passed/4skipped/1failed in551.33s.
+Its failure is macOS sandbox PermissionError(errno1) at the socketpair test's
+loopback bind, not the hosted nested-email teardown error. The original sentinel
+failure remains unreproduced/unresolved; no owning media PASS is claimed. Stop
+this three-angle local approach and retain diagnostic evidence. Publish only the
+verified Stage8 test correction and e70 integration, keeping fresh-head hosted
+owning media and native acceptance as blockers. Protected services/Chrome remain
+running, all69stashes match ordered hashes and model head remains a7a0d8c. The
+owned18102 page returns HTTP200; that check alone is not browser acceptance.
