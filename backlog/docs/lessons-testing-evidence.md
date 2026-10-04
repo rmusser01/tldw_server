@@ -373,3 +373,7 @@ exercise expiry without renewing the session, and test independent cache
 instances and both auth-mode transitions. Cookie catalogs need no persistent
 cache when offline hydration is forbidden; retain transient metadata fallback
 only after the current request's profile check succeeds.
+
+## A copied linter baseline needs the same module filename
+
+**PR3091, 2026-10-04.** The Buddy service-base integration copied nine reviewed dev modules into a temporary directory for a Ruff comparison. Their bytes matched the integrated modules, but the copy reported fifteen findings versus six: its temporary paths bypassed nine `BLE001` per-file ignores. Passing the real module name through `--stdin-filename` in both arms applied the same configuration and produced the same six findings. Preserve the filename/configuration context as well as source bytes when comparing static diagnostics; do not report an apparent improvement from a mismatched baseline.
