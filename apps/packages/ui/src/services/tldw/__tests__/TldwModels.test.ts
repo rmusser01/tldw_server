@@ -155,7 +155,63 @@ describe("TldwModelsService caching", () => {
   )
 
   it.each([false, true])(
-    "authorizes a helper-approved multi-user cookie transport without a JWT (forced=%s)",
+    "authorizes the real same-origin single-user cookie path without credentials (forced=%s)",
+    async (forced) => {
+      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+      vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+      const config = {
+        serverUrl: "http://localhost:3000",
+        authMode: "single-user" as const,
+        authSource: "cookie-session" as const
+      }
+      const api = await vi.importActual<typeof import("@/services/tldw/TldwApiClient")>(
+        "@/services/tldw/TldwApiClient"
+      )
+      expect(api.isActiveCookieSessionConfig(config)).toBe(true)
+      expect(mocks.cookieSessionApproval).toBeNull()
+      mocks.getConfig.mockResolvedValue(config)
+      const profile = deferred<object>()
+      mocks.getCurrentUserProfile.mockReturnValue(profile.promise)
+      mocks.getModels.mockResolvedValue([
+        { id: "native-cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }
+      ])
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+      const pending = service.getModels(forced)
+
+      await vi.waitFor(() => expect(mocks.getCurrentUserProfile).toHaveBeenCalledOnce())
+      expect(mocks.getModels).not.toHaveBeenCalled()
+      profile.resolve({})
+      expect((await pending).map((model) => model.id)).toEqual(["native-cookie-model"])
+      expect(mocks.storageSet).not.toHaveBeenCalled()
+      await expect(service.getCachedChatModels()).resolves.toEqual([])
+    }
+  )
+
+  it("does not add native tokenless multi-user cookie approval", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    const config = {
+      serverUrl: "http://localhost:3000",
+      authMode: "multi-user" as const,
+      authSource: "cookie-session" as const
+    }
+    const api = await vi.importActual<typeof import("@/services/tldw/TldwApiClient")>(
+      "@/services/tldw/TldwApiClient"
+    )
+    expect(api.isActiveCookieSessionConfig(config)).toBe(false)
+    expect(mocks.cookieSessionApproval).toBeNull()
+    mocks.getConfig.mockResolvedValue(config)
+    const { TldwModelsService } = await importService()
+
+    await expect(new TldwModelsService().getModels()).resolves.toEqual([])
+    expect(mocks.getCurrentUserProfile).not.toHaveBeenCalled()
+    expect(mocks.getModels).not.toHaveBeenCalled()
+  })
+
+  // Consumer-contract cases substitute approval; they do not add native auth support.
+  it.each([false, true])(
+    "honors a transport approval override before the multi-user token gate (forced=%s)",
     async (forced) => {
       mocks.cookieSessionApproval = true
       mocks.getConfig.mockResolvedValue({
@@ -182,7 +238,7 @@ describe("TldwModelsService caching", () => {
   )
 
   it.each([401, 403, 503])(
-    "withholds a cached multi-user cookie catalog after profile failure (%s)",
+    "withholds an approval-override cookie catalog after profile failure (%s)",
     async (status) => {
       mocks.cookieSessionApproval = true
       mocks.getConfig.mockResolvedValue({
@@ -208,7 +264,7 @@ describe("TldwModelsService caching", () => {
   )
 
   it.each(["token", "key", "none"])(
-    "isolates approved multi-user cookie models from the %s cache namespace",
+    "isolates approval-override cookie models from the %s cache namespace",
     async (namespace) => {
       mocks.cookieSessionApproval = true
       mocks.getConfig.mockResolvedValue({
