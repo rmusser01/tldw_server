@@ -46,9 +46,9 @@ Stage 8: add frontend Visual Identity types, Tldw API client domain methods, exp
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-02: Implemented Stage 8 frontend API/types/utilities. Added Visual Identity TypeScript request/response contracts matching backend schemas. Added visualIdentityMethods for capabilities, expression slots, pack CRUD, asset upload, generated-file asset import, asset content path building, ZIP import, draft read/update/activate, binding upsert/delete, and binding resolve. Wired the domain into TldwApiClient declaration merging and Object.assign. Added expression normalization with the eight canonical V1 slots and backend-compatible aliases/custom labels. Added /emote parsing that handles slash commands client-side and returns null for regular messages. Spec review found optional multipart fields were leaking undefined/null into bgUpload fields; fixed with compactMultipartFields and regression coverage. Quality review found no Critical or Important issues. Verification: git diff --check passed; bunx vitest run apps/packages/ui/src/utils/__tests__/visual-identity-expressions.test.ts apps/packages/ui/src/utils/__tests__/visual-identity-emote.test.ts apps/packages/ui/src/services/__tests__/tldw-api-client.visual-identities.test.ts passed with 15 tests. Bandit skipped: no Python/backend files touched in this Stage 8 task.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

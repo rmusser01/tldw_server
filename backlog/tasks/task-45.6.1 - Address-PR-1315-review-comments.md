@@ -33,7 +33,7 @@ Fix actionable review feedback on PR #1315 for the Chat/Playground status Badge 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed PR #1315 review comments: removed redundant Badge srLabel props under aria-labeled buttons, changed StatusDot icons to text-current so they inherit Badge variant color, added human-readable message-type fallback labels, and made research-run status badge test IDs unique per run.
 
 Verification: bunx vitest run src/components/Sidepanel/Chat/__tests__/StatusBadges.design-system.test.tsx src/components/Option/Playground/__tests__/PlaygroundStatusBadges.design-system.test.tsx src/components/Common/Playground/__tests__/PlaygroundUserMessage.design-system.test.tsx src/components/Option/Playground/__tests__/PlaygroundChat.research-status.integration.test.tsx src/components/Option/Playground/__tests__/research-run-status.test.ts --reporter=dot passed 39/39 tests.
@@ -41,7 +41,7 @@ Verification: bunx vitest run src/components/Sidepanel/Chat/__tests__/StatusBadg
 Verification: tldw-frontend/node_modules/.bin/eslint --config tldw-frontend/eslint.config.mjs on the touched UI files exited 0. It emits the existing Next pages-directory notice when run from apps against packages/ui files, but no lint errors or warnings on touched files.
 
 Verification: git diff --check exited 0. Bandit skipped because this is frontend-only TypeScript/React with no Python changes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

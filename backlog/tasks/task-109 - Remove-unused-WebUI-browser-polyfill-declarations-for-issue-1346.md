@@ -44,7 +44,7 @@ Implement the next quick-cleanup slice from the WebUI dependency audit for issue
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Removed direct buffer and stream-browserify declarations from apps/tldw-frontend/package.json and apps/extension/package.json, then regenerated apps/bun.lock with bun install from apps/.
 
 Focused pre-removal import/config search found no direct package usage for buffer or stream-browserify in apps/tldw-frontend, apps/packages/ui, or apps/extension source/config/script files. Post-removal manifest search found no direct declarations in the audited manifests, and apps/bun.lock no longer contains stream-browserify, buffer@6.0.3, or direct workspace declarations for either package. A transitive buffer@5.7.1 remains through bl.
@@ -54,7 +54,7 @@ Verification: bun install --frozen-lockfile passed in apps/ with 1849 installs a
 Initial apps/tldw-frontend bun run compile failed before build because advanced networking mode requires NEXT_PUBLIC_API_URL. Rerunning with NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 satisfied the documented config contract and passed.
 
 Bandit skipped: this slice changes only WebUI package metadata, apps/bun.lock, and Backlog task documentation; no Python code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

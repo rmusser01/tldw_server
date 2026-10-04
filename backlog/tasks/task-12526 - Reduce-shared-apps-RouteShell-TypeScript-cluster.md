@@ -34,14 +34,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task513-tsc-final.txt`: package `tsc` reported two diagnostics in `src/entries/shared/apps.tsx` because raw `RouteShell` calls for sidepanel and options omitted the required `routes` prop.
 - Root cause was a RouteShell API mismatch. Existing `SidepanelRouteShell` and `OptionsRouteShell` wrappers already provide the correct route registries, and `OptionsRouteShell` preserves deferred unmatched-route handling.
 - Replaced the raw `RouteShell kind="sidepanel"` and `RouteShell kind="options"` usages with `SidepanelRouteShell` and `OptionsRouteShell`, matching the newer split entrypoint files.
 - Focused test search found no dedicated `entries/shared/apps.tsx` test; package `tsc` was used for verification.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task514-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 71 in `/tmp/task513-tsc-final.txt` to 69 in `/tmp/task514-tsc-final.txt`; `rg -n 'entries/shared/apps\.tsx' /tmp/task514-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

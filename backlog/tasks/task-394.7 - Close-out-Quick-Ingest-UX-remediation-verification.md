@@ -32,13 +32,13 @@ Execute implementation plan Task 7: run final verification, update the parent ta
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Tracker mirror retained for PR visibility. The authoritative final closeout record is `backlog/completed/task-394.7 - Close-out-Quick-Ingest-UX-remediation-verification.md`.
 
 Current verification on latest dev after PR #2114: `bun run test src/components/Common/QuickIngest/__tests__ src/services/__tests__/quick-ingest-batch.test.ts src/services/__tests__/quick-ingest-session-reattach.test.ts --maxWorkers=1 --no-file-parallelism` passed with 17 files / 208 tests. `npx playwright test e2e/workflows/media-ingest.spec.ts --grep "Quick Ingest" --project=chromium --reporter=line` passed with 13 tests in 4.8m. `git diff --check` passed after the Backlog-only closeout edits. Bandit remains not applicable for this tracker-only slice because no Python code was touched.
 
 Residual risk remains the extension Playwright globalSetup/build harness blocker documented in TASK-394.6; current WebUI shared-wizard coverage includes the extension playlist handoff scenario, and PR #2114 already fixed the stale completed-results assertion helper.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

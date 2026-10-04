@@ -32,7 +32,7 @@ Rebase branch on origin/dev, inspect PR comments/reviews, add synchronization fo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased the PR work onto origin/dev in a clean temporary worktree. Resolved rebase conflicts by keeping dev-side fixes where the branch had duplicate older verification fixes, while preserving document-processing additions.
 
 Addressed PR review feedback across the backend and WebUI: serialized draft cleanup/read/create/delete access with a shared RLock, added per-owner/global draft quotas, required auth/rate-limit handling for preflight, added deterministic default-mode fallback, improved document-processing labels/reasons/cancel behavior, removed brittle source-contract coverage, hardened sidepanel handoff/import state merging, restored WebCrypto in Vitest setup, and fixed the Playwright route race.
@@ -40,7 +40,7 @@ Addressed PR review feedback across the backend and WebUI: serialized draft clea
 Cleaned malformed Backlog task records called out in review. Verification: backend document upload tests passed; focused Vitest document-processing/chat upload tests passed; frontend app typecheck passed; package UI typecheck still reports unrelated baseline errors outside touched runtime files; Playwright document-processing smoke passed; Bandit reported zero findings for the touched backend endpoint; diff and locale JSON checks passed.
 
 Follow-up review pass after re-checking unresolved PR threads: added explicit rate limits to draft create/read/delete routes, moved preflight decision logic into a core ingestion module, added minimal docstrings for the new backend API/schema module, chunked sidepanel preflight calls to the server's 50-file batch limit, and changed mixed ingest plus add-to-chat handling so extracted snippets append to the existing model message instead of replacing the user's prompt. Verification: backend document upload tests passed; focused Vitest document-processing submit/queue/service tests passed; Bandit reported zero findings for touched backend files; package UI typecheck still reports only unrelated baseline errors outside touched files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

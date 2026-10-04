@@ -114,6 +114,13 @@ def test_api_schema_change_enables_e2e() -> None:
     assert flags["e2e_changed"] is True
 
 
+def test_backlog_py_change_runs_backend_gate_without_coverage() -> None:
+    """The task editor's tests and the backlog task-format ratchet run in backend-required."""
+    flags = classify_paths(["tools/backlog-py/src/backlog_py/markdown/task_parser.py"])
+    assert flags["backend_changed"] is True
+    assert flags["coverage_required"] is False
+
+
 def test_workflow_only_change_keeps_backend_gate_but_skips_coverage() -> None:
     flags = classify_paths(
         [

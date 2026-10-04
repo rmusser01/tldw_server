@@ -35,7 +35,7 @@ Like the Media and chat-submit breaks fixed in #3035/#3046, these are hidden by 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-29 triage (AC1). One real drift, three stale tests:
 - playground-locale-mirror.test.ts: REAL DRIFT. 54 English playground strings were never mirrored into public/_locales/en/playground.json; synced with the repo's own apps/extension 'locales:sync' script, scoped to playground.json (54 keys added, 0 removed, 0 changed, the rest reordering). The test also had a latent key bug: it joined nested keys raw, so the literal dotted keys under 'actor' ('preset.sliceOfLife', 'templateMode.merge', ...) became 'actor_preset.sliceOfLife'. Chrome message names allow only [A-Za-z0-9_], and sync-public-locales.js writes 'actor_preset_sliceOfLife'; the test now sanitizes segments the same way.
 - PlaygroundHooks.jsx-extension.guard.test.ts: STALE. usePlaygroundPersistence.tsx still carries JSX, but #1987 replaced antd <Button with a native <button; the marker moved to '<button'.
@@ -48,7 +48,7 @@ AC2 / verification: all four files pass (18/18 research context). Whole src/comp
 Package-wide UI tsc run with a 12 GiB heap completed with 357 existing diagnostics outside these four touched test files; the default 4 GiB heap exhausted memory first. This standalone package tsconfig is not the hosted WebUI/extension type gate. Retain the broader inherited type backlog under UAT419.
 
 2026-09-30 PR2979 b709 reconciliation: preserve both upstream PR3054 and branch history. The upstream generalized JSX detector is retained alongside the existing composer Profiler extension assertions. PR effectiveAssistantState and ordinary history facade remain for research-only fixtures; all research test bodies stay identical. Upstream per-segment locale normalization and all 54 mirrored values are retained; UAT522 supported-locale conflict assertions and five new strings replay separately. Final combined qualification and hosted acceptance remain pending.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -40,7 +40,7 @@ Create a repo-grounded implementation plan for importing normal OpenWebUI Export
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan at Docs/superpowers/plans/2026-05-10-openwebui-chat-import-implementation-plan.md.
 
 Review pass completed against the approved TASK-233 design and current code paths in Chatbooks endpoints/service/worker, ChatbookValidator, ChaCha conversation/message stores, and the WebUI Chatbooks import tab.
@@ -48,7 +48,7 @@ Review pass completed against the approved TASK-233 design and current code path
 Plan review improvements added: multipart form parsing for source_format, JSON branching before ZIP validation, forcing unsupported OpenWebUI media/embedding options false despite current WebUI defaults, hiding Chatbook content selection for OpenWebUI v1, generalizing JSON path resolution wording, and updating static API docs if required.
 
 Verification: git diff --check passed. No pytest/Bandit run because this task only adds docs and Backlog planning metadata, not implementation code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

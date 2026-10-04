@@ -25,9 +25,9 @@ Synthetic authenticated 100-message MBOX ingestion stored only the first message
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red: routine bootstrap unit boundary failed on sequence call; real PostgreSQL repeated-handle test failed on second insert. Removed routine post-core sequence synchronization and obsolete protocol requirement; retained explicit v18 migration maintenance. Green: 75 schema unit tests and 3 sequence/FTS cases (2 live PostgreSQL, 1 unit) passed. Full authenticated MBOX probes persisted all 300 IDs, preserved IDs on 100-message retry, passed cross-user API isolation and direct forced-RLS owner 300/other 0 with a non-superuser/non-bypass role, zero model/external attempts. Ruff and Bandit clean across implementation/new test and touched existing test (B101 excluded only for test assertions). Review confirms v18 maintenance unchanged. Commit 41684adbe3. Design Docs/Design/email-postgres-bootstrap-sequence-safety.md; completed own plan removed. Throughput evidence/follow-up separate in TASK-13371.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

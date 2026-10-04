@@ -31,13 +31,13 @@ Reproduce existing CI drift/docs failures; regenerate canonical schema/fingerpri
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reproduced CI OpenAPI drift locally with exact sha256 53fd934179cff5e5a773a82e7252d63fc608312d47660c81b670a3607d32fb28 (2073 paths/3140 schemas). Existing generator refreshed the fingerprint and ignored schema/types; fresh drift check and TypeScript declaration check pass. Reproduced missing published ADR via tracked-file parity test, corrected source design link to reviewed repository permalink and refreshed curated docs. Docs suite: 206 passed, one strict-build failure from macOS multiprocessing SemLock ENOSPC, reproducible outside sandbox despite 276GiB free; no docs/test configuration weakened. Isolated serial strict-build diagnostic pending, canonical CI verification still required. Bandit not applicable to this docs/JSON-only correction; no Python runtime files changed.
 
 Serial strict MkDocs build passed in 29.40s using a temporary inherited config outside the repository with only plugin parallelism disabled and output redirected to a temporary site directory. Canonical production config remains unchanged. Public/private docs boundary check passed, published ADR matches source byte-for-byte, generated declaration compiles with tsc --noEmit, and diff whitespace checks passed. Original CI failures have direct red/green evidence; canonical strict CI result pending after push.
 
 Canonical GitHub Actions verification passed on 70db849097: backend-required run 33975744156 and onboarding-docs-gate run 33975744239 both SUCCESS. User subsequently authorized ready-for-review and merge; follow-up tracked separately in TASK-13183.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

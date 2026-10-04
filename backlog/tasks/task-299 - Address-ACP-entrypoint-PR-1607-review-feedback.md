@@ -36,7 +36,7 @@ Resolve actionable review feedback on PR #1607 for ACP entrypoint strategy readi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review threads addressed in PR #1607:
 - Removed unrelated E2E env requirements from direct ACP agent-profile manifests while keeping them marked live-agent.
 - Made stdio JSON-RPC probes return a child nonzero exit status after successful frames.
@@ -46,7 +46,7 @@ Review threads addressed in PR #1607:
 - Aggregated multiple classifier blockers and added requested docstrings.
 
 Follow-up refresh after push found one new Cubic finding. Fixed YAML null acp_command coercion so it remains an empty missing entrypoint instead of the literal string "None", with regression coverage for blocked classification.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

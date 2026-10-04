@@ -26,7 +26,7 @@ RG ingress now validates API keys through get_auth_principal before routing (pla
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 R-U implemented: API-key usage is recorded at route time, not at ingress.
 - RG ingress (middleware_simple._resolve_principal_entity) sets request.state flag User_DB_Handling.API_KEY_USAGE_DEFERRED around get_auth_principal; authenticate_api_key_user then validates with record_usage=False and leaves request.state._api_key_usage_pending = (key_id, user_id, client_ip). A recording (non-deferred) validation clears any pending entry, so usage is never counted twice.
 - record_pending_api_key_usage(request) (User_DB_Handling) records the pending usage once, with the endpoint/action/scope require_token_scope left on request state. It is called from the three route-auth fast paths that reuse a cached AuthContext: core get_auth_principal (also behind auth_deps.get_auth_principal / CurrentPrincipal), get_request_user, and auth_deps.get_current_user.
@@ -41,7 +41,7 @@ Review follow-up: approved with no Critical or Important issues; minors folded i
 Final summary: ingress validates API keys without recording usage; route auth records it exactly once, with endpoint/action/scope, when it first reuses the cached context; a 429 at ingress records nothing; RG off and ingress cache hits record at route auth as before.
 Verification: RG + AuthNZ_Unit (-n 4, TLDW_TEST_NO_DOCKER=1): 1581 passed, 6 skipped, 2 xfailed. Docs tests: 212 passed. Bandit (uvx bandit -ll) on all touched source: no findings.
 Known skips: Postgres-backed tests skip locally (no reachable Postgres). Unrelated failures seen in the symbol-hit sweep reproduce on an archive of origin/dev (see TASK-13402 notes).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

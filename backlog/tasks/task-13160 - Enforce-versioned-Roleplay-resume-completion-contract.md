@@ -41,9 +41,9 @@ Expose an exact capability-gated character completion contract that consumes the
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-04: With explicit user approval, renumbered this task from its colliding former ID TASK-13135 to TASK-13160. Its snapshot prerequisite is now TASK-13159. Scope and acceptance criteria are unchanged; implementation remains pending the prerequisite merge.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

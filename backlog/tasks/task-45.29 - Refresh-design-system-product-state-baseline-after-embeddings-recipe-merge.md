@@ -36,9 +36,9 @@ Reconcile the product-state guard baseline with the current dev branch after the
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reconciled baseline drift from the current dev branch: removed stale RecipesTab baseline IDs plus the migrated PresentationStudioStatusBadge entry, and added current embeddings recipe Alert findings as allowed legacy design-system debt. Verification: verify:design-system-state passed with 513 baseline exceptions and local-status-badge reduced to 2. Bandit skipped because touched scope is TS/TSX/JSON/Backlog only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

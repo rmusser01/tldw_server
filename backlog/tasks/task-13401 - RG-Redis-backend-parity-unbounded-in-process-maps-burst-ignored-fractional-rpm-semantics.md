@@ -32,7 +32,7 @@ Found in the final review of the RG ingress safety net (plan 2026-09-29-rg-ingre
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR reference: AC #2's 'ADR-057' means the RG safety-net ADR, now Docs/ADR/056-resource-governor-safety-net.md.
 
 ### Changes (branch fix/13401-rg-redis-parity)
@@ -142,7 +142,7 @@ From 1 rpm up, it is still `max(1, ceil(rpm))` per 60 s.
 - **(6)** Declined, per the coordinator.
 
 **Tests.** The new tests failed before the fix (5 failing in `test_governor_safety_net.py`). RG suite (`TLDW_TEST_NO_DOCKER=1`, `-n 4`): 391 passed, 5 skipped (Postgres fixture), 2 xfailed, 0 failed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

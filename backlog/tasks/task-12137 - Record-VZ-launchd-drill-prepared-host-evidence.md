@@ -29,7 +29,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/vz-launchd-drill-evidence
 Branch: codex/vz-launchd-drill-evidence
 Base: origin/dev f2d9be986499eb1bfda36f566870a98e8dd90d0d
@@ -42,7 +42,7 @@ A first diagnostic launchd-drill attempt passed a relative --helper path. The ge
 Cleanup evidence: after drill-owned bootout, explicit launchd status returned launchd_status_failed=113 and an extra bootout returned No such process, confirming the LaunchAgent was unloaded. Direct helper status reported no pid file, helper_not_running, and helper_ping_failed. The socket file remained as an inactive socket under the private 0700 runtime directory; this is documented as cleanup state and is covered by the separate stale-socket recovery drill. Helper stdout/stderr logs were empty with SHA-256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.
 
 Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py -q passed with 23 tests. git diff --check passed. Bandit skipped because the reviewable changes are Markdown/Backlog only; helper build artifacts and launchd artifacts are local evidence setup, not committed source.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

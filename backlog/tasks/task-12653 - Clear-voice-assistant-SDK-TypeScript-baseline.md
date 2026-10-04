@@ -27,16 +27,14 @@ Clear the voice-assistant-sdk typecheck diagnostics after the UI package baselin
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added @types/react as a voice-assistant-sdk devDependency so the package can typecheck its exported React hook in isolation. Removed the stale createScriptProcessor @ts-expect-error because the DOM lib now types the deprecated fallback API. Bandit is not applicable for this JS/TS-only touched scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Cleared the voice-assistant-sdk TypeScript baseline. Verification: bun run typecheck in apps/packages/voice-assistant-sdk exits 0; apps/extension bun run compile was also checked and exits 0.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

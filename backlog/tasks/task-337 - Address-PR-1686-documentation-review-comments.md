@@ -34,7 +34,7 @@ Address the still-actionable Gemini review threads on PR #1686 for the ACP admin
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed both Gemini review threads: linked ACP maturity dependency issue references and changed the Agent Registry UI verification command to a subshell. Verification: git diff --check passed; targeted rg guard confirmed the old unlinked dependency and non-subshell command patterns are absent. Bandit skipped because this slice only changes Markdown documentation.
 
 Resolved Gemini review threads after pushing c8c6f836d: linked dependency issue references thread https://github.com/rmusser01/tldw_server/pull/1686#discussion_r3239357872 and subshell verification-command thread https://github.com/rmusser01/tldw_server/pull/1686#discussion_r3239357916.
@@ -44,7 +44,7 @@ Qodo posted a new actionable review thread after the Gemini fixes: PRD compatibi
 Addressed Qodo compatibility-field thread by changing the PRD contract row to compatibility.documented_unverified_agents, compatibility.live_certification_required, and compatibility.docs_url. Verification: git diff --check passed; targeted rg confirmed the unqualified PRD field paths are absent and the qualified paths are present.
 
 Resolved Qodo compatibility-field thread after pushing 6917cae21: https://github.com/rmusser01/tldw_server/pull/1686#discussion_r3239428965.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

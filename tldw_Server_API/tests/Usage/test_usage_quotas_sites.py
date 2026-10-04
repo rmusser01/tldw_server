@@ -7,7 +7,6 @@ import pytest
 from tldw_Server_API.app.api.v1.API_Deps import storage_quota_guard
 from tldw_Server_API.app.api.v1.endpoints import workflows as workflows_ep
 from tldw_Server_API.app.core.Chatbooks.quota_manager import QuotaManager
-from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
 pytestmark = pytest.mark.unit
@@ -25,29 +24,6 @@ def quotas_off(monkeypatch: pytest.MonkeyPatch) -> None:
 def quotas_on(monkeypatch: pytest.MonkeyPatch) -> None:
     """An operator who turned usage quotas on."""
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
-
-
-def _media_request() -> SimpleNamespace:
-    """A request whose app carries a governor and a policy with media caps."""
-    loader = SimpleNamespace(get_policy=lambda _pid: {"jobs": {"max_concurrent": 2}})
-    app = SimpleNamespace(state=SimpleNamespace(rg_governor=object(), rg_policy_loader=loader))
-    return SimpleNamespace(app=app, state=SimpleNamespace())
-
-
-def test_media_budget_context_is_empty_when_quotas_off(quotas_off: None) -> None:
-    """With quotas off, the media budget context resolves to no governor, no policy and no entity, even though the app carries them."""
-    gov, _policy_id, policy, entity = persistence._resolve_media_budget_context(
-        request=_media_request(), current_user=SimpleNamespace(id=1)
-    )
-    assert gov is None and policy == {} and entity == ""
-
-
-def test_media_budget_context_unchanged_when_quotas_on(quotas_on: None) -> None:
-    """With quotas on, the media budget context still resolves the app's governor, policy and per-user entity."""
-    gov, _policy_id, policy, entity = persistence._resolve_media_budget_context(
-        request=_media_request(), current_user=SimpleNamespace(id=1)
-    )
-    assert gov is not None and policy["jobs"]["max_concurrent"] == 2 and entity == "user:1"
 
 
 def _full_storage_service(monkeypatch: pytest.MonkeyPatch) -> StorageQuotaService:
@@ -84,16 +60,18 @@ def test_storage_pool_guard_disabled_when_quotas_off(quotas_off: None) -> None:
     assert storage_quota_guard._is_enabled() is False
 
 
-async def test_workflows_cap_skipped_when_quotas_off(quotas_off: None) -> None:
-    """With quotas off, the workflows daily cap check returns without inspecting the request, user or db it was given.
+async def test_workflows_cap_skipped_when_quotas_off(quotas_off: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With quotas off, the workflows daily cap check never inspects the request or db it was
+    given, never refuses, and still records the run (gate the check, never the record; round 2).
 
     Raising on attribute access doesn't work here: every lookup inside the
     cap logic is wrapped in a try/except over `_WORKFLOWS_NONCRITICAL_EXCEPTIONS`,
-    which includes `AssertionError`, so a raise is swallowed and the function
-    falls through to its own unrelated early return either way. Recording the
+    which includes `AssertionError`, so a raise is swallowed. Recording the
     accessed names instead lets the test tell "never inspected" apart from
     "inspected, then the exception was swallowed".
     """
+    from tldw_Server_API.app.core.Workflows import daily_ledger
+
     accessed: list[str] = []
 
     class _RecordingRequest:
@@ -104,10 +82,26 @@ async def test_workflows_cap_skipped_when_quotas_off(quotas_off: None) -> None:
             accessed.append(name)
             return None
 
+    recorded: list[dict] = []
+
+    async def _fake_consume(
+        *, entity_scope: str, entity_value: str, run_id: str, daily_cap: int | None
+    ) -> tuple[bool, int]:
+        """Record the call; quotas-off must still reach this, with daily_cap=None."""
+        recorded.append(
+            {"entity_scope": entity_scope, "entity_value": entity_value, "run_id": run_id, "daily_cap": daily_cap}
+        )
+        return True, 0
+
+    monkeypatch.setattr(daily_ledger, "consume_workflow_run_if_within_cap", _fake_consume)
+
     await workflows_ep._enforce_workflows_daily_cap(
-        request=_RecordingRequest(), current_user=SimpleNamespace(id=1), db=None
+        request=_RecordingRequest(), current_user=SimpleNamespace(id=1), db=None, run_id="run-quotas-off"
     )
     assert accessed == []
+    assert recorded == [
+        {"entity_scope": "user", "entity_value": "1", "run_id": "run-quotas-off", "daily_cap": None}
+    ]
 
 
 def test_chatbooks_quotas_follow_the_switch(monkeypatch: pytest.MonkeyPatch) -> None:

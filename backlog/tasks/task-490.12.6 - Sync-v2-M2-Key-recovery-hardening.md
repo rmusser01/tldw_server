@@ -40,13 +40,13 @@ Docs/superpowers/plans/2026-05-23-sync-v2-m2-restore-completeness-blobs-implemen
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Started from Stage 5 of the Sync v2 M2 restore completeness/blobs implementation plan.
 - Added service-level key recovery bundle validation for dataset ownership, dataset_recovery purpose, registered device association, non-empty wrapping/KDF metadata, wrapped-key size, and active non-revoked rotation target references.
 - Restore preview now emits sync_key_recovery_missing when a selected dataset has no active recovery bundle while manifest/key_status continue to report active readiness.
 - API validation failures map to the generic sync_validation_failed response and tests capture Loguru warning output to verify wrapped key material and KDF secrets are not exposed.
 - Updated M2 design docs and Stage 5 plan status to document the M2 server-unlocked recovery contract and M3 deferrals.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

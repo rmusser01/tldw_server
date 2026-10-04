@@ -30,9 +30,9 @@ Migrate the PromptInsertModal prompt-load error banner from AntD Alert to the ca
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented test-first: the new PromptInsertModal regression failed on the missing canonical Alert marker, then passed after replacing the AntD prompt-load error banner with the design-system Alert and preserving the error title/description path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

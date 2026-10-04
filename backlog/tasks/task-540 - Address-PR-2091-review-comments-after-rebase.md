@@ -30,7 +30,7 @@ Rebase codex/workspaces-next onto latest dev and address still-valid review comm
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased codex/workspaces-next onto origin/dev and reviewed unresolved PR #2091 comments from Gemini, Qodo, and CodeRabbit.
 
 Backend fixes: Redis backpressure now honors explicit REDIS_ENABLED=false before URL auto-enable; Redis close failures are debug-logged instead of suppressed; sandbox diagnostics validate source_label, run blocking store calls off the event loop, propagate cancellations, document response models, and coerce pagination totals once; ACP session/new fallback also removes mcpServers when runners reject that field; Redis worker failure handling avoids masking original errors with missing locals.
@@ -38,16 +38,12 @@ Backend fixes: Redis backpressure now honors explicit REDIS_ENABLED=false before
 Frontend fixes: sandbox diagnostics strings use i18n fallbacks and runtime_config links are restricted to same-origin absolute app paths; migration recovery details labels use translated strings; workspace bundle import handles null/malformed payloads; migration cleanup blocks final tombstones when local deletion preflight cleanup is unavailable; Agent Tasks project fetches ignore stale responses.
 
 Test/support fixes: added focused regressions for each review path, changed sandbox admin list endpoint tests to use a minimal router fixture with dependency cleanup in finally, and made TASK-478 verification command portable.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Addressed PR #2091 review comments after rebasing on origin/dev. Verification: focused UI Vitest slice passed (4 files, 79 tests); TypeScript noEmit passed; focused backend pytest slice passed (60 tests, 2 warnings); Bandit over touched backend files/tests produced 0 results and 0 errors; git diff --check passed. Known unrelated files left untouched: two untracked watchlist template files under tldw_Server_API/Config_Files/templates/watchlists/.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -43,7 +43,7 @@ Resolve actionable PR #1518 review feedback for the Persona/Buddy diagnostics su
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Resolved PR #1518 review feedback by keeping intentionally dormant Buddy summaries healthy, treating unknown persona_visuals MCP readiness as degraded, requiring hasPersona to be explicitly true before reporting Persona capability ready, surfacing live session lastEvent in the session row, and preserving active visual pack ids when titles are present.
 
 Verification passed from apps/packages/ui:
@@ -52,7 +52,7 @@ Verification passed from apps/packages/ui:
 - bun run test src/components/PersonaGarden/__tests__/personaBuddyDiagnostics.test.ts src/components/PersonaGarden/__tests__/PersonaBuddyDiagnosticsPanel.test.tsx src/components/Common/PersonaBuddy/__tests__/personaVisualDiagnostics.test.ts src/store/__tests__/persona-visual-runtime.test.ts src/components/PersonaGarden/__tests__/LiveSessionPanel.test.tsx
 
 Bandit skipped because the touched scope is TypeScript and Backlog Markdown only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

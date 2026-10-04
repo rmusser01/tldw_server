@@ -29,9 +29,9 @@ dependencies: []
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed in tldw_chatbook PR #2954 (merged into chatbook dev 2026-10-03 11:29Z, merge a26d6a9c6c). Approach (b): ServerAudioServicesService maps a 401 from get_stt_health (including its warm-up capability lookup) and get_audio_streaming_status to a typed PolicyDeniedError with reason code auth_required, the same code Chatbook already uses in runtime_policy/server_context.py and Research_Workspace/server_adapter.py. Chosen over skipping probes without a token because it also covers server-rejected and late-set tokens, and older servers that still answer anonymously. The API client already sent no credentials without a token. Tests: tokenless client sends no X-API-KEY/Authorization to either probe; 401 -> auth_required for plain STT, warm-up lookup and streaming status; end-to-end through the scope service via an httpx mock transport. Targeted run: 76 passed. No Chatbook screen calls these probes yet. Known gap: test_audio_streaming (admin diagnostic) can still raise a raw AuthenticationError for tokenless clients; it is outside the two routes #3058 changed. Chatbook's Perf Guard check was red, as it is on chatbook dev itself, and is not required.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

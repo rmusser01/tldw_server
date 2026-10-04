@@ -238,10 +238,16 @@ jobs:
       # which are not required and are skipped on most PRs -- how #3013 merged with
       # the license-first contracts red (TASK-13386). A ratchet nothing enforces is
       # decoration: the private-coercer ratchet (TASK-13342) and the first-party
-      # source pinning (TASK-13380) need a required gate for the same reason.
+      # source pinning (TASK-13380) need a required gate for the same reason, as do
+      # the backlog task-format ratchet and backlog-py's own tests (TASK-13440,
+      # ADR-059): backlog-py is the task editor, and its normalizer defines the ratchet.
+      # The task-format ratchet checks only the task files this PR changed since its
+      # merge base with BACKLOG_TASK_FORMAT_BASE, so it never fails a PR for a file
+      # that reached dev through a backlog-only PR this gate did not run on.
       - name: Enforce CI contracts and code ratchets
         if: needs.changes.outputs.backend_changed == 'true'
         env:
+          BACKLOG_TASK_FORMAT_BASE: ${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
           PYTHONPATH: .
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
           TEST_MODE: "true"
@@ -251,7 +257,9 @@ jobs:
             tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py \
             tldw_Server_API/tests/CI/test_frontend_license_gate_workflow.py \
             tldw_Server_API/tests/lint/test_private_coercion_ratchet.py \
-            tldw_Server_API/tests/lint/test_first_party_source_pinning.py
+            tldw_Server_API/tests/lint/test_first_party_source_pinning.py \
+            tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py \
+            tools/backlog-py/tests
 
       - name: Backend unit smoke
         if: needs.changes.outputs.backend_changed == 'true'

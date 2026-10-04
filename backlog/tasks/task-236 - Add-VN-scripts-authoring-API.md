@@ -38,11 +38,11 @@ Implement Task 4 of the VN platform API implementation plan. Scope: add backend-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Task 4 after rebasing codex/vn-platform-api-design onto origin/dev. Task 3 commit is now a9749d044 after rebase. Implementation will follow TDD and keep the API backend-owned under /api/v1/vn/vn-scripts.
 
 Implemented Task 4 VN scripts authoring API, including per-user ChaChaNotes tables, draft revision conflicts, pure validator coverage, backend-owned scripts CRUD/draft/validate/diagnostics/publish/version/manifest/policy endpoints under /api/v1/vn/vn-scripts, atomic publish idempotency, manifest/profile snapshots, profile-store resolution, selected-pack character safety policy evaluation, and raw generation routing rejection at both generation_defaults and generate opcodes. Verification: VN_Scripts 29 passed; affected VN/platform/assets/policy/router/OpenAPI suite 320 passed; compileall exit 0; Bandit touched production scope 0 findings; git diff --check exit 0. Final read-only subagent re-review reported no blocking issues.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

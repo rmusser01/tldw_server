@@ -25,9 +25,9 @@ Extend the existing reproducible email search benchmark to run against an explic
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Scoped PostgreSQL benchmark and 10k search/RLS evidence are committed in 638066dd0b; conditional FTS refresh in 6204632094. Focused checks: 32 passed and 2 live PostgreSQL cases separately passed; Ruff/Bandit clean. Dataset 10k messages/2487 attachments/23 labels; six-operator warm p50 29.90 ms/p95 96.85 ms, forced RLS owner 10000/other 0, zero model/external attempts. These bounded results do not certify 1M scale. Cleanup initially failed on host/Docker I/O errors. Follow-up confirmed 237 GiB free, empty Docker container/volume inventories, prior container absent and old port closed: previous disposable store and resources no longer exist. Old credential manifest was removed. Task closed; own completed plan removed. Report Docs/Operations/Email_PostgreSQL_Search_Performance_2026-09-25.md. Later archive measurements/fix are separate TASK-13371/TASK-13372.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

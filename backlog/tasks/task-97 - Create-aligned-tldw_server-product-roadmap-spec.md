@@ -36,7 +36,7 @@ Write the approved product roadmap spec for tldw_server, WebUI, browser extensio
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/specs/2026-05-06-tldw-product-roadmap-design.md in isolated branch codex/product-roadmap-all-horizons.
 
 Spec review iteration 1 found gaps in extension scope, SaaS setup boundaries, and telemetry privacy; patched all three. Spec review iteration 2 approved.
@@ -46,7 +46,7 @@ Verification: git diff --check passed; non-ASCII punctuation scan passed. Bandit
 User requested an additional pre-implementation review pass. Reopened task to patch roadmap risks found during review: 6-8 week scope cutline, server-backed workspace persistence gap, connector candidate scope, and SaaS team setup minimum.
 
 Additional pre-implementation review patch added scope and architecture guardrails: first-horizon cutline, one golden-path template, server-backed workspace persistence gap, SaaS team cutline, connector candidate scope, and template artifact contract. Follow-up reviewer approved with no remaining blocking or important issues.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

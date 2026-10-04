@@ -60,13 +60,16 @@ Stage 5: Run focused tests, Bandit on touched TTS scope, and record verification
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Touched production files: tldw_Server_API/app/core/TTS/utils.py, tts_config.py, audio_utils.py, audio_converter.py, adapters/vibevoice_adapter.py, adapters/vibevoice_realtime_adapter.py, adapters/chatterbox_adapter.py, adapters/dia_adapter.py, adapters/higgs_adapter.py, adapters/kokoro_adapter.py. Added/updated focused tests under tldw_Server_API/tests/TTS and tldw_Server_API/tests/TTS_NEW.
 
 PR #2484 follow-up rebased the branch onto latest dev and addressed Qodo/CodeRabbit review comments: VibeVoice model hints are canonicalized case-insensitively, Q8 variant reloads recompute quantization, VibeVoice streaming releases the model-state lock before yielding chunks, realtime websocket policy errors use sanitized origins and pin resolved IPs through an aiohttp resolver, audio converter long-running operations accept timeout overrides, canonical TTS config saves refuse redacted secrets unless include_secrets=True, new helpers/tests have docstrings/type cleanup, and markdown plan formatting was corrected.
 
 Fresh verification passed after the review follow-up: Ruff touched Python scope; 26-test focused review suite; 51-test TTS config/audio/VibeVoice suite; 77-test Chatterbox/Higgs/Kokoro suite; py_compile on touched production and test Python files; git diff --check; Bandit touched production TTS scope wrote /tmp/bandit_tts_review_fixes_rebased.json with errors=[] and results_count=0.
-<!-- SECTION:NOTES:END -->
+
+Reopened for PR #2484 final comment pass: address remaining unresolved review threads and CodeRabbit docstring coverage warning on the current pushed branch.
+Final PR #2484 comment pass: added docstrings to changed TTS helper/test definitions flagged by the bot coverage warning, confirmed changed-span docstring coverage at 104/104 (100.0%), reran Ruff, py_compile, git diff --check, focused TTS pytest batches (51 passed and 77 passed), and Bandit touched production TTS scope with errors=[] and results_count=0 in /tmp/bandit_tts_review_fixes_docstrings.json.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -86,10 +89,3 @@ Fixed the original TTS review findings and the PR #2484 follow-up comments. The 
 - [x] #7 Focused regression tests cover the repaired review findings.
 - [x] #8 Bandit runs on touched TTS production scope.
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Reopened for PR #2484 final comment pass: address remaining unresolved review threads and CodeRabbit docstring coverage warning on the current pushed branch.
-Final PR #2484 comment pass: added docstrings to changed TTS helper/test definitions flagged by the bot coverage warning, confirmed changed-span docstring coverage at 104/104 (100.0%), reran Ruff, py_compile, git diff --check, focused TTS pytest batches (51 passed and 77 passed), and Bandit touched production TTS scope with errors=[] and results_count=0 in /tmp/bandit_tts_review_fixes_docstrings.json.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

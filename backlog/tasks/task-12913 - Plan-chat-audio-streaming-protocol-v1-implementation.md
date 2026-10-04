@@ -30,11 +30,11 @@ Create the implementation plan for the approved chat audio streaming protocol v1
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created the implementation plan from the approved design and review findings. Self-review covered spec coverage, review-finding coverage, placeholder scan, parser interface consistency, and plan-level corrections for parser base64 errors plus dictation websocket URL/auth construction. Bandit skipped: planning-only documentation change.
 
 Post-implementation follow-up complete: chat audio streaming protocol v1 was implemented using one strict parser, existing websocket endpoints, PCM16 wire audio, server-side Float32 normalization, mode allowlists, push-to-talk release commit, streaming dictation, and extension STT JSON frames. Verification commands and known skips are recorded in TASK-12914.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -42,7 +42,7 @@ Replace the PR-controlled temporary frontend contribution gate with a base-contr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review of Task 4 in TASK-12976 proved that a pull_request workflow is PR-controlled and that line-oriented changed paths are not exact. Live GitHub inspection found dev unprotected, ruleset 5653432 active only on the default branch without required checks, and rmusser01 as the only direct collaborator. The approved replacement uses a default-branch pull_request_target workflow, NUL-safe metadata-only diffing, branch-specific trusted commit-status contexts for main and dev, and staged ruleset activation. Robert Benjamin Jake Musser approved the written design on 2026-07-20. The implementation plan stages a main bootstrap, live expected-source verification, guarded ruleset activation, and reconciliation back into TASK-12976. External ruleset mutation remains a post-bootstrap step.
 
 - Task 1 created the isolated bootstrap worktree at `.worktrees/frontend-license-gate-bootstrap` from `origin/main` `7a23be3202`; commit `e66028e959` recorded the bootstrap and the baseline workflow test passed 1/1.
@@ -65,7 +65,7 @@ Review of Task 4 in TASK-12976 proved that a pull_request workflow is PR-control
 - Public ruleset snapshots are recorded under `Docs/superpowers/evidence/TASK-12977/`. Main was activated at `2026-07-21T00:43:19.243-07:00`; dev was activated at `2026-07-21T00:43:49.962-07:00`.
 - Stage 5 reconciliation replaced the rejected PR-controlled step in `frontend-required.yml` with a negative regression contract and carried the reviewed trusted workflow, classifier, tests, and actionlint target from merged `main`. RED failed because the rejected workflow lacked the conditional checkout; GREEN passed 2/2 after restoring the workflow from `origin/dev`. Fresh final verification passed 40/40 focused tests with six pre-existing warnings; pinned actionlint 1.7.12, Ruff, Black, Bandit with zero findings/errors across 74 classifier LOC, deterministic owner/external cases, evidence assertions, marker integrity, and `git diff --check` all passed. Independent code/security review was CLEAN on the base-control and NUL/rename findings. Its documentation finding was resolved by replacing the stale rejected Task 4 instructions, and the plan re-review was CLEAN.
 - Reconciled commit `f7c635d34749663fcb52a5ee93561d8013bad022` passed source-bound `frontend-license-policy/trusted/dev`. Replacement run `29813192487` / job `88578513698` completed successfully through workflow `317148516` and GitHub Actions App `15368`; PR #2755 remained draft and PR #2727 remained held behind the cutoff.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

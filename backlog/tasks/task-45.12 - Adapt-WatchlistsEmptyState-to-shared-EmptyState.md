@@ -34,7 +34,7 @@ Continue the shared product-state design-system migration by replacing the Watch
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented WatchlistsEmptyState as a compatibility adapter over components/ui/feedback/EmptyState. Preserved entity descriptions, contextual hint copy, entity icons, primary/secondary action behavior, override labels, and legacy test IDs via EmptyState action passthroughs.
 
 Verification: red WatchlistsEmptyState test failed on missing data-ds-component marker before implementation. After implementation, bunx vitest run src/components/Option/Watchlists/shared/__tests__/WatchlistsEmptyState.test.tsx src/components/Common/__tests__/FeatureEmptyState.test.tsx src/design-system/__tests__/product-state-guard.test.ts --maxWorkers=1 --reporter=dot passed 43/43; bun run verify:design-system-state exited 0 with 523 allowed legacy exceptions and no stale WatchlistsEmptyState entries; git diff --check exited 0. Package-wide bunx tsc --noEmit --pretty false -p tsconfig.json still exits 2 on unrelated existing frontend type errors outside touched Watchlists/EmptyState files. Bandit is not applicable to this frontend-only TypeScript/JSON slice.
@@ -44,7 +44,7 @@ PR review pass started for PR #1343. Actionable findings: remove unused AntD moc
 PR review pass complete. Removed the unused AntD mock from WatchlistsEmptyState.test.tsx and consolidated the lucide-react type/value import in WatchlistsEmptyState.tsx. Rechecked EmptyStateAction.icon against Button.icon and kept it as React.ReactNode intentionally; this preserves JSX button adornment compatibility while EmptyStateProps.icon remains the hero LucideIcon type.
 
 Verification after review fixes: bunx vitest run src/components/Option/Watchlists/shared/__tests__/WatchlistsEmptyState.test.tsx src/components/Common/__tests__/FeatureEmptyState.test.tsx src/design-system/__tests__/product-state-guard.test.ts --maxWorkers=1 --reporter=dot passed 43/43; bun run verify:design-system-state exited 0 with 523 allowed legacy exceptions; git diff --check exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

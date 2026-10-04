@@ -24,11 +24,11 @@ A fresh PostgreSQL AuthNZ database created by the production bootstrap lacks sto
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Direct asyncpg inspection of the fresh isolated AuthNZ database found no storage_quotas relation after production bootstrap. SQLite migration 051 defines it; PostgreSQL runtime ensure and packaged schema omit it. TDD regression will use isolated_test_environment and real AuthnzStorageQuotasRepo.
 
 Runtime and packaged PostgreSQL schemas create scoped storage quotas. Real isolated PostgreSQL quota upsert/read passed; catalog confirmed scope check, two foreign keys, and scoped unique indexes. Bandit 0 findings; fatal Ruff clean. Full live PostgreSQL probe passed. Skip: no production data tested.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

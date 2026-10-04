@@ -51,12 +51,12 @@ Implementation will proceed in an isolated worktree on branch codex/vn-script-te
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added backend-owned starter template catalog endpoints under `/api/v1/vn/vn-scripts/templates`.
 - Added WebUI template selection while preserving the blank/custom JSON creation path.
 - Documented the custom frontend contract in `Docs/API-related/VN_PLATFORM_API.md` and the VN platform API spec.
 - Addressed PR review follow-ups for atomic template draft creation, frontend template ID encoding, and portable verification commands.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Verification
 

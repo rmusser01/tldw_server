@@ -54,7 +54,7 @@ Implemented:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED verification: bunx vitest run src/components/Common/__tests__/AssistantSelect.behavior.test.tsx --testTimeout=20000 failed on the old Select assistant, Search assistants, and Scene Director (Actor) labels.
 
 GREEN verification: bunx vitest run src/components/Common/__tests__/AssistantSelect.behavior.test.tsx --testTimeout=20000 passed, 7 tests.
@@ -66,7 +66,7 @@ git diff --check passed.
 String search found no old Select assistant, Search assistants, Assistant types, or Scene Director (Actor) labels in the touched picker/locale/test/doc scope.
 
 Bandit skipped because touched scope is frontend TypeScript/tests plus docs/backlog.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -47,7 +47,7 @@ Implement the next VN Play WebUI usability slice from issue #1401: expose checkp
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red verification: bunx vitest run __tests__/vn-play/VNPlayWorkspace.test.tsx from apps/tldw-frontend failed with the intended missing behavior: checkpoint/branch metadata was not loaded, checkpoint create/restore controls were absent, retry-last-turn was absent, and stale_scene_version rendered as raw error text.
 
 Implementation: wired existing VN Play checkpoint/branch/retry API helpers into VNPlayWorkspace, added recovery controls to SceneInspector, and suppressed raw recoverable conflict text in DialoguePanel so workspace-level recovery copy owns stale/in-progress states.
@@ -55,7 +55,7 @@ Implementation: wired existing VN Play checkpoint/branch/retry API helpers into 
 Focused verification: bunx vitest run __tests__/vn-play/VNPlayWorkspace.test.tsx __tests__/vn-play/SceneStage.test.tsx __tests__/vn-play/vnPlayApi.test.ts passed with 14 tests. git diff --check passed. Full frontend TypeScript check currently fails on pre-existing unrelated apps/packages/ui/src/services/persona-visuals.ts BlobPart typing; no touched VN Play diagnostics appeared in that run.
 
 Post-rebase verification: branch rebased cleanly onto origin/dev after 8f6f94a0b. Focused command bunx vitest run __tests__/vn-play/VNPlayWorkspace.test.tsx __tests__/vn-play/SceneStage.test.tsx __tests__/vn-play/vnPlayApi.test.ts passed with 14 tests. git diff --check origin/dev..HEAD passed. Full tldw-frontend TypeScript check still fails only on the pre-existing ../packages/ui/src/services/persona-visuals.ts BlobPart typing issue; this slice did not touch that file. Bandit skipped because this task only changes frontend TypeScript/React and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

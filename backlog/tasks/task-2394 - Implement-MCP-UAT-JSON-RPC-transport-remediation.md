@@ -33,7 +33,7 @@ Implement the approved MCP UAT JSON-RPC transport remediation plan across mounte
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete. Added mounted JSON-RPC transport helper and direct helper tests in commits 93f4d20761 and eab9a44812. Focused helper pytest passed with 22 tests. Bandit on production helper reported no findings. Spec review approved. Code-quality review initially found missing helper coverage; follow-up commit fixed coverage and re-review approved.
 
 Task 2 complete. Mounted HTTP /request and /request/batch now use raw JSON-RPC body parsing and helper-based response serialization in commits 6dee07e6d9 and 3a386d0eb5. Focused route suite passed: 30 passed, 4 warnings. Spec review approved. Code-quality review initially found notification short-circuiting before server processing; follow-up commit routes notifications through the server/protocol path while suppressing responses, and re-review approved. Minor accepted note: _is_jsonrpc_notification_payload is now unused and can be removed during cleanup.
@@ -51,7 +51,7 @@ Task 7 complete in commit 69fa5c0d8a. Smoke harness expectations now accept ping
 Task 8 complete. Focused mounted JSON-RPC regression suite passed with 74 passed, 4 warnings. Standalone gateway/smoke focused suite first failed under the sandbox because live WebSocket tests could not bind 127.0.0.1; rerunning the same command with loopback escalation passed with 280 passed, 6 warnings. Auth/policy focused suite passed with 23 passed, 4 warnings. Added test-only stabilization so mounted WebSocket compatibility tests restore singleton server state with monkeypatch instead of leaving a recording protocol installed for later tests. git diff --check passed; compileall passed for the touched test module. Bandit was not run for this child slice because only tests/tracking files changed.
 
 Task 9 complete. Full UAT smoke matrix passed for fixture CLI tests, standalone in-process, standalone stdio subprocess, standalone live HTTP, standalone live WebSocket, mounted tldw_server live HTTP, mounted API-key WebSocket, and mounted JWT WebSocket. Validation found one still-valid mounted smoke gap: the mounted server has separate single and batch HTTP endpoints, so the live HTTP transport now accepts an optional `batch_url` and the CLI exposes `http --batch-url`. Added regression coverage in `test_live_http_transport_uses_batch_url_for_batch_payloads`. Mounted JWT smoke used subject `1` instead of the plan's illustrative `smoke-user`, because live AuthNZ RBAC evaluates DB grants by user id. Verification: `test_smoke_client.py` passed with 82 passed, 5 warnings; live smoke commands all reported PASS; compileall passed; git diff --check passed. The broad MCP Bandit scan wrote `/tmp/bandit_mcp_uat_remediation.json` and reported existing baseline findings outside touched production smoke files; direct Bandit on `mcp_unified/smoke/transports.py` and `mcp_unified/smoke/cli.py` wrote `/tmp/bandit_mcp_uat_touched_production.json` and reported zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

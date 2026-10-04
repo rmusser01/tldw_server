@@ -31,9 +31,9 @@ Qodo raised both on #3035, the main-to-dev sync for v0.1.45. The code shipped in
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Closed 2026-09-28. FINDING 2 (history links fail after account changes): REPRODUCED AND FIXED. With canAutomaticallyLoad() false, the state after an account/config change invalidates the native-history lease, Playground's one-shot initializePlayground returned before parsing an explicit historySelection handoff, so the link was dropped while the page stayed mounted. Now the gate applies only when there is no handoff, which matches useServerChatLoader treating deliberate selections as exempt. Regression test: Playground.search.integration.test.tsx 'TASK-13390: an explicit history link still opens...' (red before the fix; the file passes 24/24). FINDING 1 (selection spills across instances): REPRODUCED IN ISOLATION, NOT REACHABLE TODAY. Two useServerChatLoader instances mounted together both call loadConversation for one requestServerChatSelection (repro: 2 calls instead of 1). But only five callers enable the loader (hydrateServerChat: Playground, DocumentChat, WorkspaceChatPanel, ModelPlayground, ResearchWorkspace ChatPane), each on its own route, and ChatWorkspaceConsole renders a single WorkspaceChatPanel, so no screen mounts two. Latent: if a future view co-mounts two enabled loaders, make the intent claim-once. Unrelated: 15 Playground tests in 4 files (research-context, jsx-extension guard, modal footers, locale mirror) fail identically without this change.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

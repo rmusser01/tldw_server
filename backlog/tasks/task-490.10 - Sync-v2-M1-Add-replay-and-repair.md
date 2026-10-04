@@ -42,7 +42,7 @@ Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md#tas
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Sync v2 replay/repair with a cursor-ordered accepted-envelope repair runner, authenticated dataset-scoped service method, /sync/repair endpoint, repair response schemas, and per-domain profile repair_status.
 
 Verification:
@@ -52,7 +52,7 @@ Verification:
 - Focused Ruff on new/reworked replay/profile/schema/test files passed. Broader touched-file Ruff remains blocked by existing sync.py/service.py baseline issues outside this task scope.
 - Bandit touched production paths wrote /tmp/bandit_task_490_10_replay_repair.json with no errors and no findings.
 - git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

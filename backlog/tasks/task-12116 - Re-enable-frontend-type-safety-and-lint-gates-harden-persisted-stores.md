@@ -41,10 +41,7 @@ This is a phased hardening ticket; land incrementally so each step keeps CI gree
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 PR2761 refresh: repairing the real nonincremental WebUI TypeScript baseline, then adding an explicit failing typecheck step to frontend-required. No tsconfig relaxation; remaining strictness/hooks/dependency-major work stays open. Persisted version/migration work from PR2575 and661b is present in frozen candidate and should be verified before closing criterion4.
 
 Verified all9 named persisted Zustand stores already declare version1 plus identity migrate in this candidate (playground-session, persona-buddy-shell, notes-dock, ui-mode, actor, quick-ingest-session, folder, feedback, acp-sessions). Existing five-suite persistence/store selection passed17tests. Criterion4 closed for the current unchanged schema; this does not claim forward-schema migrations. WebUI nonincremental tsc also passes; CI gate added but criterion1 awaits new-head CI evidence. Strictness/additional hook rules/dependency-major alignment remain open.
@@ -92,4 +89,4 @@ PR2761 RAG input-ref boundary verified: moved the UI-only InputRef into RagSearc
 PR2761 release-specific read-only reconciliation at08946442af: required lint, nonincremental typecheck, shared-hook and five-module strict-boundary gates pass. AC1 permits separate typechecking; AC2 requires incremental strictness plus tracked expansion, not blanket immediate strict:true. AC3 remains open: four compiler-era hook rules disabled,265 findings across138files; all source/config hashes match recordedinventory. Against frozen dev6c4bdcbc,257findings are in133untouchedfiles and8in5followupfiles; no new runtime defect demonstrated by this inventory. Proposed release scope decision (NOT YET APPROVED): retain all current gates, publish no frontend binaries, leave global four-rule enforcement in this owning task without claiming full compiler-rule compliance forv0.1.42. Release plan4.2 requires explicit requester acceptance before this dependency is scope-cleared.
 
 2026-09-14 requester explicitly moved broader certification work out of PR2761. Global frontend strictness and remaining265 compiler-lint findings stay in this follow-up task and no longer block this release. This resolves the earlier pending scope question; existing frontend CI gates and diagnostic retention remain unchanged. Task remains open.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

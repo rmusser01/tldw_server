@@ -45,7 +45,7 @@ Execute Task 1 of the design-system remaining-work tracker implementation plan b
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Confirmed worktree `codex/design-system-tracker-spec` and refreshed `origin/dev` at `7c652ce2d`.
 - Regenerated the grouped baseline summary from `apps/packages/ui/scripts/design-system-product-state-baseline.json` using the implementation plan's ordered product-area categories.
 - Fresh baseline snapshot matched the spec: 500 total entries, with 481 `antd-product-state-import` and 19 `canonical-state-label`.
@@ -56,7 +56,7 @@ Execute Task 1 of the design-system remaining-work tracker implementation plan b
 - Cleaned public issue body drafts by removing draft-only approval text from `github-epic.md`, migration drafts, and governance drafts; README remains the approval gate for public GitHub mutations.
 - Updated README creation order to require human approval, duplicate tracker search, and label checks before creating public GitHub issues or Backlog mirror tasks.
 - Bandit skipped: non-code Markdown-only tracker draft work; no Python files touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Verification
 

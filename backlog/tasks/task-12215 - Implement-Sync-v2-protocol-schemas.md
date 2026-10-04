@@ -29,11 +29,11 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Sync v2 schema models and focused schema tests in commits 132202f8b and aceed2993. Spec compliance review passed. Code-quality review initially requested validation hardening; follow-up commit replaced private payload clear-field denylist with an allowlist and rejects mismatched push/envelope dataset IDs. Final code-quality review approved.
 
 Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py -v passed with 7 tests. git diff --check passed. Worker reported Bandit on touched schema/test files passed with 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

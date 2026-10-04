@@ -36,9 +36,9 @@ Resolve unresolved review comments on PR #1317 for the native CodeGraph context-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified PR #1317 review feedback against the branch. Fixed valid findings by filtering relationship ranking boosts to candidate-to-candidate edges, removing unreachable sort-key fields while preserving original-order tie stability, boosting filename stem matches such as pkg/app.py for token app, and replacing max_search_results-based term slicing with a fixed bounded search-term cap so small candidate budgets still rotate through later task terms.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

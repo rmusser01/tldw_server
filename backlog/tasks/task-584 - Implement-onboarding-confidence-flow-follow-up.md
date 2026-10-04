@@ -74,7 +74,6 @@ Implement the approved onboarding confidence flow plan as one PR with four stage
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Implementation task opened before code edits per AGENTS.md. Controller will dispatch Task 1 provider validation gate implementer first, then run spec and code-quality reviews before moving to Task 2.
 - Task 1 provider validation gate implemented:
@@ -243,7 +242,6 @@ Implement the approved onboarding confidence flow plan as one PR with four stage
   - Bandit production scope: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/setup.py -f json -o /tmp/bandit_task584_pr2214_review_fixes.json` reported 0 results.
   - `git diff --check` passed after the final review-fix edits.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

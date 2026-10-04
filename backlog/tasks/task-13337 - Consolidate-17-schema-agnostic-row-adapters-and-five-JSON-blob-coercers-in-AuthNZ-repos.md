@@ -43,7 +43,7 @@ Source: synthesis F36
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PARTIAL - the embedded DEFECT is fixed; the consolidation is not.
 
 FIXED: data_subject_requests_repo._parse_json_field now clamps the parsed value to the container the caller asked for, matching the four sibling copies. It previously returned json.loads(...) raw, so a column holding "[]", "null", "123" or a bare string yielded a list/None/int/str where fallback promised a dict.
@@ -63,7 +63,7 @@ AC1: row_dict - None -> {}, dict copied, keys()-based materialization with a san
 AC2: load_json(raw, dict|list) - decodes str/bytes/bytearray, clamps wrong shapes/None/malformed/foreign types to an empty container. Replaced all 5 coercers (shared_workspace, managed_secret_refs, mcp_hub x2, data_subject_requests, prototype_workspaces x2). Only behaviour change: bytes blobs now decode (previously {}).
 AC3: tests/AuthNZ/unit/test_authnz_row_helpers.py (replaces test_data_subject_json_field_clamp.py, cases folded in): 32 tests covering None, bytes, bytearray, invalid UTF-8 bytes, malformed, wrong-shaped, sqlite3.Row, unconvertible row. On the old repo code 4 fail (3 unguarded adapters on None, bytes metadata blob); all pass now. PrototypeWorkspaces test_row_to_dict_logs_conversion_failures -> test_row_to_dict_raises_on_unconvertible_row.
 Regression (tests/AuthNZ, AuthNZ_SQLite, AuthNZ_Unit, PrototypeWorkspaces; TLDW_TEST_NO_DOCKER=1): before 66 failed/45 errors/3101 passed; after 64 failed/45 errors/3123 passed; no new failure IDs (2 Postgres sharing tests passed after, unrelated flake). bandit -ll on all 21 touched source files: no issues. ruff I/F: no new findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

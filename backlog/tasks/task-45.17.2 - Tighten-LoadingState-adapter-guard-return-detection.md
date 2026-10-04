@@ -36,9 +36,9 @@ Address PR 1374 review feedback that the product-state guard currently treats an
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot failed first because nested LoadingState usage produced no local-loading-state finding. After the rule change, bunx vitest run src/components/Common/__tests__/UnifiedLoadingState.test.tsx src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed with 46 tests. bun run verify:design-system-state passed and baseline exceptions remained 519 with local-loading-state at 3. git diff --check passed. Bandit skipped because this is frontend JavaScript/test-only guard work.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

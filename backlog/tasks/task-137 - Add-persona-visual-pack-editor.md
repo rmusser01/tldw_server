@@ -36,7 +36,7 @@ Build the Persona Garden editor surface for V1 persona visual packs so users can
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Persona Garden visual pack editor for draft creation, pack loading, asset upload, state mapping, ordered frames, sprite-sheet region fields, preview frame, fallbacks, authored triggers, validation, activation, and deactivate. Added the persona `visuals` route tab and sidepanel tab wiring.
 
 Verification red: `bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx src/utils/__tests__/persona-garden-route.test.ts` failed before implementation because VisualPackEditor was missing and the visuals tab was rejected.
@@ -44,7 +44,7 @@ Verification red: `bunx vitest run src/components/PersonaGarden/__tests__/Visual
 Verification green: `bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx src/utils/__tests__/persona-garden-route.test.ts` passed 10 tests; `bunx vitest run src/routes/__tests__/sidepanel-persona.test.tsx` passed 73 tests; touched-file TypeScript filter produced no diagnostics; `git diff --check` passed.
 
 Bandit not run for this slice because it touched frontend TypeScript/React files and Backlog/plan docs only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
