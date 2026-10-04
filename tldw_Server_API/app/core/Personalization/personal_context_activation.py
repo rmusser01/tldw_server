@@ -39,9 +39,24 @@ class PersonalContextActivationService:
         *,
         device_id: str,
         fresh: bool = False,
+        precondition: Callable[[], None] | None = None,
     ) -> PreparedPersonalContextActivation:
-        """Prepare or replay the exact device baseline under the shared relay lease."""
+        """Prepare or replay the exact device baseline under the shared relay lease.
+
+        Args:
+            profile_id: Canonical profile to snapshot.
+            device_id: Device the baseline is prepared for.
+            fresh: Replace an active baseline instead of replaying it.
+            precondition: Optional check run under the lease before preparing;
+                it raises to refuse. No relay can stage between the check and
+                the preparation, which then fences relay until it is installed.
+
+        Returns:
+            The durable preparation, or the replayed existing one.
+        """
         with self.publications.profile_lease(profile_id) as lease:
+            if precondition is not None:
+                precondition()
             return self.repository.prepare_activation(
                 profile_id,
                 device_id=device_id,

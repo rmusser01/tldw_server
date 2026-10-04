@@ -408,9 +408,19 @@ def _device_payload(public_key: rsa.RSAPublicKey) -> dict[str, object]:
 
 
 def _seed_exchange(service: SyncV2Service, dataset_id: str) -> dict[str, object]:
-    """Install and acknowledge through the real journals before test-only rollout."""
+    """Install and acknowledge through the real journals before test-only rollout.
 
-    baseline = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
+    Like a client, restart activation once when told it is required: activation
+    refuses while the relay that ran first left a staged row unfinished, and
+    the restart's relay finishes it.
+    """
+
+    try:
+        baseline = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
+    except SyncStoreError as exc:
+        if str(exc) != "personal_context_activation_required":
+            raise
+        baseline = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
     _receipt, proof = service.acknowledge_personal_context_activation(
         user_id=_USER_ID,
         dataset_id=dataset_id,
