@@ -1,7 +1,7 @@
 # D7: One conversation model and resumable generation
 
 - **Date:** 2026-10-04
-- **Status:** Proposed. Awaiting owner decision.
+- **Status:** Accepted by the owner on 2026-10-04 (D7a, D7b, D7c and D6 as recommended; Q1–Q4 answered in §8).
 - **Tracking:** epic #3101 · enhancement group E2 #3126 · remediation plan Stage 2, slice 10 · settles D6 (N3, E3 #3127)
 - **Related groups:** G03 #3104, G04 #3105, G05 #3106, G07 #3108, G18 #3119, G19 #3120
 - **Inputs:** `Docs/Design/2026-10-02-notes-chat-ux-review.md` and its `.issues.json`, `Docs/superpowers/plans/2026-10-03-notes-chat-ux-remediation-plan.md` (both on `docs/notes-chat-ux-review-2026-10`), and the open Stage 1 PRs #3147, #3152, #3161, #3163 and #3154.
@@ -647,6 +647,16 @@ Only questions whose answers change the design:
 4. **Q4: Sync v2 users.**
    - With an active Sync v2 profile, every history-selection capture and write returns 409 `sync_owner_unsupported`, so after D1 such a user couldn't send from the WebUI at all.
    - Is supporting Sync v2 users (the Chatbook desktop client plus WebUI on one account) in scope for this work? If yes, Phase 1 needs a backend task to let versioned history writes emit Sync v2 envelopes.
+
+### Owner answers (2026-10-04)
+
+| # | Answer | Effect on the plan |
+|---|---|---|
+| D7a–c, D6 | Adopted as recommended. | Phase 1 (one identity, including D1) and CM-04 proceed in Stage 2. The side-panel Notes quick panel (no editor) follows G01 and XP-05. |
+| Q1 | **Read-only offline.** Cached chats stay readable; Send waits for the connection. | Phase 3 (outbox, P15–P17) is not scheduled. |
+| Q2 | Not asked separately; the recommendation stands. | Import is explicit, per chat or "Save all", never automatic, and always to the signed-in account. |
+| Q3 | **Temporary chats survive a reload on this device**, until closed or cleared, and never reach the server. | P7 keeps a local message array for temporary tabs, on every surface (the full page gains this). |
+| Q4 | **Sync v2 users are in scope.** | Phase 1 gains a backend task so versioned history writes emit Sync v2 envelopes and D1 doesn't lock these users out. |
 
 ---
 
