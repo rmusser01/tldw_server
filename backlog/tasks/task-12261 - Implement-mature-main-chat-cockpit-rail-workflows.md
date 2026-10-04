@@ -55,7 +55,7 @@ User approval basis: the user approved the staged design, requested prompt manag
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the main /chat cockpit rail workflow slice: prompt selection/clearing in the left rail, shared prompt-select event handling, direct MCP settings opening, runtime rail separation for Model & Chat, Character / Persona, and MCP tool-choice controls. Removed duplicate prompt/MCP labels surfaced by tests so the rails scan cleanly.
 
 Verification: focused Vitest cockpit suite passed: `bunx vitest run src/components/Option/Playground/__tests__/playground-cockpit-actions.test.ts src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-maturity.test.tsx` => 6 files / 41 tests passed. `git diff --check` passed.
@@ -67,7 +67,7 @@ Real-server validation: backend http://127.0.0.1:8000 returned degraded status o
 Provider:model scoped-settings acceptance closed from existing code and focused regression evidence: PlaygroundForm updates the active chat-model settings scope from selectedModelKey, and useStoreChatModelSettings stores effective overrides per normalized provider:model key. Verification: bunx vitest run src/store/__tests__/model.scoped-settings.test.ts => 1 file / 8 tests passed.
 
 Review follow-up: addressed the six latest CodeRabbit /chat cockpit threads by extracting mobile-panel resolution, making context/status mapped keys collision-safe, refactoring runtime provider:model display parsing while preserving provider-qualified route-label precedence, and making the real-server spec's Node fs import explicit. Verification: git diff --check passed; focused cockpit Vitest suite passed 6 files / 41 tests; real-server Playwright spec passed 3 tests against http://127.0.0.1:8000 and PR frontend http://localhost:3002 with no route interception.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

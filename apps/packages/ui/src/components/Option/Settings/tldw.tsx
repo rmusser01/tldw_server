@@ -27,6 +27,7 @@ import { emitSplashAfterSingleUserAuthSuccess } from "@/services/splash-auth"
 import { ServerOverviewHint } from "@/components/Common/ServerOverviewHint"
 import { requestOptionalHostPermission } from "@/utils/extension-permissions"
 import { isExtensionRuntime } from "@/utils/browser-runtime"
+import { RouteLeavePrompt } from "@/entries/shared/route-leave-prompt"
 import type { CoreStatus, RagStatus } from "./tldw-connection-status"
 import { TldwSettingsTabs } from "./tldw-settings-tabs"
 import { useSettingsLoginStatus } from "./useSettingsLoginStatus"
@@ -62,6 +63,30 @@ export const TldwSettings = () => {
   const [initializingError, setInitializingError] = useState<string | null>(null)
   const [loadedFormValues, setLoadedFormValues] = useState<Record<string, unknown> | null>(null)
   const configLoadGeneration = useRef(0)
+  const [connectionDirty, setConnectionDirty] = useState(false)
+  const connectionDirtyRef = useRef(false)
+  const savedConnectionValuesRef = useRef<Record<string, unknown> | null>(null)
+  const refreshConnectionDirty = () => {
+    const saved = savedConnectionValuesRef.current
+    const values = form.getFieldsValue()
+    const dirty = saved != null && ['serverUrl', 'authMode', 'apiKey', 'rememberApiKey'].some(key =>
+      key === 'rememberApiKey'
+        ? (values[key] !== false) !== (saved[key] !== false)
+        : (values[key] ?? '') !== (saved[key] ?? ''))
+    connectionDirtyRef.current = dirty
+    setConnectionDirty(dirty)
+  }
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!connectionDirtyRef.current) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', beforeUnload)
+    }
+  }, [t])
   const [testingConnection, setTestingConnection] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'success' | 'error' | null>(null)
   const [connectionDetail, setConnectionDetail] = useState<string>("")
@@ -166,7 +191,12 @@ export const TldwSettings = () => {
 
   useEffect(() => {
     // The initial skeleton has no Form; apply values only after it is mounted.
-    if (!initializing && loadedFormValues) form.setFieldsValue(loadedFormValues)
+    if (!initializing && loadedFormValues) {
+      form.setFieldsValue(loadedFormValues)
+      savedConnectionValuesRef.current = form.getFieldsValue()
+      connectionDirtyRef.current = false
+      setConnectionDirty(false)
+    }
   }, [form, initializing, loadedFormValues])
 
   useEffect(() => {
@@ -334,6 +364,12 @@ export const TldwSettings = () => {
         await tldwClient.updateConfig(config)
       }
       setServerUrl(values.serverUrl)
+      savedConnectionValuesRef.current = {
+        ...savedConnectionValuesRef.current,
+        ...values,
+        rememberApiKey: requestedRememberApiKey
+      }
+      refreshConnectionDirty()
       if (achievedPersistence === 'memory') {
         message.warning(
           t(
@@ -942,6 +978,10 @@ export const TldwSettings = () => {
       spinning={loading}
       tip={loading ? t('common:saving', 'Saving...') : undefined}>
       <div className="max-w-2xl">
+        <RouteLeavePrompt
+          when={connectionDirty}
+          message={t('settings:tldw.unsaved.leave', 'You have unsaved connection settings. Leave this page and discard these changes?')}
+        />
         {initializingError && (
           <Alert
             type="error"
@@ -998,6 +1038,9 @@ export const TldwSettings = () => {
           </Space>
         </div>
         <TldwSettingsTabs authMode={authMode} isLoggedIn={isLoggedIn} billingAvailable={billingAvailable} />
+        {connectionDirty && <Alert className="mb-4" type="warning" showIcon
+          title={t('settings:tldw.unsaved.title', 'Unsaved connection settings')}
+          description={t('settings:tldw.unsaved.guidance', 'Save your connection settings before leaving this page, or cancel navigation to keep editing.')} />}
         <h2
           id="tldw-settings-connection"
           className="mb-4 scroll-mt-24 text-base font-semibold text-text">
@@ -1011,6 +1054,7 @@ export const TldwSettings = () => {
           component={false}
           form={form}
           onValuesChange={(changed) => {
+            refreshConnectionDirty()
             if (Object.hasOwn(changed, "serverUrl") || Object.hasOwn(changed, "authMode")) authAttempt.current?.abort()
             void refreshLoginStatus()
           }}

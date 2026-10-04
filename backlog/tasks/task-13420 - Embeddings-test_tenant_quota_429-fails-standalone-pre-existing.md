@@ -26,9 +26,9 @@ Observed cause: the test does monkeypatch.setenv('AUTH_MODE', 'multi_user') and 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause confirmed as described: _is_single_user_profile() reads the cached AuthNZ settings singleton, so monkeypatching AUTH_MODE alone left the test in single-user mode and the tenant-RPS check never ran. Fix (test-only): reset_settings() after the setenv, and again in a finally so later tests rebuild settings from the restored env. Verified: test file 7 passed; tests/Embeddings -n 4: 682 passed, 18 skipped. Bandit: not applicable (test-only change). No docs affected.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

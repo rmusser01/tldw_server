@@ -24,9 +24,9 @@ Run the full local HTTP server and real startup/shutdown against isolated SQLite
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Full FastAPI app via Uvicorn loopback, TEST_MODE off; isolated AuthNZ and per-user Media SQLite, synthetic users/orgs and quota. Final probe: health/ready 200, unauth 401, upload 200, Alice email/search/detail and media search one result, Bob search empty/detail 404, outbound/model attempts zero; server shutdown exit 0. Raw probe/log in /tmp. First 403 was probe omission of required org context; macOS /var path alias was probe-only. No Python code touched, so Bandit not applicable. Missing email_native_persist_total warning tracked as TASK-13363. Production/proxy/TLS/scale and PostgreSQL remain open.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

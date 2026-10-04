@@ -40,7 +40,7 @@ Use the lightweight PRD/spec in `Docs/superpowers/specs/2026-05-09-persona-visua
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created from GitHub issue #1429 after PR #1439 merged and tracker #1428 was updated. This task is intentionally scoped to Persona/Buddy visual-pack ownership, activation, import/commit/review, and docs copy. It must not implement duplicate-to-persona, shared libraries, marketplaces, or VN/CYOA behavior.
 
 Implemented Persona Visuals editor ownership copy, portability copy, generated-candidate review copy, and Persona Visual Packs code documentation. Verification: focused Vitest passed, docs grep passed, git diff --check passed. Bandit skipped because this change only touches TSX copy/tests and Markdown documentation; no Python code was changed.
@@ -52,7 +52,7 @@ Review fix plan for PR #1447: wrap the newly added VisualPackEditor helper copy 
 PR review fixes completed: new VisualPackEditor helper copy now uses sidepanel i18n t() calls; import commit wording now says it creates a reviewed draft pack to match target_mode=create_new; docs and tests were updated. Verification: focused Vitest passed, docs grep passed, git diff --check passed. Bandit remains skipped because only TSX copy/tests and Markdown docs changed.
 
 Additional test reliability cleanup: the existing health diagnostic assertion now waits for the selected pack manifest to settle before checking the missing-asset diagnostic, avoiding the transient default-manifest state observed during final verification. Re-run verification passed after this cleanup.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

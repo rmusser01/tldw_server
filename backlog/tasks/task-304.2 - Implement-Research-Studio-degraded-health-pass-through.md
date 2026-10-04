@@ -40,13 +40,13 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red step: after adding degraded-health tests, `bun run test:run components/networking/__tests__/ServerReadinessGate.test.tsx` failed with 2 degraded-response tests failing and 5 tests passing.
 Green verification: `bun run test:run components/networking/__tests__/ServerReadinessGate.test.tsx` passed with 7 tests.
 Diff hygiene: `git diff --check` passed.
 Bandit not run: frontend TypeScript/test-only change with no backend Python touched.
 Scope note: this only changes app entry readiness classification. It does not add capability-safety claims for chat or generation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -41,7 +41,7 @@ Address validated current-code review findings in `tldw_Server_API/app/core/Util
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Manual Backlog task-file creation approved by user because the official Backlog CLI hung on search/list/create and the bundled Python clone is documented as unsafe for live mutations.
 
 Implemented fixes:
@@ -65,7 +65,7 @@ PR review follow-up:
 - Addressed review findings for `# nosec` rationale, CPU batch task bookkeeping, markdown plan heading/spacing, credential-bearing URL logging, metadata compatibility filtering, and raw segment error logging.
 - Added focused regressions for CPU batch task reference retention, URL userinfo redaction, unsupported metadata errors, and segment error-path redaction.
 - Added focused docstrings for changed Utils helpers after the PR pre-merge docstring coverage warning; local AST scan over changed production files reports 100% coverage.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

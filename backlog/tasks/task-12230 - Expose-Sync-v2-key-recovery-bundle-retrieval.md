@@ -30,9 +30,9 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Sync v2 key recovery bundle retrieval with a service method that verifies dataset ownership, filters by optional device_id and key_purpose, and returns only non-revoked records. Added a GET /api/v1/sync/keys/recovery-bundle endpoint with response schemas that include wrapped_key_blob and kdf_metadata only on the dedicated key endpoint. Restore manifests remain metadata-only. Updated Docs/API/sync-v2.md. Verification: initial red run failed on missing service method and 405 GET route; focused retrieval tests passed; broader Sync v2 service/endpoint/restore tests passed with 54 tests; Bandit JSON had empty errors/results; git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

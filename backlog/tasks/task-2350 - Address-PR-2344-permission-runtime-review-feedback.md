@@ -32,7 +32,7 @@ Address automated review feedback on PR #2344 (gateway runtime permission-rule e
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added a bounded LRU cache (collections.OrderedDict, 64 entries) of compiled permission rules on ProfileAwareGatewayRuntime, keyed by (profile.id, profile.updated_at). updated_at is bumped by every gateway management mutation, so it acts as the profile version stamp; direct store writes that reuse a stale updated_at are out of scope (the management surface is the supported mutation path). Compile failures are not cached and keep raising GatewayPolicyDenied with reason_code=invalid_permission_rules. _compiled_permission_rules() returns () when profile or policy_document is None (Gemini guard). _enforce_permission_rules_for_tool_call() now receives pre-compiled rules instead of compiling per call.
 
 Subject extraction is bounded during extraction (not after materializing): _MAX_PERMISSION_SUBJECTS=128, _MAX_SUBJECT_VALUE_LENGTH=4096, _MAX_COMMAND_ARGV_TOKENS=256. Exceeding any limit fails closed with GatewayPolicyDenied status=denied, reason_code=permission_subject_limits_exceeded, and redacted provenance (profile_id, tool_name, limit name only — no raw values). Fail-closed was chosen over truncation because silently skipping subjects past the cap could let an oversized payload push a denied subject out of evaluation. Limits only apply when the profile has permission rules, so rule-free profiles see no behavior change.
@@ -51,7 +51,7 @@ Verification:
 - Whitespace: `git diff --check` passed.
 
 Deferred: pattern-level cache invalidation for direct profile_store writes that bypass the management surface; configurable extraction limits.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

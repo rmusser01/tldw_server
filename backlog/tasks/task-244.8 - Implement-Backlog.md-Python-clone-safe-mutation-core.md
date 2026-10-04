@@ -49,18 +49,16 @@ Implement Task 7 from the Backlog.md Python compatibility clone implementation p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Worker added RED mutation/security tests and captured missing `backlog_py.security` / `MutableRepository` collection failures.
 - Implemented safe path containment, validation-before-write task creation/editing, same-directory temp-file writes committed with `os.replace`, duplicate ID/circular dependency/checklist index guards, section-scoped edits, and disabled-by-default `onStatusChange` errors.
 - Added CLI `task create` / `task edit` adapter options and pure MCP `task_create` / `task_edit` paths over the same core. Unsupported MCP argument shapes still raise explicit not-implemented errors for this slice.
 - Verification run by worker: focused mutation/security tests passed; full `tools/backlog-py/tests` suite passed. Controller still owns Bandit, diff check, and two-stage review.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Controller review updates 2026-05-11: added missing fail-closed validation for nonexistent dependencies and unknown statuses on create/edit, allowed MCP title-only create through the repository ID allocator, added AC/DoD uncheck support across repository/CLI/MCP, and fixed symlink containment so task directory/file symlinks cannot redirect writes outside the lexical backlog path. Spec review and code-quality review both approved after fixes.
 
 Final verification: focused mutation/security tests -> 21 passed; full tools/backlog-py tests -> 61 passed; Bandit on tools/backlog-py/src -> exit 0 with results []; git diff --check -> clean; pyproject dependency diff -> empty.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

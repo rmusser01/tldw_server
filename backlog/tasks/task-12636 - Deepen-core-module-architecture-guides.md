@@ -40,7 +40,7 @@ Implementation plan: Docs/superpowers/plans/2026-06-02-core-module-architecture-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created after PR #2216 merged TASK-588 into dev. Worktree: .worktrees/core-architecture-guides on branch codex/core-architecture-guides from origin/dev merge commit c7b2e66400492614914e1a8f0e4abe939b031b64.
 
 2026-06-02: Drafted Phase 2 implementation plan at Docs/superpowers/plans/2026-06-02-core-module-architecture-guides-implementation-plan.md. Plan reviews all 88 modules, prioritizes the 47 high-risk/high-complexity modules first, and records sufficient decisions for modules that do not need expansion.
@@ -58,7 +58,7 @@ Created after PR #2216 merged TASK-588 into dev. Worktree: .worktrees/core-archi
 2026-06-02: Final verification complete after merging current origin/dev. Verified all 88 top-level core modules have README files, placeholder scans returned no matches, README local-link sanity passed, Phase 2 inventory reports 88 reviewed rows, git diff --check passed, and branch diff scope against origin/dev is 29 docs/backlog files only. Bandit skipped because TASK-589 changed Markdown documentation and Backlog records only; no Python or runtime source files were modified.
 
 Final summary: Completed the Phase 2 architecture-guide pass for all 88 core modules. Expanded high-risk and cross-module guides where additional flow, state, security/operations, or extension-checklist detail was useful, and recorded source-backed sufficiency decisions for modules that did not warrant more README content.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

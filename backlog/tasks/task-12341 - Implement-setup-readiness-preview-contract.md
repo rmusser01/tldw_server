@@ -35,9 +35,9 @@ Implement the second backend slice from Docs/superpowers/plans/2026-05-18-first-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added setup readiness preview request/response schema models for the future API endpoint. Added readiness_service.py as a read-only preview builder over lane selections, existing install plan schemas, and curated audio bundle expansion. Added focused preview tests for no-write behavior, restart overlay behavior, hosted secret redaction, trusted-model blocking, and acknowledged custom model install-plan routing. Updated the implementation plan Task 2 checklist.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

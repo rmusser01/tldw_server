@@ -35,7 +35,7 @@ Add regression tests, extend the existing registry/request adapter/Settings meta
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline: 108 backend tests passed. RED: 10 expected backend failures for missing EPUB catalog/lookup, explicit-empty and canonical provider handling; new shared Settings EPUB test failed before metadata implementation. GREEN: combined backend120 and shared Settings/service/domain196 passed. Ruff lint/format, compilation and Bandit passed (zero findings). Independent read-only review in progress. Official OpenAPI exporter initially needed its ignored output directory created; rerun in progress. Main checkout remains untouched.
 
 Final: 120 focused backend +45 adjacent EPUB/ingestion/safety/chunking/usage tests passed; shared UI196 passed and WebUI-config targeted4 passed. Ruff, compileall and Bandit zero findings. Official OpenAPI export/typegen/check passed; deleting only new EPUB api_provider reproduces exact base fingerprint. Independent review found no actionable issues. Full repo suites, full frontend typecheck and live browser/provider E2E not run. Temporary dependency symlinks removed before commit; generated full schema/types stay ignored.
@@ -45,7 +45,7 @@ Published PR #2882 against dev at user request. Implementation commit cbfdd903ec
 Qodo posted three rule comments. Plan: move explicit-empty multipart preservation into get_process_ebooks_form before model validation, with a RED parser contract regression. Remove redundant exact owner lookup sequences in ownership/provider tests while keeping explicit no-read and single-snapshot contract checks. Evaluate architecture request against existing core resolver and API-owned resource lifetime; avoid introducing core-to-API dependencies.
 
 Qodo remediation verified: explicit-empty restoration moved into validated form parsing (RED empty None vs empty-string assertion; GREEN omitted/empty/literal parser cases). Removed redundant exact lookup sequences but retained approved no-read and once-per-request contracts. Architecture disposition independently reviewed: authenticated Request/User DB acquisition and same-worker cleanup stay in API adapter; prompt override/default policy already resides in core. 123 backend tests, Ruff, compileall, Bandit zero findings and unchanged OpenAPI fingerprint check passed. Review follow-up recorded in design doc. Awaiting fresh remote review/checks and human Change summary before merge.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

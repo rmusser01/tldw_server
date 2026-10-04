@@ -65,6 +65,6 @@ Reason: This changes a public runtime and dependency boundary plus protocol serv
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Drafted and iteratively review-corrected the multi-revision stdio protocol specification. Canonical ADR-033 supersedes immutable ADR-032, which itself supersedes the mistakenly placed backlog decision, without rewriting accepted history. The corrected design advertises all five revisions while filtering same-process retries to modern profiles; preserves GatewayStdioServer and the legacy GatewayRuntime while adding a narrow strict core runtime; makes resource-template support optional; supports arbitrary-root current output schemas and JSON values with legacy text-only projection; and specifies type-exact request IDs, cancellation, immutable JSON/result/catalog/page/batch limits, fingerprinted cursors, stable tool-error metadata, portable binary stdio, and a direct process-isolated time-bounded jsonschema dependency. Final documentation verification passed: Backlog parses TASK-13008 and all criteria; local spec/task/ADR/index links exist; required contract markers and supersession metadata are present; invalid/stale contract phrases are absent; touched files have no trailing whitespace; and `git diff --check` is clean. Bandit and code tests are not applicable because no implementation code is touched. The design task is complete; implementation planning and code remain deliberately deferred to the next task.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

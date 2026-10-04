@@ -35,7 +35,7 @@ Migrate the Collections reading-status badge adapter from AntD Tag to the shared
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the Collections StatusBadge adapter migration: replaced AntD Tag usage with the shared Badge primitive, mapped reading statuses through getDesignSystemState, preserved icon labels and compact sizing, and removed the old local-status-badge baseline exception.
 
 Verification: watched the new focused adapter test fail before implementation because the previous component did not expose the shared Badge marker or icon test ids; after implementation, bunx vitest run src/components/Option/Collections/common/__tests__/StatusBadge.design-system.test.tsx --reporter=dot passed 5/5 tests.
@@ -55,7 +55,7 @@ PR review follow-up: Gemini and Qodo both flagged the same sizing issue where St
 Review fix verification: updated the focused compact-size test first and confirmed it failed because the small badge still included overriding py-0 text-xs classes. Removed the adapter className override so small badges now rely on Badge size="sm" tokens.
 
 Review fix verification after implementation: focused StatusBadge test passed 5/5, product-state guard test passed 46/46, design-system verifier passed with local-status-badge at 7, and git diff --check passed. bunx tsc --noEmit --pretty false still exits 2 on unrelated existing frontend baseline errors and reports no touched Collections StatusBadge errors.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

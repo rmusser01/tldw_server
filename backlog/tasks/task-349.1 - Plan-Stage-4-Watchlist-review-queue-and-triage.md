@@ -46,9 +46,9 @@ Create a repo-grounded implementation plan for Stage 4 of first-class Watchlists
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Stage 4 plan at Docs/superpowers/plans/2026-05-15-first-class-watchlists-stage4-review-triage-plan.md. Grounded the plan in current Watchlists item DB/API behavior, ItemsTab frontend behavior, Stage 3 content-alert records, and the existing report queue handoff. Created Stage 4A-4E child tasks with dependencies for backend query/alert summary, batch triage/saved views API, frontend client contract, Items/Updates triage refresh, and docs/real-server QA closeout. Verification: git diff --check passed; plan grep confirmed server-authoritative sorting/filtering, alert_summary, batch-update, item-views, real-server CDP, and Stage 5 boundary language. Bandit skipped because this planning slice changes Markdown and Backlog task records only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

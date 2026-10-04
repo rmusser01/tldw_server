@@ -36,11 +36,11 @@ Resolve the actionable Qodo follow-up comments on PR #1713 without broadening th
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed Qodo follow-up comments on PR #1713: wrapped long test assertion/decorator plus the remaining long newly added tuple; added state-catalog helper docstrings; replaced the boolean custom-state ID helper with specific diagnostics for type, pattern, unsafe prefix, and unsafe marker failures.
 
 Verification: red test confirmed unsafe-prefix/unsafe-marker diagnostics failed before validator change; then 77 focused Persona visual tests passed; git diff --check passed; full PR diff added-line length scan found no lines over threshold; Bandit on tldw_Server_API/app/core/Persona/visuals.py reported 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -32,11 +32,11 @@ Address actionable review feedback on PR #1603 for the Persona Chat judge execut
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified PR #1603 review surface. The only actionable inline finding was Gemini comment PRRT_kwDOL1aGf86BTTlN: _load_json_array duplicated _required_array validation. Patched _load_json_array to delegate to _required_array with label="Inputs JSON", preserving bounded CLI error strings.
 
 Validation: focused Persona Chat judge suite passed with 58 tests; py_compile for persona_chat_judge_cli.py passed; Bandit on touched Python scope wrote /tmp/bandit_persona_chat_judge_artifact_cli_review_fix.json with 0 findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -47,7 +47,7 @@ Source: synthesis F25
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 STAGES 1, 2a, 2b and 4 DONE. Stage 2c and stage 3 remain. ADR-050 carries the staging table.
 
 Commits: 360696f8be (stage 1), c901fd83b7 (2a), ff1200b9fb (2b), e895450c0a (stage 4).
@@ -73,7 +73,7 @@ STILL OPEN:
 - Stage 3: discord.py / slack.py at 61.3%, which is where the signature algorithm (Ed25519 vs HMAC-SHA256 v0=) and the command parser live. Those two stay per-protocol by design; the rest does not.
 
 Verification throughout: Discord + Slack + Integrations suites 68 passed, 0 failed, at every commit (baseline 68 passed). Bandit clean on every touched file. One bandit note: the descriptor field was named token_entity_field, which B106 flagged because it reads any kwarg name containing "token" as a credential; renamed to response_entity_field, which is also more accurate -- a rename beat a suppression.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

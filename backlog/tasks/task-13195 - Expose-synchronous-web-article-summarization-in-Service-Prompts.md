@@ -33,7 +33,7 @@ Approved bounded slice: add system and summary instructions to existing shared S
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented owner-bound web summary overrides, registry and shared Settings metadata. RED tests caught missing prompt lookup, unnecessary default-file loading, and persistence owner mismatch; fixed all three. Independent review found an outdated strict fallback helper contract test; updating signature and forwarding assertions without weakening it. Shared Settings 76 passed; prompt client/domain 124 passed. Bandit on all seven touched runtime files: zero findings. Broader scraping regression and API validation in progress.
 
 Compatibility consumers: 92 passed (usage events, custom headers, permission claims, media patchpoints, workflow adapters). Strict fallback signature/forwarding regression: 4 passed after review fix. Settings: 76 passed in shared config and 76 passed in WebUI config. OpenAPI export and TypeScript generation succeeded; fingerprint unchanged and check passed. Python compileall passed. Ruff has only two verified pre-existing findings (endpoint B004 and enhanced scraper UP015); new helper/tests clean.
@@ -61,7 +61,7 @@ Final merge audit: PR head 9700edeffd on dev 946e591ee9; all seven required CI g
 Requester explicitly waived the human-written Change summary requirement for PR #2907 and authorized merge. The approval layer accepted this waiver, but GitHub blocked the normal merge because dev advanced to 36b846628d (admin first-steps PR). Rebasing again and retaining required-check enforcement; the earlier human-summary blocker is superseded by this explicit waiver.
 
 Second rebase onto dev 36b846628d verified: 129 focused tests passed and Bandit on all seven touched runtime files found zero issues. Existing PR patches are unchanged by the rebase; only local tracking records of merge-gate status and explicit waiver are newly included. Publishing with an exact-head lease and enabling normal GitHub auto-merge subject to required checks.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

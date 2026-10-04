@@ -35,9 +35,9 @@ Address the open PR 1394 review feedback for the Evaluations StatusBadge design-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added PR review regression coverage for unknown and hostile Evaluations run statuses. The tests now verify arbitrary unknown text stays visible, prototype-property keys such as constructor fall back without crashing, running spinner coverage uses a stable test id instead of the animate-spin class, and canonical state labels are not appended as extra hidden badge copy. Production changes use an own-property guard for STATUS_CONFIG lookups, keep the running icon aria-hidden with a stable test hook, and remove the additive srLabel from this adapter so the visible run status remains the accessible label. Verification passed: bunx vitest run src/components/Option/Evaluations/components/__tests__/StatusBadge.design-system.test.tsx --reporter=dot (9 tests); bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot (46 tests); bun run verify:design-system-state; git diff --check. bunx tsc --noEmit --pretty false was rerun and still fails on existing unrelated package-wide TypeScript errors; no reported errors are from the touched Evaluations StatusBadge files. Bandit was not run because this review fix only touches TS/TSX test code and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

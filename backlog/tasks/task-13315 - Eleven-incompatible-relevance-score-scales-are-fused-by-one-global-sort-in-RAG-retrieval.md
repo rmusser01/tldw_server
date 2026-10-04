@@ -40,7 +40,7 @@ Source: synthesis F16
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed in 2f3b59fd67. Design record: Docs/ADR/049-rag-cross-source-fusion.md.
 
 AC1: MultiDatabaseRetriever.retrieve now keeps each source's results in their own list and orders across them with reciprocal rank fusion (k=60) in _order_across_sources, instead of flattening and sorting by raw score.
@@ -62,7 +62,7 @@ Note on test quality: the end-to-end test first asserted only "any media documen
 Follow-up filed as TASK-13346: _retrieve_allowed_notes_via_sql returns notes ordered by last_modified with no text match required, stamped score=1.0. Fusion stops them dominating a multi-source result, but in a single-source notes query the caller still gets recency ranking presented as relevance ranking.
 
 Verification: tests/RAG + tests/RAG_NEW 12 failed / 2020 passed with the change vs 18 / 2014 without (stash-isolated); the difference is exactly these tests and there are no new failures. The 12 are pre-existing. tests/RAG/test_restricted_postgres_media_retrieval.py hangs in this environment (no local Postgres) and was excluded from both runs -- an environment limitation, not a code defect. Bandit clean on database_retrievers.py (run via uvx; bandit is CI-only, not a declared local dependency).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

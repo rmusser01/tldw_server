@@ -37,10 +37,8 @@ Record approved design and baseline; add failing behavior tests; implement minim
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 CLI allocated TASK-13177 despite a main-checkout task already owning that number. This explicitly allocated replacement avoids that collision; archive only the newly created duplicate in this worktree.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Implementation and independent review complete. Added owner-scoped email instructions via existing registry/Settings; form provider and recursive options now reach analysis. Removed explicit-key-only gate, relying on shared configured/keyless credential resolution. Self-review reproduced JSON-shaped email body loss in three RED tests; input_is_literal_text=True fixed all three. Review follow-up added real key/model resolution coverage, real PST/OST traversal with libpff boundary substituted, and worker-local cleanup checks on success/corruption; six targeted checks passed. Final combined regressions running. Historical duplicate TASK-13177 was archived in this worktree only; active task uses explicitly allocated TASK-13178.
 
@@ -55,7 +53,7 @@ Qodo findings 2-4 addressed with JSONResponse return annotation and endpoint/for
 2026-10-01 tracking closeout: GitHub verified PR2887 MERGED at 2026-09-05T17:20:18Z with merge commit 69c96ef715588f27d9cb953be13e75f3493c6ba9. Existing acceptance criteria and Definition of Done were already checked and implementation/review results recorded. Corrected stale In Progress status only; no source change or repeated tests. Bandit is not applicable to this tracking-only correction. Read-only merge receipt: /tmp/email_workstream_pr2887_status_20261001.json.
 
 Published reviewed fixes as d4693fefe37bc75d9d9b54026c77c12de3200c76 on codex/email-followup-closeout-20261001; normal push verified. Draft PR3077 contains the implementation and this tracking closeout. Repair acceptance is locally complete; this new PR is not merged and its human-written Change summary and hosted CI are pending. Source receipt /tmp/email_followup_closeout_receipt_20261001.json binds ten exact source paths and frozen verification artifacts. Browser coverage checks the AuthNZ manifest entry plus selected-document content/render; the real AuthNZ guide HTTP probe is separate. Task-owned servers stopped after identity verification; shared installations and unrelated resources preserved. Completed owned plan retained at /tmp/email_followup_plan_completed_20261001.md after all stages are complete.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

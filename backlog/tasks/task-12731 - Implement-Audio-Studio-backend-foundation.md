@@ -45,7 +45,6 @@ Follow Stage 1 tasks 1.1 through 1.3 in Docs/superpowers/plans/2026-06-23-audio-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Follow-up spec compliance fixes:
 - Strengthened Audio Studio client payload validation to reject common credential key variants including access_token, refresh-token, private_key, credentials/clientCredential, while allowing harmless keys such as tokenizer.
@@ -70,7 +69,6 @@ Follow-up verification:
 - .venv/bin/python -m pytest tldw_Server_API/tests/Audiobooks/integration/test_audiobook_jobs_endpoints.py -v: 4 passed
 - .venv/bin/python -m bandit -r touched backend files -f json -o /tmp/bandit_audio_studio_backend_foundation.json: exit 0, no findings
 - git diff --check scoped to Audio Studio touched files: pass; global dirty worktree still contains unrelated changes outside this task scope.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Follow-up code-quality review fixes:
 - Rejected nested URL-bearing keys and http/https URL string values in Audio Studio client-controlled provider/options/settings/metadata payloads.
@@ -87,7 +85,7 @@ Follow-up verification:
 - .venv/bin/python -m pytest tldw_Server_API/tests/Audiobooks/integration/test_audiobook_jobs_endpoints.py -v: 4 passed
 - .venv/bin/python -m bandit -r touched backend files -f json -o /tmp/bandit_audio_studio_backend_foundation.json: exit 0, zero findings
 - Scoped git diff --check for Audio Studio touched files: pass
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -41,9 +41,9 @@ Source: synthesis F24
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ae073d8cb8. session_manager._derive_secret_key_candidates now returns urlsafe_b64(derive_hmac_key_candidates(settings)) first, then the old derivation (moved verbatim to _derive_legacy_secret_key_candidates: static salt, 600k rounds, raw secrets incl. JWT secrets in single-user mode) as trailing rotation candidates. Canonical ValueError (no secret configured) is caught -> [] since derived keys are only a fallback behind the persisted/explicit SESSION_ENCRYPTION_KEY. Found while writing AC#2's test: decrypt_token's candidate walk never worked -- Fernet.InvalidToken was not in the caught tuple, so the first non-matching candidate aborted; and both decrypt failure raises called InvalidSessionError(msg), which takes no args (TypeError). Fixed both; otherwise adoption would have logged out every session encrypted under a derived key. Tests: tests/AuthNZ/unit/test_session_manager_key_derivation.py, 4 tests, all 4 fail on ea1cbc6941 session_manager, pass now. AuthNZ/unit + AuthNZ_Unit before: 21 failed/7 errors/2389 passed; after: 21/7/2393, identical failure set. Bandit -ll clean. Docs: none needed (internal). Cost note: init still runs the 600k-round legacy PBKDF2 per secret, as before; drop _derive_legacy_secret_key_candidates once old derived-key sessions have expired.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

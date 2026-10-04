@@ -38,7 +38,7 @@ Implement GitHub issue #1450: duplicate a Persona Visual pack from one same-user
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete: added shared persona visual manifest asset collection/remapping helpers, migrated import commit remapping to the shared helper, and added focused helper tests. Red verification: missing visual_manifest_assets module produced ModuleNotFoundError; first pytest run also confirmed collection failure. Green verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_manifest_assets.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q => 28 passed, 5 warnings.
 
 Task 2 complete: added explicit parent_persona_id support for create_persona_visual_pack so same-user duplicate creation can validate a cross-persona parent pack, exported update_persona_visual_pack_status, and added a DB-focused regression for failed-to-draft duplicate lineage. Red verification: focused test failed with unexpected parent_persona_id keyword. Green verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py::test_db_allows_explicit_cross_persona_parent_for_duplicate_path -q => 1 passed, 5 warnings.
@@ -54,7 +54,7 @@ Task 7 verification complete: PRD Phase 3 now records same-user draft duplicatio
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1467.
 
 PR review follow-up complete: normalized remap lookups to match collection, switched duplicate preflight to path plus streaming checksum instead of buffering all source bytes, soft-deleted failed duplicate packs and copied asset rows on partial failures, preserved source and target active packs in regression coverage, and guarded duplicate-target loading against stale responses. Verification: backend persona visual tests 46 passed, VisualPackEditor Vitest 17 passed, Bandit zero findings at /tmp/bandit_persona_visual_duplicate_review.json, git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

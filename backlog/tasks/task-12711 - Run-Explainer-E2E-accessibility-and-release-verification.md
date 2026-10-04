@@ -35,9 +35,9 @@ Implement Task 5 from the Explainer workspace plan: add mocked Playwright covera
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added mocked Playwright Explainer workflow coverage and a reusable Explainer page object. /explainer already participates in smoke inventory through route metadata as a manual smoke route, so page-inventory did not need a separate entry. The planned broad backend command was interrupted after selecting unrelated Chatbook tests and going quiet; feature-specific backend coverage was rerun with narrower commands and passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

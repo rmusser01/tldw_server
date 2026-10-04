@@ -34,9 +34,9 @@ Create the implementation plan for the approved unified first-time solo-user onb
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Used superpowers:writing-plans. Plan review iterations found and the plan addressed setup metadata/access-boundary gaps, privacy/security step coverage, required screen acknowledgement semantics, post-onboarding first-source milestone coverage, Python 3.10 Enum compatibility, and provider save response contract drift.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -38,7 +38,7 @@ Add a local-first Phase 4 sandbox reliability slice that defines and tests clean
 <!-- DOD:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented local-first cleanup/recovery contract coverage in isolated worktree codex/sandbox-cleanup-recovery-contracts.
 
 Added worktree timeout cleanup test asserting timed_out status, worktree destruction, run-dir removal, SIGTERM, and active tracking cleanup.
@@ -52,7 +52,7 @@ Verification: focused baseline before edits passed 64 tests; focused post-edit t
 Bandit: skipped because the branch only changes tests, docs, and Backlog.md task metadata; no production Python code changed.
 
 PR #1294 review-fix pass: verified and fixed Qodo/CodeRabbit feedback that the worktree timeout test cleared active-run tracking before asserting cleanup. The test now asserts `_active_proc`, `_active_run_dir`, and `_cancelled_runs` before the test-isolation cleanup block runs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

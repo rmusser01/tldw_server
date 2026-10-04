@@ -41,9 +41,9 @@ Create a reviewed design spec for improving self-hosted llama.cpp server managem
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/specs/2026-05-15-llamacpp-server-management-webui-design.md. Ran git diff --check on the spec and reviewed for missing placeholders, contradictions, and V1 scope creep. Tightened launch-profile language so profile persistence is deferred rather than required V1 scope. No Bandit run: documentation-only design task with no Python/code changes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -41,7 +41,7 @@ Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md#tas
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Updated API schemas to the M1 contract: public domains are `notes.note`, `chat.conversation`, `chat.message`, and `attachment.ref`; default encryption is `server_trusted_v1`; legacy capability domain inputs normalize to the M1 set.
 - Updated core models with M1 constants and transition aliases for `server_cursor`/`server_sequence`, `object_id`/`entity_id`, and `payload`/`payload_clear`. Direct `payload_clear` construction no longer copies private cleartext into the new `payload` field.
 - Extended `sync_envelopes` with M1 base-state metadata, object revisions, client sequence/profile, payload JSON/hash, created/received timestamps, tombstone flag, encryption metadata, and projection apply status/error fields.
@@ -90,7 +90,7 @@ Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md#tas
 - Focused tests: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py::test_conflict_resolution_request_rejects_skip_with_resolution_envelope tldw_Server_API/tests/Sync/test_sync_v2_service.py::test_resolve_conflict_dismiss_rejects_resolution_envelope_without_mutation -q` -> 2 passed, 5 warnings.
 - Updated targeted/conflict suite: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py tldw_Server_API/tests/Sync/test_sync_v2_object_state.py tldw_Server_API/tests/Sync/test_sync_v2_service.py::test_resolve_conflict_duplicate_rename_accepts_distinct_object_id tldw_Server_API/tests/Sync/test_sync_v2_service.py::test_resolve_conflict_rejects_expected_dataset_mismatch_without_mutation -q` -> 71 passed, 5 warnings.
 - Updated Bandit: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/schemas/sync_v2_models.py tldw_Server_API/app/core/Sync/v2/service.py -f json -o /tmp/bandit_sync_v2_task2.json` -> 0 findings (`results: []`).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

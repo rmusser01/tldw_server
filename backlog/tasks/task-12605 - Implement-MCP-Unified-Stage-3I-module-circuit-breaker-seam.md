@@ -31,7 +31,7 @@ Remove the remaining direct host circuit-breaker dependency from MCP module base
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Rebased cleanly onto origin/dev at 02a017e655 before final verification.
 - Added RED coverage for the modules/base.py circuit-breaker host import and for MCPServer default-module ModuleConfig breaker factory injection.
 - Replaced the modules/base.py fallback host circuit-breaker import with a small host-neutral async breaker supporting can_attempt(), record_failure(), record_success(), and call_async().
@@ -42,7 +42,7 @@ Remove the remaining direct host circuit-breaker dependency from MCP module base
 - Bandit touched implementation scope after rebase: 0 findings in /tmp/bandit_mcp_stage3i_module_breaker_after_rebase.json.
 - Whitespace after rebase: git diff --check -> passed.
 - Known skips/blockers: none.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

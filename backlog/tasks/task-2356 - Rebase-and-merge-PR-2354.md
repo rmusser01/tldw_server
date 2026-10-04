@@ -29,7 +29,7 @@ Track the review-comment remediation, latest dev rebase, verification, push, and
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review-comment remediation:
 - Removed the hardcoded fallback `TLDW_API_KEY` from `apps/tldw-frontend/scripts/media-multi-uat-driver.mjs`; the UAT driver now requires an explicit env API key.
 - Updated the UAT driver from stale `/media` selectors (`results-select-*`, `media-bulk-*`) to `/media-multi` selectors (`media-review-result-row`, `media-multi-batch-*`).
@@ -45,16 +45,11 @@ Verification before rebase/commit:
 - UI regression tests passed: `MediaReviewPage.stage5.batch-toolbar.test.tsx` and `MediaReviewPage.stage5.export-trash-handoff.test.tsx` (5 tests). The local worktree has a stale `antd` symlink, so it was temporarily pointed at the installed package and restored afterward.
 - Focused Playwright regression passed: `e2e/media-multi-bulk-select.spec.ts --project=chromium` (2 tests) against the running backend.
 - Bandit: no Python files touched (`git diff --name-only -- '*.py'` empty). A direct Bandit invocation on the JS/TS touched files produced parse errors and no findings, so there is no applicable Python Bandit scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

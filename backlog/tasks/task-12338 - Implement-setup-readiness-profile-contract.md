@@ -31,9 +31,9 @@ Implement the first backend slice from Docs/superpowers/plans/2026-05-18-first-t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added readiness_models.py for canonical lane IDs, supported statuses, overlays, labels, and lane-summary normalization. Added readiness_profiles.py as a pure builder over setup status, config snapshot fields, and audio recommendations. Added focused setup readiness profile tests before implementation, then kept the slice backend-only with no endpoint, schema, WebUI, provisioning, or config mutation changes. Updated the implementation plan Task 1 checklist and file list to match the actual scoped implementation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

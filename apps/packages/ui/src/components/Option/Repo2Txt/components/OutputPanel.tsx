@@ -54,7 +54,7 @@ export function OutputPanel({
         value={output}
         readOnly
         rows={14}
-        className="w-full rounded border p-3 text-xs"
+        className="w-full rounded border border-border bg-surface p-3 text-xs text-text"
         aria-label={t("option:repo2txt.outputPreviewAria", {
           defaultValue: "Repo2txt output preview"
         })}

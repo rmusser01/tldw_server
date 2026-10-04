@@ -37,7 +37,7 @@ Trace the existing history-linking boundary; add RED regressions; implement the 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: five focused regressions reproduced stale Dexie/ref and workspace/persona publication; an additional existing-chat preflight assertion also failed before its signal was threaded.
 
 GREEN: 81 focused/adjacent Vitest tests passed; extension compile passed; focused ESLint reported 0 errors; git diff --check passed.
@@ -53,7 +53,7 @@ Qodo review on PR #2799 posted two threads: remove the transaction-helper implem
 Qodo remediation RED: 2 focused failures reproduced the gap—an aborted owned loader still passed shouldCommitServerChatLoadResult, and superseded Chat A published its title after Chat B replaced it. GREEN: the loader now rejects aborted ownership, forwards its per-load signal into scoped history linking, and checks ownership before/after the link and before final publication; the brittle transaction-helper call assertion was removed while behavior coverage remains. Verification: 84/84 focused and adjacent tests passed; extension compile passed; focused ESLint reported 0 errors (pre-existing warnings only); git diff --check passed. Bandit remains not applicable because all touched implementation is TypeScript.
 
 Post-review rebase: rebased conflict-free onto origin/dev 424cb464a6225d71adbcd1fcedcb0a73853a2055, then reran the exact focused gates: 84/84 tests passed, extension compile passed, focused ESLint reported 0 errors, and branch diff check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

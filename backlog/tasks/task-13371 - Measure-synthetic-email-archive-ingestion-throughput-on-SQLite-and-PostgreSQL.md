@@ -25,11 +25,11 @@ Measure authenticated full-app archive ingestion with synthetic MBOX data, metad
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Initial SQLite live probe passed correctness/idempotency/isolation and zero model/external attempts but measured aggregate 29.26 msg/s (3x100). Profiled repeat 32.57 msg/s; worker-factory diagnostic 45.65 msg/s with handle construction about 2-3% of upload time. Initial PostgreSQL archive probe exposed 99 media_pkey duplicate failures after first child; corrected in TASK-13372. Post-fix PostgreSQL 300-message probe passed all assertions and direct forced RLS, aggregate 5.03 msg/s. Published probe rerun passed at 6.92 msg/s; neither meets 50 target. Published helper cleanup target guards: 6 tests red/green; artifact Ruff/Bandit clean. Final published SQLite rerun and cleanup ongoing.
 
 Final published probes: SQLite aggregate 53.49 msg/s with first batch 49.59 (earlier runs 29.26/45.65); PostgreSQL aggregate 6.92 msg/s. All 300 IDs, 100-message rerun, detail subjects, cross-user search/detail passed. PostgreSQL direct RLS enabled/forced, owner rows 300/other 0, non-superuser/non-bypass role; both guards zero. Target remains uncertified. Published cleanup helper checked catalog absence of both databases/role then removed private manifest. All nine private roots from this round removed, older roots/shared fixture container preserved. Report Docs/Operations/Email_Archive_Ingestion_Throughput_2026-09-25.md. Artifact Ruff/Bandit clean, 6 cleanup guard tests passed. Measurement plan complete; remove own plan.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

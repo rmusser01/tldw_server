@@ -35,9 +35,9 @@ Implement the third backend slice from Docs/superpowers/plans/2026-05-18-first-t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added first-run read-only setup readiness profiles, status, and preview routes under the existing /api/v1/setup router with require_local_setup_access and openapi_extra security clearing. Added a shared endpoint helper that builds profile/status payloads from setup status, config snapshot, and audio recommendations, with an overlays alias for UI consumers. Added API tests for profiles, status overlay separation, and preview secret redaction/no-write behavior. Updated Task 3 in the implementation plan and removed the schema file from this slice because the schema models landed in Task 2.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

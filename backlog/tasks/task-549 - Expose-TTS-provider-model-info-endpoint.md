@@ -26,15 +26,11 @@ Add a focused provider model-info endpoint for TTS providers so Chatterbox clien
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented GET /api/v1/audio/tts/providers/{provider}/model-info. The endpoint combines provider status and sanitized capabilities into a focused payload with provider, status, initialized/loaded flags, model IDs, model family metadata, optional voice-conversion metadata, capabilities, and the matching unload endpoint. Unknown providers return HTTP 404. Added aggregate audio module exports and setup/plan docs.
 
 Verification: RED focused provider_model_info tests failed before implementation with missing route. GREEN focused provider_model_info tests passed 2 tests. Broader provider/voice endpoint slice passed 10 tests. Bandit on audio_tts.py, audio.py, and audio/__init__.py wrote /tmp/bandit_chatterbox_model_info_task549.json with results empty. git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

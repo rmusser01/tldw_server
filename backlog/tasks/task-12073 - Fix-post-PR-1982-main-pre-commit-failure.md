@@ -53,9 +53,9 @@ Resolve the post-PR #1982 main pre-commit failure without weakening security che
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Completed as part of PR #2557. Kept the fixes scoped to the files reported by the post-PR-1982 pre-commit run, used runtime string construction for synthetic PEM markers instead of detector allowlists, and updated the hosted onboarding assertion to require auth. Verification details are recorded in the final summary.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

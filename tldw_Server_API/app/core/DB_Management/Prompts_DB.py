@@ -2604,7 +2604,7 @@ class PromptsDatabase:
                     cursor = self.execute_query("SELECT rowid FROM prompts_fts WHERE prompts_fts MATCH ?", (fts_query,))
                     used_fts = True
                     matching_prompt_ids.update(row['rowid'] for row in cursor.fetchall())
-                except sqlite3.Error as e:
+                except (DatabaseError, sqlite3.Error) as e:
                     logging.warning(f"FTS search on prompts failed: {e}; will fallback to naive search.")
                     fts_error = True
 
@@ -2625,11 +2625,11 @@ class PromptsDatabase:
                             tuple(matching_keyword_ids)
                         )
                         matching_prompt_ids.update(row['prompt_id'] for row in link_cursor.fetchall())
-                except sqlite3.Error as e:
+                except (DatabaseError, sqlite3.Error) as e:
                     logging.warning(f"FTS search on keywords failed: {e}; will fallback to naive search.")
                     fts_error = True
 
-            if not matching_prompt_ids and not used_fts:
+            if not matching_prompt_ids and not used_fts and not fts_error:
                 return [], 0  # No FTS used and no matches requested
 
             # Add the final ID list to the main query conditions
@@ -2639,7 +2639,12 @@ class PromptsDatabase:
                 params.extend(list(matching_prompt_ids))
 
         # If FTS was used but resulted in no matches, prevent unfiltered result set before fallback.
-        if search_query and search_fields and used_fts and not matching_prompt_ids and ("author:" not in str(search_query).lower()) and ("keyword:" not in str(search_query).lower()):
+        if (
+            search_query
+            and search_fields
+            and (used_fts or fts_error)
+            and not matching_prompt_ids
+        ):
             conditions.append("1 = 0")
 
         # --- Build and Execute Final Query ---

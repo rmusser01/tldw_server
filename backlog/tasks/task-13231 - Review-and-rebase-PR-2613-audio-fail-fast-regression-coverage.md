@@ -41,7 +41,7 @@ Stage 1: inspect PR, dev, and review threads (complete). Stage 2: rebase and arc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Supersedes the archived PR-specific TASK-13001 audit record, which collides with current dev UserProfiles TASK-13001. MCP reads were unresponsive, so official Backlog CLI is used. Rebased onto origin/dev 40345571a2cfc8b3a8893545836097d27e4ee86c. The original no-op regression repair is already in dev; remaining value is correct URL, stream=True and no body iteration for oversized Content-Length in the injected downloader path. Three focused tests pass with four warnings; Ruff passes; Bandit has seven LOW B101 findings, all ordinary pytest assertions, zero errors. Independent review found only the now-archived active task collision. Both GitHub review threads are resolved. Old July backend-required failure was OpenAPI fingerprint drift, unrelated to the test-only diff. A human-written Change summary is still required by repository merge policy.
 
 Published the rebase with explicit force-with-lease. GitHub confirms the PR is mergeable without conflicts against dev 40345571a2. Independent follow-up review confirms TASK-13231 resolves uniquely and UserProfiles TASK-13001 plus TASK-13001.1 are unchanged. Fresh workflows started successfully; frontend and license checks passed at the initial query, with remaining checks pending. The PR description contains the review and will carry the final live CI assessment; this task completes the review/rebase work, not authorization to merge.
@@ -51,7 +51,7 @@ Qodo review follow-up: PR marked ready for review and human Change summary suppl
 Qodo follow-up verified: the archived audit task now has one matching marker pair per section; all three PR task records parse without nested marker content. Historical notes, the September paragraph and unrelated UserProfiles task/child are unchanged. Repaired through installed Backlog-py configured-editor scratch workflow on an isolated original revision, then cherry-picked. The counter objection was answered with the existing dependency-boundary contract and controlled mutation evidence, and its thread was resolved. Independent re-review accepts both dispositions with no actionable findings. Focused suite: 3 passed, 4 warnings; Ruff and diff checks pass; Bandit remains seven LOW B101 pytest assertion warnings, zero errors. Human summary is supplied and PR is non-draft. Final thread resolutions and any later Qodo review results are recorded on PR #2613.
 
 Final merge request: user explicitly authorized rebasing onto latest dev, addressing subsequent Qodo feedback, and merging PR #2613. Rebased all nine commits onto origin/dev 456eafb7a603449722ba8db806071a5e2aa5e7d6 without conflicts; git range-diff confirms every patch is unchanged. Fresh focused validation on this base: 3 tests pass with four warnings; Ruff, compile and diff checks pass; Bandit is limited to the same seven LOW B101 pytest assertions with zero errors. The human-written Change summary remains intact. Final Qodo review and required CI must be clear before executing the authorized merge; the PR is the source of truth for the final merge outcome.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

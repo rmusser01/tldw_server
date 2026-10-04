@@ -35,7 +35,7 @@ Reason: Routine restoration of the existing quickstart public-health contract.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added only a quickstart /health rewrite to the configured internal backend public /health endpoint. Existing /api rewrites, advanced-mode routing, and fail-closed validation for a missing internal origin are unchanged.
 Files: apps/tldw-frontend/next.config.mjs and __tests__/next-config-quickstart-health.test.ts.
 ADR required: no; routine restoration of the documented quickstart public-health routing contract.
@@ -47,7 +47,7 @@ Live runtime restart and fresh quickstart readiness retest remain with the coord
 Live quickstart retest: same-origin /health returns200/ok and readiness state is ready. Actual cookie session mint also200. Persona then hits the separate legacy cookie-auth dependency gap TASK-13181; no quickstart asset or stream pass claimed.
 
 Coordinated final validation: 265 focused frontend tests, 54 backend tests, production Bandit0 findings, scoped frontend ESLint0 errors (warnings documented), unchanged Python lint baseline, real browser evidence and limitations recorded in Docs/Reviews/MIGU_BUDDY_UAT_2026_09_05.md. Repository-wide typechecking remains limited by80 diagnostics across6 unchanged unrelated files; no full suite run.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

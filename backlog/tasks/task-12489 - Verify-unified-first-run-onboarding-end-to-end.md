@@ -33,7 +33,7 @@ Add final Playwright coverage and run/reconcile the backend, frontend, E2E, Band
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added a mocked-backend Playwright workflow for the unified first-run onboarding journey, including focused shell, completed-state milestone, and first-chat completion gate.
 
 Moved Next root shell registration into an effect and made nested shell overrides retry once when the root shell setter is registered after nested layout mount.
@@ -41,7 +41,7 @@ Moved Next root shell registration into an effect and made nested shell override
 Coalesced initial setup state/metadata loads in useSetupOnboarding so remounts do not discard completed backend state while metadata is still in flight. Added hook regression tests for metadata-in-flight duplicate loading and remount continuation.
 
 Attempted the broader tldw_Server_API/tests/Setup release command; unrelated audio health/audio pack/installer failures were observed outside this onboarding slice before the run was stopped.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

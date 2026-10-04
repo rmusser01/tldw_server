@@ -37,9 +37,9 @@ Address the actionable PR 1374 review feedback on the UnifiedLoadingState design
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review comments addressed: restored explicit children-only return when loadingSources is empty; added a test that no LoadingState marker exists after loading; added a red-green test proving hidden labels do not call the translation fallback; kept product-state guard behavior unchanged. Verification: bunx vitest run src/components/Common/__tests__/UnifiedLoadingState.test.tsx src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed with 44 tests. bun run verify:design-system-state passed with baseline exceptions still at 519 and local-loading-state at 3. git diff --check passed. Bandit skipped because this is frontend TypeScript/test-only work.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

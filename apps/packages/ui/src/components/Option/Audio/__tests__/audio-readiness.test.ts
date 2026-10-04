@@ -328,3 +328,20 @@ describe("audio readiness helpers", () => {
     )
   })
 })
+
+describe("server TTS provider absence", () => {
+  it("reports a settled empty catalog as blocked with setup guidance", () => {
+    expect(
+      buildTtsReadinessItems({
+        provider: "kitten_tts",
+        hasAudio: true,
+        providersInfo: null
+      })
+    ).toContainEqual(
+      expect.objectContaining({
+        state: "blocked",
+        detail: expect.stringContaining("Settings")
+      })
+    )
+  })
+})
