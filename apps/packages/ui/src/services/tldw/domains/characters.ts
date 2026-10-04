@@ -467,7 +467,8 @@ export const characterMethods = {
         this.assertDomainCacheRevision(cacheRevision)
         const value = await bgRequest<any>({
           path,
-          method: 'GET'
+          method: 'GET',
+          configSnapshot: this.getDomainCacheConfigSnapshot(cacheRevision)
         })
         await this.getDomainCacheRevision()
         this.assertDomainCacheRevision(cacheRevision)

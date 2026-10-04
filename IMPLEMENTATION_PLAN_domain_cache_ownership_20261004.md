@@ -41,4 +41,11 @@ same 830 warnings as baseline; the new regression file has no warnings.
 Bandit is unavailable in the project venv and is not applicable to the
 TypeScript-only touched scope. No new auth protocol or credential persistence is
 introduced. Diff whitespace validation passed. Independent upstream-diff review
-and PR publication remain to be recorded.
+completed and identified a lower-level GET coalescing gap. Six real-transport
+regressions failed with the new API-key owner receiving the previous owner's
+response. Fenced reads now pass the existing native `configSnapshot`, preventing
+transport-only joins while retaining domain single-flight. The updated ten-suite
+matrix passes 423 tests; the ownership/scope subset passes 168 tests. Focused
+TypeScript still reports the same seven baseline diagnostics and zero introduced
+errors. Draft PR: https://github.com/rmusser01/tldw_server/pull/3170. Follow-up
+publication and conversion to ready for review remain to be recorded.

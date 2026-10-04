@@ -17,6 +17,9 @@ switching to Bob. This work fixes that generic native client behavior only.
 - Observe `watchChatAccountChanges` once for an account-boundary revision. Even
   an identical cookie-session configuration after logout/login is a new epoch.
 - Discard shared profile/message caches and in-flight indexes on a boundary.
+- Pin fenced reads to the captured native `configSnapshot`. Domain single-flight
+  remains owner-aware; lower-level GET coalescing must not join another owner's
+  request merely because a transport scope key is identical.
 - Recheck ownership after asynchronous work, including path resolution and
   response completion. Reject superseded unscoped reads with the existing scope
   changed error; never repopulate a newer epoch or delete its in-flight entry.
@@ -37,3 +40,5 @@ responses: JWT principal changes, API-key changes, server/org/auth-source change
 same-principal JWT refresh, account events with identical cookie-session configs,
 late completion, concurrent reads, and explicit-scope bypass. Run related client
 tests, TypeScript checking where available, and touched-scope security assessment.
+Real background-proxy transport tests reproduce API-key owner joins and verify
+separate dispatch, current-owner cache publication, and stale-response rejection.

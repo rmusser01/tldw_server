@@ -1886,6 +1886,13 @@ export class TldwApiClientBase {
     }
   }
 
+  getDomainCacheConfigSnapshot(revision: number): TldwConfig {
+    this.assertDomainCacheRevision(revision)
+    if (!this.domainCacheConfig) throw createServicePromptScopeChangedError()
+    // Domain single-flight owns these reads; do not join a transport-only key.
+    return { ...this.domainCacheConfig }
+  }
+
   invalidateChatMessagesCache(chatId?: string | number): void {
     const cid = chatId != null ? String(chatId) : null
     if (!cid) {
@@ -5077,7 +5084,8 @@ export class TldwApiClientBase {
         this.assertDomainCacheRevision(cacheRevision)
         const value = await bgRequest<any>({
           path,
-          method: 'GET'
+          method: 'GET',
+          configSnapshot: this.getDomainCacheConfigSnapshot(cacheRevision)
         })
         await this.getDomainCacheRevision()
         this.assertDomainCacheRevision(cacheRevision)
@@ -6104,6 +6112,7 @@ export class TldwApiClientBase {
       const data = await bgRequest<any>({
         path: `/api/v1/chats/${cid}/messages${query}`,
         method: "GET",
+        ...(useSharedCache ? { configSnapshot: this.getDomainCacheConfigSnapshot(cacheRevision) } : {}),
         abortSignal: options?.signal,
         ...(scopeFields.servicePromptConfig ? {
           headers: scopeFields.headers,

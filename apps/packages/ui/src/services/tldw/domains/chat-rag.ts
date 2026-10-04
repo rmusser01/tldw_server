@@ -1150,6 +1150,7 @@ export const chatRagMethods = {
       const data = await bgRequest<any>({
         path: `/api/v1/chats/${cid}/messages${query}`,
         method: "GET",
+        ...(useSharedCache ? { configSnapshot: this.getDomainCacheConfigSnapshot(cacheRevision) } : {}),
         abortSignal: options?.signal,
         ...(scopeFields.servicePromptConfig ? {
           headers: scopeFields.headers,
