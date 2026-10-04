@@ -1,8 +1,8 @@
-# ADR-059: Dormant Jobs-Rooted Embeddings Durability
+# ADR-060: Dormant Jobs-Rooted Embeddings Durability
 
 **Status:** Proposed
 **Date:** 2026-10-02
-**Revised:** 2026-10-03
+**Revised:** 2026-10-04
 **Backfilled from:** not backfilled
 **Decision owner:** repository requester; consolidated record awaiting written review
 **Related task:** TASK-13421
@@ -32,6 +32,8 @@ processing leases immediately. A latest root result marker is not a complete
 operation journal. Ordinary vector-store upsert does not certify first-write
 immutability or prevent late writes after superseded-output cleanup. The foundation
 must establish stronger contracts before real adapters or entrypoints are migrated.
+Generic Jobs admission also defaults to consuming failure retries on lease expiry;
+retry-neutral infrastructure recovery needs explicit, replay-validated controls.
 
 ## Alternatives considered
 
@@ -49,6 +51,14 @@ must establish stronger contracts before real adapters or entrypoints are migrat
 - Jobs retains the sole coarse lifecycle/quarantine authority. Its new prepared
   capability must preserve exact effect acknowledgements across later transitions
   and archival without importing Embeddings schemas.
+- New Embeddings roots explicitly pin `ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT` and
+  validate stored execution controls on admission replay, binding, and resume.
+  A separate durable limit of at most five consecutive no-progress acquisitions
+  bounds yield/expiry cycling, including expiry before the handler starts. Only
+  new, exact semantic-progress proofs reset it, not deferral acknowledgements.
+  Exhaustion goes through Jobs failure/quarantine authority without inventing a
+  provider attempt or retry; legacy Jobs defaults and Admin Webhook restrictions
+  remain unchanged.
 - Six owner-scoped Embeddings tables live on the configured Jobs backend behind
   DB_Management repository/migration abstractions. PostgreSQL requires FORCE RLS
   and a non-bypass runtime role; SQLite requires exact owner predicates and
@@ -82,6 +92,12 @@ Obtain approval of the consolidated written spec and this Proposed record before
 implementation planning. Deliver separate reviewable Jobs capability, repository,
 coordinator/adapter, and certification units. Real adapters and production migration
 remain later workstream stages; acceptance of this record is not activation approval.
-This proposal was renumbered from ADR-058 after that number was accepted for Jobs
-completion row identity on `dev`. Recheck the next free number before integration;
-do not replace or rewrite that accepted record.
+Repository planning must select and test an atomic global capacity reservation
+primitive compatible with owner-scoped FORCE RLS/non-bypass runtime roles. Runner
+planning must map every private durable phase/terminal outcome to the existing
+closed trace contracts without expanding inline literals or inferring completion
+before Jobs acknowledgement.
+This proposal was renumbered from ADR-058 and then ADR-059 as `dev` accepted those
+numbers for Jobs completion row identity and the backlog-py task editor cutover.
+ADR-060 is the next free number as of this revision. Recheck numbering before
+integration; do not replace or rewrite accepted records.
