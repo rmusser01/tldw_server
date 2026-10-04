@@ -90,5 +90,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-056](056-resource-governor-safety-net.md) | Accepted | Resource Governor ingress is a per-entity safety net: one policy resolver (path, then tag, then a catch-all default), the validated principal (never the proxy) is charged, `global` buckets survive only for email-sending auth endpoints, no configuration can produce a permanent 429, and one switch disables enforcement everywhere. |
 | [ADR-057](057-workspace-chat-strict-startup-receipts.md) | Proposed | Retain bounded owner-bound strict Workspace startup receipts with atomic acceptance and permanent binding invalidation. |
 | [ADR-058](058-jobs-completion-row-identity.md) | Accepted | Bind Jobs completion and bookkeeping to locked row identity with optional caller UUID preconditions. |
+| [ADR-059](059-backlog-py-task-editor-cutover.md) | Accepted | Create and edit backlog task files only with backlog-py, not the Node Backlog.md CLI or MCP; ADR-002's task requirement is unchanged. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

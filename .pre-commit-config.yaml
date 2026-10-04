@@ -12,6 +12,13 @@ repos:
       - id: check-merge-conflict
   - repo: local
     hooks:
+      - id: backlog-task-format
+        name: Backlog task files use backlog-py's canonical format (ADR-059)
+        entry: env PYTHONPATH=tools/backlog-py/src python -m backlog_py --cwd . task normalize --check
+        language: python
+        additional_dependencies: ["click>=8.0.0", "loguru>=0.7.0", "PyYAML>=6.0.0"]
+        files: ^backlog/tasks/.*\.md$
+        stages: [commit, push]
       - id: guard-legacy-complete-nonempty-body
         name: Guard non-empty legacy /complete bodies in tests
         entry: python3 Helper_Scripts/checks/guard_no_nonempty_legacy_complete.py
