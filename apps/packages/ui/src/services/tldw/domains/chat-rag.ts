@@ -393,7 +393,22 @@ export const chatRagMethods = {
             ? input.expected_version
             : null,
       scope_type,
-      workspace_id
+      workspace_id,
+      matched_in: Array.isArray(input?.matched_in)
+        ? input.matched_in.filter(
+            (field: unknown) => field === "title" || field === "content"
+          )
+        : null,
+      match_snippet:
+        typeof input?.match_snippet === "string" &&
+        input.match_snippet.trim().length > 0
+          ? input.match_snippet
+          : null,
+      match_message_id:
+        typeof input?.match_message_id === "string" &&
+        input.match_message_id.length > 0
+          ? input.match_message_id
+          : null
     }
   },
 

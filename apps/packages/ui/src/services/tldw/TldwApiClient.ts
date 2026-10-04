@@ -1115,6 +1115,12 @@ export interface ServerChatSummary {
   version?: number | null
   scope_type?: "global" | "workspace" | null
   workspace_id?: string | null
+  /** Where the search query matched. Set only by a search that includes message content. */
+  matched_in?: Array<"title" | "content"> | null
+  /** Plain-text excerpt of the message that matched the search query. */
+  match_snippet?: string | null
+  /** ID of the message that match_snippet is taken from. */
+  match_message_id?: string | null
 }
 
 export interface ChatLinkedResearchRun {
@@ -5621,7 +5627,22 @@ export class TldwApiClientBase {
             ? input.expected_version
             : null,
       scope_type,
-      workspace_id
+      workspace_id,
+      matched_in: Array.isArray(input?.matched_in)
+        ? input.matched_in.filter(
+            (field: unknown) => field === "title" || field === "content"
+          )
+        : null,
+      match_snippet:
+        typeof input?.match_snippet === "string" &&
+        input.match_snippet.trim().length > 0
+          ? input.match_snippet
+          : null,
+      match_message_id:
+        typeof input?.match_message_id === "string" &&
+        input.match_message_id.length > 0
+          ? input.match_message_id
+          : null
     }
   }
 
