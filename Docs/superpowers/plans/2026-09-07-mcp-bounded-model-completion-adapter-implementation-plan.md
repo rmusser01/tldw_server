@@ -383,9 +383,17 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Tests:** Factory/config snapshot, dependency compatibility, end-to-end adapter with fake provider, identity minimization, breaker isolation, full focused regression, lint/compile/Bandit.
 
-**Status:** Not Started
+**Status:** In Progress
+
+**Checkpoint acceptance (2026-10-04):** The human's `continue` accepts Stage 4 and authorizes this stage. ADR check: no new ADR is required; ADR-059/060/061 already govern the scope, accounting, and lifecycle rules implemented by composition. Production composition remains lazy, internal, and unavailable without explicit operator accounting and fail-closed governor policy configuration; no module or tool is enabled.
 
 ### Task 5.1: Add the production factory and composition seam
+
+**Status:** Complete
+
+**Review and verification (2026-10-04):** Specification and independent quality re-reviews approved the composition. Reject unsupported governor cost-rate buckets instead of accepting an ignored control; durable monthly cost accounting is unchanged. Preserve false-valued injected transport factories with exact-`None` selection. A fresh-process regression reproduced and repaired the first-import database-stub test leak. Parent completion/credential boundary passed `760` tests; factory/dependency/package gate passed `290` tests, including `89` factory cases. Ruff, formatting of changed code, compilation, whitespace, and production Bandit (`930` lines, zero findings/errors) passed. Governor rates and concurrency remain explicitly per port/process; unsupported backends fail closed. No tool or Skills execution is enabled.
+
+**Broad regression (2026-10-04):** Full MCP core passed `4,178` tests with three existing optional-parser skips using required local fixture access. The restricted run was interrupted after confirmed localhost bind denial and cascading async fixture failures; no production workaround or disabled test was introduced. The additional fresh-process isolation regression passed in the separate `290`-test gate.
 
 **Files:**
 - Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/factory.py`
@@ -403,6 +411,8 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 6. Commit: `feat(mcp): compose bounded model completion adapter`
 
 ### Task 5.2: Run adversarial integration and regression tests
+
+**Status:** In Progress
 
 **Files:**
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_integration.py`

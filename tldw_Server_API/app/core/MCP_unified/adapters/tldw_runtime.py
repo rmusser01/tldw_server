@@ -21,6 +21,10 @@ from tldw_Server_API.app.core.Infrastructure.redis_factory import create_async_r
 from tldw_Server_API.app.core.MCP_unified.auth.authnz_rbac import get_rbac_policy
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.MCP_unified.auth.rate_limiter import get_rate_limiter
+from tldw_Server_API.app.core.MCP_unified.interfaces.model_completion import (
+    ManagedModelCompletionPort,
+    ModelCompletionPortSettings,
+)
 from tldw_Server_API.app.core.MCP_unified.interfaces.runtime import (
     AuthenticatedIdentity,
     MCPRuntimeDependencies,
@@ -462,6 +466,17 @@ def create_tldw_circuit_breaker(*, name: str, config: Any) -> CircuitBreaker:
     return CircuitBreaker(name=name, config=_to_tldw_circuit_breaker_config(config))
 
 
+def _build_tldw_model_completion_port(
+    settings: ModelCompletionPortSettings,
+) -> ManagedModelCompletionPort:
+    """Load host completion composition only when a port is explicitly requested."""
+    from tldw_Server_API.app.core.MCP_unified.adapters.model_completion.factory import (
+        build_tldw_model_completion_port,
+    )
+
+    return build_tldw_model_completion_port(settings)
+
+
 def build_default_runtime_dependencies() -> MCPRuntimeDependencies:
     """Build the default dependency bundle for the in-repo MCP server."""
     from tldw_Server_API.app.core.MCP_unified.adapters.tldw_policy import (
@@ -493,4 +508,5 @@ def build_default_runtime_dependencies() -> MCPRuntimeDependencies:
         policy_context_provider=TldwPolicyContextProvider(),
         environment_flags_provider=TldwEnvironmentFlagsProvider(),
         websocket_stream_factory=TldwWebSocketStreamFactory(),
+        model_completion_port_factory=_build_tldw_model_completion_port,
     )

@@ -5,9 +5,10 @@ import asyncio
 import contextlib
 import inspect
 import re
+import sys
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any, get_type_hints
 
 import pytest
@@ -1999,6 +2000,66 @@ def test_default_runtime_dependency_builder_exposes_core_dependencies() -> None:
     assert hasattr(deps, "rbac_policy")
 
 
+def test_default_runtime_dependency_builder_defers_model_completion_composition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Building dependencies must not import or initialize completion services."""
+    from tldw_Server_API.app.core import config as host_config
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
+
+    def unexpected_access(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("Runtime construction accessed completion configuration")
+
+    for name in (
+        "get_module_registry",
+        "get_rbac_policy",
+        "get_rate_limiter",
+        "get_metrics_collector",
+        "get_jwt_manager",
+    ):
+        monkeypatch.setattr(tldw_runtime, name, lambda: object())
+    for name in ("load_comprehensive_config", "load_and_log_configs", "get_config_section", "get_config_value"):
+        monkeypatch.setattr(host_config, name, unexpected_access)
+    monkeypatch.setattr(host_config, "loaded_config_data", SimpleNamespace(get=unexpected_access))
+    monkeypatch.setitem(
+        sys.modules,
+        f"{MCP_PACKAGE}.adapters.model_completion.factory",
+        None,
+    )
+
+    deps = tldw_runtime.build_default_runtime_dependencies()
+
+    assert callable(deps.model_completion_port_factory)
+
+
+def test_default_runtime_model_completion_factory_delegates_settings_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lazy callable forwards the exact settings to host-only composition."""
+    from mcp_unified.interfaces.model_completion import ModelCompletionPortSettings
+
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
+
+    settings = ModelCompletionPortSettings("openai", "fixed-model", 120, 15)
+    port = object()
+    calls: list[ModelCompletionPortSettings] = []
+
+    def build_port(captured_settings: ModelCompletionPortSettings) -> Any:
+        calls.append(captured_settings)
+        return port
+
+    module_name = f"{MCP_PACKAGE}.adapters.model_completion.factory"
+    factory_module = ModuleType(module_name)
+    factory_module.build_tldw_model_completion_port = build_port
+    monkeypatch.setitem(sys.modules, module_name, factory_module)
+    deps = tldw_runtime.build_default_runtime_dependencies()
+
+    assert calls == []
+    assert deps.model_completion_port_factory(settings) is port
+    assert calls == [settings]
+    assert calls[0] is settings
+
+
 @pytest.mark.asyncio
 async def test_tldw_auth_provider_fails_closed_for_unencodable_ws_headers(
     monkeypatch: pytest.MonkeyPatch,
@@ -2191,6 +2252,64 @@ def test_runtime_dependencies_default_to_noop_tool_use_recorder() -> None:
 
     assert isinstance(runtime_dependencies.tool_use_recorder, NoopToolUseRecorder)
     assert isinstance(runtime_dependencies.tool_call_hook_manager, NoopToolCallHookManager)
+
+
+def test_runtime_dependencies_omitted_model_completion_factory_defaults_to_none() -> None:
+    from mcp_unified.interfaces.runtime import MCPRuntimeDependencies
+
+    deps = MCPRuntimeDependencies(**vars(_fake_runtime_dependencies()))
+
+    assert deps.model_completion_port_factory is None
+
+
+def test_runtime_dependencies_preserve_complete_legacy_positional_bundle() -> None:
+    from mcp_unified.interfaces.runtime import MCPRuntimeDependencies
+
+    legacy_dependencies = vars(_fake_runtime_dependencies()) | {
+        "tool_use_recorder": object(),
+        "tool_call_hook_manager": object(),
+    }
+
+    deps = MCPRuntimeDependencies(*legacy_dependencies.values())
+
+    assert len(legacy_dependencies) == 23
+    for name, value in legacy_dependencies.items():
+        assert getattr(deps, name) is value
+    assert deps.model_completion_port_factory is None
+
+
+def test_runtime_dependencies_accept_explicit_model_completion_factory() -> None:
+    from mcp_unified.interfaces.model_completion import ModelCompletionPortSettings
+    from mcp_unified.interfaces.runtime import MCPRuntimeDependencies
+
+    calls: list[ModelCompletionPortSettings] = []
+    port = object()
+
+    def factory(settings: ModelCompletionPortSettings) -> Any:
+        calls.append(settings)
+        return port
+
+    deps = MCPRuntimeDependencies(
+        **vars(_fake_runtime_dependencies()),
+        model_completion_port_factory=factory,
+    )
+
+    assert deps.model_completion_port_factory is factory
+    assert calls == []
+    settings = ModelCompletionPortSettings("openai", "fixed-model", 1, 1)
+    assert deps.model_completion_port_factory(settings) is port
+    assert calls == [settings]
+
+
+def test_runtime_dependency_model_completion_factory_is_final_optional_field() -> None:
+    from mcp_unified.interfaces.model_completion import ModelCompletionPortFactory
+    from mcp_unified.interfaces.runtime import MCPRuntimeDependencies
+
+    parameters = inspect.signature(MCPRuntimeDependencies).parameters
+
+    assert list(parameters)[-1] == "model_completion_port_factory"
+    assert parameters["model_completion_port_factory"].default is None
+    assert get_type_hints(MCPRuntimeDependencies)["model_completion_port_factory"] == ModelCompletionPortFactory | None
 
 
 def test_mcp_server_accepts_runtime_dependencies() -> None:
