@@ -106,10 +106,7 @@ def test_model_completion_capabilities_are_strict_frozen_booleans() -> None:
     )
 
     assert dataclasses.is_dataclass(capabilities)
-    assert all(
-        getattr(capabilities, field.name) is True
-        for field in dataclasses.fields(capabilities)
-    )
+    assert all(getattr(capabilities, field.name) is True for field in dataclasses.fields(capabilities))
     with pytest.raises(dataclasses.FrozenInstanceError):
         capabilities.tool_suppression = False
 
@@ -257,10 +254,7 @@ def test_model_completion_protocols_expose_only_the_narrow_operations() -> None:
 
 def test_host_model_completion_shim_reexports_package_contracts() -> None:
     package_contracts = _contracts()
-    host_contracts = importlib.import_module(
-        "tldw_Server_API.app.core.MCP_unified.interfaces.model_completion"
-    )
+    host_contracts = importlib.import_module("tldw_Server_API.app.core.MCP_unified.interfaces.model_completion")
 
     for name in package_contracts.__all__:
         assert getattr(host_contracts, name) is getattr(package_contracts, name)
-
