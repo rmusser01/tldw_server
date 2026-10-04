@@ -2,8 +2,8 @@
 
 Date: 2026-10-02
 Revised: 2026-10-04
-Task: TASK-13421
-Status: Design sections approved; consolidated written spec awaiting requester review.
+Task: TASK-13450 (canonical replacement for archived, colliding TASK-13421)
+Status: Consolidated written spec approved by requester on 2026-10-04.
 Predecessor: TASK-12973, completed through merged PR #2790.
 
 ## Purpose And Scope
@@ -631,8 +631,9 @@ coordinator/reconciler; Stage 3D crash/property/backend/compatibility certificat
 Each unit receives its own Backlog task and scoped implementation plan. These
 units are requirements for later planning, not authorization to start coding.
 
-This written spec and Proposed ADR require requester review before writing-plans.
-The final design task remains In Progress until written-spec approval. Future PRs
+The requester approved this written spec and ADR on 2026-10-04. Stage 3A planning
+is tracked separately by TASK-13451; runtime implementation still requires plan
+review and execution-method selection. Future PRs
 must meet the repository's human-authored Change summary merge gate. Production
 activation and real adapter certification require separate designs, explicit
 approval, and the later media/vector-store migration stages.
