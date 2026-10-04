@@ -378,11 +378,10 @@ async def test_exact_bounded_payload_headers_scope_and_normalized_result(credent
 
 @pytest.mark.asyncio
 async def test_explicit_native_client_overrides_environment_and_default_backend(credentials, monkeypatch):
-    monkeypatch.setenv("HTTP_CLIENT_BACKEND", "aiohttp")
+    monkeypatch.setenv("HTTP_CLIENT_BACKEND", hc.AiohttpAdapter.name)
     monkeypatch.setenv("HTTP_BACKEND", "curl")
     monkeypatch.setenv("HTTP_PROXY", "http://untrusted.example:1234")
     monkeypatch.setenv("HTTPS_PROXY", "http://untrusted.example:1234")
-    monkeypatch.setattr(hc, "aiohttp", object())
     adapter = hc._get_transport_adapter
     selected = []
 
@@ -671,20 +670,203 @@ async def test_cancellation_propagates_untouched_after_native_cleanup(credential
 
 
 @pytest.mark.asyncio
-async def test_client_cleanup_failure_is_detached(credentials):
+@pytest.mark.parametrize("error_type", [RuntimeError, httpx.ReadError])
+async def test_client_cleanup_error_preserves_validated_result_without_logs(
+    credentials, asyncio_diagnostics, error_type
+):
+    close_tasks = []
+    messages = []
+
     class BrokenCloseClient(httpx.AsyncClient):
         async def aclose(self):
+            close_tasks.append(asyncio.current_task())
             await super().aclose()
-            raise RuntimeError(PRIVATE)
+            raise error_type(PRIVATE) from ValueError(PRIVATE)
 
     client = BrokenCloseClient(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=_envelope())), trust_env=False
     )
     transport = _api().OpenAICompletionTransport(_policy(), client_factory=lambda **_kwargs: client)
+    initial_caps = transport.capabilities
+    sink = logger.add(lambda message: messages.append(str(message)), filter=lambda record: record["name"] == MODULE)
+    try:
+        result = await transport.complete(_request(), await credentials())
+    finally:
+        logger.remove(sink)
+    assert result == NormalizedModelCompletion(" answer\nline ", 17, 3)
+    assert client.is_closed
+    assert transport.capabilities is not initial_caps
+    assert transport.capabilities.native_async_cancellation is False
+    latched_caps = transport.capabilities
     with pytest.raises(ModelCompletionFailure) as caught:
         await transport.complete(_request(), await credentials())
-    _assert_failure(caught.value, "model_response_invalid", ModelFailureDomain.REQUEST)
-    assert client.is_closed
+    _assert_failure(caught.value, "model_transport_uncertified", ModelFailureDomain.SHARED_INFRASTRUCTURE)
+    assert transport.capabilities is latched_caps
+    assert len(close_tasks) == 1
+    assert close_tasks[0].done() and not close_tasks[0]._log_traceback
+    assert messages == []
+    assert asyncio_diagnostics == ([], [])
+
+
+@pytest.mark.asyncio
+async def test_receipt_notification_precedes_owned_client_cleanup(credentials):
+    close_entered, release_close = asyncio.Event(), asyncio.Event()
+    receipts = []
+
+    class GatedClient(httpx.AsyncClient):
+        async def aclose(self):
+            close_entered.set()
+            await release_close.wait()
+            await super().aclose()
+
+    client = GatedClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=_envelope())))
+    transport = _api().OpenAICompletionTransport(_policy(), client_factory=lambda **_kwargs: client)
+    call = None
+    try:
+        call = asyncio.create_task(transport.complete(_request(), await credentials(), on_receipt=receipts.append))
+        await asyncio.wait_for(close_entered.wait(), 2)
+        assert receipts == [" answer\nline "]
+        assert not call.done()
+        release_close.set()
+        assert await call == NormalizedModelCompletion(receipts[0], 17, 3)
+        assert client.is_closed
+    finally:
+        release_close.set()
+        if call is not None:
+            await asyncio.gather(call, return_exceptions=True)
+        else:
+            await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["connection", "invalid"])
+async def test_no_receipt_notification_before_validated_output(credentials, outcome):
+    receipts = []
+    harness = Harness(
+        body=Body([json.dumps(_envelope(" \n ")).encode()]),
+        error=httpx.ConnectError(PRIVATE) if outcome == "connection" else None,
+    )
+    with pytest.raises(ModelCompletionFailure) as caught:
+        await harness.transport().complete(_request(), await credentials(), on_receipt=receipts.append)
+    _assert_failure(
+        caught.value,
+        "model_transport_unavailable" if outcome == "connection" else "invalid_model_output",
+        ModelFailureDomain.SHARED_INFRASTRUCTURE if outcome == "connection" else ModelFailureDomain.REQUEST,
+    )
+    assert receipts == []
+    assert len(harness.requests) == 1
+    assert harness.clients[0].is_closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_kind", ["task_cancel", "task_cancel_return", "raised_cancel"])
+async def test_native_client_close_self_cancellation_latches_uncertified(credentials, asyncio_diagnostics, cancel_kind):
+    receipts, close_tasks = [], []
+
+    class SelfCancellingClient(httpx.AsyncClient):
+        async def aclose(self):
+            close_tasks.append(asyncio.current_task())
+            if cancel_kind != "raised_cancel":
+                asyncio.current_task().cancel(PRIVATE)
+                if cancel_kind == "task_cancel":
+                    await asyncio.sleep(0)
+            else:
+                raise asyncio.CancelledError(PRIVATE)
+
+    client = SelfCancellingClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=_envelope())))
+    transport = _api().OpenAICompletionTransport(_policy(), client_factory=lambda **_kwargs: client)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await transport.complete(_request(), await credentials(), on_receipt=receipts.append)
+        assert receipts == [" answer\nline "]
+        assert not client.is_closed
+        assert transport.capabilities.native_async_cancellation is False
+        assert all(task.done() and task.cancelled() for task in close_tasks)
+        assert asyncio_diagnostics == ([], [])
+    finally:
+        await httpx.AsyncClient.aclose(client)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_kind", ["task_cancel", "task_cancel_return", "raised_cancel"])
+@pytest.mark.parametrize(
+    "outcome,code,domain",
+    [
+        ("connection", "model_transport_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE),
+        ("rejected", "model_response_rejected", ModelFailureDomain.REQUEST),
+        ("invalid", "invalid_model_output", ModelFailureDomain.REQUEST),
+    ],
+)
+async def test_cleanup_self_cancellation_cannot_replace_known_failure(
+    credentials, asyncio_diagnostics, cancel_kind, outcome, code, domain
+):
+    requests, close_tasks, receipts = [], [], []
+
+    class SelfCancellingClient(httpx.AsyncClient):
+        async def aclose(self):
+            close_tasks.append(asyncio.current_task())
+            if cancel_kind == "raised_cancel":
+                raise asyncio.CancelledError(PRIVATE)
+            asyncio.current_task().cancel(PRIVATE)
+            if cancel_kind == "task_cancel":
+                await asyncio.sleep(0)
+
+    def handle(incoming):
+        requests.append(incoming)
+        if outcome == "connection":
+            raise httpx.ConnectError(PRIVATE)
+        return httpx.Response(
+            429 if outcome == "rejected" else 200,
+            json=_envelope(" \r\n "),
+        )
+
+    client = SelfCancellingClient(transport=httpx.MockTransport(handle), trust_env=False)
+    transport = _api().OpenAICompletionTransport(_policy(), client_factory=lambda **_kwargs: client)
+    try:
+        with pytest.raises(ModelCompletionFailure) as caught:
+            await transport.complete(_request(), await credentials(), on_receipt=receipts.append)
+        _assert_failure(caught.value, code, domain)
+        assert not asyncio.current_task().cancelling()
+        assert receipts == []
+        assert len(requests) == len(close_tasks) == 1
+        assert close_tasks[0].done() and not close_tasks[0]._log_traceback
+        assert transport.capabilities.native_async_cancellation is False
+        assert asyncio_diagnostics == ([], [])
+    finally:
+        await httpx.AsyncClient.aclose(client)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["connection", "rejected", "invalid"])
+async def test_caller_cancellation_wins_known_failure_and_cleanup_self_cancellation(credentials, outcome):
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class SelfCancellingClient(httpx.AsyncClient):
+        async def aclose(self):
+            entered.set()
+            await release.wait()
+            asyncio.current_task().cancel(PRIVATE)
+
+    def handle(incoming):
+        if outcome == "connection":
+            raise httpx.ConnectError(PRIVATE)
+        return httpx.Response(429 if outcome == "rejected" else 200, json=_envelope(" \r\n "))
+
+    client = SelfCancellingClient(transport=httpx.MockTransport(handle), trust_env=False)
+    transport = _api().OpenAICompletionTransport(_policy(), client_factory=lambda **_kwargs: client)
+    call = asyncio.create_task(transport.complete(_request(), await credentials()))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        call.cancel("original-caller-cancel")
+        release.set()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await call
+        assert caught.value.args == ("original-caller-cancel",)
+        assert transport.capabilities.native_async_cancellation is False
+    finally:
+        release.set()
+        await asyncio.gather(call, return_exceptions=True)
+        await httpx.AsyncClient.aclose(client)
 
 
 @pytest.mark.asyncio
@@ -760,7 +942,8 @@ async def test_cancelled_cleanup_failure_never_reaches_asyncio_diagnostics(
 
         harness.client_factory = client_factory
 
-    task = asyncio.create_task(harness.transport().complete(_request(), await credentials()))
+    transport = harness.transport()
+    task = asyncio.create_task(transport.complete(_request(), await credentials()))
     if cleanup_origin == "stream":
         await asyncio.wait_for(entered.wait(), timeout=2)
         task.cancel("original-cancel")
@@ -781,6 +964,8 @@ async def test_cancelled_cleanup_failure_never_reaches_asyncio_diagnostics(
     assert body.closed and harness.clients[0].is_closed
     assert len(harness.requests) == len(harness.fetches) == 1
     assert all(operation.done() and not operation._log_traceback for operation in owned_operations)
+    if cleanup_origin == "client":
+        assert transport.capabilities.native_async_cancellation is False
     contexts, messages = asyncio_diagnostics
     assert (contexts, messages) == ([], [])
 

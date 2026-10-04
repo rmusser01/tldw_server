@@ -1,4 +1,4 @@
-# ADR-061: MCP Certified Completion Lifecycle
+# ADR-062: MCP Certified Completion Lifecycle
 
 **Status:** Proposed
 **Date:** 2026-10-03
@@ -17,7 +17,7 @@ The managed adapter owns each completion child through termination. Run timeout 
 
 The generic provider stack supports behaviors unsuitable for a bounded MCP model runner, including multiple providers, streaming, retries, and tools. Cancellation of a caller does not prove that a paid provider operation stopped. Task references and durable reservation fences are both necessary: local ownership contains work, while the repository prevents late settlement after abandonment.
 
-ADR-025/026 govern provider routing and outbound egress. ADR-059 fixes credential authority and endpoint provenance; ADR-060 supplies durable admission and settlement. This decision composes those boundaries without exposing a new MCP tool or enabling Skills execution.
+ADR-025/026 govern provider routing and outbound egress. ADR-060 fixes credential authority and endpoint provenance; ADR-061 supplies durable admission and settlement. This decision composes those boundaries without exposing a new MCP tool or enabling Skills execution.
 
 ## Alternatives Considered
 
@@ -50,6 +50,10 @@ Supervisory backoff preserves a monotonic retry deadline across task cancellatio
 The public boundary also distinguishes cancellation of a completed owned invocation from cancellation of its caller. After invocation/shutdown guards, only an existing timely validated receipt permits recovery from that owned task's `CancelledError`. Without such a receipt, provider-native cancellation remains native. Genuine caller cancellation always wins, and neither bookkeeping retries nor caller cancellation-state clearing are permitted.
 
 Cancellation and shutdown take precedence over result publication. Otherwise, immutable validated content received before the original monotonic run deadline is cached before bookkeeping awaits. Ancillary bookkeeping or cleanup failure cannot turn that known paid completion into a retriable failure. If ancillary work misses cleanup, it remains retained, health is latched false, and settlement is fenced conservatively; publication uses only the earlier receipt, never the retained child's eventual result. Provider content received after the deadline is never cached or published. False persistence outcomes produce fixed degradation warnings without private context.
+
+The native transport synchronously hands validated content to the invocation-local receipt sink before awaiting client cleanup. The adapter applies its original deadline and cancellation/shutdown guards at that handoff. Close errors or native close self-cancellation invalidate transport readiness without deleting an earlier timely receipt; caller cancellation during successfully drained closure does not itself invalidate certification. The callback is a trusted internal composition detail, not part of the public completion port.
+
+Without a receipt, an already classified provider failure also survives native client-close self-cancellation. Contain that cancellation inside the independent owned close task, latch readiness false, and preserve the sanitized failure and its original domain. The separate owned wait still propagates genuine caller cancellation; provider-native cancellation remains native. Cleanup-private cancellation arguments must not replace a known public failure.
 
 The shared HTTP client's certificate-pinning preflight currently opens a synchronous TLS socket. The bounded MCP transport cannot certify native cancellation when pins apply to its selected endpoint. It rejects that configuration without bypassing operator pins, and rechecks the fresh client's pin state before dispatch to contain later configuration changes. Pins for unrelated hosts do not invalidate the selected path. Supporting selected-endpoint pinning requires a separately certified native-async implementation.
 
