@@ -437,3 +437,21 @@ all69stashes and separate modela7branch remain unchanged. Independent review
 dispatch fails because app network permission is revoked; no completed review
 is claimed. Fresh immutable build, final-head review/CI and full native Stop
 qualification remain outstanding; no normal merge is attempted yet.
+
+Final incoming sync integration at714bbdfd/tree9a21c8f5 exactly matches the
+independent integration including the preserved pre-rebase note. All eight
+incoming blobs matchdev73e. Its57activation/certification regressions and86required
+contracts pass without skips; four incoming production paths have Bandit0.
+Canonical OpenAPI recheck exits0. Normal full-range hooks pass. Independent
+read-only review resumes successfully and finds no actionable correctness,
+scope or integration issue in the artifact fix and incoming sync interactions.
+The prior failed review dispatch remains failed. Fresh immutable59c production
+build/token/budget gates pass at540.7/844.3KB under600/900KB; all7225app entries
+are verified identical to714bb, preserving the build's original head attribution.
+The initial binding reader fails on a tracked directory symlink; the corrected
+reader verifies symlink bytes without changing source. Actual API20850:18101
+restarts on all3821qualified backend/config files with current framework versions.
+Protected10/eightrows, served contracts/12negative checks,69stashes and separate
+model branch remain unchanged. Native zero-send collector is initially invoked
+before the new frontend binding exists and exits before acceptance; no passing
+acceptance or inference is attributed to that attempt.
