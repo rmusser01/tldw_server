@@ -77,3 +77,20 @@
 - [x] Derive readiness in `ChatWorkspacePage` from `storeHydrated` plus normalized workspace identity and pass it through `ChatWorkspaceConsole`.
 - [x] Add a browser transition from active streaming to an unreachable connection and assert both rails suppress stale streaming state.
 - [x] Re-run focused tests, TypeScript, lint/diff checks, and record verification in TASK-12135.
+
+## Stage 7: Bounded Missing-Model Follow-up
+
+**Goal:** Align otherwise-ready idle rails and typed/staged send admission with the existing selected-model value.
+**Success Criteria:** No selected model shows `Select a model`, disables both send paths before preparation, and preserves draft/context. Actual selection restores readiness without sending. Existing higher-priority runtime states, explicit Auto routing and optional persona remain unchanged.
+**Tests:** The three owning rail/panel suites plus all Chat Workspace regressions; real Chrome raw-CDP desktop/mobile checks against the live authenticated API and immutable production build.
+**Status:** In Progress
+
+- [x] Record the requester's bounded design approval in TASK-12135 before implementation.
+- [x] Add failing model-readiness and typed/staged restoration regressions, then reuse the classifier and existing submission guard across four production files.
+- [x] Verify 273 owning tests, production TypeScript, seven-file lint and production build/token checks with unchanged bundle budgets.
+- [x] Verify seven native no-model desktop/mobile cases and a separate four-step selection/reload/cleanup continuation, with zero inference sends and screenshots inspected. Retain the first picker timeout as failed, not a successful full run.
+- [x] Rebase onto PR3071's test-only correction and verify runtime source equivalence and protected data, tabs, draft, services and stashes.
+- [x] Publish separate stacked PR #3159 against the parent branch and link it in TASK-12135.
+- [ ] Address actual review/CI findings, retarget/rebase onto latest `dev` after the parent merge, and obtain this PR's own requester-owned `Change summary` before normal merge.
+
+Evidence is recorded in TASK-12135 and `/private/tmp/chat-workspace-model-readiness-20261003-sVaPyQ`. The default-heap TypeScript attempt failed; the established 8 GB heap run passed. Unit test doubles are not UAT. No Python source changed, so Bandit is not applicable. The old-origin model-clear writeback hypothesis remains unproven and unfixed; the original Settings tab was never navigated or closed. Historical all-browser-target preservation remains failed, separately from the current protected-tab checks.

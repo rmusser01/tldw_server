@@ -21,6 +21,52 @@ vi.mock("@/design-system", async (importActual) => {
 })
 
 describe("WorkspaceStatusStrip", () => {
+  it("does not announce Ready without a model and restores readiness on selection", () => {
+    const props = {
+      backendAvailable: true,
+      workspaceReady: true,
+      streaming: false,
+      stagedSourceCount: 2,
+      selectedPersonaLabel: null,
+      assistantSource: "none" as const
+    }
+    const { rerender } = render(
+      <WorkspaceStatusStrip {...props} hasModelSelected={false} />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("Select a model")
+    expect(screen.queryByText("Ready via registry")).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("2 sources staged")
+    expect(screen.getAllByText("Select a model")).toHaveLength(1)
+    rerender(<WorkspaceStatusStrip {...props} hasModelSelected />)
+    expect(screen.getByRole("status")).toHaveTextContent("Ready via registry")
+    expect(screen.getByRole("status")).toHaveTextContent("No persona")
+  })
+
+  it.each([
+    [{ connectionMode: "demo" }, "Demo mode - not live"],
+    [{ connectionMode: "bypass" }, "Offline bypass - not verified"],
+    [{ backendAvailable: false }, "Server unavailable"],
+    [{ workspaceReady: false }, "Loading workspace context"],
+    [{ historyLoading: true }, "Loading chat history"],
+    [{ historyLoadError: "Unavailable" }, "Chat history unavailable"],
+    [{ streaming: true }, "Streaming"],
+    [{ sending: true }, "Sending"],
+    [{ sendError: "Failed" }, "Send failed"]
+  ] as const)("retains runtime precedence with no model for %j", (runtime, label) => {
+    render(
+      <WorkspaceStatusStrip
+        backendAvailable
+        workspaceReady
+        streaming={false}
+        hasModelSelected={false}
+        stagedSourceCount={0}
+        {...runtime}
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent(label)
+    expect(screen.queryByText("Ready via registry")).not.toBeInTheDocument()
+  })
+
   it.each([
     [{ connectionMode: "demo" }, "Demo mode - not live"],
     [{ connectionMode: "bypass" }, "Offline bypass - not verified"],

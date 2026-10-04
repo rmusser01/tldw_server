@@ -23,6 +23,58 @@ vi.mock("@/design-system", async (importActual) => {
 })
 
 describe("InspectorRail", () => {
+  it("requires a model for idle readiness while leaving persona optional", () => {
+    const props = {
+      scopeLabel: "Workspace",
+      stagedSourceCount: 0,
+      stagedSources: [],
+      selectedPersonaLabel: null,
+      assistantSource: "none" as const,
+      backendAvailable: true,
+      workspaceReady: true,
+      streaming: false
+    }
+    const { rerender } = render(
+      <InspectorRail {...props} selectedModelLabel="No model selected" hasModelSelected={false} />
+    )
+    expect(screen.getByText("Select a model")).toBeInTheDocument()
+    expect(screen.queryByText("Ready via registry")).not.toBeInTheDocument()
+    expect(screen.getByText("Choose a model before sending.")).toBeInTheDocument()
+    rerender(<InspectorRail {...props} selectedModelLabel="Selected model" hasModelSelected />)
+    expect(screen.getByText("Ready via registry")).toBeInTheDocument()
+    expect(screen.queryByText("Choose a model before sending.")).not.toBeInTheDocument()
+  })
+
+  it.each([
+    [{ connectionMode: "demo" }, "Demo mode - not live"],
+    [{ connectionMode: "bypass" }, "Offline bypass - not verified"],
+    [{ backendAvailable: false }, "Server unavailable"],
+    [{ workspaceReady: false }, "Loading workspace context"],
+    [{ historyLoading: true }, "Loading chat history"],
+    [{ historyLoadError: "Unavailable" }, "Chat history unavailable"],
+    [{ streaming: true }, "Streaming"],
+    [{ sending: true }, "Sending"],
+    [{ sendError: "Failed" }, "Send failed"]
+  ] as const)("retains runtime precedence with no model for %j", (runtime, label) => {
+    render(
+      <InspectorRail
+        scopeLabel="Workspace"
+        stagedSourceCount={0}
+        stagedSources={[]}
+        selectedModelLabel="No model selected"
+        hasModelSelected={false}
+        selectedPersonaLabel={null}
+        assistantSource="none"
+        backendAvailable
+        workspaceReady
+        streaming={false}
+        {...runtime}
+      />
+    )
+    expect(screen.getByText(label)).toBeInTheDocument()
+    expect(screen.queryByText("Ready via registry")).not.toBeInTheDocument()
+  })
+
   it.each([
     [{ connectionMode: "demo" }, "Demo mode - not live"],
     [{ connectionMode: "bypass" }, "Offline bypass - not verified"],

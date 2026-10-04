@@ -493,6 +493,7 @@ export const WorkspaceChatPanel = ({
   const sendDisabled =
     !chatBackendAvailable ||
     !historyReady ||
+    !selectedModel ||
     isSending ||
     (!trimmedDraft && !hasStagedContext)
   const conversationInstanceId = normalizedWorkspaceId ?? "workspace-chat"
@@ -924,7 +925,7 @@ export const WorkspaceChatPanel = ({
               <ContextStagingCard
                 sources={stagedSources}
                 isSending={isSending}
-                canSend={chatBackendAvailable && historyReady}
+                canSend={chatBackendAvailable && historyReady && Boolean(selectedModel)}
                 onClear={() => {
                   onClearStagedSources()
                   composerRef.current?.focus()
