@@ -615,3 +615,51 @@ added unrelated persona stash is preserved alongside all69original ordered
 hashes:70total. The original draft is restored; historical18092preservation remains
 false. Failed Stop qualification is not relabeled; fresh hosted ownership and
 bounded further native approval remain blockers before normal merge.
+
+## Stage 11: Hosted Watchlist Journey Navigation
+**Goal**: Correct the hosted command-palette navigation race without changing
+production behavior or weakening run, article, notification or error assertions.
+**Success Criteria**: Wait for the actual Ant opening transition to settle, then
+require the palette to close for both navigation commands. Focused guard and
+complete owning journey pass without retries/skips; full-range hooks, types,
+source binding and exact-head hosted review qualify the published fix.
+**Tests**: Guard RED/GREEN; complete Watchlist journey; TypeScript, ESLint,
+configured PR-range hooks and independent review.
+**Status**: In Progress
+
+At17:49Z published5b25 and actualdev502da remain current. All seven required
+gates, owning auth/admin, media and database shards pass. Exact-head Qodo reports
+zero active counts and all eight threads resolved. The sole hosted failure is
+E2E Critical: Activity navigation clicks while the command palette retains scroll
+and its opening transform. The trace leaves the palette open with Feeds active.
+The test-only correction waits for transition-class removal and asserts closure
+at both commands. Focused guard RED1/GREEN9; actual two-file ESLint exits0.
+
+The isolated full journey passes Activity and article checks but initially fails
+inbox twice. Advanced mode alone does not resolve it. Verified local runner
+configuration left offline bypass enabled, unlike hosted CI; notifications reject
+that unverified state by design. Correcting only the isolated setup to online
+authentication and its own origin produces GREEN1/0skips/0retries in24.23seconds.
+This uses copied real API databases and existing CI feed fixtures, NOT UAT.
+All temporary API/frontend services are stopped and original failures retained.
+Default4GB TypeScript run fails with OOM; the bounded8GB heap run exits0.
+
+Native Stop acceptance remains failed. The newest separate accepted input
+7dcc2f79-0109-419e-a822-393757a965f5 has one canonical input/result and must never
+be resent. Stop focus validation passes but raw Enter without text does not
+activate the button. A zero-send native diagnostic proves complete keyDown Enter
+with CR text activates a visible help control; the original draft is unchanged.
+This is event-delivery diagnosis, not a full UAT pass. One additional bounded
+Stop/recovery run and viewport-only permission escalation await explicit human
+replies. No additional inference, device override, normal merge or cleanup runs.
+
+Fresh final guard9pass, two-file ESLint0errors/0warnings, fourteen-file production
+Bandit0findings/0errors and all281PR-range files pass configured hooks. Independent
+review reports no actionable findings and confirms all original journey assertions
+remain intact. Source proof verifies7223unchanged app entries plus exactly two CI
+test changes, and all3821backend/config entries unchanged. Complete production
+trees retain their immutable runtime source binding. The first proof collector
+fails on a nonexistent App Router path before tests; correction uses the actual
+Pages Router and the failed preflight is not a successful qualification. Publish
+these four owned files as one normal commit, preserving the exact human summary.
+Fresh-head hosted E2E/Qodo and outstanding native acceptance remain required.
