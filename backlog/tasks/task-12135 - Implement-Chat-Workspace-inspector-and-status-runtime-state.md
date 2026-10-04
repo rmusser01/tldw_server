@@ -4,7 +4,7 @@ title: Implement Chat Workspace inspector and status runtime state
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-10-04 02:54'
+updated_date: '2026-10-04 03:56'
 labels: []
 dependencies: []
 references:
@@ -25,9 +25,9 @@ Implement GitHub issue #2033 for /chat-workspace: replace placeholder inspector/
 <!-- AC:BEGIN -->
 - [x] #1 Chat Workspace remains non-ready and chat sends stay disabled while the workspace store is not hydrated, even when a workspace ID is present.
 - [x] #2 Live-backend browser coverage verifies connected-to-offline rail transitions and suppresses stale streaming state.
-- [ ] #3 Live idle Chat Workspace rails show Select a model rather than Ready with no selected model and qualified workspace/history.
-- [ ] #4 Typed/staged sending is disabled without a selected model, dispatches zero RAG/chat inference, and retains drafts/staging; actual model selection restores readiness without an automatic send.
-- [ ] #5 Owning red/green regressions, production TypeScript/lint/build and exact-source no-mock desktop/mobile Chrome UAT verify the bounded model-readiness follow-up without degrading existing status precedence or optional-persona behavior.
+- [x] #3 Live idle Chat Workspace rails show Select a model rather than Ready with no selected model and qualified workspace/history.
+- [x] #4 Typed/staged sending is disabled without a selected model, dispatches zero RAG/chat inference, and retains drafts/staging; actual model selection restores readiness without an automatic send.
+- [x] #5 Owning red/green regressions, production TypeScript/lint/build and exact-source no-mock desktop/mobile Chrome UAT verify the bounded model-readiness follow-up without degrading existing status precedence or optional-persona behavior.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -50,20 +50,26 @@ PR #2600 review remediation after rebase on latest origin/dev: added explicit ha
 2026-10-03 requester directly approves the bounded missing-model design and recurring parent-PR follow-up. Execute TASK12135 separately on codex/chat-workspace-model-readiness-20261003 from published qualified4ec6b976d7 atop currentdevd7997bc205; PR3071 remains unchanged. Reuse existing normalized useSelectedModel value and shared runtime classifier/send guard; preserve higher-priority offline/demo/bypass/workspace/history/recovery/streaming/sending/error states, optional persona, staged context/drafts, explicit Auto/server routing and no automatic sends. TDD owning rails/panel, production types/lint/build, actual Chrome raw CDP desktop/mobile; no UAT mocks/interception/injected state. Current parent API backend remains unchanged and archived frontend remains separately source-qualified. Implementation proceeds only after this approved tracking checkpoint.
 
 2026-10-03 model-readiness TDD: frozen regression RED5 expected failures/129passes; GREEN134passes in3 owning suites, full Chat Workspace273passes/14suites. Full production frontend tsc --noEmit exits0; actual repo-root scoped ESLint analyzes7files with0errors/0warnings/0ignored. Initial frontend-cwd lint ignores all7 files and is not qualification. Configured8file pre-commit checks pass; UI detector reports no findings. No Python source changes: Bandit is not applicable to this TS-only unit. Minimal4production-file fix forwards required hasModelSelected to shared classifier, retains status precedence, disables typed/context buttons and handler, and avoids duplicate Select-a-model pills; Auto and optional persona remain usable. Browser controls investigation first used wrong /models route (actual404, exact own poller7468 stopped; tab remains), then failed a stale prior-route conversation precondition before navigation. Both remain failed, not UAT passes; corrected source route /settings/model inspection and full native RED/GREEN are still required. No inference send has been performed by this unit. Separate parent3071 publishedhead remains4ec6b976d7 and is not modified by this branch; recurring30minute authorized follow-up is ACTIVE. New criteria and finalization remain unchecked pending native source qualification and PR review.
+
+2026-10-03 final bounded model follow-up qualification: separate commit db29d8a19c rebased cleanly onto parent PR3071 test-only correction 8c8509b6fe as 9fce2deeeb. Runtime production bytes and all backend/config remain identical to the qualified immutable db29 build; only two inherited parent test files and TASK13421.1 differ. Real isolated production frontend70392:18100 uses unchanged live API38726:18098; existing frontend38406:18099 and old main/Settings tabs are preserved. Production build/token verification and unchanged budgets pass (shared540.4KB/600, heaviest842.9KB/900). Fresh rebased owning regression run273/273 across14suites and actual7-file ESLint0errors/0warnings/0ignored pass. Initial fresh test runner had an incorrect executable path and did not run; corrected absolute executable qualifies. Initial default-heap production tsc exhausted4GB and remains failed; established Node/8GB tsc rerun exits0. No Python changed, Bandit not applicable.
+
+Real no-mock Chrome raw-CDP UAT: natural-empty18100 origin with real authentication, workspace/history/source/model APIs, no interception/injected state/focus or visibility emulation. Seven desktop1440x900/mobile390x844 checks pass for typed-only, staged-only, combined draft/context, both rails and zero-overflow inspector; native Ctrl/Meta Enter preserves draft/staging and dispatches0RAG/completion requests. Original picker runner timed out after these7 steps and remains FAILED. Separate native keyboard continuation with actual foreground Chrome passes4steps: command/model selection, both rails Ready and both sends enabled with draft/context retained and optional persona, native reload restores model/draft without auto-send, own draft/staging cleanup. Continuation has0sends/0exceptions/0HTTP errors; desktop/mobile screenshots visually inspected. No native RED pass is claimed; frozen owning unit RED5 remains genuine. Earlier old-origin clear did not persist; second Settings-tab writeback is unproven, no fix claimed. Rejected temporary old-tab navigation was never executed; original Settings/main URL/draft/model read-back unchanged. Current exact API projections remain10/eight rows, served negative contract checker PASS, current69stashes retained; historical complete browser-target preservation remains FAILED as previously documented. Evidence: /private/tmp/chat-workspace-model-readiness-20261003-sVaPyQ including native-model-isolated-uat.json, native-model-selection-continuation.json, rebased-model-source-preservation.json, rebased-owning-suite-qualified.json, rebased-lint.json and rebased-production-typecheck-qualified.json. Independent code review found no actionable model-fix issues. Separate PR review/CI and requester-owned Change summary still required before merge; parent merge approval does not waive this gate.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Completed issue #2033 and both final PR #2600 review findings. Chat Workspace now lifts send/runtime state into accurate status and inspector rails, avoids placeholder approval/task UI, gates chat and rail readiness on both workspace-store hydration and a normalized workspace ID, and provides degraded/offline/send-failure recovery states. Unit coverage proves a persisted ID cannot enable sends or ready rails before hydration; live-backend browser coverage proves active streaming rails transition to server-unavailable state without stale streaming labels. Verification: 75/75 Chat Workspace unit tests, TypeScript, 5/5 live-backend browser tests, focused ESLint (no errors; one pre-existing warning), and git diff --check all passed. No Python changed, so Bandit was not applicable.
+
+2026-10-03 bounded missing-model follow-up implemented and locally/source-bound qualified, pending separate PR review and human-owned merge summary. Shared classifier now shows Select a model for otherwise-ready idle no-model state; typed/staged buttons and existing handler guard prevent request preparation while retaining draft/context and status precedence. Actual native desktop/mobile no-model checks and separate model-selection/reload/cleanup continuation verify0inference sends. Unit273, production types, scoped lint, build/token/budgets and independent review qualify; failed runners and residual old-origin clear behavior remain explicitly recorded. This does not complete all remaining epic work or merge this follow-up.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
