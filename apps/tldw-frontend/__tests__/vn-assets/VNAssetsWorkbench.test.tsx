@@ -144,6 +144,79 @@ describe('VNAssetsWorkbench', () => {
     });
   }
 
+  /** Component unit tier: real recovery hook and workbench with transport-only doubles. */
+  describe('Task76 initial verification loading', (): void => {
+    /** Terminal identity failures stop the spinner without granting read or replay authority. */
+    it.each(['network', 'inactive', 'unverifiable'] as const)(
+      'stops initial loading after %s failure and preserves recovery until verified retry',
+      async (failure: 'network' | 'inactive' | 'unverifiable'): Promise<void> => {
+        existingFailedPack();
+        mocks.listVNAssetPacks.mockResolvedValue([
+          { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+        ]);
+        const journalKey = 'tldw:vn-generation:pending:v1';
+        const request = { idempotency_key: 'task76-saved-retry', source_batch_id: 41 };
+        const raw = JSON.stringify({ version: 1, scope, commands: [{ packId: 7, slotId: 12, request }] });
+        sessionStorage.setItem(journalKey, raw);
+        const foreign = { kind: 'start' as const, key: 'task76-foreign-key' };
+        writePendingVNAssetGeneration(otherScope, 7, foreign);
+        if (failure === 'network') mocks.profile.mockRejectedValue(new Error('Profile network unavailable'));
+        else mocks.profile.mockResolvedValue(failure === 'inactive' ? { user: { id: 1, is_active: false } } : null);
+        const user = userEvent.setup();
+        render(<VNAssetsWorkbench />);
+        await screen.findByText(failure === 'network' ? 'Profile network unavailable' : 'Current server and account could not be verified.');
+        expect(screen.queryByText('Loading VN asset packs...')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry recovery check' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+        expect(mocks.listVNAssetPacks).not.toHaveBeenCalled();
+        expect(mocks.getStarterMatrices).not.toHaveBeenCalled();
+        expect(mocks.getVNAssetGeneration).not.toHaveBeenCalled();
+        expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+        expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+        expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+        expect(sessionStorage.getItem(journalKey)).toBe(raw);
+        expect(readPendingVNAssetGeneration(otherScope, 7)).toEqual(foreign);
+
+        mocks.profile.mockResolvedValue({ user: { id: 1, is_active: true } });
+        await user.click(screen.getByRole('button', { name: 'Retry recovery check' }));
+        const recover = await screen.findByRole('button', { name: 'Recover pending request' });
+        await waitFor((): void => { expect(recover).toBeEnabled(); });
+        expect(screen.queryByText('Loading VN asset packs...')).not.toBeInTheDocument();
+        expect(screen.queryByText('Profile network unavailable')).not.toBeInTheDocument();
+        expect(screen.queryByText('Current server and account could not be verified.')).not.toBeInTheDocument();
+        expect(mocks.listVNAssetPacks).toHaveBeenCalledTimes(1);
+        expect(mocks.getVNAssetGeneration).toHaveBeenCalled();
+        expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+        expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+        expect(sessionStorage.getItem(journalKey)).toBe(raw);
+        await user.click(recover);
+        await waitFor((): void => { expect(mocks.retryVNAssetSlot).toHaveBeenCalledExactlyOnceWith(7, 12, request); });
+        expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+        expect(readPendingVNAssetGeneration(otherScope, 7)).toEqual(foreign);
+      },
+    );
+
+    /** A genuinely pending profile retains loading and never starts list or generation reads. */
+    it('keeps initial loading while profile verification is pending', async (): Promise<void> => {
+      let resolveProfile!: (value: unknown) => void;
+      mocks.profile.mockImplementationOnce((): Promise<unknown> => new Promise<unknown>(
+        (resolve: (value: unknown) => void): void => { resolveProfile = resolve; },
+      ));
+      render(<VNAssetsWorkbench />);
+      expect(screen.getByText('Loading VN asset packs...')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Retry recovery check' })).not.toBeInTheDocument();
+      expect(mocks.listVNAssetPacks).not.toHaveBeenCalled();
+      expect(mocks.getStarterMatrices).not.toHaveBeenCalled();
+      expect(mocks.getVNAssetGeneration).not.toHaveBeenCalled();
+      expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+      expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+      expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+      await act(async (): Promise<void> => { resolveProfile({ user: { id: 1, is_active: true } }); });
+      await waitFor((): void => { expect(screen.queryByText('Loading VN asset packs...')).not.toBeInTheDocument(); });
+      expect(mocks.listVNAssetPacks).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('Task69 scoped legacy recovery', () => {
     const receiptKey = 'vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1:7';
     const selectionKey = 'vn-assets:selected-pack:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1';

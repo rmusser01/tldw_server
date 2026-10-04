@@ -103,8 +103,9 @@ class _TransactionBoundPool:
             row = await self._conn.fetchrow(_convert_question_mark_to_dollar(query, params), *params)
             return dict(row) if row else None
         cursor = await self._conn.execute(query, params)
-        row = await cursor.fetchone()
-        return dict(zip((col[0] for col in cursor.description), row)) if row else None
+        async with cursor:
+            row = await cursor.fetchone()
+            return dict(zip((col[0] for col in cursor.description), row)) if row else None
 
 
 @dataclass

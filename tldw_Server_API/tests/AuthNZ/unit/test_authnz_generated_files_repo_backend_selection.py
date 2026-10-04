@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import sqlite3
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
+import aiosqlite
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
@@ -13,6 +18,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
     VALID_FILE_CATEGORIES,
     VALID_SOURCE_FEATURES,
     AuthnzGeneratedFilesRepo,
+    _TransactionBoundPool,
 )
 
 
@@ -371,3 +377,148 @@ class _ScopedPostgresLookup:
             return None
         return {"id": "9", "user_id": "5", "source_feature": "vn_assets",
                 "source_ref": "vn_asset_item:4", "is_deleted": False}
+
+
+class _LifecycleSqliteCursor(_SqliteCursor):
+    """Unit double matching guarded/aiosqlite close-on-context-exit semantics."""
+
+    def __init__(self, row: Any, failure: BaseException | None = None) -> None:
+        """Supply a driver row or failure and track owned cursor releases."""
+        super().__init__(row=row, description=[("user_id",), ("used_bytes",)])
+        self.failure = failure
+        self.close_calls = 0
+
+    async def fetchone(self) -> Any:
+        """Propagate the exact driver failure, including task cancellation."""
+        if self.failure is not None:
+            raise self.failure
+        return await super().fetchone()
+
+    async def close(self) -> None:
+        """Release only this cursor, not its borrowed connection."""
+        self.close_calls += 1
+
+    async def __aexit__(self, *_args: object) -> None:
+        """Match the guarded cursor's nonsuppressing public context exit."""
+        await self.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("row,expected", [((5, 17), {"user_id": 5, "used_bytes": 17}), (None, None)])
+async def test_bound_sqlite_fetchone_closes_owned_cursor_without_ending_transaction(
+    row: tuple[int, int] | None, expected: dict[str, int] | None,
+) -> None:
+    """Unit: map rows/misses and close the cursor without owning the transaction."""
+    cursor = _LifecycleSqliteCursor(row)
+    conn = SimpleNamespace(
+        execute=AsyncMock(return_value=cursor), fetchrow=AsyncMock(),
+        close=AsyncMock(), commit=AsyncMock(), rollback=AsyncMock(),
+    )
+    pool = _TransactionBoundPool(conn, postgres=False)
+    async with pool.transaction() as borrowed:
+        assert borrowed is conn
+        assert await pool.fetchone("SELECT quota WHERE user_id = ?", [5]) == expected
+        assert cursor.close_calls == 1
+        async with pool.acquire() as acquired:
+            assert acquired is conn
+    conn.execute.assert_awaited_once_with("SELECT quota WHERE user_id = ?", (5,))
+    conn.fetchrow.assert_not_awaited()
+    conn.close.assert_not_awaited()
+    conn.commit.assert_not_awaited()
+    conn.rollback.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_type", [RuntimeError, asyncio.CancelledError])
+async def test_bound_sqlite_fetchone_closes_cursor_and_propagates_failure(
+    failure_type: type[BaseException],
+) -> None:
+    """Unit: preserve fetch errors/cancellation while releasing the owned cursor."""
+    failure = failure_type("fetch interrupted")
+    cursor = _LifecycleSqliteCursor(None, failure)
+    conn = SimpleNamespace(
+        execute=AsyncMock(return_value=cursor), close=AsyncMock(),
+        commit=AsyncMock(), rollback=AsyncMock(),
+    )
+    pool = _TransactionBoundPool(conn, postgres=False)
+    with pytest.raises(failure_type) as raised:
+        await pool.fetchone("SELECT quota WHERE user_id = ?", (5,))
+    assert raised.value is failure
+    assert cursor.close_calls == 1
+    conn.close.assert_not_awaited()
+    conn.commit.assert_not_awaited()
+    conn.rollback.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["row", "miss", "error", "cancel"])
+async def test_bound_postgres_fetchone_preserves_driver_branch_and_ownership(outcome: str) -> None:
+    """Unit: keep fetchrow mapping, bind flattening and driver failure ownership."""
+    failure = asyncio.CancelledError() if outcome == "cancel" else RuntimeError("fetch failed")
+    conn = SimpleNamespace(
+        fetchrow=AsyncMock(return_value={"user_id": 5} if outcome == "row" else None),
+        execute=AsyncMock(), close=AsyncMock(), commit=AsyncMock(), rollback=AsyncMock(),
+    )
+    if outcome in {"error", "cancel"}:
+        conn.fetchrow.side_effect = failure
+    pool = _TransactionBoundPool(conn, postgres=True)
+    if outcome in {"error", "cancel"}:
+        with pytest.raises(type(failure)) as raised:
+            await pool.fetchone("SELECT quota WHERE user_id = ?", [5])
+        assert raised.value is failure
+    else:
+        assert await pool.fetchone("SELECT quota WHERE user_id = ?", [5]) == (
+            {"user_id": 5} if outcome == "row" else None
+        )
+    conn.fetchrow.assert_awaited_once_with("SELECT quota WHERE user_id = $1", 5)
+    conn.execute.assert_not_awaited()
+    conn.close.assert_not_awaited()
+    conn.commit.assert_not_awaited()
+    conn.rollback.assert_not_awaited()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("found", [True, False])
+async def test_bound_fetchone_native_guarded_sqlite_closes_cursor_inside_borrowed_transaction(
+    monkeypatch: pytest.MonkeyPatch, found: bool,
+) -> None:
+    """Native SQLite: close real guarded cursors while the caller transaction lives.
+
+    Use an in-memory constant-row probe, never an operator or main database.
+    The caller alone ends its transaction after observing the closed cursor.
+    """
+    from tldw_Server_API.app.core.AuthNZ.database import _GuardedSQLiteConnection, _GuardedSQLiteCursor
+
+    cursors: list[_GuardedSQLiteCursor] = []
+    original_execute = _GuardedSQLiteConnection.execute
+
+    async def track_execute(
+        conn: _GuardedSQLiteConnection, query: Any, *args: Any,
+    ) -> _GuardedSQLiteCursor:
+        """Observe the actual guarded driver's cursor without replacing its lifecycle."""
+        cursor = await original_execute(conn, query, *args)
+        cursors.append(cursor)
+        return cursor
+
+    monkeypatch.setattr(_GuardedSQLiteConnection, "execute", track_execute)
+    async with aiosqlite.connect(":memory:") as native:
+        async with native.execute("BEGIN"):
+            pass
+        conn = _GuardedSQLiteConnection(native)
+        pool = _TransactionBoundPool(conn, postgres=False)
+        async with pool.transaction() as borrowed:
+            assert borrowed is conn
+            assert await pool.fetchone(
+                "SELECT ? AS user_id, ? AS used_bytes WHERE ?", [5, 17, found],
+            ) == ({"user_id": 5, "used_bytes": 17} if found else None)
+            assert native.in_transaction
+            with pytest.raises(sqlite3.ProgrammingError, match="closed cursor"):
+                await cursors[0].fetchone()
+        assert native.in_transaction
+        await native.rollback()
+        async with native.execute("SELECT 1") as usable:
+            assert await usable.fetchone() == (1,)

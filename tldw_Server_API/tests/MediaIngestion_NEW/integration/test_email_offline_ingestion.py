@@ -13,6 +13,7 @@ import zipfile
 from email.message import EmailMessage
 from io import BytesIO
 from itertools import islice
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -146,7 +147,9 @@ def offline_client(tmp_path, monkeypatch):
         assert calls == [], f"Forbidden calls occurred, including any caught by application code: {calls}"
 
 
-def test_offline_guard_records_target_and_argument_free_caller_after_swallowed_assertion(tmp_path, monkeypatch):
+def test_offline_guard_records_target_and_argument_free_caller_after_swallowed_assertion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A caught tripwire must still fail strict teardown without exposing its arguments."""
     from tldw_Server_API.app.core import http_client
 

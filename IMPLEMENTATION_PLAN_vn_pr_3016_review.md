@@ -281,7 +281,11 @@ pending-approval notes are historical; exact scopes and preservation still bind.
 cleanup; current scoped journal smoke expectation; test-owned Jobs DB connections.
 **Tests**: Thread responsiveness/setup cancellation, retry persisted counters,
 reload scoped receipt assertions, touched-scope Bandit, independent SPEC/QUALITY.
-**Status**: In Progress
+**Status**: Complete
+Independent SPEC/QUALITY PASS after scoped acquisition-cleanup and profile-fixture
+corrections. Published5cd1c8 exact repair evidence replies and three resolved
+threads; native smoke1passed and current-dev frontend365passed. Full future-head
+Qodo acceptance remains an external Task74 gate, not inferred from local review.
 
 ### Stage 2: Task71 Canonical Task Formatting
 **Goal**: Remove the five exact-path task-format violations blocking backend CI.
@@ -340,3 +344,92 @@ server and client sessions reaped. Existing original frontend build inputs remai
 unchanged. Byte-exact strict quota matrix is included with approved Task72 repair;
 all original archives remain retained. No commit/publication yet; full new-head
 review, seven required contexts and current-dev/human-summary gates still apply.
+
+Task74 advance2026-10-04: normally committed reviewed22file union8b89a46659,
+merge-preserving rebased onto actualdevbf8f2ad6 and published5cd1c8cda761aa690875f1816986c76840cf2726
+using exact lease against independently verified bae1395. Complete rebased tree
+8199bafe equals expected union; sole audio overlap independently reviewed with
+incoming fresh-pool cleanup and8actualPG passes. Full-PR configured hooks passed;
+installed Git pre-commit hook is absent, so automatic execution is not claimed.
+Full exact5cd Qodo requested once via5983597112; Verification-only PATCH preserves
+requester summary and all outside bytes. Child remains untouched. New external
+Governed Preflight architecture failure is handled below; old-head CI never transfers.
+
+## Task75: Exact-Head Preflight Compatibility Correction
+
+Original TASK13369; same direct all-approvals authorization. Design amendment:
+Docs/Design/2026-10-04-vn-pr-3016-post-publication-repairs.md. No approval pending.
+
+### Stage 1: Verify Root Cause
+**Goal**: Identify the exact published-head Governed Preflight failure.
+**Success Criteria**: Full job log plus existing-guard local reproduction.
+**Tests**: Existing timeout compatibility architecture test unchanged.
+**Status**: Complete
+Exact5cd job111512817400/run37228426705:1failed/219passed/8warnings20.47s.
+The new raw asyncio.timeout call violates the existing boundary guard. Local
+same guard RED1failed4.22s; all previous runtime assertions remain required.
+
+### Stage 2: Scoped TDD And Review
+**Goal**: Use the existing compatibility boundary for controlled native expiry.
+**Success Criteria**: Finite absolute-deadline forwarding for native/legacy contexts,
+no private-field or architecture evasion; genuine cancellation/budget/cleanup retained.
+**Tests**: Native and forced-legacy RED/GREEN controls, complete three-file final gate,
+scoped Bandit baseline and fresh independent SPEC/QUALITY.
+**Status**: Complete
+Only compatibility helper/browser test are implementation scope; architecture guard
+is unchanged. Zeno implementation and James independent SPEC/QUALITY are complete,
+agents closed and sessions reaped. Valid18RED->18GREEN; complete gate238passed,
+zero failures/errors/skips,6warnings19.83s. Baseline Bandit0newnonassert. Legacy
+double proves forwarding/errors, not real-backport cross-task cancellation parity;
+supported native runtime correction passed review, external CI remains pending.
+
+### Stage 3: Publish And Complete External Gates
+**Goal**: Publish reviewed correction and normally merge parent3016.
+**Success Criteria**: Normal checks/commit, fresh actualdev/head verification, exact
+new-head Qodo once, all seven required integration contexts, strict current-dev/rules,
+verbatim human summary and independently verified MERGED.
+**Tests**: Complete paginated external arrays and all review replies.
+**Status**: In Progress
+No admin/autoqueue/bypass, child mutation, cleanup or premature task finalization.
+
+## Task76: Exact-Head Qodo Cursor And Loading Feedback
+
+Original TASK13369; direct all-approvals authorization. Design amendment:
+Docs/Design/2026-10-04-vn-pr-3016-post-publication-repairs.md.
+
+### Stage 1: Verify Findings
+**Goal**: Map full exact5cd Qodo feedback to actual code and preserved contracts.
+**Success Criteria**: Cursor ownership, missing types and terminal loading cause verified.
+**Tests**: Complete review/reply arrays and source trace.
+**Status**: Complete
+Review5407968175/ack5983991156 at20:17-18UTC; findings4179158341/8344/8345.
+Complete r8 has102threads3unresolved/ALL197replies; child unchanged.
+
+### Stage 2: Bounded TDD And Independent Review
+**Goal**: Close owned cursors, type the new test, end failed-verification loading.
+**Success Criteria**: Outer transaction/PG/error ownership and account/replay checks
+remain intact; no pre-verification reads or assertion weakening.
+**Tests**: Cursor lifecycle RED/GREEN, executable annotation preservation, frontend
+failure/pending/retry controls, affected scope/static/Bandit and independent review.
+**Status**: Complete
+Plato implementation and Pauli independent SPEC/QUALITY are complete; all agents
+are closed and owned sessions reaped. Cursor RED4/nativeRED2 and loadingRED3
+precede GREEN49backend/369frontend/1email. Controller supplement passes all five
+official native PostgreSQL cases with zero skips; below-floor runtime remains
+qualified. Scoped static checks and Bandit introduce no nonassert findings.
+
+### Stage 3: Publish And Normal Merge
+**Goal**: Publish both independently reviewed corrections and finish exact-head gates.
+**Success Criteria**: Fresh actualdev/head, normal hooks/commit, verified publication,
+individual finding replies, one full new-head Qodo and all required integration gates.
+**Tests**: Complete external arrays, strict rules/human summary, independent MERGED.
+**Status**: In Progress
+No duplicate review request, child mutation, bypass or cleanup.
+
+Publication preparation: actual dev c95e41fc62a07e55fd74052023826c71b2a2c789
+advances only 21 Backlog paths, including 20 canonical-format repairs; no owned
+source/test overlap. All nine dirty files are archived before integration.
+Pre-integration full-range hooks identify those same 20 old task formats, not a
+new source failure. The incoming normalization must be preserved and full hooks
+rerun after merge-preserving rebase. Exact remote publication lease remains 5cd;
+fresh new-head review and all seven current required contexts remain mandatory.

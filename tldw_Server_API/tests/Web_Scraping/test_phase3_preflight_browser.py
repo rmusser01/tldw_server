@@ -118,6 +118,146 @@ async def test_asyncio_timeout_compatibility_uses_async_timeout_when_stdlib_is_a
     assert context.expired() is False
 
 
+def _legacy_reschedule_context(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Any]:
+    compat = _asyncio_compat_module()
+
+    class LegacyTimeout:
+        deadlines: list[float]
+        update_error: Exception | None = None
+
+        def __init__(self) -> None:
+            self.deadlines = []
+
+        @property
+        def expired(self) -> bool:
+            return False
+
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def update(self, deadline: float) -> None:
+            if self.update_error is not None:
+                raise self.update_error
+            self.deadlines.append(deadline)
+
+    legacy = LegacyTimeout()
+    legacy_module = types.ModuleType("async_timeout")
+    legacy_module.timeout = lambda _delay: legacy
+    monkeypatch.delattr(compat.asyncio, "timeout", raising=False)
+    monkeypatch.setitem(sys.modules, "async_timeout", legacy_module)
+    return compat.timeout(None), legacy
+
+
+@pytest.mark.asyncio
+async def test_asyncio_timeout_reschedule_native_cancels_wait_and_marks_expired() -> None:
+    context = asyncio_timeout(None)
+    cancelled = asyncio.Event()
+
+    async with asyncio_timeout(1.0):
+        with pytest.raises(TimeoutError):
+            async with context as entered:
+                assert entered is context
+                context.reschedule(asyncio.get_running_loop().time())
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+
+    assert cancelled.is_set()
+    assert context.expired() is True
+
+
+@pytest.mark.asyncio
+async def test_asyncio_timeout_reschedule_native_future_deadline_does_not_expire() -> None:
+    context = asyncio_timeout(None)
+    async with context:
+        context.reschedule(asyncio.get_running_loop().time() + 1.0)
+        await asyncio.sleep(0)
+
+    assert context.expired() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["not_entered", "exited", "expired"])
+async def test_asyncio_timeout_reschedule_preserves_native_state_errors(state: str) -> None:
+    context = asyncio_timeout(None)
+    if state == "exited":
+        async with context:
+            pass
+    elif state == "expired":
+        async with asyncio_timeout(1.0):
+            with pytest.raises(TimeoutError):
+                async with context:
+                    context.reschedule(asyncio.get_running_loop().time())
+                    await asyncio.Event().wait()
+
+    with pytest.raises(RuntimeError):
+        context.reschedule(asyncio.get_running_loop().time())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("deadline", [0.0, -1.0, 123456.25])
+async def test_asyncio_timeout_reschedule_legacy_forwards_absolute_deadline_to_update(
+    monkeypatch: pytest.MonkeyPatch,
+    deadline: float,
+) -> None:
+    context, legacy = _legacy_reschedule_context(monkeypatch)
+
+    async with context as entered:
+        assert entered is context
+        context.reschedule(deadline)
+
+    assert legacy.deadlines == [deadline]
+    assert context.expired() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [RuntimeError("legacy state error"), ValueError("legacy update error")])
+async def test_asyncio_timeout_reschedule_preserves_legacy_update_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    context, legacy = _legacy_reschedule_context(monkeypatch)
+    legacy.update_error = error
+
+    async with context:
+        with pytest.raises(type(error)) as caught:
+            context.reschedule(asyncio.get_running_loop().time())
+
+    assert caught.value is error
+    assert legacy.deadlines == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize(
+    ("deadline", "error"),
+    [(None, TypeError), (float("nan"), ValueError), (float("inf"), ValueError), (float("-inf"), ValueError)],
+)
+async def test_asyncio_timeout_reschedule_requires_finite_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    legacy: bool,
+    deadline: Any,
+    error: type[Exception],
+) -> None:
+    if legacy:
+        context, native = _legacy_reschedule_context(monkeypatch)
+    else:
+        context = asyncio_timeout(None)
+
+    async with context:
+        with pytest.raises(error):
+            context.reschedule(deadline)
+
+    assert context.expired() is False
+    if legacy:
+        assert native.deadlines == []
+
+
 @pytest.mark.asyncio
 async def test_shared_deadline_normalizes_python310_asyncio_timeout(
     monkeypatch: pytest.MonkeyPatch,
@@ -1092,7 +1232,7 @@ async def _assert_selected_startup_deadline(stage: str, monkeypatch: pytest.Monk
     def observed_timeout(delay):
         assert delay == 1.0
         # Arm the real native timeout only once the selected operation is waiting.
-        timeout = asyncio.timeout(None)
+        timeout = asyncio_timeout(None)
         native_timeouts.append(timeout)
         return timeout
 

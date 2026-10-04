@@ -58,3 +58,41 @@ SPEC/QUALITY review. Normal hooks, full new exact-head Qodo, all seven required
 contexts, strict current dev/rules and the verbatim human Change summary govern
 normal merge. No old-head result, unsupported-runtime suite or unavailable-PG
 skip certifies those external gates. PR3067 remains untouched.
+
+## Task75 Timeout Compatibility Follow-Up
+
+Exact-head Python3.12 CI passed219 governed preflight tests but rejected the new
+test's direct `asyncio.timeout(None)` call through the existing architecture
+guard. The guard remains unchanged. The selected-stage synchronization, genuine
+native cancellation, FakeClock advance, budget and cleanup assertions also remain.
+
+Expose finite absolute-deadline `reschedule` on the existing compatibility context.
+Delegate to native `reschedule`, or legacy async-timeout4 `update`, in loop clock
+coordinates; preserve original factory/enter/exit/expired and error propagation.
+The test uses its already imported compatibility factory and public context API,
+not private native fields, AST-evasion tricks or fake cancellation. This small
+extension keeps supported and legacy timeout interfaces behind one boundary.
+
+Verify the existing guard fails before repair, new native and forced-legacy
+forwarding/error controls fail before implementation, then the complete three-file
+governed CI scope passes. Scoped Bandit and independent SPEC/QUALITY apply. Local
+Python3.11 and a forced legacy double do not establish native Python3.12/3.10 CI.
+
+## Task76 Cursor And Verification Feedback
+
+Full exact5cd Qodo review adds three verified findings. Close the SQLite cursor
+owned by the transaction-bound quota lookup through its existing public async
+lifecycle, preserving returned rows, misses, error/cancellation propagation and
+the borrowed connection's outer transaction. PostgreSQL selection is unchanged.
+
+Annotate only the newly added offline diagnostic test's fixtures and return;
+preserve its executable body and strict forbidden-call/privacy assertions.
+
+On terminal initial principal-verification failure, end the pack-list loading
+state and retain the existing error and Retry recovery check. Do not list packs
+before verified authority or weaken generation/replay/account boundaries. Cover
+network/inactive/unverifiable failures, pending verification and successful retry
+with sensitive tests. Avoid restarting list loads on unrelated recovery errors.
+
+Bounded TDD, scoped baseline Bandit/static checks and independent SPEC/QUALITY
+precede publication. Future exact-head Qodo/CI still govern normal merge.

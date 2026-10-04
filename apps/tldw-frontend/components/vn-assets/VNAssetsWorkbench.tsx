@@ -249,6 +249,10 @@ export default function VNAssetsWorkbench() {
     return true;
   }, [finishGenerationCommand, recovery]);
 
+  useEffect((): void => {
+    if (!authority && recovery.error) setIsLoading(false);
+  }, [authority, recovery.error]);
+
   useEffect(() => {
     if (!authority) return;
     let cancelled = false;
