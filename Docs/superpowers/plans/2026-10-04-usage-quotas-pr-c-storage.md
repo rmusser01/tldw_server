@@ -215,7 +215,6 @@ async def test_user_quota_status_is_read_only_and_has_quota_means_set(service) -
 ```
 
 The module imports for these tests are `from tldw_Server_API.app.core import config as config_module` and `from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError`. The quotas-off stub mirrors PR A's switch tests in `tests/Usage/test_usage_quotas_*.py`. If they stub `load_comprehensive_config` elsewhere, for example where `usage_quotas_enabled` imports it, patch the same target.
-```
 
 Add a test for `set_user_quota` in the same file. It uses a call-recording repo; Task 3's endpoint tests cover the real database round-trip:
 
