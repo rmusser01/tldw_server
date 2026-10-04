@@ -716,7 +716,7 @@ source remains identical to the live artifacts. Fresh owning regressions,
 security, types and full-range hooks pass before one exact-lease publication.
 **Tests**: Settings and owning Chat Workspace Vitest; PostgreSQL audio/auth-admin,
 incoming Persona/DB/CI tests; types, lint, Bandit and source binding.
-**Status**: In Progress
+**Status**: Complete
 
 At19:18UTC actual dev advances from502da tobf8f2ad6a42ad6396376020876a5f6a709ec6b34
 through Persona PR3055. Incoming22files are tests, Vitest configuration and
@@ -727,3 +727,76 @@ incoming accessibility assertions and override cleanup. Published23588f9 is
 retained in an exact backup branch. Existing healthy queued CI is not completion;
 the actual merge conflict requires integration. No new native input or inference
 is authorized and narrow acceptance must not become a full UAT claim.
+
+Fresh rebase qualification:1051shared UI tests,621incoming backend tests and
+164full auth/admin tests pass with0skips. Types, production Bandit and281-file
+configured hooks pass. Independent merge-tree/source proof preserves production
+equivalence; cookie logout retains the real router, timeout form combines all
+incoming accessibility assertions, and audio quota retains all six matrix cases
+plus upstream DSN-checked override cleanup. Publication is batched with the newly
+reported exact235-head Character journey failure, not evidence-only updates.
+
+## Stage 14: Character Creation Cold-Query Refresh
+**Goal**: Fix the owning hosted journey's successful creation remaining absent
+from the Characters list without weakening journey assertions or resending.
+**Success Criteria**: A successful create joins pre-create in-flight list
+reads before invalidation, preventing reuse of transport-coalesced stale data.
+Warm-list refresh, failed-create callbacks and unrelated cache stay intact.
+**Tests**: Real TanStack QueryClient/useCharacterCrud RED/GREEN in server and
+legacy modes; owning Characters/settings/workspace regressions, types/lint,
+production build/budgets and relevant actual Chrome zero-chat-send acceptance.
+**Status**: Complete
+
+Hosted E2E Critical run37226056201/job111508596670 has45passed/1failed at
+character-chat.spec.ts:59. CreationPOST201/id7 is confirmed, but only one initial
+listGET200(default3) appears in the trace. No follow-up read occurs. Existing
+TanStack5.90.20 cold-query fetch reuses its active promise when data is undefined;
+the real-client hook regression reproduces stale data in both modes:RED2failed/
+2passed. Scoped cancelQueries initially yields focusedGREEN4passed, but independent
+review identifies transport coalescing of the still-running network read. That
+first fix/build and1238passing tests are superseded, not final qualification.
+Strengthened coalescing regressionRED2fails/2passes proves the remaining race.
+Revised scoped refetchQueries joins only fetching list reads with
+cancelRefetch:false, then invalidates after they settle; immediate success UI is
+unchanged and creation is never retried. Revised focusedGREEN4passes. The
+unchanged CharacterDialogs submission draft clear is not persisted-draft UAT.
+
+Second review proves refetchQueries excludes inactive cold lists. The new
+inactive-filter regressionRED1fail/4pass demonstrates it. Third production
+correction joins matching cache promises directly, catches read failures, then
+invalidates. Its first run4pass/1fail remains retained. Stop/reassessment finds
+the fixture tracked only isSuccess before act drained a data update. Production
+reads data during render; match that observation in the fixture without a fourth
+production change. Query-core-only probe verifies fresh B and invalidated A.
+
+Source2 actual Chrome Character creation201/newGET200 and desktop/mobile reload
+pass with0sends/0retrievals; that acceptance is not attributed to final source3.
+Initial zero-send Workspace guard fails on unavailable page/missing draft, not
+silently relabeled. Native Retry diagnostic restores exact draft/conversation,
+and full protected state readback passes. Final source qualification remains
+required before publication or merge.
+Original hosted failure and regression RED are retained, not relabeled. The
+hosted Watchlist journey now passes, but owning fresh-head CI remains required.
+
+Final correction qualification passes5focused regressions and1239owning frontend
+tests with0skips. Full types pass; production lint has0errors/69inheritedwarnings,
+new regression lint0findings. Independent final source review has no actionable
+findings. Source3 immutable build/token/unchanged-budget checks pass with7226app
+entries exact. No fourth production implementation is introduced.
+
+Final source3 actual Chrome creates unique Character id5 exactly once(201), then
+performs fresh listGET200; it appears without reload and persists at desktop
+1440x900/mobile390x844CSS/DPR1. Existing four characters stay exact. Owned UAT tab
+is closed; the fixture is retained. Separate source3 Workspace cold reloads pass
+at both dimensions with exact original draft, conversation/checkpoint and13rows,
+visible Ready footer,0overflow/0exceptions/0sends/0retrievals. Screenshot pixels
+are inspected. These scoped checks are not full UAT or revised Stop acceptance.
+
+Post-collector protection passes three current pages, both APIs'10/eight protected
+rows, all seven accepted-input bindings and13current rows,70orderedstashes and
+modela7a0d8c. Historical18092preservation remainsfalse. Only owned frontend7109 on
+18102 is replaced; API20850 on18101 and shared/model resources are preserved.
+Publish latest-dev integration and verified Character fix once with the exact
+human summary; fresh exact-head Qodo and all required/owning hosted CI remain
+required before normal merge. Stages13/14Complete refer to local implementation
+and qualification, not hosted acceptance or merge completion.

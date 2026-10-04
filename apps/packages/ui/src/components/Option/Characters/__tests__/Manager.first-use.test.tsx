@@ -382,6 +382,7 @@ describe("CharactersManager first-use onboarding", () => {
 
     useQueryClientMock.mockReturnValue({
       invalidateQueries: vi.fn(),
+      getQueryCache: vi.fn(() => ({ findAll: vi.fn(() => []) })),
       setQueryData: vi.fn(),
       cancelQueries: vi.fn(async () => undefined)
     })
