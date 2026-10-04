@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   initialize: vi.fn(),
   getModels: vi.fn(),
   getCurrentUserProfile: vi.fn(),
+  cookieSessionApproval: null as boolean | null,
   getRuntimeSingleUserApiKeyOverride: vi.fn(),
   storageGet: vi.fn(async () => null),
   storageSet: vi.fn(async () => undefined),
@@ -14,21 +15,24 @@ const mocks = vi.hoisted(() => ({
   >()
 }))
 
-vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
-  isActiveCookieSessionConfig: (
-    await importOriginal<typeof import("@/services/tldw/TldwApiClient")>()
-  ).isActiveCookieSessionConfig,
-  tldwClient: {
-    getConfig: (...args: unknown[]) =>
-      (mocks.getConfig as (...args: unknown[]) => unknown)(...args),
-    initialize: (...args: unknown[]) =>
-      (mocks.initialize as (...args: unknown[]) => unknown)(...args),
-    getModels: (...args: unknown[]) =>
-      (mocks.getModels as (...args: unknown[]) => unknown)(...args),
-    getCurrentUserProfile: (...args: unknown[]) =>
-      (mocks.getCurrentUserProfile as (...args: unknown[]) => unknown)(...args)
+vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => {
+  const api = await importOriginal<typeof import("@/services/tldw/TldwApiClient")>()
+  return {
+    isActiveCookieSessionConfig: (
+      ...args: Parameters<typeof api.isActiveCookieSessionConfig>
+    ) => mocks.cookieSessionApproval ?? api.isActiveCookieSessionConfig(...args),
+    tldwClient: {
+      getConfig: (...args: unknown[]) =>
+        (mocks.getConfig as (...args: unknown[]) => unknown)(...args),
+      initialize: (...args: unknown[]) =>
+        (mocks.initialize as (...args: unknown[]) => unknown)(...args),
+      getModels: (...args: unknown[]) =>
+        (mocks.getModels as (...args: unknown[]) => unknown)(...args),
+      getCurrentUserProfile: (...args: unknown[]) =>
+        (mocks.getCurrentUserProfile as (...args: unknown[]) => unknown)(...args)
+    }
   }
-}))
+})
 
 vi.mock("@/utils/safe-storage", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/utils/safe-storage")>()),
@@ -75,6 +79,7 @@ describe("TldwModelsService caching", () => {
     mocks.initialize.mockReset()
     mocks.getModels.mockReset()
     mocks.getCurrentUserProfile.mockReset()
+    mocks.cookieSessionApproval = null
     mocks.getRuntimeSingleUserApiKeyOverride.mockReset()
     mocks.storageGet.mockReset()
     mocks.storageSet.mockReset()
@@ -146,6 +151,93 @@ describe("TldwModelsService caching", () => {
       if (allowed) {
         expect(mocks.storageSet).not.toHaveBeenCalled()
       }
+    }
+  )
+
+  it.each([false, true])(
+    "authorizes a helper-approved multi-user cookie transport without a JWT (forced=%s)",
+    async (forced) => {
+      mocks.cookieSessionApproval = true
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://localhost:3000",
+        authMode: "multi-user",
+        authSource: "cookie-session"
+      })
+      const profile = deferred<object>()
+      mocks.getCurrentUserProfile.mockReturnValue(profile.promise)
+      mocks.getModels.mockResolvedValue([
+        { id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }
+      ])
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+      const pending = service.getModels(forced)
+
+      await vi.waitFor(() => expect(mocks.getCurrentUserProfile).toHaveBeenCalledOnce())
+      expect(mocks.getModels).not.toHaveBeenCalled()
+      profile.resolve({})
+      expect((await pending).map((model) => model.id)).toEqual(["cookie-model"])
+      expect(mocks.storageSet).not.toHaveBeenCalled()
+      await expect(service.getCachedChatModels()).resolves.toEqual([])
+    }
+  )
+
+  it.each([401, 403, 503])(
+    "withholds a cached multi-user cookie catalog after profile failure (%s)",
+    async (status) => {
+      mocks.cookieSessionApproval = true
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://localhost:3000",
+        authMode: "multi-user",
+        authSource: "cookie-session"
+      })
+      mocks.getModels.mockResolvedValue([
+        { id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }
+      ])
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+      expect(await service.getModels()).toHaveLength(1)
+
+      mocks.getCurrentUserProfile.mockRejectedValue(
+        Object.assign(new Error("Profile unavailable"), { status })
+      )
+      await expect(service.getModels()).resolves.toEqual([])
+      expect(mocks.getCurrentUserProfile).toHaveBeenCalledTimes(2)
+      expect(mocks.getModels).toHaveBeenCalledOnce()
+      expect(mocks.storageSet).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["token", "key", "none"])(
+    "isolates approved multi-user cookie models from the %s cache namespace",
+    async (namespace) => {
+      mocks.cookieSessionApproval = true
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://localhost:3000",
+        authMode: "multi-user",
+        authSource: "cookie-session"
+      })
+      mocks.storageValue = {
+        version: 4,
+        timestamp: Date.now(),
+        scope: `http://localhost:3000|multi-user|${namespace}|none`,
+        models: [{ id: "other-model", name: "Other Model", provider: "llama", type: "chat" }]
+      }
+      mocks.getModels.mockResolvedValue([
+        { id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }
+      ])
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+      expect((await service.getModels()).map((model) => model.id)).toEqual(["cookie-model"])
+      expect(mocks.storageSet).not.toHaveBeenCalled()
+
+      mocks.cookieSessionApproval = false
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://localhost:3000",
+        authMode: "multi-user"
+      })
+      await expect(service.getModels()).resolves.toEqual([])
+      expect(mocks.getCurrentUserProfile).toHaveBeenCalledOnce()
+      expect(mocks.getModels).toHaveBeenCalledOnce()
     }
   )
 
