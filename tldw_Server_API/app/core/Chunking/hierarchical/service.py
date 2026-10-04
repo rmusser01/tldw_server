@@ -16,10 +16,19 @@ class HierarchyService:
     """Coordinate hierarchy operations without snapshotting the context."""
 
     def __init__(self, context: HierarchyContext) -> None:
+        """Retain the live context without copying its configuration or hooks."""
         self._context = context
 
     def flatten(self, tree: dict[str, Any]) -> list[dict[str, Any]]:
-        """Validate the public input before looking up the live normalizer."""
+        """Flatten a tree using the context's current chunk-type normalizer.
+
+        Args:
+            tree: Hierarchy envelope containing a root or legacy blocks.
+
+        Returns:
+            Flat text/metadata rows, or an empty list for non-dictionary input.
+            Malformed dictionary contents retain the component's exceptions.
+        """
         if not isinstance(tree, dict):
             return []
         return flatten_tree(tree, self._context.normalize_chunk_type)
@@ -34,7 +43,28 @@ class HierarchyService:
         template: dict[str, Any] | None = None,
         method_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Resolve each call and wrap the constructed hierarchy root."""
+        """Resolve call-time options and wrap the constructed hierarchy root.
+
+        Args:
+            text: Original source used for span detection and offset mapping.
+            method: Strategy selector, or the live context default when absent.
+            max_size: Method-specific chunk limit, or the live default for None.
+            overlap: Method-specific overlap, or the live default for None.
+            language: Language hint, falling back to the context configuration.
+            template: Optional paragraph-boundary and subsection rules.
+            method_options: Shallow-copied strategy options; sanitize_output
+                selects sanitized output by default without reaching leaf calls.
+
+        Returns:
+            A type/schema_version/root envelope. Nonempty input also includes
+            resolved method, language, max_size, and overlap values. Empty input
+            returns an empty root before reading configuration or running hooks.
+
+        Raises:
+            InvalidInputError: If text is not a string or exceeds the context's
+                configured size limit. Other hook errors retain their existing
+                propagation or component-specific fallback behavior.
+        """
         if not isinstance(text, str):
             raise InvalidInputError(f"Expected string input, got {type(text).__name__}")
         if not text:

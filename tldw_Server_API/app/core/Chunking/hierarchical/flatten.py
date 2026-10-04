@@ -18,7 +18,8 @@ def flatten_tree(
     sa_ovl = tree.get("overlap") if isinstance(tree.get("overlap"), int) else 0
     out: list[dict[str, Any]] = []
 
-    def _append_with_titles(items: list[dict[str, Any]], titles: list[str]):
+    def _append_with_titles(items: list[dict[str, Any]], titles: list[str]) -> None:
+        """Append shallow-copied output rows with the current ancestry and normalized kind."""
         for ch in items:
             txt = ch.get("text") if isinstance(ch, dict) else str(ch)
             md = dict(ch.get("metadata") or {}) if isinstance(ch, dict) else {}
@@ -108,7 +109,8 @@ def flatten_tree(
 
         return items
 
-    def walk(node: dict[str, Any], titles: list[str]):
+    def walk(node: dict[str, Any], titles: list[str]) -> None:
+        """Emit a node and recurse, grouping structure-aware sections exactly once."""
         kind = node.get("kind")
         if kind == "section":
             title = str(node.get("title") or "").strip()

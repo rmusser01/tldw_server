@@ -10,6 +10,8 @@ import pytest
 from tldw_Server_API.app.core.Chunking.hierarchical import flatten as module
 from tldw_Server_API.app.core.Chunking.hierarchical.flatten import flatten_tree
 
+pytestmark = pytest.mark.unit
+
 
 def normalize(value: Any) -> str | None:
     return {"paragraph": "text", "header_atx": "heading", "code_fence": "code"}.get(value)

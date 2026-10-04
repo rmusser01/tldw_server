@@ -23,6 +23,8 @@ from tldw_Server_API.app.core.Chunking.hierarchical.models import (
 )
 from tldw_Server_API.app.core.Chunking.process_text.models import ProcessTextContext
 
+pytestmark = pytest.mark.unit
+
 _CHUNKING_PACKAGE_NAME = "tldw_Server_API.app.core.Chunking"
 _HIERARCHICAL_PACKAGE_NAME = f"{_CHUNKING_PACKAGE_NAME}.hierarchical"
 _HIERARCHICAL_PACKAGE = Path(__file__).parents[2] / "app" / "core" / "Chunking" / "hierarchical"
