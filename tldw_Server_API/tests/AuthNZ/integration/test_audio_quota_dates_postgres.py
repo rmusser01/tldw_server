@@ -33,10 +33,16 @@ async def audio_postgres(isolated_test_environment, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("minutes_used", [None, 2.5], ids=["no-usage", "existing-usage"])
-async def test_postgres_full_profile_reports_current_day_audio_usage(audio_postgres, minutes_used) -> None:
-    """The default profile must include real audio quotas without a DATE encoding error."""
+async def test_postgres_full_profile_reports_current_day_audio_usage(
+    audio_postgres, minutes_used, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A finite profile quota reports real current-day usage without a DATE encoding error."""
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+    from tldw_Server_API.app.core.Usage import quota_resolver
+    from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
     client, pool = audio_postgres
     connection = await asyncpg.connect(pool.settings.DATABASE_URL)
     try:
@@ -68,23 +74,39 @@ async def test_postgres_full_profile_reports_current_day_audio_usage(audio_postg
             minutes_used,
         )
 
-    login = client.post(
-        "/api/v1/auth/login",
-        data={
-            "username": "audio-profile",
-            "password": "AudioProfile@Test2026!",  # nosec B105
-        },
+    overrides = UserProfileOverridesRepo(pool)
+    await overrides.ensure_tables()
+    await overrides.upsert_override(
+        user_id=user_id, key="limits.audio_daily_minutes", value=30, updated_by=None
     )
-    assert login.status_code == 200
-    response = client.get(
-        "/api/v1/users/me/profile",
-        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
-    )
+    quota_resolver.invalidate_user(user_id)
+    try:
+        login = client.post(
+            "/api/v1/auth/login",
+            data={
+                "username": "audio-profile",
+                "password": "AudioProfile@Test2026!",  # nosec B105
+            },
+        )
+        assert login.status_code == 200
+        response = client.get(
+            "/api/v1/users/me/profile",
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+        )
 
-    assert response.status_code == 200
-    audio = response.json()["quotas"]["audio"]
-    assert audio["daily_minutes_used"] == (0.0 if minutes_used is None else 2.5)
-    assert audio["daily_minutes_remaining"] == (30.0 if minutes_used is None else 27.5)
+        assert response.status_code == 200
+        audio = response.json()["quotas"]["audio"]
+        assert audio["daily_minutes_used"] == (0.0 if minutes_used is None else 2.5)
+        assert audio["daily_minutes_remaining"] == (30.0 if minutes_used is None else 27.5)
+    finally:
+        try:
+            cleanup_pool = await get_db_pool()
+            assert cleanup_pool.settings.DATABASE_URL == pool.settings.DATABASE_URL
+            await UserProfileOverridesRepo(cleanup_pool).delete_override(
+                user_id=user_id, key="limits.audio_daily_minutes"
+            )
+        finally:
+            quota_resolver.invalidate_user(user_id)
 
 
 @pytest.mark.asyncio

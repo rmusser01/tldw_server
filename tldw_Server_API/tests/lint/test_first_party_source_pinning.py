@@ -11,6 +11,7 @@ each must actually resolve inside the checkout running the tests.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 from pathlib import Path
 
@@ -24,11 +25,11 @@ except ModuleNotFoundError:  # Python 3.10
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SRC_LAYOUT_GLOBS = ("apps/*/src", "packages/*/src")
+SRC_LAYOUT_GLOBS = ("apps/*/src", "packages/*/src", "tools/*/src")
 
 
 def _src_dirs() -> list[Path]:
-    """Every src-layout directory (apps/*/src, packages/*/src) in this checkout."""
+    """Every first-party src-layout directory in this checkout."""
     return sorted(p for pattern in SRC_LAYOUT_GLOBS for p in REPO_ROOT.glob(pattern) if p.is_dir())
 
 
@@ -40,6 +41,22 @@ def _first_party_packages() -> list[tuple[str, Path]]:
         for pkg in sorted(src.iterdir())
         if (pkg / "__init__.py").is_file()
     ]
+
+
+def test_task_editor_source_is_part_of_first_party_pinning() -> None:
+    """The task-writing CLI must not resolve through another checkout's install."""
+    assert REPO_ROOT / "tools/backlog-py/src" in _src_dirs()
+
+
+@pytest.mark.parametrize("name", ["cli.main", "core.repository", "markdown.task_parser", "mcp.tools"])
+def test_task_editor_modules_resolve_to_this_checkout(name: str, record_property) -> None:
+    """Record the actual worker's editor source, not just the package version."""
+    module = importlib.import_module("backlog_py." + name)
+    origin = Path(module.__file__).resolve()
+    expected = REPO_ROOT / "tools/backlog-py/src/backlog_py" / (name.replace(".", "/") + ".py")
+    assert origin == expected.resolve()
+    record_property("editor_source", str(origin))
+    record_property("editor_sha256", hashlib.sha256(origin.read_bytes()).hexdigest())
 
 
 def test_pytest_pythonpath_lists_every_src_layout_package() -> None:
