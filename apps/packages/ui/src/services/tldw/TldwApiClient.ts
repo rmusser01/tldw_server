@@ -1673,6 +1673,15 @@ export interface SandboxWorkspaceDiagnosticsResponse {
   links: SandboxWorkspaceDiagnosticsLinks
 }
 
+// Cookie-session owners can change without changing the connection config.
+// One watcher fences all client instances without retaining each instance.
+let domainCacheAccountRevision = 0
+const stopWatchingDomainCacheAccount = watchChatAccountChanges(invalidated => {
+  if (invalidated) domainCacheAccountRevision += 1
+})
+const domainCacheHot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
+domainCacheHot?.dispose(stopWatchingDomainCacheAccount)
+
 export class TldwApiClientBase {
   private storage: Storage
   private sessionStorage: Storage
@@ -1683,6 +1692,9 @@ export class TldwApiClientBase {
   characterInFlight = new Map<string, Promise<any>>()
   chatMessagesCache = new BoundedTtlCache<ServerChatMessage[]>()
   chatMessagesInFlight = new Map<string, Promise<ServerChatMessage[]>>()
+  private domainCacheConfig: TldwConfig | null = null
+  private domainCacheAccountRevision = -1
+  private domainCacheRevision = 0
   private openApiPathSet: Set<string> | null = null
   private openApiPathSetPromise: Promise<Set<string> | null> | null = null
   private resolvedPathCache = new Map<string, string>()
@@ -1830,6 +1842,48 @@ export class TldwApiClientBase {
 
   getChatMessagesCacheKey(chatId: string, query: string): string {
     return `${chatId}${query || ""}`
+  }
+
+  private invalidateDomainCaches(): void {
+    this.domainCacheRevision += 1
+    this.characterCache.clear()
+    this.characterInFlight.clear()
+    this.chatMessagesCache.clear()
+    this.chatMessagesInFlight.clear()
+  }
+
+  async getDomainCacheRevision(): Promise<number> {
+    const accountRevision = domainCacheAccountRevision
+    const startedRevision = this.domainCacheRevision
+    try {
+      // getConfig alone may retain a previous server or API-key connection.
+      await this.initialize()
+      const config = await this.ensureConfigForRequest(true)
+      if (accountRevision !== domainCacheAccountRevision) {
+        throw createServicePromptScopeChangedError()
+      }
+      if (this.domainCacheAccountRevision !== accountRevision ||
+          !connectionAuthoritiesMatch(config, this.domainCacheConfig)) {
+        this.invalidateDomainCaches()
+      }
+      this.domainCacheConfig = { ...config }
+      this.domainCacheAccountRevision = accountRevision
+      return this.domainCacheRevision
+    } catch (error) {
+      if (this.domainCacheRevision === startedRevision) {
+        this.invalidateDomainCaches()
+        this.domainCacheConfig = null
+      }
+      throw error
+    }
+  }
+
+  assertDomainCacheRevision(revision: number): void {
+    // Keep the final check synchronous with cache reads and publication.
+    if (revision !== this.domainCacheRevision ||
+        this.domainCacheAccountRevision !== domainCacheAccountRevision) {
+      throw createServicePromptScopeChangedError()
+    }
   }
 
   invalidateChatMessagesCache(chatId?: string | number): void {
@@ -5000,6 +5054,8 @@ export class TldwApiClientBase {
         ...requestScopeFields(options.requestScope), abortSignal: options.signal
       })
     }
+    const cacheRevision = await this.getDomainCacheRevision()
+    this.assertDomainCacheRevision(cacheRevision)
     const forceRefresh = options?.forceRefresh === true
     if (!forceRefresh) {
       const cached = this.characterCache.get(cid)
@@ -5017,17 +5073,23 @@ export class TldwApiClientBase {
           "/api/v1/characters/{id}/"
         ])
         const path = this.fillPathParams(template, cid)
+        await this.getDomainCacheRevision()
+        this.assertDomainCacheRevision(cacheRevision)
         const value = await bgRequest<any>({
           path,
           method: 'GET'
         })
+        await this.getDomainCacheRevision()
+        this.assertDomainCacheRevision(cacheRevision)
         this.characterCache.set(cid, {
           value,
           expiresAt: Date.now() + CHARACTER_CACHE_TTL_MS
         })
         return value
       } finally {
-        this.characterInFlight.delete(cid)
+        if (this.characterInFlight.get(cid) === request) {
+          this.characterInFlight.delete(cid)
+        }
       }
     })()
 
@@ -6022,6 +6084,8 @@ export class TldwApiClientBase {
     })
     const cacheKey = this.getChatMessagesCacheKey(cid, query)
     const useSharedCache = !options?.fresh && !options?.requestScope
+    const cacheRevision = useSharedCache ? await this.getDomainCacheRevision() : 0
+    if (useSharedCache) this.assertDomainCacheRevision(cacheRevision)
     const cached = useSharedCache ? this.chatMessagesCache.get(cacheKey) : undefined
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value
@@ -6149,10 +6213,14 @@ export class TldwApiClientBase {
           pinned
         } as ServerChatMessage
       })
-      if (useSharedCache) this.chatMessagesCache.set(cacheKey, {
-        value: normalized,
-        expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
-      })
+      if (useSharedCache) {
+        await this.getDomainCacheRevision()
+        this.assertDomainCacheRevision(cacheRevision)
+        this.chatMessagesCache.set(cacheKey, {
+          value: normalized,
+          expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
+        })
+      }
       return normalized
     })()
 
@@ -6160,7 +6228,9 @@ export class TldwApiClientBase {
     try {
       return await request
     } finally {
-      if (useSharedCache) this.chatMessagesInFlight.delete(cacheKey)
+      if (useSharedCache && this.chatMessagesInFlight.get(cacheKey) === request) {
+        this.chatMessagesInFlight.delete(cacheKey)
+      }
     }
   }
 

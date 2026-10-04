@@ -444,6 +444,8 @@ export const characterMethods = {
         ...requestScopeFields(options.requestScope), abortSignal: options.signal
       })
     }
+    const cacheRevision = await this.getDomainCacheRevision()
+    this.assertDomainCacheRevision(cacheRevision)
     const forceRefresh = options?.forceRefresh === true
     if (!forceRefresh) {
       const cached = this.characterCache.get(cid)
@@ -461,17 +463,23 @@ export const characterMethods = {
           "/api/v1/characters/{id}/"
         ])
         const path = this.fillPathParams(template, cid)
+        await this.getDomainCacheRevision()
+        this.assertDomainCacheRevision(cacheRevision)
         const value = await bgRequest<any>({
           path,
           method: 'GET'
         })
+        await this.getDomainCacheRevision()
+        this.assertDomainCacheRevision(cacheRevision)
         this.characterCache.set(cid, {
           value,
           expiresAt: Date.now() + CHARACTER_CACHE_TTL_MS
         })
         return value
       } finally {
-        this.characterInFlight.delete(cid)
+        if (this.characterInFlight.get(cid) === request) {
+          this.characterInFlight.delete(cid)
+        }
       }
     })()
 

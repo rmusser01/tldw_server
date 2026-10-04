@@ -22,12 +22,12 @@ describe("saved Chat profile request authority", () => {
     vi.stubGlobal("fetch", boundary.fetch)
   })
   afterEach(() => vi.unstubAllGlobals())
-  it("bypasses the global ID-only cache for an owned profile, preserving the unscoped default", async () => {
+  it("bypasses the shared cache for owned profiles and fences the unscoped cache by account", async () => {
     expect((await client.getCharacter(4)).name).toBe("Alice Cedar")
     current = config(2)
     expect((await client.getCharacter(4, options(2))).name).toBe("Bob Cedar")
-    expect((await client.getCharacter(4)).name).toBe("Alice Cedar")
-    expect(boundary.fetch).toHaveBeenCalledTimes(2)
+    expect((await client.getCharacter(4)).name).toBe("Bob Cedar")
+    expect(boundary.fetch).toHaveBeenCalledTimes(3)
     expect(new Headers(boundary.fetch.mock.calls[1][1].headers).get("X-TLDW-Expected-User-ID")).toBe("2")
   })
   it.each(["owner", "target"])("never dispatches an old profile request after its %s changes", async kind => {
@@ -48,12 +48,12 @@ describe("saved Chat profile request authority", () => {
   it("does not join an unscoped in-flight profile from another owner", async () => {
     let resolve!: (value: Response) => void
     boundary.fetch.mockImplementationOnce(() => new Promise<Response>(done => { resolve = done }))
-    const alice = client.getCharacter(4)
+    const alice = client.getCharacter(4).catch(error => error)
     await vi.waitFor(() => expect(boundary.fetch).toHaveBeenCalledTimes(1))
     current = config(2)
     const bob = client.getCharacter(4, options(2))
     resolve(new Response(JSON.stringify({ id: 4, name: "Alice Cedar" }), { status: 200, headers: { "Content-Type": "application/json" } }))
     expect((await bob).name).toBe("Bob Cedar")
-    expect((await alice).name).toBe("Alice Cedar")
+    expect(await alice).toMatchObject({ status: 412 })
   })
 })
