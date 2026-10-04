@@ -602,3 +602,16 @@ preserving official task content, and batch the two qualified fixture correction
 Before publication require source-equivalence proof, full PR-range hooks and
 exact lease on published ec8. New-head owning media/database CI, seven ruleset
 gates and Qodo remain required; no normal merge or cleanup has occurred.
+
+Topology-preserving rebase candidate54c54addeaf0b2e8d00b95b02bf11a278e6c9e7e
+has exact integration tree380f883358c76410493eaacd64ac7a0846597384, equal to the
+independent merge-tree. The recreated historical merge's resolved index exactly
+matches independently integrated tree2f973e162fa03d3bbc106ef7deea08ba7134e2c7.
+All2271incoming task blobs match dev. Fresh proof verifies7225frontend and3821
+backend/config entries and complete production roots unchanged;279PR-range files
+pass configured hooks. Post-run preservation proves3current pages, protected
+10/eight rows on both APIs and five canonical input/result pairs. An externally
+added unrelated persona stash is preserved alongside all69original ordered
+hashes:70total. The original draft is restored; historical18092preservation remains
+false. Failed Stop qualification is not relabeled; fresh hosted ownership and
+bounded further native approval remain blockers before normal merge.
