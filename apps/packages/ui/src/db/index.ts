@@ -143,6 +143,9 @@ type Prompt = {
   sourceSystem?: "workspace" | "studio" | "copilot"
   lastSyncedAt?: number | null
   serverUpdatedAt?: string | null
+  // ─── Server prompt library link (/api/v1/prompts, not Prompt Studio) ───
+  serverLibraryId?: number | null
+  serverLibraryUuid?: string | null
   fewShotExamples?: Array<{
     inputs: Record<string, any>
     outputs: Record<string, any>

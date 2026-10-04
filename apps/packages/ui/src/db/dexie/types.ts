@@ -250,6 +250,10 @@ export type Prompt = {
   lastSyncedAt?: number | null;       // Timestamp of last successful sync
   serverUpdatedAt?: string | null;    // Server's updated_at for conflict detection
 
+  // ─── Server prompt library link (/api/v1/prompts, not Prompt Studio) ───
+  serverLibraryId?: number | null;    // Library prompt id this local copy was made from
+  serverLibraryUuid?: string | null;  // Library prompt uuid; the stable link used for de-duplication
+
   // ─── Studio-specific Fields (progressive disclosure) ───
   promptFormat?: PromptFormat;
   promptSchemaVersion?: number | null;
