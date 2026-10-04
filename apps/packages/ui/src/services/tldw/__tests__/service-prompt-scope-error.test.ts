@@ -34,8 +34,17 @@ describe("Service Prompt scope policy", () => {
       expect(isServicePromptRequestPath(path, method)).toBe(false)
     }
   })
+  it.each(["/api/v1/workspaces", "/api/v1/workspaces/"])(
+    "allows only GET for the canonical workspace list %s",
+    (path) => {
+      expect(isServicePromptRequestPath(path, "GET")).toBe(true)
+      for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+        expect(isServicePromptRequestPath(path, method)).toBe(false)
+      }
+    }
+  )
   it.each([
-    "/api/v1/workspaces", "/api/v1/workspaces/ws-1/settings",
+    "/api/v1/workspaces/ws-1/settings",
     "/api/v1/workspaces/ws-1/sources/status", "/api/v1/workspaces/ws-1/notes/extra",
     "/api/v1/workspaces/a%2fb", "/api/v1/workspaces/a%5cb/notes",
     "/api/v1/workspaces/%2e%2e/artifacts", "/api/v1/workspaces/../sources",

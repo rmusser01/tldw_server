@@ -62,6 +62,7 @@ import {
   type ChatModeParamsBase,
 } from "../chatModePipeline"
 import { TLDW_ERROR_BUBBLE_PREFIX } from "@/utils/chat-error-message"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { __testing__ as ragTesting } from "../ragMode"
 import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
@@ -159,7 +160,7 @@ describe("runChatPipeline provider recovery", () => {
     expect(mocks.pageAssistModel.mock.calls[0][0]).not.toHaveProperty("apiProvider")
   })
 
-  it("retains a qualified provider through selected-source preflight", async () => {
+  it("does not invoke answer generation during failed selected-source preflight", async () => {
     mocks.ragSearch.mockRejectedValueOnce(new Error("retrieval unavailable"))
     await runChatPipeline(ragTesting.ragModeDefinition, "Question", "", false, [], [], new AbortController().signal, {
       ...buildParams(), selectedModel: "llama:../../../models/gemma:Q4/model.gguf",
@@ -168,8 +169,74 @@ describe("runChatPipeline provider recovery", () => {
       currentChatModelSettings: { apiProvider: "openai" }
     })
     expect(mocks.ragSearch).toHaveBeenCalledWith("Question", expect.objectContaining({
-      generation_provider: "llama.cpp", generation_model: "../../../models/gemma:Q4/model.gguf"
+      enable_generation: false, include_media_ids: [7]
     }))
+    const retrievalOptions = mocks.ragSearch.mock.calls[0][1]
+    for (const key of ["generation_provider", "generation_model", "generation_prompt"]) {
+      expect(retrievalOptions).not.toHaveProperty(key)
+    }
+    expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+  })
+
+  it("retains the qualified answer provider after retrieval-only selected-source preflight", async () => {
+    const retrieval = { results: [{
+      content: "The trial starts on 18 November 2026.",
+      metadata: { title: "Field memo", media_id: 7 }
+    }] }
+    let finishRetrieval!: () => void
+    mocks.ragSearch.mockReturnValueOnce(new Promise((resolve) => {
+      finishRetrieval = () => resolve(retrieval)
+    }))
+    const signal = new AbortController().signal
+    const snapshot: ServicePromptSnapshot = {
+      scopeKey: "test-scope",
+      requestScope: {
+        config: { serverUrl: "https://example.test", authMode: "single-user" },
+        userId: 1
+      },
+      capability: "supported",
+      scopeSignal: signal,
+      scopeInvalidatedSignal: new AbortController().signal,
+      release: vi.fn(),
+      definitions: { "chat.rag.answer": {
+        definition: { id: "chat.rag.answer", parts: [{
+          key: "template", mode: "template", required_variables: ["context", "question"]
+        }] },
+        parts: { template: "Context: {context}\nQuestion: {question}" },
+        source: "packaged", revision: null
+      } }
+    }
+    const pending = runChatPipeline(ragTesting.ragModeDefinition, "Question", "", false, [], [], signal, {
+      ...buildParams(), selectedModel: "llama:../../../models/gemma:Q4/model.gguf",
+      selectedKnowledge: null, ragMediaIds: [7], ragSearchMode: "hybrid",
+      ragTopK: null, ragEnableGeneration: true, ragEnableCitations: true, ragSources: [],
+      currentChatModelSettings: { apiProvider: "openai" },
+      ragAdvancedOptions: {
+        generation_provider: "openai", generation_model: "wrong-model", generation_prompt: "Generate early"
+      },
+      servicePromptSnapshot: snapshot
+    })
+    await vi.waitFor(() => expect(mocks.ragSearch).toHaveBeenCalledTimes(1))
+    expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+    finishRetrieval()
+    const result = await pending
+    expect(mocks.ragSearch).toHaveBeenCalledTimes(1)
+    expect(mocks.ragSearch).toHaveBeenCalledWith("Question", expect.objectContaining({
+      enable_generation: false, include_media_ids: [7]
+    }))
+    const retrievalOptions = mocks.ragSearch.mock.calls[0][1]
+    for (const key of ["generation_provider", "generation_model", "generation_prompt"]) {
+      expect(retrievalOptions).not.toHaveProperty(key)
+    }
+    expect(mocks.pageAssistModel).toHaveBeenCalledTimes(1)
+    expect(mocks.pageAssistModel).toHaveBeenCalledWith(expect.objectContaining({
+      apiProvider: "llama.cpp", model: "llama:../../../models/gemma:Q4/model.gguf"
+    }))
+    expect(mocks.ragSearch.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.pageAssistModel.mock.invocationCallOrder[0]
+    )
+    expect(result).toMatchObject({ status: "submitted" })
+    expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
   })
 
   it("keeps a received durable user acknowledgement when the stream fails", async () => {
