@@ -24,9 +24,12 @@ vi.mock("../server-health-probe", () => ({ probeServerHealth: vi.fn() }))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({
   t: (key: string, fallback: unknown) => typeof fallback === "string" ? fallback : key
 }) }))
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router-dom", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-router-dom")>(),
   Link: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useNavigate: () => vi.fn()
+  useNavigate: () => vi.fn(),
+  useBlocker: () => ({ state: "unblocked", proceed: undefined, reset: undefined }),
+  unstable_usePrompt: vi.fn()
 }))
 
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -59,7 +62,7 @@ afterEach(() => {
   vi.unstubAllEnvs()
 })
 
-it.each(["device", "session"] as const)("settles the real %s credential Disconnect while retaining the server", async (persistence) => {
+it.for(["device", "session"] as const)("settles the real %s credential Disconnect while retaining the server", async (persistence, { signal }) => {
   const serverUrl = "https://disconnect.example.test"
   await tldwClient.saveManualSingleUserCredential({ serverUrl, apiKey: "synthetic-disconnect-key", persistence })
   const observed: unknown[] = []
@@ -76,11 +79,18 @@ it.each(["device", "session"] as const)("settles the real %s credential Disconne
     expect(disconnect).toBeEnabled()
     expect(disconnect.querySelector("svg")).toBeNull()
     expect(await screen.findByText("Logged out successfully")).toBeInTheDocument()
-    expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveValue(serverUrl)
+    const server = screen.getByLabelText("Server URL", { selector: "input" })
+    expect(server).toHaveRole("textbox")
+    expect(server).toHaveAccessibleName("Server URL")
+    expect(server).toBeVisible()
+    expect(server.closest('[aria-hidden="true"]')).toBeNull()
+    expect(server).toHaveValue(serverUrl)
     expect((await tldwClient.getConfig())?.apiKey).toBeUndefined()
     expect(await new Storage({ area: "session" }).get(MANUAL_SESSION_KEY)).toBeUndefined()
     expect(observed).toContainEqual(expect.objectContaining({ serverUrl }))
     expect(mocks.bgRequest).not.toHaveBeenCalled()
+    // Vitest timeouts do not cancel this async body or its later storage writes.
+    signal.throwIfAborted()
     await act(async () => tldwClient.saveManualSingleUserCredential({ serverUrl, apiKey: "synthetic-reconnect-key", persistence }))
     expect((await tldwClient.getConfig())?.apiKey).toBe("synthetic-reconnect-key")
   } finally {

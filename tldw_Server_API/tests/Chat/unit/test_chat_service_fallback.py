@@ -3759,6 +3759,7 @@ async def test_success_is_marked_before_cancelled_postprocessing(
     release_save = asyncio.Event()
     marked: list[str] = []
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
+    monkeypatch.setattr(chat_service, "log_llm_usage", AsyncMock(return_value=None))
 
     def successful_call() -> dict[str, object]:
         return {
