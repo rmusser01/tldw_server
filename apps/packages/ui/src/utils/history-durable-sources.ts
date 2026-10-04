@@ -72,7 +72,10 @@ const rawMetadataKeys = ["source", "title", "chunk_id", "chunkId", "retrieval_st
   "score", "relevance", "rerank_score", "bm25_norm", "page", "loc", "url", "media_type", "chunk_type",
   "created_at", "last_modified", "transcription_model", "retrieval_mode", "paragraph_kind", "highlighted",
   "match_count", "snippets", "ancestry_titles", "embedding_model", "embedding_provider",
-  "media_id", "author", "chunk_index", "total_chunks", "start_char", "end_char", "chunk_start", "chunk_end"]
+  "source_id", "evidence_origin", "section_path",
+  "media_id", "note_id", "record_id", "start", "end", "author", "chunk_index", "total_chunks", "start_char", "end_char", "chunk_start", "chunk_end"]
+const rawIdentifier = z.union([text(512), safeInt])
+const identifier = (value: unknown) => typeof value === "number" ? String(value) : value
 const first = (...values: unknown[]) => values.find(value => Boolean(value))
 const firstScore = (...values: unknown[]) => values.find(value => typeof value === "number" && Number.isFinite(value))
 
@@ -87,21 +90,29 @@ export const projectHistoryDurableSources = (value: unknown): readonly HistoryDu
     if (Object.entries(source).some(([key, item]) => !["metadata", "score", "relevance"].includes(key) &&
         item !== undefined && typeof item !== "string") ||
         Object.entries(metadata).some(([key, item]) => !["score", "relevance", "rerank_score", "bm25_norm", "page", "loc", "match_count", "snippets", "ancestry_titles",
+          "media_id", "note_id", "record_id", "chunk_id", "chunkId", "start", "end",
           "chunk_index", "total_chunks", "start_char", "end_char", "chunk_start", "chunk_end"].includes(key) &&
         item !== undefined && typeof item !== "string")) fail()
     // Search decoration/bookkeeping is not consumed by citation display or navigation.
-    if ((metadata.match_count !== undefined && !safeInt.safeParse(metadata.match_count).success) ||
+    if (["media_id", "note_id", "record_id", "chunk_id", "chunkId"].some(key =>
+        metadata[key] !== undefined && !rawIdentifier.safeParse(metadata[key]).success) ||
+        ["start", "end"].some(key => metadata[key] !== undefined && !safeInt.safeParse(metadata[key]).success) ||
+        (typeof metadata.start === "number" && typeof metadata.end === "number" && metadata.start > metadata.end) ||
+        (metadata.media_type !== undefined && !text(128).safeParse(metadata.media_type).success) ||
+        (metadata.match_count !== undefined && !safeInt.safeParse(metadata.match_count).success) ||
         (metadata.snippets !== undefined && !z.array(z.string()).safeParse(metadata.snippets).success) ||
-        (metadata.ancestry_titles !== undefined && (!Array.isArray(metadata.ancestry_titles) || metadata.ancestry_titles.length))) fail()
-    if ((metadata.url !== undefined && metadata.url !== source.url) ||
-        (metadata.media_type !== undefined && metadata.media_type !== source.type)) fail()
+        (metadata.source_id !== undefined && !text(512).safeParse(metadata.source_id).success) ||
+        (metadata.evidence_origin !== undefined && !text(128).safeParse(metadata.evidence_origin).success) ||
+        (metadata.section_path !== undefined && !text(1000).safeParse(metadata.section_path).success) ||
+        (metadata.ancestry_titles !== undefined && !z.array(text(1000)).max(20).safeParse(metadata.ancestry_titles).success)) fail()
+    if (metadata.url !== undefined && metadata.url !== source.url) fail()
     const projected: Record<string, unknown> = {}
     for (const key of ["source", "title", "page", "loc", "media_id", "author", "chunk_index", "total_chunks", "start_char", "end_char", "chunk_start", "chunk_end"]) {
-      if (metadata[key] !== undefined) projected[key] = metadata[key]
+      if (metadata[key] !== undefined) projected[key] = key === "media_id" ? identifier(metadata[key]) : metadata[key]
     }
     const aliases = {
       score: firstScore(source.score, source.relevance, metadata.score, metadata.relevance, metadata.rerank_score, metadata.bm25_norm),
-      chunk_id: first(source.chunk_id, source.chunkId, metadata.chunk_id, metadata.chunkId),
+      chunk_id: first(source.chunk_id, source.chunkId, identifier(metadata.chunk_id), identifier(metadata.chunkId)),
       retrieval_strategy: first(source.strategy, source.retrieval_strategy, source.search_mode,
         metadata.retrieval_strategy, metadata.reranking_strategy, metadata.search_mode),
       source_type: first(source.source_type, source.type, metadata.source_type, metadata.type),

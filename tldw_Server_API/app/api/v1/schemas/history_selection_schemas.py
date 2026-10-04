@@ -346,6 +346,7 @@ class SourceLinesV1(HistoryWireModel):
 
     @model_validator(mode="after")
     def validate_order(self) -> SourceLinesV1:
+        """Reject reversed source line ranges while preserving exact locators."""
         if self.from_ > self.to:
             raise ValueError("source line range is reversed")
         return self
@@ -381,6 +382,7 @@ class SourceMetadataV1(HistoryWireModel):
     @field_validator("score", mode="before")
     @classmethod
     def validate_json_number(cls, value: object) -> object:
+        """Reject nonfinite or nonnumeric scores and normalize unsafe integers."""
         if type(value) not in (int, float):
             raise ValueError("source score must be a finite JSON number")
         try:
@@ -395,6 +397,7 @@ class SourceMetadataV1(HistoryWireModel):
     )
     @classmethod
     def validate_strings(cls, value: str, info: Any) -> str:
+        """Require nonblank metadata within each field's UTF-8 byte budget."""
         limit = {"chunk_id": 512, "media_id": 512, "retrieval_strategy": 128, "source_type": 128}.get(
             info.field_name, 1000
         )
@@ -431,6 +434,7 @@ class SourceV1(HistoryWireModel):
     @field_validator("name", "type", "url", "pageContent")
     @classmethod
     def validate_strings(cls, value: str, info: Any) -> str:
+        """Bound source text by UTF-8 bytes, allowing only the URL to be blank."""
         limits = {"name": 1000, "type": 128, "url": 2048, "pageContent": 4000}
         if (info.field_name != "url" and not value.strip()) or len(value.encode("utf-8")) > limits[info.field_name]:
             raise ValueError("source string is blank or exceeds UTF-8 budget")
@@ -467,6 +471,7 @@ class HistoryResultPayloadV1(HistoryWireModel):
 
     @model_validator(mode="after")
     def validate_source_budgets(self) -> HistoryResultPayloadV1:
+        """Reject duplicate excerpts and enforce aggregate text and wire budgets."""
         excerpts = [source.pageContent for source in self.sources]
         if len(set(excerpts)) != len(excerpts):
             raise ValueError("duplicate source excerpt cannot preserve evidence marker mapping")
@@ -487,6 +492,7 @@ class DurableHistorySelectionV1(HistoryWireModel):
 
     @model_validator(mode="after")
     def validate_send(self) -> DurableHistorySelectionV1:
+        """Require send authority bound to a lowercase SHA-256 request digest."""
         if self.selection.purpose != "send":
             raise ValueError("selected durable history requires purpose=send")
         if len(self.selection.request_context_digest) != 64 or any(
@@ -523,6 +529,7 @@ class HistoryResultV1(HistoryResultMetadataV1):
 
     @field_serializer("result_message_id")
     def serialize_result_id(self, value: UUID) -> str:
+        """Emit the server-owned result UUID as its canonical wire string."""
         return str(value)
 
 
@@ -535,6 +542,7 @@ class WorkspaceHistoryScopeV1(HistoryWireModel):
     @field_validator("workspace_id")
     @classmethod
     def validate_workspace_id(cls, value: str) -> str:
+        """Require a nonblank UTF-8 workspace ID without altering its identity."""
         if not value.strip():
             raise ValueError("workspace_id must be nonblank")
         value.encode("utf-8")

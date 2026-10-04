@@ -153,16 +153,22 @@ describe("bounded source result", () => {
   })
   it.each(["chunk_id", "chunkId", "retrieval_strategy", "search_mode", "selection_reason", "why_selected"])(
     "rejects invalid raw %s rather than silently losing required display data", key => {
-      expect(() => service.projectHistoryDurableSources([{ ...source(), metadata: { [key]: 0 } }])).toThrow()
+      expect(() => service.projectHistoryDurableSources([{ ...source(), metadata: { [key]: 0.5 } }])).toThrow()
     }
   )
+  it.each(["chunk_id", "chunkId"])("normalizes safe raw %s without accepting numeric durable wire IDs", key => {
+    const projected = service.projectHistoryDurableSources([{ ...source(), metadata: { [key]: 0, media_id: 4 } }])
+    expect(projected[0].metadata).toMatchObject({ chunk_id: "0", media_id: "4" })
+    expect(() => service.parseHistoryDurableResult(result([{ ...source(), metadata: { chunk_id: 0 } }]), "rag")).toThrow()
+    expect(() => service.parseHistoryDurableResult(result([{ ...source(), metadata: { media_id: 4 } }]), "rag")).toThrow()
+  })
   it("preserves zero score and exact empty URL while allowing redundant raw metadata", () => {
     expect(service.projectHistoryDurableSources([{ ...source(), url: "", score: 0,
       metadata: { score: 1, url: "", media_type: "pdf" }
     }])[0]).toEqual({ ...source(), url: "", metadata: { score: 0, source_type: "pdf" } })
     expect(() => service.projectHistoryDurableSources([{ ...source(), metadata: { url: "lost locator" } }])).toThrow()
   })
-  it.each([{ media_id: 4 }, { page_number: 4 }, { line_range: [1, 3] }, { asset_url: "signed" }, { options: {} }, { headers: {} }])(
+  it.each([{ media_id: 4.5 }, { page_number: 4 }, { line_range: [1, 3] }, { asset_url: "signed" }, { options: {} }, { headers: {} }])(
     "rejects raw unrepresentable required locators or execution data %#", metadata => {
       expect(() => service.projectHistoryDurableSources([{ ...source(), metadata }])).toThrow()
     }

@@ -17,6 +17,61 @@ const metadata = { title: "downloaded_323911489848964201", media_type: "document
 const excerpt = "This domain is for use in documentation examples without needing permission. This is not a service, avoid relying on it for testing and monitoring purposes."
 const source = { name: metadata.title, type: metadata.media_type, mode: "rag", url: metadata.url, pageContent: excerpt, metadata }
 describe("pure durable sources and observed retrieval metadata", () => {
+  it("normalizes known serialized numeric IDs and omits bookkeeping outside the durable wire", () => {
+    const raw = { ...source, metadata: { ...metadata, media_id: 7, chunk_id: 17,
+      note_id: "note-7", record_id: 19, start: 0, end: 35 } }
+    const projected = projectHistoryDurableSources([raw])[0]
+    expect(projected).toEqual({ ...projectHistoryDurableSources([source])[0],
+      metadata: { ...projectHistoryDurableSources([source])[0].metadata, media_id: "7", chunk_id: "17" } })
+    expect(raw.metadata.media_id).toBe(7)
+    expect(raw.metadata.chunk_id).toBe(17)
+    expect(parseHistoryDurableResult({ version: 1, sources: [projected] }, "rag").sources[0]).toEqual(projected)
+  })
+  it("retains the selected semantic type when a distinct media type is serialized", () => {
+    const projected = projectHistoryDurableSources([{ ...source, type: "note",
+      metadata: { ...metadata, type: "note", media_type: "text" } }])[0]
+    expect(projected.type).toBe("note")
+    expect(projected.metadata.source_type).toBe("note")
+    expect(projected.pageContent).toBe(excerpt)
+    expect(projected.metadata).not.toHaveProperty("media_type")
+    expect(projected.metadata).not.toHaveProperty("note_id")
+  })
+  it.each([0, Number.MAX_SAFE_INTEGER])("preserves the complete safe numeric identifier boundary %s", id => {
+    const projected = projectHistoryDurableSources([{ ...source,
+      metadata: { ...metadata, media_id: id, chunk_id: id, note_id: id, record_id: id } }])[0]
+    expect(projected.metadata.media_id).toBe(String(id))
+    expect(projected.metadata.chunk_id).toBe(String(id))
+  })
+  it.each([
+    { note_id: null }, { note_id: " " }, { note_id: "x".repeat(513) },
+    { record_id: true }, { record_id: -1 }, { record_id: 1.5 },
+    { media_id: 1.5 }, { media_id: -1 }, { media_id: Number.MAX_SAFE_INTEGER + 1 },
+    { chunk_id: 1.5 }, { chunk_id: Number.NaN }, { chunk_id: false },
+    { start: -1 }, { end: "35" }, { start: 2, end: 1 },
+    { media_type: " " }, { media_type: "x".repeat(129) }
+  ])("rejects malformed recognized serializer bookkeeping %#", addition => {
+    expect(() => projectHistoryDurableSources([{ ...source, metadata: { ...metadata, ...addition } }])).toThrow()
+  })
+  it("keeps numeric identifiers invalid on the already-projected durable wire", () => {
+    expect(() => parseHistoryDurableResult({ version: 1, sources: [{ ...source,
+      metadata: { media_id: 7 } }] }, "rag")).toThrow()
+  })
+  it("projects latest-dev retrieval bookkeeping without changing source evidence or locators", () => {
+    const observed = { ...metadata, source_id: "2", evidence_origin: "local_library",
+      section_path: "Lumen Project Field Memo", ancestry_titles: ["Lumen Project Field Memo"] }
+    expect(projectHistoryDurableSources([{ ...source, metadata: observed }])).toEqual(
+      projectHistoryDurableSources([source])
+    )
+  })
+  it.each([
+    { source_id: null }, { source_id: 2 }, { source_id: "x".repeat(513) },
+    { evidence_origin: null }, { evidence_origin: 1 }, { evidence_origin: "x".repeat(129) },
+    { section_path: null }, { section_path: "x".repeat(1001) },
+    { ancestry_titles: null }, { ancestry_titles: [1] },
+    { ancestry_titles: ["x".repeat(1001)] }, { ancestry_titles: Array(21).fill("Title") },
+  ])("rejects malformed latest-dev retrieval bookkeeping %#", addition => {
+    expect(() => projectHistoryDurableSources([{ ...source, metadata: { ...metadata, ...addition } }])).toThrow()
+  })
   it("preserves the winning source_type through raw projection, strict validation and display restoration", () => {
     const raw = { name: "PDF evidence", type: "pdf", source_type: " vector-evidence ", mode: "rag", url: "urn:exact:evidence",
       pageContent: "Exact excerpt", metadata: { source: "Attribution", title: "Title", chunk_id: "chunk:1", page: 2 } }
@@ -78,7 +133,7 @@ describe("pure durable sources and observed retrieval metadata", () => {
     expect(() => projectHistoryDurableSources([{ ...source, metadata: { source: "media_db", chunk_id: "late_chunk:2:1", [key]: "required" } }])).toThrow()
   })
   it.each([
-    { media_id: " " }, { media_id: "x".repeat(513) }, { media_id: null }, { media_id: 1 },
+    { media_id: " " }, { media_id: "x".repeat(513) }, { media_id: null },
     { author: "x".repeat(1001) }, { author: null },
     { chunk_index: true }, { chunk_index: -1 }, { chunk_index: "0" }, { total_chunks: 0 },
     { chunk_index: 3, total_chunks: 3 }, { start_char: 1 }, { end_char: 1 },

@@ -50,7 +50,14 @@ def test_postgres_durable_retry_rejects_independently_appended_image(order_db):
     assert db.get_conversation_by_id(cid) == before_conversation
 
 
-def insert_writer(db, writer, cid, mid, sender, timestamp):
+def insert_writer(
+    db: CharactersRAGDB,
+    writer: str,
+    cid: str,
+    mid: str,
+    sender: str,
+    timestamp: str,
+) -> None:
     """Use each real shared writer, including SQL outside add_message."""
     if writer == "ordinary":
         db.add_message({"id": mid, "conversation_id": cid, "sender": sender, "content": "Later", "timestamp": timestamp})

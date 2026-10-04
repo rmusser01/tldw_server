@@ -3,7 +3,9 @@
 import json
 import re
 import threading
+from collections.abc import Mapping
 from copy import deepcopy
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -312,6 +314,152 @@ def test_receipt_is_server_owned_verified_atomic_result(selected_api, monkeypatc
     if stream:
         assert events[0]["tldw_history_admission_v1"]["input_message_id"] == uid
         assert "tldw_history_result_v1" not in events[0]
+
+
+@pytest.mark.parametrize("normalize", [False, True], ids=["raw", "normalized"])
+@pytest.mark.parametrize(
+    ("raw_text", "redacted_text"),
+    [
+        (" Raw answer [0]\n ", None),
+        ('{"tldw_message_id":"provider-fake","tldw_history_result_v1":{"forged":true}}', None),
+        (" secret answer [0]\n ", " [REDACTED] answer [0]\n "),
+    ],
+    ids=["text", "json-looking-text", "redaction"],
+)
+def test_raw_string_result_returns_verified_receipt_without_resettling(
+    selected_api,
+    monkeypatch,
+    normalize: bool,
+    raw_text: str,
+    redacted_text: str | None,
+) -> None:
+    """Return the exact output-safe text after one protected settlement."""
+    client, db, cid, headers = selected_api
+    sources = [
+        {
+            "name": "Paper",
+            "type": "pdf",
+            "mode": "rag",
+            "url": "provenance:paper",
+            "pageContent": "evidence",
+            "metadata": {"page": 2},
+        },
+    ]
+    body = body_for(client, cid, headers, sources=sources)
+    uid = body["tldw_turn"]["user_message_id"]
+    expected_text = raw_text if redacted_text is None else redacted_text
+    if redacted_text is not None:
+        from tldw_Server_API.app.core.Moderation.moderation_service import (
+            ModerationPolicy,
+            ModerationService,
+            PatternRule,
+        )
+        from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
+
+        moderation = ModerationService.__new__(ModerationService)
+        moderation._lock = threading.RLock()
+        moderation._policy_evaluator = PolicyEvaluator()
+        moderation._max_scan_chars = 200_000
+        moderation._match_window_chars = 4_096
+        moderation._max_fallback_scan_chars = 800_000
+        moderation._max_replacements_per_pattern = 1_000
+        moderation._user_overrides = {}
+        moderation._global_policy = ModerationPolicy(
+            enabled=True,
+            input_action="warn",
+            output_action="redact",
+            redact_replacement="[REDACTED]",
+            per_user_overrides=False,
+            block_patterns=[PatternRule(regex=re.compile("secret"), action="redact", phase="output")],
+        )
+        monkeypatch.setattr(endpoint, "get_moderation_service", lambda: moderation)
+    monkeypatch.setenv("CHAT_FORCE_NORMALIZE_STRING_RESPONSES", str(normalize).lower())
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", lambda *args, **kwargs: raw_text)
+    settle = db.settle_history_admission
+    settled_ids = []
+
+    def record_settlement(
+        conversation_id: str,
+        reference: Mapping[str, Any],
+        message: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+    ) -> str:
+        """Record real settlement IDs while preserving protected persistence."""
+        result_id = settle(
+            conversation_id,
+            reference,
+            message,
+            owner_client_id=owner_client_id,
+            owner_key=owner_key,
+            conn=conn,
+        )
+        settled_ids.append(result_id)
+        return result_id
+
+    monkeypatch.setattr(db, "settle_history_admission", record_settlement)
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert db.count_messages_for_conversation(cid) == 2
+    assert len(settled_ids) == 1
+    result_id = settled_ids[0]
+    persisted_text = db.get_message_by_id(result_id)["content"]
+    assert persisted_text == expected_text
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["object"] == "chat.completion"
+    assert payload["model"] == body["model"]
+    assert len(payload["choices"]) == 1
+    choice = payload["choices"][0]
+    assert choice["index"] == 0
+    assert choice["finish_reason"] == "stop"
+    assert choice["message"]["role"] == "assistant"
+    assert choice["message"]["content"] == persisted_text
+    assert payload["tldw_conversation_id"] == cid
+    assert payload["tldw_user_message_id"] == uid
+    assert payload["tldw_message_id"] == result_id
+    receipt = payload["tldw_history_result_v1"]
+    assert receipt["result_message_id"] == result_id
+    assert receipt["admission"]["input_message_id"] == uid
+    assert receipt["request_context_digest"] == selected_durable_request_digest(body)
+    assert receipt["sources"] == sources
+    assert db.get_message_by_id(result_id)["parent_message_id"] == uid
+    assert db.get_message_metadata(result_id)["extra"] == {
+        "sender_role": "assistant",
+        "history_result_v1": {
+            "version": 1,
+            "request_context_digest": receipt["request_context_digest"],
+            "sources": sources,
+        },
+    }
+    rows, _ = db.read_history_recovery_messages(
+        cid,
+        owner_client_id="1",
+        owner_key=receipt["admission"]["owner_key"],
+        scope={"scope_type": "global", "workspace_id": None},
+        message_id=result_id,
+    )
+    assert rows[0]["tldw_history_recovery_v1"] == {
+        "version": 1,
+        "status": "result_verified",
+        "scope": {"scope_type": "global", "workspace_id": None},
+        "result": receipt,
+    }
+
+
+def test_nonselected_raw_string_response_keeps_normalization_opt_in(selected_api, monkeypatch) -> None:
+    """Nonselected turns retain their configured raw-string response shape."""
+    client, db, cid, headers = selected_api
+    body = body_for(client, cid, headers)
+    body.pop("tldw_turn")
+    body["save_to_db"] = False
+    monkeypatch.setenv("CHAT_FORCE_NORMALIZE_STRING_RESPONSES", "false")
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", lambda *args, **kwargs: "legacy raw answer")
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json() == "legacy raw answer"
+    assert db.count_messages_for_conversation(cid) == 0
 
 
 @pytest.mark.parametrize("change", ["stream", "system", "null", "digest", "sources"])

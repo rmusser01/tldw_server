@@ -646,12 +646,17 @@ export const useServerChatLoader = ({
     setMessages,
     setIsLoading
   } = useChatBaseState(useStoreMessageOption)
-  const clearOwnedLoading = React.useCallback((controller: AbortController | null) => {
+  const clearOwnedLoading = React.useCallback((
+    controller: AbortController | null,
+    settledSelectionIntent?: ReturnType<typeof usePlaygroundSessionStore.getState>["serverChatSelectionIntent"]
+  ) => {
     if (!controller || serverChatLoadingOwner?.controller !== controller) return
-    const selectionIntent = serverChatLoadingOwner.selectionIntent
-    serverChatLoadingOwner = null
     const currentIntent = usePlaygroundSessionStore.getState().serverChatSelectionIntent
-    if (currentIntent && currentIntent !== selectionIntent) return
+    // Keep cleanup ownership while a newer selection is still debounced.
+    if (settledSelectionIntent !== undefined && currentIntent && currentIntent !== settledSelectionIntent) return
+    serverChatLoadingOwner = null
+    const current = useStoreMessageOption.getState()
+    if (current.streaming || current.isProcessing) return
     setIsLoading(false)
   }, [setIsLoading])
   const messagesRef = React.useRef(messages)
@@ -717,6 +722,7 @@ export const useServerChatLoader = ({
     inFlight: boolean
     loaded: boolean
   }>({ chatId: null, controller: null, inFlight: false, loaded: false })
+  const ownedLoadingControllerRef = React.useRef<AbortController | null>(null)
   const serverChatDebounceRef = React.useRef<{
     chatId: string | null
     timer: ReturnType<typeof setTimeout> | null
@@ -737,14 +743,14 @@ export const useServerChatLoader = ({
       if (serverChatLoadRef.current.controller) {
         serverChatLoadRef.current.controller.abort()
       }
-      clearOwnedLoading(serverChatLoadRef.current.controller)
+      clearOwnedLoading(ownedLoadingControllerRef.current)
     }
   }, [clearOwnedLoading])
 
   React.useEffect(() => {
     if (!enabled) {
       serverChatLoadRef.current.controller?.abort()
-      clearOwnedLoading(serverChatLoadRef.current.controller)
+      clearOwnedLoading(ownedLoadingControllerRef.current)
       serverChatLoadRef.current = {
         chatId: null,
         controller: null,
@@ -785,6 +791,7 @@ export const useServerChatLoader = ({
     serverChatDebounceRef.current.chatId = serverChatId
     serverChatDebounceRef.current.timer = setTimeout(() => {
       const controller = new AbortController()
+      const previousLoadingController = ownedLoadingControllerRef.current
       let selectionCurrent = selectionRef.current?.fence() || (() => true)
       let ownedSelectionRevision = getSelectedAssistantOperationRevision()
       const canCommitCurrentLoad = () =>
@@ -854,6 +861,7 @@ export const useServerChatLoader = ({
             if (usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
           } else if (selectionRef.current?.canAutomaticallyLoad?.() === false) return
           serverChatLoadingOwner = { controller, selectionIntent }
+          ownedLoadingControllerRef.current = controller
           setIsLoading(true)
           if (deliberateSelection) {
             handledSelectionIntent.current = selectionIntent
@@ -1304,7 +1312,12 @@ export const useServerChatLoader = ({
             })
           }
         } finally {
-          clearOwnedLoading(controller)
+          clearOwnedLoading(controller, selectionIntent)
+          // An unqualified replacement must release the aborted predecessor,
+          // but the controller check still protects any successor that claimed it.
+          if (previousLoadingController?.signal.aborted) {
+            clearOwnedLoading(previousLoadingController, selectionIntent)
+          }
           // Messages are ready independently of optional profile enrichment.
           // Keep this load's authority alive until that guarded work settles.
           await pendingAssistantPresentation?.catch(() => undefined)

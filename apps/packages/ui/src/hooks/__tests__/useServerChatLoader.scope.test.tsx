@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => {
     selection: null as any,
     renderedMessages: [] as any[],
     streaming: false,
+    processing: false,
     getChat: vi.fn(),
     getCharacter: vi.fn(),
     getHistoriesWithMetadata: vi.fn(),
@@ -73,7 +74,7 @@ vi.mock("@/hooks/chat/useChatBaseState", () => ({
   useChatBaseState: () => ({
     messages: mocks.renderedMessages,
     streaming: mocks.streaming,
-    isProcessing: false,
+    isProcessing: mocks.processing,
     setHistory: mocks.setHistory,
     setMessages: mocks.setMessages,
     setIsLoading: mocks.setIsLoading
@@ -83,7 +84,9 @@ vi.mock("@/hooks/chat/useChatBaseState", () => ({
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: Object.assign((
     selector: (state: typeof mocks.store) => unknown
-  ) => selector(mocks.store), { getState: () => mocks.store })
+  ) => selector(mocks.store), { getState: () => ({
+    ...mocks.store, streaming: mocks.streaming, isProcessing: mocks.processing
+  }) })
 }))
 
 let selectionRevision = 0
@@ -147,6 +150,7 @@ describe("useServerChatLoader scoped local history", () => {
     mocks.renderedMessages = []
     mocks.store.setServerChatId.mockReset()
     mocks.streaming = false
+    mocks.processing = false
     mocks.getCharacter.mockResolvedValue(null)
     mocks.store.serverChatAssistantKind = "character"
     mocks.store.serverChatCharacterId = null
@@ -529,6 +533,122 @@ describe("useServerChatLoader scoped local history", () => {
     } finally {
       mounted.unmount()
       usePlaygroundSessionStore.getState().clearSession()
+      mocks.getChat.mockReset()
+    }
+  })
+
+  it("releases interrupted busy when the replacement returns before claiming loading", async () => {
+    let busy = false
+    mocks.setIsLoading.mockImplementation(value => { busy = value })
+    mocks.store.serverChatMetaLoaded = false
+    const response = deferred<never>()
+    mocks.getChat.mockReset().mockReturnValue(response.promise)
+    const options = {
+      ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }
+    const mounted = renderHook(() => useServerChatLoader(options))
+    try {
+      await act(() => vi.advanceTimersByTimeAsync(200))
+      expect(busy).toBe(true)
+      act(() => {
+        mocks.store.serverChatId = "chat-b"
+        mocks.selection = { fence: () => () => true, canAutomaticallyLoad: () => false }
+        usePlaygroundSessionStore.getState().requestServerChatSelection("chat-c")
+      })
+      await act(async () => { response.reject(new DOMException("Aborted", "AbortError")) })
+      expect(busy).toBe(true)
+      await act(() => vi.advanceTimersByTimeAsync(200))
+      expect(busy).toBe(false)
+      expect(mocks.getChat).toHaveBeenCalledTimes(1)
+      expect(mocks.listChatMessages).not.toHaveBeenCalled()
+    } finally {
+      mounted.unmount()
+      usePlaygroundSessionStore.getState().clearSession()
+      mocks.getChat.mockReset()
+    }
+  })
+
+  it.each([
+    ["unmount", false], ["unmount", true],
+    ["disable", false], ["disable", true]
+  ] as const)("releases interrupted busy on %s before replacement debounce (old settled: %s)", async (cleanup, settled) => {
+    let busy = false
+    mocks.setIsLoading.mockImplementation(value => { busy = value })
+    mocks.store.serverChatMetaLoaded = false
+    const response = deferred<never>()
+    mocks.getChat.mockReset().mockReturnValue(response.promise)
+    const options = {
+      ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }
+    const mounted = renderHook(
+      ({ enabled }) => useServerChatLoader({ ...options, enabled }),
+      { initialProps: { enabled: true } }
+    )
+    try {
+      await act(() => vi.advanceTimersByTimeAsync(200))
+      expect(busy).toBe(true)
+      act(() => {
+        mocks.store.serverChatId = "chat-b"
+        usePlaygroundSessionStore.getState().requestServerChatSelection("chat-b")
+      })
+      if (settled) {
+        await act(async () => { response.reject(new DOMException("Aborted", "AbortError")) })
+      }
+      expect(busy).toBe(true)
+      if (cleanup === "unmount") mounted.unmount()
+      else mounted.rerender({ enabled: false })
+      expect(busy).toBe(false)
+      await act(async () => {
+        if (!settled) response.reject(new DOMException("Aborted", "AbortError"))
+        await vi.advanceTimersByTimeAsync(200)
+      })
+      expect(busy).toBe(false)
+      expect(mocks.getChat).toHaveBeenCalledTimes(1)
+    } finally {
+      mounted.unmount()
+      usePlaygroundSessionStore.getState().clearSession()
+      mocks.getChat.mockReset()
+    }
+  })
+
+  it.each([
+    ["settle", "streaming"], ["settle", "processing"],
+    ["unmount", "streaming"], ["unmount", "processing"],
+    ["disable", "streaming"], ["disable", "processing"]
+  ] as const)("does not clear live send/stream loading during loader %s (activity: %s)", async (cleanup, activity) => {
+    let busy = false
+    mocks.setIsLoading.mockImplementation(value => { busy = value })
+    mocks.store.serverChatMetaLoaded = false
+    const response = deferred<never>()
+    mocks.getChat.mockReset().mockReturnValue(response.promise)
+    const options = {
+      ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }
+    const mounted = renderHook(
+      ({ enabled }) => useServerChatLoader({ ...options, enabled }),
+      { initialProps: { enabled: true } }
+    )
+    try {
+      await act(() => vi.advanceTimersByTimeAsync(200))
+      expect(busy).toBe(true)
+      // Store writes from a send are synchronous; React may not have rerendered yet.
+      if (activity === "streaming") mocks.streaming = true
+      else mocks.processing = true
+      mocks.setIsLoading.mockClear()
+      if (cleanup === "settle") {
+        await act(async () => { response.reject(new DOMException("Aborted", "AbortError")) })
+      } else if (cleanup === "unmount") mounted.unmount()
+      else mounted.rerender({ enabled: false })
+      expect(busy).toBe(true)
+      expect(mocks.setIsLoading).not.toHaveBeenCalledWith(false)
+    } finally {
+      mounted.unmount()
+      await act(async () => { response.reject(new DOMException("Aborted", "AbortError")) })
+      mocks.streaming = false
+      mocks.processing = false
       mocks.getChat.mockReset()
     }
   })

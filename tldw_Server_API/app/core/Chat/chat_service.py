@@ -7272,7 +7272,9 @@ async def _execute_non_stream_call_impl(
             )
             raise
 
-    if isinstance(llm_response, str) and should_force_normalize_string_responses():
+    if isinstance(llm_response, str) and (
+        selected_durable_text_only or should_force_normalize_string_responses()
+    ):
         llm_response = _wrap_raw_string_response(llm_response, model)
 
     processed_choices: list[NonStreamChoice] = collect_non_stream_choices(llm_response)

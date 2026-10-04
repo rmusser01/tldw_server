@@ -800,3 +800,91 @@ Publish latest-dev integration and verified Character fix once with the exact
 human summary; fresh exact-head Qodo and all required/owning hosted CI remain
 required before normal merge. Stages13/14Complete refer to local implementation
 and qualification, not hosted acceptance or merge completion.
+
+## Stage 15: Verify Fresh Qodo Findings
+**Goal**: Verify all six exact46d review findings against actual serializer,
+provider and loader paths before modifying behavior.
+**Success Criteria**: Reproducible failing tests or a documented technical
+disposition for each finding; retain strict durable wire and ownership contracts.
+**Tests**: Raw RAG numeric identifiers/bookkeeping/type divergence, non-streaming
+raw provider text without optional normalization, aborted selection/unmount loading.
+**Status**: Complete
+
+## Stage 16: Scoped Review Corrections
+**Goal**: Correct verified source projection/provider/loader defects and add
+required source-validator docstrings and PostgreSQL helper annotations.
+**Success Criteria**: Minimal changes with focused RED/GREEN, no retry/admission
+or receipt authority weakening, and no unrelated refactors.
+**Tests**: Existing owning RAG/history/loader/provider/schema and PostgreSQL tests;
+types, matched lint, Bandit and independent review.
+**Status**: Complete
+
+Raw RAG verification retains original RED (three failures) and isolated RED
+(five failures, including both safe numeric boundaries and the independently
+isolated semantic/media-type mismatch). Qualified focused run exits0 with88
+passes/0skips; an earlier JSON-only run had passing assertions but exit1 and is
+retained separately, not counted as qualification. Known serializer IDs normalize
+only at the raw boundary; bounded bookkeeping is omitted, selected type/excerpts
+and approved locators remain exact. Strict wire numeric IDs and unknown/credential
+fields still reject. Final independent review clears all eleven production/test
+files. Loader cleanup preserves actual ownership through debounce, early return
+and unmount without clearing successor or streaming owners. Raw selected-durable
+strings normalize before output safety; returned redaction equals one persisted
+settlement and nonselected opt-in behavior is unchanged. The unsafe late-wrapper
+implementation and its passing tests retain superseded attribution.
+
+Fresh final owning runs pass1492frontend tests across88files and384backend tests,
+both with0skips. Types8GB, matched lint0errors/29inheritedwarnings/0newfindings,
+production Bandit0findings/errors and immutable build/token/unchanged budgets pass.
+Raw Python test Bandit reports129B101pytest assertions and no other findings or
+errors; no suppressions are introduced. Interrupted collectors, original failed
+owning runs and incorrectly scoped canonical-task diagnostic remain failed.
+One new zero-send Chrome collector cannot connect to existingCDP19239 and fails
+before browser acceptance; do not relabel it or restart protected profiles.
+No native Send, inference, source publication, merge or cleanup occurred.
+
+## Stage 17: Batched Dev Integration And Qualification
+**Goal**: Combine verified corrections with latest tracking-only dev c95 and
+publish once after source-bound local qualification.
+**Success Criteria**: Preserve all work/backup refs, exact human summary and
+protected resources; relevant production artifacts and narrow no-send checks
+remain honestly attributed. Require fresh exact-head review and owning hosted CI.
+**Tests**: Full PR hooks, incoming canonical task checks, backend/frontend owning
+regressions and types/build/budgets; no new native Send or inference authorization.
+**Status**: In Progress
+
+Use a separate integration checkout so rebase replay cannot mutate files under
+the running ownedAPI20850. Preserve the exact thirteen-file working patch and
+qualified source hashes before integration; compare the complete final tree to
+the independent c95 merge-tree plus that patch. Canonical task qualification must
+use actual c95 as BACKLOG_TASK_FORMAT_BASE, not stale local origin/dev3c627e6.
+
+Topology-preserving rebase finishes at f55e82f8. Its complete tree053a731f exactly
+equals the independently computed46d+c95 integration; all21 incoming task blobs
+and7226 qualified app entries match. The original API checkout was not replayed.
+The qualified thirteen-file correction patch is applied in this isolated clone.
+Canonical task/editor149 tests and full PR-range286 hooks pass without skips or
+source mutation. Final publication remains gated on fresh refs and normal hooks.
+
+## Stage 18: Owning Character Readiness Timeout
+**Goal**: Investigate exact46d E2E Critical run37232844021/job111535574839.
+**Success Criteria**: Establish the actual request/response/readiness failure from
+retained hosted artifacts before any corrective edit; preserve all assertions,
+deadlines and source attribution. Require owning new-head hosted qualification.
+**Tests**: Trace/log contract investigation and focused RED/GREEN only for a
+verified actionable correction; never resend accepted native inputs.
+**Status**: In Progress
+
+Hosted45passed/1failed: Character Phase7 readiness waits120000ms for the native
+completion response. The previously fixed create/list Character journey passes.
+The failure is not waived or proven fixed by the separate loader correction.
+
+The hosted trace proves enabled Send, one creation201, then stale_selection,
+with zero history-load/capture or completion requests. Three bounded mounted
+engineering invocations do not establish a causal RED: the successful unit path
+retains valid ACK guards, completes controller load/capture and reaches its unit
+transport sentinel. Selection epoch, model/MCP identity, account/signal lease and
+load receipt remain unproven causes; route hydration is only a hypothesis. The
+exploratory fixture is preserved in evidence and removed from repository source.
+No speculative guard weakening, fourth local reproduction or native send follows.
+Mandatory fresh candidate CI remains qualification, not a claimed root-cause fix.
