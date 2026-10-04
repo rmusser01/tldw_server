@@ -70,7 +70,8 @@ def _data_url(data: bytes) -> str:
 
 
 def _ts(minute: int, second: int = 0) -> str:
-    return f"2026-09-01T10:{minute:02d}:{second:02d}.250Z"
+    """A fixed past time: imports refuse timestamps ahead of the server clock."""
+    return f"2025-03-01T10:{minute:02d}:{second:02d}.250Z"
 
 
 def _message(mid: str, parent: str | None, role: str, minute: int, **extra: Any) -> dict[str, Any]:
@@ -105,8 +106,8 @@ def _body(messages: list[dict[str, Any]] | None = None, **extra: Any) -> dict[st
         "id": CHAT_ID,
         "title": "Trip planning",
         "state": "resolved",
-        "created_at": "2026-09-01T09:59:30.000Z",
-        "last_modified": "2026-09-02T08:30:00.000Z",
+        "created_at": "2025-03-01T09:59:30.000Z",
+        "last_modified": "2025-03-02T08:30:00.000Z",
         "messages": _branching_messages() if messages is None else messages,
         **extra,
     }
@@ -300,23 +301,23 @@ def test_timestamps_are_not_restamped_with_the_time_of_the_import(client: TestCl
     body = _simple(last_modified=None)
     assert client.post(PATH, json=body).status_code == 201
     row = db.get_conversation_by_id(CHAT_ID)
-    assert str(row["created_at"]) == "2026-09-01T09:59:30.000Z"
+    assert str(row["created_at"]) == "2025-03-01T09:59:30.000Z"
     # No last_modified sent: the newest message, not the import time.
-    assert str(row["last_modified"]) == "2026-09-01T10:01:00.250Z"
+    assert str(row["last_modified"]) == "2025-03-01T10:01:00.250Z"
     assert [str(message["timestamp"]) for message in db.get_messages_for_conversation(CHAT_ID)] == [
-        "2026-09-01T10:00:00.250Z", "2026-09-01T10:01:00.250Z",
+        "2025-03-01T10:00:00.250Z", "2025-03-01T10:01:00.250Z",
     ]
     assert all(_instant(str(value)) < started for value in (row["created_at"], row["last_modified"]))
     listed = client.get(CHATS)
     assert listed.status_code == 200, listed.text
-    assert _instant(listed.json()["chats"][0]["last_modified"]) == _instant("2026-09-01T10:01:00.250Z")
+    assert _instant(listed.json()["chats"][0]["last_modified"]) == _instant("2025-03-01T10:01:00.250Z")
 
 
 def test_offset_timestamps_are_stored_as_the_same_instant(client: TestClient, db: CharactersRAGDB) -> None:
-    messages = [{**_message("pa_q1", None, "user", 0), "timestamp": "2026-09-01T12:00:00.250+02:00"}]
-    assert client.post(PATH, json=_body(messages, created_at="2026-09-01T05:59:30-04:00")).status_code == 201
-    assert str(db.get_message_by_id("pa_q1")["timestamp"]) == "2026-09-01T10:00:00.250Z"
-    assert str(db.get_conversation_by_id(CHAT_ID)["created_at"]) == "2026-09-01T09:59:30.000Z"
+    messages = [{**_message("pa_q1", None, "user", 0), "timestamp": "2025-03-01T12:00:00.250+02:00"}]
+    assert client.post(PATH, json=_body(messages, created_at="2025-03-01T05:59:30-04:00")).status_code == 201
+    assert str(db.get_message_by_id("pa_q1")["timestamp"]) == "2025-03-01T10:00:00.250Z"
+    assert str(db.get_conversation_by_id(CHAT_ID)["created_at"]) == "2025-03-01T09:59:30.000Z"
 
 
 def test_imported_text_and_title_are_searchable(client: TestClient) -> None:
@@ -354,7 +355,7 @@ def test_replay_returns_the_same_chat_and_writes_nothing(client: TestClient, db:
         lambda body: {key: body[key] for key in reversed(list(body))},
         lambda body: {**body, "id": body["id"].upper()},
         lambda body: {**body, "state": "RESOLVED"},
-        lambda body: {**body, "created_at": "2026-09-01T11:59:30+02:00"},
+        lambda body: {**body, "created_at": "2025-03-01T11:59:30+02:00"},
         lambda body: {**body, "character_id": None, "parent_conversation_id": None},
         lambda body: {**body, "messages": [{**message, "images": message.get("images", []), "metadata": message.get("metadata")} for message in body["messages"]]},
     ],
@@ -388,7 +389,7 @@ def test_replay_compares_the_original_request_not_the_current_chat(client: TestC
     [
         lambda body: {**body, "title": "Different title"},
         lambda body: {**body, "state": "backlog"},
-        lambda body: {**body, "created_at": "2026-09-01T09:59:31.000Z"},
+        lambda body: {**body, "created_at": "2025-03-01T09:59:31.000Z"},
         lambda body: {**body, "messages": body["messages"][:-1]},
         lambda body: {**body, "messages": [{**body["messages"][0], "content": "edited"}, *body["messages"][1:]]},
         lambda body: {**body, "messages": [*body["messages"], _message("pa_new", "pa_a4", "user", 7)]},
@@ -559,12 +560,14 @@ def test_generation_metadata_on_a_user_message_is_422(client: TestClient, db: Ch
         lambda body: {key: value for key, value in body.items() if key != "created_at"},
         lambda body: {**body, "title": "   "},
         lambda body: {**body, "state": "archived"},
-        lambda body: {**body, "created_at": "2026-09-01T09:59:30"},
+        lambda body: {**body, "created_at": "2025-03-01T09:59:30"},
         lambda body: {**body, "created_at": 1788256770000},
         lambda body: {**body, "messages": []},
         lambda body: {**body, "messages": [{**body["messages"][0], "role": "tool"}]},
         lambda body: {**body, "messages": [{**body["messages"][0], "id": "has space"}]},
         lambda body: {**body, "messages": [{**body["messages"][0], "id": "../etc"}]},
+        lambda body: {**body, "messages": [{**body["messages"][0], "id": "pa_q1\n"}]},
+        lambda body: {**body, "messages": [{**body["messages"][0], "id": "x" * 256}]},
         lambda body: {**body, "messages": [{**body["messages"][0], "timestamp": "yesterday"}]},
         lambda body: {**body, "messages": [{key: value for key, value in body["messages"][0].items() if key != "timestamp"}]},
         lambda body: {**body, "messages": [{**body["messages"][0], "content": "   ", "images": []}]},
@@ -582,7 +585,7 @@ def test_generation_metadata_on_a_user_message_is_422(client: TestClient, db: Ch
     ],
     ids=[
         "bad-uuid", "nil-uuid", "no-id", "no-title", "no-created-at", "blank-title", "bad-state", "naive-date",
-        "epoch-number", "no-messages", "tool-role", "id-with-space", "id-with-slash", "bad-timestamp",
+        "epoch-number", "no-messages", "tool-role", "id-with-space", "id-with-slash", "id-with-newline", "id-too-long", "bad-timestamp",
         "no-timestamp", "empty-message", "nul-in-text", "lone-surrogate", "fork-without-parent", "persona-without-id",
         "memory-mode-on-character", "persona-with-character", "control-char-in-parent-id", "surrogate-in-assistant-id",
         "surrogate-in-message-id", "surrogate-in-state", "surrogate-in-unknown-key",
@@ -655,7 +658,7 @@ def test_owner_and_other_server_owned_conversation_fields_are_refused(
     "field,value",
     [
         ("client_id", "2"), ("conversation_id", "another-chat"), ("history_id", "pa_local"), ("deleted", True),
-        ("version", 9), ("sender", "assistant"), ("ranking", 3), ("last_modified", "2026-09-01T10:00:00Z"),
+        ("version", 9), ("sender", "assistant"), ("ranking", 3), ("last_modified", "2025-03-01T10:00:00Z"),
         ("tool_calls", []), ("history_admission_json", "{}"), ("tldw_history_admission_v1", {}),
     ],
 )

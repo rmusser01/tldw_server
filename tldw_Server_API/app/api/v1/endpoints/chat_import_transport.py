@@ -99,12 +99,16 @@ class ChatImportRoute(APIRoute):
             declared = request.headers.get("content-length", "")
             if declared.isdigit() and int(declared) > limit:
                 return _too_large(limit)
-            body = bytearray()
+            chunks: list[bytes] = []
+            received = 0
             async for chunk in request.stream():
-                if len(body) + len(chunk) > limit:
+                received += len(chunk)
+                if received > limit:
                     return _too_large(limit)
-                body.extend(chunk)
-            raw = bytes(body)
+                chunks.append(chunk)
+            raw = b"".join(chunks)
+            # Keep one copy of a large body for the rest of the request, not two.
+            del chunks
             receive = request.receive
             delivered = False
 
