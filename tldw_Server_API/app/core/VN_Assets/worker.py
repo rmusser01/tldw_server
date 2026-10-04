@@ -11,6 +11,7 @@ from functools import partial
 from hashlib import sha256
 from inspect import isawaitable
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 from loguru import logger
@@ -330,18 +331,25 @@ class VNAssetGenerationWorker:
                 ))
             except asyncio.CancelledError:
                 if job is None:
-                    self.repo.release_variant_claim(
+                    await self.repo.run_worker_replay_operation(partial(
+                        self.repo.release_variant_claim,
                         batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
                         attempt_token=attempt_token,
-                    )
+                    ))
                 raise
 
         reconciling = outcome is not None and outcome.get("item_id") is not None
         legacy_inline = recipe_version == 0 and job is None
+        legacy_display_acquired = Event()
         legacy_status: str | None = None
-        if legacy_inline:
-            self.repo.begin_inline_legacy_display(batch_id, slot_id)
+        legacy_setup_complete = not legacy_inline
         try:
+            if legacy_inline:
+                await self.repo.run_worker_replay_operation(partial(
+                    self.repo.begin_inline_legacy_display, batch_id, slot_id,
+                    on_acquired=legacy_display_acquired.set,
+                ))
+                legacy_setup_complete = True
             if outcome is not None and outcome.get("item_id") is not None:
                 if job is not None:
                     await self.repo.run_worker_replay_operation(
@@ -369,6 +377,8 @@ class VNAssetGenerationWorker:
             legacy_status = SLOT_STATUS_REVIEWING
             return result
         except Exception as exc:
+            if not legacy_setup_complete:
+                raise
             legacy_status = SLOT_STATUS_FAILED
             definitive_replay_failure = isinstance(exc, VNAssetGenerationError) and not exc.retryable
             if (recipe_version == 1 or definitive_replay_failure or not _job_has_retry_remaining(job)) and (
@@ -384,7 +394,7 @@ class VNAssetGenerationWorker:
                 ))
             raise
         finally:
-            if recipe_version == 0:
+            if recipe_version == 0 and (not legacy_inline or legacy_display_acquired.is_set()):
                 legacy_job_id = _positive_int(_job_id(job))
                 try:
                     await self.repo.run_worker_replay_operation(partial(
@@ -413,10 +423,11 @@ class VNAssetGenerationWorker:
                         error_type=error_type.__name__, traceback_frames=frames,
                     ).warning("VN legacy display reconciliation failed")
             if attempt_token is not None and job is None:
-                self.repo.release_variant_claim(
+                await self.repo.run_worker_replay_operation(partial(
+                    self.repo.release_variant_claim,
                     batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
                     attempt_token=attempt_token,
-                )
+                ))
 
     def _require_current_job_lease(self, job: Mapping[str, Any], *, user_id: int) -> None:
         """Validate job's live lease for user_id, returning None on admission.

@@ -268,3 +268,75 @@ No old-head CI/review result transfers. No admin/autoqueue/bypass, body PATCH,
 child merge or cleanup. Original TASK-13369 association remains; ambiguous
 duplicate task records and unknown task creation are untouched. AC5/AC6/DoD
 remain pending real external gates. NEW evidence is task-69-approved-rebase-20261003-r1.
+
+## Tasks70-74: Approved Post-Publication Repairs
+
+Direct human approval2026-10-04: "address them and continue until the PR is
+merged. All approvals granted". Original TASK13369 association remains. Earlier
+pending-approval notes are historical; exact scopes and preservation still bind.
+
+### Stage 1: Task70 Qodo Repairs
+**Goal**: Resolve4178073234/4178073236/4178073240 without contract drift.
+**Success Criteria**: Drained owning-thread setup/release with cancellation-safe
+cleanup; current scoped journal smoke expectation; test-owned Jobs DB connections.
+**Tests**: Thread responsiveness/setup cancellation, retry persisted counters,
+reload scoped receipt assertions, touched-scope Bandit, independent SPEC/QUALITY.
+**Status**: In Progress
+
+### Stage 2: Task71 Canonical Task Formatting
+**Goal**: Remove the five exact-path task-format violations blocking backend CI.
+**Success Criteria**: Official normalize/check, task identities/status/text retained.
+**Tests**: Exact-path check and semantic before/after comparison, normal hooks.
+**Status**: Complete
+Exact-path official check RED1 -> GREEN0; all5 parser frontmatter/checklist/
+non-structural text comparisons PASS. Independent SPEC/QUALITY PASS with no
+actionable findings. Normal commit hooks and new-head backend CI still pending.
+
+### Stage 3: Task72 Quota And RG Integration
+**Goal**: Correct inherited quota exception arity and explicitly configure audio
+test caps; dispose of mixed-version RG expiry risk without silently losing charges.
+**Success Criteria**: Typed quota denial, strict WIP matrix unchanged, persisted
+30-minute test limit with own-user cache invalidation; conservative rollout safety.
+**Tests**: Default/off/on controls, numeric DATE assertions, official PG fixture,
+source-checked quiesced rollout protocol, scoped Bandit and independent SPEC/QUALITY.
+**Status**: Complete
+Approved implementation complete; independent SPEC/QUALITY review underway.
+Storage155passed, audio8real-PGpassed, unchanged strict matrix48passed with all18
+default/off/on controls. No new non-assert Bandit findings. Below-floor runtime
+evidence does not transfer to supported-runtime CI. RG deployment docs require
+quiesced homogeneous cutover/rollback; no production RG change or live rollout.
+Independent SPEC/QUALITY PASS on the frozen40-input scope, no actionable findings.
+Task72 local stage is complete; normal publication and exact-head CI remain Task74.
+
+### Stage 4: Task73 Remaining CI Root Causes
+**Goal**: Fix verified privilege snapshot, offline email guard and preflight deadline
+causes rather than masking assertions or blindly regenerating snapshots.
+**Success Criteria**: Reproduction/caller evidence, smallest explained changes.
+**Tests**: Failing scenario before repair, covering green suite after, bounded runtime
+qualification, Bandit and independent SPEC/QUALITY. Stop the failed diff-parser approach.
+**Status**: In Progress
+Peirce is the sole implementation agent after Task70 R2 completion. Verified
+privilege/deadline fixes and strict email guard diagnostics are in scope; the
+unidentified offline caller is not declared repaired.
+Implementation is now frozen and Peirce closed.26focusedpassed; four exact quota
+dependency additions match real served routes with enforcement on/off. The full
+default profile has four extra Notes scopes, while canonical minimal-test-app
+83buckets equal the fixture and the existing full snapshot test passes1case.
+Native deadline mutant fails as intended, Bandit has0newnonassert findings.
+Independent review remains; email caller is unknown and strict diagnostic guard
+is retained for exact-head CI evidence rather than declaring a speculative fix.
+
+### Stage 5: Task74 Publish, Review And Merge
+**Goal**: Publish the reviewed union on current actual dev and normally merge3016.
+**Success Criteria**: WIP/archive preservation, normal hooks, exact lease if rewrite
+needed, complete exact-head Qodo with no actionable findings, seven required contexts
+PASS, strict current rules/dev and human Change summary, independently verified MERGED.
+**Tests**: Complete paginated external evidence, ancestry/tree checks, bounded scoped
+verification and final independent review. No admin/autoqueue/bypass/child mutation.
+**Status**: In Progress
+Task70R3 adds only the current-principal profile mock. Controller exact Chromium
+reload recovery smoke passes1case8.7s with source hashes unchanged; task-owned
+server and client sessions reaped. Existing original frontend build inputs remain
+unchanged. Byte-exact strict quota matrix is included with approved Task72 repair;
+all original archives remain retained. No commit/publication yet; full new-head
+review, seven required contexts and current-dev/human-summary gates still apply.

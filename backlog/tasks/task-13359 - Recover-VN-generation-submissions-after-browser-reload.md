@@ -39,9 +39,9 @@ IMPLEMENTATION_PLAN_vn_generation_durability.md, Stage 4
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified 301 VN backend tests, 37 VN frontend tests, TypeScript, ESLint, Ruff, Bandit (0 findings), and 4 Chromium smoke tests. Full repository suite not run; targeted VN suite covers this scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

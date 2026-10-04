@@ -7,6 +7,7 @@ from typing import Dict, List
 
 import pytest
 from fastapi import APIRouter, Depends, FastAPI
+from fastapi.routing import APIRoute
 
 from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog, load_catalog
 from tldw_Server_API.app.core.PrivilegeMaps.introspection import (
@@ -14,7 +15,53 @@ from tldw_Server_API.app.core.PrivilegeMaps.introspection import (
     serialize_route_registry,
 )
 from tldw_Server_API.app.core.PrivilegeMaps import startup as privilege_startup
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.main import app as fastapi_app
+from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
+
+
+@pytest.mark.parametrize("quotas_enabled", ["true", "false"])
+@pytest.mark.parametrize(
+    ("path", "scope", "endpoint_module", "endpoint_name"),
+    [
+        ("/api/v1/rag/search", "rag.search", "rag_unified", "unified_search_endpoint"),
+        ("/api/v1/text2sql/query", "text2sql.query", "text2sql", "query_text2sql"),
+    ],
+)
+def test_served_query_routes_register_quota_dependency_even_when_disabled(
+    monkeypatch, quotas_enabled, path, scope, endpoint_module, endpoint_name,
+):
+    """Quota enablement changes enforcement, never the served route contract."""
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", quotas_enabled)
+    app = reload_app_main().app
+    routes = [
+        served for served in iter_served_routes(app.routes)
+        if isinstance(served.route, APIRoute) and served.path == path and "POST" in served.methods
+    ]
+    assert len(routes) == 1
+    served = routes[0]
+    route = served.route
+    assert route.endpoint.__module__ == f"tldw_Server_API.app.api.v1.endpoints.{endpoint_module}"
+    assert route.endpoint.__name__ == endpoint_name
+    quota_dependencies = [
+        dependency.call for dependency in served.dependant.dependencies
+        if getattr(dependency.call, "__module__", None)
+        == "tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps"
+    ]
+    assert len(quota_dependencies) == 1
+    assert quota_dependencies[0].__qualname__ == "require_rag_query_quota.<locals>._check"
+    registry = serialize_route_registry(collect_privilege_route_registry(app, load_catalog(), strict=True))
+    expected = json.loads(Path("tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json").read_text())
+    quota_record = {
+        "id": "usage_quota_deps._check",
+        "type": "dependency",
+        "module": "tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps",
+    }
+    for bucket in ("any", scope):
+        live = next(entry for entry in registry[bucket] if entry["path"] == path and entry["methods"] == ["POST"])
+        snapshot = next(entry for entry in expected[bucket] if entry["path"] == path and entry["methods"] == ["POST"])
+        assert quota_record in live["dependencies"]
+        assert snapshot == live
 
 
 def _build_test_catalog() -> PrivilegeCatalog:

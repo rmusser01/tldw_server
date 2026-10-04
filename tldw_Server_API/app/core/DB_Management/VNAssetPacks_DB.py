@@ -2339,19 +2339,25 @@ class VNAssetPacksRepository:
         row = cursor.fetchone()
         return dict(row) if row is not None else None
 
-    def begin_inline_legacy_display(self, batch_id: int, slot_id: int) -> None:
+    def begin_inline_legacy_display(
+        self, batch_id: int, slot_id: int, *, on_acquired: Callable[[], None] | None = None,
+    ) -> None:
         """Track one inline call's exact slot locally, without admitting execution.
 
         This display-only count is not shared across repository instances or
         processes. Jobs-backed work uses the authoritative reader instead.
         No transaction/connection is held across the caller's await.
         Serialize only the local counter update against owning-thread cleanup.
+        Notify acquisition before transaction exit so a cancelled await cannot
+        hide this delivery's cleanup ownership.
         """
         with self.db.transaction() as conn:
             _lock_variant(conn, batch_id, slot_id, None)
             key = (batch_id, slot_id)
             with self._inline_legacy_activity_lock:
                 self._inline_legacy_activity[key] = self._inline_legacy_activity.get(key, 0) + 1
+                if on_acquired is not None:
+                    on_acquired()
 
     def finish_legacy_display(
         self, batch_id: int, slot_id: int, *, inline: bool, fallback_status: str | None,

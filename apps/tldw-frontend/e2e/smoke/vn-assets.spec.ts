@@ -1,4 +1,5 @@
 import type { Route } from '@playwright/test';
+import { VN_COMMAND_STORAGE_KEY, type VNPendingCommand } from '../../lib/vnGenerationRecovery';
 import { test, expect, seedAuth, SMOKE_LOAD_TIMEOUT } from './smoke.setup';
 import { waitForAppShell, waitForVisualSettle } from '../utils/helpers';
 
@@ -222,12 +223,16 @@ test.describe('VN asset packs smoke', () => {
     await page.addInitScript(() => {
       localStorage.setItem('assistant_setup_dismissed', 'true');
     });
-    const submittedKeys: string[] = [];
+    const submittedRequests: Array<VNPendingCommand['request']> = [];
+    let submittedServer: string | undefined;
     await page.route(/\/api\/v1\/health(?:\/.*)?$/, async (route) => {
       await fulfillJson(route, 200, {
         status: 'ok', auth_mode: 'single_user',
         test_api_key: 'THIS-IS-A-SECURE-KEY-123-LOCAL-TEST',
       });
+    });
+    await page.route(/\/api\/v1\/users\/me\/profile(?:\?.*)?$/, async (route) => {
+      await fulfillJson(route, 200, { user: { id: 1, is_active: true } });
     });
     await page.route(/\/api\/v1\/persona\/profiles(?:\?.*)?$/, async (route) => {
       await fulfillJson(route, 200, [{ id: 'smoke-profile', name: 'Smoke profile' }]);
@@ -251,7 +256,7 @@ test.describe('VN asset packs smoke', () => {
         await fulfillJson(route, 200, []);
       } else if (request.method() === 'GET' && path === '/packs/1/generation') {
         await fulfillJson(route, 200, {
-          status: submittedKeys.length > 1 ? 'queued' : 'failed', batch_id: 51,
+          status: submittedRequests.length > 1 ? 'queued' : 'failed', batch_id: 51,
         });
       } else if (request.method() === 'GET' && path === '/packs/1/readiness') {
         await fulfillJson(route, 200, {
@@ -263,9 +268,11 @@ test.describe('VN asset packs smoke', () => {
           local_workers_enabled: true, warnings: [], slots: [],
         });
       } else if (request.method() === 'POST' && path === '/packs/1/generate') {
-        const body = request.postDataJSON() as { idempotency_key: string };
-        submittedKeys.push(body.idempotency_key);
-        await fulfillJson(route, submittedKeys.length === 1 ? 503 : 202, {
+        const body = request.postDataJSON() as VNPendingCommand['request'];
+        const url = new URL(request.url());
+        submittedServer = `${url.origin}${url.pathname.replace('/vn/vn-assets/packs/1/generate', '')}`;
+        submittedRequests.push(body);
+        await fulfillJson(route, submittedRequests.length === 1 ? 503 : 202, {
           status: 'queued', batch_id: 51,
         });
       } else {
@@ -276,19 +283,45 @@ test.describe('VN asset packs smoke', () => {
     await page.goto('/vn-assets');
     await waitForAppShell(page, SMOKE_LOAD_TIMEOUT);
     await page.getByRole('button', { name: 'Start generation' }).click();
-    await expect.poll(() => submittedKeys.length).toBe(1);
-    await expect.poll(async () => page.evaluate(
-      () => Object.keys(sessionStorage).filter((key) => key.startsWith('vn-assets:pending-generation:')).length
-    )).toBe(1);
+    await expect.poll(() => submittedRequests.length).toBe(1);
+    expect(submittedRequests[0]).toEqual({ idempotency_key: expect.any(String) });
+    await expect.poll(() => page.evaluate((key) => {
+      const raw = sessionStorage.getItem(key);
+      return raw === null ? null : JSON.parse(raw);
+    }, VN_COMMAND_STORAGE_KEY)).toEqual({
+      version: 1,
+      scope: { server: submittedServer, principal: '1' },
+      commands: [{ packId: 1, request: submittedRequests[0] }],
+    });
+    expect(await page.evaluate(
+      () => Object.keys(sessionStorage).filter((key) => key.startsWith('vn-assets:pending-generation:'))
+    )).toEqual([]);
 
     await page.reload();
 
-    await expect.poll(() => submittedKeys.length).toBe(2);
-    expect(submittedKeys[1]).toBe(submittedKeys[0]);
+    const recover = page.getByRole('button', { name: 'Recover pending request' });
+    await expect(recover).toBeEnabled();
+    expect(submittedRequests).toHaveLength(1);
+    expect(await page.evaluate((key) => {
+      const raw = sessionStorage.getItem(key);
+      return raw === null ? null : JSON.parse(raw);
+    }, VN_COMMAND_STORAGE_KEY)).toEqual({
+      version: 1,
+      scope: { server: submittedServer, principal: '1' },
+      commands: [{ packId: 1, request: submittedRequests[0] }],
+    });
+    await recover.click();
+    await expect.poll(() => submittedRequests.length).toBe(2);
+    expect(submittedRequests[1]).toEqual(submittedRequests[0]);
     await expect(page.getByRole('status', { name: 'Generation status' })).toContainText('queued');
-    await expect.poll(async () => page.evaluate(
-      () => Object.keys(sessionStorage).filter((key) => key.startsWith('vn-assets:pending-generation:')).length
-    )).toBe(0);
+    await expect.poll(() => page.evaluate(
+      (key) => sessionStorage.getItem(key), VN_COMMAND_STORAGE_KEY
+    )).toBeNull();
+    await page.reload();
+    await waitForAppShell(page, SMOKE_LOAD_TIMEOUT);
+    await expect(page.getByRole('status', { name: 'Generation status' })).toContainText('queued');
+    expect(submittedRequests).toHaveLength(2);
+    expect(await page.evaluate((key) => sessionStorage.getItem(key), VN_COMMAND_STORAGE_KEY)).toBeNull();
   });
 });
 

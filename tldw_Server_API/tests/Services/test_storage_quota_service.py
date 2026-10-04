@@ -92,3 +92,74 @@ async def test_calculate_user_storage_cache_hit_and_miss(tmp_path: Path):
     # Third calculation with update_database True should bypass cache and see new bytes
     r3 = await svc.calculate_user_storage(user_id=user_id, update_database=True)
     assert r3["total_bytes"] >= r1["total_bytes"] + len(data2)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocking_level", ["user", "team", "org"])
+@pytest.mark.parametrize("raise_on_exceed", [False, True], ids=["report", "raise"])
+async def test_combined_quota_denial_reports_or_raises_storage_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    blocking_level: str, raise_on_exceed: bool,
+) -> None:
+    """Every denied scope returns its level or raises the real quota exception."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError
+
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
+    svc = StorageQuotaService(
+        db_pool=FakePool(quota_mb=100, used_mb=90.0 if blocking_level == "user" else 10.0),
+        settings=DummySettings(str(tmp_path)),
+    )
+
+    async def can_allocate(
+        new_bytes: int, *, team_id: int | None = None, org_id: int | None = None,
+    ) -> tuple[bool, str]:
+        """Supply the repository admission result for the selected scope."""
+        level = "team" if team_id is not None else "org"
+        return level != blocking_level, f"{level} allocation"
+
+    async def check_quota_status(
+        *, team_id: int | None = None, org_id: int | None = None,
+    ) -> dict[str, int | float]:
+        """Supply the repository usage snapshot without replacing service logic."""
+        level = "team" if team_id is not None else "org"
+        return {"quota_mb": 100, "used_mb": 90.0 if level == blocking_level else 10.0}
+
+    repo = SimpleNamespace(can_allocate=can_allocate, check_quota_status=check_quota_status)
+    monkeypatch.setattr(svc, "get_storage_quotas_repo", AsyncMock(return_value=repo))
+
+    if raise_on_exceed:
+        with pytest.raises(QuotaExceededError) as exc:
+            await svc.check_combined_quota(
+                42, 20 * 1024 * 1024, team_id=7, org_id=9, raise_on_exceed=True,
+            )
+        assert (exc.value.used_mb, exc.value.quota_mb) == (20.0, 100)
+    else:
+        allowed, info = await svc.check_combined_quota(
+            42, 20 * 1024 * 1024, team_id=7, org_id=9,
+        )
+        assert (allowed, info["has_quota"], info["blocking_level"]) == (False, False, blocking_level)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_combined_quota_does_not_convert_transaction_failure_to_denial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unrelated database failure remains a transaction error, not quota denial."""
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
+    failure = TransactionError("read storage usage")
+    pool = FakePool()
+    monkeypatch.setattr(pool, "fetchone", AsyncMock(side_effect=failure))
+    svc = StorageQuotaService(db_pool=pool, settings=DummySettings(str(tmp_path)))
+
+    with pytest.raises(TransactionError) as exc:
+        await svc.check_combined_quota(42, 20 * 1024 * 1024, raise_on_exceed=True)
+    assert exc.value is failure

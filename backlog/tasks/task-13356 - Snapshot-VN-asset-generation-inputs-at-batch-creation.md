@@ -38,9 +38,9 @@ Stages 1-2 of IMPLEMENTATION_PLAN_vn_generation_durability.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 41 focused VN repository/generation tests passed; scoped Ruff E,F,I passed; Bandit on three touched production modules reported zero findings; git diff --check passed. Existing BLE001 lint findings in preexisting broad exception handlers remain.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

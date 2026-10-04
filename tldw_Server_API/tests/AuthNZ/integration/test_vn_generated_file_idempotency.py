@@ -84,11 +84,12 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
+from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, StorageError, TransactionError
 from tldw_Server_API.app.core.AuthNZ.initialize import setup_database, bootstrap_single_user_profile
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import AuthnzStorageQuotasRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.Storage import generated_file_helpers as helpers
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
@@ -309,6 +310,52 @@ async def main() -> None:
                 user_id=owner, source_feature='vn_assets', source_ref='vn_asset_item:42',
             )
             result['committed_bytes_preserved'] = (outputs / record['storage_path']).is_file()
+        elif case.startswith('quota_policy_'):
+            level = case.removeprefix('quota_policy_')
+            if level == 'user':
+                quota_mb = await pool.fetchval('SELECT storage_quota_mb FROM users WHERE id = ?', owner)
+                await service.update_usage(owner, int(quota_mb * 1048576) - 5)
+            elif level == 'org':
+                await quotas.update_org_used_mb(51, 100 - 5 / 1048576)
+            else:
+                await quotas.update_team_used_mb(52, 100 - 5 / 1048576)
+            before = await snapshot()
+            record = await save()
+            published = await snapshot()
+            replay = await save()
+            replayed = await snapshot()
+            quota_denied = False
+            check_combined_quota = StorageQuotaService.check_combined_quota
+            async def observe_quota_denial(self: StorageQuotaService, *args: Any, **kwargs: Any) -> Any:
+                """Observe the real quota rejection before transaction error wrapping."""
+                nonlocal quota_denied
+                try:
+                    return await check_combined_quota(self, *args, **kwargs)
+                except QuotaExceededError:
+                    quota_denied = True
+                    raise
+            with patch.object(StorageQuotaService, 'check_combined_quota', observe_quota_denial):
+                try:
+                    await save(43)
+                except (QuotaExceededError, TransactionError):
+                    assert quota_denied, 'Unexpected transaction failure is not quota denial'
+                    distinct_admitted = False
+                else:
+                    distinct_admitted = True
+            final = await snapshot()
+            result = {
+                'enabled': usage_quotas_enabled(),
+                'first_charged_once': [after - prior for after, prior in zip(published['usage'], before['usage'])]
+                                      == [5 / 1048576] * 3,
+                'replay_unchanged': replayed == published,
+                'identity_preserved': replay['id'] == record['id'] and replay['storage_path'] == record['storage_path'],
+                'bytes_preserved': (outputs / record['storage_path']).read_bytes() == b'image',
+                'distinct_admitted': distinct_admitted,
+                'quota_denial_observed': quota_denied,
+                'final_accounting': [after - prior for after, prior in zip(final['usage'], before['usage'])]
+                                    == [(10 if distinct_admitted else 5) / 1048576] * 3,
+                'live': final['live'], 'files': len(list(outputs.rglob('*.png'))),
+            }
         elif case.startswith('distinct_'):
             level = case.removeprefix('distinct_')
             if level == 'user':
@@ -454,4 +501,25 @@ def test_distinct_vn_refs_cannot_overallocate_any_quota_scope(
 ) -> None:
     assert _storage_result(tmp_path, request, backend, f"distinct_{level}") == {
         "accepted": 1, "live": 1, "files": 1, "charged_once": True,
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+@pytest.mark.parametrize("level", ["user", "org", "team"])
+@pytest.mark.parametrize("quota_policy", [None, "off", "on"], ids=["default", "off", "on"])
+def test_vn_quota_policy_preserves_publication_replay_and_accounting(
+    tmp_path: Path, request: pytest.FixtureRequest, backend: str, level: str,
+    quota_policy: str | None,
+) -> None:
+    """Quota posture changes admission, never same-source bytes or accounting."""
+    enabled = quota_policy == "on"
+    assert _storage_result(
+        tmp_path, request, backend, f"quota_policy_{level}", quota_policy=quota_policy,
+    ) == {
+        "enabled": enabled, "first_charged_once": True, "replay_unchanged": True,
+        "identity_preserved": True, "bytes_preserved": True,
+        "distinct_admitted": not enabled, "final_accounting": True,
+        "quota_denial_observed": enabled,
+        "live": 1 if enabled else 2, "files": 1 if enabled else 2,
     }

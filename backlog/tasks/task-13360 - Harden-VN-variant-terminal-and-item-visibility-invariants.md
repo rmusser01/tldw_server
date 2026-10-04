@@ -34,9 +34,9 @@ Address independent review findings in VN generation durability: retain sibling 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review fixes verified in the 301-test VN backend suite and 37-test frontend VN suite. Ruff, ESLint, TypeScript, Bandit (0 findings), and 4 Chromium smoke tests passed. Full repository suite not run.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

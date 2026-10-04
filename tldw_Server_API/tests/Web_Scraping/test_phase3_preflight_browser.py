@@ -1077,9 +1077,33 @@ async def test_exhausted_deadline_reserves_once_but_prevents_launch() -> None:
         "new_page",
     ],
 )
-async def test_each_startup_await_is_bounded_by_the_shared_deadline(stage: str) -> None:
-    controls = _live_controls(deadline_s=0.02)
+async def test_each_startup_await_is_bounded_by_the_shared_deadline(
+    stage: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _assert_selected_startup_deadline(stage, monkeypatch)
+
+
+async def _assert_selected_startup_deadline(stage: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = FakeClock(1.0)
+    controls = _controls(deadline=2.0, clock=clock)
     launcher = FakePlaywrightLauncher(block_at=stage)
+    native_timeouts = []
+
+    def observed_timeout(delay):
+        assert delay == 1.0
+        # Arm the real native timeout only once the selected operation is waiting.
+        timeout = asyncio.timeout(None)
+        native_timeouts.append(timeout)
+        return timeout
+
+    monkeypatch.setattr(_adapter_module(), "_asyncio_timeout", observed_timeout)
+
+    async def expire_selected_stage():
+        await launcher.startup_gate.started.wait()
+        assert native_timeouts, "selected startup await must have a deadline context"
+        clock.advance(1.0)
+        native_timeouts[-1].reschedule(asyncio.get_running_loop().time())
+
     probe = _probe(
         controls=controls,
         guard=FakeProbeEgressGuard([]),
@@ -1087,14 +1111,45 @@ async def test_each_startup_await_is_bounded_by_the_shared_deadline(stage: str) 
     )
     options = BrowserProbeOptions(init_scripts=("window.test = true",))
 
-    with pytest.raises(PreflightDeadlineExceeded):
-        async with asyncio_timeout(0.2):
-            async with probe.open_page(options):
-                pytest.fail("page must not be created")
+    expiry = asyncio.create_task(expire_selected_stage())
+    try:
+        async with asyncio_timeout(2.0):
+            with pytest.raises(PreflightDeadlineExceeded):
+                async with probe.open_page(options):
+                    pytest.fail("page must not be created")
+    finally:
+        if not expiry.done():
+            expiry.cancel()
+        try:
+            await expiry
+        except asyncio.CancelledError:
+            pass
+        await controls.close(grace_s=0.02)
 
     assert launcher.startup_gate.started.is_set()
+    assert native_timeouts[-1].expired()
+    assert controls.remaining_seconds() == 0.0
     assert controls.consumed.browsers == 1
-    await controls.close(grace_s=0.02)
+    assert launcher.playwright.stop_calls == (0 if stage == "launcher_start" else 1)
+    assert launcher.browser.close_calls == (0 if stage in {"launcher_start", "launch_browser"} else 1)
+    assert all(context.close_calls == 1 for context in launcher.browser.contexts)
+
+
+@pytest.mark.asyncio
+async def test_selected_startup_deadline_survives_slow_earlier_setup(monkeypatch) -> None:
+    """Earlier setup exceeding the old 20ms budget must not hide the selected await."""
+    original_start = FakePlaywrightLauncher.start
+    setup_finished = asyncio.Event()
+
+    async def slow_start(self):
+        await asyncio.sleep(0.04)
+        result = await original_start(self)
+        setup_finished.set()
+        return result
+
+    monkeypatch.setattr(FakePlaywrightLauncher, "start", slow_start)
+    await _assert_selected_startup_deadline("init_script", monkeypatch)
+    assert setup_finished.is_set()
 
 
 @pytest.mark.asyncio

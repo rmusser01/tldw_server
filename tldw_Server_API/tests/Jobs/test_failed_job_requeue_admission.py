@@ -24,6 +24,21 @@ pytestmark = pytest.mark.integration
 USE_SHARED_JOBS_POSTGRES = True
 
 
+def connect_test_database(jobs: JobManager) -> Any:
+    """Open a native test-owned handle to the fixture's already-initialized database."""
+    if jobs.backend == "postgres":
+        import psycopg
+        from psycopg.rows import dict_row
+
+        connection = psycopg.connect(jobs.db_url, row_factory=dict_row)
+        assert isinstance(connection, psycopg.Connection)
+        return connection
+    connection = sqlite3.connect(jobs.db_path)
+    connection.row_factory = sqlite3.Row
+    assert isinstance(connection, sqlite3.Connection)
+    return connection
+
+
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.pg_jobs)])
 def jobs(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> JobManager:
     """Use native SQLite or the existing shared isolated PostgreSQL lifecycle."""
@@ -35,7 +50,7 @@ def jobs(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.Mon
         result = JobManager(backend="postgres", db_url=dsn)
         _, db_name = request.getfixturevalue("isolated_test_environment")
         assert "pg_temp_db" not in request.fixturenames, "alternate pg_temp_db was requested"
-        with closing(result._connect()) as conn, conn, result._pg_cursor(conn) as cur:
+        with closing(connect_test_database(result)) as conn, conn, closing(conn.cursor()) as cur:
             cur.execute("SELECT current_database() AS name")
             assert cur.fetchone()["name"] == db_name
         assert conn.closed
@@ -77,22 +92,32 @@ def retry(jobs: JobManager, job: dict[str, Any], **overrides: Any) -> dict[str, 
 
 def snapshot(jobs: JobManager, job: dict[str, Any]) -> tuple[str, int, int]:
     """Observe state, ready counters and retry admission events independently."""
-    conn = jobs._connect()
-    try:
-        if jobs.backend == "postgres":
-            with jobs._pg_cursor(conn) as cur:
-                cur.execute("SELECT ready_count FROM job_counters WHERE domain='vn_assets' AND queue='default'")
-                ready = cur.fetchone()["ready_count"]
-                cur.execute("SELECT COUNT(*) AS c FROM job_events WHERE event_type='job.retry_admitted'")
-                events = cur.fetchone()["c"]
-        else:
-            ready = conn.execute(
-                "SELECT ready_count FROM job_counters WHERE domain='vn_assets' AND queue='default'",
-            ).fetchone()[0]
-            events = conn.execute("SELECT COUNT(*) FROM job_events WHERE event_type='job.retry_admitted'").fetchone()[0]
-        return (jobs.get_job(job["id"], owner_user_id="42")["status"], int(ready), int(events))
-    finally:
-        conn.close()
+    with closing(connect_test_database(jobs)) as conn, closing(conn.cursor()) as cur:
+        query = (
+            "SELECT status FROM jobs WHERE id=%s AND owner_user_id=%s" if jobs.backend == "postgres" else
+            "SELECT status FROM jobs WHERE id=? AND owner_user_id=?"
+        )
+        cur.execute(query, (job["id"], "42"))
+        status = cur.fetchone()["status"]
+        cur.execute("SELECT ready_count FROM job_counters WHERE domain='vn_assets' AND queue='default'")
+        ready = cur.fetchone()["ready_count"]
+        cur.execute("SELECT COUNT(*) AS c FROM job_events WHERE event_type='job.retry_admitted'")
+        events = cur.fetchone()["c"]
+        return (status, int(ready), int(events))
+
+
+def test_snapshot_does_not_use_manager_connections(jobs: JobManager, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Persisted admission observations must remain independent of private manager I/O."""
+    job = failed_job(jobs)
+
+    def forbidden_connection(*args: Any, **kwargs: Any) -> None:
+        """Reject manager-owned observation without mocking persisted counters."""
+        raise AssertionError("snapshot used a private manager connection")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(jobs, "_connect", forbidden_connection)
+        patch.setattr(jobs, "_pg_cursor", forbidden_connection)
+        assert snapshot(jobs, job) == ("failed", 0, 0)
 
 
 def test_explicit_retry_and_queued_replay_preserve_identity(jobs: JobManager) -> None:
@@ -320,13 +345,13 @@ def test_retry_helper_propagates_failures_and_obeys_connection_ownership(jobs: J
             error_type = psycopg.errors.UndefinedTable
         else:
             error_type = sqlite3.OperationalError
-        with closing(jobs._connect()) as setup, setup, closing(setup.cursor()) as cur:
+        with closing(connect_test_database(jobs)) as setup, setup, closing(setup.cursor()) as cur:
             cur.execute("DROP TABLE job_events")
-    conn = jobs._connect()
+    conn = connect_test_database(jobs)
     try:
         with pytest.raises(error_type) as raised:
             retry_failed_job_admission(
-                conn, backend=jobs.backend, cursor_factory=jobs._pg_cursor, command=command,
+                conn, backend=jobs.backend, cursor_factory=lambda connection: closing(connection.cursor()), command=command,
                 job_id=job["id"], expected_uuid=job["uuid"], now=jobs._clock.now_utc(),
                 max_queued_quota=0, submits_per_minute_quota=0, counters_enabled=True,
                 decode_payload=decode, check_policy=policy,
@@ -344,7 +369,7 @@ def test_retry_helper_propagates_failures_and_obeys_connection_ownership(jobs: J
     if failure != "driver":
         assert snapshot(jobs, job) == ("failed", 0, 0)
     else:
-        with closing(jobs._connect()) as observer, observer, closing(observer.cursor()) as cur:
+        with closing(connect_test_database(jobs)) as observer, observer, closing(observer.cursor()) as cur:
             cur.execute("SELECT ready_count FROM job_counters WHERE domain='vn_assets' AND queue='default'")
             row = cur.fetchone()
             assert (row["ready_count"] if isinstance(row, dict) else row[0]) == 0
@@ -368,7 +393,7 @@ def test_processing_lease_health_is_owner_scoped_and_read_only(
             "no_lease": ("lease_id", None), "no_worker": ("worker_id", None),
             "cancel_requested": ("cancel_requested_at", "2026-09-25 00:00:00"),
         }[health]
-        conn = jobs._connect()
+        conn = connect_test_database(jobs)
         try:
             with conn:
                 marker = "%s" if jobs.backend == "postgres" else "?"

@@ -30,9 +30,9 @@ Finish the server worker replay portion of issue #2021: duplicate delivery or wo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Replay ledger uses recipe rows; hidden reservations are excluded from public listings and failed reservations from item capacity. Parent fanout preserves child-updated status. Verification: 124 scoped backend tests passed plus owner-isolation test; Ruff E,F,I clean; Bandit 0 findings; git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
