@@ -654,10 +654,12 @@ describe("mounted Knowledge research import", () => {
 })
 
 it.each([false, true])(
-  "retains canonical Quick Notes and matching source evidence after a tombstoned workspace reload (lost response=%s)",
+  "retains canonical Quick Notes and reused source evidence through reconcile and tombstoned reload (lost response=%s)",
   async (loseResponse) => {
     const { restoreMigratedResearchWorkspace } =
       await import("@/components/Option/ResearchWorkspace/workspace-server-restore")
+    const { reconcileResearchWorkspaceServerState } =
+      await import("@/components/Option/ResearchWorkspace/workspace-server-reconcile")
     localStorage.setItem(
       "tldw:research-workspace:migration:tombstone:workspace-a",
       JSON.stringify({
@@ -669,9 +671,29 @@ it.each([false, true])(
         deletedAt: "2026-10-03T00:00:00Z",
       }),
     )
+    const workspace = {
+      id: "workspace-a",
+      name: "Research",
+      created_at: "2026-10-01T00:00:00Z",
+      version: 1,
+    }
+    let serverSources = [7, 101, 50].map((mediaId, position) => ({
+      id: `server-source-${mediaId}`,
+      workspace_id: "workspace-a",
+      media_id: mediaId,
+      title: `Existing ${mediaId}`,
+      source_type: "text",
+      url: null,
+      position,
+      selected: mediaId === 50,
+      state: "queryable",
+      added_at: "2026-10-01T00:00:00Z",
+      version: 1,
+    }))
     let canonical: any = null
     let droppedResponse = false
-    mocks.request.mockImplementation(async ({ path, method, body }: any) => {
+    mocks.request.mockImplementation(async (request: any) => {
+      const { path, method, body, headers } = request
       if (path === "/api/v1/notes/" && method === "POST") {
         canonical = {
           id: body.id,
@@ -692,47 +714,49 @@ it.each([false, true])(
       if (path.startsWith("/api/v1/notes/")) {
         if (!canonical)
           throw Object.assign(new Error("missing"), { status: 404 })
+        if (method === "PUT") {
+          if (headers?.["expected-version"] !== String(canonical.version))
+            throw Object.assign(
+              new Error("expected-version header required"),
+              { status: 422 },
+            )
+          canonical = {
+            ...canonical,
+            ...body,
+            version: canonical.version + 1,
+          }
+        }
         return canonical
       }
       if (path.endsWith("/context"))
         return {
           workspace_id: "workspace-a",
-          workspace: {
-            id: "workspace-a",
-            name: "Research",
-            created_at: "2026-10-01T00:00:00Z",
-            version: 1,
-          },
-          sources: {
-            items: [
-              {
-                id: "saved-source",
-                workspace_id: "workspace-a",
-                media_id: 101,
-                title: "Field note — retrieved excerpts",
-                source_type: "text",
-                selected: false,
-                state: "queryable",
-                added_at: "2026-10-01T00:00:00Z",
-              },
-            ],
-          },
+          workspace,
+          sources: { items: serverSources },
           partial_errors: [],
         }
       return []
     })
+    const restore = () =>
+      restoreMigratedResearchWorkspace({
+        signal: new AbortController().signal,
+        apply: useWorkspaceStore.getState().restoreServerWorkspace,
+      })
+    await restore()
     const transfer = payload()
-    transfer.sources = transfer.sources.slice(0, 2)
+    transfer.sources = [
+      transfer.sources[3],
+      ...transfer.sources.slice(0, 2).map((source) => ({
+        ...source,
+        originalId: "b905bb24-0657-45de-af47-6c8a4d5db498",
+      })),
+    ]
     mocks.upload.mockResolvedValue({ id: 101 })
     await queueResearchWorkspacePrefill(transfer)
     const receiver = renderHook(() =>
       useResearchWorkspacePrefill("workspace-a", true),
     )
-    await waitFor(() =>
-      expect(useWorkspaceStore.getState().currentNote.content).toContain(
-        "Import reference:",
-      ),
-    )
+    await waitFor(() => expect(canonical).not.toBeNull())
     await waitFor(() => expect(receiver.result.current.importing).toBe(false))
     if (loseResponse) {
       expect(receiver.result.current.error).toContain("could not be saved")
@@ -743,50 +767,90 @@ it.each([false, true])(
       await waitFor(() => expect(receiver.result.current.importing).toBe(false))
     }
     expect(receiver.result.current.error).toBeNull()
-    expect(canonical.id).toMatch(/^[0-9a-f-]{36}$/)
-    expect(useWorkspaceStore.getState().currentNote.id).toBe(canonical.id)
-    await act(async () => {
-      useWorkspaceStore.setState({ selectedSourceFolderIds: ["manual-folder"] })
+    const imported = useWorkspaceStore.getState()
+    expect(imported.sources.map((source) => source.id)).toEqual([
+      "server-source-7",
+      "server-source-101",
+      "server-source-50",
+    ])
+    expect(imported.getEffectiveSelectedMediaIds()).toEqual([7, 101])
+    expect(imported.sources[0].knowledgeQaEvidence).toMatchObject({
+      snapshot: false,
+      trustState: "uncited_degraded_answer",
+      sources: [{ originalId: "7", excerpt: "Native excerpt" }],
     })
-    await waitFor(() =>
-      expect(
-        [...mocks.values.values()].some(
-          (value: any) => value.selectionIntent === null,
-        ),
-      ).toBe(true),
+    expect(imported.sources[1].knowledgeQaEvidence).toMatchObject({
+      snapshot: true,
+      trustState: "uncited_degraded_answer",
+      sources: [
+        {
+          originalId: "b905bb24-0657-45de-af47-6c8a4d5db498",
+          excerpt: "First excerpt",
+        },
+        {
+          originalId: "b905bb24-0657-45de-af47-6c8a4d5db498",
+          excerpt: "Second excerpt",
+        },
+      ],
+    })
+    expect(imported.sources[2].knowledgeQaEvidence).toBeUndefined()
+    expect(imported.currentNote.id).toBe(canonical.id)
+    expect(
+      readKnowledgeNoteProvenance(canonical.content)?.research?.sources.map(
+        (source) => source.mediaId,
+      ),
+    ).toEqual([7, 101])
+    await act(async () => {
+      imported.setSelectedSourceIds(["server-source-50"])
+    })
+    const client = {
+      upsertWorkspace: vi.fn().mockResolvedValue(workspace),
+      getWorkspaceSources: vi.fn(async () => serverSources),
+      addWorkspaceSource: vi.fn(),
+      updateWorkspaceSourceSelection: vi.fn(
+        async (_id: string, selected: string[]) => {
+          serverSources = serverSources.map((source) => ({
+            ...source,
+            selected: selected.includes(source.id),
+          }))
+        },
+      ),
+    }
+    const synced = await reconcileResearchWorkspaceServerState({
+      client,
+      workspaceId: "workspace-a",
+      workspaceName: "Research",
+      sources: useWorkspaceStore.getState().sources,
+      selectedSourceIds: useWorkspaceStore.getState().selectedSourceIds,
+    })
+    expect(synced.errors).toEqual([])
+    expect(client.addWorkspaceSource).not.toHaveBeenCalled()
+    expect(useWorkspaceStore.getState().sources[1].knowledgeQaEvidence).toEqual(
+      imported.sources[1].knowledgeQaEvidence,
     )
     receiver.unmount()
+    // A later server deletion must stay deleted even though the canonical note retains its evidence.
+    serverSources = serverSources.filter((source) => source.media_id !== 7)
     useWorkspaceStore.setState({
       workspaceId: null,
-      selectedSourceFolderIds: [],
       sources: [],
       currentNote: { title: "", content: "", keywords: [], isDirty: false },
       workspaceSnapshots: {},
       selectedSourceIds: [],
     })
-    await restoreMigratedResearchWorkspace({
-      signal: new AbortController().signal,
-      apply: useWorkspaceStore.getState().restoreServerWorkspace,
-    })
+    await restore()
     const reopened = renderHook(() =>
       useResearchWorkspacePrefill("workspace-a", true),
     )
     await waitFor(() =>
-      expect(useWorkspaceStore.getState().currentNote.content).toContain(
-        "Unsupported draft",
-      ),
+      expect(useWorkspaceStore.getState().currentNote.id).toBe(canonical.id),
     )
     const state = useWorkspaceStore.getState()
-    expect(state.currentNote.id).toBe(canonical.id)
-    expect(state.sources.map((source) => source.mediaId)).toEqual([101])
-    expect(state.sources[0].knowledgeQaEvidence).toMatchObject({
-      trustState: "uncited_degraded_answer",
-      sources: [
-        { originalId: "note-uuid", excerpt: "First excerpt" },
-        { originalId: "note-uuid", excerpt: "Second excerpt" },
-      ],
-    })
-    expect(state.selectedSourceIds).toEqual([])
+    expect(state.sources.map((source) => source.mediaId)).toEqual([101, 50])
+    expect(state.sources[0].knowledgeQaEvidence).toEqual(
+      imported.sources[1].knowledgeQaEvidence,
+    )
+    expect(state.selectedSourceIds).toEqual(["server-source-50"])
     expect(mocks.upload).toHaveBeenCalledTimes(1)
     expect(
       mocks.request.mock.calls.filter(([request]) => request.method === "POST"),
@@ -1031,7 +1095,7 @@ it.each([
   },
 )
 
-it.each(["unchanged", "edited", "replaced", "cleared"] as const)(
+it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
   "acknowledges a restored legacy numeric note only while owned (%s) and saves its canonical UUID",
   async (change) => {
     const { restoreMigratedResearchWorkspace } =
@@ -1051,7 +1115,8 @@ it.each(["unchanged", "edited", "replaced", "cleared"] as const)(
     )
     let canonical: any = null
     let finishCreate!: () => void
-    mocks.request.mockImplementation(async ({ path, method, body }: any) => {
+    mocks.request.mockImplementation(async (request: any) => {
+      const { path, method, body, headers } = request
       if (path === "/api/v1/workspaces/workspace-a/context")
         return {
           workspace_id: "workspace-a",
@@ -1098,7 +1163,12 @@ it.each(["unchanged", "edited", "replaced", "cleared"] as const)(
           path.split("?")[0] !== `/api/v1/notes/${canonical.id}`
         )
           throw Object.assign(new Error("missing"), { status: 404 })
-        if (method === "PUT")
+        if (method === "PUT") {
+          if (headers?.["expected-version"] !== String(canonical.version))
+            throw Object.assign(
+              new Error("expected-version header required"),
+              { status: 422 },
+            )
           canonical = {
             ...canonical,
             title: body.title,
@@ -1106,6 +1176,7 @@ it.each(["unchanged", "edited", "replaced", "cleared"] as const)(
             keywords: body.keywords.map((keyword: string) => ({ keyword })),
             version: canonical.version + 1,
           }
+        }
         return canonical
       }
       return []
@@ -1177,6 +1248,10 @@ it.each(["unchanged", "edited", "replaced", "cleared"] as const)(
       },
     })
     receiver.unmount()
+    if (change === "unversioned")
+      useWorkspaceStore
+        .getState()
+        .setCurrentNote({ ...note, version: undefined })
     const editor = render(<QuickNotesSection />)
     fireEvent.change(screen.getByRole("textbox", { name: "Note title" }), {
       target: { value: "Canonical title edited" },
@@ -1190,7 +1265,8 @@ it.each(["unchanged", "edited", "replaced", "cleared"] as const)(
     expect(mocks.request).toHaveBeenCalledWith(
       expect.objectContaining({
         method: "PUT",
-        path: `/api/v1/notes/${note.id}?expected_version=1`,
+        path: `/api/v1/notes/${note.id}`,
+        headers: expect.objectContaining({ "expected-version": "1" }),
       }),
     )
     expect(readKnowledgeNoteProvenance(canonical.content)).toEqual(
@@ -1232,12 +1308,18 @@ it.each([
       content: "Original legacy body",
     })
     let canonical: any = null
-    mocks.request.mockImplementation(async ({ method, body }: any) => {
+    mocks.request.mockImplementation(async ({ method, body, headers }: any) => {
       if (method === "POST") {
         canonical = { ...body, version: 1 }
         throw new Error("response lost after commit")
       }
-      if (method === "PUT") canonical = { ...canonical, ...body, version: 2 }
+      if (method === "PUT") {
+        if (headers?.["expected-version"] !== String(canonical.version))
+          throw Object.assign(new Error("expected-version header required"), {
+            status: 422,
+          })
+        canonical = { ...canonical, ...body, version: 2 }
+      }
       if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
       return canonical
     })

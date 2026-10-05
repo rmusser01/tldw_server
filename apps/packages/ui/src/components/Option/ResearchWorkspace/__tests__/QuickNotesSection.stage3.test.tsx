@@ -195,7 +195,7 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
       if (path.includes("/api/v1/notes/search/") && path.includes("limit=8")) {
         return []
       }
-      if (path.includes("/api/v1/notes/42?expected_version=1")) {
+      if (path === "/api/v1/notes/42" && request.method === "PUT") {
         throw { status: 409, message: "version conflict" }
       }
       if (path.endsWith("/api/v1/notes/42")) {
@@ -261,7 +261,7 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
       if (path.includes("/api/v1/notes/search/") && path.includes("limit=8")) {
         return []
       }
-      if (path.includes("/api/v1/notes/7?expected_version=1")) {
+      if (path === "/api/v1/notes/7" && request.method === "PUT") {
         return {
           id: 7,
           title: "Saved Note",

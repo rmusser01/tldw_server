@@ -690,14 +690,26 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
       if (currentNote.id) {
         // Update existing note with version check
-        const path = currentNote.version
-          ? `/api/v1/notes/${currentNote.id}?expected_version=${currentNote.version}` as AllowedPath
-          : `/api/v1/notes/${currentNote.id}` as AllowedPath
+        const path = `/api/v1/notes/${currentNote.id}` as AllowedPath
+        const expectedVersion =
+          currentNote.version ??
+          (
+            await bgRequest<NoteListItem>({
+              path,
+              method: "GET"
+            })
+          ).version
+        if (expectedVersion == null) {
+          throw new Error("Missing note version; reload before saving.")
+        }
 
         const updated = await bgRequest<NoteListItem>({
           path,
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "expected-version": String(expectedVersion)
+          },
           body: payload
         })
 

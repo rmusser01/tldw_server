@@ -244,7 +244,8 @@ describe("QuickNotesSection Stage 4 layout and export", () => {
     await waitFor(() =>
       expect(mockBgRequest).toHaveBeenCalledWith(
         expect.objectContaining({
-          path: "/api/v1/notes/e3b16146-9e38-42e0-bd15-549e60bd31a3?expected_version=1",
+          path: "/api/v1/notes/e3b16146-9e38-42e0-bd15-549e60bd31a3",
+          headers: expect.objectContaining({ "expected-version": "1" }),
           method: "PUT",
           body: expect.objectContaining({
             content: edited,

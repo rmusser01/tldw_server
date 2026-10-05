@@ -255,6 +255,16 @@ export function useResearchWorkspacePrefill(
           }
           assertCurrent()
           const state = useWorkspaceStore.getState()
+          const knowledgeQaEvidence = {
+            importId: payload.id,
+            threadId: payload.threadId,
+            sources,
+            trustState: payload.answerTrustState,
+            trustReasonCodes: payload.answerTrustReasonCodes,
+            evidenceOrigin: payload.answerEvidenceOrigin,
+            scope: payload.scope,
+            snapshot: source.mediaId == null,
+          }
           if (!state.sources.some((item) => item.mediaId === mediaId)) {
             state.addSources([
               {
@@ -268,18 +278,17 @@ export function useResearchWorkspacePrefill(
                   ? { status: "processing" as const }
                   : {}),
                 url: source.url,
-                knowledgeQaEvidence: {
-                  importId: payload.id,
-                  threadId: payload.threadId,
-                  sources,
-                  trustState: payload.answerTrustState,
-                  trustReasonCodes: payload.answerTrustReasonCodes,
-                  evidenceOrigin: payload.answerEvidenceOrigin,
-                  scope: payload.scope,
-                  snapshot: source.mediaId == null,
-                },
+                knowledgeQaEvidence,
               },
             ])
+          } else {
+            useWorkspaceStore.setState((current) => ({
+              sources: current.sources.map((item) =>
+                item.mediaId === mediaId
+                  ? { ...item, knowledgeQaEvidence }
+                  : item,
+              ),
+            }))
           }
           if (
             payload.selectionIntent &&
@@ -407,10 +416,11 @@ export function useResearchWorkspacePrefill(
             })
             const saved = await bgRequest<CanonicalNote>({
               ...request,
-              path: existing
-                ? `${path}?expected_version=${existing.version}`
-                : "/api/v1/notes/",
+              path: existing ? path : "/api/v1/notes/",
               method: existing ? "PUT" : "POST",
+              ...(existing
+                ? { headers: { "expected-version": String(existing.version) } }
+                : {}),
               body: {
                 ...(existing ? {} : { id: payload.canonicalNoteId }),
                 title:
