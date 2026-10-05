@@ -405,18 +405,64 @@ def test_package_ratchet_isolates_base_worktrees_per_package_and_replay() -> Non
     )
 
 
+def _evaluate_flat_expression(expression: str, context: dict[str, str]) -> object:
+    """Evaluate a parenthesis-free GitHub `&&`/`||` chain of comparisons and string literals.
+
+    `a && b` yields `b` when `a` is truthy, `a || b` yields the first truthy operand, and
+    string comparison ignores case, as in GitHub's expression language. An operand that is
+    neither a quoted literal nor a key of `context` raises `KeyError`.
+    """
+
+    def operand(text: str) -> str:
+        text = text.strip()
+        return text[1:-1] if text.startswith("'") else context[text]
+
+    def term(text: str) -> object:
+        for operator in ("==", "!="):
+            left, found, right = text.partition(operator)
+            if found:
+                return (operand(left).lower() == operand(right).lower()) is (operator == "==")
+        return operand(text)
+
+    value: object = False
+    for alternative in expression.strip().removeprefix("${{").removesuffix("}}").split("||"):
+        for conjunct in alternative.split("&&"):
+            value = term(conjunct)
+            if not value:
+                break
+        if value:
+            break
+    return value
+
+
 @pytest.mark.unit
 def test_manual_dispatch_cannot_publish_the_required_check_name() -> None:
-    """Keep diagnostic manual ratchets from satisfying branch protection."""
+    """Keep diagnostic manual ratchets from satisfying branch protection.
+
+    The one dispatch that may publish the protected name is the merge queue's, which is made
+    with GITHUB_TOKEN and therefore runs as `github-actions[bot]` (TASK-13462, spec 4.8).
+    """
 
     workflow = yaml.safe_load(
         Path(".github/workflows/frontend-required.yml").read_text(encoding="utf-8")
     )
+    name = workflow["jobs"]["frontend-required"]["name"]
 
-    assert workflow["jobs"]["frontend-required"]["name"] == (
-        "${{ github.event_name == 'workflow_dispatch' && "
-        "'frontend-required-diagnostic' || 'frontend-required' }}"
-    )
+    def published(event_name: str, actor: str) -> object:
+        return _evaluate_flat_expression(
+            name, {"github.event_name": event_name, "github.actor": actor}
+        )
+
+    # A dispatch started by anyone but the queue stays diagnostic. `[` cannot appear in a
+    # user login, so no account can be named like the exempted actor.
+    for actor in ("octocat", "github-actions", "dependabot[bot]", ""):
+        assert published("workflow_dispatch", actor) == "frontend-required-diagnostic"
+    # The queue's own dispatch publishes the required name.
+    assert published("workflow_dispatch", "github-actions[bot]") == "frontend-required"
+    # The events that always published the required name still do, whoever the actor is.
+    for event_name in ("pull_request", "workflow_run"):
+        for actor in ("octocat", "github-actions[bot]"):
+            assert published(event_name, actor) == "frontend-required"
 
 
 @pytest.mark.unit

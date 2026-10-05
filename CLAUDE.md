@@ -502,6 +502,15 @@ When multiple valid approaches exist, choose based on:
 - Use existing test utilities/helpers
 - Tests should be deterministic
 
+### Merging into dev
+
+`dev` requires seven statuses on a head that is up to date with `dev`, so merges are serial. Check the merge queue's mode first: `gh variable get MERGE_QUEUE`.
+
+- **`on`:** arm auto-merge when reviews are settled (`gh pr merge <n> --auto --merge`) and leave the PR alone. Never rebase, update or hand-merge an armed PR. Disarm (`gh pr merge <n> --disable-auto`) before pushing more work, then arm again. Never click "Approve and run" on a queue-rebased PR.
+- **unset, `off` or `dry`:** rebase only the PR that is about to merge, wait for the required statuses, then merge. Do not keep every open PR rebased.
+
+Details: `Docs/Development/CI_REQUIRED_GATES.md`, "Merge Queue".
+
 ## Important Reminders
 
 **NEVER**:

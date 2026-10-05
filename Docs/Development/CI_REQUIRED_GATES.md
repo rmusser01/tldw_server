@@ -50,6 +50,8 @@ and check current behaviour rather than assuming.
 
 - If relevant paths changed, the gate executes its full checks.
 - If relevant paths did not change, the gate exits with an explicit no-op success message.
+- If the change-detection job itself fails, the gate reports failure. Before TASK-13462 the gate job was skipped in
+  that case, and GitHub counts a skipped required job as satisfied.
 
 Examples:
 
@@ -234,6 +236,73 @@ Three traps worth stating outright:
   branch"*. Merging through the GitHub UI as a user whose own admin bypass applies does
   work.
 - **`--squash` is rejected repository-wide**; merges must use `--merge`.
+
+## Merge Queue
+
+Tracked as TASK-13462, decided in [ADR-063](../ADR/063-in-repo-merge-queue.md), designed in
+`Docs/superpowers/specs/2026-10-04-merge-queue-design.md`.
+
+Strict enforcement means one merge puts every other ready PR behind, and without a queue each of them rebases and
+re-runs the required gates to race for the next merge. The queue makes that serial: only the armed PR at the front of
+the line is rebased and tested.
+
+### Mode
+
+The repository variable `MERGE_QUEUE` is the switch. Check it before landing anything:
+
+```bash
+gh variable get MERGE_QUEUE
+```
+
+- unset or `off`: the queue does nothing. Use the manual procedure (rebase the one PR about to merge, wait for the
+  required statuses, merge).
+- `dry`: the queue writes what it would do to the `Merge queue` job summary and changes nothing. Manual procedure.
+- `on`: the queue acts. Follow the rules below.
+
+### Rules when the queue is `on`
+
+1. When reviews are settled, arm auto-merge: `gh pr merge <n> --auto --merge`. That is the whole landing procedure.
+2. Do not rebase or update an armed PR, and do not merge it by hand. The queue rebases it when it reaches the front.
+3. To push more work, disarm first (`gh pr merge <n> --disable-auto`), push, then arm again. Re-arming puts the PR at
+   the back of the line.
+4. Never click "Approve and run" on a queue-rebased PR. The empty approval-pending runs are expected; approving them
+   starts duplicates.
+5. An evicted PR gets one comment saying why (conflicts, a gate failed twice, `dev` changed workflow files, auto-merge
+   did not fire). Fix the cause and arm again.
+
+Fork PRs and PRs opened by bots or apps are never queued and stay manual.
+
+### What the queue does to the front PR
+
+- **Behind `dev`:** rebases it with a pinned head, then starts all seven required statuses on the new head and cancels
+  the old head's runs. A `GITHUB_TOKEN` rebase starts no workflow runs, so the queue dispatches them:
+  `backend-required`, `security-required`, `coverage-required`, `frontend-required` and `e2e-required` on the PR branch
+  with `base_sha` set to `dev`'s tip, `container-build-check` on the PR branch, and `frontend-license-gate.yml` on `dev`
+  with the PR number.
+- **A status failed:** starts that status again once, and evicts the PR if it fails a second time on the same head.
+- **All seven green:** waits for auto-merge. The merge pushes `dev`, which wakes the queue for the next PR.
+
+Non-required workflows (`ci.yml` and the rest) are not re-run on the rebased head.
+
+### Three details that surprise people
+
+- **The queue cannot rebase a PR across a change to workflow files.** GitHub does not let an Actions token create or
+  update anything under `.github/workflows`. If `dev` gained a workflow change after your branch was cut, the queue
+  removes the PR from the line with the steps to take: `git fetch origin dev && git rebase origin/dev`, force-push with
+  lease, arm again. After that the queue can rebase it itself until the next workflow change lands.
+
+- `frontend-required.yml` publishes `frontend-required-diagnostic`, not the protected name, when a person dispatches
+  it. Only a dispatch made by `github-actions[bot]`, which is how the queue starts it, publishes `frontend-required`.
+- The queue wakes on arm, disarm, close, pushes to `dev`, and a failed required gate (the `queue-tick` job). Nothing
+  wakes it on a timer. If the line looks stuck, any of those events moves it; arming or disarming a PR is enough.
+
+### Switching it on (owner)
+
+1. Enable **Allow auto-merge** in repository settings.
+2. `gh variable set MERGE_QUEUE --body dry` for about a day; compare the job summaries with what armed PRs do.
+3. `gh variable set MERGE_QUEUE --body on` with one low-risk PR first. That run answers the questions listed in the
+   spec's rollout section, which cannot be checked without a real queue run.
+4. Roll back at any time with `gh variable set MERGE_QUEUE --body off`.
 
 ## Security Threshold Policy
 
