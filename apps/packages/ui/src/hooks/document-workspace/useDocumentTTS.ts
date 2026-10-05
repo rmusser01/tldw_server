@@ -132,6 +132,22 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioUrlRef = useRef<string | null>(null)
 
+  const controllerRef = useRef<AbortController | null>(null)
+  const mountedRef = useRef(true)
+  const releasePlayback = useCallback(() => {
+    if (audioRef.current) {
+      detachAudioListeners(audioRef.current)
+      audioRef.current.pause()
+      audioRef.current.src = ''
+      audioRef.current.load?.()
+      audioRef.current = null
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = null
+    }
+  }, [])
+
   // Fetch available voices
   const { data: voicesData, isLoading: voicesLoading } = useQuery({
     queryKey: ["tts-voices"],
@@ -165,20 +181,14 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
 
   const voices = voicesData || []
 
-  // Cleanup audio on unmount
   useEffect(() => {
+    mountedRef.current = true
     return () => {
-      if (audioRef.current) {
-        detachAudioListeners(audioRef.current)
-        audioRef.current.pause()
-        audioRef.current = null
-      }
-      if (audioUrlRef.current) {
-        URL.revokeObjectURL(audioUrlRef.current)
-        audioUrlRef.current = null
-      }
+      mountedRef.current = false
+      controllerRef.current?.abort()
+      releasePlayback()
     }
-  }, [])
+  }, [releasePlayback])
 
   useEffect(() => {
     let cancelled = false
@@ -219,16 +229,11 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
 
   // Speak text
   const speak = useCallback(async (text: string) => {
-    // Stop any current playback
-    if (audioRef.current) {
-      detachAudioListeners(audioRef.current)
-      audioRef.current.pause()
-      audioRef.current = null
-    }
-    if (audioUrlRef.current) {
-      URL.revokeObjectURL(audioUrlRef.current)
-      audioUrlRef.current = null
-    }
+    controllerRef.current?.abort()
+    releasePlayback()
+    if (!mountedRef.current) return
+    const controller = new AbortController()
+    controllerRef.current = controller
 
     setProgress(0)
 
@@ -244,12 +249,14 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
     try {
       const model = await getTldwTTSModel()
       const fallbackVoice = await getTldwTTSVoice()
+      if (controller.signal.aborted) return
       const resolvedVoice =
         readStoredVoicePreference() || voice || fallbackVoice || DEFAULT_VOICE
 
       // Call TTS API
       const response = await fetch("/api/v1/audio/speech", {
         method: "POST",
+        signal: controller.signal,
         headers: {
           "Content-Type": "application/json"
         },
@@ -262,12 +269,14 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
         })
       })
 
+      if (controller.signal.aborted) return
       if (!response.ok) {
         throw new Error(`TTS request failed: ${response.statusText}`)
       }
 
       // Get audio blob
       const audioBlob = await response.blob()
+      if (controller.signal.aborted) return
       const audioUrl = URL.createObjectURL(audioBlob)
       audioUrlRef.current = audioUrl
 
@@ -337,6 +346,8 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
         throw playErr
       }
     } catch (err) {
+      if (controller.signal.aborted) return
+      releasePlayback()
       const errorMessage = err instanceof Error ? err.message : "TTS failed"
       setState((prev) => ({
         isPlaying: false,
@@ -347,7 +358,7 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
         lastSpokenText: prev.lastSpokenText
       }))
     }
-  }, [voice, speed, volume])
+  }, [voice, speed, volume, releasePlayback])
 
   // Pause playback
   const pause = useCallback(() => {
@@ -365,18 +376,8 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
 
   // Stop playback
   const stop = useCallback(() => {
-    if (audioRef.current) {
-      // Detach first so the pause() below can't fire onpause and leave isPaused
-      // stale after we reset state.
-      detachAudioListeners(audioRef.current)
-      audioRef.current.pause()
-      audioRef.current.currentTime = 0
-      audioRef.current = null
-    }
-    if (audioUrlRef.current) {
-      URL.revokeObjectURL(audioUrlRef.current)
-      audioUrlRef.current = null
-    }
+    controllerRef.current?.abort()
+    releasePlayback()
     setProgress(0)
     setState((prev) => ({
       isPlaying: false,
@@ -386,7 +387,7 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
       currentText: null,
       lastSpokenText: prev.lastSpokenText
     }))
-  }, [])
+  }, [releasePlayback])
 
   // Set voice with persistence
   const handleSetVoice = useCallback((voiceId: string) => {

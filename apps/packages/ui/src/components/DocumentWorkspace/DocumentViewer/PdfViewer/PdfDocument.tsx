@@ -1,4 +1,5 @@
 import React, { useCallback, useState, useRef, useEffect, useLayoutEffect } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { Document, pdfjs } from "react-pdf"
 import type { DocumentProps } from "react-pdf"
 import { Spin } from "antd"
@@ -66,11 +67,14 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
   onPageChange,
   pdfDocumentRef
 }) => {
+  // React Virtual exposes mutable instance methods; skip compiler memoization.
+  "use no memo"
   const { t } = useTranslation(["option"])
   const [numPages, setNumPages] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [pdfInstance, setPdfInstance] = useState<PdfDocumentProxy | null>(null)
+  const [documentWidth, setDocumentWidth] = useState(0)
   const [pageMetrics, setPageMetrics] = useState<{ height: number; width: number }>({
     height: 0,
     width: 0
@@ -81,10 +85,12 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
   const isUserScrollingRef = useRef(false)
   const scrollTimeoutRef = useRef<number | null>(null)
   const scrollRafRef = useRef<number | null>(null)
+  const navigationRef = useRef<{ page: number; top: number } | null>(null)
   const wheelAccumulatorRef = useRef(0)
   const wheelResetRef = useRef<number | null>(null)
   const [pageHeights, setPageHeights] = useState<number[]>([])
   const [pageOffsets, setPageOffsets] = useState<number[]>([])
+  const [metricsFailed, setMetricsFailed] = useState(false)
 
   // Text selection for popover actions
   const { selection, clearSelection } = useTextSelection(containerRef)
@@ -122,16 +128,6 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
     [onLoadError, pdfDocumentRef]
   )
 
-  // Scroll to current page in continuous mode
-  useEffect(() => {
-    if (viewMode === "continuous" && numPages > 0) {
-      const pageElement = pageRefs.current.get(currentPage)
-      if (pageElement) {
-        pageElement.scrollIntoView({ behavior: "smooth", block: "start" })
-      }
-    }
-  }, [currentPage, viewMode, numPages])
-
   // Handle page click in thumbnail mode
   const handleThumbnailClick = useCallback(
     (pageNumber: number) => {
@@ -139,37 +135,6 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
     },
     [onPageChange]
   )
-
-  // Intersection observer for continuous scroll page tracking
-  useEffect(() => {
-    if (viewMode !== "continuous" || numPages === 0) return
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            const pageNumber = parseInt(
-              entry.target.getAttribute("data-page-number") || "1",
-              10
-            )
-            onPageChange(pageNumber)
-          }
-        })
-      },
-      {
-        root: containerRef.current,
-        threshold: 0.5
-      }
-    )
-
-    pageRefs.current.forEach((element) => {
-      observer.observe(element)
-    })
-
-    return () => {
-      observer.disconnect()
-    }
-  }, [viewMode, numPages, onPageChange])
 
   const setPageRef = useCallback(
     (pageNumber: number, element: HTMLDivElement | null) => {
@@ -212,7 +177,9 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
 
   // Compute per-page dimensions for virtual single-page scrolling.
   useEffect(() => {
+    setMetricsFailed(false)
     if (!pdfInstance) {
+      setDocumentWidth(0)
       setPageHeights([])
       setPageOffsets([])
       return
@@ -228,7 +195,7 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
         const offsets: number[] = []
         let offset = 0
         let firstHeight = 0
-        let firstWidth = 0
+        let maxWidth = 0
         const batchSize = 10
         for (let start = 1; start <= pdfInstance.numPages; start += batchSize) {
           if (cancelled) return
@@ -244,8 +211,8 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
             const viewport = pages[index].getViewport({ scale: s })
             if (pageNumber === 1) {
               firstHeight = viewport.height
-              firstWidth = viewport.width
             }
+            maxWidth = Math.max(maxWidth, viewport.width)
             heights.push(viewport.height)
             offsets.push(offset)
             offset += viewport.height + pageGap
@@ -254,13 +221,15 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
         if (!cancelled) {
           setPageHeights(heights)
           setPageOffsets(offsets)
-          updatePageMetrics({ height: firstHeight, width: firstWidth })
+          setDocumentWidth(maxWidth)
+          updatePageMetrics({ height: firstHeight, width: maxWidth })
         }
       } catch (error) {
         if (!cancelled) {
           console.warn('[PdfDocument] Failed to compute page metrics', error)
           setPageHeights([])
           setPageOffsets([])
+          setMetricsFailed(true)
           updatePageMetrics({ height: 0, width: 0 })
         }
       }
@@ -275,7 +244,9 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
   const fallbackPageHeight = 1100 * scale
   const fallbackPageWidth = 800 * scale
   const basePageHeight = pageMetrics.height > 0 ? pageMetrics.height : fallbackPageHeight
-  const basePageWidth = pageMetrics.width > 0 ? pageMetrics.width : fallbackPageWidth
+  const basePageWidth = viewMode === 'single'
+    ? pageMetrics.width > 0 ? pageMetrics.width : fallbackPageWidth
+    : documentWidth || fallbackPageWidth
   const virtualPageHeight = basePageHeight + pageGap
   const totalPageCount =
     numPages || pdfDocumentRef?.current?.numPages || 0
@@ -295,10 +266,21 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
     ? pageOffsets[pageOffsets.length - 1] + pageHeights[pageHeights.length - 1] + pageGap
     : virtualPageHeight * totalPageCount
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- This component opts out of compiler memoization for React Virtual's mutable API.
+  const continuousPages = useVirtualizer({
+    count: viewMode === 'continuous' ? totalPageCount : 0,
+    getScrollElement: () => containerRef.current,
+    estimateSize: index => (pageHeights[index] ?? basePageHeight) + pageGap,
+    overscan: 2,
+    initialRect: { width: 800, height: 800 },
+    useFlushSync: false
+  })
+  useEffect(() => { continuousPages.measure() }, [continuousPages, pageHeights])
+
   // Binary search: find 1-based page whose offset region contains scrollTop
   const findPageAtOffset = useCallback(
     (scrollTop: number): number => {
-      if (pageOffsets.length === 0) return 1
+      if (pageOffsets.length === 0) return Math.min(totalPageCount, Math.max(1, Math.floor(scrollTop / virtualPageHeight) + 1))
       let lo = 0
       let hi = pageOffsets.length - 1
       while (lo < hi) {
@@ -308,11 +290,50 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
       }
       return Math.min(totalPageCount, Math.max(1, lo + 1))
     },
-    [pageOffsets, totalPageCount]
+    [pageOffsets, totalPageCount, virtualPageHeight]
   )
 
+  const findVisiblePage = useCallback((container: HTMLDivElement) => {
+    // A short final page cannot reach the top of the viewport at low zoom.
+    if (container.scrollTop > 0 && container.scrollTop + container.clientHeight >= container.scrollHeight - 1) return totalPageCount
+    return findPageAtOffset(container.scrollTop)
+  }, [totalPageCount, findPageAtOffset])
+
+  const scrollToPage = useCallback((page: number) => {
+    if (viewMode === 'continuous' && containerRef.current) {
+      const container = containerRef.current
+      const targetTop = pageOffsets[page - 1] ?? (page - 1) * virtualPageHeight
+      navigationRef.current = {
+        page,
+        top: Math.max(0, Math.min(targetTop, container.scrollHeight - container.clientHeight))
+      }
+      continuousPages.scrollToIndex(page - 1, { align: 'start' })
+    } else pageRefs.current.get(page)?.scrollIntoView()
+  }, [viewMode, pageOffsets, virtualPageHeight, continuousPages])
+
+  // React-PDF retains its initial link handler, so delegate to current navigation.
+  const pageNavigationRef = useRef({ onPageChange, scrollToPage })
+  useLayoutEffect(() => {
+    pageNavigationRef.current = { onPageChange, scrollToPage }
+  }, [onPageChange, scrollToPage])
+  const handleInternalLink = useCallback<NonNullable<DocumentProps['onItemClick']>>(({ pageNumber }) => {
+    pageNavigationRef.current.onPageChange(pageNumber)
+    pageNavigationRef.current.scrollToPage(pageNumber)
+  }, [])
+
+  useEffect(() => {
+    if (viewMode !== 'continuous') navigationRef.current = null
+    if (viewMode !== 'continuous' || !totalPageCount || !containerRef.current) return
+    // Scroll tracking feeds currentPage back to us; explicit navigation also
+    // reaches pages not currently mounted, including clamped tail pages.
+    if (findVisiblePage(containerRef.current) !== currentPage) scrollToPage(currentPage)
+  }, [viewMode, totalPageCount, currentPage, pageHeights, scrollToPage, findVisiblePage])
+
   const handleVirtualScroll = useCallback(() => {
-    if (!virtualScrollEnabled || !containerRef.current) return
+    if ((!virtualScrollEnabled && viewMode !== "continuous") || !containerRef.current) return
+    // Estimated offsets change while metadata loads; keep explicit navigation
+    // until real dimensions arrive, or use the estimate if metadata fails.
+    if (viewMode === "continuous" && !perPageReady && !metricsFailed) return
     const container = containerRef.current
 
     isUserScrollingRef.current = true
@@ -327,12 +348,16 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
       cancelAnimationFrame(scrollRafRef.current)
     }
     scrollRafRef.current = requestAnimationFrame(() => {
-      const nextPage = findPageAtOffset(container.scrollTop)
+      const navigation = navigationRef.current
+      navigationRef.current = null
+      const nextPage = navigation && Math.abs(container.scrollTop - navigation.top) < 4
+        ? navigation.page
+        : findVisiblePage(container)
       if (nextPage !== currentPage) {
         onPageChange(nextPage)
       }
     })
-  }, [virtualScrollEnabled, currentPage, onPageChange, findPageAtOffset])
+  }, [virtualScrollEnabled, viewMode, perPageReady, metricsFailed, currentPage, onPageChange, findVisiblePage])
 
   useEffect(() => {
     if (!virtualScrollEnabled || !containerRef.current) return
@@ -424,7 +449,7 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
     <div
       ref={containerRef}
       className="flex h-full min-h-0 w-full flex-col items-center overflow-x-auto overflow-y-auto py-4 px-2 sm:px-4"
-      onScroll={virtualScrollEnabled ? handleVirtualScroll : undefined}
+      onScroll={virtualScrollEnabled || viewMode === "continuous" ? handleVirtualScroll : undefined}
     >
       {/* Text Selection Popover */}
       {selection && selection.text.length > 0 && (
@@ -442,6 +467,7 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
         file={url}
         onLoadSuccess={handleDocumentLoadSuccess}
         onLoadError={handleDocumentLoadError}
+        onItemClick={handleInternalLink}
         loading={
           <div className="flex h-64 w-full flex-col items-center justify-center gap-2">
             <Spin size="large" />
@@ -497,15 +523,11 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
             />
           )
         ) : viewMode === "continuous" ? (
-          // Continuous scroll mode
-          <div className="flex flex-col items-center gap-4">
-            {Array.from({ length: numPages }, (_, index) => (
-              <PdfPage
-                key={`page-${index + 1}`}
-                pageNumber={index + 1}
-                scale={scale}
-                onSetRef={(el) => setPageRef(index + 1, el)}
-              />
+          <div className="relative" style={{ height: continuousPages.getTotalSize(), width: basePageWidth, minWidth: basePageWidth }}>
+            {continuousPages.getVirtualItems().map(page => (
+              <div key={page.key} className="absolute left-1/2 -translate-x-1/2" style={{ top: page.start }}>
+                <PdfPage pageNumber={page.index + 1} scale={scale} onSetRef={el => setPageRef(page.index + 1, el)} />
+              </div>
             ))}
           </div>
         ) : (
@@ -526,6 +548,8 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
                   scale={0.25}
                   onSetRef={(el) => setPageRef(index + 1, el)}
                   hidePageNote
+                  lazy
+                  placeholderSize={{ width: basePageWidth / scale * 0.25, height: (pageHeights[index] ?? basePageHeight) / scale * 0.25 }}
                 />
                 <span className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded bg-black/70 px-2 py-0.5 text-xs text-white">
                   {index + 1}
