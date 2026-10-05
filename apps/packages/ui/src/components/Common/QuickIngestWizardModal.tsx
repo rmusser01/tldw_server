@@ -2,7 +2,7 @@ import { getSavedMediaIds } from "./QuickIngest/result-actions"
 import { classifyError } from "./QuickIngest/ErrorClassification"
 import { buildConferenceRetryRequestItems, type ConferenceRetryRequestItem } from "@/services/tldw/conference-collections"
 import { setSetting } from "@/services/settings/registry"
-import { MEDIA_REVIEW_SELECTION_SETTING, MEDIA_REVIEW_SELECTION_OWNER_SETTING } from "@/services/settings/ui-settings"
+import { MEDIA_REVIEW_SELECTION_SETTING, MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING } from "@/services/settings/ui-settings"
 import { getEligibleQueueItems, validateQueueItem } from "./QuickIngest/queue-items"
 import { createReviewDraftsFromResults } from "./hooks/useIngestResults"
 import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
@@ -1474,6 +1474,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       markProcessingTracking({
         mode: sessionId.startsWith("qi-direct-") ? "webui-direct" : "extension-runtime",
         sessionId,
+        ...(requestPayload.conferenceRetry ? {
+          collectionId: requestPayload.conferenceRetry.collectionId,
+          plannedItemIds: requestPayload.conferenceRetry.items.map(item => item.collectionItemId),
+          durableMode: "durable_collection",
+        } : {}),
         startedAt: runStartedAtRef.current || Date.now(),
       })
 
@@ -1812,10 +1817,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     const requested = new Set(ids.map(String))
     const selected = current.filter(id => requested.has(String(id)))
     if (!selected.length) return
-    // Publish the owner fence first. Task3 reads it with the same verified authority signal.
-    await setSetting(MEDIA_REVIEW_SELECTION_OWNER_SETTING, operation.authorityKey)
+    // This single record owns the handoff; a stale snapshot cannot relabel another owner's IDs.
+    await setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, {
+      version: 1, authorityKey: operation.authorityKey, selectedIds: selected,
+    })
     if (!operation.isCurrent()) return
-    await setSetting(MEDIA_REVIEW_SELECTION_SETTING, selected)
+    try {
+      await setSetting(MEDIA_REVIEW_SELECTION_SETTING, selected)
+    } catch {
+      // Legacy readers receive a best-effort mirror; owned readers use the snapshot above.
+      console.warn("[media-review] Compatibility selection mirror could not be written.")
+    }
     if (!operation.isCurrent()) return
     navigate("/media-multi")
     onClose()

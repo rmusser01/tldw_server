@@ -30,6 +30,9 @@ const mocks = vi.hoisted(() => ({
   reviewDrafts: new Map<string, Record<string, unknown>>(),
   reviewFiles: new Map<string, File>(),
   failReviewWrite: false,
+  reviewSelectionMirrorWait: null as Promise<void> | null,
+  failReviewSelectionMirror: false,
+  reviewSelectionMirrorStarted: vi.fn(),
   reviewWriteWait: null as Promise<void> | null,
   reviewWriteStarted: vi.fn(),
   bgRequest: vi.fn(),
@@ -61,6 +64,18 @@ vi.mock("@/db/dexie/drafts", () => ({
   },
   storeDraftAsset: async (id: string, file: File) => { mocks.reviewFiles.set(id, file); return { asset: { id: "asset-" + id }, stored: true } },
 }))
+
+vi.mock("@/services/settings/registry", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/settings/registry")>()
+  return { ...actual, setSetting: async (setting: any, value: unknown) => {
+    if (setting.key === "media-review-selection") {
+      mocks.reviewSelectionMirrorStarted()
+      await mocks.reviewSelectionMirrorWait
+      if (mocks.failReviewSelectionMirror) throw new Error("Selection mirror unavailable")
+    }
+    return actual.setSetting(setting, value)
+  } }
+})
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -536,6 +551,71 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(mocks.submitQuickIngestBatch.mock.calls[0][0]).toMatchObject({ entries: [{ processAgain: true }], common: { overwrite_existing: false } })
   })
 
+  it("exposes nonretryable correction from the mounted modal when Retry and Correct callbacks are both wired", async () => {
+    mocks.useActualResultsStep = true
+    useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "partial_failure",
+      queueItems: [{ id: "auth-failed", kind: "url", url: "https://source.test/source.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true } }],
+      results: [{ id: "auth-failed", status: "error", type: "pdf", error: "Unauthorized 401" }, { id: "saved", status: "ok", type: "pdf", mediaId: 7 }],
+    })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    expect(screen.queryByRole("button", { name: "Retry auth-failed" })).toBeNull()
+    fireEvent.click(await screen.findByRole("button", { name: "Correct settings for auth-failed" }))
+    expect(await screen.findByTestId("wizard-configure")).toBeVisible()
+    expect(useQuickIngestSessionStore.getState().session?.results).toEqual(expect.arrayContaining([expect.objectContaining({ id: "saved", status: "ok", mediaId: 7 })]))
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+  })
+
+  it("retains conference identity after failed retry upload and reload before the next fresh attempt", async () => {
+    mocks.useActualResultsStep = true
+    const batch = await vi.importActual<typeof import("@/services/tldw/quick-ingest-batch")>("@/services/tldw/quick-ingest-batch")
+    mocks.startQuickIngestSession.mockImplementation(batch.startQuickIngestSession)
+    mocks.submitQuickIngestBatch.mockImplementation(batch.submitQuickIngestBatch)
+    mocks.bgUpload.mockRejectedValueOnce(new Error("Network error")).mockResolvedValue({ batch_id: "second-retry", jobs: [{ id: 99 }] })
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result: { status: "Success", media_id: 99 } } })
+    useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "partial_failure",
+      conferenceBatchMetadata: { collectionName: "Original conference" },
+      queueItems: [{ id: "talk-failed", kind: "url", url: "https://source.test/talk.mp4", detectedType: "video", icon: "Film", fileSize: 0, validation: { valid: true }, conferenceOverride: { title: "Original talk", selected: true } }],
+      results: [{ id: "saved", status: "ok", type: "video", mediaId: 7 }, { id: "talk-failed", status: "error", type: "video", error: "Network error", collectionItemId: "81", retryAttempt: 2 }],
+      tracking: { mode: "webui-direct", sessionId: "old-session", collectionId: "7", plannedItemIds: ["81"], jobIds: [77], durableMode: "durable_collection", startedAt: 1 },
+    })
+    const view = render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Retry talk-failed" }))
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.results).toEqual(expect.arrayContaining([expect.objectContaining({ id: "talk-failed", status: "error", collectionItemId: 81, retryAttempt: 3 })])))
+    expect(useQuickIngestSessionStore.getState().session?.tracking).toMatchObject({ collectionId: "7", durableMode: "durable_collection", plannedItemIds: ["81"] })
+    expect(useQuickIngestSessionStore.getState().session?.tracking?.jobIds).toBeUndefined()
+    const reloaded = JSON.parse(JSON.stringify(useQuickIngestSessionStore.getState().session!))
+    view.unmount()
+    act(() => { useQuickIngestSessionStore.setState({ session: null }); useQuickIngestSessionStore.getState().createDraftSession(reloaded) })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Retry https://source.test/talk.mp4" }))
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.results).toEqual(expect.arrayContaining([expect.objectContaining({ id: "talk-failed", status: "ok", mediaId: 99, collectionItemId: 81, retryAttempt: 4 }), expect.objectContaining({ id: "saved", mediaId: 7 })])))
+    expect(mocks.bgUpload.mock.calls.map(([request]) => request.fields.idempotency_key)).toEqual(["conference-retry-81-3", "conference-retry-81-4"])
+    expect(mocks.bgUpload.mock.calls.map(([request]) => [request.fields.media_collection_id, request.fields.media_collection_item_id])).toEqual([[7,81],[7,81]])
+    expect(mocks.bgRequest.mock.calls.some(([request]) => request.method === "POST" && request.path.startsWith("/api/v1/media/collections"))).toBe(false)
+  })
+
+  it.each(["mirror failure", "owner transition"])("publishes one consistent owned snapshot with other-owner IDs already present during %s", async mode => {
+    mocks.useActualResultsStep = true
+    localStorage.setItem("media-review-selection", JSON.stringify([42]))
+    localStorage.setItem("media-review-selection-snapshot", JSON.stringify({ version: 1, authorityKey: "other-owner", selectedIds: [42] }))
+    const mirror = deferred<void>()
+    mocks.reviewSelectionMirrorWait = mirror.promise
+    useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed", results: [{ id: "saved", status: "ok", type: "pdf", mediaId: 18 }] })
+    const authorityKey = useQuickIngestSessionStore.getState().authorityKey
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Review these 1 saved items" }))
+    await waitFor(() => expect(mocks.reviewSelectionMirrorStarted).toHaveBeenCalledTimes(1))
+    // Raw IDs still belong to the previous owner while the mirror write is suspended.
+    expect(JSON.parse(localStorage.getItem("media-review-selection") || "null")).toEqual([42])
+    expect(JSON.parse(localStorage.getItem("media-review-selection-snapshot") || "null")).toEqual({ version: 1, authorityKey, selectedIds: [18] })
+    if (mode === "owner transition") act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })))
+    else mocks.failReviewSelectionMirror = true
+    await act(async () => { mirror.resolve(); await mirror.promise })
+    expect(JSON.parse(localStorage.getItem("media-review-selection-snapshot") || "null")).toEqual({ version: 1, authorityKey, selectedIds: [18] })
+    if (mode === "owner transition") expect(mocks.navigate).not.toHaveBeenCalled()
+    else await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("/media-multi"))
+  })
+
   it("retries only failed sources through the real executor and preserves saved successes and options", async () => {
     mocks.useActualResultsStep = true
     const batch = await vi.importActual<typeof import("@/services/tldw/quick-ingest-batch")>("@/services/tldw/quick-ingest-batch")
@@ -669,7 +749,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Review.*saved items/ }))
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("/media-multi"))
     expect(JSON.parse(localStorage.getItem("media-review-selection") || "null")).toEqual([7])
-    expect(JSON.parse(localStorage.getItem("media-review-selection-owner") || "null")).toBe(useQuickIngestSessionStore.getState().authorityKey)
+    expect(JSON.parse(localStorage.getItem("media-review-selection-snapshot") || "null")).toEqual({ version: 1, authorityKey: useQuickIngestSessionStore.getState().authorityKey, selectedIds: [7] })
     const staleButton = screen.getByRole("button", { name: /Review.*saved items/ })
     mocks.navigate.mockClear()
     act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })))
@@ -737,6 +817,9 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.queuedReviewFile = null
     mocks.reviewBatches.clear(); mocks.reviewDrafts.clear(); mocks.reviewFiles.clear(); mocks.failReviewWrite = false
     mocks.reviewWriteWait = null
+    mocks.reviewSelectionMirrorWait = null
+    mocks.failReviewSelectionMirror = false
+    mocks.reviewSelectionMirrorStarted.mockClear()
     mocks.reviewWriteStarted.mockClear()
     mocks.bgRequest.mockReset()
     mocks.bgUpload.mockReset()

@@ -842,11 +842,22 @@ export const MEDIA_REVIEW_SELECTION_SETTING = defineSetting(
   }
 )
 
-/** Verified Quick Ingest authority owning the saved review selection. */
-export const MEDIA_REVIEW_SELECTION_OWNER_SETTING = defineSetting(
-  "media-review-selection-owner",
-  null as string | null,
-  (value) => typeof value === "string" && value ? value : null,
+export type MediaReviewSelectionSnapshot = {
+  version: 1
+  authorityKey: string
+  selectedIds: Array<string | number>
+}
+
+/** Authority and saved IDs are published together; raw selection IDs are only a mirror. */
+export const MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING = defineSetting(
+  "media-review-selection-snapshot",
+  null as MediaReviewSelectionSnapshot | null,
+  (value): MediaReviewSelectionSnapshot | null => {
+    if (!value || typeof value !== "object") return null
+    const snapshot = value as Partial<MediaReviewSelectionSnapshot>
+    if (snapshot.version !== 1 || typeof snapshot.authorityKey !== "string" || !snapshot.authorityKey.trim() || !Array.isArray(snapshot.selectedIds)) return null
+    return { version: 1, authorityKey: snapshot.authorityKey, selectedIds: coerceIdArray(snapshot.selectedIds) }
+  },
   { area: "local" }
 )
 

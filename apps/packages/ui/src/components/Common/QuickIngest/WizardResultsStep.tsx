@@ -526,7 +526,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
 
   const getRetryHandlerForItem = useCallback(
     (item: WizardResultItem) => {
-      if (!onRetryItems || missingFileIds.has(item.id) || (queueItems.length && !eligibleIds.has(item.id))) return undefined
+      if (!onRetryItems || item.outcome === "cancelled" || !classifyError(item.error, item.data).retryable || missingFileIds.has(item.id) || (queueItems.length && !eligibleIds.has(item.id))) return undefined
       if (!hasDurableCollection) return handleRetrySingle
       return conferenceRetryRequestsByResultId.has(item.id)
         ? handleRetrySingle
