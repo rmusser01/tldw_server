@@ -109,7 +109,7 @@ async def dispatch_prompt_improvement(
         ) from exc
 
     try:
-        provider_listing = configured_providers_getter()
+        provider_listing = await asyncio.to_thread(configured_providers_getter)
         if not isinstance(provider_listing, Mapping):
             raise TypeError("configured provider listing must be a mapping")
         default_provider = str(provider_listing.get("default_provider") or "").strip()

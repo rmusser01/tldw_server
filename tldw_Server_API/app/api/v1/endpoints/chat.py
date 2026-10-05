@@ -1761,7 +1761,7 @@ async def _resolve_auto_chat_routing_decision(
     """Resolve `model='auto'` into a canonical provider/model pair."""
     provider_overrides = get_llm_provider_overrides_snapshot()
     provider_listing = apply_llm_provider_overrides_to_listing(
-        get_configured_providers(),
+        await asyncio.to_thread(get_configured_providers),
         overrides=provider_overrides,
     )
     default_provider = str(

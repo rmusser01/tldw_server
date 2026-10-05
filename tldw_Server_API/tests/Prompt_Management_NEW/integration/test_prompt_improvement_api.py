@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import threading
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
@@ -1292,6 +1293,58 @@ def test_prompt_improvement_openapi_uses_canonical_forbidden_contracts():
     }
     assert operation["responses"]["200"]["content"]["application/json"]["schema"]
     assert operation["responses"]["400"]["content"]["application/json"]["schema"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_provider_snapshot_runs_off_loop_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Offload inventory collection while reusing one snapshot for routing."""
+    dispatch = _dispatch_module()
+    loop_thread = threading.get_ident()
+    getter_threads: list[int] = []
+    listing = _configured_providers()
+
+    def configured_providers_getter() -> dict[str, Any]:
+        """Record the execution thread of the synchronous inventory getter."""
+        getter_threads.append(threading.get_ident())
+        return listing
+
+    async def resolve_route(_request_data: Any, **kwargs: Any) -> SimpleNamespace:
+        """Read the captured listing twice without repeating discovery."""
+        assert kwargs["configured_providers_getter"]() == listing
+        assert kwargs["configured_providers_getter"]() == listing
+        assert kwargs["default_provider"] == "openai"
+        return SimpleNamespace(provider="openai", model="gpt-test", was_auto=True)
+
+    provider_call = AsyncMock(return_value={"choices": [{"message": {"content": "ok"}}]})
+    monkeypatch.setattr(dispatch, "resolve_chat_route", resolve_route)
+    monkeypatch.setattr(
+        dispatch,
+        "resolve_byok_credentials",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                api_key="test-key", app_config=None, touch_last_used=AsyncMock(),
+            )
+        ),
+    )
+    monkeypatch.setattr(dispatch, "perform_chat_api_call_async", provider_call)
+
+    result = await dispatch.dispatch_prompt_improvement(
+        request=SimpleNamespace(state=SimpleNamespace()),
+        current_user=_test_user(),
+        routing_decision_store=InMemoryRoutingDecisionStore(),
+        selected_model="auto",
+        provider_hint=None,
+        messages=[{"role": "user", "content": "draft"}],
+        request_id="snapshot-thread-test",
+        configured_providers_getter=configured_providers_getter,
+    )
+
+    assert result.text == "ok"
+    assert len(getter_threads) == 1
+    assert getter_threads[0] != loop_thread
+    provider_call.assert_awaited_once()
 
 
 @pytest.mark.asyncio

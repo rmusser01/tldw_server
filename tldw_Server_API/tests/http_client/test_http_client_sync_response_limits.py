@@ -6,6 +6,7 @@ import threading
 import time
 import types
 from contextlib import contextmanager
+from typing import Any
 
 import httpx
 import pytest
@@ -14,6 +15,144 @@ from tldw_Server_API.app.core import http_client as hc
 
 pytestmark = pytest.mark.unit
 URL = "http://93.184.216.34/models"
+
+
+@pytest.mark.parametrize("phase", ["connect", "handshake"])
+def test_sync_deadline_bounds_certificate_pinning(
+    monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    """Pin preflight cannot consume an independent connect/handshake budget."""
+    budgets: list[float] = []
+
+    class Socket:
+        """Synthetic pinning socket recording each timeout."""
+        timeout = 5.0
+
+        def settimeout(self, timeout: float) -> None:
+            self.timeout = timeout
+            budgets.append(timeout)
+
+        def __enter__(self) -> "Socket":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+    def connect(_address: Any, *, timeout: float) -> Socket:
+        """Never create a real network socket."""
+        budgets.append(timeout)
+        if phase == "connect":
+            time.sleep(min(timeout, 0.3))
+            raise TimeoutError("synthetic sensitive connect failure")
+        return Socket()
+
+    def handshake(sock: Socket, **_kwargs: Any) -> None:
+        """Simulate a handshake that exhausts its socket timeout."""
+        time.sleep(min(sock.timeout, 0.3))
+        raise TimeoutError("synthetic sensitive handshake failure")
+
+    monkeypatch.setattr(hc.socket, "create_connection", connect)
+    monkeypatch.setattr(
+        hc.ssl, "create_default_context",
+        lambda **_kwargs: types.SimpleNamespace(minimum_version=None, wrap_socket=handshake),
+    )
+    started = time.monotonic()
+    with pytest.raises(hc.NetworkError, match="^TimeoutError$"):
+        hc.fetch(
+            method="GET", url="https://93.184.216.34/models",
+            max_response_bytes=4, deadline=started + 0.1,
+            cert_pinning={"93.184.216.34": {"0" * 64}}, sensitive_observability=True,
+        )
+    assert time.monotonic() - started < 0.25
+    assert budgets and all(0 < budget <= 0.1 for budget in budgets)
+
+
+@pytest.mark.parametrize("slow_lookup", [1, 2])
+def test_sync_deadline_bounds_dns_before_transport(
+    monkeypatch: pytest.MonkeyPatch, slow_lookup: int,
+) -> None:
+    """Initial and pinned revalidation DNS share the request deadline."""
+    from tldw_Server_API.app.core.Security import egress
+
+    release = threading.Event()
+    calls: list[int] = []
+
+    def resolve(*_args: Any, **_kwargs: Any) -> list[tuple[Any, ...]]:
+        """Simulate slow DNS without contacting a resolver."""
+        calls.append(1)
+        if len(calls) == slow_lookup:
+            release.wait(0.4)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+    monkeypatch.setattr(egress.socket, "getaddrinfo", resolve)
+    scope = egress.ConfiguredEndpointScope.from_url("https://deadline.example.invalid/v1")
+    started = time.monotonic()
+    try:
+        with pytest.raises(hc.NetworkError, match="^TimeoutError$"):
+            hc.fetch(
+                method="GET", url="https://deadline.example.invalid/v1/models",
+                max_response_bytes=4, deadline=started + 0.1,
+                configured_endpoint=scope, sensitive_observability=True,
+            )
+        assert time.monotonic() - started < 0.25
+        assert len(calls) == slow_lookup
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize("failure", ["network", "retry_after", "redirect_without_location"])
+def test_sync_deadline_bounds_retry_sleep_without_late_dispatch(monkeypatch, failure):
+    calls = []
+    clients = []
+
+    def handler(request):
+        calls.append(request)
+        if failure == "network":
+            raise httpx.ReadError("synthetic-secret must not escape", request=request)
+        status = 429 if failure == "retry_after" else 302
+        return httpx.Response(status, headers={"Retry-After": "1"}, content=b"synthetic-secret")
+
+    create_async_client = hc.create_async_client
+
+    def owned_client(**kwargs):
+        client = create_async_client(transport=httpx.MockTransport(handler), **kwargs)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(hc, "create_async_client", owned_client)
+    monkeypatch.setattr(hc, "_decorrelated_jitter_sleep", lambda *_args: 1.0)
+    started = time.monotonic()
+    with pytest.raises(hc.NetworkError, match="^TimeoutError$"):
+        hc.fetch(
+            method="GET", url=URL, max_response_bytes=4, deadline=started + 0.15,
+            sensitive_observability=True,
+        )
+    assert time.monotonic() - started < 0.65
+    assert len(calls) == 1
+    assert clients and all(client.is_closed for client in clients)
+
+
+@pytest.mark.parametrize("failure", ["network", "retry_after", "redirect_without_location"])
+def test_sync_deadline_keeps_retries_that_fit_remaining_budget(monkeypatch, failure):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) > 1:
+            return httpx.Response(200, stream=httpx.ByteStream(b"safe"))
+        if failure == "network":
+            raise httpx.ReadError("synthetic failure", request=request)
+        status = 429 if failure == "retry_after" else 302
+        return httpx.Response(status, headers={"Retry-After": "0.01"})
+
+    create_async_client = hc.create_async_client
+    monkeypatch.setattr(
+        hc, "create_async_client", lambda **kwargs: create_async_client(transport=httpx.MockTransport(handler), **kwargs)
+    )
+    monkeypatch.setattr(hc, "_decorrelated_jitter_sleep", lambda *_args: 0.01)
+    response = hc.fetch(method="GET", url=URL, max_response_bytes=4, deadline=time.monotonic() + 1)
+    assert response.content == b"safe"
+    assert len(calls) == 2
 
 
 @contextmanager

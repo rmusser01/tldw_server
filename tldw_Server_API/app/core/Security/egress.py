@@ -528,11 +528,16 @@ def _resolve_host_ips(
     host: str,
     *,
     sensitive_observability: bool = False,
+    deadline: float | None = None,
 ) -> list[str]:
     """Compatibility wrapper for callers expecting a mutable address list."""
+    timeout_s = 2.0 if deadline is None else min(2.0, deadline - time.monotonic())
+    if timeout_s <= 0:
+        return []
     return list(
         resolve_host_ips(
             host,
+            **({"timeout_s": timeout_s} if deadline is not None else {}),
             sensitive_observability=sensitive_observability,
         )
     )
@@ -569,6 +574,7 @@ def _resolve_and_check_private(
     host: str,
     *,
     sensitive_observability: bool = False,
+    deadline: float | None = None,
 ) -> tuple[bool, list[str]]:
     ips: list[str] = []
     # If the host is already an IP address, check directly
@@ -576,7 +582,9 @@ def _resolve_and_check_private(
         ipaddress.ip_address(host)
         ips = [host]
     except ValueError:
-        if sensitive_observability:
+        if deadline is not None:
+            ips = _resolve_host_ips(host, sensitive_observability=sensitive_observability, deadline=deadline)
+        elif sensitive_observability:
             ips = _resolve_host_ips(host, sensitive_observability=True)
         else:
             ips = _resolve_host_ips(host)
@@ -594,11 +602,14 @@ def _resolve_host_or_literal(
     host: str,
     *,
     sensitive_observability: bool = False,
+    deadline: float | None = None,
 ) -> list[str]:
     """Return a literal address or every DNS answer for a scoped hostname."""
     try:
         return [str(ipaddress.ip_address(host))]
     except ValueError:
+        if deadline is not None:
+            return _resolve_host_ips(host, sensitive_observability=sensitive_observability, deadline=deadline)
         if sensitive_observability:
             return _resolve_host_ips(host, sensitive_observability=True)
         return _resolve_host_ips(host)
@@ -666,6 +677,7 @@ def evaluate_url_policy(
     pinned_resolved_ips: Sequence[str] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
+    deadline: float | None = None,
 ) -> URLPolicyResult:
     """Evaluate whether a URL passes the egress policy."""
     try:
@@ -768,6 +780,7 @@ def evaluate_url_policy(
             else _resolve_host_or_literal(
                 host,
                 sensitive_observability=sensitive_observability,
+                **({"deadline": deadline} if deadline is not None else {}),
             )
         )
         resolved_ips = _normalize_scoped_resolved_ips(raw_ips)
@@ -801,7 +814,11 @@ def evaluate_url_policy(
                     "address_forbidden",
                 )
         else:
-            if sensitive_observability:
+            if deadline is not None:
+                ok, ips = _resolve_and_check_private(
+                    host, sensitive_observability=sensitive_observability, deadline=deadline,
+                )
+            elif sensitive_observability:
                 ok, ips = _resolve_and_check_private(
                     host,
                     sensitive_observability=True,

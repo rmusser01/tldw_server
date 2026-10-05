@@ -1710,6 +1710,7 @@ def _validate_egress_or_raise(
     dns_pin_cache: dict[str, tuple[str, ...]] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
+    deadline: float | None = None,
 ) -> None:
     from urllib.parse import urlparse as _urlparse
 
@@ -1750,6 +1751,10 @@ def _validate_egress_or_raise(
         pinned_ips = dns_pin_cache.get(cache_host)
 
     policy_kwargs: dict[str, Any] = {"block_private_override": block_override}
+    if deadline is not None:
+        if time.monotonic() >= deadline:
+            raise NetworkError("TimeoutError")
+        policy_kwargs["deadline"] = deadline
     if configured_endpoint is not None:
         policy_kwargs["configured_endpoint"] = configured_endpoint
     if sensitive_observability:
@@ -1757,6 +1762,8 @@ def _validate_egress_or_raise(
     if pinned_ips:
         policy_kwargs["pinned_resolved_ips"] = pinned_ips
     res = evaluate_url_policy(url, **policy_kwargs)
+    if deadline is not None and time.monotonic() >= deadline:
+        raise NetworkError("TimeoutError")
     if not pinned_ips:
         if dns_pin_cache is not None and cache_host:
             resolved_ips = tuple(
@@ -2391,12 +2398,23 @@ def _check_cert_pinning(
     configured_endpoint: ConfiguredEndpointScope | None = None,
     accepted_resolved_ips: tuple[str, ...] = (),
     sensitive_observability: bool = False,
+    deadline: float | None = None,
 ) -> None:
     if not host or not pins:
         return
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
     )
+
+    def pin_timeout() -> float:
+        """Share the caller's absolute deadline across pinning I/O."""
+        remaining = DEFAULT_CONNECT_TIMEOUT if deadline is None else min(
+            DEFAULT_CONNECT_TIMEOUT, deadline - time.monotonic(),
+        )
+        if remaining <= 0:
+            raise NetworkError("TimeoutError")
+        return remaining
+
     try:
         # Enforce egress policy for the pinning connection itself. This guards
         # against any future callers that might invoke pinning without having
@@ -2421,8 +2439,10 @@ def _check_cert_pinning(
                 }
             if sensitive_observability:
                 validation_kwargs["sensitive_observability"] = True
+            if deadline is not None:
+                validation_kwargs["deadline"] = deadline
             _validate_egress_or_raise(url, **validation_kwargs)
-        except EgressPolicyError:
+        except (EgressPolicyError, NetworkError):
             raise
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
             raise EgressPolicyError(
@@ -2436,9 +2456,13 @@ def _check_cert_pinning(
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
             ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         connect_host = accepted_resolved_ips[0] if accepted_resolved_ips else host
-        with socket.create_connection((connect_host, port), timeout=DEFAULT_CONNECT_TIMEOUT) as sock, \
-             ctx.wrap_socket(sock, server_hostname=host) as ssock:
-            der = ssock.getpeercert(binary_form=True)
+        with socket.create_connection((connect_host, port), timeout=pin_timeout()) as sock:
+            if deadline is not None:
+                sock.settimeout(pin_timeout())
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                der = ssock.getpeercert(binary_form=True)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise NetworkError("TimeoutError")
         if not der:
             raise EgressPolicyError(
                 "TLS pinning: no certificate presented",
@@ -2450,9 +2474,11 @@ def _check_cert_pinning(
                 "TLS pinning mismatch for host",
                 reason_code="tls_pin_mismatch",
             )
-    except EgressPolicyError:
+    except (EgressPolicyError, NetworkError):
         raise
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise NetworkError("TimeoutError") from None
         raise EgressPolicyError(
             f"TLS pinning verification failed: {e}",
             reason_code="tls_pin_error",
@@ -2466,6 +2492,7 @@ def _check_cert_pins_for_url(
     configured_endpoint: ConfiguredEndpointScope | None,
     dns_pin_cache: dict[str, tuple[str, ...]],
     sensitive_observability: bool = False,
+    deadline: float | None = None,
 ) -> None:
     """Apply configured certificate pins to one already-validated request hop."""
     if not pins_map:
@@ -2485,6 +2512,7 @@ def _check_cert_pins_for_url(
         configured_endpoint=configured_endpoint,
         accepted_resolved_ips=_accepted_ips_for_url(dns_pin_cache, url),
         sensitive_observability=sensitive_observability,
+        **({"deadline": deadline} if deadline is not None else {}),
     )
 
 
@@ -4201,8 +4229,8 @@ def _fetch_httpx_response(
 
     ``max_response_bytes`` bounds successful raw bodies, requests identity
     encoding, and skips non-success bodies, matching the async response API.
-    ``deadline`` is an absolute monotonic network deadline for bounded reads
-    using an owned client; it does not change ordinary inactivity timeouts.
+    ``deadline`` is an absolute monotonic deadline for bounded reads and retry
+    waits using an owned client; it does not change inactivity timeouts.
 
     Raises ValueError when retries are enabled and a file-like object in `files`
     is not seekable: "File-like object must be seekable when retries are enabled.
@@ -4226,6 +4254,7 @@ def _fetch_httpx_response(
         dns_pin_cache=dns_pin_cache,
         configured_endpoint=configured_endpoint,
         sensitive_observability=sensitive_observability,
+        **({"deadline": deadline} if deadline is not None else {}),
     )
     _validate_proxies_or_raise(proxies)
 
@@ -4246,6 +4275,16 @@ def _fetch_httpx_response(
     if deadline is not None:
         request_io = _httpx_request_with_deadline
         response_limit_kwargs.update(deadline=deadline, proxies=proxies)
+
+    def _retry_sleep(delay: float) -> None:
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise NetworkError("TimeoutError")
+            delay = min(delay, remaining)
+        time.sleep(delay)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise NetworkError("TimeoutError")
 
     def _do_once(sc: httpx.Client, target_url: str) -> tuple[httpx.Response | None, str]:
         req_headers = _inject_trace_headers(headers)
@@ -4276,8 +4315,9 @@ def _fetch_httpx_response(
                                     dns_pin_cache, target_url
                                 ),
                                 sensitive_observability=sensitive_observability,
+                                **({"deadline": deadline} if deadline is not None else {}),
                             )
-            except EgressPolicyError:
+            except (EgressPolicyError, NetworkError):
                 raise
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                 return None, e.__class__.__name__
@@ -4300,7 +4340,7 @@ def _fetch_httpx_response(
                 **response_limit_kwargs,
             )
             return r, "ok"  # noqa: TRY300
-        except EgressPolicyError:
+        except (EgressPolicyError, NetworkError):
             raise
         except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
             # Classify DNS resolution errors explicitly so that retry logic
@@ -4329,11 +4369,14 @@ def _fetch_httpx_response(
                 cur_url = url
                 redirects = 0
                 while True:
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise NetworkError("TimeoutError")
                     _validate_egress_or_raise(
                         cur_url,
                         dns_pin_cache=dns_pin_cache,
                         configured_endpoint=configured_endpoint,
                         sensitive_observability=sensitive_observability,
+                        **({"deadline": deadline} if deadline is not None else {}),
                     )
                     resp, reason = _do_once(sc, cur_url)
                     if resp is None:
@@ -4358,6 +4401,7 @@ def _fetch_httpx_response(
                                         dns_pin_cache=dns_pin_cache,
                                         configured_endpoint=configured_endpoint,
                                         sensitive_observability=sensitive_observability,
+                                        **({"deadline": deadline} if deadline is not None else {}),
                                     )
                                     _check_cert_pins_for_url(
                                         cur_url,
@@ -4365,6 +4409,7 @@ def _fetch_httpx_response(
                                         configured_endpoint=configured_endpoint,
                                         dns_pin_cache=dns_pin_cache,
                                         sensitive_observability=sensitive_observability,
+                                        **({"deadline": deadline} if deadline is not None else {}),
                                     )
                                     req_headers = _inject_trace_headers(headers)
                                     req_headers = _strip_sensitive_headers_for_cross_origin(
@@ -4421,7 +4466,7 @@ def _fetch_httpx_response(
                             f"fetch network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
                             f"url={_sanitize_url_for_logs(observability_url)}"
                         )
-                        time.sleep(delay)
+                        _retry_sleep(delay)
                         sleep_s = delay
                         break
                     # redirect handling
@@ -4433,7 +4478,7 @@ def _fetch_httpx_response(
                             if attempt == attempts:
                                 raise NetworkError("Redirect without Location header")  # noqa: TRY003
                             delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
-                            time.sleep(delay)
+                            _retry_sleep(delay)
                             sleep_s = delay
                             break
                         try:
@@ -4515,7 +4560,7 @@ def _fetch_httpx_response(
                     )
                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         tm.add_event("http.retry", {"attempt": attempt, "reason": rsn})
-                    time.sleep(delay)
+                    _retry_sleep(delay)
                     sleep_s = delay
                     break
         _log_outbound_request(

@@ -13,6 +13,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable
+from concurrent.futures import Future
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode, urlsplit
@@ -84,7 +85,7 @@ _MAX_MODELS = 1000
 _MAX_CACHE_ENTRIES = 128
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 _CACHE: OrderedDict[tuple[str, str, str], tuple[float, ModelDiscoveryResult]] = OrderedDict()
-_IN_FLIGHT: dict[tuple[str, str, str], object] = {}
+_IN_FLIGHT: dict[tuple[str, str, str], Future[ModelDiscoveryResult]] = {}
 _CACHE_LOCK = threading.Lock()
 
 
@@ -182,6 +183,7 @@ def resolve_provider_models_base_url(
 
 
 def _is_huggingface_router_base(base: str) -> bool:
+    """Accept the shared chat router, never Hub or per-model inference routes."""
     parsed = urlsplit(base)
     return (
         parsed.hostname == "router.huggingface.co"
@@ -191,6 +193,10 @@ def _is_huggingface_router_base(base: str) -> bool:
 
 
 def _models_url(provider: str, base: str) -> str | None:
+    """Map a validated adapter base to its documented model-list endpoint.
+
+    Return None when the base cannot identify a supported inventory contract.
+    """
     if provider == "huggingface" and not _is_huggingface_router_base(base):
         return None
     if provider == "openrouter":
@@ -213,6 +219,7 @@ def _models_url(provider: str, base: str) -> str | None:
 
 
 def _identifier(value: Any) -> str:
+    """Validate an exact provider ID without case, whitespace, or alias rewriting."""
     if (
         not isinstance(value, str)
         or not value
@@ -333,6 +340,128 @@ def _parse_page(provider: str, payload: Any, *, page_number: int = 1) -> tuple[l
     return models, cursor, len(rows)
 
 
+def resolve_provider_model_selection(
+    provider: str,
+    api_key: str | None,
+    model: str,
+    *,
+    base_url: str,
+    inventory: ModelDiscoveryResult,
+    call_policy: ProviderCallPolicy | None = None,
+    fetch_fn: Callable[..., Any] | None = None,
+) -> ModelDiscoveryResult:
+    """Confirm a request ID against its already scoped, current inventory.
+
+    Ready results preserve the original request string, including provider-
+    confirmed Anthropic aliases and documented router selectors. Anthropic
+    aliases must resolve to an exact inventory ID. HF provider selectors must
+    name a live provider of that exact model. No aliases are inferred from model
+    names, and OpenRouter catalog variants are never replaced by the paid base.
+    Supplemental lookups use one attempt, no redirects, bounded responses and
+    a five-second budget capped by the caller's remaining policy deadline.
+    """
+    from urllib.parse import quote
+
+    from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
+
+    if inventory.status != "ready":
+        return ModelDiscoveryResult(inventory.status)
+    base = _safe_base_url(base_url)
+    if base is None:
+        return ModelDiscoveryResult("unsupported")
+    if not isinstance(api_key, str) or not api_key.strip() or any(ord(char) < 32 for char in api_key):
+        return ModelDiscoveryResult("auth_failed")
+    budget = _TIMEOUT_SECONDS
+    scope = None
+    if call_policy is not None:
+        if not isinstance(call_policy, ProviderCallPolicy):
+            return ModelDiscoveryResult("unsupported")
+        scope = call_policy.required_endpoint_scope
+        if call_policy.maximum_timeout_seconds is not None:
+            budget = min(budget, call_policy.maximum_timeout_seconds)
+    endpoint = _models_url(provider, base)
+    if endpoint is None or (scope is not None and not scope.matches(endpoint)):
+        return ModelDiscoveryResult("unsupported")
+    try:
+        _identifier(model)
+    except ValueError:
+        return ModelDiscoveryResult("not_found")
+    if model in inventory.models:
+        return ModelDiscoveryResult("ready", (model,))
+    if provider == "openrouter":
+        parts = model.split(":")
+        routing = {"nitro", "floor", "exacto", "online"}
+        catalog = {"free", "batch", "thinking", "extended"}
+        if any(not part for part in parts) or any(part not in routing | catalog for part in parts[1:]):
+            return ModelDiscoveryResult("not_found")
+        variants = [part for part in parts[1:] if part in catalog]
+        if len(variants) > 1:
+            return ModelDiscoveryResult("not_found")
+        catalog_id = parts[0] + (":" + variants[0] if variants else "")
+        return ModelDiscoveryResult("ready", (model,)) if catalog_id in inventory.models else ModelDiscoveryResult("not_found")
+    selected_provider = None
+    lookup_model = model
+    if provider == "huggingface":
+        if model.count(":") != 1:
+            return ModelDiscoveryResult("not_found")
+        lookup_model, selected_provider = model.split(":")
+        if lookup_model not in inventory.models or not selected_provider:
+            return ModelDiscoveryResult("not_found")
+        if selected_provider in {"cheapest", "fastest", "preferred"}:
+            return ModelDiscoveryResult("ready", (model,))
+    elif provider != "anthropic":
+        return ModelDiscoveryResult("not_found")
+    deadline = time.monotonic() + budget
+    headers = {"Accept": "application/json"}
+    if provider == "anthropic":
+        headers.update({"x-api-key": api_key.strip(), "anthropic-version": "2023-06-01"})
+    else:
+        headers["Authorization"] = f"Bearer {api_key.strip()}"
+    try:
+        response = (fetch_fn or _http_fetch)(
+            method="GET",
+            url=endpoint + "/" + quote(lookup_model, safe=""),
+            headers=headers,
+            timeout=budget,
+            deadline=deadline,
+            retry=RetryPolicy(attempts=1),
+            allow_redirects=False,
+            sensitive_observability=True,
+            configured_endpoint=scope,
+            max_response_bytes=_MAX_RESPONSE_BYTES,
+        )
+        try:
+            if time.monotonic() >= deadline:
+                return ModelDiscoveryResult("unreachable")
+            if response.status_code in {401, 403, 498}:
+                return ModelDiscoveryResult("auth_failed")
+            if response.status_code == 429 or response.status_code >= 500:
+                return ModelDiscoveryResult("server_error")
+            if response.status_code == 404:
+                return ModelDiscoveryResult("not_found")
+            if response.status_code != 200:
+                return ModelDiscoveryResult("unsupported")
+            payload = response.json()
+            if not isinstance(payload, dict) or payload.get("id") not in inventory.models:
+                return ModelDiscoveryResult("not_found")
+            if provider == "huggingface":
+                providers = payload.get("providers")
+                if payload.get("id") != lookup_model or not isinstance(providers, list) or not any(
+                    isinstance(entry, dict)
+                    and entry.get("provider") == selected_provider
+                    and entry.get("status") == "live"
+                    for entry in providers
+                ):
+                    return ModelDiscoveryResult("not_found")
+            if time.monotonic() >= deadline:
+                return ModelDiscoveryResult("unreachable")
+            return ModelDiscoveryResult("ready", (model,))
+        finally:
+            response.close()
+    except Exception:  # noqa: BLE001 - expose neither provider details nor credential-bearing exceptions
+        return ModelDiscoveryResult("unreachable")
+
+
 def discover_provider_models(
     provider: str,
     api_key: str | None,
@@ -348,6 +477,8 @@ def discover_provider_models(
     Limits abort discovery rather than publishing a partial catalog. Only ready
     results (including empty inventories) are cached, scoped by provider, endpoint
     and SHA-256 credential digest. A failed refresh evicts prior cached success.
+    Ordinary misses share one refresh within each caller's deadline. Forced
+    refreshes supersede pending work and fail its waiters closed.
     """
     provider = (provider or "").strip().lower()
     if provider not in _SUPPORTED:
@@ -375,13 +506,40 @@ def discover_provider_models(
     if scope is not None and not scope.matches(endpoint):
         return ModelDiscoveryResult("unsupported")
     cache_key = (provider, endpoint, hashlib.sha256(key.encode("utf-8")).hexdigest())
-    refresh_token = object()
     with _CACHE_LOCK:
         cached = _CACHE.get(cache_key)
         if not force_refresh and cached and time.monotonic() - cached[0] < _TTL_SECONDS:
             return cached[1]
-        _CACHE.pop(cache_key, None)
-        _IN_FLIGHT[cache_key] = refresh_token
+        pending = _IN_FLIGHT.get(cache_key)
+        if force_refresh or pending is None:
+            if pending is not None and not pending.done():
+                pending.set_result(ModelDiscoveryResult("unreachable"))
+            _CACHE.pop(cache_key, None)
+            refresh_token = Future()
+            _IN_FLIGHT[cache_key] = refresh_token
+        else:
+            refresh_token = None
+
+    if refresh_token is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return ModelDiscoveryResult("unreachable")
+        try:
+            result = pending.result(timeout=remaining)
+        except TimeoutError:
+            return ModelDiscoveryResult("unreachable")
+        return result if time.monotonic() < deadline else ModelDiscoveryResult("unreachable")
+
+    def finish(result: ModelDiscoveryResult) -> ModelDiscoveryResult:
+        """Publish once, without letting superseded work refill the cache."""
+        with _CACHE_LOCK:
+            if _IN_FLIGHT.get(cache_key) is refresh_token and result.status == "ready":
+                _CACHE[cache_key] = (time.monotonic(), result)
+                while len(_CACHE) > _MAX_CACHE_ENTRIES:
+                    _CACHE.popitem(last=False)
+            if not refresh_token.done():
+                refresh_token.set_result(result)
+        return result
 
     headers = {"Accept": "application/json"}
     if provider == "anthropic":
@@ -401,7 +559,7 @@ def discover_provider_models(
         for _page in range(_MAX_PAGES):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return ModelDiscoveryResult("unreachable")
+                return finish(ModelDiscoveryResult("unreachable"))
             if provider == "qwen":
                 url = endpoint + "?" + urlencode({"page_no": _page + 1, "page_size": 100})
             else:
@@ -421,48 +579,42 @@ def discover_provider_models(
             try:
                 status = response.status_code
                 if status in {401, 403, 498}:
-                    return ModelDiscoveryResult("auth_failed")
+                    return finish(ModelDiscoveryResult("auth_failed"))
                 if status == 429 or status >= 500:
-                    return ModelDiscoveryResult("server_error")
+                    return finish(ModelDiscoveryResult("server_error"))
                 if status != 200:
-                    return ModelDiscoveryResult("unsupported")
+                    return finish(ModelDiscoveryResult("unsupported"))
                 if time.monotonic() >= deadline:
-                    return ModelDiscoveryResult("unreachable")
+                    return finish(ModelDiscoveryResult("unreachable"))
                 try:
                     payload = response.json()
                     page_models, cursor, page_count = _parse_page(provider, payload, page_number=_page + 1)
                     if provider == "qwen":
                         total = payload["output"]["total"]
                         if qwen_total is not None and qwen_total != total:
-                            return ModelDiscoveryResult("unsupported")
+                            return finish(ModelDiscoveryResult("unsupported"))
                         qwen_total = total
                 except (ValueError, TypeError, KeyError):
-                    return ModelDiscoveryResult("unsupported")
+                    return finish(ModelDiscoveryResult("unsupported"))
             finally:
                 response.close()
             count += page_count
             if count > _MAX_MODELS:
-                return ModelDiscoveryResult("unsupported")
+                return finish(ModelDiscoveryResult("unsupported"))
             models.update(dict.fromkeys(page_models))
             if time.monotonic() >= deadline:
-                return ModelDiscoveryResult("unreachable")
+                return finish(ModelDiscoveryResult("unreachable"))
             if not cursor:
-                result = ModelDiscoveryResult("ready", tuple(models))
-                with _CACHE_LOCK:
-                    # Only the latest refresh may publish, even if it failed
-                    # while an older request was still in flight.
-                    if _IN_FLIGHT.get(cache_key) is refresh_token:
-                        _CACHE[cache_key] = (time.monotonic(), result)
-                        while len(_CACHE) > _MAX_CACHE_ENTRIES:
-                            _CACHE.popitem(last=False)
-                return result
+                return finish(ModelDiscoveryResult("ready", tuple(models)))
             if cursor in cursors:
-                return ModelDiscoveryResult("unsupported")
+                return finish(ModelDiscoveryResult("unsupported"))
             cursors.add(cursor)
-        return ModelDiscoveryResult("unsupported")
+        return finish(ModelDiscoveryResult("unsupported"))
     except Exception:  # noqa: BLE001 - discovery failures expose no provider response or secrets
-        return ModelDiscoveryResult("unreachable")
+        return finish(ModelDiscoveryResult("unreachable"))
     finally:
         with _CACHE_LOCK:
             if _IN_FLIGHT.get(cache_key) is refresh_token:
                 _IN_FLIGHT.pop(cache_key, None)
+            if not refresh_token.done():
+                refresh_token.set_result(ModelDiscoveryResult("unreachable"))

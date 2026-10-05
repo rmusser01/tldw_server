@@ -7,6 +7,9 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import messages
 from tldw_Server_API.app.core.Chat import chat_service
+from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
@@ -36,6 +39,10 @@ async def test_native_messages_validate_resolved_credential_inventory(
 
     monkeypatch.setattr(messages, "provider_auth_is_resolved", lambda *args, **kwargs: True)
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(
+        provider_model_inventory, "_http_fetch",
+        lambda **_kwargs: SimpleNamespace(status_code=404, json=lambda: {}, close=lambda: None),
+    )
     runtime = SimpleNamespace(resolve=resolve)
     if expected_status:
         with pytest.raises(HTTPException) as error:

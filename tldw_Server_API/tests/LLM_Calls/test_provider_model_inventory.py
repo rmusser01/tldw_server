@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import importlib
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -651,6 +654,159 @@ def test_refresh_on_one_scope_does_not_lock_network_for_other_scopes(inventory):
         return Response({"data": []})
 
     assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fetcher).status == "ready"
+
+
+class ObservedCacheLock:
+    """Signal when every caller has made its initial cache decision."""
+
+    def __init__(self, callers):
+        self.lock = threading.Lock()
+        self.callers = callers
+        self.entries = 0
+        self.joined = threading.Event()
+
+    def __enter__(self):
+        self.lock.acquire()
+        self.entries += 1
+        if self.entries == self.callers:
+            self.joined.set()
+
+    def __exit__(self, *_args):
+        self.lock.release()
+
+
+@pytest.mark.parametrize("callers", [2, 8])
+def test_singleflight_parallel_misses_share_one_fetch_and_fill_cache(inventory, monkeypatch, callers):
+    lock = ObservedCacheLock(callers)
+    monkeypatch.setattr(inventory, "_CACHE_LOCK", lock)
+    release = threading.Event()
+    calls = []
+
+    def fetcher(**kwargs):
+        calls.append(kwargs)
+        assert release.wait(3)
+        return Response({"data": [{"id": "current"}]})
+
+    with ThreadPoolExecutor(max_workers=callers) as pool:
+        futures = [pool.submit(inventory.discover_provider_models, "deepseek", "synthetic-key", fetch_fn=fetcher)
+                   for _ in range(callers)]
+        try:
+            assert lock.joined.wait(3)
+        finally:
+            release.set()
+        assert [future.result(timeout=3) for future in futures] == [ModelDiscoveryResult("ready", ("current",))] * callers
+
+    assert len(calls) == 1
+    assert inventory.discover_provider_models("deepseek", "synthetic-key").models == ("current",)
+    assert inventory._IN_FLIGHT == {}
+
+
+@pytest.mark.parametrize("response, expected", [
+    (Response({}, 401), "auth_failed"),
+    (Response(ValueError("invalid payload")), "unsupported"),
+    (RuntimeError("synthetic failure"), "unreachable"),
+])
+def test_singleflight_failure_notifies_waiters_and_allows_fresh_retry(inventory, monkeypatch, response, expected):
+    lock = ObservedCacheLock(4)
+    monkeypatch.setattr(inventory, "_CACHE_LOCK", lock)
+    release = threading.Event()
+    calls = []
+
+    def fetcher(**kwargs):
+        calls.append(kwargs)
+        assert release.wait(3)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(inventory.discover_provider_models, "deepseek", "synthetic-key", fetch_fn=fetcher)
+                   for _ in range(4)]
+        try:
+            assert lock.joined.wait(3)
+        finally:
+            release.set()
+        assert [future.result(timeout=3).status for future in futures] == [expected] * 4
+
+    assert len(calls) == 1
+    assert inventory._CACHE == {}
+    assert inventory._IN_FLIGHT == {}
+    fresh = Fetcher(Response({"data": [{"id": "current"}]}))
+    assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fresh).models == ("current",)
+    assert len(fresh.calls) == 1
+
+
+def test_singleflight_waiter_deadline_does_not_cancel_owner_or_fetch_again(inventory):
+    from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
+
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def fetcher(**kwargs):
+        calls.append(kwargs)
+        started.set()
+        assert release.wait(3)
+        return Response({"data": [{"id": "current"}]})
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        owner = pool.submit(inventory.discover_provider_models, "deepseek", "synthetic-key", fetch_fn=fetcher)
+        try:
+            assert started.wait(3)
+            before = time.monotonic()
+            result = inventory.discover_provider_models(
+                "deepseek", "synthetic-key", fetch_fn=fetcher,
+                call_policy=ProviderCallPolicy(maximum_timeout_seconds=0.05),
+            )
+            assert result == ModelDiscoveryResult("unreachable")
+            assert time.monotonic() - before < 0.5
+            assert not owner.done()
+            assert len(calls) == 1
+        finally:
+            release.set()
+        assert owner.result(timeout=3).models == ("current",)
+    assert inventory.discover_provider_models("deepseek", "synthetic-key").models == ("current",)
+    assert inventory._IN_FLIGHT == {}
+
+
+@pytest.mark.parametrize("status", [200, 401])
+def test_singleflight_forced_refresh_supersedes_waiters_without_stale_publication(inventory, monkeypatch, status):
+    lock = ObservedCacheLock(2)
+    monkeypatch.setattr(inventory, "_CACHE_LOCK", lock)
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def older_fetch(**kwargs):
+        calls.append(kwargs)
+        started.set()
+        assert release.wait(3)
+        return Response({"data": [{"id": "older"}]})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        owner = pool.submit(inventory.discover_provider_models, "deepseek", "synthetic-key", fetch_fn=older_fetch)
+        try:
+            assert started.wait(3)
+            waiter = pool.submit(inventory.discover_provider_models, "deepseek", "synthetic-key", fetch_fn=older_fetch)
+            assert lock.joined.wait(3)
+            current = inventory.discover_provider_models(
+                "deepseek", "synthetic-key", force_refresh=True,
+                fetch_fn=Fetcher(Response({"data": [{"id": "current"}]}, status)),
+            )
+            assert current.status == ("ready" if status == 200 else "auth_failed")
+            assert waiter.result(timeout=0.5) == ModelDiscoveryResult("unreachable")
+        finally:
+            release.set()
+        assert owner.result(timeout=3).models == ("older",)
+
+    assert len(calls) == 1
+    assert inventory._IN_FLIGHT == {}
+    if status == 200:
+        assert inventory.discover_provider_models("deepseek", "synthetic-key").models == ("current",)
+    else:
+        assert inventory._CACHE == {}
+        fresh = Fetcher(Response({"data": [{"id": "fresh"}]}))
+        assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fresh).models == ("fresh",)
 
 
 @pytest.mark.parametrize("base", ["https://trusted.example/custom/v1", "https://user:key@trusted.example/v1", ""])

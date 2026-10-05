@@ -6,8 +6,9 @@ import asyncio
 import json
 import math
 import re
+import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, NoReturn
 
 import httpx
@@ -19,6 +20,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
 )
 from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Slides.standalone_html_config import (
     CLOSED_ADAPTER_CATALOG,
@@ -491,15 +493,26 @@ async def _verify_model_inventory(
         required_endpoint_scope=ConfiguredEndpointScope.from_url(target.endpoint_identity),
         privacy_safe_errors=True,
     )
+
+    def discover_and_validate() -> ModelDiscoveryResult:
+        """Share the worker's remaining deadline across catalog and alias lookup."""
+        started = time.monotonic()
+        discovered = provider_model_inventory.discover_provider_models(
+            target.provider, provider_api_key, base_url=base_url, call_policy=policy,
+        )
+        remaining = policy.maximum_timeout_seconds - (time.monotonic() - started)
+        if remaining <= 0:
+            return ModelDiscoveryResult("unreachable")
+        return provider_model_inventory.resolve_provider_model_selection(
+            target.provider, provider_api_key, target.model,
+            base_url=base_url, inventory=discovered,
+            call_policy=replace(policy, maximum_timeout_seconds=remaining),
+        )
+
     failed = False
     try:
         result = await await_bounded_sync_call(
-            lambda: provider_model_inventory.discover_provider_models(
-                target.provider,
-                provider_api_key,
-                base_url=base_url,
-                call_policy=policy,
-            ),
+            discover_and_validate,
             pool=SYNC_ADAPTER_CALL_POOL,
             exhaustion_message="Standalone HTML model discovery capacity unavailable.",
         )
@@ -507,6 +520,8 @@ async def _verify_model_inventory(
         failed = True
     if current_time() >= deadline:
         _fail("standalone_html_provider_timeout")
+    if not failed and result.status == "not_found":
+        _fail("standalone_html_model_not_allowed")
     if failed or result.status != "ready":
         _fail("standalone_html_provider_unavailable")
     if target.model not in result.models:
