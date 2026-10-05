@@ -70,6 +70,77 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('media selection authority', () => {
+  it('keeps both successive off-page tags in server payloads and exports without changing same-ID Notes', async () => {
+    const view = mount()
+    const note = { ...items[0], kind: 'note' as const, keywords: ['note-only'] }
+    act(() => view.rerender({ owner: 'account-a', rows: [items[0], note] }))
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.handleSelectAllVisibleItems(); view.result.current.setInspectorItem(note) })
+    act(() => view.rerender({ owner: 'account-a', rows: [items[1]] }))
+    for (const tag of ['first-new-tag', 'second-new-tag']) {
+      act(() => view.result.current.setBulkKeywordsDraft(tag))
+      await act(async () => view.result.current.handleBulkAddKeywords())
+    }
+    const updates = vi.mocked(bgRequest).mock.calls.filter(([request]) => request.method === 'PUT')
+    expect(updates.map(([request]) => request.body)).toEqual([{ keywords: ['private', 'first-new-tag'] }, { keywords: ['private', 'first-new-tag', 'second-new-tag'] }])
+    act(() => view.result.current.handleBulkExport())
+    const exported = JSON.parse(await mocks.download.mock.calls[0][0].text()).items
+    expect(exported.find((row: MediaResultItem) => row.kind === 'media').keywords).toEqual(['private', 'first-new-tag', 'second-new-tag'])
+    expect(exported.find((row: MediaResultItem) => row.kind === 'note').keywords).toEqual(['note-only'])
+    expect(view.result.current.inspectorItem).toEqual(note)
+  })
+
+  it('keeps successful tags when selecting more rows before the refreshed page arrives', async () => {
+    const view = mount()
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.toggleBulkItemSelection('media:1'); view.result.current.setBulkKeywordsDraft('first') })
+    await act(async () => view.result.current.handleBulkAddKeywords())
+    act(() => { view.result.current.handleSelectAllVisibleItems(); view.result.current.setBulkKeywordsDraft('second') })
+    await act(async () => view.result.current.handleBulkAddKeywords())
+    expect(vi.mocked(bgRequest).mock.calls.filter(([request]) => request.method === 'PUT' && request.path === '/api/v1/media/1').map(([request]) => request.body)).toEqual([{ keywords: ['private', 'first'] }, { keywords: ['private', 'first', 'second'] }])
+  })
+
+  it.each([false, true])('restores successful Note bulk trash with the captured deleted version and scope, mixed=%s', async mixed => {
+    const view = mount()
+    const note = { ...items[0], kind: 'note' as const }
+    act(() => view.rerender({ owner: 'account-a', rows: mixed ? [items[0], note] : [note] }))
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.handleSelectAllVisibleItems() })
+    vi.mocked(bgRequest).mockResolvedValue({ version: 7 })
+    let recovery!: Awaited<ReturnType<typeof view.result.current.handleBulkDelete>>
+    await act(async () => { recovery = await view.result.current.handleBulkDelete() })
+    expect(recovery).toMatchObject({ noteCount: 1, mediaCount: mixed ? 1 : 0 })
+    vi.mocked(bgRequest).mockClear()
+    await act(async () => expect(await recovery!.restoreNotes()).toBe(0))
+    expect(bgRequest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: '/api/v1/notes/1/restore?expected_version=8', method: 'POST', abortSignal: expect.any(AbortSignal), servicePromptConfig: expect.objectContaining({ expectedUserId: 'alice' }), headers: expect.objectContaining({ 'X-TLDW-Expected-User-ID': 'alice' }) }))
+    await act(async () => recovery!.restoreNotes())
+    expect(bgRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries only failed Note restores and refuses retained recovery after owner change', async () => {
+    const view = mount()
+    act(() => view.rerender({ owner: 'account-a', rows: items.map(item => ({ ...item, kind: 'note' as const })) }))
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.handleSelectAllVisibleItems() })
+    vi.mocked(bgRequest).mockResolvedValue({ version: 7 })
+    let recovery!: Awaited<ReturnType<typeof view.result.current.handleBulkDelete>>
+    await act(async () => { recovery = await view.result.current.handleBulkDelete() })
+    vi.mocked(bgRequest).mockClear().mockImplementation(async request => {
+      if (request.path === '/api/v1/notes/2/restore?expected_version=8') throw new Error('Conflict')
+      return {}
+    })
+    await act(async () => expect(await recovery!.restoreNotes()).toBe(1))
+    expect(vi.mocked(bgRequest).mock.calls.map(([request]) => request.path)).toEqual(['/api/v1/notes/1/restore?expected_version=8', '/api/v1/notes/2/restore?expected_version=8'])
+    vi.mocked(bgRequest).mockClear().mockResolvedValue({})
+    await act(async () => expect(await recovery!.restoreNotes()).toBe(0))
+    expect(vi.mocked(bgRequest).mock.calls.map(([request]) => request.path)).toEqual(['/api/v1/notes/2/restore?expected_version=8'])
+
+    // Keep a second original-owner callback with a still-deleted Note.
+    act(() => view.result.current.handleSelectAllVisibleItems())
+    vi.mocked(bgRequest).mockResolvedValue({ version: 11 })
+    await act(async () => { recovery = await view.result.current.handleBulkDelete() })
+    vi.mocked(bgRequest).mockClear()
+    mocks.authority = 'verified-b'
+    await act(async () => recovery!.restoreNotes())
+    expect(bgRequest).not.toHaveBeenCalled()
+  })
+
   it('rejects retained actions when verified authority changes before React receives the owner update', async () => {
     const view = mount(); select(view)
     const staleDelete = view.result.current.handleBulkDelete

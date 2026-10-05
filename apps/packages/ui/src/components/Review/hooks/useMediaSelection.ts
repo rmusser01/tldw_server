@@ -107,6 +107,16 @@ function useOwnedMediaValues<T>(key: string, ownerScope: string | null, isCurren
   return [values, setValues] as const
 }
 
+export interface MediaBulkTrashRecovery {
+  mediaCount: number
+  noteCount: number
+  restoreNotes: () => Promise<number>
+}
+
+// Both recovery paths use the delete operation's captured request and deleted version.
+const restoreDeletedNote = (request: (init: Parameters<typeof bgRequest>[0]) => Promise<unknown>, id: string, version: number) =>
+  request({ path: `/api/v1/notes/${encodeURIComponent(id)}/restore?expected_version=${version}` as any, method: 'POST' as any })
+
 export interface UseMediaSelectionDeps {
   ownerScope: string | null
   t: (key: string, opts?: Record<string, any>) => string
@@ -133,6 +143,8 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
   const navigate = useNavigate()
   const authorityKey = useQuickIngestAuthority()
   const selectedMetadata = useRef(new Map<string, MediaResultItem>())
+  const [, setMetadataRevision] = useState(0)
+  const lastDisplayResults = useRef(displayResults)
   const authorityRef = useRef(authorityKey)
   authorityRef.current = authorityKey
   const { showUndoNotification } = useUndoNotification()
@@ -180,7 +192,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       const next = typeof value === 'function' ? value(previous) : value
       return next.map(id => {
         const item = displayResults.find(row => mediaResultKey(row) === id) || displayResults.find(row => String(row.id) === id)
-        if (item) { const key = mediaResultKey(item); selectedMetadata.current.set(key, item); return key }
+        if (item) { const key = mediaResultKey(item); if (!selectedMetadata.current.has(key)) selectedMetadata.current.set(key, item); return key }
         return id
       })
     })
@@ -249,15 +261,21 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     for (const key of selectedMetadata.current.keys()) {
       if (!bulkSelectedIdSet.has(key)) selectedMetadata.current.delete(key)
     }
+    const resultsChanged = lastDisplayResults.current !== displayResults
+    lastDisplayResults.current = displayResults
+    let refreshed = false
     for (const item of displayResults) {
       const key = mediaResultKey(item)
-      if (bulkSelectedIdSet.has(key)) selectedMetadata.current.set(key, item)
+      if (resultsChanged && bulkSelectedIdSet.has(key) && selectedMetadata.current.get(key) !== item) {
+        selectedMetadata.current.set(key, item)
+        refreshed = true
+      }
     }
+    if (refreshed) setMetadataRevision(previous => previous + 1)
   }, [bulkSelectedIdSet, displayResults])
-  const bulkSelectedItems = useMemo(
-    () => bulkSelectedIds.map(id => displayResults.find(item => mediaResultKey(item) === id) || selectedMetadata.current.get(id)).filter((item): item is MediaResultItem => Boolean(item)),
-    [bulkSelectedIds, displayResults]
-  )
+  const bulkSelectedItems = bulkSelectedIds
+    .map(id => selectedMetadata.current.get(id) || displayResults.find(item => mediaResultKey(item) === id))
+    .filter((item): item is MediaResultItem => Boolean(item))
   const bulkSelectedMediaItems = useMemo(
     () => bulkSelectedItems.filter((item) => item.kind === 'media'),
     [bulkSelectedItems]
@@ -474,7 +492,8 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
 
     for (const item of bulkSelectedMediaItems) {
       if (!isCurrent()) return
-      const currentKeywords = Array.isArray(item.keywords) ? item.keywords : []
+      const currentItem = selectedMetadata.current.get(mediaResultKey(item)) || item
+      const currentKeywords = Array.isArray(currentItem.keywords) ? currentItem.keywords : []
       const mergedKeywords = Array.from(new Set([...currentKeywords, ...keywordsToAdd]))
       try {
         await request({
@@ -483,6 +502,8 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
           headers: { 'Content-Type': 'application/json' },
           body: { keywords: mergedKeywords }
         })
+        selectedMetadata.current.set(mediaResultKey(item), { ...currentItem, keywords: mergedKeywords })
+        setMetadataRevision(previous => previous + 1)
         updatedKeywordMap.set(String(item.id), mergedKeywords)
         updatedCount += 1
       } catch {
@@ -538,7 +559,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     t
   ])
 
-  const handleBulkDelete = useCallback(async () => {
+  const handleBulkDelete = useCallback(async (): Promise<MediaBulkTrashRecovery | void> => {
     const { request, isCurrent } = captureOperation()
     if (!isCurrent()) return
     if (bulkSelectedItems.length === 0) {
@@ -562,6 +583,8 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     let deletedCount = 0
     let failedCount = 0
     const deletedIdSet = new Set<string>()
+    const deletedNoteVersions = new Map<string, number>()
+    let deletedMediaCount = 0
 
     for (const item of bulkSelectedItems) {
       if (!isCurrent()) return
@@ -581,12 +604,14 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
             method: 'DELETE' as any,
             headers: { 'expected-version': String(expectedVersion) }
           })
+          deletedNoteVersions.set(String(item.id), expectedVersion + 1)
         } else {
           await request({
             path: `/api/v1/media/${item.id}` as any,
             method: 'DELETE' as any
           })
         }
+        if (item.kind === 'media') deletedMediaCount += 1
         deletedIdSet.add(mediaResultKey(item))
         deletedCount += 1
       } catch {
@@ -613,6 +638,36 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       void refreshLibraryStorageUsage()
     }
 
+    let restoring = false
+    const recovery: MediaBulkTrashRecovery = {
+      mediaCount: deletedMediaCount,
+      noteCount: deletedNoteVersions.size,
+      restoreNotes: async () => {
+        if (!isCurrent() || restoring) return deletedNoteVersions.size
+        restoring = true
+        try {
+          for (const [id, version] of deletedNoteVersions) {
+            if (!isCurrent()) return deletedNoteVersions.size
+            try {
+              await restoreDeletedNote(request, id, version)
+              deletedNoteVersions.delete(id)
+            } catch {
+              if (!isCurrent()) return deletedNoteVersions.size
+            }
+          }
+          await refetch()
+          if (isCurrent() && deletedNoteVersions.size > 0) {
+            message.warning(t('review:mediaPage.noteRestorePartial', {
+              defaultValue: '{{count}} notes could not be restored. Try again.', count: deletedNoteVersions.size
+            }))
+          }
+          return deletedNoteVersions.size
+        } finally {
+          restoring = false
+        }
+      }
+    }
+
     if (failedCount > 0) {
       message.warning(
         t('review:mediaPage.bulkDeletePartial', {
@@ -621,7 +676,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
           failed: failedCount
         })
       )
-      return
+      return recovery
     }
 
     message.success(
@@ -630,6 +685,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
         count: deletedCount
       })
     )
+    return recovery
   }, [
     captureOperation,
     bulkSelectedItems,
@@ -980,10 +1036,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
           if (!isCurrent()) return
           if (item.kind === 'note') {
             if (deletedAtVersion != null) {
-              await request({
-                path: `/api/v1/notes/${id}/restore?expected_version=${deletedAtVersion}` as any,
-                method: 'POST' as any
-              })
+              await restoreDeletedNote(request, idStr, deletedAtVersion)
             }
           } else {
             await request({

@@ -5,13 +5,14 @@ import { CheckSquare, Download, Tags, Trash2, X } from 'lucide-react'
 import type { TFunction } from 'i18next'
 
 import type { MediaResultItem } from '@/components/Media/types'
+import type { MediaBulkTrashRecovery } from './hooks/useMediaSelection'
 
 interface MediaBulkToolbarSelection {
   bulkSelectedItems: MediaResultItem[]
   bulkKeywordsDraft: string
   setBulkKeywordsDraft: (value: string) => void
   handleBulkAddKeywords: () => Promise<void> | void
-  handleBulkDelete: () => Promise<void> | void
+  handleBulkDelete: () => Promise<MediaBulkTrashRecovery | void> | void
   collectionDraftName: string
   setCollectionDraftName: (value: string) => void
   handleAddSelectionToCollection: () => void
@@ -32,7 +33,8 @@ interface MediaBulkToolbarProps {
 export function MediaBulkToolbar({ selection, t, deleteDisabledReason }: MediaBulkToolbarProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [moving, setMoving] = useState(false)
-  const [showRecovery, setShowRecovery] = useState(false)
+  const [recoveries, setRecoveries] = useState<MediaBulkTrashRecovery[]>([])
+  const noteRestoreCount = recoveries.reduce((count, recovery) => count + recovery.noteCount, 0)
   const navigate = useNavigate()
   const pendingAction = useRef<MediaBulkToolbarSelection['handleBulkDelete'] | null>(null)
   const deleteButton = useRef<HTMLButtonElement>(null)
@@ -87,7 +89,19 @@ export function MediaBulkToolbar({ selection, t, deleteDisabledReason }: MediaBu
       {selection.bulkSelectedItems.some(item => item.kind === 'note') ? (
         <p className="text-xs text-text-muted">{t('review:mediaPage.notesReviewScope', { defaultValue: 'Review opens Media only; Notes stay selected.' })}</p>
       ) : null}
-      {showRecovery ? <button type="button" onClick={() => navigate('/media-trash')} className="min-h-[44px] md:min-h-8 rounded-md border border-border px-2 text-xs">{t('review:mediaPage.openTrashRecovery', { defaultValue: 'Open Trash' })}</button> : null}
+      {recoveries.some(recovery => recovery.mediaCount > 0) ? <button type="button" onClick={() => navigate('/media-trash')} className="min-h-[44px] md:min-h-8 rounded-md border border-border px-2 text-xs">{t('review:mediaPage.openTrashRecovery', { defaultValue: 'Open Trash' })}</button> : null}
+      {noteRestoreCount > 0 ? <button type="button" disabled={moving} onClick={async () => {
+        setMoving(true)
+        try {
+          const remaining = []
+          for (const recovery of recoveries) {
+            remaining.push({ ...recovery, noteCount: recovery.noteCount ? await recovery.restoreNotes() : 0 })
+          }
+          setRecoveries(remaining)
+        } finally {
+          setMoving(false)
+        }
+      }} className="min-h-[44px] md:min-h-8 rounded-md border border-border px-2 text-xs disabled:opacity-60">{t('review:mediaPage.restoreSelectedNotes', { defaultValue: noteRestoreCount === 1 ? 'Restore {{count}} note' : 'Restore {{count}} notes', count: noteRestoreCount })}</button> : null}
       <details className="max-h-48 overflow-auto">
         <summary className="cursor-pointer min-h-[44px] md:min-h-8 py-3 md:py-1 text-xs">{t('review:mediaPage.moreSelectionActions', { defaultValue: 'Tags, collections and export' })}</summary>
       <div className="flex flex-wrap items-center gap-2">
@@ -187,8 +201,8 @@ export function MediaBulkToolbar({ selection, t, deleteDisabledReason }: MediaBu
         if (!action) return
         setMoving(true)
         try {
-          await action()
-          setShowRecovery(true)
+          const recovery = await action()
+          if (recovery) setRecoveries(previous => [...previous, recovery])
           closeConfirmation()
         } finally {
           setMoving(false)
@@ -197,7 +211,7 @@ export function MediaBulkToolbar({ selection, t, deleteDisabledReason }: MediaBu
         confirmLoading={moving}
         okText={t('review:mediaPage.moveToTrash', { defaultValue: 'Move to trash' })}
         cancelText={t('common:cancel', { defaultValue: 'Cancel' })}>
-        <p>{t('review:mediaPage.trashRecoveryHint', { defaultValue: 'You can restore items from Trash. Items that fail remain selected.' })}</p>
+        <p>{t('review:mediaPage.trashRecoveryHint', { defaultValue: 'Media can be restored from Trash. Notes can be restored here or from Notes Trash. Items that fail remain selected.' })}</p>
       </Modal>
     </div>
   )

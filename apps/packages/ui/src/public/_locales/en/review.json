@@ -1935,7 +1935,7 @@
     "message": "Move to trash"
   },
   "mediaPage_trashRecoveryHint": {
-    "message": "You can restore items from Trash. Items that fail remain selected."
+    "message": "Media can be restored from Trash. Notes can be restored here or from Notes Trash. Items that fail remain selected."
   },
   "mediaPage_openTrashRecovery": {
     "message": "Open Trash"
@@ -1969,5 +1969,17 @@
   },
   "mediaPage_notesReviewScope": {
     "message": "Review opens Media only; Notes stay selected."
+  },
+  "mediaPage_restoreSelectedNotes": {
+    "message": "Restore {{count}} notes"
+  },
+  "mediaPage_noteRestorePartial": {
+    "message": "{{count}} notes could not be restored. Try again."
+  },
+  "mediaPage_restoreSelectedNotes_one": {
+    "message": "Restore {{count}} note"
+  },
+  "mediaPage_restoreSelectedNotes_other": {
+    "message": "Restore {{count}} notes"
   }
 }

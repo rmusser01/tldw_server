@@ -41,6 +41,31 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe("Review batch real outbound scope", () => {
+  it('preserves the bulk Note deleted version and cancellation signal at actual transport', async () => {
+    const controller = new AbortController()
+    const scoped = requestScopeFields(options.requestScope)
+    await bgRequest({ path: '/api/v1/notes/7', method: 'DELETE', ...scoped, headers: { ...scoped.headers, 'expected-version': '7' }, abortSignal: controller.signal })
+    let entered!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    boundary.fetch.mockImplementationOnce((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal!.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true })
+      entered()
+    }))
+    const pending = bgRequest({ path: '/api/v1/notes/7/restore?expected_version=8', method: 'POST', ...scoped, abortSignal: controller.signal })
+    const cancelled = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    await started
+    expect(boundary.fetch).toHaveBeenCalledTimes(2)
+    const [[deleteUrl, deleteInit], [restoreUrl, restoreInit]] = boundary.fetch.mock.calls
+    expect(new URL(deleteUrl).pathname).toBe('/api/v1/notes/7')
+    expect(new Headers(deleteInit.headers).get('expected-version')).toBe('7')
+    expect(new URL(restoreUrl).searchParams.get('expected_version')).toBe('8')
+    expect(new Headers(restoreInit.headers).get('X-TLDW-Expected-User-ID')).toBe('1')
+    expect(restoreInit.signal).toBeInstanceOf(AbortSignal)
+    controller.abort()
+    expect(restoreInit.signal.aborted).toBe(true)
+    await cancelled
+    expect(boundary.fetch).toHaveBeenCalledTimes(2)
+  })
   it.each(operations)("sends %s only to the captured target and principal", async (_label, run) => {
     await run()
     expect(boundary.fetch).toHaveBeenCalledTimes(1)

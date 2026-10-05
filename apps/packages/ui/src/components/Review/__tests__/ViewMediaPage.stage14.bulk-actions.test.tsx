@@ -405,6 +405,47 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
     }
   })
 
+  it.each([false, true])('offers actual version-bound Note recovery after confirmation, mixed=%s', async mixed => {
+    mocks.queryData = mixed ? [mocks.queryData[0], { ...mocks.queryData[0], kind: 'note' }] : [{ ...mocks.queryData[0], kind: 'note' }]
+    const original = mocks.bgRequest.getMockImplementation()!
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      if (request.path === '/api/v1/notes/1' && request.method === 'GET') return { version: 7 }
+      return original(request)
+    })
+    renderMediaPage()
+    await enableBulkMode()
+    fireEvent.click(screen.getByRole('button', { name: 'Select this page' }))
+    fireEvent.click(screen.getByTestId('media-bulk-delete'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }))
+    const restore = await screen.findByRole('button', { name: 'Restore 1 note' })
+    expect(Boolean(screen.queryByRole('button', { name: 'Open Trash' }))).toBe(mixed)
+    fireEvent.click(restore)
+    await waitFor(() => expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/notes/1/restore?expected_version=8', method: 'POST', headers: expect.objectContaining({ 'X-TLDW-Expected-User-ID': 'alice' }), servicePromptConfig: expect.objectContaining({ expectedUserId: 'alice' }), abortSignal: expect.any(AbortSignal) })))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Restore 1 note' })).not.toBeInTheDocument())
+  })
+
+  it('keeps failed Note restores available and retries only the failed Note', async () => {
+    mocks.queryData = mocks.queryData.map(item => ({ ...item, kind: 'note' }))
+    const original = mocks.bgRequest.getMockImplementation()!
+    let failSecond = true
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      if (request.method === 'GET' && request.path?.startsWith('/api/v1/notes/')) return { version: 7 }
+      if (request.path === '/api/v1/notes/2/restore?expected_version=8' && failSecond) throw new Error('Conflict')
+      return original(request)
+    })
+    renderMediaPage()
+    await enableBulkMode()
+    fireEvent.click(screen.getByRole('button', { name: 'Select this page' }))
+    fireEvent.click(screen.getByTestId('media-bulk-delete'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore 2 notes' }))
+    const retry = await screen.findByRole('button', { name: 'Restore 1 note' })
+    failSecond = false
+    fireEvent.click(retry)
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Restore 1 note' })).not.toBeInTheDocument())
+    expect(mocks.bgRequest.mock.calls.filter(([request]) => request.path?.includes('/restore?')).map(([request]) => request.path)).toEqual(['/api/v1/notes/1/restore?expected_version=8', '/api/v1/notes/2/restore?expected_version=8', '/api/v1/notes/2/restore?expected_version=8'])
+  })
+
   it('explains which selected kinds Open selection reviews', async () => {
     mocks.queryData.push({ id: 1, kind: 'note', title: 'Note with matching raw ID', raw: {}, keywords: [] })
     renderMediaPage()

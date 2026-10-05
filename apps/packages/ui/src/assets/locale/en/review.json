@@ -423,7 +423,7 @@
     "selectAllVisible": "Select this page",
     "moveSelectionToTrash": "Move {{count}} items to trash",
     "moveToTrash": "Move to trash",
-    "trashRecoveryHint": "You can restore items from Trash. Items that fail remain selected.",
+    "trashRecoveryHint": "Media can be restored from Trash. Notes can be restored here or from Notes Trash. Items that fail remain selected.",
     "openTrashRecovery": "Open Trash",
     "moreSelectionActions": "Tags, collections and export",
     "exportFormat": "Export format",
@@ -434,7 +434,11 @@
     "batchHintDescription": "Add media accepts multiple URLs or files. Select across pages, then open your saved Media selection to review it together.",
     "bulkDeletePartial": "Moved {{deleted}} item(s) to trash, {{failed}} failed.",
     "bulkDeleteSuccess": "Moved {{count}} item(s) to trash.",
-    "notesReviewScope": "Review opens Media only; Notes stay selected."
+    "notesReviewScope": "Review opens Media only; Notes stay selected.",
+    "restoreSelectedNotes": "Restore {{count}} notes",
+    "noteRestorePartial": "{{count}} notes could not be restored. Try again.",
+    "restoreSelectedNotes_one": "Restore {{count}} note",
+    "restoreSelectedNotes_other": "Restore {{count}} notes"
   },
   "trashPage": {
     "title": "Trash",
