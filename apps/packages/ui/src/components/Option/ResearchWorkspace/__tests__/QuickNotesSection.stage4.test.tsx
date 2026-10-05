@@ -1,6 +1,6 @@
 import { readKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QuickNotesSection } from "../StudioPane/QuickNotesSection"
 
@@ -257,4 +257,26 @@ describe("QuickNotesSection Stage 4 layout and export", () => {
       ),
     )
   })
+  it.each(["Hi", "", "<!-- tldw-knowledge:v1:invalid -->"])(
+    "hides validated provenance in Load-note preview for %s",
+    async (body) => {
+      const marker = `<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify({ origin: "knowledge_qa" }))} -->`
+      const note = {
+        id: "preview-note",
+        title: "Saved source",
+        content: `${body}\n\n${marker}`,
+        keywords: [],
+      }
+      mockBgRequest.mockResolvedValue({ notes: [note] })
+      render(<QuickNotesSection />)
+      fireEvent.click(screen.getByRole("button", { name: "Load note" }))
+      const title = await within(screen.getByRole("dialog")).findByText(
+        "Saved source",
+      )
+      const preview = title.closest("button")!
+      expect(preview.textContent).not.toContain("%7B")
+      expect(preview.textContent).toContain(body || "No content")
+    },
+  )
+
 })

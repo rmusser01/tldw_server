@@ -299,8 +299,11 @@ export function useResearchWorkspacePrefill(
         }
         assertCurrent()
         const state = useWorkspaceStore.getState()
+        const draftWasDirty = state.currentNote.isDirty
         if (
           !payload.draftRetained &&
+          (!payload.canonicalNoteId ||
+            (!draftWasDirty && state.currentNote.id == null)) &&
           !state.currentNote.content.includes(`Import reference: ${payload.id}`)
         ) {
           state.captureToCurrentNote({
@@ -321,7 +324,8 @@ export function useResearchWorkspacePrefill(
           await saveResearchWorkspacePrefill(payload)
           assertCurrent()
           let draftDiscarded = Boolean(
-            payload.draftRetained && draft.id !== payload.canonicalNoteId,
+            (payload.draftRetained || draft.id != null) &&
+            draft.id !== payload.canonicalNoteId,
           )
           const stopWatchingDraft = useWorkspaceStore.subscribe((next) => {
             if (
@@ -358,11 +362,15 @@ export function useResearchWorkspacePrefill(
             assertCurrent()
             if (existing && existing.id !== payload.canonicalNoteId)
               throw new Error("Canonical note identity changed")
-            // Preserve edits on retry; append the transfer only when absent.
-            const alreadyRetained = existing?.content.includes(
-              `Import reference: ${payload.id}`,
-            )
-            const body = alreadyRetained ? existing!.content : draft.content
+            const alreadyRetained =
+              existing?.content.includes(`Import reference: ${payload.id}`) ||
+              readKnowledgeNoteProvenance(existing?.content || "")?.research
+                ?.import_id === payload.id
+            // The owned dirty draft is authoritative even when a prior attempt
+            // reached the server. Capture-to-note itself must not count as an edit.
+            const preferDraft =
+              !alreadyRetained || (!draftDiscarded && draftWasDirty)
+            const body = preferDraft ? draft.content : existing!.content
             const content = retainKnowledgeNoteProvenance(body, {
               origin:
                 payload.threadId || payload.query || payload.answer
@@ -391,15 +399,15 @@ export function useResearchWorkspacePrefill(
               body: {
                 ...(existing ? {} : { id: payload.canonicalNoteId }),
                 title:
-                  (alreadyRetained ? existing?.title : draft.title) ||
+                  (preferDraft ? draft.title : existing?.title) ||
                   "Knowledge research",
                 content,
                 keywords: [
                   ...new Set(
                     [
-                      ...(alreadyRetained
-                        ? existing?.keywords || []
-                        : draft.keywords
+                      ...(preferDraft
+                        ? draft.keywords
+                        : existing?.keywords || []
                       )
                         .map(normalizeNoteKeyword)
                         .filter(

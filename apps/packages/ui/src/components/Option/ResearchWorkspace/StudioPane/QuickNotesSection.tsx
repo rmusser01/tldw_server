@@ -1215,7 +1215,8 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
                         {note.title || "Untitled"}
                       </p>
                       <p className="line-clamp-2 text-xs text-text-muted">
-                        {note.content?.slice(0, 100) || "No content"}
+                        {stripKnowledgeNoteProvenance(note.content || "").slice(0, 100) ||
+                          "No content"}
                       </p>
                       <div className="mt-1 flex flex-wrap items-center gap-1">
                         {workspaceScoped && (

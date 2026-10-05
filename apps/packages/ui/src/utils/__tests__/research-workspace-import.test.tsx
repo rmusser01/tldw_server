@@ -1,3 +1,7 @@
+import {
+  readKnowledgeNoteProvenance,
+  stripKnowledgeNoteProvenance,
+} from "../knowledge-note-provenance"
 import { act, render, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchWorkspace } from "@/components/Option/ResearchWorkspace"
@@ -901,3 +905,121 @@ it("retains an existing canonical note's unsaved title and body when appending t
   expect(receiver.result.current.error).toBeNull()
   receiver.unmount()
 })
+
+
+it.each([
+  ["lost response", false],
+  ["lost response", true],
+  ["partial import", false],
+  ["partial import", true],
+] as const)(
+  "preserves dirty edits before canonical %s retry and subsequent edits=%s",
+  async (failure, editDuringRetry) => {
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-a",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-a",
+        serverWorkspaceId: "workspace-a",
+        migrationId: "migration-a",
+        contentRetained: false,
+      }),
+    )
+    let canonical: any = null
+    let finishRetry!: () => void
+    mocks.request.mockImplementation(async ({ method, body }: any) => {
+      if (method === "POST") {
+        canonical = {
+          id: body.id,
+          title: body.title,
+          content: body.content,
+          keywords: body.keywords.map((keyword: string) => ({ keyword })),
+          version: 1,
+        }
+        if (failure === "lost response")
+          throw new Error("response lost after commit")
+      }
+      if (method === "PUT") {
+        canonical = {
+          ...canonical,
+          title: body.title,
+          content: body.content,
+          keywords: body.keywords.map((keyword: string) => ({ keyword })),
+          version: 2,
+        }
+        await new Promise<void>((resolve) => {
+          finishRetry = resolve
+        })
+      }
+      if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
+      return canonical
+    })
+    mocks.upload
+      .mockResolvedValueOnce({ id: 101 })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ id: 102 })
+    const transfer = payload()
+    transfer.sources = transfer.sources.slice(
+      0,
+      failure === "partial import" ? 3 : 2,
+    )
+    await queueResearchWorkspacePrefill(transfer)
+    const receiver = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    await waitFor(() => expect(canonical).not.toBeNull())
+    await waitFor(() => expect(receiver.result.current.importing).toBe(false))
+    if (failure === "lost response")
+      expect(receiver.result.current.error).toContain("could not be saved")
+    else expect(receiver.result.current.failed).toBe(1)
+    const canonicalId = canonical.id
+    await act(async () => {
+      useWorkspaceStore.getState().updateNoteTitle("Title edited before retry")
+      useWorkspaceStore
+        .getState()
+        .updateNoteContent("Body replaced before retry")
+      useWorkspaceStore.getState().updateNoteKeywords(["before-retry"])
+      await receiver.result.current.retry()
+    })
+    await waitFor(() => expect(finishRetry).toBeTypeOf("function"))
+    await act(async () => {
+      if (editDuringRetry) {
+        useWorkspaceStore.getState().updateNoteTitle("Later title")
+        useWorkspaceStore.getState().updateNoteContent("Later body")
+        useWorkspaceStore.getState().updateNoteKeywords(["later"])
+      }
+      finishRetry()
+    })
+    await waitFor(() => expect(receiver.result.current.importing).toBe(false))
+    expect(receiver.result.current.error).toBeNull()
+    expect(canonical.title).toBe("Title edited before retry")
+    expect(stripKnowledgeNoteProvenance(canonical.content)).toBe(
+      "Body replaced before retry",
+    )
+    expect(canonical.keywords).toContainEqual({ keyword: "before-retry" })
+    const note = useWorkspaceStore.getState().currentNote
+    expect(note.id).toBe(canonicalId)
+    expect(note.title).toBe(
+      editDuringRetry ? "Later title" : "Title edited before retry",
+    )
+    expect(stripKnowledgeNoteProvenance(note.content)).toBe(
+      editDuringRetry ? "Later body" : "Body replaced before retry",
+    )
+    expect(note.keywords).toEqual([editDuringRetry ? "later" : "before-retry"])
+    expect(note.isDirty).toBe(editDuringRetry)
+    expect(
+      readKnowledgeNoteProvenance(note.content)?.research?.sources.map(
+        (source) => source.mediaId,
+      ),
+    ).toEqual(failure === "partial import" ? [101, 102] : [101])
+    expect(mocks.upload).toHaveBeenCalledTimes(
+      failure === "partial import" ? 3 : 1,
+    )
+    expect(
+      mocks.request.mock.calls.filter(([request]) => request.method === "POST"),
+    ).toHaveLength(1)
+    expect(
+      useWorkspaceStore.getState().sources.map((source) => source.mediaId),
+    ).toEqual(failure === "partial import" ? [101, 102] : [101])
+    receiver.unmount()
+  },
+)
