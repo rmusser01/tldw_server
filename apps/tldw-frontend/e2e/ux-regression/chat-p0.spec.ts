@@ -1,6 +1,6 @@
 /**
- * Chat P0 reproductions from the 2026-10-02 UX review (tracking #3101).
- * Each test fails loudly once its defect is fixed; see e2e/ux-regression/README.md.
+ * Chat P0 tests from the 2026-10-02 UX review (tracking #3101). CS-02 is fixed
+ * and guards its fix with a plain assertion; see e2e/ux-regression/README.md.
  *
  * These reproductions seed chats through the API and never send from the
  * composer: on current dev the first send in a fresh browser is not reliably
@@ -9,7 +9,6 @@
 import type { Page, Response } from "@playwright/test"
 import { test, expect, skipIfServerUnavailable } from "../utils/fixtures"
 import { ChatPage } from "../utils/page-objects"
-import { expectKnownDefect } from "../utils/known-defect"
 import { createCharacter, createChatWithMessages, createSeedApi, warmBackendOnce } from "../utils/seed-api"
 
 /** A single lowercase word, so the server's full-text search treats it as one term. */
@@ -54,7 +53,7 @@ test.describe("Chat P0 reproductions", () => {
     authedPage,
     serverInfo,
     request,
-  }, testInfo) => {
+  }) => {
     skipIfServerUnavailable(serverInfo)
     const api = createSeedApi(request)
     await warmBackendOnce(api)
@@ -85,15 +84,10 @@ test.describe("Chat P0 reproductions", () => {
 
     const byContent = await searchHistory(authedPage, search, contentWord)
 
-    await expectKnownDefect(
-      testInfo,
-      { id: "CS-02", issue: 3108, summary: "Chat history search matches titles only, not message content" },
-      async () => {
-        await expect(
-          chatRow,
-          `the chat should be listed; the server's search returned ${JSON.stringify(byContent.map((item) => item.id))}`
-        ).toBeVisible({ timeout: 5_000 })
-      }
-    )
+    // CS-02 (#3108, fixed): history search used to match titles only.
+    await expect(
+      chatRow,
+      `the chat should be listed; the server's search returned ${JSON.stringify(byContent.map((item) => item.id))}`
+    ).toBeVisible({ timeout: 5_000 })
   })
 })

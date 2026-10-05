@@ -1,6 +1,8 @@
 /**
- * Notes P0 reproductions from the 2026-10-02 UX review (tracking #3101).
- * Each test fails loudly once its defect is fixed; see e2e/ux-regression/README.md.
+ * Notes P0 tests from the 2026-10-02 UX review (tracking #3101). NL-01, NS-01
+ * and NS-N1 are fixed and guard their fixes with plain assertions. NE-04 is a
+ * reproduction that fails loudly once its defect is fixed; see
+ * e2e/ux-regression/README.md.
  */
 import type { Page, Response } from "@playwright/test"
 import { test, expect, skipIfServerUnavailable } from "../utils/fixtures"
@@ -40,7 +42,7 @@ test.describe("Notes P0 reproductions", () => {
     authedPage,
     serverInfo,
     request,
-  }, testInfo) => {
+  }) => {
     skipIfServerUnavailable(serverInfo)
     const api = createSeedApi(request)
     await warmBackendOnce(api)
@@ -57,20 +59,15 @@ test.describe("Notes P0 reproductions", () => {
     await expect(footer).toBeVisible()
     const shownTotal = Number((await footer.innerText()).match(/of (\d+)$/)?.[1])
 
-    await expectKnownDefect(
-      testInfo,
-      { id: "NL-01", issue: 3103, summary: "The notes list is capped at the 100 most recent notes" },
-      () => {
-        expect(shownTotal).toBe(apiTotal)
-      }
-    )
+    // NL-01 (#3103, fixed): the list used to be capped at the 100 most recent notes.
+    expect(shownTotal).toBe(apiTotal)
   })
 
   test("NS-01: an edit made just before in-app navigation is saved or the user is asked", async ({
     authedPage,
     serverInfo,
     request,
-  }, testInfo) => {
+  }) => {
     skipIfServerUnavailable(serverInfo)
     const api = createSeedApi(request)
     await warmBackendOnce(api)
@@ -101,31 +98,26 @@ test.describe("Notes P0 reproductions", () => {
     // The scenario is only valid if we left well inside the 5 s debounce.
     await authedPage.waitForURL("**/chat", { timeout: 3_000 })
 
-    await expectKnownDefect(
-      testInfo,
-      { id: "NS-01", issue: 3102, summary: "Unsaved note edits are discarded on in-app navigation" },
-      async () => {
-        await expect
-          .poll(
-            async () => {
-              const leaveGuard = authedPage.getByRole("dialog").filter({ hasText: /unsaved|leave|discard/i })
-              if (await leaveGuard.isVisible().catch(() => false)) return "asked"
-              const response = await api.get(`/api/v1/notes/${note.id}`)
-              const saved = await response.json()
-              return String(saved?.content ?? "").includes(marker) ? "saved" : "lost"
-            },
-            { timeout: 10_000 }
-          )
-          .not.toBe("lost")
-      }
-    )
+    // NS-01 (#3102, fixed): unsaved note edits used to be discarded on in-app navigation.
+    await expect
+      .poll(
+        async () => {
+          const leaveGuard = authedPage.getByRole("dialog").filter({ hasText: /unsaved|leave|discard/i })
+          if (await leaveGuard.isVisible().catch(() => false)) return "asked"
+          const response = await api.get(`/api/v1/notes/${note.id}`)
+          const saved = await response.json()
+          return String(saved?.content ?? "").includes(marker) ? "saved" : "lost"
+        },
+        { timeout: 10_000 }
+      )
+      .not.toBe("lost")
   })
 
   test("NS-N1: 'Reload notes' after a save conflict keeps the other tab's change", async ({
     authedPage,
     serverInfo,
     request,
-  }, testInfo) => {
+  }) => {
     skipIfServerUnavailable(serverInfo)
     const api = createSeedApi(request)
     await warmBackendOnce(api)
@@ -157,43 +149,49 @@ test.describe("Notes P0 reproductions", () => {
     await pageB.close()
 
     // Tab A, still on version 1, edits and saves: the server rejects it. The
-    // save is explicit because only a manual save shows the conflict toast
-    // with "Reload notes"; a rejected autosave shows just the inline notice.
+    // single conflict panel (NS-03) replaced the "Reload notes" toast; its
+    // "Use their version" is the reload.
     await appendToEditor(pageA, ` ${markerA}`)
     const conflictSave = pageA.waitForResponse(isNotePut(note.id))
     await pageA.getByTestId("notes-save-button").click()
     expect((await conflictSave).status()).toBe(409)
-    const reloadAction = pageA.getByRole("button", { name: "Reload notes", exact: true })
+    const conflictPanel = pageA.getByTestId("notes-save-issue")
+    await expect(conflictPanel).toHaveAttribute("data-kind", "conflict")
+    const reloadAction = conflictPanel.getByTestId("notes-conflict-take-theirs")
     await expect(reloadAction).toBeVisible()
 
-    // Follow the toast's advice, then give tab A's autosave (5 s debounce)
+    // Take the server's version, then give tab A's autosave (5 s debounce)
     // time to run.
     const autosaveAfterReload = pageA
       .waitForResponse(isNotePut(note.id), { timeout: 15_000 })
       .then((response) => response.status(), () => null)
     await reloadAction.click()
+    // The unsaved text is copied to the clipboard first. Where the browser
+    // refuses the clipboard, the app asks before discarding the text.
+    const discardConfirm = pageA
+      .getByRole("dialog")
+      .filter({ hasText: "Use their version?" })
+      .getByRole("button", { name: "Use their version", exact: true })
+    await expect
+      .poll(async () => (await discardConfirm.isVisible()) || !(await conflictPanel.isVisible()), {
+        message: "the reload should finish or ask before discarding the unsaved text",
+      })
+      .toBe(true)
+    if (await discardConfirm.isVisible()) await discardConfirm.click()
     const autosaveStatus = await autosaveAfterReload
     const editorText = await editorA.inputValue()
     const server = await readNote(api, note.id)
 
-    await expectKnownDefect(
-      testInfo,
+    // NS-N1 (#3102, fixed): the reload used to advance the base version without
+    // reloading the text, so autosave overwrote the other tab.
+    expect(
       {
-        id: "NS-N1",
-        issue: 3102,
-        summary: "'Reload notes' advances the base version without reloading, so autosave overwrites the other tab",
+        editorShowsOtherTabsChange: editorText.includes(markerB),
+        serverKeepsOtherTabsChange: server.content.includes(markerB),
       },
-      () => {
-        expect(
-          {
-            editorShowsOtherTabsChange: editorText.includes(markerB),
-            serverKeepsOtherTabsChange: server.content.includes(markerB),
-          },
-          `After 'Reload notes', tab A autosaved (${autosaveStatus ?? "no request"}); ` +
-            `server v${server.version} content: ${JSON.stringify(server.content)}`
-        ).toEqual({ editorShowsOtherTabsChange: true, serverKeepsOtherTabsChange: true })
-      }
-    )
+      `After 'Reload notes', tab A autosaved (${autosaveStatus ?? "no request"}); ` +
+        `server v${server.version} content: ${JSON.stringify(server.content)}`
+    ).toEqual({ editorShowsOtherTabsChange: true, serverKeepsOtherTabsChange: true })
   })
 
   test("NE-04: 'Print / Save as PDF' prints the note without a pop-up error", async ({

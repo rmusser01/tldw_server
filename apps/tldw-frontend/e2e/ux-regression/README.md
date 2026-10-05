@@ -143,15 +143,21 @@ Determinism:
 
 | Id | Issue | Spec |
 |---|---|---|
+| NE-04 Print / Save as PDF always fails with a pop-up error | #3117 | `notes-p0.spec.ts` |
+
+Fixed, and now guarded by a plain assertion in the same test:
+
+| Id | Issue | Spec |
+|---|---|---|
 | NL-01 notes list capped at 100 | #3103 | `notes-p0.spec.ts` |
 | NS-01 edits lost on in-app navigation | #3102 | `notes-p0.spec.ts` |
-| NS-N1 "Reload notes" after a save conflict overwrites the other tab | #3102 | `notes-p0.spec.ts` |
-| NE-04 Print / Save as PDF always fails with a pop-up error | #3117 | `notes-p0.spec.ts` |
-| CS-02 chat history search ignores message content | #3108 | `chat-p0.spec.ts` |
-| XS-01 opening a past chat from side-panel search overwrites the current tab | #3105 | `sidepanel-p0.spec.ts` |
-| XS-07 side-panel "Delete" only closes the tab | #3105 | `sidepanel-p0.spec.ts` |
-| XS-07 side-panel "Rename" only relabels the tab | #3105 | `sidepanel-p0.spec.ts` |
-| XP-08 a reopened side panel never refreshes its chat from the server | #3105 | `sidepanel-p0.spec.ts` |
+| NS-N1 reloading after a save conflict overwrote the other tab | #3102 | `notes-p0.spec.ts` |
+| NE-01 WYSIWYG typed text backwards | #3102 | `notes-wysiwyg.spec.ts` |
+| CS-02 chat history search ignored message content | #3108 | `chat-p0.spec.ts` |
+| XS-01 opening a past chat from side-panel search overwrote the current tab | #3105 | `sidepanel-p0.spec.ts` |
+| XS-07 side-panel "Delete" only closed the tab | #3105 | `sidepanel-p0.spec.ts` |
+| XS-07 side-panel "Rename" only relabelled the tab | #3105 | `sidepanel-p0.spec.ts` |
+| XP-08 a reopened side panel never refreshed its chat from the server | #3105 | `sidepanel-p0.spec.ts` |
 
 Chat reproductions here seed saved chats through the API
 (`createCharacter`, `createChatWithMessages`) and never send from the

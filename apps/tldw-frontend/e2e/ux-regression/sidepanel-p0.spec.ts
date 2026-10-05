@@ -1,7 +1,7 @@
 /**
- * Extension side-panel reproductions from the 2026-10-02 UX review (G04,
- * #3105; tracking #3101). Each test fails loudly once its defect is fixed; see
- * e2e/ux-regression/README.md.
+ * Extension side-panel tests from the 2026-10-02 UX review (G04, #3105;
+ * tracking #3101). XS-01, XS-07 and XP-08 are fixed and guard their fixes with
+ * plain assertions; see e2e/ux-regression/README.md.
  *
  * The tests load the built extension into Chromium against the runner's
  * isolated backend (e2e/utils/extension-sidepanel.ts). They seed chats through
@@ -13,7 +13,6 @@ import { createCharacter, createChatWithMessages, createSeedApi, warmBackendOnce
 import { addServerChatMessage, listServerChatMessages, readServerChat, type ServerChatState } from "../utils/chat-api"
 import { SidePanelChat, expect, test, type SidePanelTab } from "../utils/extension-sidepanel"
 import { skipIfServerUnavailable } from "../utils/fixtures"
-import { expectKnownDefect } from "../utils/known-defect"
 
 /** A single lowercase word, so the server's full-text search treats it as one term. */
 const uniqueWord = (prefix: string) =>
@@ -57,7 +56,7 @@ test.describe("Extension side-panel P0 reproductions", () => {
     extension,
     serverInfo,
     request,
-  }, testInfo) => {
+  }) => {
     skipIfServerUnavailable(serverInfo)
     const api = createSeedApi(request)
     await warmBackendOnce(api)
@@ -107,22 +106,17 @@ test.describe("Extension side-panel P0 reproductions", () => {
       return problems
     }
 
-    await expectKnownDefect(
-      testInfo,
-      { id: "XS-01", issue: 3105, summary: "Opening a past chat from side-panel search overwrites the current tab's conversation" },
-      async () => {
-        await expect
-          .poll(misplaced, { timeout: 5_000, message: "each side-panel tab should hold only its own chat" })
-          .toEqual([])
-      }
-    )
+    // XS-01 (#3105, fixed): opening a past chat from search used to overwrite the current tab.
+    await expect
+      .poll(misplaced, { timeout: 5_000, message: "each side-panel tab should hold only its own chat" })
+      .toEqual([])
   })
 
   test("XS-07: 'Delete' on a side-panel chat deletes the conversation, not just its tab", async ({
     extension,
     serverInfo,
     request,
-  }, testInfo) => {
+  }) => {
     skipIfServerUnavailable(serverInfo)
     const api = createSeedApi(request)
     await warmBackendOnce(api)
@@ -135,37 +129,32 @@ test.describe("Extension side-panel P0 reproductions", () => {
 
     await panel.chooseTabMenuItem(chat.title, "Delete")
     const dialog = panel.page.getByRole("dialog", { name: "Delete conversation" })
-    await expect(dialog).toContainText("cannot be undone")
-    await dialog.getByRole("button", { name: "Delete", exact: true }).click()
+    await expect(dialog).toContainText("moves to Trash")
+    await dialog.getByRole("button", { name: "Move to Trash", exact: true }).click()
     await expect(dialog).toBeHidden()
     // Precondition: the delete went through in the UI (the tab is gone).
     await expect(panel.tabRow(chat.title)).toHaveCount(0)
 
-    await expectKnownDefect(
-      testInfo,
-      { id: "XS-07", issue: 3105, summary: "'Delete — cannot be undone' on a side-panel chat only closes the tab" },
-      async () => {
-        const server = await settleServerChat(api, chat.chatId)
-        await panel.search(chat.title)
-        const noMatches = panel.sidebar.getByText("No matches found")
-        await expect(panel.searchResult(chat.title).or(noMatches).first()).toBeVisible()
-        const listed = await panel.searchResult(chat.title).allInnerTexts()
-        expect(
-          {
-            server: server.deleted ? "deleted" : `still saved (GET returns ${server.status})`,
-            sidePanelSearch: listed.length ? `still lists it: ${listed.join(" | ").replace(/\s+/g, " ")}` : "no match",
-          },
-          "Delete should remove the conversation from the server and from side-panel search"
-        ).toEqual({ server: "deleted", sidePanelSearch: "no match" })
-      }
-    )
+    // XS-07 (#3105, fixed): Delete used to close the tab and leave the chat on the server.
+    const server = await settleServerChat(api, chat.chatId)
+    await panel.search(chat.title)
+    const noMatches = panel.sidebar.getByText("No matches found")
+    await expect(panel.searchResult(chat.title).or(noMatches).first()).toBeVisible()
+    const listed = await panel.searchResult(chat.title).allInnerTexts()
+    expect(
+      {
+        server: server.deleted ? "deleted" : `still saved (GET returns ${server.status})`,
+        sidePanelSearch: listed.length ? `still lists it: ${listed.join(" | ").replace(/\s+/g, " ")}` : "no match",
+      },
+      "Delete should remove the conversation from the server and from side-panel search"
+    ).toEqual({ server: "deleted", sidePanelSearch: "no match" })
   })
 
   test("XS-07: 'Rename' on a side-panel chat renames the conversation, not just its tab", async ({
     extension,
     serverInfo,
     request,
-  }, testInfo) => {
+  }) => {
     skipIfServerUnavailable(serverInfo)
     const api = createSeedApi(request)
     await warmBackendOnce(api)
@@ -185,25 +174,20 @@ test.describe("Extension side-panel P0 reproductions", () => {
     // Precondition: the rename went through in the UI.
     await expect(panel.tabRow(newTitle)).toBeVisible()
 
-    await expectKnownDefect(
-      testInfo,
-      { id: "XS-07", issue: 3105, summary: "'Rename' on a side-panel chat only relabels the local tab" },
-      async () => {
-        await expect
-          .poll(async () => (await readServerChat(api, chat.chatId)).title, {
-            timeout: 5_000,
-            message: "the server's chat should carry the new title",
-          })
-          .toBe(newTitle)
-      }
-    )
+    // XS-07 (#3105, fixed): Rename used to relabel only the local tab.
+    await expect
+      .poll(async () => (await readServerChat(api, chat.chatId)).title, {
+        timeout: 5_000,
+        message: "the server's chat should carry the new title",
+      })
+      .toBe(newTitle)
   })
 
   test("XP-08: a reopened side panel shows turns added to its chat elsewhere", async ({
     extension,
     serverInfo,
     request,
-  }, testInfo) => {
+  }) => {
     skipIfServerUnavailable(serverInfo)
     const api = createSeedApi(request)
     await warmBackendOnce(api)
@@ -236,15 +220,10 @@ test.describe("Extension side-panel P0 reproductions", () => {
     // Precondition: the panel restored the chat.
     await expect(reopened.transcript.getByText(chat.answer)).toBeVisible()
 
-    await expectKnownDefect(
-      testInfo,
-      { id: "XP-08", issue: 3105, summary: "Side-panel tabs never refresh from the server, so a reopened panel shows a stale chat" },
-      async () => {
-        await expect(
-          reopened.transcript.getByText(reply).or(reopened.page.getByText(STALE_NOTICE)).first(),
-          "the reopened side panel should show the turn added in another client, or warn that its copy is out of date"
-        ).toBeVisible({ timeout: 10_000 })
-      }
-    )
+    // XP-08 (#3105, fixed): side-panel tabs used never to refresh from the server.
+    await expect(
+      reopened.transcript.getByText(reply).or(reopened.page.getByText(STALE_NOTICE)).first(),
+      "the reopened side panel should show the turn added in another client, or warn that its copy is out of date"
+    ).toBeVisible({ timeout: 10_000 })
   })
 })
