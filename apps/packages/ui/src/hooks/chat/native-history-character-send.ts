@@ -169,7 +169,13 @@ export const sendNativeHistoryCharacter = async (
         if (!params.characterId)
           throw new Error("native_history_character_required")
         const created = await tldwClient.createChat(
-          { character_id: params.characterId },
+          {
+            character_id: params.characterId,
+            provider,
+            model,
+            ...(settings.temperature != null ? { temperature: settings.temperature } : {}),
+            ...(settings.topP != null ? { top_p: settings.topP } : {})
+          },
           {
             scope: params.scope,
             signal: snapshot.scopeSignal,

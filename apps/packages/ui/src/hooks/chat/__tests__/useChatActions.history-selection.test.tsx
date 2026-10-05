@@ -1416,14 +1416,20 @@ it.each(["asset", "temporary", "local-owner"])(
   }
 )
 
-it.each([false, true])(
-  "native first creation is fenced around its ACK (navigation=%s)",
-  async (navigate) => {
+it.each([
+  { navigate: false, model: "deepseek-chat", provider: "openai", modelId: "deepseek-chat", defaults: false },
+  { navigate: true, model: "deepseek-chat", provider: "openai", modelId: "deepseek-chat", defaults: false },
+  { navigate: false, model: "ollama:gemma3:4b", provider: "ollama", modelId: "gemma3:4b", defaults: true }
+])(
+  "native first creation captures setup and fences its ACK (model=$model, navigation=$navigate)",
+  async ({ navigate, model, provider, modelId, defaults }) => {
     const options = {
       ...createHookOptions(),
       historyId: null,
       serverChatId: null,
       serverChatCharacterId: null,
+      selectedModel: model,
+      currentChatModelSettings: defaults ? { apiProvider: "openai" } : { apiProvider: "openai", temperature: 0, topP: 0 },
       selectedAssistant: {
         kind: "character",
         id: "12",
@@ -1464,12 +1470,19 @@ it.each([false, true])(
       await result.current.onSubmit({ message: "next", image: "" })
     })
     expect(createChatMock).toHaveBeenCalledOnce()
+    expect(createChatMock).toHaveBeenCalledWith(
+      defaults
+        ? { character_id: "12", provider, model: modelId }
+        : { character_id: "12", provider, model: modelId, temperature: 0, top_p: 0 },
+      expect.objectContaining({ requestScope: expect.objectContaining({ userId: "alice" }) })
+    )
     if (navigate) {
       expect(h1.wire).not.toHaveBeenCalled()
       expect(load).not.toHaveBeenCalled()
       expect(options.setServerChatId).not.toHaveBeenCalled()
     } else {
       expect(h1.wire).toHaveBeenCalledOnce()
+      expect(h1.wire.mock.calls[0][0]).toMatchObject({ model: modelId, api_provider: provider })
       expect(
         h1.wire.mock.calls[0][0].tldw_history_selection_v1.messages
       ).toEqual([])
