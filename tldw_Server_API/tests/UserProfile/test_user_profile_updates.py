@@ -131,31 +131,31 @@ def test_committed_quota_status_and_mfa_updates_strictly_advance_profile_version
 
             versions = [await reader.read(user_id)]
             quota_service = StorageQuotaService(db_pool=pool)
-            await quota_service.set_user_quota(user_id, original_quota + 1)
-            versions.append(await reader.read(user_id))
+            try:
+                await quota_service.set_user_quota(user_id, original_quota + 1)
+                versions.append(await reader.read(user_id))
 
-            await users.update_user(user_id, is_active=not original_active)
-            versions.append(await reader.read(user_id))
-            await users.update_user(user_id, is_active=original_active)
+                await users.update_user(user_id, is_active=not original_active)
+                versions.append(await reader.read(user_id))
+                await users.update_user(user_id, is_active=original_active)
 
-            mfa_repo = AuthnzMfaRepo(pool)
-            await mfa_repo.set_mfa_config(
-                user_id=user_id,
-                encrypted_secret="encrypted-test-secret",
-                backup_codes_json="[]",
-                updated_at=datetime.now(timezone.utc),
-            )
-            versions.append(await reader.read(user_id))
+                mfa_repo = AuthnzMfaRepo(pool)
+                await mfa_repo.set_mfa_config(
+                    user_id=user_id,
+                    encrypted_secret="encrypted-test-secret",
+                    backup_codes_json="[]",
+                    updated_at=datetime.now(timezone.utc),
+                )
+                versions.append(await reader.read(user_id))
 
-            await mfa_repo.clear_mfa_config(
-                user_id=user_id,
-                updated_at=datetime.now(timezone.utc),
-            )
-            # Restore to "no override" (None), not the legacy column's default: under
-            # the new contract set_user_quota writes a durable user_config_overrides
-            # row, so writing back a concrete number here would leak a stale 5120
-            # override into every later test that reads this user's quota.
-            await quota_service.set_user_quota(user_id, None)
+                await mfa_repo.clear_mfa_config(
+                    user_id=user_id,
+                    updated_at=datetime.now(timezone.utc),
+                )
+            finally:
+                # Always restore "no override" (None): set_user_quota writes a durable
+                # user_config_overrides row that would otherwise leak into later tests.
+                await quota_service.set_user_quota(user_id, None)
             return tuple(versions)
 
         before, after_quota, after_status, after_mfa = _run_async(

@@ -81,10 +81,15 @@ def test_admin_create_with_quota_writes_override(auth_headers: dict) -> None:
             )
             return int(info["user_id"])
 
-        new_id = asyncio.run(_create(f"quota250{suffix}", f"quota250-{suffix}@example.com", 250))
-        other_id = asyncio.run(_create(f"quotanone{suffix}", f"quotanone-{suffix}@example.com", None))
-        assert quota(new_id) == 250
-        assert quota(other_id) is None
+        new_id = None
+        try:
+            new_id = asyncio.run(_create(f"quota250{suffix}", f"quota250-{suffix}@example.com", 250))
+            other_id = asyncio.run(_create(f"quotanone{suffix}", f"quotanone-{suffix}@example.com", None))
+            assert quota(new_id) == 250
+            assert quota(other_id) is None
+        finally:
+            if new_id is not None:
+                patch_quota(client, auth_headers, new_id, None)
 
 
 def test_team_storage_value_enforced_and_user_value_wins(auth_headers: dict) -> None:

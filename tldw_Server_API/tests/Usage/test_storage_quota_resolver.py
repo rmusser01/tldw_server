@@ -3,6 +3,7 @@
 import pytest
 
 from tldw_Server_API.app.core import config as config_module
+from tldw_Server_API.app.core.Storage import generated_file_helpers
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError
 from tldw_Server_API.app.core.Usage import quota_resolver
 from tldw_Server_API.app.services import storage_quota_service as sqs
@@ -85,6 +86,25 @@ async def test_switch_off_admits_past_stale_column(monkeypatch: pytest.MonkeyPat
     svc._initialized = True
     ok, info = await svc.check_quota(7, 5 * 1024 * MB + MB)
     assert ok is True and info["quota_mb"] is None
+
+
+async def test_generated_file_preflight_admits_past_stale_column(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Quotas off: the generated-file admit path ignores the 5120 column and admits 5 GB + 1 MB."""
+    monkeypatch.delenv("USAGE_QUOTAS_ENABLED", raising=False)
+    monkeypatch.delenv("LIMIT_ENFORCEMENT_ENABLED", raising=False)
+    monkeypatch.setattr(config_module, "load_comprehensive_config", lambda *a, **k: None)
+    svc = sqs.StorageQuotaService(db_pool=_Pool())
+    svc._initialized = True
+
+    async def _get_service():
+        """The real service over the stub pool."""
+        return svc
+
+    monkeypatch.setattr(generated_file_helpers, "get_storage_service", _get_service)
+    returned = await generated_file_helpers._preflight_generated_file_write(
+        user_id=7, file_size_bytes=5 * 1024 * MB + MB, org_id=None, team_id=None, check_quota=True
+    )
+    assert returned is svc
 
 
 async def test_combined_pool_denial_raises_quota_exceeded(service, monkeypatch: pytest.MonkeyPatch) -> None:
