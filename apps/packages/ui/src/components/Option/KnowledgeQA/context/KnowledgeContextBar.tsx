@@ -6,7 +6,7 @@ import type { KnowledgeSourceHealthState } from "../types"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { cn } from "@/libs/utils"
-import { Popover, Tooltip } from "antd"
+import { Modal, Popover, Tooltip } from "antd"
 import {
   ChevronDown,
   Layers,
@@ -27,6 +27,7 @@ import {
   getRagSourceLabel,
   isRagSource,
 } from "@/services/rag/sourceMetadata"
+import { containDialogTab } from "../dialogKeyboard"
 import { AnswerModelMenu } from "./AnswerModelMenu"
 import {
   EMPTY_SOURCE_HEALTH_STATE,
@@ -731,21 +732,19 @@ export function KnowledgeContextBar({
   )
 
   useEffect(() => {
-    if (!sourceMenuOpen && !granularMenuOpen) return
+    if (!sourceMenuOpen) return
 
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node
       if (sourceMenuRef.current?.contains(target)) return
       if (granularMenuRef.current?.contains(target)) return
       setSourceMenuOpen(false)
-      setGranularMenuOpen(false)
     }
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
       event.preventDefault()
       event.stopPropagation()
       setSourceMenuOpen(false)
-      setGranularMenuOpen(false)
     }
 
     document.addEventListener("mousedown", handleClickOutside)
@@ -754,7 +753,7 @@ export function KnowledgeContextBar({
       document.removeEventListener("mousedown", handleClickOutside)
       document.removeEventListener("keydown", handleEscape, true)
     }
-  }, [sourceMenuOpen, granularMenuOpen])
+  }, [sourceMenuOpen])
 
   useEffect(() => {
     if (!granularMenuOpen) return
@@ -764,14 +763,6 @@ export function KnowledgeContextBar({
       granularLoadRequestIdRef.current += 1
     }
   }, [granularMenuOpen, granularReload, loadGranularOptions])
-
-  useEffect(() => {
-    if (!granularMenuOpen) return
-    const focusTimer = window.setTimeout(() => {
-      granularSearchInputRef.current?.focus()
-    }, 0)
-    return () => window.clearTimeout(focusTimer)
-  }, [granularMenuOpen, granularTab])
 
   const toggleSource = (sourceKey: RagSource) => {
     const exists = normalizedSources.includes(sourceKey)
@@ -890,27 +881,32 @@ export function KnowledgeContextBar({
     onIncludeNoteIdsChange(recentIds)
   }
 
-  const handleGranularMenuKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    const target = event.target
-    const targetElement = target instanceof HTMLElement ? target : null
-    const isFormControl =
-      targetElement instanceof HTMLInputElement ||
-      targetElement instanceof HTMLTextAreaElement ||
-      targetElement instanceof HTMLSelectElement
+  const handleGranularMenuKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const target = event.target
+      const targetElement = target instanceof HTMLElement ? target : null
+      const isFormControl =
+        targetElement instanceof HTMLInputElement ||
+        targetElement instanceof HTMLTextAreaElement ||
+        targetElement instanceof HTMLSelectElement
 
-    if (isFormControl) return
+      if (isFormControl) return
 
-    if (event.key === "]") {
-      event.preventDefault()
-      setGranularTab("notes")
-    } else if (event.key === "[") {
-      event.preventDefault()
-      setGranularTab("media")
-    } else if (event.key === "/") {
-      event.preventDefault()
-      granularSearchInputRef.current?.focus()
-    }
-  }, [])
+      if (event.key === "]") {
+        event.preventDefault()
+        setGranularTab("notes")
+        requestAnimationFrame(() => granularSearchInputRef.current?.focus())
+      } else if (event.key === "[") {
+        event.preventDefault()
+        setGranularTab("media")
+        requestAnimationFrame(() => granularSearchInputRef.current?.focus())
+      } else if (event.key === "/") {
+        event.preventDefault()
+        granularSearchInputRef.current?.focus()
+      }
+    },
+    [],
+  )
 
   // ---- Saved search profile handlers ----
 
@@ -1063,7 +1059,10 @@ export function KnowledgeContextBar({
                           className="rounded px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-hover hover:text-text transition-colors"
                           onClick={onRefreshSourceHealth}
                         >
-                          {t("contextBar.refreshSourceHealth", "Refresh source health")}
+                          {t(
+                            "contextBar.refreshSourceHealth",
+                            "Refresh source health",
+                          )}
                         </button>
                       ) : null}
                       <button
@@ -1095,7 +1094,7 @@ export function KnowledgeContextBar({
                           onClick={() => toggleSource(option.key)}
                           className={cn(
                             "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors",
-                            selected ? "bg-primary/10 text-primaryStrong" : "hover:bg-surface2 text-text"
+                            selected ? "bg-primary/10 text-primaryStrong" : "hover:bg-surface2 text-text",
                           )}
                         >
                           <span className="flex flex-col">
@@ -1125,7 +1124,7 @@ export function KnowledgeContextBar({
                     <p className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
                       {t(
                         "contextBar.noSourcesSelected",
-                        "No sources selected. Searches may return empty results."
+                        "No sources selected. Searches may return empty results.",
                       )}
                     </p>
                   ) : null}
@@ -1137,6 +1136,7 @@ export function KnowledgeContextBar({
               <button
                 type="button"
                 onClick={() => {
+                  setSourceMenuOpen(false)
                   setGranularMenuOpen((previous) => !previous)
                   setGranularQuery("")
                   setGranularPage(1)
@@ -1154,24 +1154,56 @@ export function KnowledgeContextBar({
                 )}
                 <ChevronDown className="h-3.5 w-3.5 text-text-muted" />
               </button>
-              {granularMenuOpen ? (
+              <Modal
+                open={granularMenuOpen}
+                modalRender={(node) => (
+                  <div
+                    onKeyDown={(event) => {
+                      containDialogTab(event)
+                      handleGranularMenuKeyDown(event)
+                    }}
+                  >
+                    {node}
+                  </div>
+                )}
+                title="Specific source selector"
+                onCancel={() => setGranularMenuOpen(false)}
+                width={720}
+                footer={
+                  <button
+                    type="button"
+                    className="rounded-md border border-border px-4 py-2"
+                    onClick={() => setGranularMenuOpen(false)}
+                  >
+                    Done
+                  </button>
+                }
+                styles={{
+                  body: {
+                    maxHeight: "calc(100dvh - 14rem)",
+                    overflowY: "auto",
+                  },
+                }}
+                afterOpenChange={(open) => {
+                  if (open) granularSearchInputRef.current?.focus()
+                }}
+              >
                 <div
                   id="knowledge-granular-source-menu"
-                  role="dialog"
-                  aria-label="Specific source selector"
                   aria-keyshortcuts="[ ] /"
-                  onKeyDown={handleGranularMenuKeyDown}
-                className="absolute left-0 z-30 mt-2 w-[28rem] max-w-[85vw] rounded-lg border border-border/80 bg-surface p-3 shadow-lg"
-              >
+                >
                   <div className="mb-2 flex items-start justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-                        {t("contextBar.specificSourceScope", "Specific source scope")}
+                        {t(
+                          "contextBar.specificSourceScope",
+                          "Specific source scope",
+                        )}
                       </p>
                       <p className="text-xs text-text-muted">
                         {t(
                           "contextBar.specificSourceDescription",
-                          "Choose exact docs or notes. Leave this empty to search all items inside selected categories."
+                          "Choose exact docs or notes. Leave this empty to search all items inside selected categories.",
                         )}
                       </p>
                     </div>
@@ -1189,13 +1221,16 @@ export function KnowledgeContextBar({
                       type="button"
                       onClick={() => {
                         setGranularTab("media")
+                        requestAnimationFrame(() =>
+                          granularSearchInputRef.current?.focus(),
+                        )
                         setGranularPage(1)
                       }}
                       className={cn(
                         "inline-flex h-7 items-center rounded-md px-2 text-[11px] font-medium transition-colors",
                         granularTab === "media"
                           ? "bg-primary text-white"
-                          : "text-text hover:bg-surface2"
+                          : "text-text hover:bg-surface2",
                       )}
                     >
                       {t("contextBar.documentsAndMedia", "Documents & Media")} (
@@ -1205,13 +1240,16 @@ export function KnowledgeContextBar({
                       type="button"
                       onClick={() => {
                         setGranularTab("notes")
+                        requestAnimationFrame(() =>
+                          granularSearchInputRef.current?.focus(),
+                        )
                         setGranularPage(1)
                       }}
                       className={cn(
                         "inline-flex h-7 items-center rounded-md px-2 text-[11px] font-medium transition-colors",
                         granularTab === "notes"
                           ? "bg-primary text-white"
-                          : "text-text hover:bg-surface2"
+                          : "text-text hover:bg-surface2",
                       )}
                     >
                       {t("contextBar.notes", "Notes")} (
@@ -1231,6 +1269,9 @@ export function KnowledgeContextBar({
                   <label className="mb-2 flex h-9 items-center gap-2 rounded-md border border-border bg-surface2/70 px-2">
                     <Search className="h-3.5 w-3.5 text-text-muted" />
                     <input
+                      aria-label={t("contextBar.findDocumentsOrNotes", {
+                        defaultValue: "Find documents or notes",
+                      })}
                       ref={granularSearchInputRef}
                       type="text"
                       value={granularQuery}
@@ -1240,8 +1281,14 @@ export function KnowledgeContextBar({
                       }}
                       placeholder={
                         granularTab === "media"
-                          ? t("contextBar.filterDocsPlaceholder", "Filter docs by title")
-                          : t("contextBar.filterNotesPlaceholder", "Filter notes by title")
+                          ? t(
+                              "contextBar.filterDocsPlaceholder",
+                              "Filter docs by title",
+                            )
+                          : t(
+                              "contextBar.filterNotesPlaceholder",
+                              "Filter notes by title",
+                            )
                       }
                       className="w-full bg-transparent text-[11px] text-text outline-none placeholder:text-text-muted"
                     />
@@ -1251,41 +1298,65 @@ export function KnowledgeContextBar({
                     <label className="text-[11px] font-medium text-text-muted">
                       {t("contextBar.sourceStatus", "Source status")}
                       <select
-                        aria-label={t("contextBar.sourceStatus", "Source status")}
+                        aria-label={t(
+                          "contextBar.sourceStatus",
+                          "Source status",
+                        )}
                         value={granularStatusFilter}
                         onChange={(event) => setGranularStatusFilter(event.target.value)}
                         className="mt-1 h-8 w-full rounded-md border border-border bg-surface2 px-2 text-[11px] text-text outline-none focus:border-primary"
                       >
-                        <option value="all">{t("contextBar.allStatuses", "All statuses")}</option>
+                        <option value="all">
+                          {t("contextBar.allStatuses", "All statuses")}
+                        </option>
                         <option value="ready">{READY_STATE_LABEL}</option>
-                        <option value="indexing">{t("contextBar.indexing", "Indexing")}</option>
+                        <option value="indexing">
+                          {t("contextBar.indexing", "Indexing")}
+                        </option>
                         <option value="error">{ERROR_STATE_LABEL}</option>
-                        <option value="unavailable">{UNAVAILABLE_STATE_LABEL}</option>
+                        <option value="unavailable">
+                          {UNAVAILABLE_STATE_LABEL}
+                        </option>
                       </select>
                     </label>
 
                     <label className="text-[11px] font-medium text-text-muted">
                       {t("contextBar.recentImports", "Recent imports")}
                       <select
-                        aria-label={t("contextBar.recentImports", "Recent imports")}
+                        aria-label={t(
+                          "contextBar.recentImports",
+                          "Recent imports",
+                        )}
                         value={granularRecentFilter}
                         onChange={(event) => setGranularRecentFilter(event.target.value)}
                         className="mt-1 h-8 w-full rounded-md border border-border bg-surface2 px-2 text-[11px] text-text outline-none focus:border-primary"
                       >
-                        <option value="all">{t("contextBar.allDates", "All dates")}</option>
-                        <option value="recent">{t("contextBar.recentImports", "Recent imports")}</option>
+                        <option value="all">
+                          {t("contextBar.allDates", "All dates")}
+                        </option>
+                        <option value="recent">
+                          {t("contextBar.recentImports", "Recent imports")}
+                        </option>
                       </select>
                     </label>
 
                     <label className="text-[11px] font-medium text-text-muted">
                       {t("contextBar.workspaceScope", "Workspace scope")}
                       <select
-                        aria-label={t("contextBar.workspaceScope", "Workspace scope")}
+                        aria-label={t(
+                          "contextBar.workspaceScope",
+                          "Workspace scope",
+                        )}
                         value={granularWorkspaceFilter}
                         onChange={(event) => setGranularWorkspaceFilter(event.target.value)}
                         className="mt-1 h-8 w-full rounded-md border border-border bg-surface2 px-2 text-[11px] text-text outline-none focus:border-primary"
                       >
-                        <option value="">{t("contextBar.noWorkspaceScope", "No workspace scope")}</option>
+                        <option value="">
+                          {t(
+                            "contextBar.noWorkspaceScope",
+                            "No workspace scope",
+                          )}
+                        </option>
                         {workspaceOptions.map((workspace) => (
                           <option key={workspace.id} value={workspace.id}>
                             {workspace.label}
@@ -1384,7 +1455,10 @@ export function KnowledgeContextBar({
                   {granularLoading ? (
                     <div className="flex items-center justify-center gap-2 rounded-md border border-border/80 bg-surface2/60 py-8 text-xs text-text-muted">
                       <LoaderCircle className="h-4 w-4 animate-spin" />
-                      {t("contextBar.loadingAvailableSources", "Loading available sources...")}
+                      {t(
+                        "contextBar.loadingAvailableSources",
+                        "Loading available sources...",
+                      )}
                     </div>
                   ) : null}
 
@@ -1395,12 +1469,18 @@ export function KnowledgeContextBar({
                   ) : null}
 
                   {!granularLoading && !granularError ? (
-                    <div className="max-h-64 overflow-y-auto rounded-md border border-border/80 bg-surface2/40">
+                    <div className="rounded-md border border-border/80 bg-surface2/40">
                       {activeGranularOptions.length === 0 ? (
                         <p className="px-3 py-6 text-center text-xs text-text-muted">
                           {granularTab === "media"
-                            ? t("contextBar.noMatchingDocuments", "No matching documents.")
-                            : t("contextBar.noMatchingNotes", "No matching notes.")}
+                            ? t(
+                                "contextBar.noMatchingDocuments",
+                                "No matching documents.",
+                              )
+                            : t(
+                                "contextBar.noMatchingNotes",
+                                "No matching notes.",
+                              )}
                         </p>
                       ) : (
                         <ul className="divide-y divide-border" role="list">
@@ -1415,7 +1495,7 @@ export function KnowledgeContextBar({
                                 <label
                                   className={cn(
                                     "flex cursor-pointer items-start gap-2 px-2.5 py-2 text-xs transition-colors",
-                                    selected ? "bg-primary/10" : "hover:bg-surface2"
+                                    selected ? "bg-primary/10" : "hover:bg-surface2",
                                   )}
                                 >
                                   <input
@@ -1431,7 +1511,9 @@ export function KnowledgeContextBar({
                                     className="mt-0.5 rounded border-border"
                                   />
                                   <span className="min-w-0 flex-1">
-                                    <span className="block truncate text-text">{option.label}</span>
+                                    <span className="block truncate text-text">
+                                      {option.label}
+                                    </span>
                                     <span className="block text-[11px] text-text-muted">
                                       {[
                                         t("contextBar.itemId", {
@@ -1451,7 +1533,7 @@ export function KnowledgeContextBar({
                     </div>
                   ) : null}
                 </div>
-              ) : null}
+              </Modal>
             </div>
 
             <button

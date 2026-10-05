@@ -114,12 +114,23 @@ describe("KnowledgeReadyState activation", () => {
     renderReadyState({ hasSources: false, onAddSources })
 
     expect(screen.getByText("Ask Your Library")).toBeInTheDocument()
-    expect(
-      screen.getByText(/This page answers questions over searchable sources/i)
-    ).toBeInTheDocument()
+    const guide = screen.getByRole("button", { name: "How it works" })
+    expect(guide).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(guide)
+    expect(screen.getByText(/This page answers questions over searchable sources/i)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Add sources" }))
+    fireEvent.click(screen.getAllByRole("button", { name: "Add sources" })[0])
     expect(onAddSources).toHaveBeenCalledOnce()
+  })
+
+  it("places Add and Ask before optional guidance and recipes", () => {
+    renderReadyState({ children: <button>Ask</button> })
+    const add = screen.getByRole("button", { name: "Add sources" })
+    const ask = screen.getByRole("button", { name: "Ask" })
+    const guide = screen.getByRole("button", { name: "How it works" })
+    expect(add.compareDocumentPosition(ask) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(ask.compareDocumentPosition(guide) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(guide).toHaveAttribute("aria-expanded", "false")
   })
 
   it("distinguishes no history from a resumable history state", () => {

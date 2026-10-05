@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import "./dialogTestSetup"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { KnowledgeContextBar } from "../context/KnowledgeContextBar"
@@ -114,7 +115,7 @@ describe("KnowledgeContextBar", () => {
     ).toBeInTheDocument()
   })
 
-  it("closes source selectors on Escape before nested controls can trap the event", async () => {
+  it("closes each selector on Escape from its active controls", async () => {
     render(
       <KnowledgeContextBar
         preset="balanced"
@@ -143,14 +144,11 @@ describe("KnowledgeContextBar", () => {
     expect(screen.queryByRole("menu", { name: /Source selector/i })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /Specific:/i }))
-    const specificDialog = await screen.findByRole("dialog", {
+    await screen.findByRole("dialog", {
       name: /Specific source selector/i,
     })
-    specificDialog.addEventListener("keydown", (event) => event.stopPropagation())
-    fireEvent.keyDown(specificDialog, { key: "Escape" })
-    expect(
-      screen.queryByRole("dialog", { name: /Specific source selector/i })
-    ).not.toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Find documents or notes" }), { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Specific source selector/i })).not.toBeInTheDocument())
   })
 
   it("labels answer generation as Server default until the user chooses an explicit provider or model", () => {

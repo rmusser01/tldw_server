@@ -1,4 +1,6 @@
+import "./dialogTestSetup"
 import React from "react"
+import userEvent from "@testing-library/user-event"
 import {
   act,
   waitFor,
@@ -26,6 +28,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     searchMedia: vi.fn(),
     searchNotes: vi.fn(),
   },
+}))
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string, fallback?: string | { defaultValue?: string }) => typeof fallback === "string" ? fallback : fallback?.defaultValue ?? key })
 }))
 
 const mediaItems = [
@@ -105,11 +111,27 @@ describe("KnowledgeContextBar scalable source picker", () => {
     vi.clearAllMocks()
   })
 
+  it("names the exact-source search and returns focus after choosing Done", async () => {
+    const user = userEvent.setup()
+    renderContextBar()
+    const trigger = screen.getByRole("button", { name: /Specific:/i })
+    await user.click(trigger)
+    const dialog = screen.getByRole("dialog", { name: "Specific source selector" })
+    const filter = screen.getByRole("textbox", { name: "Find documents or notes" })
+    await waitFor(() => expect(filter).toHaveFocus())
+    for (let i = 0; i < 18; i++) {
+      await user.tab({ shift: i >= 6 })
+      expect(dialog.contains(document.activeElement)).toBe(true)
+    }
+    await user.click(within(dialog).getByRole("button", { name: "Done" }))
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
   it("filters specific sources by status, recent imports, and explicit workspace scope", async () => {
     renderContextBar()
     await openSpecificSources()
 
-    expect(screen.getByPlaceholderText("Filter docs by title")).toHaveFocus()
+    await waitFor(() => expect(screen.getByPlaceholderText("Filter docs by title")).toHaveFocus())
     expect(screen.queryByText("Generated Fixture")).not.toBeInTheDocument()
     expect(screen.queryByText("Workspace Scratch")).not.toBeInTheDocument()
     expect(screen.getByText(/ID: 42/)).toBeInTheDocument()
@@ -145,14 +167,14 @@ describe("KnowledgeContextBar scalable source picker", () => {
     await openSpecificSources()
 
     const dialog = screen.getByRole("dialog", { name: "Specific source selector" })
-    fireEvent.keyDown(dialog, {
+    fireEvent.keyDown(within(dialog).getByRole("button", { name: /Documents & Media/ }), {
       key: "]",
     })
 
     expect(within(dialog).getByRole("button", { name: /Notes/ })).toHaveClass("bg-primary")
-    expect(screen.getByPlaceholderText("Filter notes by title")).toHaveFocus()
+    await waitFor(() => expect(screen.getByPlaceholderText("Filter notes by title")).toHaveFocus())
 
-    fireEvent.keyDown(dialog, {
+    fireEvent.keyDown(within(dialog).getByRole("button", { name: /Notes/ }), {
       key: "[",
     })
 
