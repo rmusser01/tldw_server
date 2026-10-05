@@ -561,7 +561,11 @@ jobs:
           fi
 
   frontend-required:
-    name: ${{ github.event_name == 'workflow_dispatch' && 'frontend-required-diagnostic' || 'frontend-required' }}
+    # A dispatch started by hand publishes a diagnostic name, so it can never satisfy the
+    # protected check. The one exemption is a dispatch made with GITHUB_TOKEN, whose actor is
+    # github-actions[bot]: that is how the merge queue starts this gate on the head it just
+    # rebased (TASK-13452, spec 4.8).
+    name: ${{ github.event_name == 'workflow_dispatch' && github.actor != 'github-actions[bot]' && 'frontend-required-diagnostic' || 'frontend-required' }}
     runs-on: ubuntu-latest
     needs: [changes, admission, frontend-unit-tests, await_license]
     if: >-
