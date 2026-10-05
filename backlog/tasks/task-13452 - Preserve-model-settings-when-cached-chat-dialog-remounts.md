@@ -4,9 +4,11 @@ title: Preserve model settings when cached chat dialog remounts
 status: In Progress
 assignee: []
 created_date: '2026-10-05 07:36'
-updated_date: '2026-10-05 07:43'
+updated_date: '2026-10-05 07:46'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/3193'
 priority: high
 ---
 
@@ -20,7 +22,7 @@ Staging acceptance reproduced new-chat settings blank on cached dialog remount a
 <!-- AC:BEGIN -->
 - [x] #1 Cached remount displays the current token limit and provider alongside existing prompt settings.
 - [x] #2 Saving a cached remount preserves token limit and provider routing; clearing numeric input still works.
-- [ ] #3 Focused real-component regressions and adjacent scoped-settings tests pass; record upstream PR and hosted backport.
+- [x] #3 Focused real-component regressions and adjacent scoped-settings tests pass; record upstream PR and hosted backport.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -37,6 +39,8 @@ RED: real ModelBasicsTab + shared QueryClient Save/remount returns blank token f
 Correction: Bandit cannot run in the shared Python3.12 venv (No module named bandit), and no standalone bandit executable is installed. This PR changes only TypeScript/React plus task Markdown; no Python executable source. Independent code/security-owner review completed; no claim of a successful Bandit scan.
 
 Final focused run:51/51 passed including real Save/remount/save plus explicit numeric clear/save/remount (four real Antd dialogs; test uses a15s allowance, completed8.2s). Diffcheck clean. Hosted production-only patch023 and strict source-parity test prepared underTASK14.4.74. Shared production SHA2567a05bb6a3dc104728954d285f2c54f42c177ef34cde6e34b2a374e759c71ca32. Change-summary requirement waived by owner in current thread. Actual staging deployment remains pending; this task does not claim betaGO.
+
+Upstream PR3193 opened targeting latestdev49cec71190. Private PR119 headc1f8efb contains exact production-only backport and111 strict focused checks; all1110 hostedfrontend checks pass. Qodo externalreview requested and is running. PublicCI queued; merge pendingCI/review. Local25GB-start/12GB-floor WebUI build started independently, no production target.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
