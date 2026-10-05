@@ -8464,9 +8464,9 @@ async def delete_chat_session(
 
                 # Rows Sync never saw (the chat predates the profile, or a message was saved
                 # by a path that publishes nothing) are deleted directly, as without a
-                # profile. A tombstone for one would be rejected, and for a message it
-                # would block the dataset (#3181). Published rows are tombstoned as before:
-                # every message first, then the chat.
+                # profile. They were never in the log, so there is nothing to retract there
+                # (#3181). Published rows are tombstoned as before: every message first,
+                # then the chat.
                 message_versions = {
                     str(message["id"]): message.get("version", 1) for message in child_messages if message.get("id")
                 }

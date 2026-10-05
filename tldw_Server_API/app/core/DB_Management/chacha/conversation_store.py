@@ -17,6 +17,8 @@ from tldw_Server_API.app.core.DB_Management.chacha.conversation_search_snippets 
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     _CHACHA_NONCRITICAL_EXCEPTIONS,
+    RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID,
+    RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND,
     BackendType,
     CharactersRAGDBError,
     ConflictError,
@@ -427,6 +429,46 @@ class ConversationStore:
         except InputError:
             return False
         return previous == binding
+
+    def is_retired_sync_placeholder_assistant(
+        self,
+        *,
+        assistant_kind: Any,
+        assistant_id: Any,
+        character_id: Any,
+    ) -> bool:
+        """Return whether an identity is the placeholder older Sync projections invented.
+
+        The stored rows were cleared by a migration, but the identity also
+        reached the Sync log: an upsert built from a stored placeholder row
+        carried it, and a device may echo it. It means "no assistant" unless
+        this owner has, or had, a persona profile with exactly that id, in
+        which case the chat names their own persona. This is the same rule the
+        migration applies, so a cleared chat cannot get the placeholder back.
+
+        Args:
+            assistant_kind: The identity's kind, as sent or stored.
+            assistant_id: The identity's id, as sent or stored.
+            character_id: The identity's character, which the placeholder never has.
+
+        Returns:
+            True only for the exact placeholder with no persona profile behind it.
+        """
+        kind = self._db._normalize_nullable_text(assistant_kind)
+        identity = self._db._normalize_nullable_text(assistant_id)
+        if (
+            character_id is not None
+            or kind is None
+            or kind.lower() != RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND
+            or identity != RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID
+        ):
+            return False
+        profile = self._db.get_persona_profile(
+            RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID,
+            user_id=self._db.owner_user_id,
+            include_deleted=True,
+        )
+        return profile is None
 
     def add_conversation(
         self,

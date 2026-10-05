@@ -1314,8 +1314,8 @@ async def delete_message(
         if sync_service is not None:
             try:
                 # A message Sync never saw (it predates the profile, or was saved by a path
-                # that publishes nothing) is deleted directly, as without a profile. A
-                # tombstone for it would be rejected and block the dataset (#3181).
+                # that publishes nothing) is deleted directly, as without a profile. It was
+                # never in the log, so there is nothing to retract there (#3181).
                 published = await run_in_threadpool(
                     delete_unenrolled_server_origin_objects,
                     sync_service,

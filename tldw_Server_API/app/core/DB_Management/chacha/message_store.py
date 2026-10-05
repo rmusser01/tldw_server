@@ -1840,8 +1840,13 @@ class MessageStore:
         sync_client_id: str,
         object_revision: int,
         object_hash: str,
+        owner_client_id: str | None = None,
     ) -> bool:
-        """Soft-delete all projections for a stable message from an accepted Sync v2 tombstone."""
+        """Soft-delete all projections for a stable message from an accepted Sync v2 tombstone.
+
+        ``owner_client_id`` limits the projections to chats that owner holds; see
+        ``get_messages_by_sync_stable_id``.
+        """
 
         normalized_stable_id = str(stable_message_id).strip()
         if not normalized_stable_id:
@@ -1849,7 +1854,9 @@ class MessageStore:
         if object_revision < 1:
             raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
 
-        existing_versions = self.get_messages_by_sync_stable_id(normalized_stable_id, include_deleted=True)
+        existing_versions = self.get_messages_by_sync_stable_id(
+            normalized_stable_id, include_deleted=True, owner_client_id=owner_client_id
+        )
         matched_versions = [
             version
             for version in existing_versions
@@ -1919,16 +1926,85 @@ class MessageStore:
                 self._advance_history_version(conn, affected_conversation_id)
         return True
 
+    def tombstone_unsynced_message_from_sync(
+        self,
+        *,
+        stable_message_id: str,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+    ) -> str:
+        """Make a message the Sync dataset holds no state for absent, and report what that took.
+
+        A device can tombstone a message this server never received through
+        Sync. The end state it asks for is "gone", so there is nothing to
+        conflict with: either no row carries the id, or the only rows are copies
+        kept outside Sync, which the delete now reaches too.
+
+        Rows that carry Sync history of their own are left alone. They were
+        projected from an object state this dataset does not have, so this
+        tombstone is not theirs to apply.
+
+        Only chats owned by ``sync_client_id`` are looked at. The lookup is by
+        message id, and on PostgreSQL one database holds every owner's messages;
+        with no Sync state to tie the id to this owner, the chat's owner is the
+        only thing that does.
+
+        Args:
+            stable_message_id: The message id the tombstone names.
+            sync_client_id: The projection's client id: the owner whose chats are
+                searched, and the id stamped on deleted rows.
+            object_revision: The tombstone's revision.
+            object_hash: The tombstone's payload hash, recorded on deleted rows so
+                a replay of the same tombstone recognises its own work.
+
+        Returns:
+            ``"absent"`` when no row carries the id and nothing changed,
+            ``"deleted"`` when the rows found are now soft-deleted, or
+            ``"foreign"`` when a row belongs to other Sync history and nothing changed.
+        """
+        normalized_stable_id = str(stable_message_id).strip()
+        if not normalized_stable_id:
+            raise InputError("stable_message_id cannot be empty.")  # noqa: TRY003
+
+        owner = str(sync_client_id)
+        existing_versions = self.get_messages_by_sync_stable_id(
+            normalized_stable_id, include_deleted=True, owner_client_id=owner
+        )
+        if not existing_versions:
+            return "absent"
+        for version in existing_versions:
+            sync_meta = ((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {}
+            recorded_hash = sync_meta.get("payload_hash")
+            applied_by_this_tombstone = bool(sync_meta.get("tombstoned")) and recorded_hash == object_hash
+            if recorded_hash and not applied_by_this_tombstone:
+                return "foreign"
+        self.tombstone_message_from_sync(
+            stable_message_id=normalized_stable_id,
+            sync_client_id=sync_client_id,
+            object_revision=object_revision,
+            object_hash=object_hash,
+            owner_client_id=owner,
+        )
+        return "deleted"
+
     def get_messages_by_sync_stable_id(
         self,
         stable_message_id: str,
         *,
         include_deleted: bool = False,
+        owner_client_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Fetch message projections associated with a Sync v2 stable message ID."""
+        """Fetch message projections associated with a Sync v2 stable message ID.
+
+        With ``owner_client_id``, only messages in chats that owner holds are
+        returned. A caller that has no Sync state tying the id to an owner must
+        pass it: the match is by id, across every chat the connection can read.
+        """
 
         self._db._ensure_message_metadata_table()
         deleted_clause = "" if include_deleted else "AND m.deleted = FALSE AND c.deleted = FALSE"
+        owner_clause = "" if owner_client_id is None else "AND c.client_id = ?"
         query = (
             "SELECT m.id, m.conversation_id, m.parent_message_id, m.sender, m.content, "
             "m.image_data, m.image_mime_type, m.timestamp, m.ranking, m.last_modified, "
@@ -1936,10 +2012,14 @@ class MessageStore:
             "FROM messages m "
             "LEFT JOIN message_metadata mm ON mm.message_id = m.id "
             "JOIN conversations c ON c.id = m.conversation_id "
-            f"WHERE 1 = 1 {deleted_clause} "  # nosec B608
+            f"WHERE 1 = 1 {deleted_clause} {owner_clause} "  # nosec B608
             "ORDER BY m.timestamp ASC, m.last_modified ASC, m.id ASC"
         )
-        cursor = self._db.execute_query(query)
+        cursor = (
+            self._db.execute_query(query)
+            if owner_client_id is None
+            else self._db.execute_query(query, (str(owner_client_id),))
+        )
         rows = cursor.fetchall()
         columns = [col[0] for col in cursor.description] if cursor.description else []
         results: list[dict[str, Any]] = []
