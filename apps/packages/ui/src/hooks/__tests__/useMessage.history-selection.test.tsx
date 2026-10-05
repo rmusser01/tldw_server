@@ -1850,3 +1850,112 @@ it("mounted native fork without local history retains an unknown create and neve
   expect(localForks.commit).not.toHaveBeenCalled()
   expect([...memory.forkOperations.rows.values()][0].request.operation_id).toBe(first.operation_id)
 })
+
+
+describe("compact submission outcomes", () => {
+  it("returns the normal helper's completed result", async () => {
+    const { result } = renderHook(() => useMessage())
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.onSubmit({ message: "next", image: "" })
+    })
+    expect(outcome).toEqual({ status: "submitted" })
+    expect(h1.append).toHaveBeenCalledTimes(2)
+  })
+
+  it("returns a failed normal outcome while retaining its accepted input", async () => {
+    h1.wire.mockImplementation(async function* () {
+      yield {}
+      throw new Error("provider refused this request")
+    })
+    const { result } = renderHook(() => useMessage())
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.onSubmit({ message: "next", image: "" })
+    })
+    expect(outcome).toMatchObject({ status: "failed" })
+    expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+      input_text: "next",
+      state: "accepted_unsent"
+    })
+    expect(h1.controller.followResult).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])(
+    "returns submitted after a verified native settlement (late disconnect=%s)",
+    async (lateDisconnect) => {
+      h1.native = true
+      mocks.storeState.serverChatCharacterId = "12"
+      mocks.storeState.serverChatAssistantKind = "character"
+      h1.wire.mockImplementation(async function* (request) {
+        yield { tldw_history_admission_v1: nativeAdmission(request) }
+        yield {
+          tldw_message_id: "owner-result",
+          tldw_conversation_id: "tracked-chat-1"
+        }
+        if (lateDisconnect) throw new Error("late disconnect")
+      })
+      const { result } = renderHook(() => useMessage())
+      let outcome: unknown
+      await act(async () => {
+        outcome = await result.current.onSubmit({ message: "next", image: "" })
+      })
+      expect(outcome).toEqual({ status: "submitted" })
+      expect(h1.dismiss).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.any(String),
+        "completed"
+      )
+    }
+  )
+
+  it("returns failed when native admission has no settlement, keeping the recovery receipt", async () => {
+    h1.native = true
+    mocks.storeState.serverChatCharacterId = "12"
+    mocks.storeState.serverChatAssistantKind = "character"
+    h1.wire.mockImplementation(async function* (request) {
+      yield { tldw_history_admission_v1: nativeAdmission(request) }
+    })
+    const { result } = renderHook(() => useMessage())
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.onSubmit({ message: "next", image: "" })
+    })
+    expect(outcome).toMatchObject({
+      status: "failed",
+      errorMessage: "native_history_persistence_unacknowledged"
+    })
+    expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+      state: "accepted_unsent",
+      input_text: "next"
+    })
+    expect(h1.dismiss).not.toHaveBeenCalled()
+  })
+
+  it("returns an explicit skipped outcome when model selection blocks preparation", async () => {
+    mocks.storeState.selectedModel = ""
+    const { result } = renderHook(() => useMessage())
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.onSubmit({ message: "next", image: "" })
+    })
+    expect(outcome).toMatchObject({ status: "skipped" })
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(h1.append).not.toHaveBeenCalled()
+  })
+
+  it("returns skipped for an unsupported native persona before dispatch", async () => {
+    h1.persona = true
+    const { result } = renderHook(() => useMessage())
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.onSubmit({ message: "next", image: "" })
+    })
+    expect(outcome).toMatchObject({
+      status: "skipped",
+      reason: "native_history_persona_unsupported"
+    })
+    expect(h1.wire).not.toHaveBeenCalled()
+  })
+})

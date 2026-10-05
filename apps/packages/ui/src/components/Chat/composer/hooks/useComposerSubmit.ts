@@ -19,7 +19,8 @@ import React from "react"
  * - `afterSend` runs only if the dispatch resolves. It receives the resolved
  *   `sendMessage` result so callers can distinguish successful submissions
  *   from handled failed/skipped results. On rejection it's skipped and the
- *   error propagates so the caller can render it.
+ *   error propagates so the caller can render it. `onSendError` receives that
+ *   rejection before rethrowing, so the caller can recover its current input.
  */
 
 export interface UseComposerSubmitOptions<TPayload, TResult = unknown> {
@@ -29,6 +30,7 @@ export interface UseComposerSubmitOptions<TPayload, TResult = unknown> {
 export interface ComposerSubmitHooks<TResult = unknown> {
   beforeSend?: () => void
   afterSend?: (result: TResult) => void
+  onSendError?: (error: unknown) => void
 }
 
 export interface UseComposerSubmitResult<TPayload, TResult = unknown> {
@@ -47,7 +49,13 @@ export function useComposerSubmit<TPayload, TResult = unknown>({
   const dispatch = React.useCallback(
     async (payload: TPayload, hooks?: ComposerSubmitHooks<TResult>) => {
       hooks?.beforeSend?.()
-      const result = await sendMessage(payload)
+      let result: TResult
+      try {
+        result = await sendMessage(payload)
+      } catch (error) {
+        hooks?.onSendError?.(error)
+        throw error
+      }
       hooks?.afterSend?.(result)
       return result
     },

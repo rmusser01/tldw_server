@@ -175,7 +175,8 @@ import {
 } from "@/services/chat-document-processing"
 import {
   isChatSubmitSuccess,
-  normalizeChatSubmitResult
+  normalizeChatSubmitResult,
+  throwIfChatSubmitUnsuccessful
 } from "@/hooks/chat/chat-action-utils"
 
 type Props = {
@@ -366,6 +367,7 @@ export const SidepanelForm = ({
     messageRevision,
     promptAssistMutation,
     beginPromptAssistReset,
+    restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     promptAssistSavedAttemptId,
     textAreaFocus: promptAssistReturnFocus,
@@ -2021,10 +2023,15 @@ export const SidepanelForm = ({
             markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
             // Legacy void outcomes can include a swallowed failure.
             if (result !== undefined) clearDraft(promptAssistAttemptId)
+            clearSelectedDocuments()
+            setContextFiles([])
+            setKnowledgeMentionActive(false)
+          } else if (promptAssistAttemptId !== null) {
+            restorePromptAssistAttempt(promptAssistAttemptId)
           }
-          clearSelectedDocuments()
-          setContextFiles([])
-          setKnowledgeMentionActive(false)
+        },
+        onSendError: () => {
+          if (promptAssistAttemptId !== null) restorePromptAssistAttempt(promptAssistAttemptId)
         }
       }
       )
@@ -2649,7 +2656,7 @@ export const SidepanelForm = ({
         ? sourceContext.documents
         : []
 
-      await sendMessage({
+      const result = await sendMessage({
         assertQueuedDispatchCurrent,
         image: sourceContext?.isImageCommand ? "" : item.image,
         message: item.promptText,
@@ -2671,6 +2678,7 @@ export const SidepanelForm = ({
           ? sourceContext.imageBackendOverride
           : undefined
       })
+      throwIfChatSubmitUnsuccessful(result)
     },
     [
       captureQueuedDispatchGuard,

@@ -45,6 +45,7 @@ type DocumentProcessingTurnReservation = {
 export type UsePlaygroundSubmitDeps = {
   form: any
   beginPromptAssistReset: () => number
+  restorePromptAssistAttempt: (attemptId: number) => void
   markPromptAssistAttemptSaved: (attemptId: number, acknowledgedDelivery?: boolean) => void
   isSending: boolean
   isConnectionReady: boolean
@@ -139,6 +140,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   const {
     form,
     beginPromptAssistReset,
+    restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     isSending,
     isConnectionReady,
@@ -588,8 +590,11 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
             if (messageForModel) {
               clearImportedSidepanelContext?.()
             }
+          } else {
+            restorePromptAssistAttempt(promptAssistAttemptId)
           }
-        }
+        },
+        onSendError: () => restorePromptAssistAttempt(promptAssistAttemptId)
       })
       if (openUIRequestMode) {
         clearOpenUIRequestMode()

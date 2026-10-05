@@ -86,6 +86,8 @@ export interface UseComposerTextResult {
   promptAssistMutation: ComposerPromptAssistMutation
   /** Resets the owner and returns the exact optimistic attempt token. */
   beginPromptAssistReset: () => number
+  /** Restore an unsuccessful attempt only if its original composer is still untouched. */
+  restorePromptAssistAttempt: (attemptId: number) => void
   /** Marks a specific owner attempt as definitively sent or enqueued. */
   markPromptAssistAttemptSaved: (attemptId: number, acknowledgedDelivery?: boolean) => void
   /** Most recently completed owner attempt, or null before the first completion. */
@@ -136,7 +138,29 @@ export function useComposerText(
   const [savedAttempt, setSavedAttempt] =
     React.useState<{ id: number; acknowledgedDelivery: boolean } | null>(null)
   const promptAssistSavedAttemptId = savedAttempt?.id ?? null
-  const attemptSourceRef = React.useRef<{ id: number; storageKey: string; address: ChatDraftAddress } | null>(null)
+  const attemptSourceRef = React.useRef<{
+    id: number
+    storageKey: string
+    draftKey: string
+    address: ChatDraftAddress
+    draftRevision: number
+    ownerIsCurrent: () => boolean
+    values: { message: string; image: string }
+    metadata?: DraftMetadataObject
+    messageRevision: number
+    imageRevision: number
+  } | null>(null)
+  const [restoreAttemptId, setRestoreAttemptId] = React.useState<number | null>(
+    null
+  )
+  const imageRevisionRef = React.useRef(0)
+  const previousImageRef = React.useRef(form.values.image)
+  React.useLayoutEffect(() => {
+    if (previousImageRef.current !== form.values.image) {
+      previousImageRef.current = form.values.image
+      imageRevisionRef.current++
+    }
+  }, [form.values.image])
   const previousMessageRef = React.useRef(form.values.message)
   const nextPromptAssistAttemptIdRef = React.useRef(0)
   const pendingPromptAssistResetRef = React.useRef<{
@@ -182,6 +206,7 @@ export function useComposerText(
     pendingPromptAssistResetRef.current = null
     setSavedAttempt(null)
     attemptSourceRef.current = null
+    setRestoreAttemptId(null)
     form.reset()
     restoreWithMetadata?.("", undefined)
   })
@@ -218,15 +243,118 @@ export function useComposerText(
   const beginPromptAssistReset = React.useCallback(() => {
     flushDraft()
     const attemptId = ++nextPromptAssistAttemptIdRef.current
-    attemptSourceRef.current = ownerKey && draftAddress?.kind === "fresh"
-      ? { id: attemptId, storageKey: `${draftKey}:owner:${ownerKey}`, address: draftAddress } : null
-    pendingPromptAssistResetRef.current = { attemptId, fromValue: form.values.message }
+    const current = useStoreMessageOption.getState()
+    let originalMetadata: DraftMetadataObject | undefined
+    try {
+      const value = getDraftMetadata?.()
+      if (value !== undefined)
+        originalMetadata = JSON.parse(
+          JSON.stringify(value)
+        ) as DraftMetadataObject
+    } catch {
+      // Unavailable metadata must not prevent recovering the original input.
+    }
+    attemptSourceRef.current =
+      ownerKey &&
+      draftAddress &&
+      current.chatDraftAddress === draftAddress &&
+      isCurrent()
+        ? {
+            id: attemptId,
+            storageKey: `${draftKey}:owner:${ownerKey}`,
+            draftKey,
+            address: draftAddress,
+            draftRevision: current.chatDraftRevision,
+            ownerIsCurrent: isCurrent,
+            values: { ...form.values },
+            metadata: originalMetadata,
+            messageRevision:
+              promptAssistMutation.revision + Number(form.values.message !== ""),
+            imageRevision:
+              imageRevisionRef.current + Number(form.values.image !== "")
+          }
+        : null
+    setRestoreAttemptId(null)
+    pendingPromptAssistResetRef.current = {
+      attemptId,
+      fromValue: form.values.message
+    }
     form.reset()
     return attemptId
-  }, [form, ownerKey, draftAddress, draftKey, flushDraft])
+  }, [
+    form,
+    ownerKey,
+    draftAddress,
+    draftKey,
+    flushDraft,
+    getDraftMetadata,
+    isCurrent,
+    promptAssistMutation.revision
+  ])
+
+  const restorePromptAssistAttempt = React.useCallback((attemptId: number) => {
+    const attempt = attemptSourceRef.current
+    if (
+      attempt?.id === attemptId &&
+      attemptId === nextPromptAssistAttemptIdRef.current &&
+      attempt.ownerIsCurrent()
+    )
+      setRestoreAttemptId(attemptId)
+  }, [])
+
+  React.useLayoutEffect(() => {
+    const attempt = attemptSourceRef.current
+    if (!attempt) return
+    const current = useStoreMessageOption.getState()
+    const transition = current.chatDraftTransition
+    const sameSource =
+      current.chatDraftAddress === attempt.address &&
+      current.chatDraftRevision === attempt.draftRevision &&
+      draftKey === attempt.draftKey
+    const acceptedBind =
+      current.chatDraftRevision === attempt.draftRevision + 1 &&
+      transition?.kind === "bind" &&
+      transition.sourceAddress === attempt.address &&
+      transition.destinationKey ===
+        chatDraftAddressKey(current.chatDraftAddress) &&
+      bindFromDraftKey === attempt.draftKey
+    if (!sameSource && !acceptedBind) {
+      attemptSourceRef.current = null
+      return
+    }
+    if (
+      restoreAttemptId !== attempt.id ||
+      attempt.id !== nextPromptAssistAttemptIdRef.current ||
+      !attempt.ownerIsCurrent() ||
+      !draftReady ||
+      draftAddress !== current.chatDraftAddress ||
+      form.values.message !== "" ||
+      form.values.image !== "" ||
+      imageRevisionRef.current !== attempt.imageRevision ||
+      promptAssistMutation.revision !== attempt.messageRevision ||
+      (attempt.values.message !== "" &&
+        (promptAssistMutation.source !== "optimistic_reset" ||
+          promptAssistMutation.attemptId !== attempt.id))
+    )
+      return
+    attemptSourceRef.current = null
+    pendingPromptAssistResetRef.current = null
+    setRestoreAttemptId(null)
+    form.setValues(attempt.values)
+    restoreWithMetadata?.(attempt.values.message, attempt.metadata)
+  }, [
+    restoreAttemptId,
+    draftAddress,
+    draftKey,
+    bindFromDraftKey,
+    draftReady,
+    form,
+    promptAssistMutation,
+    restoreWithMetadata
+  ])
   React.useEffect(() => {
     const source = attemptSourceRef.current
-    if (!savedAttempt?.acknowledgedDelivery || !source || savedAttempt.id !== source.id ||
+    if (!savedAttempt?.acknowledgedDelivery || !source || source.address.kind !== "fresh" || savedAttempt.id !== source.id ||
       savedAttempt.id !== nextPromptAssistAttemptIdRef.current || previousMessageRef.current !== "" || !isCurrent()) return
     const transition = useStoreMessageOption.getState().chatDraftTransition
     if (transition?.kind !== "bind" || !transition.sourceAddress || !draftAddress ||
@@ -310,6 +438,7 @@ export function useComposerText(
     messageRevision: promptAssistMutation.revision,
     promptAssistMutation,
     beginPromptAssistReset,
+    restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     promptAssistSavedAttemptId,
     setMessageValue,

@@ -1,6 +1,9 @@
 import { createEditMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
 import {
   captureLocalMutationOwner,
+  chatSubmitFailed,
+  chatSubmitSkipped,
+  chatSubmitSubmitted,
   createSelectedForkAction
 } from "@/hooks/chat/chat-action-utils";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
@@ -2504,7 +2507,7 @@ export const useMessage = () => {
             ? error.name
             : undefined;
         if (signal.aborted || errorName === "AbortError") {
-          return;
+          return chatSubmitSkipped("Submission preparation cancelled");
         }
         if (
           typeof error === "object" &&
@@ -2530,7 +2533,7 @@ export const useMessage = () => {
               </>
             ),
           });
-          return;
+          return chatSubmitSkipped("service_prompt_migration_required");
         }
         notification.error({
           message: t(
@@ -2542,7 +2545,7 @@ export const useMessage = () => {
             "Unable to load workflow prompts from your tldw server. Check the connection and try again.",
           ),
         });
-        return;
+        return chatSubmitFailed(error instanceof Error ? error.message : "Workflow prompts unavailable");
       }
     }
 
@@ -2596,7 +2599,7 @@ export const useMessage = () => {
     };
     if (!hasExplicitImageBackend) {
       if (!validateBeforeSubmit(resolvedSelectedModel, t, notification)) {
-        return;
+        return chatSubmitSkipped(t("formError.noModel"));
       }
       let modelAvailable: boolean;
       modelAvailable = await ensureSelectedChatModelIsAvailable(
@@ -2604,7 +2607,7 @@ export const useMessage = () => {
       );
       assertQueuedDispatchCurrent?.();
       if (!modelAvailable) {
-        return;
+        return chatSubmitSkipped(t("playground:composer.validationModelUnavailableInline", "Selected model is not available on this server. Refresh models or choose a different model."));
       }
     }
 
@@ -2635,7 +2638,7 @@ export const useMessage = () => {
       : {};
 
       if (hasExplicitImageBackend || imageBackendCandidates.length > 0) {
-        await normalChatMode(
+        return await normalChatMode(
           message,
           image,
           isRegenerate,
@@ -2670,7 +2673,6 @@ export const useMessage = () => {
             ...replyOverrides,
           },
         );
-        return;
       }
       if (uploadedFiles && uploadedFiles.length > 0) {
         await documentChatMode(
@@ -2770,7 +2772,7 @@ export const useMessage = () => {
               setIsProcessing(false);
               setStreaming(false);
             }
-            return;
+            return chatSubmitSkipped("native_history_persona_unsupported");
           }
           const trackedCharacterForSend =
             sendMode === "tracked_character"
@@ -2837,8 +2839,9 @@ export const useMessage = () => {
                   setIsProcessing(false);
                   setStreaming(false);
                 }
+                return chatSubmitFailed(error instanceof Error ? error.message : "Native history completion failed");
               }
-              return;
+              return chatSubmitSubmitted();
             }
             const hydratedTrackedCharacter =
               await hydrateTrackedCharacterForSend(
@@ -2898,7 +2901,7 @@ export const useMessage = () => {
               setServerChatExternalRef,
             });
             assertQueuedDispatchCurrent?.();
-            await normalChatMode(
+            return await normalChatMode(
               message,
               image,
               isRegenerate,
@@ -2942,7 +2945,7 @@ export const useMessage = () => {
               },
             );
           } else if (sendMode === "overlay" && effectiveSelectedAssistant) {
-            await normalChatMode(
+            return await normalChatMode(
               message,
               image,
               isRegenerate,
@@ -2996,7 +2999,7 @@ export const useMessage = () => {
               }
             );
           } else {
-            await normalChatMode(
+            return await normalChatMode(
               message,
               image,
               isRegenerate,

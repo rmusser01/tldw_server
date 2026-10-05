@@ -33,6 +33,7 @@ vi.mock("@/services/service-prompts", async (original) => ({
   resolveServicePromptScope: async () => scope()
 }))
 import { useComposerText } from "../hooks/useComposerText"
+import { useComposerSubmit } from "../hooks/useComposerSubmit"
 const compactFormAst = ts.createSourceFile(
   "form.tsx",
   readFileSync(
@@ -72,6 +73,7 @@ const deployedAfterSend = (
     "promptAssistAttemptId",
     "markPromptAssistAttemptSaved",
     "clearDraft",
+    "restorePromptAssistAttempt",
     "isChatSubmitSuccess",
     "normalizeChatSubmitResult",
     "clearSelectedDocuments",
@@ -82,12 +84,103 @@ const deployedAfterSend = (
     attempt,
     composer.markPromptAssistAttemptSaved,
     composer.clearDraft,
+    composer.restorePromptAssistAttempt,
     isChatSubmitSuccess,
     normalizeChatSubmitResult,
     vi.fn(),
     vi.fn(),
     vi.fn()
-  ) as (result: undefined) => void
+  ) as (
+    result:
+      | import("@/hooks/chat/chat-action-utils").ChatSubmitResult
+      | undefined
+  ) => void
+
+const webSubmitAst = ts.createSourceFile(
+  "usePlaygroundSubmit.ts",
+  readFileSync(
+    path.resolve(
+      __dirname,
+      "../../../Option/Playground/hooks/usePlaygroundSubmit.ts"
+    ),
+    "utf8"
+  ),
+  ts.ScriptTarget.Latest,
+  true,
+  ts.ScriptKind.TS
+)
+let webAfterSend: ts.Expression | undefined
+const findWebAfterSend = (node: ts.Node) => {
+  if (
+    ts.isPropertyAssignment(node) &&
+    node.name.getText(webSubmitAst) === "afterSend" &&
+    node.initializer
+      .getText(webSubmitAst)
+      .includes("markPromptAssistAttemptSaved")
+  )
+    webAfterSend = node.initializer
+  ts.forEachChild(node, findWebAfterSend)
+}
+findWebAfterSend(webSubmitAst)
+if (!webAfterSend) throw new Error("Missing actual WebUI send outcome callback")
+const webAfterSendCode = ts.transpileModule(
+  `const afterSend = ${webAfterSend.getText(webSubmitAst)};`,
+  { compilerOptions: { target: ts.ScriptTarget.ES2022 } }
+).outputText
+const deployedWebAfterSend = (
+  attempt: number,
+  composer: ReturnType<typeof useComposerText>
+) =>
+  new Function(
+    "promptAssistAttemptId",
+    "markPromptAssistAttemptSaved",
+    "restorePromptAssistAttempt",
+    "isChatSubmitSuccess",
+    "normalizeChatSubmitResult",
+    "messageForModel",
+    "clearImportedSidepanelContext",
+    `${webAfterSendCode}; return afterSend;`
+  )(
+    attempt,
+    composer.markPromptAssistAttemptSaved,
+    composer.restorePromptAssistAttempt,
+    isChatSubmitSuccess,
+    normalizeChatSubmitResult,
+    undefined,
+    vi.fn()
+  ) as (
+    result: import("@/hooks/chat/chat-action-utils").ChatSubmitResult
+  ) => void
+
+const deployedSendError = (
+  surface: "compact" | "WebUI",
+  attempt: number,
+  composer: ReturnType<typeof useComposerText>
+) => {
+  const ast = surface === "compact" ? compactFormAst : webSubmitAst
+  let handler: ts.Expression | undefined
+  const find = (node: ts.Node) => {
+    if (
+      ts.isPropertyAssignment(node) &&
+      node.name.getText(ast) === "onSendError" &&
+      node.initializer.getText(ast).includes("restorePromptAssistAttempt")
+    )
+      handler = node.initializer
+    ts.forEachChild(node, find)
+  }
+  find(ast)
+  if (!handler)
+    throw new Error(`Missing ${surface} dispatch rejection recovery callback`)
+  const code = ts.transpileModule(
+    `const onSendError = ${handler.getText(ast)};`,
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } }
+  ).outputText
+  return new Function(
+    "promptAssistAttemptId",
+    "restorePromptAssistAttempt",
+    `${code}; return onSendError;`
+  )(attempt, composer.restorePromptAssistAttempt) as (error: unknown) => void
+}
 
 type StoredDraft = {
   value: { content: string; metadata: Record<string, unknown> }
@@ -103,7 +196,14 @@ const settle = async () => {
     )
   })
 }
-const mount = (surface = root, tabs = false) =>
+const mount = (
+  surface = root,
+  tabs = false,
+  options?: Pick<
+    Parameters<typeof useComposerText>[0],
+    "getDraftMetadata" | "restoreWithMetadata"
+  >
+) =>
   renderHook(
     ({ surface }) => {
       const address = useStoreMessageOption((state) => state.chatDraftAddress)
@@ -122,10 +222,13 @@ const mount = (surface = root, tabs = false) =>
         recoverySurfaceTabs: tabs,
         tabScopedDraft: true,
         textareaRef: React.createRef<HTMLTextAreaElement>(),
-        getDraftMetadata: () => ({
-          collapsedRange: { start: 1, end: 5 },
-          wasExpanded: false
-        })
+        getDraftMetadata:
+          options?.getDraftMetadata ??
+          (() => ({
+            collapsedRange: { start: 1, end: 5 },
+            wasExpanded: false
+          })),
+        restoreWithMetadata: options?.restoreWithMetadata
       })
     },
     { initialProps: { surface } }
@@ -677,4 +780,277 @@ describe("retained fresh composer recovery", () => {
       { content: "LEGACY UNCONFIRMED INPUT", handle: { address: source } }
     ])
   })
+  it.each(["fresh", "local", "native"] as const)(
+    "restores the original untouched %s composer after an unsuccessful send",
+    async (kind) => {
+      if (kind !== "fresh")
+        act(() =>
+          useStoreMessageOption.getState().setChatDraftAddress(
+            kind === "local"
+              ? { kind: "local", id: "local-chat", profileId: "profile" }
+              : {
+                  kind: "native",
+                  id: "native-chat",
+                  ownerKey: "server-owner",
+                  scope: { type: "global" }
+                }
+          )
+        )
+      const view = mount()
+      await settle()
+      act(() => {
+        view.result.current.setMessageValue("  ORIGINAL COMPOSER TEXT  ")
+        view.result.current.form.setFieldValue("image", "original-image")
+      })
+      let attempt!: number
+      act(() => {
+        attempt = view.result.current.beginPromptAssistReset()
+      })
+      await settle()
+      act(() => view.result.current.restorePromptAssistAttempt(attempt))
+      expect(view.result.current.form.values).toEqual({
+        message: "  ORIGINAL COMPOSER TEXT  ",
+        image: "original-image"
+      })
+      expect(view.result.current.promptAssistSavedAttemptId).toBeNull()
+    }
+  )
+
+  it("restores a failure that resolves before the optimistic reset commits", async () => {
+    const view = mount()
+    await settle()
+    act(() => view.result.current.setMessageValue("FAST FAILED TEXT"))
+    await act(async () => {
+      const attempt = view.result.current.beginPromptAssistReset()
+      await Promise.resolve()
+      view.result.current.restorePromptAssistAttempt(attempt)
+    })
+    expect(view.result.current.form.values.message).toBe("FAST FAILED TEXT")
+  })
+
+  it("restores original text after its one accepted first-ID bind", async () => {
+    const view = mount()
+    await settle()
+    const source = useStoreMessageOption.getState().chatDraftAddress!
+    act(() => view.result.current.setMessageValue("BOUND FAILED INPUT"))
+    let attempt!: number
+    act(() => {
+      attempt = view.result.current.beginPromptAssistReset()
+    })
+    act(() =>
+      useStoreMessageOption.getState().setChatDraftAddress(
+        {
+          kind: "native",
+          id: "new-chat",
+          ownerKey: "server-owner",
+          scope: { type: "global" }
+        },
+        {
+          kind: "bind",
+          sourceAddress: source,
+          expectedRevision: useStoreMessageOption.getState().chatDraftRevision
+        }
+      )
+    )
+    await settle()
+    act(() => view.result.current.restorePromptAssistAttempt(attempt))
+    expect(view.result.current.form.values.message).toBe("BOUND FAILED INPUT")
+  })
+
+  it.each([
+    "text",
+    "type then erase",
+    "image",
+    "image then erase",
+    "new attempt",
+    "New",
+    "ABA",
+    "account",
+    "unmount"
+  ])("does not restore an old attempt after %s", async (boundary) => {
+    const view = mount()
+    await settle()
+    const source = useStoreMessageOption.getState().chatDraftAddress!
+    act(() => view.result.current.setMessageValue("OLD FAILED INPUT"))
+    let attempt!: number
+    act(() => {
+      attempt = view.result.current.beginPromptAssistReset()
+    })
+    await settle()
+    const recover = () =>
+      view.result.current.restorePromptAssistAttempt(attempt)
+    act(() => {
+      if (boundary === "text" || boundary === "type then erase")
+        view.result.current.setMessageValue("NEW INPUT")
+      else if (boundary === "image" || boundary === "image then erase")
+        view.result.current.form.setFieldValue("image", "new-image")
+      else if (boundary === "new attempt")
+        view.result.current.beginPromptAssistReset()
+      else if (boundary === "New" || boundary === "ABA")
+        useStoreMessageOption.getState().startNewChatDraft()
+      else if (boundary === "account") {
+        authority.user = "bob"
+        window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+      }
+    })
+    await settle()
+    if (boundary === "type then erase")
+      act(() => view.result.current.setMessageValue(""))
+    if (boundary === "image then erase")
+      act(() => view.result.current.form.setFieldValue("image", ""))
+    if (boundary === "ABA") {
+      act(() => useStoreMessageOption.getState().setChatDraftAddress(source))
+      await settle()
+      act(() => view.result.current.setMessageValue(""))
+    }
+    if (boundary === "unmount") view.unmount()
+    const values = { ...view.result.current.form.values }
+    act(recover)
+    expect(view.result.current.form.values).toEqual(values)
+  })
+
+  it.each(["compact", "WebUI"])(
+    "the actual %s callback restores explicit failed and skipped text",
+    async (surface) => {
+      for (const outcome of [
+        { status: "failed", errorMessage: "unconfirmed send" },
+        { status: "skipped", reason: "choose a model" }
+      ] as const) {
+        const view = mount(
+          surface === "compact" ? "tldw:sidepanelChatDraft:active" : root,
+          surface === "compact"
+        )
+        await settle()
+        act(() =>
+          view.result.current.setMessageValue("ORIGINAL CALLBACK INPUT")
+        )
+        let attempt!: number
+        act(() => {
+          attempt = view.result.current.beginPromptAssistReset()
+        })
+        await settle()
+        act(() =>
+          (surface === "compact" ? deployedAfterSend : deployedWebAfterSend)(
+            attempt,
+            view.result.current
+          )(outcome)
+        )
+        expect(view.result.current.form.values.message).toBe(
+          "ORIGINAL CALLBACK INPUT"
+        )
+        expect(view.result.current.promptAssistSavedAttemptId).toBeNull()
+        view.unmount()
+      }
+    }
+  )
+
+  it.each(["compact", "WebUI"] as const)(
+    "the actual %s rejection hook restores original text on fast dispatch rejection",
+    async (surface) => {
+      const view = mount(
+        surface === "compact" ? "tldw:sidepanelChatDraft:active" : root,
+        surface === "compact"
+      )
+      await settle()
+      act(() => view.result.current.setMessageValue("ORIGINAL REJECTED TEXT"))
+      const error = new Error("pre-dispatch failure")
+      const dispatcher = renderHook(() =>
+        useComposerSubmit({
+          sendMessage: async () => {
+            throw error
+          }
+        })
+      )
+      await act(async () => {
+        const attempt = view.result.current.beginPromptAssistReset()
+        await expect(
+          dispatcher.result.current.dispatch(
+            { message: "TRANSFORMED REQUEST TEXT" },
+            {
+              onSendError: deployedSendError(
+                surface,
+                attempt,
+                view.result.current
+              )
+            }
+          )
+        ).rejects.toBe(error)
+      })
+      expect(view.result.current.form.values.message).toBe(
+        "ORIGINAL REJECTED TEXT"
+      )
+      expect(view.result.current.promptAssistSavedAttemptId).toBeNull()
+    }
+  )
+
+  it("restores reset-time collapse metadata without reusing a later-mutated object", async () => {
+    const metadata = { collapsedRange: { start: 2, end: 8 }, wasExpanded: true }
+    const restore = vi.fn()
+    const view = mount(root, false, {
+      getDraftMetadata: () => metadata,
+      restoreWithMetadata: restore
+    })
+    await settle()
+    act(() => view.result.current.setMessageValue("COLLAPSED ORIGINAL TEXT"))
+    let attempt!: number
+    act(() => {
+      attempt = view.result.current.beginPromptAssistReset()
+    })
+    metadata.collapsedRange.end = 200
+    metadata.wasExpanded = false
+    await settle()
+    restore.mockClear()
+    act(() => view.result.current.restorePromptAssistAttempt(attempt))
+    expect(restore).toHaveBeenCalledWith("COLLAPSED ORIGINAL TEXT", {
+      collapsedRange: { start: 2, end: 8 },
+      wasExpanded: true
+    })
+  })
+  it.each(["local", "native"] as const)(
+    "keeps pending %s input reachable after held preparation and cold reopen",
+    async (kind) => {
+      const locks = new Map<string, Promise<unknown>>()
+      vi.stubGlobal("navigator", {
+        userAgent: navigator.userAgent,
+        locks: {
+          request: (name: string, operation: () => Promise<unknown>) => {
+            const previous = locks.get(name) ?? Promise.resolve()
+            const next = previous.catch(() => undefined).then(operation)
+            locks.set(name, next)
+            return next
+          }
+        }
+      })
+      const address: ChatDraftAddress =
+        kind === "local"
+          ? { kind: "local", id: "pending-local", profileId: "profile" }
+          : {
+              kind: "native",
+              id: "pending-native",
+              ownerKey: "server-owner",
+              scope: { type: "global" }
+            }
+      act(() => useStoreMessageOption.getState().setChatDraftAddress(address))
+      const view = mount()
+      await settle()
+      act(() => view.result.current.setMessageValue("PENDING ORIGINAL INPUT"))
+      let attempt!: number
+      act(() => {
+        attempt = view.result.current.beginPromptAssistReset()
+      })
+      await settle() // model preparation is still pending; no owner admission exists
+      const oldRecovery = view.result.current.restorePromptAssistAttempt
+      act(() => useStoreMessageOption.getState().startNewChatDraft())
+      await settle()
+      view.unmount()
+      oldRecovery(attempt) // the later failed/skipped result cannot restore another view
+      sessionStorage.clear()
+      act(() => useStoreMessageOption.getState().setChatDraftAddress(address))
+      const cold = mount()
+      await settle()
+      expect(cold.result.current.form.values.message).toBe(
+        "PENDING ORIGINAL INPUT"
+      )
+    }
+  )
 })

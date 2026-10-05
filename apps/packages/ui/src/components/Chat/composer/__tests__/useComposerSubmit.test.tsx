@@ -117,3 +117,27 @@ describe("useComposerSubmit", () => {
     expect(dispatchResult).toBe("ok")
   })
 })
+
+it("reports dispatch rejection to the recovery hook and preserves the original error", async () => {
+  const error = new Error("dispatch rejected")
+  const beforeSend = vi.fn(),
+    afterSend = vi.fn(),
+    onSendError = vi.fn()
+  const { result } = renderHook(() =>
+    useComposerSubmit({
+      sendMessage: async () => {
+        throw error
+      }
+    })
+  )
+  await expect(
+    result.current.dispatch({ message: "original text" }, {
+      beforeSend,
+      afterSend,
+      onSendError
+    })
+  ).rejects.toBe(error)
+  expect(beforeSend).toHaveBeenCalledOnce()
+  expect(onSendError).toHaveBeenCalledWith(error)
+  expect(afterSend).not.toHaveBeenCalled()
+})
