@@ -84,3 +84,49 @@ async def test_unknown_registration_code_role_rolls_back_every_postgres_write(
         assert (user_count, membership_count, times_used) == (0, 0, 0)
     finally:
         await reset_db_pool()
+
+
+@pytest.mark.asyncio
+async def test_privileged_registration_writes_storage_quota_override_postgres(
+    isolated_test_environment,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """The privileged path writes limits.storage_quota_mb in the registration transaction; a plain signup writes none."""
+    _client, _db_name = isolated_test_environment
+    pool = await get_db_pool()
+    try:
+        settings = SimpleNamespace(
+            ENABLE_REGISTRATION=True,
+            REQUIRE_REGISTRATION_CODE=False,
+            DEFAULT_USER_ROLE="user",
+            DEFAULT_STORAGE_QUOTA_MB=5120,
+            ENABLE_ORG_SCOPED_REGISTRATION_CODES=False,
+            USER_DATA_BASE_PATH=str(tmp_path / "users"),
+            CHROMADB_BASE_PATH=None,
+        )
+        service = RegistrationService(
+            db_pool=pool,
+            password_service=_PasswordService(),
+            settings=settings,
+        )
+        monkeypatch.setattr(service, "_create_user_directories", lambda _user_id: True)
+
+        plain = await service.register_user(
+            username="pg-quota-plain",
+            email="pg-quota-plain@example.com",
+            password="StrongPass123!",
+        )
+        privileged = await service.register_user(
+            username="pg-quota-admin-made",
+            email="pg-quota-admin-made@example.com",
+            password="StrongPass123!",
+            created_by=int(plain["user_id"]),
+            storage_quota_override=250,
+        )
+
+        sql = "SELECT value_json FROM user_config_overrides WHERE user_id = $1 AND key = 'limits.storage_quota_mb'"
+        assert str(await pool.fetchval(sql, int(privileged["user_id"]))) == "250"
+        assert await pool.fetchval(sql, int(plain["user_id"])) is None
+    finally:
+        await reset_db_pool()
