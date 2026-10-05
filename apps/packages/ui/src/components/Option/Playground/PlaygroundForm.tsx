@@ -1645,6 +1645,7 @@ export const PlaygroundForm = ({
     const expected = useStoreMessageOption.getState();
     const targetId = expected.serverChatId;
     const historyId = expected.historyId;
+    const draftRevision = expected.chatDraftRevision;
     const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision;
     return () => {
       const current = useStoreMessageOption.getState();
@@ -1652,7 +1653,7 @@ export const PlaygroundForm = ({
         selectionIsCurrent() && (assistantOwnerIsCurrent?.() ?? true) &&
         assistantActionRevisionRef.current === actionRevision &&
         usePlaygroundSessionStore.getState().restoreRevision === restoreRevision &&
-        current.serverChatId === targetId && current.historyId === historyId;
+        current.serverChatId === targetId && current.historyId === historyId && current.chatDraftRevision === draftRevision;
     };
   }, [captureSelectionFence, assistantOwnerIsCurrent]);
   const applyAssistantSelection = React.useCallback(
@@ -1736,6 +1737,7 @@ export const PlaygroundForm = ({
         }
       if (replacing) {
         if (!preparationIsCurrent()) return false;
+        activeChat.startNewChatDraft(nativeCharacter ? false : activeChat.temporaryChat);
         dispatchChatRouteReplacement({ serverChatId: activeChat.serverChatId, historyId: activeChat.historyId,
           restoreRevision: usePlaygroundSessionStore.getState().restoreRevision,
           characterId: selection?.kind === "character" ? String(selection.id) : null });
@@ -3450,6 +3452,7 @@ export const PlaygroundForm = ({
 
   const { submitForm, submitFormRef, isPreparingDocuments } = usePlaygroundSubmit({
     form,
+    draftReady,
     beginPromptAssistReset,
     markPromptAssistAttemptSaved,
     isSending,

@@ -1,4 +1,6 @@
 import type { Dispatch, SetStateAction } from "react"
+import { captureChatDraftLoad } from "./chat-draft-transition"
+import { useStoreMessageOption } from "@/store/option"
 import type { TFunction } from "i18next"
 import { buildCharacterChatAssistantErrorContent } from "./useCharacterChatMode"
 import type { Message, ToolChoice } from "@/store/option"
@@ -20,6 +22,7 @@ import { formatSelectedHistory } from "@/db/dexie/helpers"
 import { getActorSettingsForChat } from "@/services/actor-settings"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import {
+  assertHistoryConversationTarget,
   captureHistorySnapshot,
   prepareHistoryContext,
   finalizeHistorySelection,
@@ -62,6 +65,7 @@ export const sendNativeHistoryCharacter = async (
   params: NativeHistoryCharacterSendParams
 ): Promise<void> => {
   const { controller, signal } = params
+  const acceptDraftBind = !params.historyId && !params.serverChatId && useStoreMessageOption.getState().chatDraftAddress?.kind === "fresh" ? captureChatDraftLoad("bind") : null
   if (!params.message.trim()) throw new Error("native_history_input_required")
   const settingsState = useStoreChatModelSettings.getState()
   const toolsState = useMcpToolsStore.getState()
@@ -89,6 +93,7 @@ export const sendNativeHistoryCharacter = async (
   })
   const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
   const leaseValid = () =>
+    acceptDraftBind?.isCurrent() !== false &&
     authValid() &&
     !signal.aborted &&
     useStoreChatModelSettings.getState() === settingsState &&
@@ -97,6 +102,8 @@ export const sendNativeHistoryCharacter = async (
     if (!params.originIsCurrent() || !leaseValid())
       throw new Error("stale_selection")
     let current = controller.getCurrent()
+    let selectionCurrent = params.originIsCurrent
+    let targetChatId = params.serverChatId
     if (!current.owner && current.status === "idle") {
       if (!params.originIsCurrent() || !leaseValid())
         throw new Error("stale_selection")
@@ -131,7 +138,8 @@ export const sendNativeHistoryCharacter = async (
         {
           historyId: params.historyId,
           serverChatId: chatId,
-          scope: params.scope
+          scope: params.scope,
+          isCurrent: acceptDraftBind?.isCurrent
         },
         null,
         (value) => {
@@ -153,6 +161,9 @@ export const sendNativeHistoryCharacter = async (
           receipt.owner.conversation_id !== chatId)
       )
         throw new Error("owner_conversation_mismatch")
+      if (acceptDraftBind && !acceptDraftBind(receipt)) throw new Error("stale_selection")
+      selectionCurrent = controller.fence()
+      targetChatId = chatId
       if (chatId) params.setServerChatId(chatId)
       if (createdCharacterId != null) params.onCreated?.(createdCharacterId)
     }
@@ -167,6 +178,9 @@ export const sendNativeHistoryCharacter = async (
       current.capture?.status !== "captured"
     )
       throw new Error(current.error || "history_selection_not_ready")
+    await assertHistoryConversationTarget(current.owner, { historyId: params.historyId, serverChatId: targetChatId })
+    if (!selectionCurrent() || !leaseValid() || controller.getCurrent().owner !== current.owner || controller.getCurrent().view !== current.view)
+      throw new Error("stale_selection")
     const view = structuredClone(current.view)
     const scope = { ...current.bookmarkScope }
     const owner = {

@@ -1,4 +1,5 @@
 import { HistorySelectionProvider, useHistorySelectionContext, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection";
+import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition";
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview";
 import { formatSelectedHistory } from "@/db/dexie/helpers";
 import { resolveServicePromptScope, loadServicePromptSnapshot } from "@/services/service-prompts";
@@ -1798,8 +1799,12 @@ const PlaygroundContent = () => {
     try { storedHistoryReference = historySelection.getStoredReference(); }
     catch { await historySelection.open({ kind: "unavailable", code: "invalid_history_reference" }); return; }
     if (handoff) {
-      const loaded = await historySelection.loadConversation(handoff.owner_kind === "local" ? { historyId: handoff.conversation_id } : { serverChatId: handoff.conversation_id }, handoff);
-      if (loaded && !signal.aborted && historySelection.getCurrent().capture) {
+      const acceptDraft = captureChatDraftLoad("switch", () => !signal.aborted);
+      let draftAccepted = false;
+      const loaded = await historySelection.loadConversation(handoff.owner_kind === "local" ? { historyId: handoff.conversation_id, isCurrent: acceptDraft.isCurrent } : { serverChatId: handoff.conversation_id, isCurrent: acceptDraft.isCurrent }, handoff, receipt => { draftAccepted = acceptDraft(receipt); });
+      const selected = historySelection.getCurrent();
+      if (loaded && !draftAccepted && selected.owner && selected.owner.kind !== "unavailable" && selected.owner.kind === handoff.owner_kind && selected.owner.conversation_id === handoff.conversation_id && selected.view) draftAccepted = acceptDraft({ owner: selected.owner, view: selected.view });
+      if (loaded && draftAccepted && acceptDraft.isCurrent() && !signal.aborted && historySelection.getCurrent().capture) {
         setHistoryId(handoff.owner_kind === "local" ? handoff.conversation_id : null);
         setServerChatId(handoff.owner_kind === "native" ? handoff.conversation_id : null);
         const handoffCurrent = historySelection.fence();

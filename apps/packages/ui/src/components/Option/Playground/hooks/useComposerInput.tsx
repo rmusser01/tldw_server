@@ -7,6 +7,8 @@ import { isFirefoxTarget } from "@/config/platform";
 import { createComposerPerfTracker } from "@/utils/perf/composer-perf";
 import { createRenderPerfTracker } from "@/utils/perf/render-profiler";
 import type { CollapsedRange } from "@/hooks/playground";
+import { useStoreMessageOption } from "@/store/option";
+import { chatDraftAddressKey, conversationDraftKey } from "@/utils/chat-draft-address";
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -101,8 +103,18 @@ export function useComposerInput(deps: UseComposerInputDeps) {
   // See apps/packages/ui/src/components/Chat/composer/hooks/useComposerText.ts.
   // `form`, `draftSaved`, and `textAreaFocus` live there; auto-resize is
   // wired separately below so we can size against `messageDisplayValue`.
+  const draftAddress = useStoreMessageOption(state => state.chatDraftAddress);
+  const draftTransition = useStoreMessageOption(state => state.chatDraftTransition);
+  React.useLayoutEffect(() => {
+    if (!useStoreMessageOption.getState().chatDraftAddress) useStoreMessageOption.getState().startNewChatDraft();
+  }, [draftAddress]);
+  const draftKey = draftAddress ? conversationDraftKey("tldw:playgroundChatDraft", draftAddress) : "tldw:playgroundChatDraft";
   const composerText = useComposerText({
-    draftKey: "tldw:playgroundChatDraft",
+    draftKey,
+    draftEnabled: draftAddress !== null,
+    bindFromDraftKey: draftAddress && draftTransition?.kind === "bind" && draftTransition.sourceAddress &&
+      draftTransition.destinationKey === chatDraftAddressKey(draftAddress)
+      ? conversationDraftKey("tldw:playgroundChatDraft", draftTransition.sourceAddress) : undefined,
     tabScopedDraft: true,
     textareaRef,
     isProMode,

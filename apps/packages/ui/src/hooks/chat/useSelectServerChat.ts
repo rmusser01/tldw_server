@@ -1,4 +1,5 @@
 import React from "react"
+import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
 import { useNavigate } from "react-router-dom"
 import { Modal } from "antd"
 import { shallow } from "zustand/shallow"
@@ -88,6 +89,7 @@ export const useSelectServerChat = () => {
 
   return React.useCallback(
     (chat: ServerChatSummary) => {
+      const acceptDraft = captureChatDraftLoad("switch")
       usePlaygroundSessionStore.getState().cancelPendingRestore()
       if (typeof window !== "undefined") {
         Modal.destroyAll()
@@ -127,7 +129,7 @@ export const useSelectServerChat = () => {
       setServerChatSource(chat.source ?? null)
       setServerChatExternalRef(chat.external_ref ?? null)
       setServerChatMetaLoaded(true)
-      usePlaygroundSessionStore.getState().requestServerChatSelection(chat.id)
+      usePlaygroundSessionStore.getState().requestServerChatSelection(chat.id, acceptDraft)
       updatePageTitle(chat.title)
       const chatPath = typeof window !== "undefined" &&
         window.location.pathname.toLowerCase().endsWith("sidepanel.html")

@@ -1,4 +1,5 @@
 import type { HistorySelectionReference } from "@/hooks/chat/useHistorySelection"
+import type { HistoryLoadReceipt } from "@/hooks/chat/useHistorySelection"
 import { createWithEqualityFn } from "zustand/traditional"
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
@@ -97,8 +98,8 @@ export interface PlaygroundSessionData {
 }
 
 interface PlaygroundSessionState extends PlaygroundSessionData {
-  serverChatSelectionIntent: { chatId: string } | null
-  requestServerChatSelection: (chatId: string) => void
+  serverChatSelectionIntent: { chatId: string; onLoaded?: (receipt: HistoryLoadReceipt) => boolean; isCurrent?: () => boolean } | null
+  requestServerChatSelection: (chatId: string, onLoaded?: ((receipt: HistoryLoadReceipt) => boolean) & { isCurrent?: () => boolean }) => void
   restoreRevision: number
   sourceSelectionRevision: number
   // Actions
@@ -143,8 +144,8 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       restoreRevision: 0,
       sourceSelectionRevision: 0,
       serverChatSelectionIntent: null,
-      requestServerChatSelection: (chatId) =>
-        set({ serverChatSelectionIntent: { chatId } }),
+      requestServerChatSelection: (chatId, onLoaded) =>
+        set({ serverChatSelectionIntent: { chatId, onLoaded, isCurrent: onLoaded?.isCurrent } }),
 
       saveSession: (data) =>
         set((state) => ({

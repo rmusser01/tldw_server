@@ -195,6 +195,7 @@ const mocks = vi.hoisted(() => {
     })
 
   return {
+    draftFields: null as (() => Record<string, unknown>) | null,
     addMedia: vi.fn(),
     answerDefinition,
     chatBaseState,
@@ -243,7 +244,10 @@ vi.mock("~/services/tldw-server", async (original) => ({
   systemPromptForNonRag: vi.fn(async () => "system")
 }))
 
-vi.mock("@/services/service-prompts", () => ({
+vi.mock("@/services/service-prompts", async original => ({
+  ...await original<typeof import("@/services/service-prompts")>(),
+  resolveServicePromptScope: async () => mocks.makeSnapshot("supported").requestScope,
+  subscribeToServicePromptConfigChanges: () => () => {},
   loadServicePromptSnapshot: (...args: unknown[]) =>
     mocks.loadServicePromptSnapshot(...args),
   renderServicePromptPart: (...args: unknown[]) =>
@@ -254,7 +258,7 @@ vi.mock("~/store/option", () => ({
   useStoreMessageOption: Object.assign(
     (selector?: (state: Record<string, unknown>) => unknown) =>
       selector ? selector(mocks.storeState) : mocks.storeState,
-    { getState: () => mocks.storeState, subscribe: () => () => {} }
+    { getState: () => ({ ...mocks.storeState, ...mocks.draftFields?.() }), subscribe: () => () => {} }
   )
 }))
 
@@ -578,6 +582,7 @@ const makeController = () => {
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  mocks.draftFields = null
   h1.auth = new AbortController()
   h1.native = false
   h1.persona = false
@@ -1176,6 +1181,14 @@ it.each(["asset", "temporary", "local-owner"])(
 it.each([false, true])(
   "native first creation is fenced around its ACK (navigation=%s)",
   async (navigate) => {
+    const { useStoreMessageOption: draftStore } = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    draftStore.getState().startNewChatDraft(false)
+    const sourceDraft = draftStore.getState().chatDraftAddress
+    mocks.draftFields = () => {
+      const state = draftStore.getState()
+      return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision,
+        setChatDraftAddress: state.setChatDraftAddress }
+    }
     h1.native = true
     mocks.chatBaseState.historyId = null as any
     mocks.storeState.serverChatId = null
@@ -1214,10 +1227,13 @@ it.each([false, true])(
     })
     expect(h1.create).toHaveBeenCalledOnce()
     if (navigate) {
+      expect(draftStore.getState().chatDraftAddress).toBe(sourceDraft)
       expect(h1.wire).not.toHaveBeenCalled()
       expect(load).not.toHaveBeenCalled()
       expect(mocks.storeState.setServerChatId).not.toHaveBeenCalled()
     } else {
+      expect(draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1", ownerKey: "native-key" })
+      expect(draftStore.getState().chatDraftTransition).toMatchObject({ kind: "bind", sourceAddress: sourceDraft })
       expect(h1.wire).toHaveBeenCalledOnce()
       expect(
         h1.wire.mock.calls[0][0].tldw_history_selection_v1.messages
@@ -1230,6 +1246,41 @@ it.each([false, true])(
     expect(h1.append).not.toHaveBeenCalled()
   }
 )
+
+it("dispatches first native creation through a real controller epoch and accepted bind", async () => {
+  const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+  actual.useStoreMessageOption.getState().startNewChatDraft()
+  mocks.draftFields = () => {
+    const state = actual.useStoreMessageOption.getState()
+    return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision, setChatDraftAddress: state.setChatDraftAddress }
+  }
+  const { useHistorySelection } = await import("@/hooks/chat/useHistorySelection")
+  const { memory } = await import("@/hooks/chat/__tests__/local-history-fixture")
+  memory.forkOperations.rows.clear()
+  const selection = renderHook(() => useHistorySelection())
+  h1.controller = selection.result.current
+  const sourceCurrent = h1.controller.fence()
+  h1.native = true
+  mocks.chatBaseState.historyId = null
+  mocks.storeState.serverChatId = null
+  h1.create.mockResolvedValue({ id: "tracked-chat-1" })
+  h1.capture.mockImplementation(async (_id, request) => {
+    const result = captureFor({ ...request.view, owner_key: "native-key" })
+    return { ...result, rows: [], selected_content: [], snapshot: { ...result.snapshot, nodes: [] } }
+  })
+  h1.wire.mockImplementation(async function* (request) {
+    yield { tldw_history_admission_v1: nativeAdmission(request) }
+    yield { tldw_message_id: "native-result", tldw_conversation_id: "tracked-chat-1" }
+  })
+  const hook = renderHook(() => useMessage())
+  await act(async () => { await hook.result.current.onSubmit({ message: "first", image: "" }) })
+  expect(sourceCurrent()).toBe(false)
+  expect(h1.create).toHaveBeenCalledOnce()
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(actual.useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+  hook.unmount()
+  selection.unmount()
+})
 
 it("native dispatch freezes workspace routing independently of the view owner", async () => {
   h1.native = true
@@ -1626,6 +1677,13 @@ vi.mock("@/db/dexie/schema", async () => ({
 it.each([false, true])(
   "real controller fork -> immediate send -> reopen keeps source unchanged (comparison=%s)",
   async (comparison) => {
+    const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    actual.useStoreMessageOption.getState().startNewChatDraft()
+    mocks.draftFields = () => {
+      const state = actual.useStoreMessageOption.getState()
+      return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision,
+        setChatDraftAddress: state.setChatDraftAddress }
+    }
     const { memory, seedLocalFork } = await import(
       "@/hooks/chat/__tests__/local-history-fixture"
     )
@@ -1671,6 +1729,8 @@ it.each([false, true])(
     })
     expect(outcome.state, JSON.stringify(outcome)).toBe("committed")
     const childId = outcome.child_id
+    expect(actual.useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "local", id: childId })
+    expect(mocks.chatBaseState.historyId).toBe(childId)
     expect(controller.result.current.getCurrent().owner).toMatchObject({
       kind: "local",
       conversation_id: childId

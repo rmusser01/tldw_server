@@ -831,12 +831,19 @@ export const useServerChatLoader = ({
             if (usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
             handledSelectionIntent.current = selectionIntent
             const control = selectionRef.current
+            let accepted = !selectionIntent?.onLoaded
             if (control && !await control.loadConversation({ serverChatId, scope, temporary: temporaryChat,
-              isCurrent: () => !controller.signal.aborted &&
+              isCurrent: () => selectionIntent?.isCurrent?.() !== false && !controller.signal.aborted &&
                 usePlaygroundSessionStore.getState().serverChatSelectionIntent === selectionIntent &&
                 useStoreMessageOption.getState().serverChatId === serverChatId
-            })) return
+            }, null, receipt => { accepted = selectionIntent?.onLoaded?.(receipt) ?? true })) return
             selectionCurrent = control?.fence() || (() => true)
+            const selected = control?.getCurrent()
+            if (!accepted && selected?.owner?.kind === "native" && selected.owner.conversation_id === serverChatId && selected.view) {
+              accepted = selectionIntent?.onLoaded?.({ owner: selected.owner, view: selected.view }) ?? false
+            }
+            // Temporary history is a display-only read; H1 supplies no owned receipt.
+            if ((!accepted && !temporaryChat) || selectionIntent?.isCurrent?.() === false) return
             if (controller.signal.aborted || usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
           } else if (selectionRef.current?.canAutomaticallyLoad?.() === false) return
           setIsLoading(true)

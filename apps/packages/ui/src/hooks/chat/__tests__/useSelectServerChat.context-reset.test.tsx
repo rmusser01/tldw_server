@@ -22,6 +22,9 @@ const chatBaseState = vi.hoisted(() => ({
 
 const optionState = vi.hoisted(() => ({
   value: {
+    chatDraftAddress: { kind: "fresh", id: "draft-a", scope: { type: "global" }, temporary: false },
+    chatDraftRevision: 3,
+    setChatDraftAddress: vi.fn(() => true),
     setIsSearchingInternet: vi.fn(),
     clearReplyTarget: vi.fn(),
     setServerChatId: vi.fn(),
@@ -67,10 +70,10 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 }));
 
 vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector?: (state: unknown) => unknown) =>
+  useStoreMessageOption: Object.assign((selector?: (state: unknown) => unknown) =>
     typeof selector === "function"
       ? selector(optionState.value)
-      : optionState.value,
+      : optionState.value, { getState: () => optionState.value }),
 }));
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -116,7 +119,17 @@ describe("useSelectServerChat context reset", () => {
         external_ref: null,
       } as any);
     });
-    expect(usePlaygroundSessionStore.getState().serverChatSelectionIntent).toEqual({ chatId: "chat-2" });
+    const intent = usePlaygroundSessionStore.getState().serverChatSelectionIntent;
+    expect(intent).toMatchObject({ chatId: "chat-2", onLoaded: expect.any(Function) });
+    expect(optionState.value.setChatDraftAddress).not.toHaveBeenCalled();
+    intent?.onLoaded?.({
+      owner: { kind: "native", conversation_id: "chat-2", request_scope: {} as never, validate_lease: () => true },
+      view: { owner_key: "native-owner", conversation_id: "chat-2", view_session_id: "v", selection_revision: 1, cursor: { kind: "empty" }, interpretation: { kind: "parent_graph_v1" } }
+    });
+    expect(optionState.value.setChatDraftAddress).toHaveBeenCalledWith(
+      { kind: "native", id: "chat-2", ownerKey: "native-owner", scope: { type: "global" } },
+      { kind: "switch", expectedRevision: 3, sourceAddress: optionState.value.chatDraftAddress }
+    );
 
     expect(optionState.value.setWebSearch).toHaveBeenCalledWith(false);
     expect(optionState.value.setSelectedSystemPrompt).toHaveBeenCalledWith("");

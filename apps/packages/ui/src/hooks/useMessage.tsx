@@ -114,6 +114,7 @@ import {
   type ServicePromptSnapshot,
 } from "@/services/service-prompts";
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error";
+import { requestSettingsNavigation } from "@/utils/settings-return";
 
 const extractToolCalls = (generationInfo: unknown): ToolCall[] | undefined => {
   if (!generationInfo || typeof generationInfo !== "object") return undefined;
@@ -354,7 +355,11 @@ export const useMessage = () => {
 
   // Local embedding store removed; rely on tldw_server RAG
 
-  const clearChat = () => {
+  const clearChat = (beforeReset?: () => void) => {
+    if (!requestSettingsNavigation("/")) return false;
+    beforeReset?.();
+    useStoreMessageOption.getState().startNewChatDraft();
+    historySelection?.reset();
     stopStreamingRequest();
     setMessages([]);
     setHistory([]);
@@ -376,6 +381,7 @@ export const useMessage = () => {
       setTemporaryChat(true);
     }
     clearReplyTarget();
+    return true;
   };
 
   const historySetterForQueuedTurn = (guard?: QueuedDispatchGuard) =>

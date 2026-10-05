@@ -1,4 +1,6 @@
 import React from "react"
+import { MemoryRouter } from "react-router-dom"
+import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
 import type { ServerChatMessage } from "@/services/tldw/TldwApiClient"
 // @vitest-environment jsdom
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react"
@@ -8,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => {
   const store = {
     messages: [],
-    historyId: "history-a",
+    historyId: "history-a" as string | null,
     serverChatId: "chat-a" as string | null,
     serverChatTitle: "Chat A" as string | null,
     serverChatCharacterId: null as string | number | null,
@@ -74,15 +76,20 @@ vi.mock("@/hooks/chat/useChatBaseState", () => ({
     isProcessing: false,
     setHistory: mocks.setHistory,
     setMessages: mocks.setMessages,
-    setIsLoading: mocks.setIsLoading
+    setIsLoading: mocks.setIsLoading,
+    setHistoryId: (id: string | null) => { mocks.store.historyId = id },
+    setIsProcessing: vi.fn(), setStreaming: vi.fn(), setIsEmbedding: vi.fn()
   })
 }))
 
-vi.mock("@/store/option", () => ({
+vi.mock("@/store/option", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/store/option")>()
+  return {
   useStoreMessageOption: Object.assign((
-    selector: (state: typeof mocks.store) => unknown
-  ) => selector(mocks.store), { getState: () => mocks.store })
-}))
+    selector: (state: ReturnType<typeof actual.useStoreMessageOption.getState>) => unknown
+  ) => selector({ ...actual.useStoreMessageOption.getState(), ...mocks.store }), { getState: () => ({ ...actual.useStoreMessageOption.getState(), ...mocks.store }) })
+  }
+})
 
 let selectionRevision = 0
 vi.mock("@/hooks/useSelectedAssistant", () => ({ getSelectedAssistantOperationRevision: () => selectionRevision, waitForSelectedAssistantCommit: async () => undefined,
@@ -645,7 +652,7 @@ it.each(["child", "another-chat"])("reopens deliberately selected %s once after 
     usePlaygroundSessionStore.getState().requestServerChatSelection(chatId)
   })
   await act(async () => { await vi.advanceTimersByTimeAsync(300) })
-  expect(loadConversation).toHaveBeenCalledExactlyOnceWith({ serverChatId: chatId, scope: undefined, temporary: mocks.store.temporaryChat, isCurrent: expect.any(Function) })
+  expect(loadConversation).toHaveBeenCalledExactlyOnceWith({ serverChatId: chatId, scope: undefined, temporary: mocks.store.temporaryChat, isCurrent: expect.any(Function) }, null, expect.any(Function))
   expect(mocks.listChatMessages).toHaveBeenCalled()
   valid = false
   mounted.rerender()
@@ -711,6 +718,38 @@ it.each([
   // The selected assistant is persisted to extension storage, so a temporary read leaves it alone.
   expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
   mounted.unmount()
+  vi.useRealTimers()
+})
+
+it("reads saved history through the actual Temporary selector without granting ownership", async () => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+  actual.useStoreMessageOption.getState().startNewChatDraft(true)
+  const draft = actual.useStoreMessageOption.getState().chatDraftAddress
+  mocks.store.serverChatId = null
+  mocks.store.temporaryChat = true
+  mocks.store.serverChatMetaLoaded = true
+  mocks.store.setServerChatId.mockImplementation(id => { mocks.store.serverChatId = id })
+  mocks.listChatMessages.mockResolvedValue([{ id: "answer", role: "assistant", content: "Saved answer", version: 1 }])
+  const mounted = renderHook(() => {
+    const control = useHistorySelection()
+    mocks.selection = control
+    useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((key: string) => key) as TFunction })
+    return { control, select: useSelectServerChat() }
+  }, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> })
+  act(() => mounted.result.current.select({ id: "saved", title: "Saved" }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  expect(mocks.setMessages).toHaveBeenCalledWith([expect.objectContaining({ message: "Saved answer" })])
+  expect(mocks.store.setServerChatLoadState).toHaveBeenLastCalledWith("loaded")
+  expect(mounted.result.current.control.getCurrent().owner).toEqual({ kind: "unavailable", code: "temporary_history_unavailable" })
+  expect(actual.useStoreMessageOption.getState().chatDraftAddress).toBe(draft)
+  expect(mocks.saveHistoryBookmark).not.toHaveBeenCalled()
+  expect(mocks.reconcileServerChatMirror).not.toHaveBeenCalled()
+  expect(mocks.linkServerChatMirror).not.toHaveBeenCalled()
+  mounted.unmount()
+  mocks.store.setServerChatId.mockReset()
+  usePlaygroundSessionStore.getState().clearSession()
   vi.useRealTimers()
 })
 

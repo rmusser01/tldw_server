@@ -94,6 +94,8 @@ import { PageAssistDatabase } from "@/db/dexie/chat"
 import { saveHistory } from "@/db/dexie/helpers"
 import { saveMessageOnSuccess, saveMessageOnError } from "@/hooks/chat-helper"
 import { captureHistorySnapshot } from "@/services/chat-history-selection"
+import { assertHistoryConversationTarget, type NativeHistoryOwnerV1 } from "@/services/chat-history-selection"
+import { linkServerChatMirror } from "@/db/dexie/server-chat-mirror"
 import { tldwChat } from "@/services/tldw"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import { useStoreChatModelSettings } from "@/store/model"
@@ -150,6 +152,28 @@ beforeEach(() => {
 })
 
 describe("normal Chat owned history creation and H1 admission", () => {
+  it.each(["owned", "foreign", "other conversation"])("checks a historyId-only native mirror against its captured owner (%s)", async kind => {
+    const historyId = await linkServerChatMirror({ chatId: kind === "other conversation" ? "other" : "native",
+      title: "Mirror", ownerKey: kind === "foreign" ? "other-account" : ACCOUNT })
+    const owner: NativeHistoryOwnerV1 = { kind: "native", conversation_id: "native", request_scope: snapshot().requestScope, validate_lease: () => true }
+    const check = assertHistoryConversationTarget(owner, { historyId })
+    if (kind === "owned") await expect(check).resolves.toBeUndefined()
+    else await expect(check).rejects.toThrow("owner_conversation_mismatch")
+  })
+
+  it("refuses a ready selection belonging to a different displayed conversation", async () => {
+    const source = await saveHistory("Source", false, "web-ui", undefined, undefined, snapshot().requestScope)
+    const target = await saveHistory("Target", false, "web-ui", undefined, undefined, snapshot().requestScope)
+    const mounted = renderHook(() => useHistorySelection())
+    await act(async () => { await mounted.result.current.loadConversation({ historyId: target.id }) })
+    await act(async () => {
+      await expect(send(mounted.result.current, { historyId: source.id })).rejects.toThrow("owner_conversation_mismatch")
+    })
+    expect(tldwChat.streamMessage).not.toHaveBeenCalled()
+    expect(await savedMessages()).toEqual([])
+    mounted.unmount()
+  })
+
   it("dispatches explicit model and tool overrides despite unrelated global selector changes", async () => {
     const mounted = renderHook(() => useHistorySelection())
     const created = await saveHistory("Saved", false, "web-ui", undefined, undefined, snapshot().requestScope)
@@ -212,12 +236,16 @@ describe("normal Chat owned history creation and H1 admission", () => {
   })
 
   it("persists the captured account before first local admission and reopens the exact selected turn", async () => {
+    useStoreMessageOption.getState().startNewChatDraft();
+    const sourceDraft = useStoreMessageOption.getState().chatDraftAddress;
     const mounted = renderHook(() => useHistorySelection())
     let historyId = ""
     await act(async () => {
-      expect(await send(mounted.result.current, { setHistoryId: id => { historyId = id } })).toEqual({ status: "submitted" })
+      expect(await send(mounted.result.current, { originIsCurrent: mounted.result.current.fence(), setHistoryId: id => { historyId = id } })).toEqual({ status: "submitted" })
     })
     const persisted = await new PageAssistDatabase().getHistoryInfo(historyId)
+    expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "local", id: historyId });
+    expect(useStoreMessageOption.getState().chatDraftTransition).toMatchObject({ kind: "bind", sourceAddress: sourceDraft });
     expect(persisted).toMatchObject({ server_scope_key: ACCOUNT, local_owner_key: expect.stringMatching(/^local-history-v1:/) })
     expect(persisted.server_chat_id).toBeUndefined()
     expect((await savedMessages()).map(({ id, history_id, role, content, parent_message_id }) => ({ id, history_id, role, content, parent_message_id }))).toEqual([
@@ -271,6 +299,7 @@ describe("normal Chat owned history creation and H1 admission", () => {
   })
 
   it("does not adopt a creation that finishes after navigation", async () => {
+    useStoreMessageOption.getState().startNewChatDraft();
     let finish!: () => void
     const gate = new Promise<void>(resolve => { finish = resolve })
     let entered = false
@@ -283,11 +312,13 @@ describe("normal Chat owned history creation and H1 admission", () => {
     await waitFor(() => expect(entered).toBe(true))
     await act(async () => {
       current = false
+      useStoreMessageOption.getState().startNewChatDraft();
       mounted.result.current.reset()
       finish()
       await expect(pending).rejects.toThrow("stale_selection")
     })
     expect(adopted).toBe("")
+    expect(useStoreMessageOption.getState().chatDraftAddress?.kind).toBe("fresh")
     expect(mounted.result.current.getCurrent().owner).toBeNull()
     expect(await savedMessages()).toEqual([])
   })

@@ -28,6 +28,7 @@ const baseState = vi.hoisted(() => ({
 }))
 
 const optionState = vi.hoisted(() => ({
+  startNewChatDraft: vi.fn(),
   setServerChatId: vi.fn(),
   setServerChatVersion: vi.fn(),
   setContextFiles: vi.fn(),
@@ -71,7 +72,7 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
 vi.mock("@/store/option", () => {
   const useStoreMessageOption = Object.assign(
     (selector: (state: typeof optionState) => unknown) => selector(optionState),
-    { setState: optionStoreSetStateMock, getState: () => ({ serverChatId: "saved", historyId: "local" }) }
+    { setState: optionStoreSetStateMock, getState: () => ({ ...optionState, serverChatId: "saved", historyId: "local" }) }
   )
   return { useStoreMessageOption }
 })
@@ -126,6 +127,7 @@ describe("useClearChat settings navigation", () => {
     expect(cleanupOverlaysMock).not.toHaveBeenCalled()
     expect(baseState.setMessages).not.toHaveBeenCalled()
     expect(optionState.setServerChatId).not.toHaveBeenCalled()
+    expect(optionState.startNewChatDraft).not.toHaveBeenCalled()
     expect(resetModelSettingsMock).not.toHaveBeenCalled()
     expect(updatePageTitleMock).not.toHaveBeenCalled()
     expect(focusTextAreaMock).not.toHaveBeenCalled()
@@ -142,6 +144,7 @@ describe("useClearChat settings navigation", () => {
     expect(destroyAllMock).toHaveBeenCalledOnce()
     expect(cleanupOverlaysMock).toHaveBeenCalledOnce()
     expect(optionState.setServerChatId).toHaveBeenCalledOnce()
+    expect(optionState.startNewChatDraft).toHaveBeenCalledOnce()
     expect(resetModelSettingsMock).toHaveBeenCalledOnce()
     expect(updatePageTitleMock).toHaveBeenCalledOnce()
     expect(focusTextAreaMock).toHaveBeenCalledOnce()

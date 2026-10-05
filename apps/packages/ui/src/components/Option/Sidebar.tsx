@@ -33,7 +33,7 @@ import {
 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
-import { lastUsedChatModelEnabled } from "@/services/model-settings"
+import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation"
 import { useDebounce } from "@/hooks/useDebounce"
 import React, { useState, useEffect } from "react"
 import { FolderTree, FolderToolbar } from "@/components/Folders"
@@ -43,12 +43,8 @@ import { useStorage } from "@plasmohq/storage/hook"
 import {
   deleteByHistoryId,
   deleteHistoriesByDateRange,
-  formatToChatHistory,
   updateHistory,
   pinHistory,
-  formatToMessage,
-  getSessionFiles,
-  getPromptById,
   getHistoriesWithMetadata
 } from "@/db/dexie/helpers"
 import { isDatabaseClosedError } from "@/utils/ff-error"
@@ -463,75 +459,18 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
     [loadServerChat, serverChatById, t]
   )
 
-  const loadLocalConversation = React.useCallback(
-    async (conversationId: string) => {
-      try {
-        const db = new PageAssistDatabase()
-        const [history, historyDetails] = await Promise.all([
-          db.getChatHistory(conversationId),
-          db.getHistoryInfo(conversationId)
-        ])
-
-        // Switch to a local Dexie-backed chat; clear any active server-backed session id.
-        setServerChatId(null)
-        setHistoryId(conversationId)
-        setHistory(formatToChatHistory(history))
-        setMessages(formatToMessage(history))
-
-        const isLastUsedChatModel = await lastUsedChatModelEnabled()
-        if (isLastUsedChatModel && historyDetails?.model_id) {
-          setSelectedModel(historyDetails.model_id)
-        }
-
-        const lastUsedPrompt = historyDetails?.last_used_prompt
-        if (lastUsedPrompt) {
-          let promptContent = lastUsedPrompt.prompt_content ?? ""
-          if (lastUsedPrompt.prompt_id) {
-            const prompt = await getPromptById(lastUsedPrompt.prompt_id)
-            if (prompt) {
-              setSelectedSystemPrompt(prompt.id)
-              if (!promptContent.trim()) {
-                promptContent = prompt.content
-              }
-            }
-          }
-          setSystemPrompt(promptContent)
-        }
-
-        const session = await getSessionFiles(conversationId)
-        setContextFiles(session)
-
-        updatePageTitle(
-          historyDetails?.title || t("common:untitled", { defaultValue: "Untitled" })
-        )
-        navigate("/")
-        onClose()
-
-        return { history, historyDetails }
-      } catch (error) {
-        console.error("Failed to load local chat history from local storage:", error)
-        message.error(
-          t("common:error.friendlyLocalHistorySummary", {
-            defaultValue: "Something went wrong while loading local chat history."
-          })
-        )
-        return null
-      }
-    },
-    [
-      navigate,
-      onClose,
-      setHistory,
-      setHistoryId,
-      setMessages,
-      setSelectedModel,
-      setSelectedSystemPrompt,
-      setServerChatId,
-      setContextFiles,
-      setSystemPrompt,
-      t
-    ]
+  const openLocalConversation = useLoadLocalConversation(
+    { setHistory, setHistoryId, setMessages, setSelectedModel, setSelectedSystemPrompt,
+      setServerChatId, setContextFiles, setSystemPrompt },
+    { t, errorLogPrefix: "Failed to load local chat history",
+      errorDefaultMessage: "Something went wrong while loading local chat history." }
   )
+  const loadLocalConversation = React.useCallback(async (conversationId: string) => {
+    if (!await openLocalConversation(conversationId)) return false
+    navigate("/chat")
+    onClose()
+    return true
+  }, [openLocalConversation, navigate, onClose])
 
   // Handle folder selection for a chat
   const handleFolderSelect = async (folderIds: number[]) => {

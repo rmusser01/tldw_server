@@ -1,4 +1,5 @@
 import type { StoreSlice } from "@/store/option/slices/types"
+import { chatDraftAddressKey, freshChatDraftAddress } from "@/utils/chat-draft-address"
 import {
   buildQueuedRequest,
   normalizeQueuedRequests
@@ -8,6 +9,11 @@ import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
 export const createCoreSlice: StoreSlice<
   Pick<
     import("@/store/option/types").State,
+    | "chatDraftAddress"
+    | "chatDraftRevision"
+    | "chatDraftTransition"
+    | "startNewChatDraft"
+    | "setChatDraftAddress"
     | "messages"
     | "setMessages"
     | "history"
@@ -67,6 +73,27 @@ export const createCoreSlice: StoreSlice<
     | "setFileRetrievalEnabled"
   >
 > = (set, get) => ({
+  chatDraftAddress: null,
+  chatDraftRevision: 0,
+  chatDraftTransition: null,
+  startNewChatDraft: (temporary = get().temporaryChat) => {
+    get().setChatDraftAddress(freshChatDraftAddress(temporary))
+  },
+  setChatDraftAddress: (address, options = {}) => {
+    let accepted = false
+    set((state) => {
+      if (options.expectedRevision !== undefined && options.expectedRevision !== state.chatDraftRevision) return state
+      if (options.sourceAddress !== undefined && options.sourceAddress !== state.chatDraftAddress) return state
+      accepted = true
+      const destinationKey = chatDraftAddressKey(address)
+      if (state.chatDraftAddress && chatDraftAddressKey(state.chatDraftAddress) === destinationKey) return state
+      const revision = state.chatDraftRevision + 1
+      return { chatDraftAddress: address, chatDraftRevision: revision,
+        temporaryChat: address.kind === "fresh" && address.temporary,
+        chatDraftTransition: { kind: options.kind ?? "switch", sourceAddress: state.chatDraftAddress, destinationKey, revision } }
+    })
+    return accepted
+  },
   messages: [],
   setMessages: (messagesOrUpdater) =>
     set({
@@ -161,7 +188,13 @@ export const createCoreSlice: StoreSlice<
   selectedKnowledge: null,
   setSelectedKnowledge: (selectedKnowledge) => set({ selectedKnowledge }),
   temporaryChat: isFireFoxPrivateMode,
-  setTemporaryChat: (temporaryChat) => set({ temporaryChat }),
+  setTemporaryChat: (temporaryChat) => set((state) => ({ temporaryChat,
+    ...(state.temporaryChat !== temporaryChat ? {
+      chatDraftRevision: state.chatDraftRevision + 1,
+      chatDraftTransition: null,
+      chatDraftAddress: state.chatDraftAddress?.kind === "fresh" ? { ...state.chatDraftAddress, temporary: temporaryChat } : state.chatDraftAddress
+    } : {})
+  })),
   useOCR: false,
   setUseOCR: (useOCR) => set({ useOCR }),
   documentContext: null,

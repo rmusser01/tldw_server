@@ -784,8 +784,9 @@ function RootLayoutShell({
       </LayoutShellContext.Provider>
     </DemoModeProvider>
   )
-  return location.pathname === "/chat" ? (
+  return (
     <HistorySelectionProvider
+      key={location.pathname === "/chat" ? "chat" : "sidebar"}
       storageKey="tldw-h1-playground-reference"
       onCapture={(capture) => {
         const display = formatSelectedHistory(capture)
@@ -795,7 +796,7 @@ function RootLayoutShell({
     >
       {content}
     </HistorySelectionProvider>
-  ) : content
+  )
 }
 
 export default function OptionLayout(props: OptionLayoutProps) {

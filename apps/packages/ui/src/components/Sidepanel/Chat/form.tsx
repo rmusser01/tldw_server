@@ -121,6 +121,7 @@ import {
 } from "@/utils/quick-ingest-open"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
+import { chatDraftAddressKey, conversationDraftKey } from "@/utils/chat-draft-address"
 import { useStoreChatModelSettings } from "@/store/model"
 import { shallow } from "zustand/shallow"
 import { Button } from "@/components/Common/Button"
@@ -348,6 +349,11 @@ export const SidepanelForm = ({
     ? COMPOSER_CONSTANTS.TEXTAREA_MIN_HEIGHT_PRO
     : COMPOSER_CONSTANTS.TEXTAREA_MIN_HEIGHT_CASUAL
   const storageKey = draftKey || STORAGE_KEYS.SIDEPANEL_CHAT_DRAFT
+  const draftAddress = useStoreMessageOption(state => state.chatDraftAddress)
+  const draftTransition = useStoreMessageOption(state => state.chatDraftTransition)
+  React.useLayoutEffect(() => {
+    if (!useStoreMessageOption.getState().chatDraftAddress) useStoreMessageOption.getState().startNewChatDraft()
+  }, [draftAddress])
   // Shared primitive: form state + draft persistence.
   // See apps/packages/ui/src/components/Chat/composer/hooks/useComposerText.ts.
   // Sidepanel keeps its existing local `textAreaFocus` below for legacy flows.
@@ -361,9 +367,14 @@ export const SidepanelForm = ({
     promptAssistSavedAttemptId,
     textAreaFocus: promptAssistReturnFocus,
     draftSaved,
+    draftReady,
     clearDraft
   } = useComposerText({
-    draftKey: storageKey,
+    draftKey: draftAddress ? conversationDraftKey(storageKey, draftAddress) : storageKey,
+    draftEnabled: draftAddress !== null,
+    bindFromDraftKey: draftAddress && draftTransition?.kind === "bind" && draftTransition.sourceAddress &&
+      draftTransition.destinationKey === chatDraftAddressKey(draftAddress)
+      ? conversationDraftKey(storageKey, draftTransition.sourceAddress) : undefined,
     textareaRef,
     isProMode
   })
@@ -2802,6 +2813,10 @@ export const SidepanelForm = ({
         return
       }
 
+      if (!draftReady) {
+        notification.info({ message: t("playground:composer.draftLoading", "Your draft is still loading. Try again in a moment.") })
+        return
+      }
       const trimmed = intent.combinedMessage.trim()
       if (
         !intent.isImageCommand &&
@@ -2863,6 +2878,7 @@ export const SidepanelForm = ({
     [
       availableChatModelIds,
       contextFiles.length,
+      draftReady,
       form,
       isConnectionReady,
       isSending,

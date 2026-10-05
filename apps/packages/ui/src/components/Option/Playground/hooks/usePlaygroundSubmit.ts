@@ -1,4 +1,5 @@
 import React from "react"
+import { useStoreMessageOption } from "@/store/option"
 import { defaultEmbeddingModelForRag } from "~/services/tldw-server"
 import { getIsSimpleInternetSearch } from "@/services/search"
 import { formatPinnedResults } from "@/utils/rag-format"
@@ -47,6 +48,7 @@ export type UsePlaygroundSubmitDeps = {
   markPromptAssistAttemptSaved: (attemptId: number) => void
   isSending: boolean
   isConnectionReady: boolean
+  draftReady: boolean
   webSearch: boolean
   compareModeActive: boolean
   compareSelectedModels: string[]
@@ -140,6 +142,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     markPromptAssistAttemptSaved,
     isSending,
     isConnectionReady,
+    draftReady,
     webSearch,
     compareModeActive,
     compareSelectedModels,
@@ -176,6 +179,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     notificationApi,
     t
   } = deps
+  const draftReadyRef = React.useRef(draftReady)
+  draftReadyRef.current = draftReady
 
   const submitFormRef = React.useRef<
     (options?: { ignorePinnedResults?: boolean }) => void
@@ -221,6 +226,13 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
   const submitForm = (options?: { ignorePinnedResults?: boolean }) => {
     form.onSubmit(async (value: any) => {
+      if (!draftReadyRef.current) {
+        notificationApi.info({ message: t("playground:draftLoading", "Draft still loading"),
+          description: t("playground:draftLoadingWait", "Wait for this conversation's draft to finish loading before sending.") })
+        return
+      }
+      const draftRevision = useStoreMessageOption.getState().chatDraftRevision
+      const currentDraft = () => draftReadyRef.current && useStoreMessageOption.getState().chatDraftRevision === draftRevision
       if (activeDocumentPreparationRef.current) return
       let documentPreparation: {
         controller: AbortController
@@ -382,6 +394,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       }
       if (!intent.isImageCommand && uploadedFiles.length > 0) {
         if (!documentPreparation) return
+        if (!currentDraft()) return
         const waitingMetadata = buildPendingDocumentProcessingMetadata(
           uploadedFiles,
           "waiting_for_files"
@@ -507,6 +520,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           }
         }
       }
+      if (!currentDraft()) return
       const promptAssistAttemptId = beginPromptAssistReset()
       form.reset()
       clearSelectedDocuments()

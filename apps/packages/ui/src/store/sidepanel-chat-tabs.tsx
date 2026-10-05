@@ -4,6 +4,7 @@ import type { ChatHistory, Message as ChatMessage, ToolChoice } from "@/store/op
 import type { ConversationState } from "@/services/tldw/TldwApiClient"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import type { ChatDraftAddress } from "@/utils/chat-draft-address"
 
 export type ChatModelSettingsSnapshot = {
   f16KV?: boolean
@@ -54,6 +55,7 @@ export type ChatModelSettingsSnapshot = {
 }
 
 export type SidepanelChatSnapshot = {
+  chatDraftAddress?: ChatDraftAddress | null
   historySelectionReference?: HistorySelectionReference | null
   history: ChatHistory
   messages: ChatMessage[]

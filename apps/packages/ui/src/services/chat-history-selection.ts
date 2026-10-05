@@ -227,6 +227,32 @@ const assertOwnerLease = (
   )
     fail("request_config_scope_changed")
 }
+
+/** A ready controller must still belong to the conversation being submitted. */
+export const assertHistoryConversationTarget = async (
+  owner: HistoryOwnerV1,
+  target: { historyId?: string | null; serverChatId?: string | null }
+): Promise<void> => {
+  assertOwnerLease(owner)
+  if (owner.kind === "unavailable") return fail(owner.code)
+  if (target.serverChatId) {
+    if (owner.kind !== "native" || owner.conversation_id !== target.serverChatId)
+      fail("owner_conversation_mismatch")
+    return
+  }
+  if (!target.historyId) fail("owner_conversation_mismatch")
+  if (owner.kind === "local") {
+    if (owner.conversation_id !== target.historyId) fail("owner_conversation_mismatch")
+    return
+  }
+  const { PageAssistDatabase } = await import("@/db/dexie/chat")
+  const { serverChatMirrorOwnerKey } = await import("@/db/dexie/server-chat-mirror")
+  const details = await new PageAssistDatabase().getHistoryInfo(target.historyId)
+  assertOwnerLease(owner)
+  if (details?.server_chat_id !== owner.conversation_id ||
+      details.server_scope_key !== serverChatMirrorOwnerKey({ requestScope: owner.request_scope }))
+    fail("owner_conversation_mismatch")
+}
 const localOptions = (
   owner: LocalHistoryOwnerV1,
   opts?: HistoryOperationOptions

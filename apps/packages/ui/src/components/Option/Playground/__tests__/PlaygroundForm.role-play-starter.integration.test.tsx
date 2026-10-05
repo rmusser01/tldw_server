@@ -112,6 +112,14 @@ const chatModelSettingsState = vi.hoisted(() => ({
 }))
 
 const createMessageOptionState = () => ({
+  chatDraftAddress: { kind: "fresh", id: "form-fixture", scope: { type: "global" }, temporary: false },
+  chatDraftRevision: 0,
+  chatDraftTransition: null,
+  startNewChatDraft: vi.fn(() => {
+    const state = playgroundFormMessageOptionState.value
+    state.chatDraftRevision++
+    state.chatDraftAddress = { kind: "fresh", id: `form-fixture-${state.chatDraftRevision}`, scope: { type: "global" }, temporary: state.temporaryChat }
+  }),
   onSubmit: onSubmitMock,
   messages: [],
   selectedModel: "deepseek-chat",

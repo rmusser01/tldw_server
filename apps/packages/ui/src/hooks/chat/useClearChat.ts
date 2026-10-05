@@ -95,6 +95,7 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   return React.useCallback(() => {
     const destination = resolveClearChatPath()
     if (!requestSettingsNavigation(destination)) return false
+    useStoreMessageOption.getState().startNewChatDraft()
     resetHistorySelection?.()
     const current = useStoreMessageOption.getState()
     dispatchChatRouteReplacement({

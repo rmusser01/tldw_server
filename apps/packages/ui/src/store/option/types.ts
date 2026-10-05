@@ -17,6 +17,7 @@ import type {
   QueuedRequestInput
 } from "@/utils/chat-request-queue"
 import type { CharacterEmoteEvent } from "@/utils/character-emotes"
+import type { ChatDraftAddress, ChatDraftTransition } from "@/utils/chat-draft-address"
 
 // Knowledge type is now server-side only; this is a placeholder for legacy compatibility
 export type Knowledge = {
@@ -125,6 +126,15 @@ export type ChatHistory = {
 }[]
 
 export type State = {
+  chatDraftAddress: ChatDraftAddress | null
+  chatDraftRevision: number
+  chatDraftTransition: ChatDraftTransition | null
+  startNewChatDraft: (temporary?: boolean) => void
+  setChatDraftAddress: (address: ChatDraftAddress, options?: {
+    kind?: ChatDraftTransition["kind"]
+    expectedRevision?: number
+    sourceAddress?: ChatDraftAddress | null
+  }) => boolean
   messages: Message[]
   // Accepts either direct Message[] or functional update (like React setState)
   setMessages: (

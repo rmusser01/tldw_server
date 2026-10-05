@@ -44,6 +44,7 @@ const {
 }))
 
 const messageStoreState = vi.hoisted(() => ({
+  draftFields: null as (() => Record<string, unknown>) | null,
   value: {
     selectedModel: "deepseek-chat" as string | null,
     toolChoice: "auto" as "auto" | "none" | "required",
@@ -150,7 +151,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: {
-    getState: () => messageStoreState.value
+    getState: () => ({ ...messageStoreState.value, ...messageStoreState.draftFields?.() })
   }
 }))
 
@@ -442,6 +443,7 @@ const makeController = () => {
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  messageStoreState.draftFields = null
   h1.beforeModel.mockReset()
   messageStoreState.value.selectedModel = "deepseek-chat"
   messageStoreState.value.toolChoice = "auto"
@@ -1873,6 +1875,12 @@ vi.mock("@/db/dexie/schema", async () => ({
 it.each(["normal", "bubble", "cluster"])(
   "real controller fork -> immediate send -> reopen keeps source unchanged (entry=%s)",
   async (entry) => {
+    const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    actual.useStoreMessageOption.getState().startNewChatDraft()
+    messageStoreState.draftFields = () => {
+      const state = actual.useStoreMessageOption.getState()
+      return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision, setChatDraftAddress: state.setChatDraftAddress }
+    }
     const comparison = entry !== "normal"
     const { memory, seedLocalFork } = await import(
       "@/hooks/chat/__tests__/local-history-fixture"
@@ -1937,6 +1945,8 @@ it.each(["normal", "bubble", "cluster"])(
     expect(onOpened).toHaveBeenCalledWith(outcome.child_id)
     expect(outcome.state, JSON.stringify(outcome)).toBe("committed")
     const childId = outcome.child_id
+    expect(actual.useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "local", id: childId })
+    expect(options.historyId).toBe(childId)
     expect(controller.result.current.getCurrent().owner).toMatchObject({
       kind: "local",
       conversation_id: childId

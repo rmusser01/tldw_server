@@ -1,4 +1,5 @@
 import i18n from "i18next"
+import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
 import { getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
 import type { UploadedFile } from "@/db"
 import { commitLocalFork, prepareLocalFork } from "@/db/dexie/branch"
@@ -274,6 +275,7 @@ export const createBranchMessage =
       owner_key: request.owner_key
     }
     const current = options.captureViewFence?.() ?? (() => true)
+    const acceptDraft = captureChatDraftLoad("switch")
     const origin = options.historySelection?.getCurrent?.()
     const native = origin?.owner?.kind === "native" ? origin.owner : null
     if ((options.serverChatId || options.serverOnly) && !native)
@@ -337,8 +339,8 @@ export const createBranchMessage =
       if (!controller) return result
       await controller.loadConversation(
         native
-          ? { serverChatId: result.child_id, scope: native.scope }
-          : { historyId: result.child_id },
+          ? { serverChatId: result.child_id, scope: native.scope, isCurrent: acceptDraft.isCurrent }
+          : { historyId: result.child_id, isCurrent: acceptDraft.isCurrent },
         undefined,
         (receipt) => {
           const live = controller.getCurrent()
@@ -367,6 +369,7 @@ export const createBranchMessage =
                 actual.workspaceId !== expected.workspaceId)
             )
               return
+            if (!acceptDraft(receipt)) return
             options.setHistoryId(null)
             options.setContext?.([])
             options.setSelectedSystemPrompt?.("")
@@ -377,6 +380,7 @@ export const createBranchMessage =
             return
           }
           const local = prepared as Awaited<ReturnType<typeof prepareLocalFork>>
+          if (!acceptDraft(receipt)) return
           options.setHistory(formatToChatHistory(local.messages))
           options.setMessages(formatToMessage(local.messages))
           options.setContext?.(local.files?.files ?? [])

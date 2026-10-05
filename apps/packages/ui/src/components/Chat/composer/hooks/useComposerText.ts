@@ -28,6 +28,8 @@ import React from "react"
 export interface UseComposerTextOptions {
   /** Persistence key for draft messages. Each surface uses its own key. */
   draftKey: string
+  /** Explicit first-ID binding; ignored unless this source is already mounted. */
+  bindFromDraftKey?: string
   /** Keep active browser tabs from replacing each other's unsent text. */
   tabScopedDraft?: boolean
   /** Textarea ref owned by the caller (usually the composer component). */
@@ -93,6 +95,7 @@ export function useComposerText(
 ): UseComposerTextResult {
   const {
     draftKey,
+    bindFromDraftKey,
     tabScopedDraft = false,
     textareaRef,
     isProMode = false,
@@ -177,6 +180,7 @@ export function useComposerText(
 
   const { draftSaved, draftReady, clearDraft: clearPersistedDraft } = useDraftPersistence({
     storageKey: `${draftKey}:owner:${ownerKey ?? "unresolved"}`,
+    bindFromStorageKey: bindFromDraftKey && ownerKey ? `${bindFromDraftKey}:owner:${ownerKey}` : undefined,
     tabScoped: tabScopedDraft,
     legacyStorageKey: draftKey,
     isCurrent,

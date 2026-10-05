@@ -393,13 +393,13 @@ describe("OptionLayout bypass block (#2889)", () => {
   })
 })
 
-it("places the chat controller above both shell consumers and route content", () => {
+it.each(["/chat", "/settings"])("places the history validator above sidebar consumers on %s", pathname => {
   delete (globalThis as any).__tldwOptionShell
   function Probe() {
     const selection = useHistorySelectionContext()
     return <output data-testid="selection-probe">{selection ? "present" : "absent"}</output>
   }
-  const view = render(<MemoryRouter initialEntries={["/chat"]}><OptionLayout><Probe /></OptionLayout></MemoryRouter>)
+  const view = render(<MemoryRouter initialEntries={[pathname]}><OptionLayout><Probe /></OptionLayout></MemoryRouter>)
   expect(view.getByTestId("header")).toHaveAttribute("data-history-controller", "present")
   expect(view.getByTestId("selection-probe")).toHaveTextContent("present")
 })
@@ -421,7 +421,8 @@ it("reuses the shell controller and gives chat route reentry a fresh lifetime", 
   const first = seen.at(-1)
   expect(first).toBeTypeOf("function")
   fireEvent.click(view.getByText("Leave"))
-  expect(seen.at(-1)).toBeNull()
+  expect(seen.at(-1)).toBeTypeOf("function")
+  expect(seen.at(-1)).not.toBe(first)
   fireEvent.click(view.getByText("Return"))
   expect(seen.at(-1)).toBeTypeOf("function")
   expect(seen.at(-1)).not.toBe(first)

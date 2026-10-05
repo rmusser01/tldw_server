@@ -109,6 +109,8 @@ const clearLegacyDraft = (storageKey: string) => {
 
 interface DraftPersistenceOptions {
   storageKey: string
+  /** A first-ID acknowledgement may rekey this current, hydrated source. */
+  bindFromStorageKey?: string
   tabScoped?: boolean
   /** Discard this older, unowned key instead of migrating its private content. */
   legacyStorageKey?: string
@@ -138,6 +140,7 @@ interface DraftPersistenceResult {
  */
 export const useDraftPersistence = ({
   storageKey,
+  bindFromStorageKey,
   tabScoped = false,
   legacyStorageKey,
   isCurrent,
@@ -153,8 +156,15 @@ export const useDraftPersistence = ({
   const [draftSaved, setDraftSaved] = React.useState(false)
   const identity = React.useMemo(() => ({ storageKey, enabled, isCurrent }), [storageKey, enabled, isCurrent])
   const currentIdentityRef = React.useRef(identity)
-  React.useLayoutEffect(() => { currentIdentityRef.current = identity }, [identity])
   const [hydrated, setHydrated] = React.useState<object | null>(null)
+  const boundIdentityRef = React.useRef<object | null>(null)
+  React.useLayoutEffect(() => {
+    const previous = currentIdentityRef.current
+    boundIdentityRef.current = previous !== identity && enabled && previous.enabled &&
+      hydrated === previous && previous.storageKey === bindFromStorageKey &&
+      (!previous.isCurrent || previous.isCurrent()) ? identity : null
+    currentIdentityRef.current = identity
+  }, [identity, enabled, hydrated, bindFromStorageKey])
   const draftSavedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingPersistRef = React.useRef<(() => void) | null>(null)
@@ -202,6 +212,14 @@ export const useDraftPersistence = ({
   // Restore unsent draft on mount
   React.useEffect(() => {
     if (!enabled) return
+    // This view already owns the input; assigning its first ID is not a load.
+    // Mounts and skipped source transitions have no matching prior identity.
+    if (boundIdentityRef.current === identity) {
+      lastPersistedSignatureRef.current = null
+      setDraftSaved(false)
+      setHydrated(identity)
+      return
+    }
     let cancelled = false
     const current = () => !cancelled && (!isCurrent || isCurrent())
     const restoreRevision = draftRevisionRef.current

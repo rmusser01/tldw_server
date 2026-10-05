@@ -31,7 +31,8 @@ export const useStoreMessageOption = createWithEqualityFn<State>()((set, get) =>
 const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
   if (!invalidated) return
   useStoreMessageOption.getState().setServerChatId(null)
-  useStoreMessageOption.setState({
+  useStoreMessageOption.setState((state) => ({
+    chatDraftAddress: null, chatDraftTransition: null, chatDraftRevision: state.chatDraftRevision + 1,
     messages: [], history: [], historyId: null, queuedMessages: [],
     isFirstMessage: true, isLoading: false, isProcessing: false, streaming: false,
     isEmbedding: false, isSearchingInternet: false,
@@ -42,7 +43,7 @@ const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
     compareActiveModelsByCluster: {}, compareParentByHistory: {},
     compareCanonicalByCluster: {}, compareContinuationModeByCluster: {}, compareSplitChats: {},
     replyTarget: null, messageSteeringMode: "none", messageSteeringForceNarrate: false
-  })
+  }))
   updatePageTitle()
 })
 const hot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot

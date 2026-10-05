@@ -1,4 +1,5 @@
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
 import React from "react"
 import { message } from "antd"
 
@@ -73,6 +74,7 @@ export function useLoadLocalConversation(
 
   return React.useCallback(
     async (conversationId: string): Promise<boolean> => {
+      const acceptDraft = captureChatDraftLoad("switch")
       const generation = ++loadGenerationRef.current
       const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision
       if (!mountedRef.current) return false
@@ -81,7 +83,7 @@ export function useLoadLocalConversation(
       let snapshot: ServicePromptSnapshot | undefined
       // The controller advances its own fence while opening. This caller lease
       // must track navigation/account changes independently of that fence.
-      const isCurrentLoad = () => mountedRef.current &&
+      const isCurrentLoad = () => acceptDraft.isCurrent() && mountedRef.current &&
         !snapshot?.scopeSignal.aborted && !snapshot?.scopeInvalidatedSignal.aborted &&
         generation === loadGenerationRef.current &&
         restoreRevision === usePlaygroundSessionStore.getState().restoreRevision
@@ -102,9 +104,17 @@ export function useLoadLocalConversation(
         const history = await db.getChatHistory(conversationId)
         if (!isCurrent()) return false
         if (loadConversation && fence) {
-          if (!await loadConversation({ historyId: conversationId, isCurrent: isCurrentLoad })) return false
+          let accepted = false
+          if (!await loadConversation({ historyId: conversationId, isCurrent: isCurrentLoad }, null, receipt => { accepted = acceptDraft(receipt) })) return false
           if (generation !== loadGenerationRef.current) return false
           selectionCurrent = fence()
+          const selected = getCurrent?.()
+          if (!accepted && selected?.owner && selected.owner.kind !== "unavailable" && selected.view &&
+            selected.owner.conversation_id === (historyDetails.server_chat_id || conversationId)) {
+            // A review state may locate a private draft; it does not authorize sending.
+            accepted = acceptDraft({ owner: selected.owner, view: selected.view })
+          }
+          if (!accepted) return false
         }
         if (!isCurrent()) return false
         const selected = getCurrent?.()

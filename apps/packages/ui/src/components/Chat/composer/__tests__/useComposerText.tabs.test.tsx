@@ -3,6 +3,9 @@ import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { COMPOSER_CONSTANTS } from "@/config/ui-constants"
 import { Storage as PlasmoStorage } from "@plasmohq/storage"
+import { usePlaygroundSubmit, type UsePlaygroundSubmitDeps } from "@/components/Option/Playground/hooks/usePlaygroundSubmit"
+import { useStoreMessageOption } from "@/store/option"
+import { conversationDraftKey } from "@/utils/chat-draft-address"
 
 const authority = vi.hoisted(() => ({ user: "alice" }))
 vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
@@ -52,6 +55,63 @@ describe("Playground drafts in distinct native tab storage areas", () => {
   beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); authority.user = "alice" })
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
+  it.each([false, true])("refuses WebUI submission before a destination draft hydrates (queue: %s)", async isSending => {
+    const tab = makeTabStorage()
+    vi.stubGlobal("sessionStorage", tab)
+    useStoreMessageOption.getState().startNewChatDraft()
+    const source = useStoreMessageOption.getState().chatDraftAddress!
+    const sendMessage = vi.fn(async () => ({ status: "submitted" }))
+    const queueSubmission = vi.fn()
+    const view = renderHook(() => {
+      const address = useStoreMessageOption(state => state.chatDraftAddress)!
+      const composer = useComposerText({ draftKey: conversationDraftKey("submit-test", address), tabScopedDraft: true,
+        textareaRef: React.createRef<HTMLTextAreaElement>() })
+      const deps: UsePlaygroundSubmitDeps & { draftReady: boolean } = {
+        ...composer, draftReady: composer.draftReady, isSending, isConnectionReady: true,
+        webSearch: false, compareModeActive: false, compareSelectedModels: [], selectedModel: "test",
+        fileRetrievalEnabled: false, ragPinnedResults: [], selectedDocuments: [], uploadedFiles: [],
+        currentContextSnapshot: {}, conversationTokenCount: 0, characterContextTokenEstimate: 0,
+        pinnedSourceTokenEstimate: 0, resolvedMaxContext: 1000, jsonMode: false, openUIRequestMode: false,
+        sendMessage, queueSubmission, clearOpenUIRequestMode: () => {}, clearSelectedDocuments: () => {},
+        clearUploadedFiles: () => {}, setLastSubmittedContext: () => {}, estimateTokensForText: () => 1,
+        resolveSubmissionIntent: (message: string) => ({ message }), validateSelectedChatModelsAvailability: () => true,
+        compareModelsSupportCapability: () => true, notificationApi: { info: vi.fn(), warning: vi.fn() },
+        t: (key: string, fallback?: string | { defaultValue?: string }) => typeof fallback === "string" ? fallback : fallback?.defaultValue ?? key
+      }
+      return { ...composer, ...usePlaygroundSubmit(deps) }
+    })
+    await settle()
+    act(() => view.result.current.setMessageValue("SOURCE DRAFT"))
+    await settle()
+    let finish!: () => void
+    const held = new Promise<void>(resolve => { finish = resolve })
+    const original = PlasmoStorage.prototype.get
+    let destinationKey = ""
+    const read = vi.spyOn(PlasmoStorage.prototype, "get").mockImplementation(async function (key) {
+      if (destinationKey && String(key).includes(destinationKey)) await held
+      return original.call(this, key)
+    })
+    try {
+      act(() => {
+        useStoreMessageOption.getState().startNewChatDraft()
+        destinationKey = conversationDraftKey("submit-test", useStoreMessageOption.getState().chatDraftAddress!)
+      })
+      await act(async () => { await Promise.resolve(); await Promise.resolve() })
+      expect(view.result.current.draftReady).toBe(false)
+      act(() => view.result.current.submitForm())
+      await act(async () => { await Promise.resolve(); await Promise.resolve() })
+      expect(sendMessage).not.toHaveBeenCalled()
+      expect(queueSubmission).not.toHaveBeenCalled()
+      expect(view.result.current.form.values.message).toBe("SOURCE DRAFT")
+      await act(async () => { finish(); await held })
+      await settle()
+      expect(view.result.current.form.values.message).toBe("")
+      act(() => useStoreMessageOption.getState().setChatDraftAddress(source))
+      await settle()
+      expect(view.result.current.form.values.message).toBe("SOURCE DRAFT")
+    } finally { finish?.(); read.mockRestore(); view.unmount() }
+  })
+
   it("recovers the latest source text and collapse metadata after switching keys before debounce", async () => {
     const tab = makeTabStorage()
     const destination = mount(tab, false, "saved-B")
@@ -72,6 +132,59 @@ describe("Playground drafts in distinct native tab storage areas", () => {
     await settle()
     expect(view.result.current.form.values.message).toBe("LATEST A")
     expect(metadata).toEqual({ wasExpanded: false, collapsedRange: { start: 10, end: 50 } })
+  })
+
+  it("binds first-ID acknowledgement without replacing the next draft or collapse state", async () => {
+    const tab = makeTabStorage()
+    vi.stubGlobal("sessionStorage", tab)
+    let metadata = { wasExpanded: true, collapsedRange: { start: 10, end: 60 } }
+    const view = renderHook(({ draftKey, bindFromDraftKey }) => useComposerText({
+      draftKey, bindFromDraftKey, tabScopedDraft: true, textareaRef: React.createRef<HTMLTextAreaElement>(),
+      getDraftMetadata: () => metadata,
+      restoreWithMetadata: (_text, restored) => { metadata = restored as typeof metadata }
+    }), { initialProps: { draftKey: "fresh-A", bindFromDraftKey: undefined as string | undefined } })
+    await settle()
+    metadata = { wasExpanded: true, collapsedRange: { start: 10, end: 60 } }
+    act(() => view.result.current.setMessageValue("SUBMITTED"))
+    await settle()
+    act(() => view.result.current.beginPromptAssistReset())
+    act(() => view.result.current.setMessageValue("NEXT DRAFT"))
+    view.rerender({ draftKey: "saved-A", bindFromDraftKey: "fresh-A" })
+    await settle()
+    expect(view.result.current.form.values.message).toBe("NEXT DRAFT")
+    expect(metadata).toEqual({ wasExpanded: true, collapsedRange: { start: 10, end: 60 } })
+    view.unmount()
+    const restored = mount(tab, false, "saved-A")
+    await settle()
+    expect(restored.result.current.form.values.message).toBe("NEXT DRAFT")
+  })
+
+  it("hydrates normally on a remount even when its previous bind marker remains", async () => {
+    const tab = makeTabStorage()
+    const saved = mount(tab, false, "saved-A")
+    await settle(); await enter(saved, "RESTORED A"); saved.unmount()
+    vi.stubGlobal("sessionStorage", tab)
+    const restored = renderHook(() => useComposerText({
+      draftKey: "saved-A", bindFromDraftKey: "fresh-A", tabScopedDraft: true,
+      textareaRef: React.createRef<HTMLTextAreaElement>()
+    }))
+    await settle()
+    expect(restored.result.current.form.values.message).toBe("RESTORED A")
+  })
+
+  it("does not replay a skipped bind from a different source key", async () => {
+    const tab = makeTabStorage()
+    const saved = mount(tab, false, "saved-A")
+    await settle(); await enter(saved, "SAVED A"); saved.unmount()
+    vi.stubGlobal("sessionStorage", tab)
+    const view = renderHook(({ draftKey, bindFromDraftKey }) => useComposerText({
+      draftKey, bindFromDraftKey, tabScopedDraft: true, textareaRef: React.createRef<HTMLTextAreaElement>()
+    }), { initialProps: { draftKey: "other-B", bindFromDraftKey: undefined as string | undefined } })
+    await settle()
+    act(() => view.result.current.setMessageValue("OTHER B"))
+    view.rerender({ draftKey: "saved-A", bindFromDraftKey: "fresh-A" })
+    await settle()
+    expect(view.result.current.form.values.message).toBe("SAVED A")
   })
 
   it("restores an absent destination as empty instead of copying source text", async () => {

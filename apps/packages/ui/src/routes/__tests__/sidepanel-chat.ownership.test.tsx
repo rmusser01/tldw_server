@@ -12,6 +12,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import LegacySidepanelChat from "../../../../../tldw-frontend/extension/routes/sidepanel-chat"
 import SidepanelChat from "../sidepanel-chat"
+import { useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { requestSettingsNavigation, SETTINGS_NAVIGATION_REQUEST_EVENT } from "@/utils/settings-return"
+import type { HistoryBookmarkScope } from "@/db/dexie/types"
+import type { HistoryOwnerV1 } from "@/services/chat-history-selection"
+import type { HistoryCaptureRequestV1, HistoryViewSelectionV1 } from "@/types/history-selection"
 
 const io = vi.hoisted(() => ({
   noop: () => {},
@@ -19,6 +24,10 @@ const io = vi.hoisted(() => ({
     typeof fallback === "string" ? fallback : key,
   user: "alice",
   sequence: 0,
+  localId: "foreign",
+  serverId: "server-chat",
+  captureNative: false,
+  controller: null as HistorySelectionController | null,
   data: new Map<string, unknown>(),
   read: vi.fn(),
   local: vi.fn(),
@@ -43,6 +52,7 @@ vi.mock("@/utils/safe-storage", () => ({
 vi.mock("@/hooks/useMessage", () => ({
   useMessage: () => {
     const state = useStoreMessageOption()
+    const historySelection = useHistorySelectionContext()
     const selection = useSelectedModel()
     return new Proxy(state, {
       get: (target, key) =>
@@ -51,7 +61,11 @@ vi.mock("@/hooks/useMessage", () => ({
           : key in target
             ? Reflect.get(target, key)
             : key === "clearChat"
-              ? () =>
+              ? (beforeReset?: () => void) => {
+                  if (!requestSettingsNavigation("/")) return false
+                  beforeReset?.()
+                  useStoreMessageOption.getState().startNewChatDraft()
+                  historySelection?.reset()
                   useStoreMessageOption.setState({
                     messages: [],
                     history: [],
@@ -59,6 +73,8 @@ vi.mock("@/hooks/useMessage", () => ({
                     serverChatId: null,
                     queuedMessages: []
                   })
+                  return true
+                }
               : String(key).startsWith("set") ||
                   ["stopStreamingRequest", "onSubmit"].includes(String(key))
                 ? io.noop
@@ -67,9 +83,49 @@ vi.mock("@/hooks/useMessage", () => ({
   }
 }))
 vi.mock("@/services/service-prompts", () => ({
-  loadServicePromptSnapshot: () => io.scope()
+  loadServicePromptSnapshot: () => io.scope(),
+  resolveServicePromptScope: async () => (await io.scope()).requestScope,
+  subscribeToServicePromptConfigChanges: () => io.noop
+}))
+// Storage/capture I/O only; the mounted logical-view controller and route remain real.
+vi.mock("@/db/dexie/chat", async original => {
+  const actual = await original<typeof import("@/db/dexie/chat")>()
+  return { ...actual, PageAssistDatabase: class extends actual.PageAssistDatabase {
+    async getHistoryInfo(id: string) { return (await io.local(id))?.historyInfo }
+  } }
+})
+vi.mock("@/db/dexie/history-selection", async original => ({
+  ...await original<typeof import("@/db/dexie/history-selection")>(),
+  ensureLocalProfileId: async () => "profile",
+  getLocalHistoryOwner: async (id: string) => ({ kind: "local", profile_id: "profile", owner_key: "local-profile", conversation_id: id }),
+  loadHistoryBookmark: async (scope: HistoryBookmarkScope, owner: { owner_key: string; conversation_id: string }) => io.data.get(`bookmark:${JSON.stringify([scope.profile_id, scope.client_session_id, owner.owner_key, owner.conversation_id])}`) ?? null,
+  saveHistoryBookmark: async (scope: HistoryBookmarkScope, view: HistoryViewSelectionV1) => {
+    io.data.set(`bookmark:${JSON.stringify([scope.profile_id, scope.client_session_id, view.owner_key, view.conversation_id])}`, { ...scope, view })
+  },
+  loadHistoryTurnRecoveries: async () => []
+}))
+vi.mock("@/services/chat-history-selection", async original => ({
+  ...await original<typeof import("@/services/chat-history-selection")>(),
+  captureHistorySnapshot: async (owner: HistoryOwnerV1, incoming: HistoryCaptureRequestV1["view"], purpose: string) => {
+    if (owner.kind === "unavailable" || (owner.kind === "native" && (!io.captureNative || owner.conversation_id === "failed"))) throw new Error("unsupported_history_capability")
+    const cached = owner.kind === "native" ? { historyInfo: { id: owner.conversation_id }, messages: [] } : await io.local(owner.conversation_id)
+    if (!cached || cached.historyInfo.id !== owner.conversation_id) throw new Error("missing_conversation")
+    const view = { ...incoming, owner_key: owner.owner_key || `native:${owner.conversation_id}` }
+    const rows = cached.messages.map((row: { id: string; role: string }) => ({ id: row.id, revision: "1", role: row.role, parent_id: null, settled: true }))
+    return { status: "captured", view, purpose, rows,
+      selected_content: cached.messages.map((row: { id: string; content: string }) => ({ id: row.id, revision: "1", message: row.content, images: [] })),
+      storage_context_digest: "storage",
+      snapshot: { version: 1, owner_key: view.owner_key, conversation_id: owner.conversation_id, nodes: rows,
+        fences: { conversation: "1", history: "1", settings: "1" }, source_digest: "source", storage_context_digest: "storage", interpretation_status: { kind: "parent_graph_v1" } }
+    }
+  }
 }))
 vi.mock("@/hooks/useBackgroundMessage", () => ({ default: () => null }))
+vi.mock("@/db/dexie/fork-operations", async original => ({
+  ...await original<typeof import("@/db/dexie/fork-operations")>(),
+  findForkCandidate: async () => null,
+  loadForkOperations: async () => []
+}))
 vi.mock("@/hooks/useMigration", () => ({ useMigration: () => {} }))
 vi.mock("@/hooks/useSmartScroll", () => ({
   useSmartScroll: () => ({
@@ -130,13 +186,14 @@ vi.mock("@/services/web-clipper/enrichment", () => ({
   clearPendingWebClipAnalyzeRequest: io.noop
 }))
 vi.mock("@/components/Sidepanel/Chat/body", () => ({
-  SidePanelBody: () => (
-    <div>
+  SidePanelBody: () => {
+    io.controller = useHistorySelectionContext()
+    return <div>
       {useStoreMessageOption((state) => state.messages).map((item, index) => (
         <p key={index}>{item.message}</p>
       ))}
     </div>
-  )
+  }
 }))
 vi.mock("@/components/Sidepanel/Chat/form", () => ({
   SidepanelForm: () => null
@@ -151,6 +208,7 @@ vi.mock("@/components/Sidepanel/Chat/Sidebar", () => ({
   SidepanelChatSidebar: (props: {
     tabs: { id: string; label: string }[]
     onSelectTab: (id: string) => void
+    onCloseTab: (id: string) => void
     onNewTab: () => void
     onOpenLocalHistory: (id: string) => void
     onOpenServerChat: (chat: { id: string; title: string }) => void
@@ -158,16 +216,16 @@ vi.mock("@/components/Sidepanel/Chat/Sidebar", () => ({
     <nav>
       <button onClick={props.onNewTab}>New conversation</button>
       {props.tabs.map((tab) => (
-        <button key={tab.id} onClick={() => props.onSelectTab(tab.id)}>
+        <React.Fragment key={tab.id}><button onClick={() => props.onSelectTab(tab.id)}>
           {tab.label}
-        </button>
+        </button><button aria-label={`Close ${tab.label}`} onClick={() => props.onCloseTab(tab.id)}>Close</button></React.Fragment>
       ))}
-      <button onClick={() => props.onOpenLocalHistory("foreign")}>
+      <button onClick={() => props.onOpenLocalHistory(io.localId)}>
         Open cached history
       </button>
       <button
         onClick={() =>
-          props.onOpenServerChat({ id: "server-chat", title: "Server chat" })
+          props.onOpenServerChat({ id: io.serverId, title: "Server chat" })
         }>
         Open server history
       </button>
@@ -298,6 +356,10 @@ describe.each([
   beforeEach(() => {
     io.user = "alice"
     io.sequence = 0
+    io.localId = "foreign"
+    io.serverId = "server-chat"
+    io.captureNative = false
+    io.controller = null
     io.data.clear()
     io.read.mockReset().mockImplementation(async (key) => io.data.get(key))
     io.local.mockReset()
@@ -729,6 +791,7 @@ describe.each([
   )
 
   it("restores an owned local history and its title", async () => {
+    io.localId = "owned"
     io.local.mockResolvedValue({
       historyInfo: {
         id: "owned",
@@ -749,6 +812,109 @@ describe.each([
     )
     await screen.findByText("OWNED CACHED TRANSCRIPT")
     expect(useStoreMessageOption.getState().historyId).toBe("owned")
+  })
+
+  if (_name === "shared") it("loads a destination in its own logical view without overwriting the source tab", async () => {
+    io.data.set(storedKey("alice"), tabsState())
+    io.localId = "B"
+    const data = (id: string) => ({ historyInfo: { id, title: id, server_scope_key: ownerKey("alice") },
+      messages: [{ id: `${id}-message`, role: "user", content: `${id} TRANSCRIPT` }] })
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    let opening = false
+    io.local.mockImplementation(async id => { if (id === "B" && opening) await held; return data(id) })
+    render(<Route />)
+    await screen.findByRole("button", { name: "alice one" })
+    await act(async () => {
+      await io.controller!.loadConversation({ historyId: "A" }, null)
+      useStoreMessageOption.getState().setHistoryId("A")
+      useStoreMessageOption.getState().setChatDraftAddress({ kind: "local", id: "A", profileId: "profile" })
+    })
+    await screen.findByText("A TRANSCRIPT")
+    opening = true
+    fireEvent.click(screen.getByRole("button", { name: "Open cached history" }))
+    await waitFor(() => expect(io.local).toHaveBeenCalledWith("B"))
+    expect(io.controller!.getCurrent().view?.conversation_id).toBe("A")
+    expect(io.controller!.getCurrent().status).toBe("ready")
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+    expect(useStoreMessageOption.getState().messages[0]?.message).toBe("A TRANSCRIPT")
+    act(() => useStoreChatModelSettings.getState().setSystemPrompt("EDITED A SETUP"))
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().snapshotsById["alice-one"].modelSettings?.systemPrompt).toBe("EDITED A SETUP"))
+    await act(async () => { release(); await held })
+    await screen.findByText("B TRANSCRIPT")
+    fireEvent.click(screen.getByRole("button", { name: "alice one" }))
+    await screen.findByText("A TRANSCRIPT")
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe("EDITED A SETUP")
+    expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "local", id: "A" })
+    await waitFor(() => expect(io.controller!.getCurrent().view?.conversation_id).toBe("A"))
+  })
+
+  if (_name === "shared") it("keeps the live source owner when a second opening fails after native preparation", async () => {
+    io.data.set(storedKey("alice"), tabsState())
+    io.captureNative = true
+    io.local.mockImplementation(async id => ({ historyInfo: { id, title: id, server_scope_key: ownerKey("alice") },
+      messages: [{ id: `${id}-message`, role: "user", content: `${id} TRANSCRIPT` }] }))
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    io.server.mockImplementation(async () => { await held; return [] })
+    render(<Route />)
+    await screen.findByRole("button", { name: "alice one" })
+    await act(async () => {
+      await io.controller!.loadConversation({ historyId: "A" }, null)
+      useStoreMessageOption.getState().setHistoryId("A")
+      useStoreMessageOption.getState().setChatDraftAddress({ kind: "local", id: "A", profileId: "profile" })
+    })
+    await screen.findByText("A TRANSCRIPT")
+    const source = io.controller!.getCurrent()
+    const sourceCurrent = io.controller!.fence()
+    fireEvent.click(screen.getByRole("button", { name: "Open server history" }))
+    // The route lists messages only after B's native H1 capture is ready.
+    await waitFor(() => expect(io.server).toHaveBeenCalledWith("server-chat", expect.anything(), expect.anything()))
+    expect(io.controller!.getCurrent()).toBe(source)
+    expect(sourceCurrent()).toBe(true)
+    io.serverId = "failed"
+    fireEvent.click(screen.getByRole("button", { name: "Open server history" }))
+    await waitFor(() => expect(useStoreMessageOption.getState().isLoading).toBe(false))
+    await act(async () => { release(); await held })
+    expect(io.controller!.getCurrent()).toBe(source)
+    expect(sourceCurrent()).toBe(true)
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+    expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "local", id: "A" })
+  })
+
+  if (_name === "shared") it("resets the new logical tab after preserving the departing selection", async () => {
+    io.data.set(storedKey("alice"), tabsState())
+    io.local.mockResolvedValue({ historyInfo: { id: "A", title: "A" },
+      messages: [{ id: "A-message", role: "user", content: "A TRANSCRIPT" }] })
+    render(<Route />)
+    await screen.findByRole("button", { name: "alice one" })
+    await act(async () => {
+      await io.controller!.open({ kind: "local", profile_id: "profile", owner_key: "local-profile", conversation_id: "A" }, null)
+      useStoreMessageOption.getState().setHistoryId("A")
+      useStoreMessageOption.getState().setChatDraftAddress({ kind: "local", id: "A", profileId: "profile" })
+    })
+    await screen.findByText("A TRANSCRIPT")
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }))
+    expect(useStoreMessageOption.getState().chatDraftAddress?.kind).toBe("fresh")
+    expect(io.controller!.getCurrent().status).toBe("idle")
+    act(() => { io.controller!.activate("alice-one") })
+    expect(io.controller!.getCurrent().view?.conversation_id).toBe("A")
+    expect(io.controller!.getCurrent().view?.cursor).toEqual({ kind: "after_message", message_id: "A-message" })
+  })
+
+  if (_name === "shared") it.each([1, 2])("keeps the active tab when closing %s tab(s) requires declined navigation", async count => {
+    const saved = tabsState()
+    saved.tabs = saved.tabs.slice(0, count)
+    io.data.set(storedKey("alice"), saved)
+    render(<Route />)
+    await screen.findByRole("button", { name: "alice one" })
+    const source = useSidepanelChatTabsStore.getState().getSnapshot("alice-one")
+    const decline = (event: Event) => event.preventDefault()
+    window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, decline, { once: true })
+    fireEvent.click(screen.getByRole("button", { name: "Close alice one" }))
+    expect(useSidepanelChatTabsStore.getState().tabs).toHaveLength(count)
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+    expect(useSidepanelChatTabsStore.getState().getSnapshot("alice-one")).toEqual(source)
   })
 
   it("does not persist an invalidated render into the replacement owner's durable key", async () => {

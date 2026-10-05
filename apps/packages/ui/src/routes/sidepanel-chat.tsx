@@ -1,4 +1,7 @@
 import { restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation"
+import { isChatDraftAddress } from "@/utils/chat-draft-address"
+import { chatDraftAddressForReceipt } from "@/hooks/chat/chat-draft-transition"
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { HistorySelectionContext, useHistorySelection, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
@@ -453,7 +456,10 @@ const OwnedSidepanelChat = ({ owner }: { owner: SidepanelChatOwner }) => {
 }
 
 const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
+  const chatDraftAddress = useStoreMessageOption(state => state.chatDraftAddress)
   const historySelection = useHistorySelectionContext()!
+  // Destination preparation must not replace the mounted composer's owner.
+  const openingHistorySelection = useHistorySelection()
   const transferFlashcards = useFlashcardsGenerateTransfer()
   const transferStudyPack = useStudyPackTransfer()
   useServerOnline()
@@ -828,6 +834,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
 
   const buildSnapshot = React.useCallback((): SidepanelChatSnapshot => {
     return {
+      chatDraftAddress,
       historySelectionReference: historySelection.getReference(),
       history,
       messages,
@@ -850,6 +857,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
       modelSettings: modelSettingsSnapshot
     }
   }, [
+    chatDraftAddress,
     history,
     messages,
     chatMode,
@@ -874,6 +882,8 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
   const applySnapshot = React.useCallback(
     (snapshot: SidepanelChatSnapshot) => {
       if (!owner.isCurrent()) return
+      if (isChatDraftAddress(snapshot.chatDraftAddress)) useStoreMessageOption.getState().setChatDraftAddress(snapshot.chatDraftAddress)
+      else useStoreMessageOption.getState().startNewChatDraft(snapshot.temporaryChat ?? false)
       historySelection.activate(useSidepanelChatTabsStore.getState().activeTabId || "initial")
       void historySelection.loadConversation({ historyId: snapshot.historyId, serverChatId: snapshot.serverChatId, temporary: snapshot.temporaryChat }, snapshot.historySelectionReference).then(loaded => { if (loaded) return restoreReadableLocalComparison(historySelection, display => { setHistory(display.history); setMessages(display.messages) }) }).catch(error => console.warn("Failed to restore readable comparison", error))
       setHistory(snapshot.history || [])
@@ -1198,14 +1208,15 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
   ])
 
   const handleNewTab = React.useCallback(() => {
-    if (!owner.isCurrent() || isRestoringChat) return
-    loadGenerationRef.current++
+    if (!owner.isCurrent() || isRestoringChat) return false
     saveActiveTabSnapshot()
-    if (streaming) {
-      stopStreamingRequest()
-    }
-    setDropedFile(undefined)
     const newTabId = generateID()
+    if (clearChat(() => {
+      isSwitchingTabRef.current = true
+      historySelection.activate(newTabId)
+    }) === false) return false
+    loadGenerationRef.current++
+    setDropedFile(undefined)
     useSidepanelChatTabsStore.getState().upsertTab({
       id: newTabId,
       label: newChatLabel,
@@ -1216,12 +1227,10 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
     })
     isSwitchingTabRef.current = true
     useSidepanelChatTabsStore.getState().setActiveTabId(newTabId)
-    historySelection.activate(newTabId)
-    historySelection.reset()
-    clearChat()
     setTimeout(() => {
       isSwitchingTabRef.current = false
     }, 0)
+    return true
   }, [
     owner,
       isRestoringChat,
@@ -1235,25 +1244,26 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
 
   const handleSelectTab = React.useCallback(
     (tabId: string) => {
-      if (!owner.isCurrent() || isRestoringChat || !tabId || tabId === activeTabId) return
-      loadGenerationRef.current++
+      if (!owner.isCurrent() || isRestoringChat || !tabId) return false
+      if (tabId === activeTabId) return true
       saveActiveTabSnapshot()
+      const snapshot = useSidepanelChatTabsStore.getState().getSnapshot(tabId)
+      if (snapshot ? !requestSettingsNavigation("/") : clearChat() === false) return false
+      loadGenerationRef.current++
       if (streaming) {
         stopStreamingRequest()
       }
       setDropedFile(undefined)
-      const snapshot = useSidepanelChatTabsStore.getState().getSnapshot(tabId)
       isSwitchingTabRef.current = true
       useSidepanelChatTabsStore.getState().setActiveTabId(tabId)
       historySelection.activate(tabId)
       if (snapshot) {
         applySnapshot(snapshot)
-      } else {
-        clearChat()
       }
       setTimeout(() => {
         isSwitchingTabRef.current = false
       }, 0)
+      return true
     },
     [
       activeTabId,
@@ -1273,8 +1283,8 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
       if (!owner.isCurrent() || isRestoringChat) return
       const store = useSidepanelChatTabsStore.getState()
       if (store.tabs.length <= 1) {
+        if (!handleNewTab()) return
         store.removeTab(tabId)
-        handleNewTab()
         return
       }
       if (tabId === store.activeTabId) {
@@ -1282,7 +1292,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
         const nextTab =
           store.tabs[currentIndex + 1] || store.tabs[currentIndex - 1]
         if (nextTab) {
-          handleSelectTab(nextTab.id)
+          if (!handleSelectTab(nextTab.id)) return
         }
       }
       store.removeTab(tabId)
@@ -1309,8 +1319,12 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
   const openLocalHistory = React.useCallback(
     async (targetHistoryId: string) => {
       if (!owner.isCurrent() || isRestoringChat) return
+      if (!requestSettingsNavigation("/")) return
       const generation = ++loadGenerationRef.current
-      const current = () => owner.isCurrent() && generation === loadGenerationRef.current
+      const sourceDraftRevision = useStoreMessageOption.getState().chatDraftRevision
+      const sourceCurrent = historySelection.fence()
+      const current = () => sourceCurrent() && owner.isCurrent() && generation === loadGenerationRef.current &&
+        useStoreMessageOption.getState().chatDraftRevision === sourceDraftRevision
       const existingTab = tabs.find((tab) => tab.historyId === targetHistoryId)
       if (existingTab) {
         handleSelectTab(existingTab.id)
@@ -1322,12 +1336,13 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
       }
       setDropedFile(undefined)
       setIsLoading(true)
-      historySelection.beginLoad()
-      const isCurrentLoad = historySelection.fence()
+      openingHistorySelection.activate("opening-history")
+      openingHistorySelection.beginLoad()
+      const isCurrentLoad = openingHistorySelection.fence()
       try {
         const chatData = await getFullChatData(targetHistoryId)
         if (!current() || !isCurrentLoad()) return
-        if (!chatData || chatData.historyInfo.server_scope_key !== owner.ownerKey) {
+        if (!chatData || (chatData.historyInfo.server_scope_key && chatData.historyInfo.server_scope_key !== owner.ownerKey)) {
           notification.error({
             message: t("common:error", "Error"),
             description: t(
@@ -1338,8 +1353,15 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
           return
         }
 
-        const restoredHistory = formatToChatHistory(chatData.messages)
-        const restoredMessages = formatToMessage(chatData.messages)
+        if (!await openingHistorySelection.loadConversation({ historyId: targetHistoryId, isCurrent: current }, null) || !current()) return
+        const selected = openingHistorySelection.getCurrent()
+        const address = selected.owner && selected.view && selected.owner.kind !== "unavailable" &&
+          selected.owner.conversation_id === (chatData.historyInfo.server_chat_id || targetHistoryId)
+          ? chatDraftAddressForReceipt({ owner: selected.owner, view: selected.view }) : null
+        if (!address) return
+        const display = selected.capture?.status === "captured" ? formatSelectedHistory(selected.capture) : null
+        const restoredHistory = display?.history ?? formatToChatHistory(chatData.messages)
+        const restoredMessages = display?.messages ?? formatToMessage(chatData.messages)
         const historyInfo = chatData.historyInfo
         const snapshot = buildHistorySnapshot({
           historyInfo,
@@ -1351,6 +1373,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
           useOCR,
           webSearch
         })
+        snapshot.chatDraftAddress = address
 
         const newTabId = generateID()
         openSnapshotTab(
@@ -1376,10 +1399,15 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
             t("common:serverChatLoadError", "Failed to load conversation.")
         })
       } finally {
-        if (current()) setIsLoading(false)
+        if (owner.isCurrent() && generation === loadGenerationRef.current) {
+          openingHistorySelection.reset()
+          setIsLoading(false)
+        }
       }
     },
     [
+      historySelection,
+      openingHistorySelection,
       owner,
       isRestoringChat,
       handleSelectTab,
@@ -1419,25 +1447,29 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
       chat: ServerChatHistoryItem,
       list: ServerChatMessageInput[]
     ) => {
-      const current = historySelection.getCurrent()
+      const current = openingHistorySelection.getCurrent()
       if (current.owner?.kind !== "native" || current.owner.conversation_id !== chatId || current.capture?.status !== "captured") return null
       const ownerKey = serverChatMirrorOwnerKey({ requestScope: current.owner.request_scope })
-      const signal = historySelection.getSignal()
-      const isCurrent = historySelection.fence()
+      const signal = openingHistorySelection.getSignal()
+      const isCurrent = openingHistorySelection.fence()
       const localHistoryId = await linkServerChatMirror({ chatId, title: chat.title || newChatLabel, ownerKey, signal })
       if (!isCurrent()) return null
       const incoming = mapServerChatMessages(list, userDisplayName).mappedMessages.map(message => ({ ...message, serverMessageId: message.serverMessageId || message.id }))
       await reconcileServerChatMirror({ historyId: localHistoryId, chatId, ownerKey, messages: incoming, signal })
       return isCurrent() ? localHistoryId : null
     },
-    [historySelection, newChatLabel, userDisplayName]
+    [openingHistorySelection, newChatLabel, userDisplayName]
   )
 
   const openServerChat = React.useCallback(
     async (chat: ServerChatHistoryItem) => {
       if (!owner.isCurrent() || isRestoringChat) return
+      if (!requestSettingsNavigation("/")) return
       const generation = ++loadGenerationRef.current
-      const current = () => owner.isCurrent() && generation === loadGenerationRef.current
+      const sourceDraftRevision = useStoreMessageOption.getState().chatDraftRevision
+      const sourceCurrent = historySelection.fence()
+      const current = () => sourceCurrent() && owner.isCurrent() && generation === loadGenerationRef.current &&
+        useStoreMessageOption.getState().chatDraftRevision === sourceDraftRevision
       const chatId = String(chat.id)
       const existingTab = tabs.find((tab) => tab.serverChatId === chatId)
       if (existingTab) {
@@ -1450,15 +1482,20 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
       }
       setDropedFile(undefined)
       setIsLoading(true)
+      openingHistorySelection.activate("opening-history")
       const snapshotOwner = owner.snapshot
       try {
-        const loaded = await historySelection.loadConversation({ serverChatId: chatId })
+        const loaded = await openingHistorySelection.loadConversation({ serverChatId: chatId, isCurrent: current }, null)
         if (!loaded || !current()) return
-        const isCurrent = historySelection.fence()
-        const historyOwner = historySelection.getCurrent().owner
+        const selected = openingHistorySelection.getCurrent()
+        const address = selected.owner?.kind === "native" && selected.owner.conversation_id === chatId && selected.view
+          ? chatDraftAddressForReceipt({ owner: selected.owner, view: selected.view }) : null
+        if (!address) return
+        const isCurrent = openingHistorySelection.fence()
+        const historyOwner = openingHistorySelection.getCurrent().owner
         const list = await tldwClient.listChatMessages(chatId, {
           include_deleted: "false", include_metadata: "true"
-        }, { signal: historySelection.getSignal(), requestScope: snapshotOwner.requestScope })
+        }, { signal: openingHistorySelection.getSignal(), requestScope: snapshotOwner.requestScope })
         if (!current() || !isCurrent() || (historyOwner?.kind === "native" && !historyOwner.validate_lease())) return
         const messageList: ServerChatMessageInput[] = list
         const { history, mappedMessages } = mapServerChatMessages(
@@ -1470,8 +1507,9 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
 
         if (!isCurrent()) return
         const snapshot: SidepanelChatSnapshot = {
-          historySelectionReference: historySelection.getReference(),
-          ...(historySelection.getCurrent().capture?.status === "captured" ? formatSelectedHistory(historySelection.getCurrent().capture as import("@/types/history-selection").HistorySelectionCaptureV1) : { history, messages: mappedMessages }),
+          chatDraftAddress: address,
+          historySelectionReference: openingHistorySelection.getReference(),
+          ...(openingHistorySelection.getCurrent().capture?.status === "captured" ? formatSelectedHistory(openingHistorySelection.getCurrent().capture as import("@/types/history-selection").HistorySelectionCaptureV1) : { history, messages: mappedMessages }),
           chatMode,
           historyId: localHistoryId,
           webSearch,
@@ -1515,10 +1553,16 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
             t("common:serverChatLoadError", "Failed to load conversation.")
         })
       } finally {
-        if (current()) setIsLoading(false)
+        if (owner.isCurrent() && generation === loadGenerationRef.current) {
+          openingHistorySelection.reset()
+          setIsLoading(false)
+        }
       }
     },
     [
+      historySelection,
+      openingHistorySelection,
+      ensureLocalHistoryMirror,
       owner,
       isRestoringChat,
       userDisplayName,

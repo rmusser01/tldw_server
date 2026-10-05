@@ -1374,6 +1374,7 @@ export const useChatActions = ({
       setAbortController,
       releaseAbortControllerIfOwned,
       historyId: resolvedHistoryId ?? historyId,
+      serverChatId: resolvedServerChatId,
       setHistoryId,
       fileRetrievalEnabled,
       ragMediaIds,

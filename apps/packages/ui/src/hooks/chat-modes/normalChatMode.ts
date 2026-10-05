@@ -2,8 +2,10 @@ import type {
   HistoryLoadReceipt,
   HistorySelectionController
 } from "@/hooks/chat/useHistorySelection"
+import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
 import type { HistorySendTurn } from "@/types/chat-modes"
 import {
+  assertHistoryConversationTarget,
   captureHistorySnapshot,
   historyAdmissionReference
 } from "@/services/chat-history-selection"
@@ -644,10 +646,13 @@ const captureNormalHistoryTurn = async (
   signal: AbortSignal
 ): Promise<HistorySendTurn> => {
   const { controller, originIsCurrent, temporary } = params.historySelection!
+  const acceptDraftBind = !params.historyId && !params.serverChatId && useStoreMessageOption.getState().chatDraftAddress?.kind === "fresh" ? captureChatDraftLoad("bind") : null
   if (temporary || params.historyId === "temp")
     throw new Error("temporary_history_unavailable")
   if (!originIsCurrent()) throw new Error("stale_selection")
   let current = controller.getCurrent()
+  let selectionCurrent = originIsCurrent
+  let targetHistoryId = params.historyId
   if (!current.owner && current.status === "idle") {
     let localId = params.historyId
     if (!localId && !params.serverChatId) {
@@ -660,12 +665,13 @@ const captureNormalHistoryTurn = async (
         snapshot.requestScope
       )
       // Creation may have succeeded after navigation. It remains its own local history.
-      if (!originIsCurrent()) throw new Error("stale_selection")
+      if (!originIsCurrent() || acceptDraftBind?.isCurrent() === false) throw new Error("stale_selection")
       localId = created.id
       params.setHistoryId(localId)
     }
     if (!originIsCurrent()) throw new Error("stale_selection")
-    const target = { historyId: localId, serverChatId: params.serverChatId }
+    targetHistoryId = localId
+    const target = { historyId: localId, serverChatId: params.serverChatId, isCurrent: acceptDraftBind?.isCurrent }
     let receipt: HistoryLoadReceipt | undefined
     const loaded = await controller.loadConversation(target, null, (value) => {
       receipt = value
@@ -691,6 +697,8 @@ const captureNormalHistoryTurn = async (
     ) {
       throw new Error("owner_conversation_mismatch")
     }
+    if (acceptDraftBind && !acceptDraftBind(receipt)) throw new Error("stale_selection")
+    selectionCurrent = controller.fence()
   }
   if (
     current.status !== "ready" ||
@@ -702,6 +710,9 @@ const captureNormalHistoryTurn = async (
   ) {
     throw new Error(current.error || "history_selection_not_ready")
   }
+  await assertHistoryConversationTarget(current.owner, { historyId: targetHistoryId, serverChatId: params.serverChatId })
+  if (!selectionCurrent() || controller.getCurrent().owner !== current.owner || controller.getCurrent().view !== current.view)
+    throw new Error("stale_selection")
   const view = structuredClone(current.view)
   const bookmarkScope = { ...current.bookmarkScope }
   const authValid = () => !snapshot.scopeInvalidatedSignal.aborted

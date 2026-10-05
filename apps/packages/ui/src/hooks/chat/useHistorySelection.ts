@@ -1041,8 +1041,10 @@ export function useHistorySelection(
           return false
       }
       const { useStoreMessageOption } = await import("@/store/option")
+      const { captureChatDraftLoad } = await import("./chat-draft-transition")
       if (live.current.owner !== owner || live.current.view !== current.view)
         return false
+      const acceptDraft = captureChatDraftLoad("switch")
       return loadConversation(
         owner.kind === "native"
           ? {
@@ -1059,6 +1061,7 @@ export function useHistorySelection(
             receipt.view.conversation_id !== entry.candidate_child_id
           )
             return
+          if (!acceptDraft(receipt)) return
           const store = useStoreMessageOption.getState()
           store.setHistoryId(
             owner.kind === "native" ? null : entry.candidate_child_id!
