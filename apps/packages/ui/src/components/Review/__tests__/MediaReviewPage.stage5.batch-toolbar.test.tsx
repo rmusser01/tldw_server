@@ -57,6 +57,11 @@ vi.mock("@/hooks/useMediaCapabilities", () => ({
   useMediaCapabilities: () => ({ canDelete: mocks.canDelete, loading: false })
 }))
 
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({
+  useQuickIngestAuthority: () => 'verified-alice',
+  quickIngestAuthority: { capture: () => ({ isCurrent: () => true, signal: new AbortController().signal }) }
+}))
+
 const interpolate = (template: string, values?: Record<string, unknown>) =>
   template.replace(/\{\{(\w+)\}\}/g, (_, key) => String(values?.[key] ?? ""))
 
@@ -85,7 +90,8 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("react-router-dom", () => ({
-  useNavigate: () => mocks.navigate
+  useNavigate: () => mocks.navigate,
+  useLocation: () => ({ key: 'initial' })
 }))
 
 vi.mock("@/hooks/useMessageOption", () => ({
@@ -198,6 +204,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
   MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING: { key: "mediaReviewFiltersCollapsed", defaultValue: false },
   MEDIA_REVIEW_FOCUSED_ID_SETTING: { key: "mediaReviewFocusedId", defaultValue: null },
   MEDIA_REVIEW_ORIENTATION_SETTING: { key: "mediaReviewOrientation", defaultValue: "vertical" },
+  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING: { key: 'media-review-selection-snapshot', defaultValue: null },
   MEDIA_REVIEW_SELECTION_SETTING: { key: "mediaReviewSelection", defaultValue: [] },
   MEDIA_REVIEW_VIEW_MODE_SETTING: { key: "mediaReviewViewMode", defaultValue: "spread" }
 }))
@@ -477,7 +484,7 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
     mocks.setChatMode.mockClear()
     mocks.setRagMediaIds.mockClear()
     render(<MediaReviewPage />)
-    await screen.findByText("0 / 30 selected")
+    await screen.findByTestId('media-review-selection-count')
     selectItemByCheckbox("Alpha paper")
     selectItemByCheckbox("Beta notes")
     fireEvent.click(screen.getByRole("button", { name: "Chat about selection (2)" }))
@@ -492,7 +499,7 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText("0 / 30 selected")).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     selectItemByCheckbox("Alpha paper")
@@ -505,7 +512,7 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
   it("disables bulk trash when the account lacks delete permission", async () => {
     mocks.canDelete = false
     render(<MediaReviewPage />)
-    await screen.findByText("0 / 30 selected")
+    await screen.findByTestId('media-review-selection-count')
     selectItemByCheckbox("Alpha paper")
     expect(screen.getByTestId("media-multi-batch-trash")).toBeDisabled()
   })
@@ -514,7 +521,7 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText("0 / 30 selected")).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     selectItemByCheckbox("Alpha paper")
@@ -529,7 +536,7 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText("0 / 30 selected")).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     selectItemByCheckbox("Alpha paper")

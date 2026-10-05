@@ -642,7 +642,7 @@
     "message": "Feature unavailable"
   },
   "mediaPage_spreadMode": {
-    "message": "Compare"
+    "message": "Side-by-side"
   },
   "mediaPage_listMode": {
     "message": "Focus"
@@ -651,13 +651,13 @@
     "message": "Stack"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "View selected items side-by-side for comparison"
+    "message": "Arrange selected items side-by-side"
   },
   "mediaPage_listModeTooltip": {
     "message": "View one item at a time with navigation"
   },
   "mediaPage_allModeTooltip": {
-    "message": "View all selected items in a scrollable list"
+    "message": "View the current reading window in a scrollable stack"
   },
   "mediaPage_copyContentLabel": {
     "message": "Copy Content"
@@ -702,19 +702,19 @@
     "message": "Select items"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "Click items in the left panel to add them to your viewer."
+    "message": "Use named checkboxes to select items, then choose Review selected. Click or Enter on a result to preview."
   },
   "mediaPage_firstUseStep2": {
     "message": "Choose a view"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "Use \"Compare\" for side-by-side, \"Focus\" for one at a time, or \"Stack\" to see all."
+    "message": "Use Side-by-side for layout, Focus for one item, or Stack for the current reading window. Compare content compares selected text."
   },
   "mediaPage_firstUseStep3": {
     "message": "Navigate"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "Use Prev/Next buttons or keyboard (Tab + Enter) to move through items."
+    "message": "Use Prev/Next or j/k to navigate the active preview or selected set. Tab to a checkbox and Space selects."
   },
   "mediaPage_gotIt": {
     "message": "Got it"
@@ -1494,7 +1494,7 @@
     "message": "Server offline"
   },
   "mediaPage_resultsHint": {
-    "message": "Click to stack, Shift+click for range"
+    "message": "Click or Enter to preview. Space on a checkbox selects. Shift+click selects a range."
   },
   "mediaPage_paginationHint": {
     "message": "Use pagination or open all visible items"
@@ -1506,7 +1506,7 @@
     "message": "Single item view"
   },
   "mediaPage_viewerAll": {
-    "message": "All items (stacked)"
+    "message": "Reading window (stacked)"
   },
   "mediaPage_stackPosition": {
     "message": "#{{num}}"
@@ -1870,5 +1870,56 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "Choose an analysis provider, then retry analysis."
+  },
+  "mediaPage_selectedTotal": {
+    "message": "{{count}} selected"
+  },
+  "mediaPage_reviewSelected": {
+    "message": "Review selected ({{count}})"
+  },
+  "mediaPage_selectionStatusWindowed": {
+    "message": "Windowed reading"
+  },
+  "mediaPage_selectionStatusReady": {
+    "message": "Ready to review"
+  },
+  "mediaPage_selectionSaveFailed": {
+    "message": "Could not save the review selection. Try again."
+  },
+  "mediaPage_reading": {
+    "message": "Reading"
+  },
+  "mediaPage_layout": {
+    "message": "Layout"
+  },
+  "mediaPage_selectionActions": {
+    "message": "Selection actions"
+  },
+  "mediaPage_backToResults": {
+    "message": "Back to results"
+  },
+  "mediaPage_resultPreviewTitle": {
+    "message": "Result preview: {{title}}"
+  },
+  "mediaPage_selectedReadingTitle": {
+    "message": "Selected reading: {{title}}"
+  },
+  "mediaPage_returnToPreview": {
+    "message": "Return to preview"
+  },
+  "mediaPage_readingWindow": {
+    "message": "Reading {{start}}–{{end}} of {{total}} selected ({{limit}} at a time)"
+  },
+  "mediaPage_previousReadingWindow": {
+    "message": "Previous reading window"
+  },
+  "mediaPage_nextReadingWindow": {
+    "message": "Next reading window"
+  },
+  "mediaPage_selectNamedItem": {
+    "message": "Select {{title}}"
+  },
+  "mediaPage_selectionLoadFailed": {
+    "message": "Could not load the saved selection. Reopen Review to try again."
   }
 }

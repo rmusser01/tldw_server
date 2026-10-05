@@ -1,5 +1,7 @@
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React from "react"
+import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
+import { quickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 import { Button, Modal } from "antd"
 import { bgRequest } from "@/services/background-proxy"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -35,6 +37,21 @@ import {
 } from "@/components/Review/media-review-types"
 
 export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions & { _fetchList: () => Promise<MediaItem[]> } {
+  const actionLifetime = React.useRef<AbortController | null>(null)
+  React.useLayoutEffect(() => {
+    const lifetime = new AbortController()
+    actionLifetime.current = lifetime
+    return () => lifetime.abort()
+  }, [s.authorityKey])
+  const captureOperation = React.useCallback(() => {
+    const lifetime = actionLifetime.current
+    if (!lifetime || lifetime.signal.aborted) return null
+    try {
+      const operation = quickIngestAuthority.capture({sessionBound: false})
+      return {...operation, isCurrent: () => operation.isCurrent() && !lifetime.signal.aborted}
+    } catch { return null }
+  }, [])
+  const detailRequests = React.useRef(new Map<string, Promise<MediaDetail>>())
   const ownerScope = useHomeMilestoneScope()
   const handoffBoundaryRevision = React.useRef(0)
   React.useLayoutEffect(() => watchChatAccountChanges(invalidated => {
@@ -48,13 +65,16 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   }, [ownerScope, s.selectedIds])
   const {
     t, navigate, message,
+    authorityKey, readingActive, setReadingActive, readingIds,
+    readingWindowStart, setReadingWindowStart, previewNavigationIds, setPreviewNavigationIds,
+    selectedMetadata, isMobileViewport, setMobileTab,
     query, page, pageSize, types, keywordTokens, includeContent, sortBy, dateRange,
     selectedIds, setSelectedIds, focusedId, setFocusedId,
-    previewedId, previewIndex, setPreviewedId,
+    previewedId, setPreviewedId,
     details, setDetails, setTotal, setAvailableTypes, availableTypes,
     setContentLoading, setContentFilterProgress, contentFilterRunRef,
     setDetailLoading, setFailedIds, detailLoading,
-    openAllLimit, allResults, focusIndex, viewerItems,
+    openAllLimit, allResults, viewerItems,
     viewMode, viewerVirtualizer,
     batchKeywordsDraft, setBatchKeywordsDraft,
     batchExportFormat, setBatchActionLoading, setBatchTrashHandoffIds,
@@ -62,15 +82,38 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     setCompareLeftLabel, setCompareRightLabel, setCompareDiffOpen,
     visibleIds,
     setContentExpandedIds, setAnalysisExpandedIds,
-    searchInputRef, viewerRef, listParentRef,
+    viewerRef, listParentRef,
     lastClickedRef, pendingRestoreFocusIdRef, ensureDetailRef,
     cardRefs, prefersReducedMotion,
     setKeywordOptions,
-    data, refetch,
-    setFocusedId: _setFocusedId,
+    data,
     pendingInitialMediaId, setPendingInitialMediaId,
     isOnline
   } = s
+
+  // Reading, comparison, content filtering and export share the same request ceiling.
+  const fetchDetail = React.useCallback(async (id: string | number): Promise<MediaDetail> => {
+    const operation = captureOperation()
+    if (!operation) throw new Error('Review owner is unavailable')
+    const key = `${authorityKey}:${id}`
+    while (detailRequests.current.size >= openAllLimit && !detailRequests.current.has(key)) {
+      await Promise.race([...detailRequests.current.values()].map(promise => promise.catch(() => null)))
+      if (!operation.isCurrent()) throw new Error('Review owner changed')
+    }
+    const existing = detailRequests.current.get(key)
+    if (existing) return existing
+    const pending = bgRequest<MediaDetail>({
+      path: `/api/v1/media/${id}?include_content=true&include_versions=false` as any,
+      method: 'GET' as any,
+      abortSignal: operation.signal,
+      ...requestScopeFields(operation.requestScope)
+    }).then(detail => {
+      if (!operation.isCurrent()) throw new Error('Review owner changed')
+      return detail
+    }).finally(() => {detailRequests.current.delete(key)})
+    detailRequests.current.set(key, pending)
+    return pending
+  }, [authorityKey, openAllLimit, captureOperation])
 
   const cancelContentFiltering = React.useCallback(() => {
     contentFilterRunRef.current += 1
@@ -111,10 +154,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       let d = details[m.id]
       if (!d) {
         try {
-          d = await bgRequest<MediaDetail>({
-            path: `/api/v1/media/${m.id}?include_content=true&include_versions=false` as any,
-            method: 'GET' as any
-          })
+          d = await fetchDetail(m.id)
           if (contentFilterRunRef.current !== runId) return []
           setDetails((prev) => (prev[m.id] ? prev : { ...prev, [m.id]: d! }))
         } catch {
@@ -149,7 +189,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       })
     }
     return filtered
-  }, [details, includeContent, keywordTokens, query, contentFilterRunRef, setContentLoading, setContentFilterProgress, setDetails])
+  }, [fetchDetail, details, includeContent, keywordTokens, query, contentFilterRunRef, setContentLoading, setContentFilterProgress, setDetails])
 
   const mapMediaItems = React.useCallback((items: any[]): MediaItem[] => (
     items.map((m: any) => ({
@@ -163,6 +203,8 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
 
   const ensureDetail = React.useCallback(async (id: string | number, isRetry = false) => {
     if (details[id] || detailLoading[id]) return
+    const operation = captureOperation()
+    if (!operation) return
     setDetailLoading((prev) => ({ ...prev, [id]: true }))
     if (isRetry) {
       setFailedIds((prev) => {
@@ -172,10 +214,8 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       })
     }
     try {
-      const d = await bgRequest<MediaDetail>({
-        path: `/api/v1/media/${id}?include_content=true&include_versions=false` as any,
-        method: 'GET' as any
-      })
+      const d = await fetchDetail(id)
+      if (!operation.isCurrent()) return
       const base = Array.isArray(data) ? (data as MediaItem[]).find((x) => idsEqual(x.id, id)) : undefined
       const enriched = { ...d, id, title: (d as any)?.title ?? base?.title, type: (d as any)?.type ?? base?.type, created_at: (d as any)?.created_at ?? base?.created_at } as any
       setDetails((prev) => ({ ...prev, [id]: enriched }))
@@ -185,6 +225,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         return next
       })
     } catch (error) {
+      if (!operation.isCurrent()) return
       setFailedIds((prev) => new Set(prev).add(id))
       const statusCode = getErrorStatusCode(error)
       if (statusCode === 404 || statusCode === 410) {
@@ -195,13 +236,13 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         setFocusedId((prev) => (prev != null && String(prev) === String(id) ? null : prev))
       }
     } finally {
-      setDetailLoading((prev) => {
+      if (operation.isCurrent()) setDetailLoading((prev) => {
         const next = { ...prev }
         delete next[id]
         return next
       })
     }
-  }, [data, detailLoading, details, setDetailLoading, setDetails, setFailedIds, setSelectedIds, setFocusedId])
+  }, [captureOperation, fetchDetail, data, detailLoading, details, setDetailLoading, setDetails, setFailedIds, setSelectedIds, setFocusedId])
 
   // Keep ref in sync
   React.useEffect(() => {
@@ -219,6 +260,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
 
   const clearSelectionWithGuard = React.useCallback(() => {
     if (selectedIds.length === 0) return
+    const operation = captureOperation()
     const selectionToRestore = [...selectedIds]
     const focusToRestore = focusedId
     const activeElement = document.activeElement as HTMLElement | null
@@ -243,11 +285,13 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
           size="small"
           className="!p-0"
           onClick={() => {
+            if (!operation?.isCurrent()) return
             setSelectedIds(selectionToRestore)
             const restoredFocusId = focusToRestore ?? selectionToRestore[0] ?? null
             setFocusedId(restoredFocusId)
             pendingRestoreFocusIdRef.current = restoreFocusId
             window.setTimeout(() => {
+              if (!operation?.isCurrent()) return
               const focusId = pendingRestoreFocusIdRef.current
               if (focusId == null) return
               const container = listParentRef.current
@@ -269,7 +313,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       </span>,
       UNDO_DURATION_SECONDS
     )
-  }, [selectedIds, focusedId, t, message, setSelectedIds, setFocusedId, listParentRef, pendingRestoreFocusIdRef])
+  }, [captureOperation, selectedIds, focusedId, t, message, setSelectedIds, setFocusedId, listParentRef, pendingRestoreFocusIdRef])
 
   const focusViewerSoon = React.useCallback(() => {
     if (typeof window === "undefined") {
@@ -283,152 +327,90 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     }, 0)
   }, [viewerRef])
 
-  const previewItem = React.useCallback((id: string | number) => {
+  const previewItem = React.useCallback((id: string | number, preserveContext = false) => {
+    if (!authorityKey) return
+    setReadingActive(false)
+    if (isMobileViewport) setMobileTab(2)
+    if (!preserveContext) setPreviewNavigationIds(allResults.map(item => item.id))
     setPreviewedId(id)
-    setFocusedId(id)
     focusViewerSoon()
     void ensureDetail(id)
-  }, [setPreviewedId, setFocusedId, focusViewerSoon, ensureDetail])
+  }, [allResults, setPreviewNavigationIds, authorityKey, setReadingActive, isMobileViewport, setMobileTab, setPreviewedId, focusViewerSoon, ensureDetail])
+
+  const startSelectedReview = React.useCallback((id?: string | number) => {
+    if (!authorityKey || selectedIds.length === 0) return
+    const target = id != null && includesId(selectedIds, id) ? id : selectedIds[0]
+    const index = selectedIds.findIndex(candidate => idsEqual(candidate, target))
+    setReadingWindowStart(Math.floor(index / openAllLimit) * openAllLimit)
+    setFocusedId(target)
+    setReadingActive(true)
+    if (isMobileViewport) setMobileTab(2)
+    focusViewerSoon()
+  }, [authorityKey, selectedIds, openAllLimit, setFocusedId, setReadingWindowStart, setReadingActive, isMobileViewport, setMobileTab, focusViewerSoon])
+
+  const returnToPreview = React.useCallback(() => {
+    setReadingActive(false)
+    if (previewedId != null) void ensureDetail(previewedId)
+  }, [setReadingActive, previewedId, ensureDetail])
+
+  const changeReadingWindow = React.useCallback((delta: number) => {
+    const lastStart = Math.max(0, Math.floor((selectedIds.length - 1) / openAllLimit) * openAllLimit)
+    const next = Math.max(0, Math.min(lastStart, readingWindowStart + delta * openAllLimit))
+    startSelectedReview(selectedIds[next])
+  }, [selectedIds, openAllLimit, readingWindowStart, startSelectedReview])
 
   const toggleSelect = React.useCallback(async (id: string | number, event?: React.MouseEvent) => {
-    if (event?.shiftKey && lastClickedRef.current != null && Array.isArray(data)) {
-      const lastIdx = data.findIndex(r => idsEqual(r.id, lastClickedRef.current!))
-      const currIdx = data.findIndex(r => idsEqual(r.id, id))
+    if (!authorityKey) return
+    if (event?.shiftKey && lastClickedRef.current != null) {
+      const lastIdx = allResults.findIndex(r => idsEqual(r.id, lastClickedRef.current!))
+      const currIdx = allResults.findIndex(r => idsEqual(r.id, id))
       if (lastIdx !== -1 && currIdx !== -1) {
         const [start, end] = lastIdx < currIdx ? [lastIdx, currIdx] : [currIdx, lastIdx]
-        const rangeIds = data.slice(start, end + 1).map(r => r.id)
-        const nextSelection = [...selectedIds]
-        const remaining = openAllLimit - nextSelection.length
-        if (remaining <= 0) {
-          message.warning(
-            t('mediaPage.selectionLimitReached', {
-              defaultValue: 'Selection limit reached ({{limit}} items)',
-              limit: openAllLimit
-            })
-          )
-          return
-        }
-        const newIds = rangeIds.filter((rid) => !includesId(nextSelection, rid))
-        let toAdd = newIds
-        if (newIds.length > remaining) {
-          message.warning(
-            t('mediaPage.selectionLimitReached', {
-              defaultValue: 'Selection limit reached ({{limit}} items)',
-              limit: openAllLimit
-            })
-          )
-          toAdd = newIds.slice(newIds.length - remaining)
-        }
-        toAdd.forEach((rid) => nextSelection.push(rid))
-        setSelectedIds(nextSelection)
-        toAdd.forEach((rid) => void ensureDetail(rid))
-        setFocusedId(id)
+        const rangeIds = allResults.slice(start, end + 1).map(r => r.id)
+        setSelectedIds(prev => [...prev, ...rangeIds.filter(rid => !includesId(prev, rid))])
         lastClickedRef.current = id
-        setTimeout(() => viewerRef.current?.focus(), 100)
         return
       }
     }
+    lastClickedRef.current = id
+    setSelectedIds(prev => includesId(prev, id) ? prev.filter(x => !idsEqual(x, id)) : [...prev, id])
+  }, [authorityKey, allResults, setSelectedIds, lastClickedRef])
 
-    if (!includesId(selectedIds, id) && selectedIds.length >= openAllLimit) {
-      message.warning(
-        t('mediaPage.selectionLimitReached', {
-          defaultValue: 'Selection limit reached ({{limit}} items)',
-          limit: openAllLimit
-        })
-      )
+  // Checkbox selection is metadata only. Fetch just the active reading window.
+  React.useEffect(() => {
+    if (!readingActive) return
+    readingIds.forEach(id => { void ensureDetailRef.current(id) })
+  }, [readingIds, readingActive, authorityKey, ensureDetailRef])
+
+  React.useEffect(() => {
+    if (!readingActive) return
+    const index = selectedIds.findIndex(id => focusedId != null && idsEqual(id, focusedId))
+    if (index < 0) {
+      setFocusedId(readingIds[0] ?? null)
       return
     }
-
-    lastClickedRef.current = id
-    setSelectedIds((prev) => {
-      const exists = includesId(prev, id)
-      const next = exists ? prev.filter((x) => !idsEqual(x, id)) : [...prev, id]
-      if (!exists && viewerRef.current) {
-        setTimeout(() => viewerRef.current?.focus(), 100)
-      }
-      return next
-    })
-    setFocusedId(id)
-    void ensureDetail(id)
-  }, [data, selectedIds, openAllLimit, ensureDetail, message, t, setSelectedIds, setFocusedId, lastClickedRef, viewerRef])
-
-  // Auto-fetch details for selected items
-  React.useEffect(() => {
-    selectedIds.forEach((id) => {
-      void ensureDetailRef.current(id)
-    })
-  }, [selectedIds, ensureDetailRef])
+    const start = Math.floor(index / openAllLimit) * openAllLimit
+    if (start !== readingWindowStart) setReadingWindowStart(start)
+  }, [readingActive, selectedIds, focusedId, readingIds, readingWindowStart, setReadingWindowStart, openAllLimit, setFocusedId])
 
   const addVisibleToSelection = React.useCallback(() => {
-    if (allResults.length === 0) return
-    if (selectedIds.length >= openAllLimit) {
-      message.warning(
-        t('mediaPage.selectionLimitReached', {
-          defaultValue: 'Selection limit reached ({{limit}} items)',
-          limit: openAllLimit
-        })
-      )
-      return
-    }
-
-    const visibleSlice = allResults.slice(0, Math.min(allResults.length, openAllLimit))
-    const next = [...selectedIds]
-    const newlyAdded: Array<string | number> = []
-
-    for (const item of visibleSlice) {
-      if (includesId(next, item.id)) continue
-      if (next.length >= openAllLimit) break
-      next.push(item.id)
-      newlyAdded.push(item.id)
-    }
-
-    setSelectedIds(next)
-    newlyAdded.forEach((id) => void ensureDetail(id))
-    if (newlyAdded.length > 0 && focusedId == null) {
-      setFocusedId(next[0] ?? null)
-    }
-
-    if (allResults.length > openAllLimit || next.length >= openAllLimit) {
-      message.info(
-        t("mediaPage.openAllCapped", {
-          defaultValue: "Showing first {{count}} items to keep things smooth",
-          count: openAllLimit
-        })
-      )
-    }
-  }, [allResults, ensureDetail, openAllLimit, t, selectedIds, message, focusedId, setSelectedIds, setFocusedId])
+    if (!authorityKey) return
+    setSelectedIds(prev => [...prev, ...allResults.map(item => item.id).filter(id => !includesId(prev, id))])
+  }, [authorityKey, allResults, setSelectedIds])
 
   const replaceSelectionWithVisible = React.useCallback(() => {
-    if (allResults.length === 0) return
+    if (!authorityKey || allResults.length === 0) return
     const previousSelection = [...selectedIds]
-    const previousFocus = focusedId
-    const visibleSlice = allResults.slice(0, Math.min(allResults.length, openAllLimit))
-    const nextIds = visibleSlice.map((m) => m.id)
-
-    setSelectedIds(nextIds)
-    nextIds.forEach((id) => void ensureDetail(id))
-    setFocusedId(nextIds[0] ?? null)
-
-    message.info(
-      <span>
-        {t('mediaPage.selectionReplaced', 'Selection replaced with current visible items.')}
-        {' '}
-        <Button
-          type="link"
-          size="small"
-          className="!p-0"
-          onClick={() => {
-            setSelectedIds(previousSelection)
-            setFocusedId(previousFocus ?? previousSelection[0] ?? null)
-            message.success(t('mediaPage.selectionRestored', 'Selection restored'))
-          }}
-        >
-          {t('mediaPage.undo', 'Undo')}
-        </Button>
-      </span>,
-      UNDO_DURATION_SECONDS
-    )
-  }, [allResults, selectedIds, focusedId, openAllLimit, ensureDetail, message, t, setSelectedIds, setFocusedId])
+    const operation = captureOperation()
+    setSelectedIds(allResults.map(item => item.id))
+    setReadingWindowStart(0)
+    setFocusedId(allResults[0]?.id ?? null)
+    message.info(<span>{t('mediaPage.selectionReplaced', 'Selection replaced with current visible items.')} <Button type="link" size="small" className="!p-0" onClick={() => {
+      if (!operation?.isCurrent()) return
+      setSelectedIds(previousSelection)
+      message.success(t('mediaPage.selectionRestored', 'Selection restored'))
+    }}>{t('mediaPage.undo', 'Undo')}</Button></span>, UNDO_DURATION_SECONDS)
+  }, [captureOperation, authorityKey, setReadingWindowStart, allResults, selectedIds, message, t, setSelectedIds, setFocusedId])
 
   const removeFromSelection = React.useCallback((id: string | number) => {
     setSelectedIds((prev) => {
@@ -461,27 +443,15 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     [viewMode, viewerItems, viewerVirtualizer, prefersReducedMotion, cardRefs]
   )
 
-  const goRelative = React.useCallback(
-    (delta: number) => {
-      if (allResults.length === 0) return
-      const currentIdx =
-        selectedIds.length === 0 && previewedId != null && previewIndex >= 0
-          ? previewIndex
-          : focusIndex >= 0
-            ? focusIndex
-            : 0
-      let next = currentIdx + delta
-      if (next < 0) next = 0
-      if (next >= allResults.length) next = allResults.length - 1
-      const nextId = allResults[next]?.id
-      if (nextId != null) {
-        setFocusedId(nextId)
-        setPreviewedId(nextId)
-        void ensureDetail(nextId)
-      }
-    },
-    [allResults, ensureDetail, focusIndex, previewIndex, previewedId, selectedIds.length, setFocusedId, setPreviewedId]
-  )
+  const goRelative = React.useCallback((delta: number) => {
+    const ids = readingActive ? selectedIds : previewNavigationIds
+    if (!ids.length) return
+    const activeId = readingActive ? focusedId : previewedId
+    const currentIndex = ids.findIndex(id => activeId != null && idsEqual(id, activeId))
+    const nextIndex = Math.max(0, Math.min(ids.length - 1, Math.max(0, currentIndex) + delta))
+    if (readingActive) startSelectedReview(ids[nextIndex])
+    else previewItem(ids[nextIndex], true)
+  }, [readingActive, previewNavigationIds, selectedIds, focusedId, previewedId, startSelectedReview, previewItem])
 
   // Pending initial media restoration
   React.useEffect(() => {
@@ -526,13 +496,14 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   React.useEffect(() => { if (isOnline) void loadKeywordSuggestions() }, [loadKeywordSuggestions, isOnline])
 
   const resolveDetailForCompare = React.useCallback(async (id: string | number): Promise<MediaDetail | null> => {
+    const operation = captureOperation()
+    if (!operation) return null
+
     const existing = details[id]
     if (existing) return existing
     try {
-      const fetched = await bgRequest<MediaDetail>({
-        path: `/api/v1/media/${id}?include_content=true&include_versions=false` as any,
-        method: 'GET' as any
-      })
+      const fetched = await fetchDetail(id)
+      if (!operation.isCurrent()) return null
       const base = allResults.find((item) => item.id === id)
       const enriched = {
         ...fetched,
@@ -544,16 +515,21 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       setDetails((prev) => ({ ...prev, [id]: enriched }))
       return enriched
     } catch {
+      if (!operation.isCurrent()) return
       return null
     }
-  }, [allResults, details, setDetails])
+  }, [captureOperation, fetchDetail, allResults, details, setDetails])
 
   const handleCompareContent = React.useCallback(async () => {
+    const operation = captureOperation()
+    if (!operation) return
+
     if (selectedIds.length !== 2) return
     const [leftId, rightId] = selectedIds
     const leftDetail = await resolveDetailForCompare(leftId)
     const rightDetail = await resolveDetailForCompare(rightId)
 
+    if (!operation.isCurrent()) return
     if (!leftDetail || !rightDetail) {
       message.error(
         t('mediaPage.compareContentLoadFailed', 'Could not load both items for comparison. Retry and try again.')
@@ -575,9 +551,11 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     setCompareLeftLabel(leftDetail.title || `${t('mediaPage.media', 'Media')} ${leftId}`)
     setCompareRightLabel(rightDetail.title || `${t('mediaPage.media', 'Media')} ${rightId}`)
     setCompareDiffOpen(true)
-  }, [message, resolveDetailForCompare, selectedIds, t, setCompareLeftText, setCompareRightText, setCompareLeftLabel, setCompareRightLabel, setCompareDiffOpen])
+  }, [captureOperation, message, resolveDetailForCompare, selectedIds, t, setCompareLeftText, setCompareRightText, setCompareLeftLabel, setCompareRightLabel, setCompareDiffOpen])
 
   const handleChatAboutSelection = React.useCallback(async () => {
+    const operation = captureOperation()
+    if (!operation) return
     const boundaryRevision = handoffBoundaryRevision.current
     const lifetime = handoffLifetime.current
     if (selectedIds.length === 0 || !ownerScope || !lifetime || lifetime.signal.aborted) return
@@ -609,7 +587,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
 
     try {
       const token = await createMediaChatHandoff(payload)
-      if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted) {
+      if (!operation.isCurrent() || boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted) {
         await removeMediaChatHandoff(token)
         return
       }
@@ -633,7 +611,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         count: numericIds.length
       })
     )
-  }, [message, navigate, ownerScope, selectedIds, t])
+  }, [captureOperation, message, navigate, ownerScope, selectedIds, t])
 
   const getSelectedNumericIds = React.useCallback(() => {
     return Array.from(
@@ -655,6 +633,9 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   )
 
   const handleBatchAddTags = React.useCallback(async () => {
+    const operation = captureOperation()
+    if (!operation) return
+
     if (selectedIds.length === 0) {
       message.warning(t("mediaPage.batchRequiresSelection", "Select at least one item."))
       return
@@ -680,7 +661,8 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         media_ids: mediaIds,
         keywords,
         mode: "add"
-      })
+      }, {requestScope: operation.requestScope, signal: operation.signal})
+      if (!operation.isCurrent()) return
       const updated = Number(result?.updated ?? 0)
       const failed = Number(result?.failed ?? 0)
 
@@ -698,11 +680,12 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         })
       )
     } catch {
+      if (!operation.isCurrent()) return
       message.error(t("mediaPage.batchKeywordsFailed", "Failed to update selected item tags."))
     } finally {
-      setBatchActionLoading(null)
+      if (operation.isCurrent()) setBatchActionLoading(null)
     }
-  }, [batchKeywordsDraft, getSelectedNumericIds, message, selectedIds.length, t, setBatchActionLoading, setBatchKeywordsDraft])
+  }, [captureOperation, batchKeywordsDraft, getSelectedNumericIds, message, selectedIds.length, t, setBatchActionLoading, setBatchKeywordsDraft])
 
   const confirmBatchTrash = React.useCallback(async (): Promise<boolean> => {
     const confirmFn = (Modal as any)?.confirm
@@ -721,20 +704,24 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   }, [t])
 
   const handleBatchMoveToTrash = React.useCallback(async () => {
+    const operation = captureOperation()
+    if (!operation) return
+
     if (selectedIds.length === 0) {
       message.warning(t("mediaPage.batchRequiresSelection", "Select at least one item."))
       return
     }
 
     const confirmed = await confirmBatchTrash()
-    if (!confirmed) return
+    if (!confirmed || !operation.isCurrent()) return
 
     const idsToDelete = [...selectedIds]
     setBatchActionLoading("trash")
     try {
       const settled = await Promise.allSettled(
-        idsToDelete.map((id) => tldwClient.deleteMedia(id))
+        idsToDelete.map((id) => tldwClient.deleteMedia(id, {requestScope: operation.requestScope, signal: operation.signal}))
       )
+      if (!operation.isCurrent()) return
       const deletedIds: Array<string | number> = []
       let failedCount = 0
       settled.forEach((entry, index) => {
@@ -793,14 +780,17 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         message.success(toastContent, UNDO_DURATION_SECONDS)
       }
     } catch {
+      if (!operation.isCurrent()) return
       setBatchTrashHandoffIds([])
       message.error(t("mediaPage.batchTrashFailed", "Failed to move selected items to trash."))
     } finally {
-      setBatchActionLoading(null)
+      if (operation.isCurrent()) setBatchActionLoading(null)
     }
-  }, [confirmBatchTrash, message, openTrashFromBatch, selectedIds, t, setBatchActionLoading, setSelectedIds, setFocusedId, setDetails, setBatchTrashHandoffIds])
+  }, [captureOperation, confirmBatchTrash, message, openTrashFromBatch, selectedIds, t, setBatchActionLoading, setSelectedIds, setFocusedId, setDetails, setBatchTrashHandoffIds])
 
-  const handleBatchExport = React.useCallback(() => {
+  const handleBatchExport = React.useCallback(async () => {
+    const operation = captureOperation()
+    if (!operation) return
     if (selectedIds.length === 0) {
       message.warning(t("mediaPage.batchRequiresSelection", "Select at least one item."))
       return
@@ -809,11 +799,15 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     setBatchActionLoading("export")
     try {
       const currentResults: MediaItem[] = Array.isArray(data) ? data : []
-      const exportItems: MediaMultiBatchExportItem[] = selectedIds.map((id) => {
-        const row = currentResults.find((candidate) => idsEqual(candidate.id, id))
-        const detail = details[id]
+      const exportItems: MediaMultiBatchExportItem[] = []
+      for (const id of selectedIds) {
+        if (!operation.isCurrent()) return
+        const row = selectedMetadata[String(id)] ?? currentResults.find((candidate) => idsEqual(candidate.id, id))
+        // Fetch missing export content one at a time; do not populate the reading window.
+        const detail = details[id] ?? await fetchDetail(id)
+        if (!operation.isCurrent()) return
         const analysisText = extractMediaDetailAnalysis(detail)
-        return {
+        exportItems.push({
           id,
           title: detail?.title || row?.title || `${t("mediaPage.media", "Media")} ${id}`,
           snippet: row?.snippet || "",
@@ -822,8 +816,8 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
           keywords: Array.isArray((row as any)?.keywords) ? ((row as any).keywords as string[]) : [],
           content: detail ? getContent(detail) : "",
           analysis: analysisText
-        }
-      })
+        })
+      }
 
       const artifact = buildBatchExportArtifact(exportItems, batchExportFormat)
       const blob = new Blob([artifact.content], { type: artifact.mimeType })
@@ -832,13 +826,17 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         t("mediaPage.batchExportReady", "Exported {{count}} selected item(s).", { count: exportItems.length })
       )
     } catch {
+      if (!operation.isCurrent()) return
       message.error(t("mediaPage.batchExportFailed", "Failed to export selection."))
     } finally {
-      setBatchActionLoading(null)
+      if (operation.isCurrent()) setBatchActionLoading(null)
     }
-  }, [batchExportFormat, data, details, message, selectedIds, t, setBatchActionLoading])
+  }, [captureOperation, fetchDetail, selectedMetadata, batchExportFormat, data, details, message, selectedIds, t, setBatchActionLoading])
 
   const handleBatchReprocess = React.useCallback(async () => {
+    const operation = captureOperation()
+    if (!operation) return
+
     const mediaIds = getSelectedNumericIds()
     if (mediaIds.length === 0) {
       message.warning(
@@ -851,9 +849,10 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     try {
       const settled = await Promise.allSettled(
         mediaIds.map((id) =>
-          tldwClient.reprocessMedia(id, { perform_chunking: true, generate_embeddings: true })
+          tldwClient.reprocessMedia(id, { perform_chunking: true, generate_embeddings: true }, {requestScope: operation.requestScope, signal: operation.signal})
         )
       )
+      if (!operation.isCurrent()) return
       const successCount = settled.filter((entry) => entry.status === "fulfilled").length
       const failedCount = mediaIds.length - successCount
 
@@ -868,11 +867,12 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         t("mediaPage.batchReprocessSuccess", "Queued reprocess for {{count}} item(s).", { count: successCount })
       )
     } catch {
+      if (!operation.isCurrent()) return
       message.error(t("mediaPage.batchReprocessFailed", "Failed to queue reprocess for selected items."))
     } finally {
-      setBatchActionLoading(null)
+      if (operation.isCurrent()) setBatchActionLoading(null)
     }
-  }, [getSelectedNumericIds, message, t, setBatchActionLoading])
+  }, [captureOperation, getSelectedNumericIds, message, t, setBatchActionLoading])
 
   const expandAllContent = React.useCallback(() => {
     setContentExpandedIds(new Set(visibleIds.map((id) => String(id))))
@@ -885,6 +885,8 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
 
   // fetchList function for the query
   const fetchList = React.useCallback(async (): Promise<MediaItem[]> => {
+    const operation = captureOperation()
+    if (!operation) return []
     const hasQuery = query.trim().length > 0
     const hasDateRange = Boolean(dateRange.startDate || dateRange.endDate)
     const shouldUseSearchEndpoint =
@@ -903,8 +905,11 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         path: `/api/v1/media/search?page=${page}&results_per_page=${pageSize}` as any,
         method: "POST" as any,
         headers: { "Content-Type": "application/json" },
-        body
+        body,
+        abortSignal: operation.signal,
+        ...requestScopeFields(operation.requestScope)
       })
+      if (!operation.isCurrent()) return []
       const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res?.results) ? res.results : [])
       const pagination = res?.pagination
       setTotal(Number(pagination?.total_items || items.length || 0))
@@ -924,8 +929,11 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     if (dateRange.endDate) params.set("end_date", dateRange.endDate)
     const res = await bgRequest<any>({
       path: `/api/v1/media/?${params.toString()}` as any,
-      method: "GET" as any
+      method: "GET" as any,
+      abortSignal: operation.signal,
+      ...requestScopeFields(operation.requestScope)
     })
+    if (!operation.isCurrent()) return []
     const items = Array.isArray(res?.items) ? res.items : []
     const pagination = res?.pagination
     setTotal(Number(pagination?.total_items || items.length || 0))
@@ -934,9 +942,10 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     for (const it of mapped) if (it.type) typeSet.add(it.type)
     setAvailableTypes(Array.from(typeSet))
     return runContentFiltering(mapped)
-  }, [query, page, pageSize, types, keywordTokens, sortBy, dateRange, availableTypes, mapMediaItems, runContentFiltering, setTotal, setAvailableTypes])
+  }, [captureOperation, query, page, pageSize, types, keywordTokens, sortBy, dateRange, availableTypes, mapMediaItems, runContentFiltering, setTotal, setAvailableTypes])
 
   return {
+    startSelectedReview, returnToPreview, changeReadingWindow,
     previewItem,
     toggleSelect,
     ensureDetail,

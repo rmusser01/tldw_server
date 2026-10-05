@@ -478,14 +478,16 @@ export const mediaMethods = {
   async updateMediaKeywords(
     mediaId: string | number,
     payload: { keywords: string[]; mode?: "add" | "remove" | "set" },
-    options?: { suppressBackendUnavailableEvent?: boolean }
+    options?: { suppressBackendUnavailableEvent?: boolean; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{ media_id: number; keywords: string[] }> {
     const id = encodeURIComponent(String(mediaId))
     return await bgRequest<{ media_id: number; keywords: string[] }>({
       path: `/api/v1/media/${id}/keywords`,
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
       body: payload,
+      ...requestScopeFields(options?.requestScope),
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
+      abortSignal: options?.signal,
       suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })
   },
@@ -494,7 +496,7 @@ export const mediaMethods = {
     media_ids: number[]
     keywords: string[]
     mode?: "add" | "remove" | "set"
-  }): Promise<{
+  }, options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }): Promise<{
     endpoint: "bulk" | "fallback"
     updated: number
     failed: number
@@ -535,8 +537,10 @@ export const mediaMethods = {
       const response = await bgRequest<any>({
         path: "/api/v1/media/bulk/keyword-update",
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: requestPayload
+        body: requestPayload,
+        ...requestScopeFields(options?.requestScope),
+        headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
+        abortSignal: options?.signal
       })
       const results = Array.isArray(response?.results)
         ? response.results.map((entry: any) => ({
@@ -588,7 +592,7 @@ export const mediaMethods = {
         const updated = await mediaMethods.updateMediaKeywords(mediaId, {
           keywords,
           mode
-        })
+        }, options)
         return {
           media_id: mediaId,
           success: true,
@@ -627,11 +631,13 @@ export const mediaMethods = {
     }
   },
 
-  async deleteMedia(mediaId: string | number): Promise<void> {
+  async deleteMedia(mediaId: string | number, options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }): Promise<void> {
     const id = encodeURIComponent(String(mediaId))
     await bgRequest<void>({
       path: `/api/v1/media/${id}`,
-      method: "DELETE"
+      method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   },
 
@@ -653,14 +659,17 @@ export const mediaMethods = {
 
   async reprocessMedia(
     mediaId: string | number,
-    options?: Record<string, unknown>
+    options?: Record<string, unknown>,
+    requestOptions?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
     const id = encodeURIComponent(String(mediaId))
     return await bgRequest<any>({
       path: `/api/v1/media/${id}/reprocess`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: options || {}
+      body: options || {},
+      ...requestScopeFields(requestOptions?.requestScope),
+      headers: { ...requestScopeFields(requestOptions?.requestScope).headers, "Content-Type": "application/json" },
+      abortSignal: requestOptions?.signal
     })
   },
 

@@ -65,7 +65,7 @@ export const MediaReviewResultsList: React.FC<MediaReviewResultsListProps> = ({ 
         </div>
         <div className="flex items-center gap-2 text-[11px] text-text-muted">
           <span className="text-xs text-text-muted">
-            {t("mediaPage.resultsHint", "Click to preview. Use checkboxes to select. Shift+click for range.")}
+            {t("mediaPage.resultsHint", "Click or Enter to preview. Space on a checkbox selects. Shift+click selects a range.")}
           </span>
           {selectedIds.length > 0 && (
             <Button
@@ -138,15 +138,13 @@ export const MediaReviewResultsList: React.FC<MediaReviewResultsListProps> = ({ 
                     data-media-id={String(item.id)}
                     data-index={virtualRow.index}
                     role="button"
-                    aria-selected={isSelected}
                     aria-current={isPreviewed ? "true" : undefined}
                     tabIndex={0}
                     onClick={() => previewItem(item.id)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
+                      if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
                         e.preventDefault()
-                        // Enter/Space on row = toggle selection (for keyboard a11y)
-                        void toggleSelect(item.id)
+                        previewItem(item.id)
                       }
                     }}
                     style={{
@@ -168,7 +166,9 @@ export const MediaReviewResultsList: React.FC<MediaReviewResultsListProps> = ({ 
                       >
                         <Checkbox
                           checked={isSelected}
-                          tabIndex={-1}
+                          aria-label={t("mediaPage.selectNamedItem", "Select {{title}}", { title: item.title || `Media ${item.id}` })}
+                          tabIndex={0}
+                          onKeyDown={(e) => e.stopPropagation()}
                         />
                       </div>
                       <div className="min-w-0 flex-1">

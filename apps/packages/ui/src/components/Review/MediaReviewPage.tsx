@@ -12,8 +12,6 @@ import { MediaReviewReadingPane } from "@/components/Review/MediaReviewReadingPa
 import { ResizablePanels } from "@/components/Review/ResizablePanels"
 import type { MediaItem, MediaReviewState } from "@/components/Review/media-review-types"
 import {
-  idsEqual,
-  SELECTION_WARNING_THRESHOLD,
   DEFAULT_SORT_BY
 } from "@/components/Review/media-review-types"
 
@@ -88,20 +86,20 @@ export const MediaReviewPage: React.FC = () => {
   useMediaReviewKeyboard(fullState, actions)
 
   const {
-    t, selectedIds, focusedId, setFocusedId,
+    t, selectedIds,
     query, setQuery, setPage, refetch,
-    openAllLimit, isMobileViewport,
+    isMobileViewport,
     searchInputRef, filtersCollapsed, setFiltersCollapsed,
-    activeFilterCount, selectionStatusLevel, selectionStatusText,
+    activeFilterCount, selectionStatusText,
     selectedItemsDrawerOpen, setSelectedItemsDrawerOpen,
     batchTrashHandoffIds, setBatchTrashHandoffIds,
     helpModalOpen, setHelpModalOpen,
     compareDiffOpen, setCompareDiffOpen,
     compareLeftText, compareRightText, compareLeftLabel, compareRightLabel,
-    details, allResults, previewIndex
+    details, previewIndex
   } = fullState
 
-  const { clearSelectionWithGuard, openTrashFromBatch, ensureDetail, scrollToCard, removeFromSelection } = actions
+  const { openTrashFromBatch, scrollToCard, removeFromSelection } = actions
 
   // Filter sidebar panel content
   const filterPanel = (
@@ -149,43 +147,10 @@ export const MediaReviewPage: React.FC = () => {
   // Results panel content (with batch bar at bottom)
   const resultsPanel = (
     <div className="flex flex-col h-full p-2 bg-surface border border-border rounded">
-      {/* Selection status bar */}
-      <div className="flex items-center gap-2 mb-1">
-        <div className="w-16 h-2 bg-surface2 rounded-full overflow-hidden">
-          <div
-            className={`h-full transition-all duration-200 ${
-              selectedIds.length >= openAllLimit
-                ? 'bg-danger'
-                : selectedIds.length >= SELECTION_WARNING_THRESHOLD
-                  ? 'bg-warn'
-                  : 'bg-primary'
-            }`}
-            style={{ width: `${Math.min((selectedIds.length / openAllLimit) * 100, 100)}%` }}
-          />
-        </div>
-        <span className={`text-xs whitespace-nowrap ${
-          selectedIds.length >= openAllLimit
-            ? 'text-danger font-medium'
-            : selectedIds.length >= SELECTION_WARNING_THRESHOLD
-              ? 'text-warn font-medium'
-              : 'text-text-muted'
-        }`}>
-          {t('mediaPage.selectionCount', '{{selected}} / {{limit}} selected', {
-            selected: selectedIds.length,
-            limit: openAllLimit
-          })}
-          {selectedIds.length >= SELECTION_WARNING_THRESHOLD && selectedIds.length < openAllLimit && (
-            <span className="ml-1">({openAllLimit - selectedIds.length} {t('mediaPage.remaining', 'left')})</span>
-          )}
-        </span>
-        <span
-          className="text-[11px] whitespace-nowrap text-text-muted"
-          data-testid="media-multi-selection-status"
-        >
-          {t("mediaPage.selectionStatus", "Selection status: {{status}}", {
-            status: selectionStatusText
-          })}
-        </span>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="text-xs text-text-muted" data-testid="media-review-selection-count">{t('mediaPage.selectedTotal', '{{count}} selected', {count: selectedIds.length})}</span>
+        <span className="text-xs text-text-muted" data-testid="media-multi-selection-status">{t('mediaPage.selectionStatus', 'Selection status: {{status}}', {status: selectionStatusText})}</span>
+        <Button size="small" disabled={!selectedIds.length} onClick={() => actions.startSelectedReview()}>{t('mediaPage.reviewSelected', 'Review selected ({{count}})', {count: selectedIds.length})}</Button>
       </div>
 
       {selectedIds.length > 0 && (
@@ -250,7 +215,7 @@ export const MediaReviewPage: React.FC = () => {
     <div className="flex h-full min-h-0 w-full flex-1 flex-col">
       {/* Aria-live region for selection count announcements */}
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-        {selectedIds.length} {t('mediaPage.itemsSelected', 'items selected')}, {openAllLimit - selectedIds.length} {t('mediaPage.remaining', 'remaining')}
+        {t('mediaPage.selectedTotal', '{{count}} selected', {count: selectedIds.length})}
       </div>
 
       {/* Three-panel layout */}
@@ -260,6 +225,8 @@ export const MediaReviewPage: React.FC = () => {
           center={resultsPanel}
           right={readingPanel}
           collapsed={isMobileViewport}
+          mobileTab={fullState.mobileTab}
+          onMobileTabChange={fullState.setMobileTab}
           tabLabels={[
             t('mediaPage.filtersTab', 'Filters'),
             t('mediaPage.resultsTab', 'Results'),
@@ -283,7 +250,7 @@ export const MediaReviewPage: React.FC = () => {
             <span>
               {t('mediaPage.statusPreview', 'Previewing {{current}} of {{total}}', {
                 current: previewIndex + 1,
-                total: allResults.length
+                total: fullState.previewNavigationIds.length
               })}
             </span>
           )}
@@ -306,7 +273,7 @@ export const MediaReviewPage: React.FC = () => {
           <div className="space-y-2" data-testid="selected-items-drawer">
             {selectedIds.map((id, idx) => {
               const detail = details[id]
-              const row = allResults.find((candidate) => idsEqual(candidate.id, id))
+              const row = fullState.selectedMetadata[String(id)]
               const itemTitle = detail?.title || row?.title || `${t('mediaPage.media', 'Media')} ${id}`
               const itemType = detail?.type || row?.type
               const itemDate = detail?.created_at || row?.created_at
@@ -334,8 +301,7 @@ export const MediaReviewPage: React.FC = () => {
                       <Button
                         size="small"
                         onClick={() => {
-                          setFocusedId(id)
-                          void ensureDetail(id)
+                          actions.startSelectedReview(id)
                           scrollToCard(id)
                           setSelectedItemsDrawerOpen(false)
                         }}

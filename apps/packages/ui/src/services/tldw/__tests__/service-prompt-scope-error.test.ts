@@ -263,3 +263,21 @@ it.each([
 ])("scoped chat path %s %s has exact access %s", (path, method, expected) => {
   expect(isServicePromptRequestPath(path, method)).toBe(expected)
 })
+
+
+it.each([
+  ['/api/v1/media/7', 'DELETE', true],
+  ['/api/v1/media/7/keywords', 'PATCH', true],
+  ['/api/v1/media/bulk/keyword-update', 'POST', true],
+  ['/api/v1/media/7/keywords', 'DELETE', false],
+  ['/api/v1/media/7/keywords/extra', 'PATCH', false],
+  ['/api/v1/media/7/keywords/', 'PATCH', false],
+  ['/api/v1/media/7%2fother', 'DELETE', false],
+  ['/api/v1/media/%2e%2e', 'DELETE', false],
+  ['/api/v1/media/7/permanent', 'DELETE', false],
+  ['/api/v1/media/7/extra', 'DELETE', false],
+  ['/api/v1/media/bulk/keyword-update/extra', 'POST', false],
+  ['/api/v1/media/bulk/keyword-update', 'DELETE', false],
+] as const)('bounds owned Review action %s %s', (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})
