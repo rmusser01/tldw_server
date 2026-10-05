@@ -853,6 +853,34 @@ Previous combined Docs/Privileges/CI/ratchets (724 passed, four host Bash 3 lice
 
 All seven required gates succeeded for the old pushed head `3c9b42e795`, but none qualify the new head. All four inline threads remain resolved and no review requests changes. Qodo's last completed report still references `47a262cae6`; the single manual review request at 11:29 UTC received `qodo:billing-blocked` because the workspace is out of credits. The user has been notified; do not repeat manual triggers, change billing/settings, purchase credits or waive review while this condition persists. Merge remains prohibited until a fresh exact-head report is inspected and all required gates succeed. The known optional media-ingestion Redis/offline-harness failure and its aggregate remain failed historical checks, with baseline reproduction evidence preserved; neither was relabeled successful or re-diagnosed during this rebase. TASK-13001.2 stays In Progress until verified merge; WP3 remains untouched.
 
+### October 5 Native Chat-Ownership Dev Rebase
+
+## Stage 1: Preserve Reviewed Patches and Upstream Repair
+**Goal**: Replay WP2 onto authoritative dev `27ce976387` without changing reviewed WP2 behavior or the upstream native chat-ownership repair.
+**Success Criteria**: All 32 reviewed patches remain equal; only the 14 exact upstream files differ from the previous head; WP2 executable inputs, ADR060 and API fingerprint stay byte-identical.
+**Tests**: Clean rebase at `3375447652`, complete range-diff, whole-tree comparison and upstream blob/mode parity.
+**Status**: Complete
+
+The upstream delta restores native ownership for fresh connected saved normal chats, fences cancelled or stale creation/load, resets selection after accepted New chat navigation, preserves reasoning text, and updates focused frontend regressions and two native-persistence journey oracles. Its plan and TASK-13461 are preserved without edits. All 14 files match dev byte-for-byte and retain their modes (615 insertions, 121 deletions total). Outside those files, the old and rebased committed trees are identical; backend, instructions, CI policy and WP3 are unchanged.
+
+## Stage 2: Scoped Verification and Independent Review
+**Goal**: Verify integration tracking and unchanged touched-scope backend static/security evidence.
+**Success Criteria**: Docs/task-format tests pass, runtime lint/compile/security baseline is unchanged, and independent bounded review finds no actionable issues.
+**Tests**: Docs/task-format ratchet, 27-file runtime Ruff/compileall/Bandit, canonical task normalization and independent range/tree review.
+**Status**: Complete
+
+Fresh verification passed 216 tests (212 Docs plus four task-format checks), with no skips. Runtime Ruff and compileall passed across 27 PR-touched files. Fresh runtime Bandit exactly matches the prior 20 findings (19 low, one medium), with zero new findings or scan errors. Independent bounded review found no actionable integration issues and confirmed all 32 patches are equal, the complete tree outside the 14 upstream files is unchanged, and their blobs/modes match dev. Native chat creation uses the existing scoped authenticated client; authorization/quota enforcement remains unchanged. Local frontend tests were not run because frontend dependencies are absent; successful new exact-head required frontend and e2e CI remain mandatory.
+
+Previous combined Docs/Privileges/CI/ratchets (724 passed, four host Bash 3 license-fetch skips), Profile/Usage (546 passed, one environment skip), writer/SQLite (485 passed), official live PostgreSQL WP2 (48 passed, no skips), guard-file Bandit and Python 3.12 API export evidence are carried forward, not freshly rerun. Their executable inputs are byte-identical; the fingerprint remains `5cb6cf6736d7` (2107 paths, 3247 schemas), with the prior schema memo reset and both assertions unchanged. ADR check: no new ADR for this mechanical integration; [ADR060](../../ADR/060-authnz-membership-writer-transaction-and-version-ownership.md) remains governing.
+
+## Stage 3: Publish and Exact-Head Merge
+**Goal**: Publish with an explicit lease against `3fc99cd1a1`, then require fresh exact-head Qodo and all seven successful merge gates.
+**Success Criteria**: Latest authoritative dev is an ancestor; the human Change summary stays verbatim; feedback is resolved; expected-head merge and official task finalization are read back.
+**Tests**: Remote refs, fully paginated PR/review/check readbacks and merge verification.
+**Status**: In Progress
+
+All seven required gates succeeded for old head `3fc99cd1a1`, but none qualify the new head. Fully paginated feedback is unchanged: all four threads resolved, no changes-requested review. Qodo remains explicitly billing-blocked after the single manual trigger; do not repeat triggers, change billing/settings, purchase credits or waive review. Its last completed report is for `47a262cae6`, not this head. The historical optional Redis/offline-harness shard failure and its aggregate retain their failed status and existing evidence without repeated diagnosis. TASK-13001.2 stays In Progress until verified merge; WP3 remains untouched.
+
 ## Work Package 3: Typed Pipeline and Effects
 
 ### Task 9: Replace open payload contracts with frozen discriminated types
