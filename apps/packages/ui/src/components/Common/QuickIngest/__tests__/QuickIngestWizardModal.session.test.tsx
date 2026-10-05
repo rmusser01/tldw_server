@@ -1061,6 +1061,172 @@ describe("QuickIngestWizardModal session runtime", () => {
       ).toEqual([1, 3])
     }
   )
+  it.each([
+    "remount",
+    "remount-empty",
+    "start-ack",
+    "start-reject",
+    "batch-reject"
+  ])(
+    "preserves durable lineage through %s failure and advances the next retry",
+    async (failure) => {
+      mocks.useActualResultsStep = true
+      const remount = failure.startsWith("remount")
+      const retryIdentity = {
+        resultId: "failed-item",
+        collectionItemId: "11",
+        retryAttempt: 2,
+        idempotencyKey: "conference-retry-11-2"
+      }
+      useQuickIngestSessionStore.getState().createDraftSession({
+        ...createEmptyQuickIngestSession(),
+        currentStep: remount ? 4 : 5,
+        lifecycle: remount ? "processing" : "partial_failure",
+        queueItems: [
+          {
+            id: "failed-item",
+            kind: "url",
+            url: "https://example.com/source.pdf",
+            detectedType: "pdf",
+            icon: "File",
+            fileSize: 0,
+            validation: { valid: true }
+          }
+        ],
+        results: [
+          { id: "saved-item", type: "pdf", status: "ok", mediaId: 1 },
+          ...(remount
+            ? []
+            : [
+                {
+                  id: "failed-item",
+                  type: "pdf",
+                  status: "error" as const,
+                  outcome: "failed" as const,
+                  error: "Network timeout",
+                  collectionItemId: "11",
+                  retryAttempt: 1,
+                  idempotencyKey: "conference-retry-11-1"
+                }
+              ])
+        ],
+        tracking: {
+          mode: "webui-direct",
+          sessionId: "qi-direct-old",
+          collectionId: "7",
+          durableMode: "durable_collection",
+          ...(remount
+            ? {
+                jobIds: [77],
+                itemIds: ["failed-item"],
+                jobIdToItemId: { "77": "failed-item" },
+                jobIdToCollectionItemId: { "77": "11" },
+                retryItems: [retryIdentity]
+              }
+            : {})
+        },
+        processingState: {
+          status: remount ? "running" : "complete",
+          perItemProgress: [],
+          elapsed: 1,
+          estimatedRemaining: 0
+        }
+      })
+      mocks.startQuickIngestSession.mockResolvedValue({
+        ok: true,
+        sessionId: "qi-direct-next-retry"
+      })
+      mocks.submitQuickIngestBatch.mockResolvedValue({
+        ok: true,
+        results: [
+          {
+            id: "failed-item",
+            type: "pdf",
+            status: "ok",
+            mediaId: 3,
+            collectionItemId: 11,
+            retryAttempt: 3,
+            idempotencyKey: "conference-retry-11-3"
+          }
+        ]
+      })
+      if (remount) {
+        mocks.reattachQuickIngestSession.mockResolvedValue({
+          lifecycle: "partial_failure",
+          jobs:
+            failure === "remount-empty"
+              ? []
+              : [
+                  {
+                    jobId: 77,
+                    status: "failed",
+                    error: "Network timeout"
+                  }
+                ],
+          errorMessage: "Network timeout"
+        })
+      } else if (failure === "start-ack") {
+        mocks.startQuickIngestSession.mockResolvedValueOnce({
+          ok: false,
+          error: "Network timeout"
+        })
+      } else if (failure === "start-reject") {
+        mocks.startQuickIngestSession.mockRejectedValueOnce(
+          new Error("Network timeout")
+        )
+      } else {
+        mocks.submitQuickIngestBatch.mockRejectedValueOnce(
+          new Error("Network timeout")
+        )
+      }
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      if (!remount) {
+        fireEvent.click(await screen.findByRole("button", { name: /Retry all/ }))
+        await waitFor(() =>
+          expect(mocks.startQuickIngestSession).toHaveBeenCalledOnce()
+        )
+      }
+      await waitFor(() => {
+        expect(
+          useQuickIngestSessionStore
+            .getState()
+            .session?.results.find((item) => item.id === "failed-item")
+        ).toMatchObject({
+          status: "error",
+          collectionItemId: "11",
+          retryAttempt: 2,
+          idempotencyKey: "conference-retry-11-2"
+        })
+      })
+      fireEvent.click(await screen.findByRole("button", { name: /Retry all/ }))
+      await waitFor(() =>
+        expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(
+          failure === "batch-reject" ? 2 : 1
+        )
+      )
+      const payload = mocks.submitQuickIngestBatch.mock.lastCall?.[0]
+      expect(payload.conferenceRetry).toEqual({
+        collectionId: "7",
+        items: [
+          {
+            ...retryIdentity,
+            retryAttempt: 3,
+            idempotencyKey: "conference-retry-11-3"
+          }
+        ]
+      })
+      expect(payload.entries.map((item: any) => item.id)).toEqual(["failed-item"])
+      await waitFor(() =>
+        expect(
+          useQuickIngestSessionStore
+            .getState()
+            .session?.results.filter((item) => item.status === "ok")
+            .map((item) => item.mediaId)
+        ).toEqual([1, 3])
+      )
+    }
+  )
+
   it("keeps earlier successes when a retried direct job reattaches after remount", async () => {
     mocks.useActualResultsStep = true
     useQuickIngestSessionStore

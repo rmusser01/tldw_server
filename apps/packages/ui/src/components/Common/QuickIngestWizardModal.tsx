@@ -27,6 +27,7 @@ import { reattachQuickIngestSession } from "@/services/tldw/quick-ingest-session
 import { useConnectionStore } from "@/store/connection"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import {
+  type PersistedQuickIngestTracking,
   type PersistedWizardQueueItem,
   type QuickIngestSessionLifecycle,
   type QuickIngestSessionRecord,
@@ -72,7 +73,6 @@ import type {
   DetectedMediaType,
   ItemProgress,
   ItemProgressStatus,
-  PersistedQuickIngestTracking,
   PlaylistQueueMetadata,
   ReattachedQuickIngestJob,
   TypeDefaults,
@@ -307,17 +307,28 @@ const buildTerminalProgress = (
 const buildFailureResults = (
   items: WizardQueueItem[],
   message: string,
-  outcome: "failed" | "cancelled"
+  outcome: "failed" | "cancelled",
+  retryItems?: ConferenceRetryRequestItem[]
 ): WizardResultItem[] =>
-  items.map((item) => ({
-    id: item.id,
-    status: "error",
-    outcome,
-    url: item.url,
-    fileName: item.fileName,
-    type: mapDetectedTypeToEntryType(item.detectedType),
-    error: message,
-  }))
+  items.map((item) => {
+    const retry = retryItems?.find((entry) => entry.resultId === item.id)
+    return {
+      id: item.id,
+      status: "error",
+      outcome,
+      url: item.url,
+      fileName: item.fileName,
+      type: mapDetectedTypeToEntryType(item.detectedType),
+      error: message,
+      ...(retry
+        ? {
+            collectionItemId: retry.collectionItemId,
+            retryAttempt: retry.retryAttempt,
+            idempotencyKey: retry.idempotencyKey
+          }
+        : {})
+    }
+  })
 
 const buildQueueFileKey = (item: WizardQueueItem): string | undefined => {
   if (item.fileStub?.key) return item.fileStub.key
@@ -754,6 +765,9 @@ const buildResultsFromReattachedJobs = (
       job.jobId,
       index
     )
+    const retry = tracking?.retryItems?.find(
+      (entry) => entry.resultId === item?.id
+    )
     const jobStatus = String(job.status || "").trim().toLowerCase()
     const logicalFailure =
       jobStatus === "completed" && completedIngestJobIndicatesFailure(job.result)
@@ -781,9 +795,12 @@ const buildResultsFromReattachedJobs = (
             `Quick ingest ${jobStatus || "failed"}.`,
       mediaId: extractCompletedIngestJobMediaId(job.result),
       warning: resultStatus === "ok" ? extractCompletedIngestJobWarning(job.result) : undefined,
-      collectionItemId: tracking?.jobIdToCollectionItemId?.[String(job.jobId)] ?? null,
-      retryAttempt: null,
-      idempotencyKey: null,
+      collectionItemId:
+        tracking?.jobIdToCollectionItemId?.[String(job.jobId)] ??
+        retry?.collectionItemId ??
+        null,
+      retryAttempt: retry?.retryAttempt ?? null,
+      idempotencyKey: retry?.idempotencyKey ?? null,
       title: job.result?.title ?? null,
       data: job.result,
       message: isDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined
@@ -1177,7 +1194,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           : buildFailureResults(
               reattachQueueItems,
               snapshot.errorMessage || "Quick ingest could not reconnect to live job status.",
-              "failed"
+              "failed",
+              latestTracking.retryItems
             )
 
       const mergedResults = mergeWizardResults(resultsRef.current, reattachedResults)
@@ -1281,7 +1299,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       const fallbackResults = buildFailureResults(
         unresolvedFallbackItems,
         message,
-        outcome
+        outcome,
+        retryRequestsRef.current.length ? retryRequestsRef.current : persistedTrackingRef.current?.retryItems
       )
       finalizeRun(outcome === "cancelled" ? "cancelled" : "error", fallbackResults)
     },
