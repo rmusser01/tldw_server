@@ -13,6 +13,8 @@ import { useSidepanelChatTabsStore, type SidepanelChatSnapshot, type SidepanelCh
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
 import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { createSafeStorage } from "@/utils/safe-storage"
+import { isChatDraftHandle } from "@/utils/chat-draft-address"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import {
   getSidepanelDraftStorageKey,
   getSidepanelOverlayResumeMarkerKey
@@ -28,6 +30,38 @@ export type SidepanelTabsState = {
 
 export const getTabsStorageKey = (id: number | null | undefined, ownerKey: string) =>
   `sidepanelChatTabsState:v2:${encodeURIComponent(ownerKey)}:${id !== null && id !== undefined ? `tab-${id}` : "global"}`
+
+/** Durable tabs retain setup and private draft locators, never Temporary history. */
+export const durableSidepanelTabs = (
+  state: SidepanelTabsState,
+  ownerHash: string,
+  newChatLabel = "New chat"
+): SidepanelTabsState => {
+  const snapshotsById: SidepanelTabsState["snapshotsById"] = {}
+  const tabs = state.tabs.map(tab => {
+    const snapshot = state.snapshotsById[tab.id]
+    if (!snapshot) return { ...tab }
+    const handle = isChatDraftHandle(snapshot.chatDraftHandle) && snapshot.chatDraftHandle.ownerHash === ownerHash &&
+      (snapshot.chatDraftHandle.address.kind !== "fresh" || snapshot.chatDraftHandle.address.temporary === snapshot.temporaryChat) &&
+      (!snapshot.temporaryChat || snapshot.chatDraftHandle.address.kind === "fresh") ? snapshot.chatDraftHandle : null
+    const fresh = handle?.address.kind === "fresh"
+    const clearHistory = snapshot.temporaryChat || fresh
+    snapshotsById[tab.id] = {
+      ...snapshot, chatDraftAddress: null, chatDraftHandle: handle,
+      ...(clearHistory ? {
+        history: [], messages: [], historyId: null, serverChatId: null, historySelectionReference: null,
+        serverChatState: null, serverChatTopic: null, serverChatClusterId: null, serverChatSource: null, serverChatExternalRef: null
+      } : handle?.address.kind === "native" ? { historyId: null } : {}),
+      ...(snapshot.temporaryChat ? { queuedMessages: [] } : {})
+    }
+    return {
+      ...tab,
+      ...(clearHistory ? { historyId: null, serverChatId: null, serverChatTopic: null } : handle?.address.kind === "native" ? { historyId: null } : {}),
+      ...(snapshot.temporaryChat ? { label: newChatLabel, labelSource: "auto" as const } : {})
+    }
+  })
+  return { ...state, tabs, snapshotsById }
+}
 
 /** Recover a completed durable reply when its tab snapshot still has a stream cursor. */
 const recoverCompletedSnapshotReplies = async (
@@ -68,7 +102,8 @@ export const readSidepanelTabs = async (
   storage: Pick<ReturnType<typeof createSafeStorage>, "get">,
   tabId: number | null,
   ownerKey: string,
-  isCurrent: () => boolean
+  isCurrent: () => boolean,
+  ownerHash: string
 ): Promise<SidepanelTabsState | null> => {
   const keys = [getTabsStorageKey(tabId, ownerKey)]
   if (tabId !== null) keys.push(getTabsStorageKey(null, ownerKey))
@@ -80,13 +115,14 @@ export const readSidepanelTabs = async (
         Array.isArray(candidate.tabs) && candidate.snapshotsById &&
         typeof candidate.snapshotsById === "object" &&
         candidate.tabs.every(tab => typeof tab?.id === "string")) {
-      const snapshotsById = { ...candidate.snapshotsById }
-      for (const tab of candidate.tabs) {
+      const normalized = durableSidepanelTabs(candidate, ownerHash)
+      const snapshotsById = normalized.snapshotsById
+      for (const tab of normalized.tabs) {
         if (!isCurrent()) return null
         const snapshot = snapshotsById[tab.id]
         if (snapshot) snapshotsById[tab.id] = await recoverCompletedSnapshotReplies(snapshot, ownerKey, isCurrent)
       }
-      return isCurrent() ? { ...candidate, snapshotsById } : null
+      return isCurrent() ? { ...normalized, snapshotsById } : null
     }
   }
   return null
@@ -139,6 +175,8 @@ const hasRestorableSnapshot = async (
     return false
   }
 
+  if (isChatDraftHandle(snapshot.chatDraftHandle)) return true
+
   if (
     snapshot.history.length > 0 ||
     snapshot.messages.length > 0 ||
@@ -166,7 +204,7 @@ export const hasResumableSidepanelChat = async (): Promise<boolean> => {
     if (!current()) return false
     const tabId = await readSidepanelRuntimeTabId()
     const storage = createSafeStorage({ area: "local" })
-    const tabs = await readSidepanelTabs(storage, tabId, serverChatMirrorOwnerKey(snapshot), current)
+    const tabs = await readSidepanelTabs(storage, tabId, serverChatMirrorOwnerKey(snapshot), current, chatDraftOwnerKey(snapshot.requestScope))
     if (!current()) return false
     if (tabs) {
       const restorable = await Promise.all(tabs.tabs.map(tab =>

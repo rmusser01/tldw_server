@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SidepanelHeaderSimple } from "../SidepanelHeaderSimple"
 
-const { runtimeGetURLMock, tabsCreateMock } = vi.hoisted(() => ({
+const { runtimeGetURLMock, tabsCreateMock, runtime } = vi.hoisted(() => ({
+  runtime: { id: "header-extension" as string | undefined },
   runtimeGetURLMock: vi.fn((path: string) => `chrome-extension://test${path}`),
   tabsCreateMock: vi.fn().mockResolvedValue(undefined)
 }))
@@ -41,6 +42,7 @@ vi.mock("antd", () => ({
 vi.mock("wxt/browser", () => ({
   browser: {
     runtime: {
+      get id() { return runtime.id },
       getURL: runtimeGetURLMock
     },
     tabs: {
@@ -77,6 +79,7 @@ vi.mock("../TtsClipsDrawer", () => ({
 
 describe("SidepanelHeaderSimple WebUI chat handoff", () => {
   beforeEach(() => {
+    runtime.id = "header-extension"
     runtimeGetURLMock.mockClear()
     tabsCreateMock.mockClear()
   })
@@ -99,7 +102,21 @@ describe("SidepanelHeaderSimple WebUI chat handoff", () => {
 })
 
 import { HistorySelectionContext, historySelectionExpansionPath, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection"
+it("uses the configured WebUI handoff with H1 present in the web compact view", async () => {
+  runtime.id = undefined
+  const onOpenChatInWebUi = vi.fn().mockResolvedValue(undefined)
+  const prepareExpansionPath = vi.fn()
+  render(<HistorySelectionContext.Provider value={{ prepareExpansionPath } as unknown as import("@/hooks/chat/useHistorySelection").HistorySelectionController}>
+    <SidepanelHeaderSimple onOpenChatInWebUi={onOpenChatInWebUi} />
+  </HistorySelectionContext.Provider>)
+  fireEvent.click(screen.getByTestId("chat-open-full-screen"))
+  await waitFor(() => expect(onOpenChatInWebUi).toHaveBeenCalledTimes(1))
+  expect(prepareExpansionPath).not.toHaveBeenCalled()
+  expect(tabsCreateMock).not.toHaveBeenCalled()
+})
+
 it("opens H1 expansion in the extension full page with only a scoped bookmark address", async () => {
+  runtime.id = "header-extension"
   const onOpenChatInWebUi = vi.fn()
   const reference = { profile_id: "profile", client_session_id: "view-a", owner_key: "owner", conversation_id: "chat" }
   render(<HistorySelectionContext.Provider value={{ reference, owner: { kind: "local" }, prepareExpansionPath: async () => historySelectionExpansionPath({ reference, owner: { kind: "local" } as any }) } as any}>
@@ -110,5 +127,15 @@ it("opens H1 expansion in the extension full page with only a scoped bookmark ad
   const url = tabsCreateMock.mock.calls.at(-1)![0].url
   expect(url.startsWith("chrome-extension://test/options.html#/chat?")).toBe(true)
   expect(parseHistorySelectionHandoff(url)).toEqual({ ...reference, owner_kind: "local" })
+  expect(onOpenChatInWebUi).not.toHaveBeenCalled()
+})
+
+ it("disables expansion until the conversation has restored", () => {
+  runtime.id = undefined
+  const onOpenChatInWebUi = vi.fn()
+  render(<SidepanelHeaderSimple chatReady={false} onOpenChatInWebUi={onOpenChatInWebUi} />)
+  const expand = screen.getByTestId("chat-open-full-screen")
+  expect(expand).toBeDisabled()
+  fireEvent.click(expand)
   expect(onOpenChatInWebUi).not.toHaveBeenCalled()
 })

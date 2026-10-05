@@ -472,13 +472,14 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     [selectedAssistant, selectedCharacterId]
   )
   const historySelection = useHistorySelectionContext()
-  const fullAppButtonLabel = historySelection ? t("playground:historySelection.expand", "Expand in full page") : rolePlayActive
+  const usesExtensionExpansion = Boolean(historySelection && (browser.runtime.id || !onOpenChatInWebUi))
+  const fullAppButtonLabel = usesExtensionExpansion ? t("playground:historySelection.expand", "Expand in full page") : rolePlayActive
     ? t(
         "sidepanel:controlRow.openCharacterChatInFullUI",
         "Open Character Chat in full app"
       )
     : t("sidepanel:controlRow.openInFullUI", "Open full app")
-  const fullAppHandoffDescription = historySelection ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.") : rolePlayActive
+  const fullAppHandoffDescription = usesExtensionExpansion ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.") : rolePlayActive
     ? t(
         "sidepanel:controlRow.openRolePlayFullAppDescription",
         "Opens /chat in a new tab with the active role-play route. Use Continue in WebUI to carry a draft or page context."
@@ -581,7 +582,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   }, [])
 
   const openFullApp = async () => {
-    if (historySelection) { const route = await historySelection.prepareExpansionPath(); if (route) void openFullAppPath(route); return }
+    if (historySelection && usesExtensionExpansion) { const route = await historySelection.prepareExpansionPath(); if (route) void openFullAppPath(route); return }
     if (onOpenChatInWebUi) {
       Promise.resolve(onOpenChatInWebUi())
         .catch((error) => {

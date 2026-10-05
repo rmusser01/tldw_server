@@ -40,6 +40,7 @@ type MockInputProps = React.InputHTMLAttributes<HTMLInputElement> & {
 }
 
 const mocks = vi.hoisted(() => ({
+  runtimeId: "review-extension" as string | undefined,
   selectedAssistant: {
     kind: "character",
     id: "char-review",
@@ -64,7 +65,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("wxt/browser", () => ({
   browser: {
     runtime: {
-      id: "review-extension",
+      get id() { return mocks.runtimeId },
       getURL: mocks.runtimeGetURL
     },
     tabs: {}
@@ -338,6 +339,19 @@ describe("ControlRow role-play handoff behavior", () => {
 })
 
 import { HistorySelectionContext, historySelectionExpansionPath, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection"
+it("uses the WebUI document handoff with H1 present outside the packaged extension", async () => {
+  mocks.runtimeId = undefined
+  const webui = vi.fn().mockResolvedValue(undefined)
+  const prepareExpansionPath = vi.fn()
+  render(<HistorySelectionContext.Provider value={{ prepareExpansionPath } as unknown as import("@/hooks/chat/useHistorySelection").HistorySelectionController}>
+    <ControlRow {...defaultProps()} onOpenChatInWebUi={webui} />
+  </HistorySelectionContext.Provider>)
+  fireEvent.click(screen.getByTestId("chat-open-full-app"))
+  await waitFor(() => expect(webui).toHaveBeenCalledTimes(1))
+  expect(prepareExpansionPath).not.toHaveBeenCalled()
+  mocks.runtimeId = "review-extension"
+})
+
 it("keeps H1 full-page expansion distinct from the explicit WebUI draft handoff", async () => {
   const reference = { profile_id: "p", client_session_id: "a", owner_key: "owner", conversation_id: "chat" }
   const webui = vi.fn()

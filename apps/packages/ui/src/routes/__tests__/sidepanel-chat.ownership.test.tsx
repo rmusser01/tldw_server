@@ -6,17 +6,24 @@ import {
   type SidepanelChatSnapshot,
   useSidepanelChatTabsStore
 } from "@/store/sidepanel-chat-tabs"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { readFileSync } from "node:fs"
+import path from "node:path"
+import ts from "typescript"
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import LegacySidepanelChat from "../../../../../tldw-frontend/extension/routes/sidepanel-chat"
 import SidepanelChat from "../sidepanel-chat"
-import { useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { useHistorySelectionContext, parseHistorySelectionHandoff, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import { requestSettingsNavigation, SETTINGS_NAVIGATION_REQUEST_EVENT } from "@/utils/settings-return"
 import type { HistoryBookmarkScope } from "@/db/dexie/types"
 import type { HistoryOwnerV1 } from "@/services/chat-history-selection"
 import type { HistoryCaptureRequestV1, HistoryViewSelectionV1 } from "@/types/history-selection"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
+import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
+import { chatDraftAddressKey, conversationDraftKey } from "@/utils/chat-draft-address"
+import { decodeSidepanelChatWebUiHandoff } from "@/services/tldw/sidepanel-chat-webui-handoff"
 
 const io = vi.hoisted(() => ({
   noop: () => {},
@@ -27,7 +34,10 @@ const io = vi.hoisted(() => ({
   localId: "foreign",
   serverId: "server-chat",
   captureNative: false,
+  useComposer: false,
+  physicalTabId: 7 as number | null,
   controller: null as HistorySelectionController | null,
+  keyboardNew: null as (() => void) | null,
   data: new Map<string, unknown>(),
   read: vi.fn(),
   local: vi.fn(),
@@ -134,7 +144,7 @@ vi.mock("@/hooks/useSmartScroll", () => ({
   })
 }))
 vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({
-  useChatShortcuts: io.noop,
+  useChatShortcuts: (action: () => void) => { io.keyboardNew = action },
   useSidebarShortcuts: io.noop,
   useChatModeShortcuts: io.noop,
   useWebSearchShortcuts: io.noop
@@ -195,11 +205,52 @@ vi.mock("@/components/Sidepanel/Chat/body", () => ({
     </div>
   }
 }))
+// Read the production option rather than giving the probe stronger isolation
+// than the deployed form. The mounted composer/registry remain real.
+const formAst = ts.createSourceFile("form.tsx", readFileSync(path.resolve(__dirname,
+  "../../components/Sidepanel/Chat/form.tsx"), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+let sidepanelTabScopedDraft = false
+const findComposerOptions = (node: ts.Node) => {
+  if (ts.isCallExpression(node) && node.expression.getText(formAst) === "useComposerText") {
+    const options = node.arguments[0]
+    if (options && ts.isObjectLiteralExpression(options)) sidepanelTabScopedDraft = options.properties.some(property =>
+      ts.isPropertyAssignment(property) && property.name.getText(formAst) === "tabScopedDraft" &&
+      property.initializer.kind === ts.SyntaxKind.TrueKeyword)
+  }
+  ts.forEachChild(node, findComposerOptions)
+}
+findComposerOptions(formAst)
+const tabStorage = (): Storage => {
+  const entries = new Map<string, string>()
+  return { get length() { return entries.size }, key: index => [...entries.keys()][index] ?? null,
+    getItem: key => entries.get(key) ?? null, setItem: (key, value) => { entries.set(key, value) },
+    removeItem: key => { entries.delete(key) }, clear: () => entries.clear() }
+}
+const ComposerProbe = ({ draftKey, inputRef }: { draftKey: string; inputRef?: React.RefObject<HTMLTextAreaElement> }) => {
+  const address = useStoreMessageOption(state => state.chatDraftAddress)
+  React.useLayoutEffect(() => {
+    if (!useStoreMessageOption.getState().chatDraftAddress) useStoreMessageOption.getState().startNewChatDraft()
+  }, [address])
+  const transition = useStoreMessageOption(state => state.chatDraftTransition)
+  const composer = useComposerText({
+    draftKey: address ? conversationDraftKey(draftKey, address) : draftKey,
+    draftEnabled: address !== null,
+    tabScopedDraft: sidepanelTabScopedDraft,
+    bindFromDraftKey: address && transition?.kind === "bind" && transition.sourceAddress &&
+      transition.destinationKey === chatDraftAddressKey(address)
+      ? conversationDraftKey(draftKey, transition.sourceAddress) : undefined,
+    textareaRef: inputRef ?? React.createRef<HTMLTextAreaElement>()
+  })
+  return <textarea ref={inputRef} aria-label="Composer draft" disabled={!composer.draftReady}
+    value={composer.form.values.message}
+    onChange={event => composer.setMessageValue(event.target.value)} />
+}
 vi.mock("@/components/Sidepanel/Chat/form", () => ({
-  SidepanelForm: () => null
+  SidepanelForm: (props: { draftKey: string }) => io.useComposer ? <ComposerProbe {...props} /> : null
 }))
 vi.mock("@/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({
-  SidepanelHeaderSimple: () => null
+  SidepanelHeaderSimple: (props: { onOpenChatInWebUi?: () => void }) => <button
+    onClick={() => props.onOpenChatInWebUi?.()}>Open full chat in WebUI</button>
 }))
 vi.mock("@/components/Sidepanel/Chat/ConnectionBanner", () => ({
   ConnectionBanner: () => null
@@ -233,7 +284,8 @@ vi.mock("@/components/Sidepanel/Chat/Sidebar", () => ({
   )
 }))
 vi.mock("@/components/Common/CommandPaletteHost", () => ({
-  CommandPaletteHost: () => null
+  CommandPaletteHost: ({ commandPaletteProps }: { commandPaletteProps: { onNewChat: () => void } }) =>
+    <button onClick={() => commandPaletteProps.onNewChat()}>Palette New chat</button>
 }))
 vi.mock("@/components/Common/CommandPalette", () => ({
   CommandPalette: () => null
@@ -263,7 +315,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 vi.mock("wxt/browser", () => ({
-  browser: { runtime: { sendMessage: async () => ({ tabId: 7 }) } }
+  browser: { runtime: { sendMessage: async () => ({ tabId: io.physicalTabId }) } }
 }))
 
 const ownerKey = (user: string) =>
@@ -354,12 +406,18 @@ describe.each([
   ["legacy", LegacySidepanelChat]
 ] as const)("%s sidepanel snapshot ownership", (_name, Route) => {
   beforeEach(() => {
+    vi.unstubAllGlobals()
+    vi.spyOn(window, "open").mockImplementation(() => ({}) as Window)
     io.user = "alice"
     io.sequence = 0
     io.localId = "foreign"
     io.serverId = "server-chat"
     io.captureNative = false
+    io.useComposer = false
+    io.physicalTabId = 7
+    sessionStorage.clear()
     io.controller = null
+    io.keyboardNew = null
     io.data.clear()
     io.read.mockReset().mockImplementation(async (key) => io.data.get(key))
     io.local.mockReset()
@@ -400,6 +458,391 @@ describe.each([
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
     expect(useStoreMessageOption.getState().messages[0]?.message).toBe("alice first")
     expect(useSidepanelChatTabsStore.getState().tabs).toHaveLength(2)
+  })
+
+  it("retains a verified unsent-only Temporary locator while excluding live transcript and derived labels from durable tabs", async () => {
+    render(<Route />)
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).toBeTruthy())
+    act(() => {
+      useStoreMessageOption.getState().setTemporaryChat(true)
+      useStoreMessageOption.getState().startNewChatDraft(true)
+      useStoreMessageOption.getState().setHistoryId("temp")
+      useStoreMessageOption.getState().setMessages(snapshot("TEMPORARY PRIVATE TURN").messages)
+      useStoreMessageOption.getState().setHistory(snapshot("TEMPORARY PRIVATE TURN").history)
+      useStoreMessageOption.getState().setQueuedMessages([buildQueuedRequest({ promptText: "TEMPORARY QUEUED TURN" })])
+    })
+    const id = useSidepanelChatTabsStore.getState().activeTabId!
+    const address = useStoreMessageOption.getState().chatDraftAddress!
+    act(() => window.dispatchEvent(new Event("beforeunload")))
+    await waitFor(() => {
+      const durable = io.data.get(storedKey("alice")) as ReturnType<typeof tabsState>
+      expect(durable.snapshotsById[id]).toMatchObject({
+        chatDraftHandle: { address, ownerHash: chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }) },
+        temporaryChat: true, messages: [], history: [], queuedMessages: [], historyId: null, serverChatId: null, historySelectionReference: null
+      })
+      expect(JSON.stringify(durable)).not.toContain("TEMPORARY PRIVATE TURN")
+      expect(JSON.stringify(durable)).not.toContain("TEMPORARY QUEUED TURN")
+    })
+    expect(useSidepanelChatTabsStore.getState().getSnapshot(id)?.messages[0]?.message).toBe("TEMPORARY PRIVATE TURN")
+    expect(useStoreMessageOption.getState().messages[0]?.message).toBe("TEMPORARY PRIVATE TURN")
+  })
+
+  it.each([false, true])("cold restores a fresh handle before stale H1, transcript and recent fallback (Temporary %s)", async temporary => {
+    const saved = tabsState()
+    const address = { kind: "fresh" as const, id: "retained-unsent", scope: { type: "global" as const }, temporary }
+    Object.assign(saved.snapshotsById["alice-one"], {
+      temporaryChat: temporary,
+      chatDraftHandle: { address, ownerHash: chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }) },
+      historyId: "stale-local", serverChatId: "stale-native",
+      historySelectionReference: { profile_id: "profile", client_session_id: "old-tab", conversation_id: "stale-native", owner_key: "old-owner", owner_kind: "native" },
+      queuedMessages: temporary ? [buildQueuedRequest({ promptText: "OLD TEMP QUEUE" })] : []
+    })
+    saved.snapshotsById["alice-one"].messages[0].message = "STALE PRIVATE TRANSCRIPT▋"
+    io.data.set(storedKey("alice"), saved)
+    render(<Route />)
+    await screen.findByRole("button", { name: "alice two" })
+    await waitFor(() => expect(useStoreMessageOption.getState()).toMatchObject({ chatDraftAddress: address, temporaryChat: temporary, messages: [], history: [], historyId: null, serverChatId: null, queuedMessages: [] }))
+    expect(io.local).not.toHaveBeenCalled()
+    expect(io.server).not.toHaveBeenCalled()
+    expect(io.controller?.getCurrent().owner).toBeNull()
+  })
+
+  it("reloads a New tab and its first unsent edit before debounce without further core changes", async () => {
+    io.useComposer = true
+    const view = render(<Route />)
+    await screen.findByRole("button", { name: "New conversation" })
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }))
+    const id = useSidepanelChatTabsStore.getState().activeTabId!
+    const address = useStoreMessageOption.getState().chatDraftAddress!
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "FIRST UNSENT EDIT" } })
+    act(() => window.dispatchEvent(new Event("pagehide")))
+    view.unmount()
+    await act(async () => {})
+    const saved = io.data.get(storedKey("alice")) as ReturnType<typeof tabsState>
+    expect(saved.activeTabId).toBe(id)
+    expect(saved.snapshotsById[id].chatDraftHandle?.address).toEqual(address)
+    useSidepanelChatTabsStore.getState().clear()
+    useStoreMessageOption.getState().startNewChatDraft()
+    render(<Route />)
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toHaveValue("FIRST UNSENT EDIT"))
+    expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(address)
+  })
+
+  it("keeps same-fallback logical tab drafts independent across physical session storage areas", async () => {
+    useStoreMessageOption.getState().startNewChatDraft(false)
+    const firstArea = tabStorage(), secondArea = tabStorage()
+    const key = "tldw:sidepanelChatDraft:shared-fallback-logical-id"
+    vi.stubGlobal("sessionStorage", firstArea)
+    let first = render(<ComposerProbe draftKey={key} />)
+    await waitFor(() => expect(within(first.container).getByLabelText("Composer draft")).toBeEnabled())
+    fireEvent.change(within(first.container).getByLabelText("Composer draft"), { target: { value: "FIRST PANEL TEXT" } })
+    act(() => window.dispatchEvent(new Event("pagehide")))
+    vi.stubGlobal("sessionStorage", secondArea)
+    let second = render(<ComposerProbe draftKey={key} />)
+    await waitFor(() => expect(within(second.container).getByLabelText("Composer draft")).toBeEnabled())
+    fireEvent.change(within(second.container).getByLabelText("Composer draft"), { target: { value: "SECOND PANEL TEXT" } })
+    act(() => window.dispatchEvent(new Event("pagehide")))
+    first.unmount(); second.unmount()
+    vi.stubGlobal("sessionStorage", firstArea)
+    first = render(<ComposerProbe draftKey={key} />)
+    await waitFor(() => expect(within(first.container).getByLabelText("Composer draft")).toHaveValue("FIRST PANEL TEXT"))
+    fireEvent.change(within(first.container).getByLabelText("Composer draft"), { target: { value: "" } })
+    act(() => window.dispatchEvent(new Event("pagehide")))
+    vi.stubGlobal("sessionStorage", secondArea)
+    second = render(<ComposerProbe draftKey={key} />)
+    await waitFor(() => expect(within(second.container).getByLabelText("Composer draft")).toHaveValue("SECOND PANEL TEXT"))
+    fireEvent.change(within(second.container).getByLabelText("Composer draft"), { target: { value: "SECOND PANEL NEWER TEXT" } })
+    act(() => window.dispatchEvent(new Event("pagehide")))
+    first.unmount(); second.unmount()
+    vi.stubGlobal("sessionStorage", firstArea)
+    first = render(<ComposerProbe draftKey={key} />)
+    await waitFor(() => expect(within(first.container).getByLabelText("Composer draft")).toBeEnabled())
+    expect(within(first.container).getByLabelText("Composer draft")).toHaveValue("")
+    first.unmount()
+  })
+
+  it("retains Temporary RAM and next unsent text on warm return, then only unsent text on cold reload", async () => {
+    io.useComposer = true
+    let view = render(<Route />)
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    act(() => {
+      useStoreMessageOption.getState().setTemporaryChat(true)
+      useStoreMessageOption.getState().startNewChatDraft(true)
+      useStoreMessageOption.getState().setHistoryId("temp")
+      useStoreMessageOption.getState().setHistory(snapshot("TEMP PRIVATE REPLY").history)
+      useStoreMessageOption.getState().setMessages(snapshot("TEMP PRIVATE REPLY").messages)
+      useStoreMessageOption.getState().setQueuedMessages([buildQueuedRequest({ promptText: "TEMP PRIVATE QUEUE" })])
+    })
+    const address = useStoreMessageOption.getState().chatDraftAddress!
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "NEXT TEMP UNSENT" } })
+    view.unmount()
+    await act(async () => {})
+    expect(JSON.stringify(io.data.get(storedKey("alice")))).not.toContain("TEMP PRIVATE")
+    view = render(<Route />)
+    await screen.findByText("TEMP PRIVATE REPLY")
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toHaveValue("NEXT TEMP UNSENT"))
+    expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(address)
+    expect(useStoreMessageOption.getState().historyId).toBe("temp")
+    view.unmount()
+    await act(async () => {})
+    useSidepanelChatTabsStore.getState().clear()
+    useStoreMessageOption.getState().startNewChatDraft(false)
+    render(<Route />)
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toHaveValue("NEXT TEMP UNSENT"))
+    expect(useStoreMessageOption.getState()).toMatchObject({ chatDraftAddress: address, temporaryChat: true,
+      history: [], messages: [], queuedMessages: [], historyId: null, serverChatId: null })
+    expect(screen.queryByText("TEMP PRIVATE REPLY")).not.toBeInTheDocument()
+  })
+
+  it.each(["local", "native"])("loads the exact qualified %s handle and its retained composer text", async kind => {
+    io.useComposer = true
+    io.captureNative = true
+    const saved = tabsState()
+    const address = kind === "local"
+      ? { kind: "local" as const, id: "saved-B", profileId: "profile" }
+      : { kind: "native" as const, id: "saved-B", ownerKey: "native:saved-B", scope: { type: "workspace" as const, workspaceId: "workspace-B" } }
+    const ownerHash = chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" })
+    Object.assign(saved.snapshotsById["alice-two"], {
+      chatDraftHandle: { address, ownerHash }, historyId: kind === "local" ? "saved-B" : "obsolete-mirror",
+      serverChatId: kind === "native" ? "saved-B" : null
+    })
+    io.data.set(storedKey("alice"), saved)
+    io.data.set(`registry:draft:${conversationDraftKey("tldw:sidepanelChatDraft:alice-two", address)}:owner:${ownerHash}`,
+      { value: { content: "SAVED B UNSENT" }, updatedAt: Date.now() })
+    io.local.mockResolvedValue({ historyInfo: { id: "saved-B", local_owner_key: "local-profile" }, messages: [] })
+    render(<Route />)
+    await screen.findByText("alice first")
+    fireEvent.click(await screen.findByRole("button", { name: "alice two" }))
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toHaveValue("SAVED B UNSENT"))
+    expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(address)
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-two")
+    await waitFor(() => expect(io.controller?.getCurrent().status).toBe("ready"))
+    expect(io.controller?.getCurrent().owner?.kind).toBe(kind)
+    if (kind === "native") expect(io.controller?.getCurrent().owner).toMatchObject({ scope: address.scope })
+  })
+
+  it("keeps setup edits made on A while saved B is being qualified", async () => {
+    const saved = tabsState()
+    const ownerHash = chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" })
+    Object.assign(saved.snapshotsById["alice-two"], {
+      historyId: "saved-B", chatDraftHandle: { ownerHash, address: { kind: "local", id: "saved-B", profileId: "profile" } }
+    })
+    io.data.set(storedKey("alice"), saved)
+    const cached = { historyInfo: { id: "saved-B", local_owner_key: "local-profile" }, messages: [] }
+    let finish!: (value: typeof cached) => void
+    io.local.mockImplementationOnce(() => new Promise(resolve => { finish = resolve })).mockResolvedValue(cached)
+    render(<Route />)
+    fireEvent.click(await screen.findByRole("button", { name: "alice two" }))
+    await waitFor(() => expect(finish).toBeTypeOf("function"))
+    act(() => {
+      useStoreMessageOption.getState().setWebSearch(true)
+      useStoreMessageOption.getState().setSelectedModel("changed-source-model")
+      useStoreMessageOption.getState().setSelectedSystemPrompt("changed-source-prompt")
+    })
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().getSnapshot("alice-one")?.webSearch).toBe(true))
+    await act(async () => { finish(cached) })
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-two"))
+    expect(useSidepanelChatTabsStore.getState().getSnapshot("alice-one")).toMatchObject({
+      webSearch: true, selectedModel: "changed-source-model", selectedSystemPrompt: "changed-source-prompt" })
+    fireEvent.click(screen.getByRole("button", { name: "alice one" }))
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one"))
+    expect(useStoreMessageOption.getState()).toMatchObject({ webSearch: true,
+      selectedModel: "changed-source-model", selectedSystemPrompt: "changed-source-prompt" })
+  })
+
+  it.each(["New", "another tab"])("recovers from an invalid active saved handle using %s without replacing retained records", async action => {
+    const saved = tabsState()
+    const ownerHash = chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" })
+    Object.assign(saved.snapshotsById["alice-one"], {
+      historyId: "stale-A", chatDraftHandle: { ownerHash, address: { kind: "local", id: "stale-A", profileId: "old-profile" } }
+    })
+    Object.assign(saved.snapshotsById["alice-two"], {
+      historyId: "valid-B", chatDraftHandle: { ownerHash, address: { kind: "local", id: "valid-B", profileId: "profile" } }
+    })
+    io.local.mockImplementation(async id => ({ historyInfo: { id, local_owner_key: "local-profile" }, messages: [] }))
+    io.data.set(storedKey("alice"), saved)
+    render(<Route />)
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("Your saved chats and drafts are kept.")
+    expect(io.data.get(storedKey("alice"))).toEqual(saved)
+    if (action === "New") fireEvent.click(screen.getByRole("button", { name: "Start a new conversation" }))
+    else fireEvent.click(await screen.findByRole("button", { name: "alice two" }))
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument())
+    expect(useSidepanelChatTabsStore.getState().tabs.some(tab => tab.id === "alice-one")).toBe(true)
+    expect(useSidepanelChatTabsStore.getState().getSnapshot("alice-one")?.chatDraftHandle).toEqual(saved.snapshotsById["alice-one"].chatDraftHandle)
+    if (action === "New") expect(useStoreMessageOption.getState().chatDraftAddress?.kind).toBe("fresh")
+    else expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(saved.snapshotsById["alice-two"].chatDraftHandle?.address)
+  })
+
+  it("keeps the ready native source lease while preparing B and cancels B when A is selected again", async () => {
+    io.captureNative = true
+    const saved = tabsState()
+    const ownerHash = chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" })
+    Object.assign(saved.snapshotsById["alice-one"], {
+      serverChatId: "source-A", chatDraftHandle: { ownerHash,
+        address: { kind: "native", id: "source-A", ownerKey: "native:source-A", scope: { type: "global" } } }
+    })
+    Object.assign(saved.snapshotsById["alice-two"], {
+      historyId: "saved-B", chatDraftHandle: { ownerHash, address: { kind: "local", id: "saved-B", profileId: "profile" } }
+    })
+    io.data.set(storedKey("alice"), saved)
+    let finish!: (value: unknown) => void
+    io.local.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    render(<Route />)
+    await screen.findByRole("button", { name: "alice two" })
+    await waitFor(() => expect(io.controller?.getCurrent().status).toBe("ready"))
+    const sourceOwner = io.controller!.getCurrent().owner!
+    expect(sourceOwner.validate_lease?.()).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "alice two" }))
+    await waitFor(() => expect(finish).toBeTypeOf("function"))
+    expect(sourceOwner.validate_lease?.()).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "alice one" }))
+    await act(async () => { finish({ historyInfo: { id: "saved-B", local_owner_key: "local-profile" }, messages: [] }) })
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+    expect(io.controller!.getCurrent().owner).toBe(sourceOwner)
+    expect(sourceOwner.validate_lease?.()).toBe(true)
+  })
+
+  it.each([0, null])("does not carry another physical panel's RAM transcript into empty context %s", async physicalTabId => {
+    io.useComposer = true
+    io.data.set(storedKey("alice"), tabsState())
+    const first = render(<Route />)
+    await screen.findByText("alice first")
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    const address = useStoreMessageOption.getState().chatDraftAddress
+    fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "PANEL SEVEN UNSENT" } })
+    first.unmount()
+    io.physicalTabId = physicalTabId
+    render(<Route />)
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(useStoreMessageOption.getState().chatDraftAddress).not.toEqual(address)
+    expect(screen.getByLabelText("Composer draft")).toHaveValue("")
+    const key = `sidepanelChatTabsState:v2:${encodeURIComponent(ownerKey("alice"))}:${physicalTabId === null ? "global" : "tab-0"}`
+    expect(useSidepanelChatTabsStore.getState().storageKey).toBe(key)
+    expect(io.read).toHaveBeenCalledWith(key)
+  })
+
+  it.each(["profile", "replacement", "closed"])("keeps the source tab and composer when a saved handle has a %s mismatch", async reason => {
+    io.useComposer = true
+    const saved = tabsState()
+    const target = saved.snapshotsById["alice-two"]
+    Object.assign(target, {
+      historyId: "saved-B",
+      chatDraftHandle: { address: { kind: "local", id: "saved-B", profileId: reason === "profile" ? "another-profile" : "profile" },
+        ownerHash: chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }) }
+    })
+    io.data.set(storedKey("alice"), saved)
+    let finish!: (value: unknown) => void
+    io.local.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    render(<Route />)
+    await screen.findByText("alice first")
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    const source = useStoreMessageOption.getState().chatDraftAddress
+    fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "A UNSENT TEXT" } })
+    fireEvent.click(screen.getByRole("button", { name: "alice two" }))
+    await waitFor(() => expect(finish).toBeTypeOf("function"))
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+    expect(useStoreMessageOption.getState().chatDraftAddress).toBe(source)
+    expect(screen.getByLabelText("Composer draft")).toHaveValue("A UNSENT TEXT")
+    if (reason === "replacement") {
+      fireEvent.click(screen.getByRole("button", { name: "New conversation" }))
+      await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+      fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "NEW UNSENT TEXT" } })
+    }
+    if (reason === "closed") fireEvent.click(screen.getByRole("button", { name: "Close alice two" }))
+    const accepted = useStoreMessageOption.getState().chatDraftAddress
+    const active = useSidepanelChatTabsStore.getState().activeTabId
+    await act(async () => { finish({ historyInfo: { id: "saved-B", local_owner_key: "local-profile" }, messages: [] }) })
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe(active)
+    expect(useStoreMessageOption.getState().chatDraftAddress).toBe(accepted)
+    expect(screen.getByLabelText("Composer draft")).toHaveValue(reason === "replacement" ? "NEW UNSENT TEXT" : "A UNSENT TEXT")
+  })
+
+  it("preserves the configured WebUI route, setup and unsent draft through the shared legacy entry", async () => {
+    io.useComposer = true
+    io.data.set("tldwConfig", { serverUrl: "http://chat.test", webUiUrl: "https://webui.test/base" })
+    render(<Route />)
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "CARRY THIS UNSENT TEXT" } })
+    act(() => useStoreMessageOption.getState().setWebSearch(true))
+    fireEvent.click(screen.getByRole("button", { name: "Open full chat in WebUI" }))
+    await waitFor(() => expect(window.open).toHaveBeenCalled())
+    const url = new URL(String(vi.mocked(window.open).mock.calls.at(-1)![0]))
+    expect(url.origin + url.pathname).toBe("https://webui.test/base/chat")
+    const payload = decodeSidepanelChatWebUiHandoff(new URLSearchParams(url.hash.slice(1)).get("handoff"))
+    expect(payload).toMatchObject({ draft: "CARRY THIS UNSENT TEXT", webSearch: true,
+      historyId: null, serverChatId: null, temporaryChat: false })
+    expect(screen.getByLabelText("Composer draft")).toHaveValue("CARRY THIS UNSENT TEXT")
+  })
+
+  it.each(["keyboard", "palette"])("uses the same restoration boundary for %s New", async entry => {
+    const saved = tabsState()
+    let finish!: (value: unknown) => void
+    io.read.mockImplementation(key => key === storedKey("alice")
+      ? new Promise(resolve => { finish = resolve }) : Promise.resolve(io.data.get(key)))
+    render(<Route />)
+    await waitFor(() => expect(finish).toBeTypeOf("function"))
+    const source = useStoreMessageOption.getState().chatDraftAddress
+    const newChat = () => { if (entry === "keyboard") io.keyboardNew?.()
+      else fireEvent.click(screen.getByRole("button", { name: "Palette New chat" })) }
+    act(newChat)
+    expect(useStoreMessageOption.getState().chatDraftAddress).toBe(source)
+    await act(async () => { finish(saved) })
+    await screen.findByText("alice first")
+    act(newChat)
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).not.toBe("alice-one"))
+    expect(useStoreMessageOption.getState().chatDraftAddress?.kind).toBe("fresh")
+    expect(useSidepanelChatTabsStore.getState().tabs.some(tab => tab.id === "alice-one")).toBe(true)
+  })
+
+  it("expands the selected history review through its qualified bookmark in the web compact view", async () => {
+    io.localId = "owned"
+    io.local.mockResolvedValue({ historyInfo: { id: "owned", title: "Owned review", server_scope_key: ownerKey("alice") },
+      messages: [{ id: "row", role: "user", content: "OWNED REVIEW TEXT" }] })
+    render(<Route />)
+    fireEvent.click(await screen.findByRole("button", { name: "Open cached history" }))
+    await screen.findByText("OWNED REVIEW TEXT")
+    fireEvent.click(screen.getByRole("button", { name: "Expand in full page" }))
+    await waitFor(() => expect(window.open).toHaveBeenCalled())
+    const route = String(vi.mocked(window.open).mock.calls.at(-1)![0])
+    expect(parseHistorySelectionHandoff(route)).toMatchObject({ owner_kind: "local", conversation_id: "owned" })
+    expect(route).not.toContain("handoff=")
+  })
+
+  it.each(["pending", "target failure"])("does not expand unresolved %s restoration from the header", async state => {
+    const saved = tabsState()
+    if (state === "target failure") {
+      const ownerHash = chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" })
+      Object.assign(saved.snapshotsById["alice-one"], { historyId: "old-A",
+        chatDraftHandle: { ownerHash, address: { kind: "local", id: "old-A", profileId: "old-profile" } } })
+    }
+    io.data.set(storedKey("alice"), saved)
+    io.data.set("tldwConfig", { webUiUrl: "https://webui.test" })
+    if (state === "pending") io.read.mockImplementation(key => key === storedKey("alice")
+      ? new Promise(() => {}) : Promise.resolve(io.data.get(key)))
+    render(<Route />)
+    if (state === "target failure") await screen.findByRole("alert")
+    else await waitFor(() => expect(io.read).toHaveBeenCalledWith(storedKey("alice")))
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Open full chat in WebUI" })) })
+    expect(window.open).not.toHaveBeenCalled()
+  })
+
+  it("ignores a configured WebUI handoff config read after accepted New", async () => {
+    io.useComposer = true
+    let finish!: (value: unknown) => void
+    io.read.mockImplementation(key => key === "tldwConfig"
+      ? new Promise(resolve => { finish = resolve }) : Promise.resolve(io.data.get(key)))
+    render(<Route />)
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    fireEvent.click(screen.getByRole("button", { name: "Open full chat in WebUI" }))
+    await waitFor(() => expect(finish).toBeTypeOf("function"))
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }))
+    await act(async () => { finish({ webUiUrl: "https://old-webui.test" }) })
+    expect(window.open).not.toHaveBeenCalled()
   })
 
   it.each(["account", "unmount"])("ignores a restore rejection after %s replacement", async boundary => {

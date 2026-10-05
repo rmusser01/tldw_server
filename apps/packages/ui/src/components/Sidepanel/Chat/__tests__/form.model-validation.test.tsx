@@ -22,7 +22,8 @@ const mocks = vi.hoisted(() => ({
   useMessage: vi.fn(),
   fetchChatModels: vi.fn(),
   send: vi.fn(),
-  queue: vi.fn()
+  queue: vi.fn(),
+  loading: vi.fn()
 }))
 const models = [{ model: "ready-model", provider: "llamacpp" }]
 const t = (key: string, fallback?: string) => fallback ?? key
@@ -90,7 +91,7 @@ if (!catalogDataName) throw new Error("Missing sidebar model catalog data")
 const compiled = ts.transpileModule(
   `
   return function useSidebarValidation(scope) {
-    const { form, selectedModel, isSending, isConnectionReady, isProMode } = scope;
+    const { form, selectedModel, isSending, isConnectionReady, isProMode, draftReady } = scope;
     const audioHealthEnabled = false;
     const fetchChatModels = mocks.fetchChatModels;
     const ${catalogQuery.getText(ast)};
@@ -98,7 +99,7 @@ const compiled = ts.transpileModule(
     const contextFiles = [], selectedDocuments = [];
     const streaming = false, sendWhenEnter = true;
     const resolveSubmissionIntent = (combinedMessage) => ({ combinedMessage, isImageCommand: false });
-    const notification = { error: () => {} };
+    const notification = { error: () => {}, info: mocks.loading };
     const queueSubmission = mocks.queue;
     const stopListening = async () => {};
     const stopServerDictation = () => {};
@@ -138,6 +139,7 @@ const useSidebarValidation = new Function(
   isSending: boolean
   isConnectionReady: boolean
   isProMode: boolean
+  draftReady: boolean
 }) => {
   submit: (message: string, image: string) => Promise<void>
   inline: React.ReactNode
@@ -149,6 +151,7 @@ function Harness({
   busy = false,
   connected = true,
   pro = false,
+  draftReady = true,
   text = "keep my draft",
   image = ""
 }) {
@@ -160,7 +163,8 @@ function Harness({
     selectedModel,
     isSending: busy,
     isConnectionReady: connected,
-    isProMode: pro
+    isProMode: pro,
+    draftReady
   })
   return (
     <>
@@ -298,6 +302,15 @@ describe("sidebar model validation", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
     expect(mocks.send).not.toHaveBeenCalled()
     expect(mocks.queue).not.toHaveBeenCalled()
+  })
+
+  it.each([{}, { busy: true }, { connected: false }])("retains an unrestored draft without send or queue for %j", async props => {
+    renderHarness(<Harness model="ready-model" draftReady={false} {...props} />)
+    await act(async () => fireEvent.click(screen.getByText("Send")))
+    expect(mocks.send).not.toHaveBeenCalled()
+    expect(mocks.queue).not.toHaveBeenCalled()
+    expect(mocks.loading).toHaveBeenCalledOnce()
+    expect(screen.getByLabelText("Message")).toHaveValue("keep my draft")
   })
 
   it("sends with an available model and keeps the Casual picker out of the way", async () => {

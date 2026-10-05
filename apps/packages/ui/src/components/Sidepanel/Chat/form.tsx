@@ -372,6 +372,7 @@ export const SidepanelForm = ({
   } = useComposerText({
     draftKey: draftAddress ? conversationDraftKey(storageKey, draftAddress) : storageKey,
     draftEnabled: draftAddress !== null,
+    tabScopedDraft: true,
     bindFromDraftKey: draftAddress && draftTransition?.kind === "bind" && draftTransition.sourceAddress &&
       draftTransition.destinationKey === chatDraftAddressKey(draftAddress)
       ? conversationDraftKey(storageKey, draftTransition.sourceAddress) : undefined,
@@ -482,12 +483,23 @@ export const SidepanelForm = ({
     () => () => sidepanelDocumentPreparationRef.current?.controller.abort(),
     []
   )
+  const documentWebUiHandoffRef = React.useRef<AbortController | null>(null)
+  React.useEffect(() => () => documentWebUiHandoffRef.current?.abort(), [])
   const openChatInWebUiWithDocumentHandoff = React.useCallback(async () => {
     if (!onOpenChatInWebUi) return
     if (contextFiles.length === 0) {
       await onOpenChatInWebUi()
       return
     }
+    documentWebUiHandoffRef.current?.abort()
+    const controller = new AbortController()
+    documentWebUiHandoffRef.current = controller
+    const source = useStoreMessageOption.getState()
+    const selectionKey = currentDocumentSelectionKeyRef.current
+    const current = () => !controller.signal.aborted && documentWebUiHandoffRef.current === controller &&
+      currentDocumentSelectionKeyRef.current === selectionKey &&
+      useStoreMessageOption.getState().chatDraftRevision === source.chatDraftRevision &&
+      useStoreMessageOption.getState().chatDraftAddress === source.chatDraftAddress
     try {
       const draft = await tldwClient.createDocumentUploadDraft({
         payload: {
@@ -495,8 +507,9 @@ export const SidepanelForm = ({
           files: contextFiles
         }
       })
-      await onOpenChatInWebUi({ chatDocumentDraftId: draft.draft_id })
+      if (current()) await onOpenChatInWebUi({ chatDocumentDraftId: draft.draft_id })
     } catch (error) {
+      if (!current()) return
       console.error("[Sidepanel] Failed to create document handoff draft:", error)
       notification.error({
         message: t(

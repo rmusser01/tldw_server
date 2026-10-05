@@ -14,6 +14,7 @@ import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { CHAT_PATH } from "@/routes/route-paths"
 
 type SidepanelHeaderSimpleProps = {
+  chatReady?: boolean
   sidebarOpen?: boolean
   setSidebarOpen?: (open: boolean) => void
   activeTitle?: string
@@ -31,6 +32,7 @@ type SidepanelHeaderSimpleProps = {
  * All other controls moved to ControlRow in the composer area.
  */
 export const SidepanelHeaderSimple = ({
+  chatReady = true,
   sidebarOpen: propSidebarOpen,
   setSidebarOpen: propSetSidebarOpen,
   activeTitle,
@@ -60,11 +62,12 @@ export const SidepanelHeaderSimple = ({
   const sidebarToggleLabel = sidebarOpen
     ? t("common:chatSidebar.collapse", "Collapse sidebar")
     : t("common:chatSidebar.expand", "Expand sidebar")
-  const openFullChatLabel = historySelection ? t("playground:historySelection.expand", "Expand in full page") : t(
+  const usesExtensionExpansion = Boolean(historySelection && (browser.runtime.id || !onOpenChatInWebUi))
+  const openFullChatLabel = usesExtensionExpansion ? t("playground:historySelection.expand", "Expand in full page") : t(
     "sidepanel:header.openFullChatWebui",
     "Open full chat in WebUI"
   )
-  const openFullChatDescription = historySelection ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.") : t(
+  const openFullChatDescription = !chatReady ? t("sidepanel:header.restoreBeforeExpand", "Restore or start a conversation before opening it in a full page.") : usesExtensionExpansion ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.") : t(
     "sidepanel:header.openFullChatWebuiDescription",
     "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
   )
@@ -108,6 +111,7 @@ export const SidepanelHeaderSimple = ({
   }, [activeTitle, draftTitle, onRenameTitle])
 
   const openFullScreen = React.useCallback(async () => {
+    if (!chatReady) return
     const showFailure = () => {
       notification.error({
         message: t(
@@ -116,7 +120,7 @@ export const SidepanelHeaderSimple = ({
         )
       })
     }
-    if (!historySelection && onOpenChatInWebUi) {
+    if (onOpenChatInWebUi && !usesExtensionExpansion) {
       Promise.resolve(onOpenChatInWebUi()).catch((error) => {
         console.error("Failed to open WebUI chat handoff:", error)
         showFailure()
@@ -140,7 +144,7 @@ export const SidepanelHeaderSimple = ({
       return
     }
     openFallback()
-  }, [historySelection, notification, onOpenChatInWebUi, t])
+  }, [chatReady, historySelection, notification, onOpenChatInWebUi, t, usesExtensionExpansion])
 
   const openDashboard = React.useCallback(() => {
     const url = browser.runtime.getURL("/options.html#/flashcards")
@@ -293,6 +297,7 @@ export const SidepanelHeaderSimple = ({
           <button
             type="button"
             onClick={openFullScreen}
+            disabled={!chatReady}
             aria-describedby={fullChatHandoffDescriptionId}
             aria-label={openFullChatLabel}
             className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
