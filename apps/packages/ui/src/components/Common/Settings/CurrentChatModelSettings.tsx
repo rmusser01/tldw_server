@@ -568,7 +568,7 @@ export const CurrentChatModelSettings = ({
     ]
   )
 
-  const { isLoading } = useQuery({
+  const { data: modelConfig, isLoading } = useQuery({
     queryKey: ["fetchModelConfig2", open, selectedCharacterId],
     queryFn: async () => {
       if (import.meta?.env?.DEV) {
@@ -887,7 +887,7 @@ export const CurrentChatModelSettings = ({
           <Form
             form={form}
             // A remounted dialog may reuse cached config without rerunning its query.
-            initialValues={{ systemPrompt: systemPrompt ?? "" }}
+            initialValues={buildBaseValues(modelConfig)}
             layout="vertical"
             onFinish={(values) => {
               saveSettings({

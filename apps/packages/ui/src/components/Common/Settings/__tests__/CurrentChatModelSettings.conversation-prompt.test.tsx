@@ -89,7 +89,7 @@ vi.mock("@/components/Common/Settings/LorebookDebugPanel", () => ({
 }))
 vi.mock("../tabs", async () => ({
   ConversationTab: (await import("../tabs/ConversationTab")).ConversationTab,
-  ModelBasicsTab: () => null,
+  ModelBasicsTab: (await import("../tabs/ModelBasicsTab")).ModelBasicsTab,
   ActorTab: () => null,
   AdvancedParamsTab: () => null,
 }))
@@ -190,6 +190,50 @@ describe("Conversation prompt editor through real model settings Save", () => {
     const { editor } = await mountSettings()
     expect(editor).toHaveValue(instruction)
   })
+
+  it("keeps generation settings through a cached dialog remount and Save", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const first = await mountSettings(undefined, client)
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    fireEvent.change(screen.getByLabelText("modelSettings.form.numPredict.label"), {
+      target: { value: "48" },
+    })
+    fireEvent.change(screen.getByLabelText("modelSettings.form.temperature.label"), {
+      target: { value: "0.25" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(first.close).toHaveBeenCalledWith(false))
+    expect(useStoreChatModelSettings.getState().numPredict).toBe(48)
+    first.unmount()
+
+    const reopened = await mountSettings(undefined, client)
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    expect(screen.getByLabelText("modelSettings.form.numPredict.label")).toHaveValue("48")
+    expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.25")
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(reopened.close).toHaveBeenCalledWith(false))
+    expect(useStoreChatModelSettings.getState()).toMatchObject({
+      numPredict: 48,
+      temperature: 0.25,
+      apiProvider: "llama.cpp",
+    })
+    reopened.unmount()
+    const clearing = await mountSettings(undefined, client)
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    fireEvent.change(screen.getByLabelText("modelSettings.form.numPredict.label"), {
+      target: { value: "" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() =>
+      expect(useStoreChatModelSettings.getState().numPredict).toBeUndefined(),
+    )
+    clearing.unmount()
+    await mountSettings(undefined, client)
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    expect(screen.getByLabelText("modelSettings.form.numPredict.label")).toHaveValue("")
+  }, 15000)
 
   it.each(["saved", "reset-default", "reset-template", "owner-changed"])(
     "shows the current prompt when the dialog remounts with the existing query cache (%s)",
