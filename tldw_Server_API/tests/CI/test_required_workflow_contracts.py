@@ -140,7 +140,10 @@ def test_coverage_required_is_path_conditional() -> None:
     assert "coverage-required" in jobs
 
 
-def test_conditional_required_lanes_run_after_successful_change_detection() -> None:
+def test_conditional_required_lanes_run_whenever_change_detection_ran() -> None:
+    """Not only when it succeeded: a failed `changes` used to skip the required job, which
+    GitHub counts as satisfied. The lane now runs and its first step fails (TASK-13452;
+    truth table in test_merge_queue_gate_workflows.py)."""
     for workflow_path, job_name in (
         (".github/workflows/coverage-required.yml", "coverage-required"),
         (".github/workflows/e2e-required.yml", "e2e-required"),
@@ -148,7 +151,7 @@ def test_conditional_required_lanes_run_after_successful_change_detection() -> N
         job = _load(workflow_path)["jobs"][job_name]
         assert job["needs"] == ["changes"]
         assert " ".join(job["if"].split()) == (
-            "always() && !cancelled() && needs.changes.result == 'success'"
+            "always() && !cancelled() && needs.changes.result != 'skipped'"
         )
 
 
