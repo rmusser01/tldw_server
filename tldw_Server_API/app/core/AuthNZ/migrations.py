@@ -6509,6 +6509,11 @@ def get_authnz_migrations() -> list[Migration]:
             "Add llm_usage_log user_id + ts index",
             migration_099_add_llm_usage_log_user_ts_index,
         ),
+        Migration(
+            100,
+            "Create durable provider usage reservations",
+            migration_100_create_provider_usage_reservations,
+        ),
     ]
 
 
@@ -6580,6 +6585,75 @@ def migration_099_add_llm_usage_log_user_ts_index(conn: sqlite3.Connection) -> N
         "CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)"
     )
     logger.info("Migration 099: Added llm_usage_log user_id + ts index")
+
+
+def migration_100_create_provider_usage_reservations(conn: sqlite3.Connection) -> None:
+    """Add conservative MCP accounting anchors; any DDL failure aborts migration."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS provider_usage_scope_locks (
+            billing_scope_type TEXT NOT NULL CHECK (billing_scope_type IN ('user', 'team', 'org')),
+            billing_scope_id INTEGER NOT NULL CHECK (typeof(billing_scope_id) = 'integer' AND billing_scope_id > 0),
+            PRIMARY KEY (billing_scope_type, billing_scope_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS provider_usage_reservations (
+            execution_id TEXT PRIMARY KEY NOT NULL CHECK (
+                length(execution_id) = 36 AND execution_id = lower(execution_id)
+                AND execution_id NOT GLOB '*[^0-9a-f-]*'
+                AND length(replace(execution_id, '-', '')) = 32
+                AND substr(execution_id, 9, 1) = '-' AND substr(execution_id, 14, 1) = '-'
+                AND substr(execution_id, 19, 1) = '-' AND substr(execution_id, 24, 1) = '-'
+                AND substr(execution_id, 15, 1) = '4' AND substr(execution_id, 20, 1) IN ('8', '9', 'a', 'b')
+            ),
+            user_id INTEGER NOT NULL CHECK (typeof(user_id) = 'integer' AND user_id > 0),
+            active_team_id INTEGER CHECK (active_team_id IS NULL OR (typeof(active_team_id) = 'integer' AND active_team_id > 0)),
+            active_organization_id INTEGER CHECK (active_organization_id IS NULL OR (typeof(active_organization_id) = 'integer' AND active_organization_id > 0)),
+            billing_scope_type TEXT NOT NULL CHECK (billing_scope_type IN ('user', 'team', 'org')),
+            billing_scope_id INTEGER NOT NULL CHECK (typeof(billing_scope_id) = 'integer' AND billing_scope_id > 0),
+            provider TEXT NOT NULL CHECK (length(trim(provider)) > 0),
+            model TEXT NOT NULL CHECK (length(trim(model)) > 0),
+            reserved_input_tokens INTEGER NOT NULL CHECK (typeof(reserved_input_tokens) = 'integer' AND reserved_input_tokens >= 0),
+            reserved_output_tokens INTEGER NOT NULL CHECK (typeof(reserved_output_tokens) = 'integer' AND reserved_output_tokens >= 0),
+            reserved_cost_units INTEGER NOT NULL CHECK (typeof(reserved_cost_units) = 'integer' AND reserved_cost_units >= 0),
+            actual_input_tokens INTEGER CHECK (actual_input_tokens IS NULL OR (typeof(actual_input_tokens) = 'integer' AND actual_input_tokens BETWEEN 0 AND reserved_input_tokens)),
+            actual_output_tokens INTEGER CHECK (actual_output_tokens IS NULL OR (typeof(actual_output_tokens) = 'integer' AND actual_output_tokens BETWEEN 0 AND reserved_output_tokens)),
+            actual_cost_units INTEGER CHECK (actual_cost_units IS NULL OR (typeof(actual_cost_units) = 'integer' AND actual_cost_units BETWEEN 0 AND reserved_cost_units)),
+            state TEXT NOT NULL CHECK (state IN ('reserved', 'dispatched', 'ambiguous', 'reconciled', 'released')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            dispatched_at TEXT,
+            resolved_at TEXT,
+            CHECK (reserved_input_tokens <= 9223372036854775807 - reserved_output_tokens),
+            CHECK (
+                (active_organization_id IS NOT NULL AND billing_scope_type = 'org' AND billing_scope_id = active_organization_id)
+                OR (active_organization_id IS NULL AND active_team_id IS NOT NULL AND billing_scope_type = 'team' AND billing_scope_id = active_team_id)
+                OR (active_organization_id IS NULL AND active_team_id IS NULL AND billing_scope_type = 'user' AND billing_scope_id = user_id)
+            ),
+            CHECK (
+                (state = 'reconciled' AND actual_input_tokens IS NOT NULL AND actual_output_tokens IS NOT NULL AND actual_cost_units IS NOT NULL)
+                OR (state != 'reconciled' AND actual_input_tokens IS NULL AND actual_output_tokens IS NULL AND actual_cost_units IS NULL)
+            ),
+            CHECK ((state IN ('released', 'reconciled') AND resolved_at IS NOT NULL) OR (state NOT IN ('released', 'reconciled') AND resolved_at IS NULL)),
+            CHECK ((state IN ('reserved', 'released') AND dispatched_at IS NULL) OR (state NOT IN ('reserved', 'released') AND dispatched_at IS NOT NULL))
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_provider_usage_reservations_scope "
+        "ON provider_usage_reservations(billing_scope_type, billing_scope_id, state)"
+    )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_log)")}
+    if "billing_org_id" not in columns:
+        conn.execute("ALTER TABLE llm_usage_log ADD COLUMN billing_org_id INTEGER")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_usage_mcp_execution "
+        "ON llm_usage_log(request_id) "
+        "WHERE operation = 'mcp_model_completion' AND request_id IS NOT NULL"
+    )
 
 
 def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:

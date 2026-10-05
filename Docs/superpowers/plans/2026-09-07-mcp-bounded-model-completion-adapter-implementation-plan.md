@@ -1,0 +1,528 @@
+# MCP Bounded Model Completion Adapter Implementation Plan
+
+> **For Claude:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task by task. Use `superpowers:test-driven-development` for every behavior change and `superpowers:verification-before-completion` before each completion claim.
+
+**Goal:** Add a host-composed, capability-gated MCP model-completion adapter that can make one bounded OpenAI request for a server-authenticated identity while preserving authoritative credential scope, durable conservative accounting, native cancellation, and fail-closed lifecycle behavior.
+
+**Architecture:** Keep the standalone MCP package host-neutral by defining immutable request/result/failure contracts and a narrow port plus a managed lifecycle extension. The tldw host adapter will compose four explicit security boundaries: authenticated-scope projection, authoritative credential selection, durable admission/accounting, and a certified native-async OpenAI transport. The adapter owns every provider child until termination and reports trusted failure provenance so the later Skills module can update its global breaker only for shared-infrastructure failures.
+
+**Tech Stack:** Python 3.11+, `dataclasses`, `typing.Protocol`, FastAPI authentication context, existing AuthNZ repositories and `ProviderCredentialRuntime`, existing Billing and Resource Governance services, SQLite/PostgreSQL migrations, `httpx`/`aiohttp` through `app.core.http_client`, `pytest`, Hypothesis where available, Ruff, `compileall`, and Bandit.
+
+**Backlog:** `TASK-2294.3.2`
+
+**Design source:** `Docs/superpowers/specs/2026-07-23-mcp-skills-model-only-runner-design.md`
+
+**ADR check (2026-10-02):** ADR required: yes. [ADR-060](../../ADR/060-authoritative-provider-credential-scope.md) records exact authenticated scope and absence-only credential fallback. ADR-025 remains the governing provider-routing decision; the bounded adapter's stricter mode disables credential endpoint overrides.
+
+**Rebase (2026-10-02):** Stage 1 commits rebased cleanly onto `origin/dev` at `9958110df2` before Stage 2 implementation. All five planning/implementation commits were subsequently rebased cleanly onto the newer `origin/dev` at `86e287fee7`; `git range-diff` confirmed unchanged patches before the final evidence update.
+
+## Revalidation Decisions
+
+The implementation must account for four gaps found against the current `dev` runtime contracts:
+
+1. The approved core completion port does not expose health or shutdown ownership. Preserve that narrow protocol and add a separate `ManagedModelCompletionPort` extension used by production composition.
+2. Passing explicit team or organization IDs to the current credential runtime is not an authorization guarantee. Add an authoritative exact-scope resolution mode that distinguishes authorized credential absence from revoked, invalid, inconsistent, or unavailable scope.
+3. Current Billing checks and usage logging do not reserve durably, and the current Resource Governor release helper does not explicitly reconcile reserved categories to zero. Add a durable MCP provider reservation state machine and correct governor release/reconciliation behavior instead of treating best-effort post-call logging as proof of quota settlement.
+4. Bounded async JSON reads enforce decompressed byte limits, but their streaming path does not carry the frozen configured endpoint into per-hop egress validation. Thread that trusted endpoint through the bounded streaming API before certifying the OpenAI transport.
+
+## Scope Boundaries
+
+This task includes the port contracts, authenticated active-scope propagation needed by the port, authoritative credential resolution, durable reservation/reconciliation, certified OpenAI transport, adapter lifecycle, and the host factory injected into runtime dependencies.
+
+This task does **not** add `skills.run`, Skills YAML configuration, a Skills module, or a `ModuleConfig.model_completion_port` field. `TASK-2294.3.3` consumes the factory and managed port to expose the disabled-by-default runner. It also does not change ordinary Chat provider selection, enable request-supplied endpoints/models, add retries or fallbacks, or support streaming, tools, or multiple choices.
+
+## Stage 1: Host-Neutral Contracts And Authenticated Scope
+
+**Goal:** Establish minimized immutable contracts and carry active AuthNZ scope separately from client-controlled metadata on every MCP transport.
+
+**Success Criteria:** The standalone interface has no tldw imports or mutable request context; production HTTP, batch, and WebSocket requests populate a typed scope from authenticated state; scope remains covered by context integrity and second pre-dispatch verification; no-scope callers remain compatible.
+
+**Tests:** Contract immutability/minimization, package import boundary, HTTP/batch/WS scope projection, API-key/JWT/cookie/single-user paths, spoofed metadata isolation, integrity tamper rejection.
+
+**Status:** Complete
+
+### Task 1.1: Define the minimized completion contracts
+
+**Files:**
+- Create: `apps/mcp-unified/src/mcp_unified/interfaces/model_completion.py`
+- Modify: `apps/mcp-unified/src/mcp_unified/interfaces/__init__.py`
+- Create: `tldw_Server_API/app/core/MCP_unified/interfaces/model_completion.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/interfaces/__init__.py`
+- Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_contracts.py`
+
+1. Write failing tests proving all value objects are frozen, reject booleans/non-positive identity IDs, reject malformed execution IDs, and expose no credentials, client IDs, generic metadata, or `RequestContext`.
+2. Define `ModelInvocationIdentity`, `ModelCompletionCapabilities`, `ModelCompletionRequest`, and `ModelCompletionResult` as frozen, slots-based dataclasses. Require `execution_id` to be the canonical lowercase hyphenated representation of a UUIDv4, including version and variant validation, without accepting arbitrary request identifiers.
+3. Define a stable `ModelFailureDomain` enum and sanitized `ModelCompletionFailure`. The failure exposes a stable code and one of `request`, `credential_scope`, or `shared_infrastructure`; it must not retain provider bodies, secret values, URLs with query strings, or arbitrary exception objects.
+4. Define the narrow async `ModelCompletionPort` with `capabilities` and `complete(...)` only. Define `ManagedModelCompletionPort` as a separate extension with `is_healthy()`, `shutdown()`, and `wait_for_shutdown_completion()`.
+5. Add a callable `ModelCompletionPortFactory` protocol that accepts only frozen operator settings and returns a managed port. Export all contracts through the standalone package and tldw compatibility shim.
+6. Run:
+   ```bash
+   /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q \
+     tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_contracts.py
+   ```
+   Expected before implementation: import/collection failure for the missing interface. Expected after implementation: pass.
+7. Commit: `feat(mcp): define bounded model completion contracts`
+
+### Task 1.2: Project authoritative active scope into MCP request context
+
+**Files:**
+- Modify: `apps/mcp-unified/src/mcp_unified/interfaces/runtime.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/server.py`
+- Modify the mounted MCP endpoint/auth bridge located by `rg -n "McpAuthContext|handle_http_batch|handle_http_request" tldw_Server_API/app`
+- Modify the MCP WebSocket authentication/connection types located by `rg -n "AuthenticatedIdentity|WebSocketConnection|authenticate_authnz_websocket_token" tldw_Server_API/app/core/MCP_unified`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_mounted_jsonrpc_transport_contract.py`
+- Modify: `tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py`
+- Add focused WebSocket auth tests beside the existing transport tests
+
+1. Write failing tests for JWT, API-key, cookie-session, and personal/single-user authentication. Cover HTTP single requests, HTTP batches, and WebSockets.
+2. Add one host helper that derives `AuthenticatedExecutionScope` from the authenticated principal first and authenticated API-key record second. When both exist, reject conflicting values; reject non-positive/bool values; never read active scope from request metadata or headers other than the existing authenticated selection path.
+3. Extend server entry points with an optional typed `server_auth_scope` argument and pass it to every created `RequestContext`. Keep existing metadata only for compatibility; the completion adapter never consumes it.
+4. Extend authenticated WebSocket identity/connection state with the same typed scope and propagate it to each message context. Preserve `None` for personal MCP JWTs and no-active-scope users.
+5. Retain existing full-context fingerprint and second pre-dispatch verification. Add regression tests proving a scope mutation or replacement after prepare fails, while metadata containing fake `team_id`/`org_id` cannot affect the typed scope.
+6. Run:
+   ```bash
+   /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q \
+     tldw_Server_API/app/core/MCP_unified/tests/test_prepared_execution_integrity.py \
+     tldw_Server_API/app/core/MCP_unified/tests/test_mounted_jsonrpc_transport_contract.py \
+     tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py
+   ```
+7. Commit: `feat(mcp): propagate authenticated active scope`
+
+**Stage 1 verification (2026-09-07):**
+- Independent review findings were reproduced and fixed: API-key owner mismatch, malformed AuthNZ WebSocket downgrade, Persona scope omission, and process-global registry contamination.
+- The plan's combined transport gate passed: `149 passed`.
+- The full Persona WebSocket suite passed: `98 passed`.
+- Focused model-contract, extraction-boundary, security-hardening, prompt/error-mapping, and package-boundary gates passed: `39 + 143 + 12 + 16 + 2` tests.
+- Ruff passed on all touched files; `compileall` passed on all touched production files; Bandit reported zero findings and zero scan errors across 15,036 lines.
+- One unrelated baseline assertion remains outside the stage gate: `test_tools_call_dict_result_is_json_content` expects an exact dictionary while the existing runtime adds its established `eval` field.
+
+## Stage 2: Authoritative Credential Resolution
+
+**Goal:** Extend the shared provider runtime with an exact active-scope mode that cannot fall through after authorization loss or infer a membership.
+
+**Success Criteria:** Credential order is user, exact active team, exact active organization, then server; only authoritative credential absence advances; disabled/revoked user, membership, team, organization, inconsistent team-to-organization relationship, or repository unavailability fails closed; endpoint overrides stay disabled.
+
+**Tests:** Unit plus SQLite/PostgreSQL resolution matrices, concurrent revocation checks, precedence, absence versus unauthorized state, fixed endpoint, snapshot immutability, legacy caller compatibility.
+
+**Status:** Complete
+
+### Task 2.1: Add an exact shared-scope authorization query
+
+**Files:**
+- Modify: `tldw_Server_API/app/core/AuthNZ/repos/user_provider_secrets_repo.py`
+- Modify: `tldw_Server_API/app/core/AuthNZ/repos/org_provider_secrets_repo.py`
+- Create: `tldw_Server_API/app/core/AuthNZ/repos/provider_scope_result.py`
+- Create: `tldw_Server_API/tests/AuthNZ/unit/test_provider_scope_result.py`
+- Create: `tldw_Server_API/tests/AuthNZ/unit/test_provider_scope_repositories.py`
+- Create: `tldw_Server_API/tests/AuthNZ_SQLite/test_provider_scope_resolution_sqlite.py`
+- Create: `tldw_Server_API/tests/AuthNZ/integration/test_provider_scope_resolution_postgres.py`
+- Retain existing user/org provider-secret row-normalization and SQLite repository suites as regression gates.
+
+**Implementation adjustment (2026-10-02):** Keep the new exact-scope matrix in focused test files and reuse its cases across SQLite and PostgreSQL, rather than duplicating the matrix in older repository suites. Existing legacy suites remain unchanged and are included in verification.
+
+1. Write a table-driven failure matrix for active/inactive user, membership, team, and organization; missing secret; revoked secret; wrong organization relationship; and repository error.
+2. Add a typed result with states `resolved`, `authorized_absent`, `unauthorized`, and `unavailable`. Do not overload `None`, because absence is the only state allowed to advance precedence.
+3. Implement exact team and organization lookups as one authoritative database query per scope. When both active IDs are supplied, verify the team belongs to that organization in the same snapshot used to verify active membership and secret state.
+4. Return only normalized provider-secret records. Preserve backend parity and parameterized SQL.
+5. Run focused SQLite tests, then the repository's canonical PostgreSQL fixture. PostgreSQL tests may skip only when that fixture reports the service unavailable.
+6. Commit: `feat(authnz): resolve provider secrets in active scope`
+
+### Task 2.2: Add authoritative mode to ProviderCredentialRuntime
+
+**Files:**
+- Modify: `tldw_Server_API/app/core/AuthNZ/byok_runtime.py`
+- Modify: `tldw_Server_API/app/core/AuthNZ/provider_credential_runtime.py`
+- Modify: `tldw_Server_API/tests/AuthNZ_Unit/test_byok_runtime.py`
+- Modify: `tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py`
+- Modify: `tldw_Server_API/tests/AuthNZ_SQLite/test_byok_runtime_sqlite.py`
+
+1. Write failing tests that require one exact optional team ID and organization ID, reject lists or guessed memberships, and distinguish authorized absence from authorization loss at every precedence step.
+2. Add an immutable `AuthoritativeProviderScope` with positive `user_id`, optional exact `team_id`, and optional exact `organization_id`.
+3. Add an opt-in authoritative resolution path while preserving the existing default behavior for current callers. It must revalidate the user and supplied relationships during each credential resolution and fail closed on unauthorized/unavailable states rather than continuing to a broader credential.
+4. Resolve user, then exact team, then exact organization, then the frozen server credential. Set `trusted_base_url_override=False`; assert the returned `ProviderCallCredentials.trusted_endpoint` comes from the deep-copied server snapshot.
+5. Add a revocation-between-construction-and-resolution test to prove the check occurs at credential fetch time rather than only in the MCP adapter.
+6. Run:
+   ```bash
+   /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q \
+     tldw_Server_API/tests/AuthNZ_Unit/test_byok_runtime.py \
+     tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py \
+     tldw_Server_API/tests/AuthNZ_SQLite/test_byok_runtime_sqlite.py
+   ```
+7. Commit: `feat(authnz): enforce authoritative BYOK scope precedence`
+
+**Stage 2 review decisions (2026-10-02):** Every strict resolution owns a fresh authority read; it cannot reuse either cached credentials or an older in-flight lookup. All supplied active scope relationships are checked even when a user key wins. Disabling BYOK or its provider allowlist cannot replace an existing exact-scope key with a broader server key; verified absence still allows the frozen server fallback. Legacy resolution retains its existing defaults.
+
+**Stage 2 verification (2026-10-02):**
+- Repository/result/SQLite matrices and unchanged legacy repository regression gates contributed `227 passed` to the combined `500 passed, 1 skipped` gate before the final shutdown regression was added.
+- The final Task 2.2 runtime gate passed `274 passed, 1 skipped`, including the deterministic close-during-waiter-cleanup regression. The skip is the installed `aiosqlite` lacking `InterfaceError`.
+- The canonical isolated AuthNZ PostgreSQL fixture passed `5 passed`, exercising the same 96 matrix cases with no skips. An initial sandbox-only run reported PostgreSQL unavailable; the normal local-service-access rerun passed without fixture changes.
+- Independent spec and code-quality review findings were reproduced and fixed: policy-denied scoped credentials must not fall back, older in-flight authority reads cannot be reused, and shutdown cannot publish a completed credential handle during waiter cleanup. No actionable Stage 2 findings remain.
+- Rebased Stage 1 transport/model-contract gate passed `188 passed`; Persona WebSocket regression gate passed `98 passed`.
+- Final post-rebase combined credential/runtime, model-contract, prepared-integrity, mounted/HTTP-auth transport, and MCP CLI gate passed `561 passed, 1 skipped` on `origin/dev` at `86e287fee7`. The same driver-specific skip is the only skip. The intervening `dev` work changed only CLI tests and its task record; PostgreSQL and repository matrix patches were unchanged.
+- Ruff and `compileall` passed. Black passed on new files and formatted only changed ranges in existing files. Bandit reported zero findings and zero scan errors across the five touched production files (`bandit_task_2294_3_2_stage2.json`, ignored local report).
+- Scope checks remain authoritative at each database read, not a transaction spanning all scope reads or network dispatch. Later adapter admission/dispatch checks are still required.
+
+## Stage 3: Durable Admission And Accounting
+
+**Goal:** Reserve worst-case token and cost exposure before dispatch and encode cancellation/reconciliation outcomes as durable, idempotent state transitions.
+
+**Success Criteria:** No provider dispatch can occur without a committed reservation; pre-dispatch failure releases it; dispatch uncertainty retains it; a valid result is never retried because reconciliation fails; active/ambiguous reservations remain chargeable in later MCP admission; transitions are monotonic and safe under process restart.
+
+**Tests:** SQLite/PostgreSQL migration and repository tests, concurrent reservation races, integer overflow, pre/post-dispatch cancellation, idempotent transitions, monthly quota with outstanding reservations, Resource Governor release parity.
+
+**Status:** Complete
+
+**ADR check (2026-10-02):** ADR required: yes. [ADR-061](../../ADR/061-mcp-durable-provider-accounting.md) records durable conservative admission/dispatch/settlement. ADR-018 and ADR-056 continue to govern the existing Resource Governor policy.
+
+**Revalidation adjustment (2026-10-02):** Acquire the durable scope lock before reading uncached canonical actual usage, not only before summing reservations. The repository accepts a required snapshot-reader callback on the transaction connection, preventing stale snapshots from missing a just-reconciled MCP call. Settlement takes the same lock. All unresolved reservations remain chargeable regardless of age; billing-period reset cannot erase an ambiguous dispatch. Legacy Chat is not coordinated by this lock.
+
+**Precision adjustment (2026-10-02):** Keep `llm_usage_log` as the canonical completed-call/period record, but join its MCP execution ID to the atomically reconciled reservation for exact integer cost actuals. Tests at the signed-integer ceiling showed that reconstructing those units from legacy floating-point USD can overflow or lose units. Missing/inconsistent MCP settlement fails closed.
+
+**Specification-review adjustments (2026-10-02):** Use the existing `jobs` governor concurrency category with one unit; `provider_calls` is not a supported lease category. Read DB-backed subscription limits through the supplied transaction connection to avoid nested-pool starvation. Attempt known pre-dispatch governor cleanup independently of durable-release availability. Local release/dispatch markers make those boundaries mutually exclusive, and the durable transition fence prevents post-dispatch refunds. A failed release cannot later dispatch using a refunded governor handle.
+
+**Duplicate-operation adjustment (2026-10-02):** Serialize same-operation governor reservations through cached-result publication, with the operation lock retained for queued callers and removed after the final participant exits. Start cache/handle lifetimes after daily-ledger I/O. Only a reservation that inserted a durable daily row owns downward settlement; replay after cache expiry or from another governor cannot refund an earlier operation's charge.
+
+**Backend-parity adjustment (2026-10-02):** Bind explicit UTC timestamps for MCP canonical usage instead of relying on PostgreSQL session-local `CURRENT_TIMESTAMP` conversion into the legacy naive timestamp column. Normalize PostgreSQL `SUM(BIGINT)` results only when their `Decimal` value is finite, integral, non-negative, and within the signed-integer bound. Invalid aggregates remain errors rather than being coerced to zero.
+
+### Task 3.1: Add the provider usage reservation state machine
+
+**Files:**
+- Modify the canonical SQLite migrations in `tldw_Server_API/app/core/AuthNZ/migrations.py`
+- Modify the canonical PostgreSQL migrations in `tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py`
+- Create: `tldw_Server_API/app/core/AuthNZ/repos/provider_usage_reservations_repo.py`
+- Create: `tldw_Server_API/tests/AuthNZ_Unit/test_provider_usage_reservations_repo.py`
+- Add PostgreSQL integration tests under `tldw_Server_API/tests/AuthNZ/integration/`
+
+1. Write migration and repository tests before adding the table. The row key is the opaque `execution_id`; stored fields are authenticated user ID, optional active team/organization IDs, explicit billing scope, provider/model identifiers, reserved/actual input and output token ceilings, reserved/actual integer cost units, timestamps, and state. Never store prompt, completion, credentials, headers, raw provider usage, or request metadata. In the same migration, add nullable `llm_usage_log.billing_org_id` and a partial unique index for non-null execution IDs where `operation = 'mcp_model_completion'`.
+2. Implement monotonic compare-and-set transitions: `reserved -> released`, `reserved -> dispatched`, `dispatched -> reconciled`, and `dispatched -> ambiguous`. Allow idempotent replay of the same transition, but reject rollback and conflicting actual values.
+3. Keep `reserved`, `dispatched`, and `ambiguous` rows in the outstanding total. Reconciled rows are audit/recovery records; the normal `llm_usage_log` remains the canonical actual-usage record. Add an index for exact billing scope/state and a uniqueness constraint on execution ID. Canonical usage already indexes time for monthly checks; unresolved reservations must not be filtered by age. Add a reservation-time index only when a concrete time-filtered audit/recovery query requires one.
+4. Implement one transaction that serializes MCP admissions for a billing scope, obtains a caller-supplied fail-closed Billing snapshot reader on that locked connection, adds current outstanding reservations, checks integer overflow, and inserts the worst-case reservation. Calls without an organization use the exact active team when supplied, otherwise the authenticated user scope. Document that this closes races among MCP completions but cannot make legacy Chat calls transactional until those calls adopt the same reservation API.
+5. Prove two concurrent requests cannot both pass the final unit of quota. Prove a restart can find and conservatively retain dispatched/ambiguous rows.
+6. Commit: `feat(mcp): add durable provider usage reservations`
+
+### Task 3.2: Make Resource Governor release/reconciliation explicit
+
+**Files:**
+- Modify: `tldw_Server_API/app/core/Resource_Governance/governor.py`
+- Modify: `tldw_Server_API/app/core/Resource_Governance/daily_caps.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/Resource_Daily_Ledger.py`
+- Modify focused tests under `tldw_Server_API/tests/Resource_Governance/`
+
+1. Write failing tests proving `release(handle)` reconciles every reserved category to zero rather than treating omitted actuals as fully consumed.
+2. Retain each daily-cap operation identity on the in-memory reservation handle. Extend the daily-cap helper and durable ledger with an idempotent downward adjustment keyed by that identity. Reject increases during reconciliation and keep conservative durable values when the ledger is unavailable.
+3. Make `MemoryResourceGovernor.release()` construct explicit zero actuals for every reserved category, and make `commit()` reconcile any consumed daily-cap rows to the bounded actuals. Keep current public method signatures compatible and preserve the existing global fail-open daily-cap policy; the MCP adapter's separate durable reservation is its fail-closed quota authority.
+4. If a later category is denied after an earlier daily-cap category was consumed, roll back the earlier entries before returning denial. Add property tests for repeated release/commit, partial actuals, multi-category partial denial, duplicate callbacks, unknown handles, and values near the integer ceiling.
+   Same-operation reservations must publish one cached handle/decision while callers overlap. Durable insertion ownership, not cached operation identity alone, determines which daily entries may be reconciled downward after cache expiry or across governor instances.
+5. Run all Resource Governance tests touched by these changes.
+6. Commit: `fix(governance): reconcile released reservations explicitly`
+
+**Task 3.2 verification (2026-10-02):** Independent specification and code-quality re-reviews approved the duplicate-operation repair. Parent reconciliation gate passed `47 passed`, including four real PostgreSQL cache-expiry/cross-instance ownership cases and PostgreSQL downward-adjustment parity, with zero skips. Parent full governance/Billing/accounting regression passed `899 passed, 2 xfailed`; both expected failures are existing Redis retry-after determinism cases. Same-op publication, cancellation/error lock cleanup, insertion-only settlement ownership, and mixed-ownership partial rollback were independently probed.
+
+### Task 3.3: Compose MCP completion accounting
+
+**Files:**
+- Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/__init__.py`
+- Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/accounting.py`
+- Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_accounting.py`
+- Modify: `tldw_Server_API/app/core/AuthNZ/repos/usage_repo.py`
+- Modify: `tldw_Server_API/app/core/Billing/enforcement.py`
+- Modify: `tldw_Server_API/app/core/Billing/subscription_service.py` and `tldw_Server_API/app/core/AuthNZ/repos/billing_repo.py` for strict connection-bound limits
+- Modify: `tldw_Server_API/tests/Billing/test_billing_enforcer_org_usage.py`
+- Modify focused usage-repository tests under `tldw_Server_API/tests/AuthNZ_Unit/` and `tldw_Server_API/tests/AuthNZ/integration/`
+
+1. Write failing tests around a `ModelCompletionAccounting` service with explicit `reserve`, `mark_dispatched`, `release_before_dispatch`, `reconcile`, and `retain_ambiguous` operations.
+2. Calculate worst-case tokens with checked integer arithmetic from conservative prompt UTF-8 bytes plus configured maximum output tokens. Calculate integer cost units using cost-unit weights and provider/model pricing captured by value at factory construction; never re-read mutable environment pricing or trust provider-returned prices during reconciliation.
+3. Obtain a fail-closed, non-stale Billing snapshot on the supplied transaction connection for an explicit active organization when present; otherwise use the exact active team or authenticated user as the durable quota scope. Then require both the durable repository reservation and Resource Governor rate/concurrency admission before dispatch, using the supported `jobs` lease category and matching policy. If any required service is unavailable or denies admission, unwind only the pre-dispatch work already acquired and return a sanitized failure with trusted provenance.
+4. On pre-dispatch cancellation/error, explicitly reconcile governor actuals to zero and transition the durable row to `released`. Once dispatch is marked, cancellation, timeout, transport uncertainty, or a failed accounting write keeps the durable row conservative.
+5. Extend `llm_usage_log` with nullable explicit `billing_org_id` attribution and preserve `None` for legacy callers. Update Billing aggregation to prefer that explicit scope and use existing primary-organization/API-key attribution only when it is absent.
+6. On a valid response, use one strict transaction that locks/rechecks a `dispatched` reservation, idempotently inserts the normal `llm_usage_log` record under operation `mcp_model_completion` and server execution ID, then transitions the reservation to `reconciled`. Add a partial uniqueness rule for that operation/execution pair as defense in depth. The transaction must refuse reconciliation after an `ambiguous` transition, preventing a contained late child from publishing usage. Use bounded trusted provider counts when available and conservative estimated ceilings otherwise; do not retain raw usage metadata.
+7. Return the valid normalized result even if strict post-call usage persistence, reservation transition, governor commit, or credential `mark_used` fails. Leave the reservation active/ambiguous, which may conservatively double-count an already-written usage row, and emit only bounded operational logging.
+8. Include outstanding MCP reservations in Billing enforcement in addition to canonical `llm_usage_log` actuals. Reconciled reservation rows are excluded, preventing normal success from double counting. Do not claim atomic coordination with unrelated legacy Chat calls.
+9. Commit: `feat(mcp): enforce conservative completion accounting`
+
+**Stage 3 verification (2026-10-02):**
+- Independent specification and code-quality reviews approved all three implementation tasks after validated findings were reproduced and repaired. Final repairs cover duplicate daily-charge ownership, exact integer MCP cost actuals, required transaction-bound Billing reads, release/dispatch mutual exclusion, UTC canonical timestamps, and PostgreSQL integral numeric aggregates.
+- Final combined governance/Billing/accounting and legacy usage/migration gate passed `899 passed, 2 xfailed`, with zero skips. The expected failures are existing Redis retry-after determinism cases.
+- Final canonical AuthNZ PostgreSQL reservation/composition/strict Billing/legacy usage matrix passed `87 passed`, with zero skips. It includes the 71-case reservation matrix and 14 composed accounting lifecycle cases.
+- Expanded governor reconciliation gate passed `47 passed`, with zero skips, including PostgreSQL daily-settlement ownership across cache expiry and governor instances.
+- Final full MCP Unified module gate passed `3,535 passed, 3 skipped`. Skips are unavailable optional tree-sitter C/C++, Java/Kotlin, and C# parsers.
+- Ruff and `compileall` passed on the touched scope. Black passed on 12 new files; existing-file edits were formatted in changed ranges. Bandit reported zero findings and zero scan errors across the touched production scope in `/tmp/bandit_task_2294_3_2_stage3_checkpoint.json`.
+- A fresh fetch confirmed `origin/dev` remains `86e287fee7`; no additional rebase was needed. Task 3.1 is committed as `b8c289659c` and Task 3.2 as `95bede87c5`.
+- This completes the accounting foundation, not the production completion adapter. Stages 4 and 5 remain unstarted, and the overall Backlog task remains In Progress. No adapter PR has been created or pushed.
+
+## Stage 4: Certified Async Transport And Adapter Lifecycle
+
+**Goal:** Add one narrowly certified OpenAI request path with decompressed bounds, deterministic normalization, and complete child-task ownership.
+
+**Success Criteria:** A healthy adapter can issue exactly one non-streaming, no-tools, one-choice request to the frozen endpoint; output is bounded before and after decode; cancellation cannot orphan work; late results are discarded; health fails closed while cleanup is outstanding.
+
+**Tests:** Egress pinning, decompressed limit-plus-one, no retry/redirect/fallback, cancellation, output normalization property tests, retained child and shutdown, sanitized failure provenance.
+
+**Status:** Complete
+
+**Checkpoint (2026-10-03):** Tasks 4.1 through 4.4 are complete. Independent specification and quality reviews approved the final lifecycle repairs. The final parent gate passed `4,084` MCP core tests with three existing optional-parser skips, `1,083` completion/HTTP/credential/provider boundary tests, and `39` authentication tests. All `135` adapter cases pass with `97%` branch-aware coverage. Ruff, Black on new files and touched ranges, compilation, whitespace checks, and production Bandit pass; Bandit reports zero findings/errors across 2,160 lines. Verification used macOS CPython 3.14.3 with mocked provider I/O; live-provider execution and other event loops/Python versions remain unverified. Stage 5 remains Not Started pending checkpoint acceptance.
+
+**Rebase verification (2026-10-03):** All 15 local commits rebased without conflict onto latest `origin/dev` at `d7997bc205`; the lifecycle commit is now `27efafa714`. The complete old/new HEAD diff contains only five upstream CI parallelism-limit lines. Production source and tests are unchanged. A fresh completion/credential gate passed `672` tests with no skips; Ruff, Black on new files and changed ranges, compilation, and Bandit passed again (zero findings/errors across 2,160 lines). The branch-wide whitespace check additionally identified an earlier contract test's extra EOF blank line, removed without behavioral change. Stage 5 remains unstarted and no PR was created, pushed, or merged.
+
+**Rebase/revalidation (2026-10-03):** Rebasing all eight local commits onto `origin/dev` at `4c4f197f68` changed no production patch; the sole conflict preserved both ADR index additions. Upstream owns ADR-058 for Jobs, so the unmerged MCP credential/accounting ADRs are renumbered to ADR-059/060 without changing their decisions. The new hosted-only Billing activation contract is being revalidated before transport composition; explicit MCP operator limits and durable recording remain separate from implicit OSS free-plan enforcement.
+
+**ADR check (2026-10-03):** ADR required: yes. [ADR-062](../../ADR/062-mcp-certified-completion-lifecycle.md) records the certified single-attempt transport and retained-child lifecycle; ADR-025/026 govern routing/egress and ADR-060/061 govern credentials/accounting.
+
+**Implementation adjustment (2026-10-03):** The existing JSON helper could consume a full final decoded chunk beyond `max_bytes + 1`. Its public byte-stream wrapper now accepts an optional decoded-byte budget and clips the final chunk to the first overflow byte before the JSON helper rejects it. Unbounded streams and legacy delegate keyword defaults remain unchanged. The guarantee covers application consumption and envelope retention, not internal codec allocations.
+
+**Billing compatibility verification (2026-10-03):** The strict MCP limit getter now applies hosted subscription caps only while `billing_checks_active()` is true, preserving explicit operator bounds and mandatory records on inactive/OSS deployments. Seventeen new red cases reproduced the implicit-free-plan defect before repair. Independent spec/quality review approved; parent Billing/accounting regressions passed `160` tests and the canonical PostgreSQL reservation/composition/Billing matrix passed `86` with zero skips. Ruff, compilation, changed-range formatting, and Bandit passed. Committed as `375a20e868`.
+
+### Task 4.1: Carry configured endpoint through bounded streaming JSON
+
+**Status:** Complete
+
+**Files:**
+- Modify: `tldw_Server_API/app/core/http_client.py`
+- Modify: `tldw_Server_API/tests/http_client/test_http_client_simple_response_limits.py`
+- Modify: `tldw_Server_API/tests/http_client/test_http_client_adapters.py`
+- Modify: `tldw_Server_API/tests/http_client/test_redirect_header_hardening.py`
+
+1. Write failing tests showing `afetch_json(max_bytes=..., configured_endpoint=...)` preserves the configured endpoint in each async streaming adapter and each redirect-hop decision.
+2. Thread `configured_endpoint` through `TransportAdapter.stream_bytes`, `HttpxAdapter`, `AiohttpAdapter`, `_astream_bytes_httpx`, `_astream_bytes_aiohttp`, and public `astream_bytes` without changing existing defaults.
+3. Confirm the bounded helper consumes decompressed bytes and reads at most `max_bytes + 1` before rejecting, before `json.loads`. A forged `Content-Length`, chunking, or compressed expansion must not bypass the cap.
+4. Confirm caller cancellation closes the response/client stream and is re-raised. Use `RetryPolicy(attempts=1)` and `follow_redirects=False` in the certified caller.
+5. Run the focused HTTP client suite listed above.
+6. Commit: `fix(http): enforce endpoint scope on bounded streams`
+
+**Verification (2026-10-03):** Missing scope propagation and final-chunk over-consumption were reproduced before implementation. The independent specification review passed. Quality review additionally reproduced scope loss inside certificate-pinning validation in both backends; the new two-case red regression now passes after conditional scope propagation to those checks. Independent repair re-review approved both scoped and unscoped real-policy pinning probes. The fresh full HTTP suite passes `327` tests. Bandit found no issues; nine existing Ruff diagnostics were reproduced from the unchanged baseline.
+
+### Task 4.2: Implement strict response normalization
+
+**Status:** Complete
+
+**Files:**
+- Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/normalization.py`
+- Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_normalization.py`
+
+**Implementation adjustment:** Internal helpers use explicit module imports, consistent with the accounting boundary; the package initializer remains a namespace rather than re-exporting transport internals.
+
+1. Write table and property tests before implementation. Cover zero/two choices, non-text content, tool/function calls, empty/whitespace output, lone surrogates, C0/C1 controls, CRLF/CR conversion, exact character/byte limits, multibyte boundary overflow, and atomic rejection without truncation.
+2. Validate the bounded JSON envelope, require exactly one choice, reject any tool/function call signal, and require textual `message.content`.
+3. Encode strict UTF-8 to reject malformed Unicode. Normalize only CRLF and CR to LF. Preserve all other whitespace and Unicode exactly; do not trim or apply Unicode normalization.
+4. Allow only tab and LF from the control ranges. Enforce configured character and UTF-8 byte maxima after line-ending normalization and reject the entire response on overflow.
+5. Return a frozen internal normalized result with bounded provider usage counts for accounting; convert only content to the host-neutral result.
+6. Commit: `feat(mcp): normalize model output deterministically`
+
+**Verification (2026-10-03):** Independent specification and code-quality reviews approved the two-file boundary. TDD exercised 249 normalization cases, including six Hypothesis properties. The parent normalization/contracts/accounting regression gate passed `314` tests. Ruff, Black, compilation, and production Bandit passed. Committed as `d1aed10bd5`.
+
+### Task 4.3: Add the single-attempt OpenAI transport
+
+**Status:** Complete
+
+**API compatibility adjustment:** The bounded JSON path selects HTTPX from its explicit native client; it does not accept the generic request helper's `backend` keyword. Redirect suppression uses `allow_redirects=False` at the bounded helper and the native stream IO always uses `follow_redirects=False`.
+
+**Certification revalidation:** The shared selected-host certificate-pin probe blocks the event loop. A parent probe requested cancellation at 10 ms but completed at 54 ms before cancellation could run. This optional path is not certified: reject selected-endpoint pinning at construction/health and recheck the fresh client's pin state before any fetch, without disabling operator pins. Unrelated-host pins remain compatible. ADR-062 records the limitation.
+
+**Review/revalidation (2026-10-03):** The independent spec review reproduced a genuine pre-response egress denial incorrectly classified as shared infrastructure. Its explicit security-policy provenance must remain breaker neutral. HTTP status and provider-response failures remain neutral, and arbitrary fixed transport defects remain shared. A separate parent regression reproduced nine pre-existing observability test failures when core config was collected first; the mocked HTTP fixture now declares only its additional port `8443`, preserving all host/deny/private policy controls. The core-first reproducer passes `83` tests and the combined transport/normalization/contracts/accounting/HTTP/credential gate passes `852`, with no command-line egress override.
+
+**Review boundary:** The managed run deadline's hard ceiling of 120 seconds is enforced at Task 4.4 initialization, rather than inferred from the HTTP transport timeout. Terminal HTTP-client close failures still return a detached failure; the explicit valid-result preservation rule applies to accounting and credential-use persistence, not arbitrary client teardown. The independent spec review did not validate a broader preservation requirement. Non-terminating teardown remains covered by retained-child containment.
+
+**Quality-review repair (2026-10-03):** Python 3.14's cancelled `asyncio.shield()` installs a late-exception logging callback. Independent full-transport probes and a parent helper-boundary reproduction confirmed private response/client-cleanup exception content reaches the event-loop error handler despite later retrieval. Replace only the owned-operation wait with callback-free task draining; preserve first/repeated/simultaneous caller cancellation and client ownership. Add delayed-error tests for both cleanup paths and capture the loop handler/default asyncio logger. This is a sanitization repair, not a broader terminal-close result-preservation change.
+
+**Final verification (2026-10-03):** The egress repair passed independent spec re-review. A fresh bypass/regression and quality repair review approved the callback-free owned wait after 164 transport tests and 284 additional in-memory probes, including the original shield leak as a positive control. The parent four-case stream/client cleanup privacy regression and 12 cancellation/race cases pass; the fresh combined transport/normalization/contracts/accounting/HTTP/credential gate passes `858` tests. Ruff, Black (including the touched fixture range), compilation, and production Bandit pass; Bandit reports zero findings/errors. Verification used macOS CPython 3.14.3 with its default event loop and mocked provider I/O; other Python versions/loop implementations and fatal process signals were not exercised. No validated Task 4.3 findings remain.
+
+**Files:**
+- Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/transport.py`
+- Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_transport.py`
+- Modify: `tldw_Server_API/tests/http_client/test_http_client_sensitive_observability.py`
+
+1. Write request-capture tests proving the request uses `ProviderCallCredentials.trusted_endpoint`, generated credential headers, and the frozen model only. Reject unsupported providers and missing endpoint/credential state before dispatch.
+2. Build one OpenAI chat-completions payload with `stream=false`, `n=1`, `tools=None`, no `tool_choice` field, and the provider-native output-token field selected from the frozen model policy. Do not accept extra headers/body, endpoint, model, retry, fallback, or stream settings from the completion request.
+3. Call bounded `afetch_json` once with no redirect and `RetryPolicy(attempts=1)`. Convert HTTP status, malformed envelope, and request-dependent output failures to breaker-neutral domains. Mark only failures in the frozen shared transport path as trusted `shared_infrastructure` failures.
+4. Expose a static capabilities object only when native async, caller cancellation, response-byte bound, output-token bound, tool suppression, one choice, and no server retry are all active.
+5. Prove exactly one network attempt under timeout, 429, 5xx, malformed JSON, and cancellation.
+6. Commit: `feat(mcp): add certified OpenAI completion transport`
+
+### Task 4.4: Implement adapter ownership, timeout, and health
+
+**Status:** Complete
+
+**Final review (2026-10-03):** The actual-runtime ownership gap, post-close API failure/premature-drain gap, cancellation-interrupted hot loop, terminal ancillary cancellation leak, and post-success owned-task cancellation provenance were independently reproduced and repaired with red/green tests. The final specification re-review passed 26 targeted cases; the independent quality repair review passed nine additional bounded probes, including real credential-runtime usage writers, caller/shutdown priority, and no-receipt provider cancellation. No validated Task 4.4 findings remain. Paid output survives only through its original timely receipt; bookkeeping is never retried and caller cancellation is never cleared.
+
+**Initialization boundary:** Revalidate and snapshot the exact settings, request, and invocation identity before the first admission await. Enforce the run/cleanup hard ceilings of 120/15 seconds and require matching frozen provider/model policies in accounting and transport. A read-only accounting policy property supports this check without exposing mutable services or private state.
+
+**Native-runtime review repair (2026-10-03):** The shared credential runtime's legacy `close()` is bounded and may return with cancellation-resistant resolver or usage tasks still running. Add a truthful public pending-work/drain boundary, retaining every native task from creation through termination even when its active-map entry was removed by an earlier bounded drain. Preserve legacy bounded close semantics. The adapter owns the drain operation, refuses new dispatch while retained work exists, and shutdown cannot report completion before that work terminates.
+
+**Lifecycle API fault containment (2026-10-03):** Admission-time API validation does not certify later cleanup. An owned supervisor revalidates the public pending boolean and async drain operation after close and requires positive empty-work confirmation before releasing ownership. Getter/drain errors, malformed post-close state, and premature drain completion retain ownership and health false. Rechecks use a short nonbusy delay and at most one fixed degradation warning per invocation; this is lifecycle supervision, never a provider or network retry. A timely paid receipt still survives these ancillary failures, while caller cancellation and shutdown suppress publication. Fault-injection tests restore the API and release native work before final teardown.
+
+**Cancellation-safe supervision delay (2026-10-03):** A faulty drain may request cancellation of its current task and return immediately. Backoff must wait until a monotonic retry deadline despite cancellation; skipping or restarting the delay permits a hot loop or indefinite deadline extension. The public run and cleanup deadlines remain unchanged. Tests use actual `Task.cancel()`, not only a raised `CancelledError`, and bound observed retry counts.
+
+**Terminal cancellation provenance (2026-10-03):** A drain can also request cancellation after native work terminates and return before cancellation is delivered. Both positive-empty paths use an owned cancellation checkpoint before normal supervisor completion, containing ancillary task cancellation and its private argument. Otherwise the task may finish cancelled and incorrectly replace a timely paid receipt. Genuine cancellation of the separate public caller and shutdown remain authoritative; the repair never clears the caller's cancellation state.
+
+**Completed-invocation provenance (2026-10-03):** Internal usage marking or reconciliation can cancel the owned invocation after transport has succeeded. Cancellation of that completed owned task is not proof that the separate public caller was cancelled. After the existing invocation/shutdown guard, a narrow `CancelledError` catch around `invocation.task.result()` may return only the existing timely validated receipt, with a fixed degradation warning. The genuine public-cancellation branch remains authoritative, and without a receipt provider-native cancellation stays native. Cleanup ownership and conservative fencing must already have completed; no bookkeeping operation is retried and no caller cancellation state is cleared.
+
+**Post-success precedence clarification (2026-10-03):** Cache immutable validated content immediately after the certified transport returns and before post-success persistence awaits, only when received before the original monotonic run deadline and before cancellation/abandonment. Caller cancellation and shutdown always suppress publication. A timely receipt survives ancillary bookkeeping or cleanup failure, including a cleanup-allowance miss: retain all unfinished work, latch health false, fence settlement conservatively, discard the child's eventual result, and publish only the earlier receipt. Without a timely receipt, terminating cleanup yields request-local timeout and incomplete cleanup yields shared unavailability. This narrow clarification preserves the spec's paid-result rule without accepting late provider content. False credential-use or reconciliation outcomes emit fixed, bounded degradation warnings.
+
+**Files:**
+- Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/adapter.py`
+- Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_adapter.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/accounting.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_accounting.py`
+- Modify: `tldw_Server_API/app/core/AuthNZ/provider_credential_runtime.py`
+- Modify: `tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py`
+
+1. Write failing tests for success, credential-scope rejection, pre-dispatch cancellation, timeout after dispatch, caller cancellation, child cancellation that completes, child cancellation that is swallowed, late success/error, repeated cancellation, shutdown, and post-shutdown calls.
+2. In `complete`, validate immutable identity/request bounds, resolve credentials authoritatively, reserve accounting, create exactly one named child task, transition to dispatched immediately before that child enters the transport, and wait with a distinct run timeout and cleanup allowance.
+3. On caller cancellation or timeout, cancel the child and drain it only for the cleanup allowance. Re-raise cancellation or a stable sanitized timeout when cleanup succeeds.
+4. If cleanup misses its deadline, atomically set an abandonment latch and transition the reservation to ambiguous before retaining the task in an owned set. Attach a callback that consumes/discards every late result and latch health false. The child checks the latch before reconciliation, and the repository state machine is the final race arbiter. Reject new calls while any retained task exists.
+5. `shutdown()` stops new calls and cancels owned children. `wait_for_shutdown_completion()` drains all retained children without dropping references. The late-task callback removes ownership but does not clear the unhealthy latch; a later explicit `is_healthy()` check may re-establish health only after it revalidates that no retained work remains, the adapter is not closing, and all certified capabilities still hold.
+6. Close the per-call credential runtime in `finally` on every path. Mark credential usage after valid completion; its failure follows the conservative post-success accounting rule and cannot replace the result.
+7. Determine breaker behavior only from explicit trusted failure domains. Never infer shared failure from HTTP status or Python exception class.
+8. Commit: `feat(mcp): own completion request lifecycle`
+
+## Stage 5: Host Composition And Quality Gates
+
+**Goal:** Wire the adapter factory at the tldw composition root, demonstrate the complete security contract, and leave a clean handoff for the Skills runner task.
+
+**Success Criteria:** Default runtime dependencies can construct the managed port from operator settings without importing host code into the standalone package; unsupported or uncertified configurations fail closed; all acceptance criteria and quality gates pass.
+
+**Tests:** Factory/config snapshot, dependency compatibility, end-to-end adapter with fake provider, identity minimization, breaker isolation, full focused regression, lint/compile/Bandit.
+
+**Status:** Complete
+
+**Checkpoint acceptance (2026-10-04):** The human's `continue` accepts Stage 4 and authorizes this stage. ADR check: no new ADR is required; ADR-060/061/062 already govern the scope, accounting, and lifecycle rules implemented by composition. Production composition remains lazy, internal, and unavailable without explicit operator accounting and fail-closed governor policy configuration; no module or tool is enabled.
+
+### Task 5.1: Add the production factory and composition seam
+
+**Status:** Complete
+
+**Review and verification (2026-10-04):** Specification and independent quality re-reviews approved the composition. Reject unsupported governor cost-rate buckets instead of accepting an ignored control; durable monthly cost accounting is unchanged. Preserve false-valued injected transport factories with exact-`None` selection. A fresh-process regression reproduced and repaired the first-import database-stub test leak. Parent completion/credential boundary passed `760` tests; factory/dependency/package gate passed `290` tests, including `89` factory cases. Ruff, formatting of changed code, compilation, whitespace, and production Bandit (`930` lines, zero findings/errors) passed. Governor rates and concurrency remain explicitly per port/process; unsupported backends fail closed. No tool or Skills execution is enabled.
+
+**Broad regression (2026-10-04):** Full MCP core passed `4,178` tests with three existing optional-parser skips using required local fixture access. The restricted run was interrupted after confirmed localhost bind denial and cascading async fixture failures; no production workaround or disabled test was introduced. The additional fresh-process isolation regression passed in the separate `290`-test gate.
+
+**Files:**
+- Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/factory.py`
+- Modify: `apps/mcp-unified/src/mcp_unified/interfaces/runtime.py`
+- Modify the tldw runtime dependency builder located by `rg -n "build_default_runtime_dependencies|MCPRuntimeDependencies" tldw_Server_API/app/core/MCP_unified`
+- Modify: `apps/mcp-unified/src/mcp_unified/README.md`
+- Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_factory.py`
+- Modify runtime dependency compatibility tests
+
+1. Write failing tests that the runtime dependency bundle remains constructible by existing callers and optionally exposes a `ModelCompletionPortFactory`.
+2. Implement `build_tldw_model_completion_port(...)` to freeze provider/model/timeouts/limits, cost weights, a non-fallback Resource Governor policy snapshot, and a deep-copied server provider configuration; inject repositories/governor/clock/transport for tests; and support only the certified canonical OpenAI path.
+3. Return an unhealthy/fail-closed result for unsupported providers or missing certified capabilities without logging secrets. Do not construct a port at server startup until the later Skills module supplies its disabled-by-default settings.
+4. Inject the factory from `build_default_runtime_dependencies()` as a final optional dependency field with a compatibility default. Keep the standalone package dependent only on its factory protocol.
+5. Document the internal composition contract and explicitly state that it does not expose a tool or enable model execution by itself.
+6. Commit: `feat(mcp): compose bounded model completion adapter`
+
+### Task 5.2: Run adversarial integration and regression tests
+
+**Status:** Complete
+
+**Review and verification (2026-10-04):** Specification and independent quality reviews approved the 42-case real-storage/native-fake-provider suite. Quality probes independently observed real Billing, governor and canonical usage operations, checked fixture restoration, and rejected missing canonical usage and uncommitted dispatch. No runtime defect was validated. Parent prescribed combined gate passed `1,012` tests; branch-aware completion coverage passed `706` tests at `96%`; final full MCP core passed `4,221` tests with three existing optional-parser skips. Ruff, Black, compilation and whitespace passed on the new test file. MockTransport does not validate live TLS/provider behavior; separate canonical PostgreSQL parity passed `91` tests with no skips.
+
+**Files:**
+- Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_integration.py`
+- Modify relevant focused tests only when a regression is validated
+
+1. Add an end-to-end fake-provider test from authenticated MCP scope through credential selection, reservation, transport, normalization, and reconciliation.
+2. Add adversarial tests for scope revocation immediately before resolution, endpoint override attempts, metadata spoofing, compressed expansion, cancellation at every admission/dispatch/reconcile boundary, process-style reconstruction with ambiguous rows, and post-success reconciliation failure.
+3. Assert no secret, prompt, completion, raw provider body, or query-bearing endpoint enters exceptions, logs, reservation rows, or port result metadata.
+4. Assert request/content/credential failures are breaker neutral and only explicitly tagged shared failures are eligible for global breaker mutation by `TASK-2294.3.3`.
+5. Run the focused baseline plus all new tests:
+   ```bash
+   /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q \
+     tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py \
+     tldw_Server_API/tests/LLM_Calls/test_provider_adapter_runtime_boundary.py \
+     tldw_Server_API/tests/http_client/test_http_client_simple_response_limits.py \
+     tldw_Server_API/app/core/MCP_unified/tests/test_prepared_execution_integrity.py \
+     tldw_Server_API/app/core/MCP_unified/tests/test_mounted_jsonrpc_transport_contract.py \
+     tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_contracts.py \
+     tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_accounting.py \
+     tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_normalization.py \
+     tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_transport.py \
+     tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_adapter.py \
+     tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_factory.py \
+     tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_integration.py
+   ```
+6. Commit: `test(mcp): cover bounded completion security contract`
+
+### Task 5.3: Complete static and security verification
+
+**Status:** Complete
+
+**Verification preparation (2026-10-04):** Compilation and whole-branch whitespace passed. Prescribed production Bandit passed over `19,465` lines; the extended scan of every branch-touched production Python file passed over `44,059` lines, both with zero findings/errors. Whole-branch Ruff reports ten diagnostics reproduced from unchanged `origin/dev` code in Persona, the shared HTTP client and its redirect test; none is new in this work. These inherited whole-file diagnostics are recorded explicitly, not represented as a passing whole-file lint gate. Changed/new completion code passes focused Ruff. Final cross-module review remains required before task acceptance criteria are checked.
+
+**Latest-dev rebase (2026-10-04):** All 18 local commits replayed onto pinned `bf8f2ad6a42ad6396376020876a5f6a709ec6b34`; the integration checkpoint is now `c9e6b1274c`. Preserve published SQLite migration `099` (user/month usage index), assign MCP reservations migration `100`, and preserve the upstream per-user usage sum and PostgreSQL index. Upstream ADR-059 belongs to backlog-py; the unpublished MCP decisions are now ADR-060/061/062. Historical verification above remains pre-rebase evidence, not a latest-dev gate. A published-099-to-100 regression was RED before the rebase and is now GREEN; the fresh SQLite migration/storage gate passed `79` tests. The upstream legacy index fixture now includes its published operation/request-ID columns while retaining the latest-upgrade assertion. The new backlog-py format ratchet passed all four tests.
+
+**Final-review repair (2026-10-04):** Independent immutable-source review found that transport `aclose()` failure can replace an already normalized paid completion before the adapter caches its receipt. TDD repair is in progress under this task: preserve timely validated output through ancillary cleanup failure, retain owned work and truthful unhealthy state, and keep caller cancellation/shutdown authoritative. Final post-rebase runtime, static/security gates and re-review remain open.
+
+**Receipt-handoff refinement (2026-10-04):** The immediate-error repair passed `349` focused cases, but two additional RED regressions show receipt loss when client close crosses the original run deadline or remains blocked past cleanup. Enforce the existing ADR-062 contract with a trusted synchronous invocation-local notification immediately after normalization and before client cleanup. The adapter checks cancellation/shutdown and its original monotonic deadline before caching immutable content. Native cleanup stays owned; late results cannot settle an abandoned reservation; the public port protocol and one-request guarantee are unchanged. No catch-and-retry signature fallback is permitted. This narrow transport/adapter repair requires fresh specification and quality review.
+
+**Receipt repair verification (2026-10-04):** Immediate-close RED `11 failed, 2 passed` became GREEN `13 passed`; delayed/blocked-close and callback RED `5 failed, 16 passed` became GREEN `21 passed`. Native-close self-cancellation, including cancellation requested immediately before a no-yield return, is contained with a terminal checkpoint and an uncertified latch; final focused verification passed `364` tests. Parent full MCP core passed `4,244` tests with the same three optional-parser skips; completion branch coverage passed `768` cases at `96.12%` over `932` statements and `304` branches. All touched production Python passes Bandit (`44,115` lines, zero findings/errors); focused Ruff, changed-code Black, compilation and whitespace pass. Whole-file Ruff remains ten independently reproduced inherited diagnostics. The combined boundary gate exposed fifteen new test-fixture violations of the existing HTTPX monkeypatch guard; test-only client-factory injection repair and fresh review are pending. Do not treat the failed combined gate as accepted.
+
+**Extended migration fixtures (2026-10-04):** Canonical migration-015 schema is restored in synthetic profile/session/RBAC fixtures that claim later migration versions while omitting usage tables. Production migration-100 validation, latest-upgrade targets and all existing assertions remain unchanged. Parent migration/schema gate passed `138` tests; final repaired profile/session/RBAC gate passed `34` tests. Independent fixture reviews approved all five canonical-015 call sites. The first full AuthNZ run passed `3,166` cases with one existing aiosqlite skip and three fixture failures (one already fixed but loaded before its edit, two RBAC omissions). A fresh full run is required before acceptance; it is underway.
+
+**Final frozen-artifact verification (2026-10-04):** The test-only HTTPX fixture repair uses local client subclasses through the existing trusted client factory; all 155 integration assertions and parameterization remain intact, with no global guard or production changes. Fresh parent verification passed `1,035` prescribed boundary tests and `4,244` full MCP core tests with the same three optional-parser skips. The fresh complete AuthNZ unit/legacy-unit/SQLite run passed `3,169` tests with one existing skip (`aiosqlite` lacks `InterfaceError`), closing every earlier fixture failure. Canonical PostgreSQL scope/reservation/accounting/Billing parity passed `91` tests with no skips; governance/Billing/Usage passed `827` tests with one optional PostgreSQL-environment skip and two existing Redis expected failures; mounted auth/Persona/shared HTTP passed `471` tests. Specification re-review approved all five frozen repair files after `364` focused cases and ten independent probes. Final quality re-review remains pending. Runtime verification is pinned to base `bf8f2ad6a42ad6396376020876a5f6a709ec6b34`; shared `dev` subsequently advanced to `c95e41fc62a07e55fd74052023826c71b2a2c789` with unrelated Backlog normalization records only. Commit and clean rebase onto that pinned revision remain pending. Task documentation metadata still needs the requested human-approved exception because backlog-py cannot edit that field.
+
+**Cleanup-cancellation provenance repair (2026-10-04):** Quality re-review approved the original paid-receipt repair but validated another P1: native client-close self-cancellation replaces an already classified HTTP rejection, invalid-output or connection failure with a private `CancelledError`. Parent reproduced all `18` transport/integration combinations before the fix. Contain self-cancellation only inside the independently owned close task when a classified failure already exists; keep readiness false, the original sanitized failure domain, native provider cancellation and genuine caller/shutdown precedence. All `18` regressions and nine caller/shutdown race cases pass (`27` total). New integration fixtures restore deliberately unclosed native clients before shared privacy/closure assertions. Fresh specification then quality reviews and affected broad/static/security gates are required on `/tmp/mcp_stage5_provenance_final_sha256.txt`; earlier totals above are historical for the preceding artifact, not acceptance of this repair.
+
+**Provenance gates and static guard (2026-10-04):** Fresh parent verification passed `4,271` MCP core cases with three existing parser skips, `1,062` prescribed boundary cases, and `795` completion coverage cases at `96.13%` over `933` statements and `306` branches. Production Bandit reports zero findings/errors over `44,116` lines; the test scan has only the two structurally matched inherited LOW B105 false positives (assertion B101 alone excluded). Ruff, Black, compilation and whitespace pass. The pre-commit HTTP patch guard then identified an earlier transport test's unnecessary optional-library module stub and its backend environment literal. Remove the library stub and select the same environment value through the host's `AiohttpAdapter.name`; retain all native-client and proxy assertions, with no guard edits or skipped tests. The guard and targeted backend case pass, and `aiohttp` is a declared project dependency. Production hashes are unchanged. Final full/core boundary reruns and specification review now use `/tmp/mcp_stage5_guard_final_sha256.txt`; quality must follow specification approval.
+
+**Runtime quality checkpoint (2026-10-04):** The final guard-compatible artifact passed fresh parent MCP core verification (`4,271` passed, three existing optional-parser skips) and the prescribed boundary gate (`1,062` passed). Independent specification review approved `391` focused cases plus 20 offline real-storage probes; the original finding reviewer approved quality after `97` focused cases plus 20 offline probes. Both paid-receipt loss and cleanup-private cancellation leakage are resolved; no validated findings remain. All five manifest hashes match and every test/probe session has drained. Coverage remains `96.13%` on the identical production artifact; Bandit has zero production findings/errors over `44,116` lines. No live-provider/TLS or other Python/event-loop certification is claimed. Commit and pinned-`c95e41fc62` rebase verification are next. Stage 5 remains In Progress solely for final tracking/documentation: the three Backlog ADR documentation links require the requested human-approved metadata exception; runtime implementation and review gates are complete, with no Skills tool enabled.
+
+**Final pinned rebase (2026-10-04):** The reviewed repair checkpoint `bc8dea3221` replayed as `48186fc25f` onto `dev` at `c95e41fc62a07e55fd74052023826c71b2a2c789`. All 19 commits are patch-identical by range comparison. Complete old/new tree comparisons show no production, test, documentation or task-record change; only unrelated upstream Backlog normalization records differ. All five artifact hashes still match. Fresh post-rebase verification passed `1,062` boundary cases, four Backlog-format cases, focused Ruff/Black, compilation, whole-branch whitespace, and production Bandit (zero findings/errors across `44,116` lines). Every configured pre-commit check applicable to the full branch changes passed; YAML/TOML and wizard-only Ruff/Black hooks correctly had no matching files. The immediately pre-rebase full MCP suite (`4,271` passed, three parser skips), AuthNZ suite (`3,169` passed, one driver skip), canonical PostgreSQL parity (`91` passed, no skips), and `96.13%` coverage apply to the byte-identical reviewed source/test artifact. All sessions are drained; the branch remains local and the worktree is preserved. All 11 task acceptance criteria are checked, but Stage 5 and the task remain In Progress only because Backlog documentation-field correction needs the outstanding human approval. No PR, push, merge or Skills enablement occurred.
+
+**Finalization approval (2026-10-04):** The requester approved the metadata-only exception for the three Backlog ADR documentation links. Only those three entries were edited manually; backlog-py normalized and manages all subsequent task changes. ADR-060/061/062 references resolve to the existing proposed records, the task-format gate passed four tests, and all five reviewed runtime/test hashes are unchanged. The documentation blocker is resolved and all five stages are complete. Retain this tracked, linked plan as the implementation and verification record. Finalization changes no runtime behavior, enables no Skills tool, and does not authorize a push, PR or merge.
+
+1. Run Ruff only over touched Python files, using the repository configuration:
+   ```bash
+   git diff --name-only origin/dev...HEAD -- '*.py' | \
+     xargs /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m ruff check
+   ```
+2. Compile touched packages:
+   ```bash
+   /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m compileall -q \
+     apps/mcp-unified/src/mcp_unified/interfaces \
+     tldw_Server_API/app/core/MCP_unified/adapters/model_completion \
+     tldw_Server_API/app/core/AuthNZ \
+     tldw_Server_API/app/core/Resource_Governance
+   ```
+3. Run Bandit over the touched runtime scope and inspect the JSON report rather than relying only on exit status:
+   ```bash
+   /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r \
+     apps/mcp-unified/src/mcp_unified/interfaces \
+     tldw_Server_API/app/core/MCP_unified/adapters/model_completion \
+     tldw_Server_API/app/core/MCP_unified/server.py \
+     tldw_Server_API/app/core/AuthNZ/provider_credential_runtime.py \
+     tldw_Server_API/app/core/AuthNZ/byok_runtime.py \
+     tldw_Server_API/app/core/AuthNZ/repos/provider_usage_reservations_repo.py \
+     tldw_Server_API/app/core/AuthNZ/repos/user_provider_secrets_repo.py \
+     tldw_Server_API/app/core/AuthNZ/repos/org_provider_secrets_repo.py \
+     tldw_Server_API/app/core/AuthNZ/repos/usage_repo.py \
+     tldw_Server_API/app/core/Billing/enforcement.py \
+     tldw_Server_API/app/core/DB_Management/Resource_Daily_Ledger.py \
+     tldw_Server_API/app/core/Resource_Governance/daily_caps.py \
+     tldw_Server_API/app/core/Resource_Governance/governor.py \
+     tldw_Server_API/app/core/http_client.py \
+     -f json -o /tmp/bandit_task_2294_3_2.json
+   ```
+4. Run `git diff --check`, inspect the complete diff, confirm the standalone package imports no tldw host module, and confirm no new broad exception swallowing or secret-bearing logging was introduced.
+5. Update `TASK-2294.3.2` with touched files, exact verification totals, skipped PostgreSQL reason if applicable, and a human-readable final summary. Check acceptance criteria only after matching evidence exists.
+6. Use `superpowers:requesting-code-review`, address validated findings, rerun affected gates, then use `superpowers:finishing-a-development-branch`.
+7. Final commit if verification requires metadata changes: `docs(mcp): finalize completion adapter evidence`
+
+## Acceptance-Criteria Traceability
+
+| Criterion | Primary implementation | Required evidence |
+|---|---|---|
+| AC 1 | Task 1.1 | Contract minimization, immutability, identity validation, package boundary tests |
+| AC 2 | Tasks 2.1-2.2, 5.1 | Scope authorization matrix, exact precedence, frozen endpoint tests |
+| AC 3 | Tasks 1.1, 4.3-4.4, 5.2 | Trusted failure-domain and breaker-neutral outcome tests |
+| AC 4 | Tasks 4.1, 4.3, 5.1 | Capability certification and unsupported-path health tests |
+| AC 5 | Task 4.2 | Table/property normalization tests |
+| AC 6 | Tasks 3.1-3.3, 4.4 | Reservation state, cancellation boundary, reconciliation failure tests |
+| AC 7 | Task 4.4 | Retained-child ownership, health, late-result, and shutdown tests |
+| AC 8 | Task 4.3 | Request capture and one-attempt tests |
+| AC 9 | Tasks 5.2-5.3 | Focused tests, Ruff, compile, Bandit evidence |
+| AC 10 | Task 4.1 | Decompressed limit-plus-one before-JSON tests |
+| AC 11 | Task 1.2 | Auth-path projection, integrity, spoofing, and no-scope compatibility tests |
+
+## Review Checkpoints
+
+Pause for review after each stage. In particular, do not begin Stage 4 until the Stage 3 reservation state machine has passed concurrent SQLite tests and its PostgreSQL schema/query shape has been reviewed. Do not expose the port to any MCP module until all Stage 5 capability, lifecycle, and security gates pass.

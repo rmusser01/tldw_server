@@ -2,12 +2,80 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from decimal import ROUND_CEILING, Decimal
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import execute, fetch_all, fetch_one, fetch_value
 from tldw_Server_API.app.core.AuthNZ.repos.datetime_utils import _strip_tzinfo
+from tldw_Server_API.app.core.AuthNZ.repos.provider_usage_reservations_repo import (
+    BillingScope,
+    ProviderUsageReservation,
+    ReservationActuals,
+)
+
+COST_UNITS_PER_USD = 1_000_000_000
+_MAX_ACCOUNTING_UNITS = (1 << 63) - 1
+
+
+def _accounting_count(value: Any) -> int:
+    if type(value) is not int or not 0 <= value <= _MAX_ACCOUNTING_UNITS:
+        raise ValueError("Invalid accounting count")
+    return value
+
+
+def _accounting_aggregate(value: Any) -> int:
+    """Accept PostgreSQL's exact NUMERIC sums without coercing invalid counts."""
+    if type(value) is Decimal:
+        if not value.is_finite() or not 0 <= value <= _MAX_ACCOUNTING_UNITS or value != value.to_integral_value():
+            raise ValueError("Invalid accounting aggregate")
+        value = int(value)
+    return _accounting_count(value)
+
+
+def _scope_usage_parts(scope: BillingScope) -> tuple[str, str, str, tuple[int, ...]]:
+    if type(scope.value) is not int or scope.value <= 0 or scope.kind not in {"user", "team", "org"}:
+        raise ValueError("Invalid accounting scope")
+    joins = """
+        FROM llm_usage_log AS l
+        LEFT JOIN provider_usage_reservations AS r
+          ON l.operation = 'mcp_model_completion' AND r.execution_id = l.request_id
+    """
+    if scope.kind == "team":
+        return "", joins, "r.billing_scope_type = 'team' AND r.billing_scope_id = ?", (scope.value,)
+    if scope.kind == "user":
+        return (
+            "",
+            joins,
+            """l.user_id = ? AND l.billing_org_id IS NULL
+            AND (r.billing_scope_type IS NULL OR r.billing_scope_type = 'user')""",
+            (scope.value,),
+        )
+    prefix = """
+        WITH primary_org AS (
+            SELECT user_id, org_id FROM (
+                SELECT user_id, org_id, ROW_NUMBER() OVER (
+                    PARTITION BY user_id ORDER BY added_at ASC, org_id ASC
+                ) AS rn FROM org_members WHERE added_at IS NOT NULL
+            ) ranked WHERE rn = 1
+        )
+    """
+    joins += """
+        LEFT JOIN primary_org AS po ON l.user_id = po.user_id
+        LEFT JOIN api_keys AS ak ON l.key_id = ak.id
+    """
+    predicate = """(l.billing_org_id = ? OR (l.billing_org_id IS NULL
+        AND COALESCE(l.operation, '') <> 'mcp_model_completion'
+        AND (po.org_id = ? OR ak.org_id = ?)))"""
+    return prefix, joins, predicate, (scope.value, scope.value, scope.value)
+
+
+def _scope_usage_query(scope: BillingScope, selection: str, time_filter: str) -> tuple[str, tuple[int, ...]]:
+    prefix, joins, predicate, args = _scope_usage_parts(scope)
+    return prefix + selection + joins + " WHERE " + predicate + " AND " + time_filter, args
+
 
 _SQLITE_CORRUPTION_SIGNATURES = (
     "database disk image is malformed",
@@ -73,6 +141,181 @@ class AuthnzUsageRepo:
         connection capabilities.
         """
         return bool(getattr(self.db_pool, "pool", None))
+
+    async def read_provider_scope_usage(
+        self,
+        conn: Any,
+        scope: BillingScope,
+        month_start: datetime,
+    ) -> tuple[int, int]:
+        """Read strict canonical actuals on the caller's locked transaction.
+
+        Unresolved reservations are added by the admission repository. Convert
+        legacy cost rows individually. MCP costs use the exact integer audit
+        value committed atomically with the canonical usage record.
+        """
+        is_pg = self._is_postgres_backend()
+        sql, args = _scope_usage_query(
+            scope,
+            """SELECT l.total_tokens, l.total_cost_usd, l.operation,
+                r.state AS reservation_state, r.actual_cost_units""",
+            "l.ts >= ?" if is_pg else "datetime(l.ts) >= datetime(?)",
+        )
+        since = _strip_tzinfo(month_start) if is_pg else _strip_tzinfo(month_start).isoformat(" ", timespec="seconds")
+        rows = await fetch_all(
+            conn,
+            is_pg,
+            sql,
+            (*args, since),
+            (
+                "total_tokens",
+                "total_cost_usd",
+                "operation",
+                "reservation_state",
+                "actual_cost_units",
+            ),
+        )
+        tokens = costs = 0
+        for row in rows:
+            count = 0 if row["total_tokens"] is None else row["total_tokens"]
+            tokens = _accounting_count(tokens + _accounting_count(count))
+            if row["operation"] == "mcp_model_completion":
+                if row["reservation_state"] != "reconciled":
+                    raise ValueError("MCP usage lacks atomic settlement")
+                units = _accounting_count(row["actual_cost_units"])
+            else:
+                raw_cost = 0 if row["total_cost_usd"] is None else row["total_cost_usd"]
+                cost = Decimal(str(raw_cost))
+                if not cost.is_finite() or cost < 0:
+                    raise ValueError("Invalid accounting cost")
+                units = int((cost * COST_UNITS_PER_USD).to_integral_value(rounding=ROUND_CEILING))
+            costs = _accounting_count(costs + _accounting_count(units))
+        return tokens, costs
+
+    async def read_org_token_exposure(self, conn: Any, org_id: int, month_start: datetime) -> int:
+        """Include unresolved exact-org MCP exposure in normal Billing checks."""
+        is_pg = self._is_postgres_backend()
+        sql, args = _scope_usage_query(
+            BillingScope("org", org_id),
+            """SELECT COALESCE(SUM(l.total_tokens), 0) + (
+                SELECT COALESCE(SUM(reserved_input_tokens + reserved_output_tokens), 0)
+                FROM provider_usage_reservations
+                WHERE billing_scope_type = 'org' AND billing_scope_id = ?
+                  AND state IN ('reserved', 'dispatched', 'ambiguous')
+            )""",
+            "l.ts >= ?" if is_pg else "datetime(l.ts) >= datetime(?)",
+        )
+        since = _strip_tzinfo(month_start) if is_pg else _strip_tzinfo(month_start).isoformat(" ", timespec="seconds")
+        return _accounting_aggregate(await fetch_value(conn, is_pg, sql, (org_id, *args, since)))
+
+    async def insert_mcp_completion_usage(
+        self,
+        conn: Any,
+        reservation: ProviderUsageReservation,
+        actuals: ReservationActuals,
+        *,
+        estimated: bool,
+        input_cost_units: int = 0,
+    ) -> None:
+        """Insert minimized usage atomically with reservation settlement, without fallback."""
+        is_pg = self._is_postgres_backend()
+        if type(estimated) is not bool:
+            raise ValueError("Invalid usage estimation flag")
+        input_tokens = _accounting_count(actuals.input_tokens)
+        output_tokens = _accounting_count(actuals.output_tokens)
+        total_tokens = _accounting_count(input_tokens + output_tokens)
+        cost_units = _accounting_count(actuals.cost_units)
+        input_cost_units = _accounting_count(input_cost_units)
+        if input_cost_units > cost_units:
+            raise ValueError("Invalid accounting cost split")
+        org_id = reservation.billing_scope.value if reservation.billing_scope.kind == "org" else None
+        total_cost = float(Decimal(cost_units) / COST_UNITS_PER_USD)
+        values = (
+            reservation.user_id,
+            org_id,
+            reservation.provider,
+            reservation.model,
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            float(Decimal(input_cost_units) / COST_UNITS_PER_USD),
+            float(Decimal(cost_units - input_cost_units) / COST_UNITS_PER_USD),
+            total_cost,
+            bool(estimated),
+            reservation.execution_id,
+            "mcp_conservative_ceiling" if estimated else "mcp_provider_counts",
+        )
+        now = _strip_tzinfo(datetime.now(timezone.utc))
+        timestamp = now if is_pg else now.isoformat(" ", timespec="seconds")
+        await execute(
+            conn,
+            is_pg,
+            """
+            INSERT INTO llm_usage_log (
+                ts, user_id, billing_org_id, endpoint, operation, provider, model, status, latency_ms,
+                prompt_tokens, completion_tokens, total_tokens, prompt_cost_usd, completion_cost_usd,
+                total_cost_usd, currency, estimated, request_id, estimate_source
+            ) VALUES (?, ?, ?, '/mcp/model_completion', 'mcp_model_completion',
+                      ?, ?, 200, 0, ?, ?, ?, ?, ?, ?, 'USD', ?, ?, ?)
+            ON CONFLICT (request_id) WHERE operation = 'mcp_model_completion' AND request_id IS NOT NULL
+            DO NOTHING
+        """,
+            (timestamp, *values),
+        )
+        row = await fetch_one(
+            conn,
+            is_pg,
+            """
+            SELECT user_id, billing_org_id, provider, model, prompt_tokens, completion_tokens,
+                   total_tokens, prompt_cost_usd, completion_cost_usd, total_cost_usd,
+                   endpoint, status, latency_ms, currency, estimated, estimate_source
+            FROM llm_usage_log
+            WHERE request_id = ? AND operation = 'mcp_model_completion'
+        """,
+            (reservation.execution_id,),
+            (
+                "user_id",
+                "billing_org_id",
+                "provider",
+                "model",
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "prompt_cost_usd",
+                "completion_cost_usd",
+                "total_cost_usd",
+                "endpoint",
+                "status",
+                "latency_ms",
+                "currency",
+                "estimated",
+                "estimate_source",
+            ),
+        )
+        expected = {
+            "user_id": reservation.user_id,
+            "billing_org_id": org_id,
+            "provider": reservation.provider,
+            "model": reservation.model,
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "prompt_cost_usd": values[7],
+            "completion_cost_usd": values[8],
+            "total_cost_usd": total_cost,
+            "endpoint": "/mcp/model_completion",
+            "status": 200,
+            "latency_ms": 0,
+            "currency": "USD",
+            "estimated": estimated,
+            "estimate_source": values[12],
+        }
+        for key in ("prompt_cost_usd", "completion_cost_usd", "total_cost_usd"):
+            expected[key] = Decimal(str(expected[key]))
+            if row is not None:
+                row[key] = Decimal(str(row[key]))
+        if row != expected:
+            raise ValueError("Conflicting MCP usage replay")
 
     async def sum_org_api_requests(self, *, org_id: int, day: date) -> int:
         """Sum the UTC daily rollup, assigning each user to one primary org.

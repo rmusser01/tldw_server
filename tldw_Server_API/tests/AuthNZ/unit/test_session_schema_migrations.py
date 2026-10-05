@@ -11,7 +11,10 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.migrations import apply_authnz_migrations
+from tldw_Server_API.app.core.AuthNZ.migrations import (
+    apply_authnz_migrations,
+    migration_015_create_llm_usage_tables,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
 
 pytestmark = pytest.mark.unit
@@ -98,6 +101,8 @@ def _create_legacy_database(
             "INSERT INTO schema_migrations (version, name, applied_at) "
             "VALUES (97, 'legacy current', CURRENT_TIMESTAMP)"
         )
+        # Include the published usage schema before claiming migration 97.
+        migration_015_create_llm_usage_tables(conn)
 
 
 def test_fresh_sqlite_sessions_have_last_activity_default(tmp_path: Path) -> None:

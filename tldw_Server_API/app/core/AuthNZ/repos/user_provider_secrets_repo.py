@@ -9,7 +9,12 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
-from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import dollar, row_dict
+from tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result import (
+    ProviderScopeResult,
+    ProviderScopeStatus,
+    _validate_positive_id,
+)
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
     fold_provider_credential_rows,
@@ -284,6 +289,52 @@ class AuthnzUserProviderSecretsRepo:
                 "AuthnzUserProviderSecretsRepo.upsert_secret failed"
             )
             raise
+
+    async def resolve_authorized_secret(
+        self,
+        user_id: int,
+        provider: str,
+    ) -> ProviderScopeResult:
+        """Resolve user authorization and all secret aliases in one snapshot.
+
+        Missing or inactive users fail closed even when no secret exists. Store
+        failures are sanitized; legacy alias conflicts remain explicit errors.
+        """
+        _validate_positive_id(user_id, "user_id")
+        canonical, *legacy_names = provider_lookup_names(provider)
+        providers = (canonical, *legacy_names)
+        placeholders = ", ".join("?" for _ in providers)
+        # Only generated placeholder tokens are interpolated; all values are bound.
+        sql = f"""
+            SELECT s.id, s.user_id, s.provider, s.encrypted_blob, s.key_hint,
+                   s.metadata, s.created_at, s.updated_at, s.last_used_at,
+                   s.created_by, s.updated_by, s.revoked_by, s.revoked_at
+            FROM users u
+            LEFT JOIN user_provider_secrets s
+              ON s.user_id = u.id AND s.provider IN ({placeholders})
+            WHERE u.id = ? AND u.is_active = TRUE
+        """  # nosec B608
+        params = (*providers, user_id)
+        try:
+            if getattr(self.db_pool, "pool", None) is not None:
+                rows = await self.db_pool.fetchall(dollar(sql), *params)
+            else:
+                rows = await self.db_pool.fetchall(sql, params)
+            if not rows:
+                return ProviderScopeResult(ProviderScopeStatus.UNAUTHORIZED)
+            records = [self._row_to_dict(row) for row in rows]
+            records = [row for row in records if row.get("id") is not None]
+            record = self._select_authoritative_row(records, canonical)
+            if record is None:
+                return ProviderScopeResult(ProviderScopeStatus.AUTHORIZED_ABSENT)
+            if record.get("revoked_at") is not None:
+                return ProviderScopeResult(ProviderScopeStatus.UNAUTHORIZED)
+            return ProviderScopeResult(ProviderScopeStatus.RESOLVED, record)
+        except ProviderCredentialAliasConflictError:
+            raise
+        except Exception:
+            logger.error("AuthnzUserProviderSecretsRepo.resolve_authorized_secret unavailable")
+            return ProviderScopeResult(ProviderScopeStatus.UNAVAILABLE)
 
     async def fetch_secret_for_user(
         self,

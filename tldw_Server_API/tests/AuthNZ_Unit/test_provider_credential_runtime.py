@@ -88,6 +88,137 @@ def _runtime(resolver, **overrides) -> ProviderCredentialRuntime:
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["inflight", "refresh", "authoritative"])
+async def test_lifecycle_retains_resolution_after_legacy_bounded_close(monkeypatch, phase):
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "RESOLUTION_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS", 0.01)
+    started, cancelled, finish = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    initial = phase == "refresh"
+
+    async def resolver(provider, **kwargs):
+        nonlocal initial
+        if initial:
+            initial = False
+            return _resolution(provider)
+        started.set()
+        try:
+            await finish.wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await finish.wait()
+        raise RuntimeError(SECRET)
+
+    if phase == "authoritative":
+        monkeypatch.setattr(runtime_module, "resolve_byok_credentials", resolver)
+        runtime = ProviderCredentialRuntime(
+            user_id=41,
+            team_ids=[],
+            org_ids=[],
+            trusted_base_url_override=False,
+            authoritative_scope=runtime_module.AuthoritativeProviderScope(41),
+            server_config_snapshot={},
+        )
+    else:
+        runtime = _runtime(resolver)
+    if phase == "refresh":
+        await runtime.resolve("openai")
+    call = asyncio.create_task(runtime.resolve("openai", force_refresh=phase == "refresh"))
+    await started.wait()
+    drain = None
+    try:
+        await asyncio.wait_for(runtime.close(), 0.2)
+        assert cancelled.is_set()
+        assert runtime.has_pending_shutdown_work is True
+        drain = asyncio.create_task(runtime.wait_for_shutdown_completion())
+        await asyncio.sleep(0)
+        assert not drain.done()
+        finish.set()
+        await drain
+        assert runtime.has_pending_shutdown_work is False
+    finally:
+        finish.set()
+        await asyncio.gather(call, return_exceptions=True)
+        if drain is not None:
+            await drain
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_retains_usage_popped_before_close_and_preserves_drain_cancel(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "USAGE_TASK_DRAIN_TIMEOUT_SECONDS", 0.01)
+    started, cancelled, finish = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def touch():
+        started.set()
+        try:
+            await finish.wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await finish.wait()
+        raise RuntimeError(SECRET)
+
+    async def resolver(provider, **kwargs):
+        return _resolution(provider, touch=touch)
+
+    runtime = _runtime(resolver)
+    handle = await runtime.resolve("openai")
+    usage = asyncio.create_task(runtime.mark_used(handle))
+    await started.wait()
+    usage.cancel("usage-cancel")
+    drain = None
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await usage
+        assert cancelled.is_set()
+        await asyncio.wait_for(runtime.close(), 0.2)
+        assert runtime.has_pending_shutdown_work is True
+        drain = asyncio.create_task(runtime.wait_for_shutdown_completion())
+        await asyncio.sleep(0)
+        drain.cancel("first-drain-cancel")
+        await asyncio.sleep(0)
+        drain.cancel("second-drain-cancel")
+        await asyncio.sleep(0)
+        assert not drain.done()
+        finish.set()
+        with pytest.raises(asyncio.CancelledError, match="first-drain-cancel"):
+            await drain
+        assert runtime.has_pending_shutdown_work is False
+    finally:
+        finish.set()
+        await asyncio.gather(usage, *(() if drain is None else (drain,)), return_exceptions=True)
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_pending_includes_legacy_close_task(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+
+    entered, finish = asyncio.Event(), asyncio.Event()
+
+    async def resolver(provider, **kwargs):
+        return _resolution(provider)
+
+    async def close_owned(self):
+        entered.set()
+        await finish.wait()
+
+    monkeypatch.setattr(runtime_module.ProviderCredentialRuntime, "_close_owned", close_owned)
+    runtime = _runtime(resolver)
+    close = asyncio.create_task(runtime.close())
+    await entered.wait()
+    try:
+        assert runtime.has_pending_shutdown_work is True
+    finally:
+        finish.set()
+        await close
+    await runtime.wait_for_shutdown_completion()
+    assert runtime.has_pending_shutdown_work is False
+
+
 def test_default_runtime_rejects_dynamic_fallback_resolver() -> None:
     """Production resolution cannot combine a frozen snapshot with live fallback reads."""
     with pytest.raises(
@@ -1707,3 +1838,201 @@ async def test_typed_resolver_failure_detaches_private_exception_graph() -> None
         assert secret not in repr(exc_info.value)
     finally:
         await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_authoritative_runtime_revalidates_cached_credentials(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result import (
+        ProviderScopeResult,
+        ProviderScopeStatus,
+    )
+
+    active = True
+    calls = 0
+
+    class Repo:
+        async def resolve_authorized_secret(self, user_id, provider):
+            nonlocal calls
+            calls += 1
+            return ProviderScopeResult(
+                ProviderScopeStatus.AUTHORIZED_ABSENT if active else ProviderScopeStatus.UNAUTHORIZED
+            )
+
+    async def repo():
+        return Repo()
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", repo)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+    snapshot = {"openai_api": {"api_key": "captured-key", "api_base_url": "https://fixed.example/v1"}}
+    runtime = ProviderCredentialRuntime(
+        user_id=7,
+        team_ids=[],
+        org_ids=[],
+        trusted_base_url_override=True,
+        authoritative_scope=byok_runtime.AuthoritativeProviderScope(7),
+        server_config_snapshot=snapshot,
+    )
+    snapshot["openai_api"]["api_key"] = "changed-key"
+    snapshot["openai_api"]["api_base_url"] = "https://changed.example/v1"
+    try:
+        first = await runtime.resolve("openai")
+        assert first.api_key == "captured-key"
+        assert first.trusted_endpoint.base_url == "https://fixed.example/v1"
+        active = False
+        with pytest.raises(ByokResolutionError, match="credential_scope_revoked"):
+            await runtime.resolve("openai")
+        assert calls == 2
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"team_ids": [11]},
+        {"org_ids": [13]},
+        {"user_id": 8},
+        {"resolver": lambda *args, **kwargs: None},
+        {"fallback_resolver": lambda _provider: "live-key"},
+        {"override_snapshot_resolver": lambda _provider: None},
+    ],
+)
+def test_authoritative_runtime_rejects_competing_authority(extra):
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import AuthoritativeProviderScope
+
+    kwargs = {"user_id": 7, "team_ids": [], "org_ids": [], "trusted_base_url_override": False}
+    kwargs.update(extra)
+    with pytest.raises(ValueError):
+        ProviderCredentialRuntime(
+            authoritative_scope=AuthoritativeProviderScope(7), server_config_snapshot={}, **kwargs
+        )
+
+
+@pytest.mark.asyncio
+async def test_authoritative_runtime_does_not_join_older_authority_read(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import AuthoritativeProviderScope
+
+    read_started = asyncio.Event()
+    release_read = asyncio.Event()
+    active = True
+    calls = 0
+
+    async def resolver(provider, **kwargs):
+        nonlocal calls
+        calls += 1
+        authority_at_read = active
+        if calls == 1:
+            read_started.set()
+            await release_read.wait()
+        if not authority_at_read:
+            raise ByokResolutionError("credential_scope_revoked", provider)
+        return _resolution(provider)
+
+    monkeypatch.setattr(runtime_module, "resolve_byok_credentials", resolver)
+    runtime = ProviderCredentialRuntime(
+        user_id=7,
+        team_ids=[],
+        org_ids=[],
+        trusted_base_url_override=False,
+        authoritative_scope=AuthoritativeProviderScope(7),
+        server_config_snapshot={},
+    )
+    first = asyncio.create_task(runtime.resolve("openai"))
+    try:
+        await asyncio.wait_for(read_started.wait(), 1)
+        active = False
+        with pytest.raises(ByokResolutionError, match="credential_scope_revoked"):
+            await asyncio.wait_for(runtime.resolve("openai"), 0.5)
+        assert calls == 2
+    finally:
+        release_read.set()
+        await asyncio.gather(first, return_exceptions=True)
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_authoritative_runtime_close_owns_each_independent_read(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import AuthoritativeProviderScope
+
+    two_reads_started = asyncio.Event()
+    calls = 0
+    cancelled = 0
+
+    async def resolver(provider, **kwargs):
+        nonlocal calls, cancelled
+        calls += 1
+        if calls == 2:
+            two_reads_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled += 1
+            raise
+
+    monkeypatch.setattr(runtime_module, "resolve_byok_credentials", resolver)
+    runtime = ProviderCredentialRuntime(
+        user_id=7,
+        team_ids=[],
+        org_ids=[],
+        trusted_base_url_override=False,
+        authoritative_scope=AuthoritativeProviderScope(7),
+        server_config_snapshot={},
+    )
+    callers = [asyncio.create_task(runtime.resolve("openai")) for _ in range(2)]
+    try:
+        await asyncio.wait_for(two_reads_started.wait(), 1)
+        await runtime.close()
+        outcomes = await asyncio.gather(*callers, return_exceptions=True)
+        assert all(isinstance(outcome, RuntimeError) for outcome in outcomes)
+        assert cancelled == 2
+    finally:
+        await runtime.close()
+        await asyncio.gather(*callers, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_authoritative_runtime_cannot_publish_after_waiter_cleanup_close(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import AuthoritativeProviderScope
+
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    original_gather = asyncio.gather
+    caller = None
+
+    async def resolver(provider, **kwargs):
+        return _resolution(provider)
+
+    async def controlled_gather(*awaitables, **kwargs):
+        result = await original_gather(*awaitables, **kwargs)
+        if asyncio.current_task() is caller:
+            cleanup_started.set()
+            await release_cleanup.wait()
+        return result
+
+    monkeypatch.setattr(runtime_module, "resolve_byok_credentials", resolver)
+    monkeypatch.setattr(runtime_module.asyncio, "gather", controlled_gather)
+    runtime = ProviderCredentialRuntime(
+        user_id=7,
+        team_ids=[],
+        org_ids=[],
+        trusted_base_url_override=False,
+        authoritative_scope=AuthoritativeProviderScope(7),
+        server_config_snapshot={"openai_api": {"api_base_url": "https://fixed.example/v1"}},
+    )
+    caller = asyncio.create_task(runtime.resolve("openai"))
+    try:
+        await asyncio.wait_for(cleanup_started.wait(), 1)
+        await runtime.close()
+        release_cleanup.set()
+        with pytest.raises(RuntimeError, match="runtime is closed"):
+            await caller
+        assert runtime._issued_entries == {}
+    finally:
+        release_cleanup.set()
+        await runtime.close()
+        await original_gather(caller, return_exceptions=True)

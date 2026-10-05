@@ -11,6 +11,7 @@ from typing import Any, NoReturn, Protocol
 from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    AuthoritativeProviderScope,
     ByokResolutionError,
     ByokResolutionStatus,
     ResolvedByokCredentials,
@@ -78,11 +79,15 @@ class _ProviderCallTransportSnapshot:
 def _trusted_endpoint_from_snapshot(
     provider: str,
     app_config: Mapping[str, Any] | None,
+    *,
+    authoritative: bool = False,
 ) -> TrustedProviderEndpoint | None:
     """Build an exact-origin capability solely from a captured config snapshot."""
 
     provider_norm = canonical_provider_name(provider)
     field_spec = _SCOPED_ENDPOINT_FIELDS.get(provider_norm)
+    if authoritative and provider_norm == "openai":
+        field_spec = ("openai_api", ("api_base_url", "api_base", "base_url"))
     custom_number = custom_openai_provider_number(provider_norm)
     if field_spec is None and custom_number is not None:
         field_spec = (
@@ -374,6 +379,8 @@ class ProviderCredentialRuntime:
 
     __slots__ = (
         "_user_id",
+        "_authoritative_scope",
+        "_authoritative_tasks",
         "_team_ids",
         "_org_ids",
         "_trusted_base_url_override",
@@ -394,6 +401,7 @@ class ProviderCredentialRuntime:
         "_closed",
         "_closed_event",
         "_close_task",
+        "_lifecycle_tasks",
     )
 
     def __init__(
@@ -407,8 +415,22 @@ class ProviderCredentialRuntime:
         server_config_snapshot: Mapping[str, Any] | None = None,
         override_snapshot_resolver: _OverrideSnapshotResolver | None = None,
         resolver: _Resolver | None = None,
+        authoritative_scope: AuthoritativeProviderScope | None = None,
     ) -> None:
         uses_default_resolver = resolver is None or resolver is resolve_byok_credentials
+        if authoritative_scope is not None:
+            if (
+                type(authoritative_scope) is not AuthoritativeProviderScope
+                or type(user_id) is not int
+                or user_id != authoritative_scope.user_id
+                or team_ids
+                or org_ids
+                or not uses_default_resolver
+                or fallback_resolver is not None
+                or override_snapshot_resolver is not None
+            ):
+                raise ValueError("Authoritative resolution requires one exact scope and frozen settings")
+            trusted_base_url_override = False
         if uses_default_resolver and fallback_resolver is not None:
             raise ValueError(
                 "Default credential resolution requires a frozen server config snapshot"
@@ -427,6 +449,8 @@ class ProviderCredentialRuntime:
                 RuntimeError("Provider server configuration is unavailable")
             )
         self._user_id = user_id
+        self._authoritative_scope = authoritative_scope
+        self._authoritative_tasks: set[asyncio.Task[_ResolvedEntry]] = set()
         self._team_ids = list(team_ids or ())
         self._org_ids = list(org_ids or ())
         self._trusted_base_url_override = trusted_base_url_override is True
@@ -447,6 +471,36 @@ class ProviderCredentialRuntime:
         self._closed = False
         self._closed_event = asyncio.Event()
         self._close_task: asyncio.Task[None] | None = None
+        self._lifecycle_tasks: set[asyncio.Task[Any]] = set()
+
+    def _own_lifecycle(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
+        """Retain work from creation through termination, independent of caches."""
+        self._lifecycle_tasks.add(task)
+        task.add_done_callback(self._lifecycle_task_done)
+        return task
+
+    def _lifecycle_task_done(self, task: asyncio.Task[Any]) -> None:
+        """Consume late private failures and release only terminal work."""
+        if not task.cancelled():
+            task.exception()
+        self._lifecycle_tasks.discard(task)
+
+    @property
+    def has_pending_shutdown_work(self) -> bool:
+        """Report live work even after bounded close has scrubbed lookup maps."""
+        return any(not task.done() for task in self._lifecycle_tasks)
+
+    async def wait_for_shutdown_completion(self) -> None:
+        """Drain all lifecycle work without cancelling it or installing shield callbacks."""
+        cancellation = None
+        while pending := {task for task in self._lifecycle_tasks if not task.done()}:
+            try:
+                await asyncio.wait(pending)
+            except asyncio.CancelledError as error:
+                if cancellation is None:
+                    cancellation = error
+        if cancellation is not None:
+            raise cancellation
 
     async def resolve(
         self,
@@ -458,6 +512,24 @@ class ProviderCredentialRuntime:
         """Return explicit credentials for a normalized provider."""
         self._ensure_open()
         provider_norm = canonical_provider_name(provider)
+        if self._authoritative_scope is not None:
+            generation = self._generations.get(provider_norm, 0) + 1
+            self._generations[provider_norm] = generation
+            task = self._own_lifecycle(
+                asyncio.create_task(
+                    self._resolve_entry(
+                        provider_norm,
+                        generation=generation,
+                        force_refresh=force_refresh,
+                        override_snapshot=None,
+                    )
+                )
+            )
+            self._authoritative_tasks.add(task)
+            task.add_done_callback(self._forget_authoritative_task)
+            entry = await self._await_owned(task)
+            self._ensure_open()
+            return self._new_handle(provider_norm, entry)
         if force_refresh:
             override_snapshot = self._capture_override_snapshot(provider_norm, model)
             return await self._refresh(provider_norm, model, override_snapshot)
@@ -485,12 +557,14 @@ class ProviderCredentialRuntime:
                     generation = self._generations.get(provider_norm, 0) + 1
                     self._generations[provider_norm] = generation
                     self._cache.pop(provider_norm, None)
-                task = asyncio.create_task(
-                    self._resolve_entry(
-                        provider_norm,
-                        generation=generation,
-                        force_refresh=False,
-                        override_snapshot=override_snapshot,
+                task = self._own_lifecycle(
+                    asyncio.create_task(
+                        self._resolve_entry(
+                            provider_norm,
+                            generation=generation,
+                            force_refresh=False,
+                            override_snapshot=override_snapshot,
+                        )
                     )
                 )
                 self._inflight[provider_norm] = task
@@ -531,7 +605,7 @@ class ProviderCredentialRuntime:
 
         task = self._usage_tasks.get(entry)
         if task is None:
-            task = asyncio.create_task(self._mark_entry_used(handle.provider, entry))
+            task = self._own_lifecycle(asyncio.create_task(self._mark_entry_used(handle.provider, entry)))
             self._usage_tasks[entry] = task
             task.add_done_callback(
                 lambda completed, owned_entry=entry: self._forget_usage_task(
@@ -553,7 +627,7 @@ class ProviderCredentialRuntime:
                 return
             self._closed = True
             self._closed_event.set()
-            task = asyncio.create_task(self._close_owned())
+            task = self._own_lifecycle(asyncio.create_task(self._close_owned()))
             self._close_task = task
             task.add_done_callback(self._close_task_done)
 
@@ -607,13 +681,15 @@ class ProviderCredentialRuntime:
                         raise RuntimeError(
                             "Provider credential generation is unavailable"
                         )
-                task = asyncio.create_task(
-                    self._resolve_entry(
-                        provider,
-                        generation=generation,
-                        force_refresh=True,
-                        override_snapshot=override_snapshot,
-                        rejected_credential_generation=rejected_credential_generation,
+                task = self._own_lifecycle(
+                    asyncio.create_task(
+                        self._resolve_entry(
+                            provider,
+                            generation=generation,
+                            force_refresh=True,
+                            override_snapshot=override_snapshot,
+                            rejected_credential_generation=rejected_credential_generation,
+                        )
                     )
                 )
                 self._refresh_tasks[provider] = task
@@ -695,6 +771,8 @@ class ProviderCredentialRuntime:
                 "force_oauth_refresh": force_refresh,
                 "trusted_base_url_override": self._trusted_base_url_override,
             }
+            if self._authoritative_scope is not None:
+                resolver_kwargs["authoritative_scope"] = self._authoritative_scope
             if self._uses_default_resolver:
                 if override_snapshot is not None:
                     base_fallback = resolve_static_server_fallback_from_snapshot(
@@ -825,7 +903,7 @@ class ProviderCredentialRuntime:
             pass
 
     async def _await_owned(self, task: asyncio.Task[_ResolvedEntry]) -> _ResolvedEntry:
-        closed_waiter = asyncio.create_task(self._closed_event.wait())
+        closed_waiter = self._own_lifecycle(asyncio.create_task(self._closed_event.wait()))
         try:
             done, _pending = await asyncio.wait(
                 {task, closed_waiter},
@@ -866,7 +944,8 @@ class ProviderCredentialRuntime:
             ),
             trusted_endpoint=_trusted_endpoint_from_snapshot(
                 provider,
-                app_config,
+                self._server_config_snapshot if self._authoritative_scope is not None else app_config,
+                authoritative=self._authoritative_scope is not None,
             ),
             _issued_token=_RUNTIME_ISSUED_CREDENTIAL_TOKEN,
         )
@@ -896,8 +975,13 @@ class ProviderCredentialRuntime:
         if not task.cancelled():
             task.exception()
 
+    def _forget_authoritative_task(self, task: asyncio.Task[_ResolvedEntry]) -> None:
+        self._authoritative_tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
+
     async def _close_owned(self) -> None:
-        cancellable_tasks = set(self._inflight.values()) | set(self._refresh_tasks.values())
+        cancellable_tasks = set(self._inflight.values()) | set(self._refresh_tasks.values()) | self._authoritative_tasks
         usage_tasks = set(self._usage_tasks.values())
         for task in cancellable_tasks:
             if not task.done():
@@ -919,6 +1003,7 @@ class ProviderCredentialRuntime:
             self._issued_entries.clear()
             self._inflight.clear()
             self._refresh_tasks.clear()
+            self._authoritative_tasks.clear()
             self._usage_tasks.clear()
             self._refresh_locks.clear()
             self._refreshed_generations.clear()
@@ -926,6 +1011,7 @@ class ProviderCredentialRuntime:
             self._team_ids.clear()
             self._org_ids.clear()
             self._user_id = None
+            self._authoritative_scope = None
             self._trusted_base_url_override = False
             self._fallback_resolver = None
             self._server_config_snapshot.clear()

@@ -419,6 +419,7 @@ def _create_version_089_rbac_database(db_path: Path) -> None:
 def _migrate_version_089_database(db_path: Path) -> None:
     from tldw_Server_API.app.core.AuthNZ.migrations import (
         get_authnz_migrations,
+        migration_015_create_llm_usage_tables,
         migration_090_seed_notification_permissions,
     )
     from tldw_Server_API.app.core.DB_Management.migrations import MigrationManager
@@ -435,6 +436,7 @@ def _migrate_version_089_database(db_path: Path) -> None:
         manager.add_migration(migration)
 
     with sqlite3.connect(db_path) as conn:
+        migration_015_create_llm_usage_tables(conn)
         conn.execute(
             "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
             (89, "Seed MCP prompts.read permission"),

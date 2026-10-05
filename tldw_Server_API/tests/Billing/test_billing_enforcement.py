@@ -27,29 +27,28 @@ All tests use mocking to isolate from database dependencies. For integration
 tests with real database, see test_billing_endpoints_integration.py.
 """
 import re
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
+import pytest
+
+from tldw_Server_API.app.core.Billing import enforcement as enforcement_module
 from tldw_Server_API.app.core.Billing.enforcement import (
     BillingEnforcer,
-    LimitCategory,
     EnforcementAction,
+    LimitCategory,
     LimitCheckResult,
     UsageSummary,
-    check_billing_with_rg,
-    get_billing_enforcer,
     billing_enabled,
+    check_billing_with_rg,
     enforcement_enabled,
+    get_billing_enforcer,
 )
-from tldw_Server_API.app.core.Billing import enforcement as enforcement_module
 from tldw_Server_API.app.core.Billing.plan_limits import (
-    PlanTier,
-    PlanLimits,
     DEFAULT_LIMITS,
     VALID_PLAN_NAMES,
-    get_plan_limits,
+    PlanTier,
     check_limit,
-    SOFT_LIMIT_PERCENT,
+    get_plan_limits,
 )
 
 
@@ -384,10 +383,9 @@ class TestBillingEnforcer:
         await enforcer._get_llm_tokens_month(org_id=1)
 
         assert fake_conn.params is not None
-        assert len(fake_conn.params) == 3
-
-        ts_param = fake_conn.params[0]
-        assert isinstance(ts_param, str)
+        timestamp_params = [param for param in fake_conn.params if isinstance(param, str)]
+        assert len(timestamp_params) == 1
+        ts_param = timestamp_params[0]
         assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", ts_param)
 
     @pytest.mark.asyncio

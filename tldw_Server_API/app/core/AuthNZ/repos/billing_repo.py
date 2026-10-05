@@ -15,6 +15,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import fetch_one
 from tldw_Server_API.app.core.Billing.plan_limits import get_plan_limits
 
 
@@ -952,6 +953,27 @@ class AuthnzBillingRepo:
     # Effective Limits Helper
     # =========================================================================
 
+    @staticmethod
+    def _has_active_subscription(subscription: dict[str, Any] | None) -> bool:
+        """Only active, trialing, and canceling subscriptions retain plan limits."""
+        if not subscription:
+            return False
+        status = str(subscription.get("status", "active")).strip().lower()
+        return status in {"active", "trialing", "canceling"}
+
+    def _effective_org_limits(
+        self,
+        subscription: dict[str, Any] | None,
+        free_plan: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Merge stored overrides over canonical defaults for both read paths."""
+        if subscription is not None and self._has_active_subscription(subscription):
+            base_limits = get_plan_limits(subscription.get("plan_name", "free"))
+            return {**base_limits, **subscription.get("effective_limits", {})}
+        base_limits = get_plan_limits("free")
+        free_limits = self._normalize_storage_limits((free_plan or {}).get("limits", {}) or {})
+        return {**base_limits, **free_limits}
+
     async def get_org_limits(self, org_id: int) -> dict[str, Any]:
         """
         Get the effective limits for an organization.
@@ -960,33 +982,42 @@ class AuthnzBillingRepo:
         Falls back to free tier if no subscription exists.
         """
         subscription = await self.get_org_subscription(org_id)
-
-        if not subscription:
-            base_limits = get_plan_limits("free")
-            # Fall back to free plan from DB if present, merged over canonical defaults
-            # so newly introduced categories are not silently treated as unlimited.
+        free_plan = None
+        if not self._has_active_subscription(subscription):
             free_plan = await self.get_plan_by_name("free")
-            if free_plan:
-                free_plan_limits = self._normalize_storage_limits(free_plan.get("limits", {}) or {})
-                return {**base_limits, **free_plan_limits}
-            # Ultimate fallback to canonical defaults.
-            return base_limits
+        return self._effective_org_limits(subscription, free_plan)
 
-        # Only billable/active subscriptions should retain paid limits.
-        # Other statuses (e.g. pending, past_due, canceled) fall back to free-tier
-        # limits to avoid stale paid access after billing failures.
-        status = str(subscription.get("status", "active")).strip().lower()
-        paid_statuses = {"active", "trialing", "canceling"}
-        if status not in paid_statuses:
-            base_limits = get_plan_limits("free")
-            free_plan = await self.get_plan_by_name("free")
-            if free_plan:
-                free_plan_limits = self._normalize_storage_limits(free_plan.get("limits", {}) or {})
-                return {**base_limits, **free_plan_limits}
-            return base_limits
+    async def get_org_limits_on_connection(self, conn: Any, org_id: int) -> dict[str, Any]:
+        """Read uncached limits only on the caller's connection; propagate failures.
 
-        plan_name = subscription.get("plan_name", "free")
-        base_limits = get_plan_limits(plan_name)
-        effective_limits = subscription.get("effective_limits", {})
-        # Merge defaults so newly added categories are not silently unlimited.
-        return {**base_limits, **effective_limits}
+        Never acquire another pool slot, start/end a transaction, or write. The
+        caller owns the billing-scope transaction and its lifetime.
+        """
+        if conn is None:
+            raise ValueError("Billing limits require a supplied connection")
+        postgres = self._is_postgres(conn)
+        row = await fetch_one(
+            conn,
+            postgres,
+            """
+            SELECT os.status, sp.name AS plan_name, sp.limits_json AS plan_limits_json,
+                   os.custom_limits_json
+            FROM org_subscriptions os
+            JOIN subscription_plans sp ON os.plan_id = sp.id
+            WHERE os.org_id = ?
+            """,
+            (org_id,),
+            ("status", "plan_name", "plan_limits_json", "custom_limits_json"),
+        )
+        subscription = self._subscription_row_to_dict(row) if row else None
+        free_plan = None
+        if not self._has_active_subscription(subscription):
+            row = await fetch_one(
+                conn,
+                postgres,
+                "SELECT limits_json FROM subscription_plans WHERE name = ?",
+                ("free",),
+                ("limits_json",),
+            )
+            free_plan = self._plan_row_to_dict(row) if row else None
+        return self._effective_org_limits(subscription, free_plan)

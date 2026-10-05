@@ -143,6 +143,85 @@ drain. There is no separate idempotency lock-TTL environment variable. Lock TTL
 is derived as the greater of the replay TTL and twice the module timeout plus
 the finalization bound, with a hard maximum of 604800 seconds.
 
+## Internal Bounded Model Completion
+
+The default runtime dependency bundle supplies a lazy
+`model_completion_port_factory`. It is an internal composition contract, not a
+tool, endpoint, or execution switch. Constructing the bundle does not construct
+a port or perform completion configuration, database, or provider I/O. Skills
+execution remains disabled and is owned by the later runner task.
+
+The factory accepts frozen operator `ModelCompletionPortSettings`: canonical
+`openai`, one fixed model, run timeout 1-120 seconds, and cancellation cleanup
+1-15 seconds. It returns a managed port with health, shutdown, and complete
+ownership draining. Unsupported providers, malformed policies, or uncertified
+paths return an unhealthy port with a static shared-infrastructure failure.
+Health checks never call a provider.
+
+Host configuration uses `[MCP-Model-Completion]` in `config.txt` with one
+`policy_json` value. It must be a JSON object of at most 65,536 UTF-8 bytes,
+with no duplicate or unknown fields. The required object shape is:
+
+```json
+{
+  "accounting": {
+    "input_cost_units_per_token": 0,
+    "output_cost_units_per_token": 0,
+    "monthly_token_limit": 1000000,
+    "monthly_cost_limit": 1000000000,
+    "governor_policy_id": "mcp.completion",
+    "input_token_overhead": 32,
+    "governor_tokens_per_cost_unit": 1000
+  },
+  "governor": {
+    "requests": {"rpm": 60, "burst": 1},
+    "tokens": {"per_min": 500000, "burst": 1},
+    "jobs": {"max_concurrent": 2, "ttl_sec": 135},
+    "scopes": ["user"],
+    "fail_mode": "fail_closed"
+  },
+  "output_token_field": "max_completion_tokens"
+}
+```
+
+This example is structural, not provider pricing. Set the two per-token weights
+explicitly in integer nanodollars; zero means an explicitly zero-priced model.
+Accounting counts and prices are nonnegative signed-64-bit integers, and the
+tokens-per-governor-unit divisor is positive. The monthly limits must be
+explicit integers or `null` for no additional operator ceiling. Active hosted
+Billing limits still apply; canonical usage recording is required even when
+hosted Billing is inactive. Governor cost-unit estimates are separate from
+nanodollars; the in-process governor does not enforce a cost-per-minute bucket.
+Such a bucket is rejected, not accepted as an ignored control. Monetary limits
+are enforced by the durable monthly scope accounting boundary.
+
+Governor rates, bursts, concurrency, and lease duration must be positive
+non-boolean integers. Bucket capacities must be at most `2**53 - 1`; token
+capacity must cover the largest hard-bounded request, so the
+ordinary governor cannot silently clamp its reservation. Lease duration must
+cover run plus cleanup, with a maximum of 3,600 seconds. Scopes must include
+`user`, may additionally include `global`, and may not repeat. Only
+`fail_closed` is accepted, and policy ID `default` is rejected. The output token
+field must be `max_completion_tokens` or `max_tokens`, explicitly selected for
+the fixed model's native contract.
+
+The first production composition certifies a dedicated in-process memory
+governor. `RG_BACKEND` must be absent or exactly `memory`; selecting Redis or
+another backend makes this port unavailable, without substituting memory.
+Concurrency and rate buckets are therefore per port/process, while durable
+monthly scope reservations remain shared through AuthNZ. Multi-process
+concurrency requires a separately certified shared governor; the factory's
+trusted injection seams do not certify one automatically.
+
+The factory captures server provider configuration and policy once per port.
+The endpoint comes only from the captured `openai_api` base URL fields; it never
+falls back to a request endpoint or discovers a provider. Scoped credentials
+cannot override it. Missing explicit endpoint configuration is unavailable.
+Provider/model/pricing changes require construction of a replacement port and
+complete shutdown draining of its predecessor. Internal test seams can inject
+repositories, billing, governor, clock, and certified transport; none is
+accepted from request metadata.
+
 ## Managed External Credential Brokering
 
 Managed external MCP servers now follow a brokered runtime model instead of static secret hydration.

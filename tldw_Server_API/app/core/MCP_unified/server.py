@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
 )
 
 from .auth.rate_limiter import RateLimitExceeded
+from .auth_scope import project_authenticated_execution_scope
 from .config import get_config, get_config_warnings, validate_config
 from .interfaces.runtime import MCPRuntimeDependencies, WebSocketStream
 from .jsonrpc_transport import (
@@ -40,6 +41,7 @@ from .jsonrpc_transport import (
 )
 from .module_surface import describe_module_surface
 from .protocol import MCPError, MCPProtocol, MCPRequest, MCPResponse, RequestContext, _trusted_compat_claims_metadata
+from .protocol_types import AuthenticatedExecutionScope
 from .security.ip_filter import get_ip_access_controller
 from .security.request_guards import enforce_client_certificate_headers
 from .transport.guarded_slides_websocket import guarded_slides_websocket_metadata
@@ -244,7 +246,13 @@ class WebSocketConnection:
         session_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
         cwd: Optional[str] = None,
+        server_auth_scope: AuthenticatedExecutionScope | None = None,
     ):
+        if server_auth_scope is not None and not isinstance(
+            server_auth_scope,
+            AuthenticatedExecutionScope,
+        ):
+            raise TypeError("server_auth_scope must be an AuthenticatedExecutionScope or None")
         self.websocket = websocket
         self.connection_id = connection_id
         self.client_id = client_id
@@ -253,6 +261,7 @@ class WebSocketConnection:
         self.session_id = session_id or connection_id
         self.workspace_id = workspace_id
         self.cwd = cwd
+        self.server_auth_scope = server_auth_scope
         self.connected_at = datetime.now(timezone.utc)
         self.last_activity = self.connected_at
         self.message_count = 0
@@ -1461,6 +1470,7 @@ class MCPServer:
             if cookie_session_id is not None
             else None
         ) or None
+        server_auth_scope: AuthenticatedExecutionScope | None = None
         stable_session_id = _normalize_optional_text(mcp_session_id)
         workspace_key = _normalize_optional_text(workspace_id)
         cwd_key = _normalize_optional_text(cwd)
@@ -1480,6 +1490,16 @@ class MCPServer:
                 ] = validation_pool
         if user_id is not None:
             principal = getattr(websocket_state, "auth_principal", None)
+            try:
+                server_auth_scope = project_authenticated_execution_scope(
+                    authenticated_user_id=user_id,
+                    principal_user_id=getattr(principal, "user_id", None),
+                    principal_active_org_id=getattr(principal, "active_org_id", None),
+                    principal_active_team_id=getattr(principal, "active_team_id", None),
+                )
+            except ValueError:
+                await websocket.close(code=1008, reason="Authentication failed")
+                return
             metadata["auth_via"] = "single_user_session"
             metadata["single_user_session_id"] = cookie_session_id
             metadata["roles"] = list(getattr(principal, "roles", []) or [])
@@ -1577,14 +1597,25 @@ class MCPServer:
         if auth_token:
             ok = False
             authnz_token_failed = False
+            identity = None
             try:
                 # Try AuthNZ JWT first for consistency with HTTP endpoints
                 identity = await self.auth_provider.authenticate_authnz_websocket_token(
                     auth_token,
                     websocket=websocket,
                 )
-                if identity is not None and identity.user_id:
-                    user_id = identity.user_id
+                if identity is not None:
+                    if not identity.user_id:
+                        raise ValueError("Authenticated identity is missing a user ID")
+                    authenticated_user_id = identity.user_id
+                    authenticated_scope = project_authenticated_execution_scope(
+                        authenticated_user_id=authenticated_user_id,
+                        principal_user_id=authenticated_user_id,
+                        principal_active_org_id=identity.active_org_id,
+                        principal_active_team_id=identity.active_team_id,
+                    )
+                    user_id = authenticated_user_id
+                    server_auth_scope = authenticated_scope
                     ok = True
                     logger.info(f"WebSocket authenticated for user (AuthNZ JWT): {user_id}")
                     if identity.roles:
@@ -1598,6 +1629,9 @@ class MCPServer:
                         return
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"AuthNZ JWT auth failed: {self._mask_secrets(str(e))}")
+                if identity is not None:
+                    await websocket.close(code=1008, reason="Authentication failed")
+                    return
                 if self._is_authnz_access_token(auth_token):
                     authnz_token_failed = True
                     if not api_key:
@@ -1608,6 +1642,7 @@ class MCPServer:
                 try:
                     token_data = self.jwt_manager.verify_token(auth_token)
                     user_id = token_data.sub
+                    server_auth_scope = None
                     ok = True
                     logger.info(f"WebSocket authenticated for user (MCP JWT): {user_id}")
                     if token_data.roles:
@@ -1626,6 +1661,7 @@ class MCPServer:
             if compat_auth_via is not None:
                 settings = get_settings()
                 user_id = str(getattr(settings, "SINGLE_USER_FIXED_ID", "1"))
+                server_auth_scope = None
                 metadata.update(
                     _trusted_compat_claims_metadata(
                         auth_via=compat_auth_via,
@@ -1648,7 +1684,13 @@ class MCPServer:
                         ip_address=client_ip,
                     )
                     if info and info.get("user_id"):
-                        user_id = str(info["user_id"])
+                        authenticated_user_id = str(info["user_id"])
+                        authenticated_scope = project_authenticated_execution_scope(
+                            authenticated_user_id=authenticated_user_id,
+                            api_key_info=info,
+                        )
+                        user_id = authenticated_user_id
+                        server_auth_scope = authenticated_scope
                         # Attach org/team context
                         if info.get("org_id") is not None:
                             metadata["org_id"] = info.get("org_id")
@@ -1750,6 +1792,7 @@ class MCPServer:
                 session_id=stable_session_id or connection_id,
                 workspace_id=workspace_key,
                 cwd=cwd_key,
+                server_auth_scope=server_auth_scope,
             )
 
             self.connections[connection_id] = connection
@@ -1955,6 +1998,7 @@ class MCPServer:
                 session_id=connection.session_id,
                 metadata=context_metadata,
                 db_paths=self._resolve_user_db_paths(connection.user_id),
+                server_auth_scope=connection.server_auth_scope,
             )
 
             # Process MCP request (supports single, notification, and batch)
@@ -2024,6 +2068,7 @@ class MCPServer:
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        server_auth_scope: AuthenticatedExecutionScope | None = None,
     ) -> MCPResponse:
         """
         Handle an HTTP MCP request.
@@ -2094,6 +2139,7 @@ class MCPServer:
             session_id=session_id,
             metadata=metadata_map,
             db_paths=self._resolve_user_db_paths(user_id),
+            server_auth_scope=server_auth_scope,
         )
 
         # Process request
@@ -2128,6 +2174,7 @@ class MCPServer:
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        server_auth_scope: AuthenticatedExecutionScope | None = None,
     ) -> Optional[list[MCPResponse]]:
         """
         Handle a batch of HTTP MCP requests with consistent session semantics.
@@ -2194,6 +2241,7 @@ class MCPServer:
             session_id=session_id,
             metadata=metadata_map,
             db_paths=self._resolve_user_db_paths(user_id),
+            server_auth_scope=server_auth_scope,
         )
 
         # Process batch request

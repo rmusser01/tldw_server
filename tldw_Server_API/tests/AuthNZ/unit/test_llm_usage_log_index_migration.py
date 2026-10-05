@@ -28,15 +28,15 @@ def test_fresh_sqlite_db_has_the_user_ts_index(tmp_path: Path) -> None:
 def _create_legacy_llm_usage_log_database(db_path: Path) -> None:
     """A version-98 database: llm_usage_log exists with only the pre-migration-99 indexes."""
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE llm_usage_log (
                 id INTEGER PRIMARY KEY,
                 ts TIMESTAMP NOT NULL,
-                user_id INTEGER
+                user_id INTEGER,
+                operation TEXT,
+                request_id TEXT
             )
-            """
-        )
+            """)
         conn.execute("CREATE INDEX idx_llm_usage_log_ts ON llm_usage_log(ts)")
         conn.execute("CREATE INDEX idx_llm_usage_log_user ON llm_usage_log(user_id)")
         conn.execute(
