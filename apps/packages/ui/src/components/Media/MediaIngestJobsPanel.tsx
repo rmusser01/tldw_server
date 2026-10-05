@@ -3,6 +3,11 @@ import {
   MEDIA_REVIEW_SELECTION_SETTING,
   MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING
 } from "@/services/settings/ui-settings"
+import {
+  completedIngestJobIndicatesFailure,
+  extractCompletedIngestJobMediaId,
+  extractCompletedIngestJobPayload
+} from "@/services/tldw/ingest-job-results"
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import {
   quickIngestAuthority,
@@ -28,7 +33,7 @@ type MediaIngestJobStatus = {
   progress_percent?: number | null
   progress_message?: string | null
   error_message?: string | null
-  result?: { media_id?: number | string; persisted?: boolean }
+  result?: unknown
 }
 const activeJob = (status: string) =>
   ["running", "processing", "started", "queued"].includes(status.toLowerCase())
@@ -85,15 +90,22 @@ export function MediaIngestJobsPanel() {
     "ingestJobsLoadError",
     "Unable to refresh this import. Try again."
   )
-  const loadJobs = useCallback(async () => {
-    if (!authorityKey || !batchIds) return
-    const request = ++sequence.current
-    let operation: ReturnType<typeof quickIngestAuthority.capture>
+  const captureHistoryOperation = useCallback(() => {
+    if (!authorityKey) return null
     try {
-      operation = quickIngestAuthority.capture({ sessionBound: false })
+      const operation = quickIngestAuthority.capture({ sessionBound: false })
+      return operation.authorityKey === authorityKey && operation.isCurrent()
+        ? operation
+        : null
     } catch {
-      return
+      return null
     }
+  }, [authorityKey])
+  const loadJobs = useCallback(async () => {
+    if (!batchIds) return
+    const operation = captureHistoryOperation()
+    if (!operation) return
+    const request = ++sequence.current
     const current = () => request === sequence.current && operation.isCurrent()
     setLoading(true)
     setError(null)
@@ -151,8 +163,15 @@ export function MediaIngestJobsPanel() {
               "cancelled"
             ].includes(job.status.toLowerCase())
         )
+        const outcomes = (job: MediaIngestJobStatus): unknown[] => {
+          const payload = extractCompletedIngestJobPayload(job)
+          if (Array.isArray(job.result)) return job.result
+          return Array.isArray(payload?.results) ? payload.results : [job]
+        }
         const failed = next.some((job) =>
-          ["failed", "error"].includes(job.status.toLowerCase())
+          ["failed", "error"].includes(job.status.toLowerCase()) ||
+          completedIngestJobIndicatesFailure(job) ||
+          outcomes(job).some(completedIngestJobIndicatesFailure)
         )
         const cancelled = next.every(
           (job) => job.status.toLowerCase() === "cancelled"
@@ -160,18 +179,24 @@ export function MediaIngestJobsPanel() {
         useQuickIngestSessionStore.getState().updateRecentImport(selectedId, {
           lifecycle: anyActive
             ? "processing"
-            : failed
-              ? "partial_failure"
-              : cancelled
-                ? "cancelled"
+            : cancelled
+              ? "cancelled"
+              : failed
+                ? "partial_failure"
                 : "completed",
           savedMediaIds: next
             .filter(
               (job) =>
                 ["completed", "succeeded"].includes(job.status.toLowerCase()) &&
-                job.result?.persisted !== false
+                !completedIngestJobIndicatesFailure(job) &&
+                extractCompletedIngestJobPayload(job)?.persisted !== false
             )
-            .map((job) => Number(job.result?.media_id))
+            .flatMap(outcomes)
+            .filter((result) =>
+              !completedIngestJobIndicatesFailure(result) &&
+              extractCompletedIngestJobPayload(result)?.persisted !== false
+            )
+            .map((result) => Number(extractCompletedIngestJobMediaId(result)))
             .filter((id) => Number.isSafeInteger(id) && id > 0)
         })
       }
@@ -183,7 +208,7 @@ export function MediaIngestJobsPanel() {
     } finally {
       if (current()) setLoading(false)
     }
-  }, [authorityKey, batchIds, selectedId, loadError])
+  }, [captureHistoryOperation, batchIds, selectedId, loadError])
 
   useEffect(() => {
     if (!panelCollapsed) void loadJobs()
@@ -217,12 +242,8 @@ export function MediaIngestJobsPanel() {
 
   const reviewSaved = async (item: RecentImport) => {
     if (item.authorityKey !== authorityKey || !item.savedMediaIds.length) return
-    let operation: ReturnType<typeof quickIngestAuthority.capture>
-    try {
-      operation = quickIngestAuthority.capture({ sessionBound: false })
-    } catch {
-      return
-    }
+    const operation = captureHistoryOperation()
+    if (!operation || operation.authorityKey !== item.authorityKey) return
     setError(null)
     try {
       await setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, {
@@ -320,9 +341,15 @@ export function MediaIngestJobsPanel() {
                     session.authorityKey === authorityKey && (
                       <button
                         className={actionClass}
-                        onClick={() =>
-                          useQuickIngestSessionStore.getState().showSession()
-                        }>
+                        onClick={() => {
+                          const operation = captureHistoryOperation()
+                          const current = useQuickIngestSessionStore.getState()
+                          if (
+                            operation &&
+                            operation.authorityKey === item.authorityKey &&
+                            current.session?.id === item.id
+                          ) current.showSession()
+                        }}>
                         {qi("resumeImport", "Resume import")}
                       </button>
                     )}
@@ -330,6 +357,7 @@ export function MediaIngestJobsPanel() {
                     <button
                       className={actionClass}
                       onClick={() => {
+                        if (!captureHistoryOperation()) return
                         setDiagnosticBatch("")
                         if (selectedId === item.id) void loadJobs()
                         else setSelectedId(item.id)
@@ -370,6 +398,7 @@ export function MediaIngestJobsPanel() {
                 className={actionClass}
                 data-testid="media-ingest-batch-apply"
                 onClick={() => {
+                  if (!captureHistoryOperation()) return
                   setSelectedId(null)
                   setDiagnosticBatch(batchDraft.trim())
                 }}>

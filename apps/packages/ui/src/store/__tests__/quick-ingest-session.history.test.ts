@@ -164,4 +164,48 @@ describe("recent import metadata", () => {
     reloaded.persist.rehydrate()
     expect(reloaded.getState().recentImports[0].id).toBe("run")
   })
+  it.each(["completed", "partial_failure", "cancelled"] as const)(
+    "retains authoritative terminal %s outcomes after reload despite superseded job refresh",
+    (lifecycle) => {
+      const store = createQuickIngestSessionStore()
+      store.getState().setAuthority(owner)
+      start(store)
+      store
+        .getState()
+        .upsertSession({
+          lifecycle,
+          completedAt: 2,
+          results: [{ id: "source", type: "web", status: "ok", mediaId: 41 }]
+        })
+      store.getState().replaceWithNewDraft()
+      const reloaded = createQuickIngestSessionStore()
+      reloaded.getState().setAuthority(owner)
+      reloaded
+        .getState()
+        .updateRecentImport("run", {
+          lifecycle: "processing",
+          savedMediaIds: [99]
+        })
+      expect(reloaded.getState().recentImports[0]).toMatchObject({
+        lifecycle,
+        completedAt: 2,
+        savedMediaIds: [41]
+      })
+    }
+  )
+
+  it("allows recovery refresh when the session was interrupted rather than authoritatively completed", () => {
+    const store = createQuickIngestSessionStore()
+    store.getState().setAuthority(owner)
+    start(store)
+    store.getState().upsertSession({ lifecycle: "interrupted", completedAt: 2 })
+    store
+      .getState()
+      .updateRecentImport("run", { lifecycle: "completed", savedMediaIds: [41] })
+    expect(store.getState().recentImports[0]).toMatchObject({
+      lifecycle: "completed",
+      savedMediaIds: [41]
+    })
+  })
+
 })

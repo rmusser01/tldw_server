@@ -878,7 +878,14 @@ export const createQuickIngestSessionStore = (
               if (!isCurrent()) return
               set((state) => ({
                 recentImports: state.recentImports.map((item) =>
-                  item.id === id && item.authorityKey === state.authorityKey
+                  item.id === id &&
+                  item.authorityKey === state.authorityKey &&
+                  // Completed session results already reconcile retries per source.
+                  // Historical job unions also contain superseded attempts.
+                  !(
+                    item.completedAt != null &&
+                    ["completed", "partial_failure", "cancelled"].includes(item.lifecycle)
+                  )
                     ? {
                         ...item,
                         lifecycle: patch.lifecycle,

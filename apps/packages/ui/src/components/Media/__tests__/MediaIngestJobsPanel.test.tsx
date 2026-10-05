@@ -289,6 +289,9 @@ describe("MediaIngestJobsPanel", () => {
     await waitFor(() =>
       expect(store.getState().recentImports[0].savedMediaIds).toEqual([41, 42])
     )
+    expect(mocks.listMediaIngestJobs.mock.calls[1][1]).toBeDefined()
+    expect(mocks.listMediaIngestJobs.mock.calls[1][1].requestScope).toBe(mocks.listMediaIngestJobs.mock.calls[0][1].requestScope)
+    expect(mocks.listMediaIngestJobs.mock.calls[1][1].signal).toBe(mocks.listMediaIngestJobs.mock.calls[0][1].signal)
     expect(mocks.listMediaIngestJobs.mock.calls[1][0]).toEqual({
       batch_id: "batch-123",
       limit: 50,
@@ -323,4 +326,257 @@ describe("MediaIngestJobsPanel", () => {
     })
     expect(mocks.listMediaIngestJobs).not.toHaveBeenCalled()
   })
+  it.each(["Review 1 saved items", "Refresh import", "Resume import"])(
+    "rejects retained %s after a replacement owner is verified before capture",
+    async (action) => {
+      store
+        .getState()
+        .upsertSession({
+          lifecycle: "completed",
+          results: [{ id: "source", status: "ok", type: "web", mediaId: 41 }]
+        })
+      mocks.listMediaIngestJobs.mockResolvedValue({ jobs: [] })
+      render(<MediaIngestJobsPanel />)
+      if (action === "Refresh import") {
+        fireEvent.click(screen.getByRole("button", { name: action }))
+        await waitFor(() =>
+          expect(mocks.listMediaIngestJobs).toHaveBeenCalledTimes(1)
+        )
+        mocks.listMediaIngestJobs.mockClear()
+      }
+      const retained = screen.getByRole("button", { name: action })
+      act(() => {
+        mocks.owner = "verified-B"
+        store.getState().setAuthority(mocks.owner)
+        store
+          .getState()
+          .createDraftSession({ id: "owner-B-draft", visibility: "hidden" })
+        fireEvent.click(retained)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(mocks.setSetting).not.toHaveBeenCalled()
+      expect(mocks.navigate).not.toHaveBeenCalled()
+      expect(mocks.listMediaIngestJobs).not.toHaveBeenCalled()
+      expect(store.getState().session?.visibility).toBe("hidden")
+    }
+  )
+
+  it.each([
+    [
+      "logical failure",
+      { status: "Error", error: "Failed to save", media_id: 99 },
+      [],
+      "partial_failure"
+    ],
+    [
+      "saved warning",
+      { status: "Warning", warnings: ["Analysis unavailable"], db_id: 41 },
+      [41],
+      "completed"
+    ],
+    [
+      "unsaved warning",
+      { status: "Warning", warnings: ["Failed to save"] },
+      [],
+      "partial_failure"
+    ],
+    ["db alias", { status: "Success", db_id: 41 }, [41], "completed"],
+    ["camel alias", { status: "Success", mediaId: 41 }, [41], "completed"],
+    [
+      "nested media/add",
+      { results: [{ status: "Success", db_id: 41 }] },
+      [41],
+      "completed"
+    ],
+    ["direct media/add", [{ status: "Success", db_id: 41 }], [41], "completed"],
+    [
+      "unsaved alias",
+      { status: "Success", db_id: 41, persisted: false },
+      [],
+      "completed"
+    ],
+    [
+      "nested unsaved",
+      { results: [{ status: "Success", db_id: 41, persisted: false }] },
+      [],
+      "completed"
+    ],
+    [
+      "mixed logical outcomes",
+      {
+        results: [
+          { status: "Error", media_id: 99, error: "Failed to save" },
+          { status: "Success", db_id: 41 }
+        ]
+      },
+      [41],
+      "partial_failure"
+    ]
+  ])(
+    "refresh interprets %s through canonical result semantics",
+    async (_label, result, saved, lifecycle) => {
+      mocks.listMediaIngestJobs.mockResolvedValue({
+        jobs: [{ id: 7, status: "completed", result }]
+      })
+      render(<MediaIngestJobsPanel />)
+      fireEvent.click(screen.getByRole("button", { name: "Refresh import" }))
+      await screen.findByTestId("media-ingest-job-row-7")
+      expect(store.getState().recentImports[0]).toMatchObject({
+        savedMediaIds: saved,
+        lifecycle
+      })
+    }
+  )
+
+  it("preserves a successful durable retry after replacement, reload and refresh of both attempts", async () => {
+    store
+      .getState()
+      .markProcessingTracking({
+        mode: "webui-direct",
+        batchId: "failed-file-batch",
+        jobIds: [10]
+      })
+    store
+      .getState()
+      .upsertSession({
+        lifecycle: "partial_failure",
+        completedAt: 1,
+        results: [{ id: "source", type: "document", status: "error" }]
+      })
+    store.getState().upsertSession({ lifecycle: "processing", completedAt: null })
+    store
+      .getState()
+      .markProcessingTracking({
+        mode: "webui-direct",
+        batchId: "retry-file-batch",
+        jobIds: [20]
+      })
+    store
+      .getState()
+      .upsertSession({
+        lifecycle: "completed",
+        completedAt: 2,
+        results: [{ id: "source", type: "document", status: "ok", mediaId: 41 }]
+      })
+    store.getState().replaceWithNewDraft()
+    const raw = sessionStorage.getItem("tldw-quick-ingest-session")!
+    store.setState({ recentImports: [], session: null })
+    sessionStorage.setItem("tldw-quick-ingest-session", raw)
+    await store.persist.rehydrate()
+    mocks.listMediaIngestJobs.mockImplementation(async ({ batch_id }) => ({
+      jobs:
+        batch_id === "failed-file-batch"
+          ? [{ id: 10, status: "failed", error_message: "Old failed attempt" }]
+          : batch_id === "retry-file-batch"
+            ? [{ id: 20, status: "completed", result: { media_id: 41 } }]
+            : []
+    }))
+    render(<MediaIngestJobsPanel />)
+    fireEvent.click(screen.getByRole("button", { name: "Refresh import" }))
+    await screen.findByTestId("media-ingest-job-row-20")
+    expect(store.getState().recentImports[0]).toMatchObject({
+      lifecycle: "completed",
+      completedAt: 2,
+      savedMediaIds: [41],
+      jobIds: [10, 20]
+    })
+    expect(
+      mocks.listMediaIngestJobs.mock.calls.map(([request]) => request.batch_id)
+    ).toEqual(["batch-123", "failed-file-batch", "retry-file-batch"])
+    fireEvent.click(screen.getByRole("button", { name: "Review 1 saved items" }))
+    await waitFor(() =>
+      expect(mocks.navigate).toHaveBeenCalledWith("/media-multi")
+    )
+    expect(mocks.setSetting.mock.calls[0][1]).toEqual({
+      version: 1,
+      authorityKey: "verified-A",
+      selectedIds: [41]
+    })
+  })
+
+  it("retains the initiating review owner across the snapshot write", async () => {
+    store
+      .getState()
+      .upsertSession({
+        lifecycle: "completed",
+        results: [{ id: "source", status: "ok", type: "web", mediaId: 41 }]
+      })
+    let finish!: () => void
+    mocks.setSetting.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    render(<MediaIngestJobsPanel />)
+    fireEvent.click(screen.getByRole("button", { name: "Review 1 saved items" }))
+    await waitFor(() => expect(mocks.setSetting).toHaveBeenCalledTimes(1))
+    act(() => {
+      mocks.owner = "verified-B"
+      store.getState().setAuthority(mocks.owner)
+    })
+    await act(async () => {
+      finish()
+      await Promise.resolve()
+    })
+    expect(mocks.setSetting).toHaveBeenCalledTimes(1)
+    expect(mocks.setSetting.mock.calls[0][1]).toEqual({
+      version: 1,
+      authorityKey: "verified-A",
+      selectedIds: [41]
+    })
+    expect(mocks.navigate).not.toHaveBeenCalled()
+  })
+
+  it("abandons the next known-batch page after the initiating owner changes", async () => {
+    let finish!: (value: unknown) => void
+    mocks.listMediaIngestJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    render(<MediaIngestJobsPanel />)
+    fireEvent.click(screen.getByRole("button", { name: "Refresh import" }))
+    await waitFor(() =>
+      expect(mocks.listMediaIngestJobs).toHaveBeenCalledTimes(1)
+    )
+    const originalScope = mocks.listMediaIngestJobs.mock.calls[0][1].requestScope
+    act(() => {
+      mocks.owner = "verified-B"
+      store.getState().setAuthority(mocks.owner)
+    })
+    await act(async () => {
+      finish({
+        jobs: [{ id: 10, status: "completed", result: { media_id: 41 } }],
+        has_more: true,
+        next_offset: 50
+      })
+    })
+    expect(originalScope.userId).toBe("verified-A")
+    expect(mocks.listMediaIngestJobs).toHaveBeenCalledTimes(1)
+    expect(store.getState().recentImports).toEqual([])
+  })
+
+  it("keeps a wholly cancelled batch cancelled when using logical result interpretation", async () => {
+    mocks.listMediaIngestJobs.mockResolvedValue({
+      jobs: [
+        {
+          id: 7,
+          status: "cancelled",
+          cancellation_reason: "User requested cancellation"
+        }
+      ]
+    })
+    render(<MediaIngestJobsPanel />)
+    fireEvent.click(screen.getByRole("button", { name: "Refresh import" }))
+    await screen.findByTestId("media-ingest-job-row-7")
+    expect(store.getState().recentImports[0]).toMatchObject({
+      lifecycle: "cancelled",
+      savedMediaIds: []
+    })
+  })
+
 })
