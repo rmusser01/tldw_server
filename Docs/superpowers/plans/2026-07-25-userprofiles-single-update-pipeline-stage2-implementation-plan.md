@@ -721,6 +721,30 @@ pass. No runtime guard, required check, or license policy was weakened.
 **Tests**: Remote ref/PR/review/check readbacks, merge commit verification.
 **Status**: In Progress
 
+### October 5 Claims-Dev Rebase
+
+## Stage 1: Preserve Upstream Integration
+**Goal**: Replay reviewed WP2 onto authoritative dev `ba553fdc51`.
+**Success Criteria**: All 27 reviewed commits retain identical patches; upstream Claims/MediaDB changes and both scope-predicate entries are preserved; WP2 runtime, tests, ADR and API fingerprint remain unchanged.
+**Tests**: Clean rebase at `b4f0d013c4`, range-diff and touched-tree comparisons.
+**Status**: Complete
+
+## Stage 2: Focused Requalification
+**Goal**: Verify shared SQLite/startup integration without changing WP2 behavior.
+**Success Criteria**: Profile/Usage, writer/tenant, existing-only SQLite, official live PostgreSQL, CI contracts and strict Docs pass; API fingerprint and Bandit remain unchanged; independent rebase review has no actionable finding.
+**Tests**: Existing profile/writer gates plus MediaDB existing-only tests, Python3.12 export, touched-scope Bandit and independent review.
+**Status**: Complete
+
+Fresh verification: Profile/Usage 546 passed, with one existing Usage aggregator PostgreSQL skip because `DATABASE_URL` is unset; writer/context/lock-plan/guard/candidate/tenant plus existing-only SQLite 485 passed; official live PostgreSQL WP2 48 passed with no skips; CI contracts/ratchets 469 passed with four local Bash 3 license-fetch skips; strict Docs 212 passed. Ruff, compileall and diff checks passed. Python 3.12 OpenAPI fingerprint remains `5cb6cf6736d7` (2107 paths, 3247 schemas). Runtime Bandit matches the prior reviewed head and unchanged dev touched scope exactly: 20 existing findings, no new findings or scan errors. Independent bounded rebase review found no actionable regression and confirmed upstream-only integration, both predicate entries and all 27 equal patches. No implementation or fixture changes; WP3 remains untouched.
+
+## Stage 3: Publish and Gated Merge
+**Goal**: Publish with an explicit lease and merge only after fresh exact-head gates pass.
+**Success Criteria**: Latest authoritative dev remains an ancestor; human Change summary stays verbatim; current-head Qodo is clear and all required checks succeed; expected-head merge is verified and task tracking finalized.
+**Tests**: Authoritative remote/PR/review/check readbacks and merge verification.
+**Status**: In Progress
+
+Before publication, authoritative dev remains `ba553fdc51a16ba04330754671f0c2ee3398e17f` and remote PR head remains `8658dc4b8098bcd1771835ae9a1b51e4b8f0c7dd`. All previous Qodo conversations, reviews and four resolved inline threads are unchanged, pagination is complete, and no review requests changes. Old-head backend, security, coverage, e2e and container gates succeeded; frontend remained queued with no actionable failures. Those statuses do not qualify the new head. Publish with an explicit old-head lease, then require fresh exact-head Qodo and all seven required gates before merging. Human Change summary remains verbatim.
+
 ## Work Package 3: Typed Pipeline and Effects
 
 ### Task 9: Replace open payload contracts with frozen discriminated types
