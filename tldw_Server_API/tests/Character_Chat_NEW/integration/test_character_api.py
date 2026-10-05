@@ -341,9 +341,8 @@ class TestChatSessionEndpoints:
         assert delete_response.status_code == 204  # No Content status
         # 204 No Content doesn't have a response body
 
-    # CS-N2 (#3104): delete_chat_session soft-deletes every message (character_chat_sessions.py:7983-8037); restore (:8102 -> conversation_store.py:1481-1490) only undeletes the conversation row.
+    # CS-N2 (#3104, fixed): delete_chat_session used to soft-delete every message, and restore only undeleted the conversation row.
     @pytest.mark.integration
-    @pytest.mark.xfail(strict=True, reason="CS-N2 (#3104): restoring a chat from trash leaves its messages soft-deleted")
     def test_restore_chat_from_trash_restores_its_messages(self, test_client, auth_headers):
         """UX review 2026-10 contract reproduction: Trash -> Restore must bring the messages back."""
         char_response = test_client.post(
