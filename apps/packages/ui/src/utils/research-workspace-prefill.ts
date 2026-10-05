@@ -53,6 +53,7 @@ export type ResearchWorkspacePrefill = {
   ownerScope?: string
   workspaceId?: string
   canonicalNoteId?: string
+  legacyNoteId?: number
   draftRetained?: boolean
   completed?: boolean
   selectionIntent?: {

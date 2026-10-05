@@ -318,12 +318,27 @@ export function useResearchWorkspacePrefill(
         if (hasResearchWorkspaceMigrationTombstone(workspaceId)) {
           const current = useWorkspaceStore.getState()
           const draft = current.currentNote
+          // Retain the original legacy identity across a lost response and remount.
+          if (
+            !payload.canonicalNoteId &&
+            typeof draft.id === "number" &&
+            Number.isSafeInteger(draft.id) &&
+            draft.id > 0
+          )
+            payload.legacyNoteId = draft.id
           // Client-supplied canonical UUID makes a lost create response retryable.
           payload.canonicalNoteId ||=
             typeof draft.id === "string" ? draft.id : payload.id
           await saveResearchWorkspacePrefill(payload)
           assertCurrent()
+          const convertingLegacyDraft =
+            !payload.draftRetained &&
+            typeof payload.legacyNoteId === "number" &&
+            Number.isSafeInteger(payload.legacyNoteId) &&
+            payload.legacyNoteId > 0 &&
+            draft.id === payload.legacyNoteId
           let draftDiscarded = Boolean(
+            !convertingLegacyDraft &&
             (payload.draftRetained || draft.id != null) &&
             draft.id !== payload.canonicalNoteId,
           )

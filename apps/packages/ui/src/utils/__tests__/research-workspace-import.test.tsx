@@ -2,7 +2,14 @@ import {
   readKnowledgeNoteProvenance,
   stripKnowledgeNoteProvenance,
 } from "../knowledge-note-provenance"
-import { act, render, renderHook, waitFor } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchWorkspace } from "@/components/Option/ResearchWorkspace"
 import { useWorkspaceStore } from "@/store/workspace"
@@ -1020,6 +1027,262 @@ it.each([
     expect(
       useWorkspaceStore.getState().sources.map((source) => source.mediaId),
     ).toEqual(failure === "partial import" ? [101, 102] : [101])
+    receiver.unmount()
+  },
+)
+
+it.each(["unchanged", "edited", "replaced", "cleared"] as const)(
+  "acknowledges a restored legacy numeric note only while owned (%s) and saves its canonical UUID",
+  async (change) => {
+    const { restoreMigratedResearchWorkspace } =
+      await import("@/components/Option/ResearchWorkspace/workspace-server-restore")
+    const { QuickNotesSection } =
+      await import("@/components/Option/ResearchWorkspace/StudioPane/QuickNotesSection")
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-a",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-a",
+        serverWorkspaceId: "workspace-a",
+        migrationId: "migration-a",
+        serverScopeKey: "alice",
+        contentRetained: false,
+        deletedAt: "2026-10-03T00:00:00Z",
+      }),
+    )
+    let canonical: any = null
+    let finishCreate!: () => void
+    mocks.request.mockImplementation(async ({ path, method, body }: any) => {
+      if (path === "/api/v1/workspaces/workspace-a/context")
+        return {
+          workspace_id: "workspace-a",
+          workspace: {
+            id: "workspace-a",
+            name: "Research",
+            created_at: "2026-10-01T00:00:00Z",
+            version: 1,
+          },
+          sources: { items: [] },
+          partial_errors: [],
+        }
+      if (path === "/api/v1/workspaces/workspace-a/notes")
+        return [
+          {
+            id: 7,
+            workspace_id: "workspace-a",
+            title: "Legacy note",
+            content: "Legacy body",
+            keywords_json: '["legacy"]',
+            version: 3,
+            created_at: "2026-10-01T00:00:00Z",
+            last_modified: "2026-10-01T00:00:00Z",
+          },
+        ]
+      if (path === "/api/v1/notes/" && method === "POST") {
+        canonical = {
+          id: body.id,
+          title: body.title,
+          content: body.content,
+          keywords: body.keywords.map((keyword: string) => ({ keyword })),
+          version: 1,
+        }
+        await new Promise<void>((resolve) => {
+          finishCreate = resolve
+        })
+        return canonical
+      }
+      if (path.startsWith("/api/v1/notes/search/")) return { notes: [] }
+      if (path.startsWith("/api/v1/notes/keywords/")) return []
+      if (path.startsWith("/api/v1/notes/")) {
+        if (
+          !canonical ||
+          path.split("?")[0] !== `/api/v1/notes/${canonical.id}`
+        )
+          throw Object.assign(new Error("missing"), { status: 404 })
+        if (method === "PUT")
+          canonical = {
+            ...canonical,
+            title: body.title,
+            content: body.content,
+            keywords: body.keywords.map((keyword: string) => ({ keyword })),
+            version: canonical.version + 1,
+          }
+        return canonical
+      }
+      return []
+    })
+    await restoreMigratedResearchWorkspace({
+      signal: new AbortController().signal,
+      apply: useWorkspaceStore.getState().restoreServerWorkspace,
+    })
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      id: 7,
+      title: "Legacy note",
+      content: "Legacy body",
+      version: 3,
+    })
+    const transfer = payload()
+    transfer.sources = transfer.sources.slice(0, 2)
+    mocks.upload.mockResolvedValue({ id: 101 })
+    await queueResearchWorkspacePrefill(transfer)
+    const receiver = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    await waitFor(() => expect(finishCreate).toBeTypeOf("function"))
+    await act(async () => {
+      const state = useWorkspaceStore.getState()
+      if (change === "edited") state.updateNoteContent("Edited during import")
+      if (change === "replaced")
+        state.loadNote({
+          id: 8,
+          title: "Different legacy note",
+          content: "Keep replacement",
+        })
+      if (change === "cleared") state.clearCurrentNote()
+      finishCreate()
+    })
+    await waitFor(() => expect(receiver.result.current.importing).toBe(false))
+    expect(receiver.result.current.error).toBeNull()
+    const note = useWorkspaceStore.getState().currentNote
+    if (change === "replaced" || change === "cleared") {
+      expect(note.id).toBe(change === "replaced" ? 8 : undefined)
+      expect(note.content).toBe(change === "replaced" ? "Keep replacement" : "")
+      receiver.unmount()
+      return
+    }
+    expect(canonical.id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(note.id).toBe(canonical.id)
+    expect(note.title).toBe("Legacy note")
+    expect(note.keywords).toEqual(["legacy"])
+    expect(note.version).toBe(1)
+    expect(note.isDirty).toBe(change === "edited")
+    expect(note.content).toContain(
+      change === "edited" ? "Edited during import" : "Legacy body",
+    )
+    expect(readKnowledgeNoteProvenance(note.content)).toMatchObject({
+      origin: "knowledge_qa",
+      trust_state: "uncited_degraded_answer",
+      research: {
+        workspace_id: "workspace-a",
+        sources: [
+          {
+            mediaId: 101,
+            evidence: {
+              sources: [
+                { originalId: "note-uuid", excerpt: "First excerpt" },
+                { originalId: "note-uuid", excerpt: "Second excerpt" },
+              ],
+            },
+          },
+        ],
+      },
+    })
+    receiver.unmount()
+    const editor = render(<QuickNotesSection />)
+    fireEvent.change(screen.getByRole("textbox", { name: "Note title" }), {
+      target: { value: "Canonical title edited" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Update" }))
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().currentNote.isDirty).toBe(false),
+    )
+    expect(canonical.title).toBe("Canonical title edited")
+    expect(canonical.version).toBe(2)
+    expect(mocks.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "PUT",
+        path: `/api/v1/notes/${note.id}?expected_version=1`,
+      }),
+    )
+    expect(readKnowledgeNoteProvenance(canonical.content)).toEqual(
+      readKnowledgeNoteProvenance(note.content),
+    )
+    expect(canonical.keywords).toContainEqual({
+      keyword: "workspace:workspace-a",
+    })
+    expect(
+      mocks.request.mock.calls.filter(([request]) => request.method === "POST"),
+    ).toHaveLength(1)
+    expect(mocks.upload).toHaveBeenCalledTimes(1)
+    editor.unmount()
+  },
+)
+
+it.each([
+  [7, false],
+  [7, true],
+  [8, false],
+  [8, true],
+  ["6a1ba7ea-7384-413a-90be-62c5e7f56b41", false],
+  ["6a1ba7ea-7384-413a-90be-62c5e7f56b41", true],
+] as const)(
+  "retries an unacknowledged legacy note without adopting replacement %s (remount=%s)",
+  async (currentId, remount) => {
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-a",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-a",
+        serverWorkspaceId: "workspace-a",
+        migrationId: "migration-a",
+        contentRetained: false,
+      }),
+    )
+    useWorkspaceStore.getState().loadNote({
+      id: 7,
+      title: "Original legacy note",
+      content: "Original legacy body",
+    })
+    let canonical: any = null
+    mocks.request.mockImplementation(async ({ method, body }: any) => {
+      if (method === "POST") {
+        canonical = { ...body, version: 1 }
+        throw new Error("response lost after commit")
+      }
+      if (method === "PUT") canonical = { ...canonical, ...body, version: 2 }
+      if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
+      return canonical
+    })
+    const transfer = payload()
+    transfer.sources = transfer.sources.slice(3)
+    await queueResearchWorkspacePrefill(transfer)
+    let receiver = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    await waitFor(() =>
+      expect(receiver.result.current.error).toContain("could not be saved"),
+    )
+    const originalBody = canonical.content
+    await act(async () => {
+      const state = useWorkspaceStore.getState()
+      if (currentId !== 7)
+        state.loadNote({
+          id: currentId,
+          title: "Replacement note",
+          content: "Replacement body",
+        })
+      state.updateNoteContent("Edits before retry")
+      if (!remount) await receiver.result.current.retry()
+    })
+    if (remount) {
+      receiver.unmount()
+      receiver = renderHook(() =>
+        useResearchWorkspacePrefill("workspace-a", true),
+      )
+    }
+    await waitFor(() => expect(canonical.version).toBe(2))
+    await waitFor(() => expect(receiver.result.current.importing).toBe(false))
+    expect(receiver.result.current.error).toBeNull()
+    const note = useWorkspaceStore.getState().currentNote
+    expect(note.id).toBe(currentId === 7 ? canonical.id : currentId)
+    expect(stripKnowledgeNoteProvenance(note.content)).toBe(
+      "Edits before retry",
+    )
+    expect(note.isDirty).toBe(currentId !== 7)
+    expect(canonical.content).toBe(
+      currentId === 7 ? note.content : originalBody,
+    )
+    expect(
+      mocks.request.mock.calls.filter(([request]) => request.method === "POST"),
+    ).toHaveLength(1)
     receiver.unmount()
   },
 )
