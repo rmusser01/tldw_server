@@ -570,6 +570,15 @@ def _own_run_id() -> int:
     return int(os.environ.get("GITHUB_RUN_ID", "0") or 0)
 
 
+def _host_workflow() -> str:
+    """The workflow file whose run is executing this script, or "" outside Actions.
+
+    `GITHUB_WORKFLOW_REF` is `owner/repo/.github/workflows/<file>@<ref>`.
+    """
+    ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
+    return ref.split("@", 1)[0].rsplit("/", 1)[-1]
+
+
 def required_run_stand_ins(runs: list[dict], checks: tuple[CheckRun, ...]) -> tuple[CheckRun, ...]:
     """Required-workflow runs on a head that have not reported their check, as stand-ins.
 
@@ -728,7 +737,10 @@ def _evict(gh: GhApi, pr: PrState, action: Action, log: Callable[[str], None]) -
     return True
 
 
-def _dispatch_contexts(gh: GhApi, pr: PrState, names: tuple[str, ...], log: Callable[[str], None]) -> bool:
+def _dispatch_contexts(
+    gh: GhApi, pr: PrState, names: tuple[str, ...], log: Callable[[str], None],
+    finish: Callable[[], None] = lambda: None,
+) -> bool:
     """Dispatch the named contexts on the PR's head; a refusal by the PR's branch evicts the PR.
 
     Only HTTP 422 (the branch's workflow is broken, lacks the trigger or rejects the input) and
@@ -740,11 +752,34 @@ def _dispatch_contexts(gh: GhApi, pr: PrState, names: tuple[str, ...], log: Call
     The license gate goes first: it is the one dispatch the PR cannot be blamed for, so if it
     fails the run stops before any runner is spent on the six gates.
 
-    Returns True if the PR was evicted (the line moves on), False if the runs were started.
+    The workflow this script is running in goes last. A queue-tick runs inside a required
+    workflow's own run, and dispatching that same workflow on the same branch cancels the run
+    executing this script (one concurrency group per workflow, event and ref, with
+    cancel-in-progress). Everything the caller still has to do once the runs are started is
+    passed as `finish`: it runs after the last dispatch, or just before the host workflow's
+    dispatch when there is one, so a cancelled tick loses nothing.
+
+    Args:
+        gh: The GitHub client.
+        pr: The PR whose head the contexts are started on.
+        names: The contexts to start.
+        log: Receives one line per dispatch.
+        finish: The caller's remaining work (cancel superseded runs, comment). Not run if the
+            PR is evicted before the point where it would run.
+
+    Returns:
+        True if the PR was evicted (the line moves on), False if the runs were started.
     """
-    ordered = sorted((c for c in CONTEXTS if c.name in names), key=lambda c: c.kind != "status")
+    host = _host_workflow()
+    ordered = sorted(
+        (c for c in CONTEXTS if c.name in names), key=lambda c: (c.workflow == host, c.kind != "status"),
+    )
     requests = [(ctx, dispatch_request(ctx, pr)) for ctx in ordered]  # all resolved before any is sent
+    finished = False
     for ctx, (workflow, ref, inputs) in requests:
+        if workflow == host and not finished:
+            finish()
+            finished = True
         try:
             dispatch(gh, workflow, ref, inputs)
         except GhError as exc:
@@ -753,6 +788,8 @@ def _dispatch_contexts(gh: GhApi, pr: PrState, names: tuple[str, ...], log: Call
             reason = f"CI dispatch of {workflow} failed: {str(exc)[:200]}"
             return _evict(gh, pr, Action("evict", reason, slug="dispatch"), log)
         log(f"  dispatched {workflow} on {ref} for #{pr.number}")
+    if not finished:
+        finish()
     return False
 
 
@@ -793,26 +830,30 @@ def _rebase(gh: GhApi, pr: PrState, log: Callable[[str], None], sleep: Callable[
         log(f"  rebase of #{pr.number} accepted but the head never moved; a later wake recovers it")
         return False
     old_runs = runs_on(gh, pr.head_sha)
+
+    def finish() -> None:
+        # The run executing this script is never cancelled: a queue-tick runs inside a required
+        # workflow's run on the old head, and an auto_merge_enabled-triggered merge-queue.yml
+        # run shares that head too.
+        for run in old_runs:
+            if run.get("status") not in LIVE_RUN_STATUSES:
+                continue
+            if run.get("id") == _own_run_id() or _workflow_name(run) == QUEUE_WORKFLOW:
+                continue
+            _best_effort(log, f"cancel run {run['id']}",
+                         lambda rid=run["id"]: gh.rest("POST", f"repos/{REPO}/actions/runs/{rid}/cancel"))
+        cleanup_approval_runs(gh, rebased, log)
+        comment_once(
+            gh, pr.number, "rebased", rebased.head_sha,
+            f"Merge queue: this PR is next. Rebased onto `{BASE}` (head `{rebased.head_sha[:10]}`) and started "
+            f"the {len(CONTEXTS)} required checks.",
+        )
+
     # A rebase made with GITHUB_TOKEN starts no pull_request run, so the queue starts all seven
-    # contexts itself (spec 4.2), and nothing else (spec 4.5). They are dispatched *before*
-    # anything on the old head is cancelled: a queue-tick runs inside a required workflow's run,
-    # and an auto_merge_enabled-triggered merge-queue.yml run shares the old head too.
-    # Cancelling first would kill the run executing this script.
-    if _dispatch_contexts(gh, rebased, ALL_CONTEXTS, log):
+    # contexts itself (spec 4.2), and nothing else (spec 4.5). The old head's runs are cancelled
+    # only once the new ones are started (see _dispatch_contexts for the one exception).
+    if _dispatch_contexts(gh, rebased, ALL_CONTEXTS, log, finish):
         return True
-    for run in old_runs:
-        if run.get("status") not in LIVE_RUN_STATUSES:
-            continue
-        if run.get("id") == _own_run_id() or _workflow_name(run) == QUEUE_WORKFLOW:
-            continue
-        _best_effort(log, f"cancel run {run['id']}",
-                     lambda rid=run["id"]: gh.rest("POST", f"repos/{REPO}/actions/runs/{rid}/cancel"))
-    cleanup_approval_runs(gh, rebased, log)
-    comment_once(
-        gh, pr.number, "rebased", rebased.head_sha,
-        f"Merge queue: this PR is next. Rebased onto `{BASE}` (head `{rebased.head_sha[:10]}`) and started the "
-        f"{len(CONTEXTS)} required checks.",
-    )
     log(f"  rebased #{pr.number} {pr.head_sha[:10]} -> {rebased.head_sha[:10]}")
     return False
 
@@ -864,16 +905,17 @@ def apply(
         targets = tuple(n for n in action.contexts if n not in appeared)
         if not targets:
             return False
-        if _dispatch_contexts(gh, pr, targets, log):
-            return True
-        if action.kind == "retry":
-            links = "".join(f"\n- {u}" for u in action.links)
-            comment_once(
-                gh, pr.number, "retry", pr.head_sha,
-                f"Merge queue: {', '.join(targets)} failed once on `{pr.head_sha[:10]}`; retrying with a fresh run."
-                f"{links}",
-            )
-        return False
+
+        def finish() -> None:
+            if action.kind == "retry":
+                links = "".join(f"\n- {u}" for u in action.links)
+                comment_once(
+                    gh, pr.number, "retry", pr.head_sha,
+                    f"Merge queue: {', '.join(targets)} failed once on `{pr.head_sha[:10]}`; retrying with a "
+                    f"fresh run.{links}",
+                )
+
+        return _dispatch_contexts(gh, pr, targets, log, finish)
     if action.kind == "evict":
         return _evict(gh, pr, action, log)
     return False

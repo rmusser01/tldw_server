@@ -21,6 +21,7 @@ OLD = "a" * 40
 NEW = "b" * 40
 DEV = "d" * 40
 BACKEND, E2E, CONTAINER = "backend-required", "e2e-required", "container-build-check"
+SECURITY = "security-required"
 LICENSE = "frontend-license-policy/trusted/dev"
 LICENSE_GATE = "frontend-license-gate.yml"
 CHECK_NAMES = tuple(c.name for c in mq.CONTEXTS if c.kind == "check")
@@ -28,9 +29,11 @@ CHECK_NAMES = tuple(c.name for c in mq.CONTEXTS if c.kind == "check")
 
 @pytest.fixture(autouse=True)
 def _no_real_run_id(monkeypatch):
-    """Isolate GITHUB_RUN_ID: these tests must not depend on (or be confused by) this
-    process's own CI run id. Tests that exercise self-exclusion set it explicitly."""
+    """Isolate GITHUB_RUN_ID and GITHUB_WORKFLOW_REF: these tests must not depend on (or be
+    confused by) the CI run executing them, which is itself a required workflow's run. Tests
+    that exercise self-exclusion or host-last ordering set them explicitly."""
     monkeypatch.delenv("GITHUB_RUN_ID", raising=False)
+    monkeypatch.delenv("GITHUB_WORKFLOW_REF", raising=False)
 
 
 def _node(number, *, head=OLD, armed="2026-10-04T10:00:00Z", state="BEHIND", repo=None, draft=False,
@@ -558,6 +561,53 @@ def test_rebase_dispatches_before_cancelling_and_spares_the_queue(monkeypatch):
     assert kinds[:8] == ["rebase"] + ["dispatch"] * 7
     assert [c for c in gh.calls if c[0] == "cancel"] == [("cancel", "12"), ("cancel", "15")]
     assert kinds.index("cancel") > max(i for i, k in enumerate(kinds) if k == "dispatch")
+
+
+def _as_tick_of(monkeypatch, workflow, run_id="11"):
+    """Run the script as the queue-tick job of one required workflow's run."""
+    monkeypatch.setenv("GITHUB_RUN_ID", run_id)
+    monkeypatch.setenv("GITHUB_WORKFLOW_REF", f"rmusser01/tldw_server/.github/workflows/{workflow}@refs/heads/feat/1")
+
+
+def test_a_tick_dispatches_its_own_workflow_last_after_everything_else(monkeypatch):
+    """Dispatching the host workflow on the same branch cancels the run executing the script
+    (same concurrency group, cancel-in-progress). So after a rebase decided inside a tick, that
+    one dispatch must be the very last call: the other six are out, the old head's runs are
+    cancelled and the comment is posted before it."""
+    _as_tick_of(monkeypatch, "security-required.yml")
+    runs = {OLD: [
+        _run_of("security-required.yml", 11),
+        _run_of("ci.yml", 12, event="pull_request"),
+    ]}
+    gh = FakeGh([_node(1)], runs=runs)
+    _run(gh)
+    assert gh.calls[-1] == _dispatch_call(SECURITY, base=DEV), gh.calls[-1]
+    before_last = gh.calls[:-1]
+    assert [c for c in before_last if c[0] == "dispatch"] == [
+        _dispatch_call(name) for name in ALL_SEVEN if name != SECURITY
+    ]
+    assert ("cancel", "12") in before_last
+    assert ("cancel", "11") not in gh.calls
+    assert any(c[0] == "comment" for c in before_last)
+
+
+def test_a_tick_retrying_its_own_gate_comments_before_the_dispatch_that_cancels_it(monkeypatch):
+    _as_tick_of(monkeypatch, "e2e-required.yml")
+    gh = FakeGh([_node(1, state="BLOCKED")], **_green({E2E: "failure", BACKEND: "failure"}))
+    _run(gh)
+    kinds = [(c[0], c[1]) for c in gh.calls if c[0] in ("dispatch", "comment")]
+    assert kinds[0] == ("dispatch", "backend-required.yml")
+    assert kinds[1][0] == "comment"
+    assert kinds[2] == ("dispatch", "e2e-required.yml")
+    assert gh.calls[-1] == _dispatch_call(E2E)
+
+
+def test_outside_a_gate_run_the_comment_follows_the_dispatches():
+    """merge-queue.yml is not a workflow the queue dispatches, so nothing is reordered."""
+    gh = FakeGh([_node(1, state="BLOCKED")], **_green({E2E: "failure"}))
+    _run(gh)
+    assert gh.calls[0] == _dispatch_call(E2E)
+    assert gh.calls[1][0] == "comment"
 
 
 def test_rebase_deletes_the_new_heads_empty_approval_runs():
