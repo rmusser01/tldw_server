@@ -1390,6 +1390,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -3044,6 +3045,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -4535,6 +4537,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -5937,6 +5940,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -7330,6 +7334,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py

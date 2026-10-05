@@ -522,7 +522,14 @@ class MessageResponse(BaseModel):
     images: Optional[list[str]] = Field(None, description="Complete ordered image data URLs, only when explicitly requested")
     version: int = Field(1, description="Version number for optimistic locking")
     tool_calls: Optional[list[dict[str, Any]]] = Field(None, description="Tool calls associated with this message (if any)")
-    metadata_extra: Optional[dict[str, Any]] = Field(None, description="Additional stored metadata for this message (if requested)")
+    metadata_extra: Optional[dict[str, Any]] = Field(
+        None,
+        description=(
+            "Additional stored metadata for this message (if requested). Assistant replies settled by the "
+            "server include generation_status (complete, stopped, interrupted, length or error) and, when "
+            "known, model_id, provider, finish_reason and usage (prompt_tokens, completion_tokens, total_tokens)."
+        ),
+    )
 
     @model_serializer(mode="wrap")
     def omit_unrequested_images(self, handler):

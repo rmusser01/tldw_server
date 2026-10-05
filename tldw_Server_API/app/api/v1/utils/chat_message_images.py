@@ -52,6 +52,30 @@ def _detect_image_mime_type(data: bytes) -> Optional[str]:
     return None
 
 
+def message_image_pixel_count(data: bytes) -> int:
+    """Return width times height from an image's header, without decoding the picture.
+
+    Args:
+        data: Raw image bytes.
+
+    Returns:
+        The number of pixels in the image's first frame.
+
+    Raises:
+        HTTPException: 413 when the picture exceeds the shared pixel limit, 409
+            when the header is damaged or is not an image, as a saved-image
+            read would report it.
+    """
+    try:
+        validate_image_pixel_limit(data)
+        with Image.open(io.BytesIO(data)) as decoded:
+            return decoded.width * decoded.height
+    except Image.DecompressionBombError as exc:
+        raise HTTPException(status_code=413, detail="A saved chat attachment exceeds the image pixel limit.") from exc
+    except (OSError, ValueError, SyntaxError) as exc:
+        raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete or invalid.") from exc
+
+
 def _complete_message_images(message: dict[str, Any]) -> list[str]:
     """Expand every stored attachment, or fail the entire opt-in read."""
     import base64

@@ -134,6 +134,7 @@ The process-local safety controls are:
 | `CHAT_STREAM_CLEANUP_DAEMON_MAX_WORKERS` | `4` | Capacity reserved for synchronous late-work cleanup |
 | `CHAT_STREAM_ASYNC_MAX_TASKS` | `256` | Asynchronous provider stream work |
 | `CHAT_STREAM_ASYNC_CLEANUP_MAX_TASKS` | `32` | Capacity reserved for asynchronous late-work cleanup |
+| `CHAT_STREAM_SETTLEMENT_MAX_TASKS` | `256` | Detached writes that save a partial reply after a stream ended early |
 
 Each value must be an integer from `1` through `256`. Invalid or out-of-range
 values use the listed default, and changes require an application restart.
