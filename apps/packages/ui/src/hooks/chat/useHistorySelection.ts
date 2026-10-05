@@ -287,8 +287,20 @@ export function useHistorySelection(
       owner: HistoryOwnerV1,
       reference?: HistorySelectionReference | null,
       onOpened?: (receipt: HistoryLoadReceipt) => void,
-      isCurrentLoad: () => boolean = () => true
+      isCurrentLoad: () => boolean = () => true,
+      qualification?: { profileId: string | null; installLease: () => void }
     ) => {
+      let qualifiedProfile: string | undefined
+      if (qualification) {
+        const preparedEpoch = epoch.current
+        try {
+          qualifiedProfile = await ensureLocalProfileId(qualification.profileId)
+        } catch {
+          return false
+        }
+        if (preparedEpoch !== epoch.current || !isCurrentLoad() || !ownerLeaseValid(owner)) return false
+        qualification.installLease()
+      }
       const operation = invalidate()
       if (owner.kind === "unavailable" || (owner.kind === "local" && !owner.validate_lease)) {
         releaseOwnerLease.current?.()
@@ -298,7 +310,7 @@ export function useHistorySelection(
       try {
         // Unsupported temporary owners must not create even a profile/bookmark.
         if (owner.kind === "unavailable") throw new Error(owner.code)
-        const profile = await ensureLocalProfileId()
+        const profile = qualifiedProfile ?? await ensureLocalProfileId()
         if (operation.epoch !== epoch.current || !isCurrentLoad() || !ownerLeaseValid(owner)) return false
         const scope = {
           profile_id: profile,
@@ -682,6 +694,7 @@ export function useHistorySelection(
         temporary?: boolean
         scope?: import("@/types/chat-scope").ChatScope
         bindUnbound?: boolean
+        onDeviceScope?: import("@/db/dexie/history-selection").OnDeviceHistoryScope
         isCurrent?: () => boolean
       },
       reference?: HistorySelectionReference | null,
@@ -710,23 +723,31 @@ export function useHistorySelection(
         return result
       }
       const operation = invalidate()
-      releaseOwnerLease.current?.()
-      releaseOwnerLease.current = null
+      let releaseCandidateLease: (() => void) | null = null
       if (target.temporary || target.historyId === "temp")
         return open({
           kind: "unavailable",
           code: "temporary_history_unavailable"
         })
       if (!target.historyId && !target.serverChatId) {
+        releaseOwnerLease.current?.()
+        releaseOwnerLease.current = null
         publish(initialState())
         return false
       }
       try {
-        const { PageAssistDatabase } = await import("@/db/dexie/chat")
+        const chatDatabase = await import("@/db/dexie/chat")
         const details = target.historyId
-          ? await new PageAssistDatabase().getHistoryInfo(target.historyId)
+          ? await new chatDatabase.PageAssistDatabase().getHistoryInfo(target.historyId)
           : null
         if (operation.epoch !== epoch.current || !isCurrent()) return false
+        // Recheck the actual row before any native/local owner can be published.
+        // Rejecting a promoted/foreign row preserves the settled source's lease.
+        if (target.onDeviceScope && (!details || !target.onDeviceScope.isCurrent() || !chatDatabase.isOnDeviceHistory(details, target.onDeviceScope))) return false
+        if (!target.onDeviceScope) {
+          releaseOwnerLease.current?.()
+          releaseOwnerLease.current = null
+        }
         if (target.historyId && target.serverChatId && details?.server_chat_id !== target.serverChatId)
           throw new Error("owner_conversation_mismatch")
         const chatId = target.serverChatId || details?.server_chat_id
@@ -737,9 +758,18 @@ export function useHistorySelection(
             throw new Error("owner_conversation_mismatch")
           const { getLocalHistoryOwner } =
             await import("@/db/dexie/history-selection")
-          const owner = await getLocalHistoryOwner(target.historyId!)
+          const owner = await getLocalHistoryOwner(target.historyId!, target.onDeviceScope)
           if (operation.epoch !== epoch.current || !isCurrent()) return false
-          return completed(await open(owner, reference, opened, isCurrent))
+          if (target.onDeviceScope && owner.profile_id !== target.onDeviceScope.profileId) return false
+          return completed(await open(owner, reference, opened, isCurrent,
+            target.onDeviceScope ? {
+              profileId: target.onDeviceScope.profileId,
+              installLease: () => {
+                releaseOwnerLease.current?.()
+                releaseOwnerLease.current = null
+              }
+            } : undefined
+          ))
         }
         if (
           details?.server_chat_id &&
@@ -768,11 +798,15 @@ export function useHistorySelection(
         const stopAccountWatch = watchChatAccountChanges((invalidated) => {
           if (invalidated) revoke()
         })
-        releaseOwnerLease.current = () => {
+        const releaseLease = () => {
           valid = false
           unsubscribe()
           stopAccountWatch()
         }
+        // A qualified discovery click does not retire A while B is still being
+        // verified. Failed preflight cleans B's subscriptions and leaves A usable.
+        if (target.onDeviceScope) releaseCandidateLease = releaseLease
+        else releaseOwnerLease.current = releaseLease
         const requestScope = await resolveServicePromptScope({
           signal: operation.signal
         })
@@ -792,12 +826,22 @@ export function useHistorySelection(
             await import("@/db/dexie/history-selection")
           if (!valid || operation.epoch !== epoch.current || !isCurrent()) return false
           const owner = {
-            ...await getLocalHistoryOwner(target.historyId!),
+            ...await getLocalHistoryOwner(target.historyId!, target.onDeviceScope),
             validate_lease: () => valid && isCurrent()
           }
           if (!valid || operation.epoch !== epoch.current || !isCurrent()) return false
+          if (target.onDeviceScope && owner.profile_id !== target.onDeviceScope.profileId) return false
           capturedOwner = owner
-          return completed(await open(owner, reference, opened, isCurrent))
+          return completed(await open(owner, reference, opened, isCurrent,
+            target.onDeviceScope ? {
+              profileId: target.onDeviceScope.profileId,
+              installLease: () => {
+                releaseOwnerLease.current?.()
+                releaseOwnerLease.current = releaseCandidateLease
+                releaseCandidateLease = null
+              }
+            } : undefined
+          ))
         }
         const owner: HistoryOwnerV1 = {
           kind: "native",
@@ -841,8 +885,10 @@ export function useHistorySelection(
         }
         return completed(result)
       } catch (error) {
-        if (operation.epoch !== epoch.current || !isCurrent()) return false
+        if (operation.epoch !== epoch.current || !isCurrent() || target.onDeviceScope) return false
         return open({ kind: "unavailable", code: errorCode(error) })
+      } finally {
+        releaseCandidateLease?.()
       }
     },
     [invalidate, open, publish]

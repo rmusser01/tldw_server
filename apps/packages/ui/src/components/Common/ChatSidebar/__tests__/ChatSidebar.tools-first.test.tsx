@@ -345,3 +345,5 @@ describe("ChatSidebar tools-first reset", () => {
     )
   })
 })
+
+vi.mock("../LocalChatList", () => ({ LocalChatList: () => <div data-testid="local-chat-list" /> }))

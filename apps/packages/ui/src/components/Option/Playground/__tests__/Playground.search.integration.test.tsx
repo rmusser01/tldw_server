@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useHistorySelection, useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import { useStoreMessageOption } from "@/store/option"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { resolveHistorySelection } from "@/utils/history-selection"
 import { Playground } from "../Playground"
@@ -15,7 +17,12 @@ import {
   SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE
 } from "@/services/tldw/sidepanel-chat-webui-handoff"
 
-const h1 = vi.hoisted(() => ({ enabled: false, legacyNative: false, controller: null as HistorySelectionController | null, bookmarks: new Map<string, any>(), confirm: vi.fn(), historyInfo: vi.fn() }))
+const h1 = vi.hoisted(() => ({ enabled: false, legacyNative: false, controller: null as HistorySelectionController | null, bookmarks: new Map<string, any>(), confirm: vi.fn(), historyInfo: vi.fn(), sawFreshHandle: false }))
+const verifiedOwner = { config: { serverUrl: "http://chat.test", authMode: "multi-user" as const }, userId: "A", scopeKey: "verified-A" }
+vi.mock("@/services/service-prompts", async original => {
+  const actual = await original<typeof import("@/services/service-prompts")>()
+  return { ...actual, resolveServicePromptScope: (...args: Parameters<typeof actual.resolveServicePromptScope>) => h1.enabled ? Promise.resolve(verifiedOwner) : actual.resolveServicePromptScope(...args) }
+})
 const timelineReveal = vi.hoisted(() => ({ current: null as null | (() => Promise<boolean>) }))
 const h1Key = (scope: any, owner: any) => JSON.stringify([scope.profile_id, scope.client_session_id, owner.owner_key, owner.conversation_id])
 
@@ -143,7 +150,7 @@ const storeOptionState = vi.hoisted(() => ({
 }))
 
 const tldwClientState = vi.hoisted(() => ({
-  getConfig: vi.fn(async () => ({})),
+  getConfig: vi.fn(async () => h1.enabled ? { serverUrl: "http://chat.test", authMode: "multi-user" } : ({})),
   getProvidersStatus: vi.fn(async () => ({})),
   initialize: vi.fn(async () => null),
   getResearchBundle: vi.fn(async () => null),
@@ -233,9 +240,15 @@ vi.mock("@/hooks/useMessageOption", () => ({
 
 vi.mock("@/hooks/usePlaygroundSessionPersistence", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/usePlaygroundSessionPersistence")>()
-  return { usePlaygroundSessionPersistence: () => h1.enabled ? actual.usePlaygroundSessionPersistence() : ({
+  return { usePlaygroundSessionPersistence: () => {
+    if (h1.enabled) {
+      const state = actual.usePlaygroundSessionPersistence()
+      if (state.hasPersistedFreshDraft) h1.sawFreshHandle = true
+      return state
+    }
+    return ({
     restoreSession: vi.fn(async () => false), sessionScopeReady: true, hasPersistedSession: false, persistedHistoryId: null, persistedServerChatId: null
-  }) }
+  }) } }
 })
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
@@ -302,7 +315,8 @@ vi.mock("@/store/option", async (importOriginal) => {
   return { useStoreMessageOption }
 })
 
-vi.mock("@/services/tldw/TldwApiClient", () => ({
+vi.mock("@/services/tldw/TldwApiClient", async original => ({
+  ...await original<typeof import("@/services/tldw/TldwApiClient")>(),
   tldwClient: tldwClientState
 }))
 
@@ -882,6 +896,7 @@ describe("Playground H1 URL initialization with the mounted session/controller",
   beforeEach(() => {
     routerState.hashRouter = false
     h1.enabled = true
+    h1.sawFreshHandle = false
     forkPresentation.controller = null
     h1.legacyNative = false
     forkPresentation.mode = null
@@ -900,6 +915,9 @@ describe("Playground H1 URL initialization with the mounted session/controller",
     window.history.replaceState(null, "", "/chat")
     usePlaygroundSessionStore.getState().clearSession()
     useStoreMessageOption.setState({
+      chatDraftAddress: null,
+      chatDraftTransition: null,
+      chatDraftRevision: 0,
       historyId: null,
       serverChatId: null,
       history: [],
@@ -1079,6 +1097,31 @@ describe("Playground H1 URL initialization with the mounted session/controller",
       page.unmount()
     }
   )
+  it("keeps an explicit owned handoff ahead of a valid old fresh handle after provider remount", async () => {
+    const reference = seed()
+    const fresh = { kind: "fresh" as const, id: "old-unsent", scope: { type: "global" as const }, temporary: false }
+    usePlaygroundSessionStore.getState().saveSession({
+      chatDraftHandle: { address: fresh, ownerHash: chatDraftOwnerKey(verifiedOwner as never) },
+      scopeKey: buildChatSurfaceScopeKeyFromConfig(verifiedOwner.config), historyId: null, serverChatId: null
+    })
+    expect(usePlaygroundSessionStore.getState().isSessionValid(buildChatSurfaceScopeKeyFromConfig(verifiedOwner.config))).toBe(true)
+    // Layout's settings controller has accepted B; its chat controller now remounts.
+    useStoreMessageOption.getState().startNewChatDraft(false)
+    const source = useStoreMessageOption.getState()
+    useStoreMessageOption.getState().setChatDraftAddress({ kind: "local", id: reference.conversation_id, profileId: reference.profile_id }, { kind: "switch", expectedRevision: source.chatDraftRevision, sourceAddress: source.chatDraftAddress })
+    window.history.replaceState(null, "", "/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference)))
+    let page = render(<Playground />)
+    await waitFor(() => expect(screen.getByTestId("playground-chat")).toHaveAttribute("data-selected-history", "chat-one answer A"))
+    expect(h1.sawFreshHandle).toBe(true)
+    expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "local", id: "chat-one", profileId: "profile" })
+    expect(window.location.search).toBe("")
+    page.unmount()
+    page = render(<Playground />)
+    await waitFor(() => expect(screen.getByTestId("playground-chat")).toHaveAttribute("data-selected-history", "chat-one answer A"))
+    expect(h1.controller?.getCurrent().owner?.conversation_id).toBe("chat-one")
+    expect(useStoreMessageOption.getState().chatDraftAddress?.kind).toBe("local")
+    page.unmount()
+  })
   it("retains the exact pending origin after consuming its URL and reloading", async () => {
     const reference = seed(true)
     window.history.replaceState(

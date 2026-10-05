@@ -193,7 +193,7 @@ Each stage delivers a reviewable behavior change. This is a design sequence, not
 
 ### Stage 2 — Focused composer and reachable history
 
-**Task:** TASK-13455. **Status:** Not Started.
+**Task:** TASK-13455. **Status:** In Progress.
 
 **Goal:** simplify everyday setup and make every relevant saved chat findable. Findings 3, 10; navigation portion of 1.
 

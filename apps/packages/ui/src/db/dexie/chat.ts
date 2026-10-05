@@ -1,5 +1,7 @@
 import {
   assertNoPendingLocalSettingsWrite,
+  isOnDeviceHistory,
+  type OnDeviceHistoryScope,
   withLocalMessageMutation,
   type LocalHistoryOwnerV1,
   sanitizeImportedHistory,
@@ -21,10 +23,20 @@ import {
   Webshare,
 
 } from "./types"
-import type { UpdateSpec } from "dexie"
+import Dexie, { type ObservabilitySet, type UpdateSpec } from "dexie"
 import { db } from './schema';
 import { getAllModelNicknames } from "./nickname";
 const PAGE_SIZE = 30;
+
+export { isOnDeviceHistory, type OnDeviceHistoryScope } from "./history-selection";
+
+async function assertOnDeviceReader(scope: OnDeviceHistoryScope): Promise<void> {
+  if (!scope.isCurrent()) throw new Error("on_device_history_scope_changed");
+  const settings = await db.userSettings.get("main");
+  if (!scope.isCurrent() || (settings?.history_profile_id ?? null) !== scope.profileId) {
+    throw new Error("on_device_history_scope_changed");
+  }
+}
 
 function searchQueryInContent(content: string, query: string): boolean {
   if (!content || !query) {
@@ -246,10 +258,18 @@ export class PageAssistDatabase {
     };
   }
 
-  async getHistoriesWithMetadata(historyIds: string[]): Promise<Map<string, {
+  async getHistoriesWithMetadata(historyIds: string[], scope?: OnDeviceHistoryScope): Promise<Map<string, {
     messageCount: number;
     lastMessage?: { content: string; role: string; createdAt: number };
   }>> {
+    if (scope) return db.transaction("r", [db.userSettings, db.chatHistories, db.messages], async () => {
+      await assertOnDeviceReader(scope);
+      const rows = await Promise.all(historyIds.map(id => db.chatHistories.get(id)));
+      const eligible = rows.filter((row): row is HistoryInfo => !!row && isOnDeviceHistory(row, scope));
+      const metadata = await this.getHistoriesWithMetadata(eligible.map(row => row.id));
+      await assertOnDeviceReader(scope);
+      return metadata;
+    });
     const result = new Map();
 
     // Batch fetch all messages for the given history IDs
@@ -416,18 +436,28 @@ export class PageAssistDatabase {
   async deleteMessage(history_id: string) {
     await db.messages.where('history_id').equals(history_id).delete();
   }
-  async getChatHistoriesPaginated(page: number = 1, searchQuery?: string): Promise<{
+  async getChatHistoriesPaginated(page: number = 1, searchQuery?: string, scope?: OnDeviceHistoryScope): Promise<{
     histories: ChatHistory;
     hasMore: boolean;
     totalCount: number;
   }> {
     const offset = (page - 1) * PAGE_SIZE;
+    const query = searchQuery?.trim();
+    if (scope) return db.transaction("r", [db.userSettings, db.chatHistories, db.messages], async () => {
+      await assertOnDeviceReader(scope);
+      const candidates = query ? await this.fullTextSearchChatHistories(query) : await this.getChatHistories();
+      const eligible = candidates.filter(history => isOnDeviceHistory(history, scope));
+      await assertOnDeviceReader(scope);
+      return {
+        histories: eligible.slice(offset, offset + PAGE_SIZE),
+        hasMore: offset + PAGE_SIZE < eligible.length,
+        totalCount: eligible.length
+      };
+    });
 
-    if (searchQuery) {
-      console.log("Searching chat histories with query:", searchQuery);
-      const allResults = await this.fullTextSearchChatHistories(searchQuery);
-      const paginatedResults = allResults.slice(offset, offset + PAGE_SIZE)
-      console.log("Paginated search results:", paginatedResults);
+    if (query) {
+      const allResults = await this.fullTextSearchChatHistories(query);
+      const paginatedResults = allResults.slice(offset, offset + PAGE_SIZE);
       return {
         histories: paginatedResults,
         hasMore: offset + PAGE_SIZE < allResults.length,
@@ -446,7 +476,7 @@ export class PageAssistDatabase {
 
       return {
         histories,
-        hasMore: histories.length === PAGE_SIZE,
+        hasMore: offset + PAGE_SIZE < totalCount,
         totalCount
       };
     } else {
@@ -467,6 +497,18 @@ export class PageAssistDatabase {
       };
     }
   }
+  /** Stored rows for a labelled read-only preview; no H1 path or bookmark is adopted. */
+  async getOnDeviceChatPreview(id: string, scope: OnDeviceHistoryScope): Promise<{ historyInfo: HistoryInfo; messages: Message[] } | null> {
+    return db.transaction("r", [db.userSettings, db.chatHistories, db.messages], async () => {
+      await assertOnDeviceReader(scope);
+      const historyInfo = await db.chatHistories.get(id);
+      if (!historyInfo || !isOnDeviceHistory(historyInfo, scope)) return null;
+      const messages = await db.messages.where("history_id").equals(id).toArray();
+      await assertOnDeviceReader(scope);
+      return { historyInfo, messages: messages.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)) };
+    });
+  }
+
   async getChatHistoriesPaginatedOptimized(lastEntry?: any, searchQuery?: string): Promise<{
     histories: ChatHistory;
     hasMore: boolean;
@@ -915,3 +957,15 @@ export class PageAssistDatabase {
 }
 
 export const pageAssistDatabase = new PageAssistDatabase()
+
+/** Invalidate existing history queries without scanning stored message bodies. */
+export function watchOnDeviceHistoryChanges(changed: (profileChanged: boolean) => void): () => void {
+  const listener = (parts: ObservabilitySet) => {
+    const keys = Object.keys(parts)
+    const touches = (table: string) => keys.some(key => key === "all" || key.startsWith(`idb://${db.name}/${table}/`))
+    const profileChanged = touches("userSettings")
+    if (profileChanged || touches("chatHistories") || touches("messages")) changed(profileChanged)
+  }
+  Dexie.on("storagemutated", listener)
+  return () => Dexie.on.storagemutated.unsubscribe(listener)
+}

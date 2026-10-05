@@ -1,7 +1,4 @@
-import React from "react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { LocalChatList } from "@/components/Common/ChatSidebar/LocalChatList"
-import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useLoadLocalConversation } from "../useLoadLocalConversation"
@@ -182,33 +179,32 @@ describe("local conversation load ownership", () => {
     unmount()
   })
 
-  it.each(["current", "unmounted", "failed"] as const)("reports only an accepted LocalChatList selection: %s", async outcome => {
-    const pending = deferred<unknown[]>()
-    io.readMessages.mockReturnValueOnce(pending.promise)
-    const { state, unmount: unmountUnusedHook } = setup()
-    unmountUnusedHook()
-    const onSelectChat = vi.fn()
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const view = render(<QueryClientProvider client={queryClient}><LocalChatList searchQuery="" selectedChatId={null} onSelectChat={onSelectChat} /></QueryClientProvider>)
-    fireEvent.click(await screen.findByRole("button", { name: "Owned local chat" }))
-    await waitFor(() => expect(io.readMessages).toHaveBeenCalledWith("owned"))
-    if (outcome === "unmounted") view.unmount()
-    if (outcome === "failed") vi.spyOn(console, "error").mockImplementation(() => undefined)
-    await act(async () => {
-      if (outcome === "failed") pending.reject(new Error("Synthetic read failure"))
-      else pending.resolve([{ content: "Current local chat" }])
-      await pending.promise.catch(() => undefined)
-    })
-    if (outcome === "current") {
-      await waitFor(() => expect(onSelectChat).toHaveBeenCalledWith("owned"))
-      expect(state.historyId).toBe("owned")
-      expect(state.prompt).toBe("Saved prompt")
-    } else {
-      expect(onSelectChat).not.toHaveBeenCalled()
-      expect(state.historyId).toBe("before")
-      if (outcome === "failed") expect(io.notifyError).toHaveBeenCalled()
-    }
-    view.unmount()
-    queryClient.clear()
+
+})
+
+describe("local selection preparation", () => {
+  it.each(["model", "prompt", "files"] as const)("keeps the complete source when %s preparation fails", async boundary => {
+    const { result, state, unmount } = setup()
+    const source = structuredClone(state)
+    const failedRead = { model: io.readModelPreference, prompt: io.readPrompt, files: io.readFiles }[boundary]
+    failedRead.mockRejectedValueOnce(new Error("Synthetic preparation failure"))
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    await act(async () => { expect(await result.current("owned")).toBe(false) })
+    expect(state).toEqual(source)
+    expect(document.title).toBe("Current page")
+    unmount()
+  })
+  it.each(["model", "prompt", "files"] as const)("does not partially publish while %s preparation is held", async boundary => {
+    const { result, state, unmount } = setup()
+    const source = structuredClone(state)
+    const pending = deferred<unknown>()
+    const heldRead = { model: io.readModelPreference, prompt: io.readPrompt, files: io.readFiles }[boundary]
+    heldRead.mockReturnValueOnce(pending.promise)
+    const loading = result.current("owned")
+    await waitFor(() => expect(heldRead).toHaveBeenCalled())
+    expect(state).toEqual(source)
+    unmount()
+    await act(async () => { pending.resolve(boundary === "model" ? true : boundary === "prompt" ? { id: "saved-prompt", content: "Saved prompt" } : []); await loading })
+    expect(state).toEqual(source)
   })
 })

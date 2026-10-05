@@ -963,7 +963,7 @@
     "message": "Folders"
   },
   "chatSidebar_tabs_local": {
-    "message": "Local"
+    "message": "On this device"
   },
   "chatSidebar_tabs_server": {
     "message": "Server"
@@ -1732,5 +1732,80 @@
   },
   "help_reload": {
     "message": "Reload page"
+  },
+  "chatSidebar_local_search": {
+    "message": "Search on-device chats…"
+  },
+  "chatSidebar_local_help": {
+    "message": "Chats stored on this device. Account-bound chats appear for the current account."
+  },
+  "chatSidebar_local_temporaryHelp": {
+    "message": "Your Temporary chat stays open. Select a chat to preview its stored messages."
+  },
+  "chatSidebar_local_readError": {
+    "message": "Could not load chats on this device."
+  },
+  "chatSidebar_local_noMatches": {
+    "message": "No matching chats on this device."
+  },
+  "chatSidebar_local_empty": {
+    "message": "No available chats on this device."
+  },
+  "chatSidebar_local_previewAction": {
+    "message": "Preview chat: {{title}}"
+  },
+  "chatSidebar_local_moreError": {
+    "message": "Could not load more chats. Previously loaded chats are still available."
+  },
+  "chatSidebar_local_previewError": {
+    "message": "Message previews are unavailable. You can still open a chat."
+  },
+  "chatSidebar_local_openError": {
+    "message": "Could not open this chat. Select it again to retry."
+  },
+  "chatSidebar_local_previewTitle": {
+    "message": "{{title}} — read-only preview"
+  },
+  "chatSidebar_local_closePreview": {
+    "message": "Close preview"
+  },
+  "chatSidebar_local_previewHelp": {
+    "message": "Your Temporary chat stays open. These are stored messages in time order; alternatives and comparison results may be included."
+  },
+  "chatSidebar_local_previewReadError": {
+    "message": "Could not read this chat."
+  },
+  "chatSidebar_local_unavailable": {
+    "message": "This chat is no longer available in this view."
+  },
+  "chatSidebar_local_storedMessages": {
+    "message": "Stored messages"
+  },
+  "chatSidebar_local_noMessages": {
+    "message": "No stored messages in this chat."
+  },
+  "chatSidebar_local_alternative": {
+    "message": "Alternative reply {{index}} of {{count}}"
+  },
+  "chatSidebar_local_comparison": {
+    "message": "Comparison result"
+  },
+  "chatSidebar_local_comparisonPrompt": {
+    "message": "Comparison prompt"
+  },
+  "chatSidebar_local_image": {
+    "message": "Image {{index}} from {{speaker}}"
+  },
+  "chatSidebar_local_roles_user": {
+    "message": "You"
+  },
+  "chatSidebar_local_roles_assistant": {
+    "message": "Assistant"
+  },
+  "chatSidebar_local_roles_system": {
+    "message": "System"
+  },
+  "chatSidebar_local_roles_tool": {
+    "message": "Tool"
   }
 }

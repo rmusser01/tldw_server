@@ -129,3 +129,5 @@ describe("ChatSidebar coordinator integration", () => {
     ).toBe(true)
   })
 })
+
+vi.mock("../ChatSidebar/LocalChatList", () => ({ LocalChatList: () => <div data-testid="local-chat-list" /> }))

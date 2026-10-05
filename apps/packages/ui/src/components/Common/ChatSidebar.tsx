@@ -34,6 +34,7 @@ import {
 import { cn } from "@/libs/utils"
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
 import { ServerChatList } from "./ChatSidebar/ServerChatList"
+import { LocalChatList } from "./ChatSidebar/LocalChatList"
 import { FolderChatList } from "./ChatSidebar/FolderChatList"
 import {
   normalizeSidebarShortcutSelection,
@@ -57,7 +58,7 @@ interface ChatSidebarProps {
   onConversationSelected?: () => void
 }
 
-type SidebarTab = "server" | "folders"
+type SidebarTab = "server" | "local" | "folders"
 
 export function ChatSidebar({
   collapsed = false,
@@ -277,6 +278,10 @@ export function ChatSidebar({
       label: `${t("common:chatSidebar.tabs.server", "Server")}${serverChatCount > 0 ? ` (${serverChatCount})` : ""}`
     },
     {
+      value: "local",
+      label: t("common:chatSidebar.tabs.local", "On this device")
+    },
+    {
       value: "folders",
       label: `${t("common:chatSidebar.tabs.folders", "Folders")}${folderConversationCount > 0 ? ` (${folderConversationCount})` : ""}`
     }
@@ -305,6 +310,7 @@ export function ChatSidebar({
     return (
       <div
         data-testid="chat-sidebar"
+        data-chat-sidebar
         className={cn(
           "flex flex-col h-screen items-center py-4 gap-2 w-12 overflow-hidden border-r border-border bg-surface2",
           className
@@ -403,6 +409,7 @@ export function ChatSidebar({
   return (
     <div
       data-testid="chat-sidebar"
+        data-chat-sidebar
       className={cn(
         "flex h-screen min-h-0 flex-col overflow-hidden border-r border-border bg-surface2",
         className
@@ -550,7 +557,8 @@ export function ChatSidebar({
               <Input
                 data-testid="chat-sidebar-search"
                 prefix={<Search className="size-3.5 text-text-subtle" />}
-                placeholder={t("common:chatSidebar.search", "Search chats...")}
+                placeholder={currentTab === "local" ? t("common:chatSidebar.local.search", "Search on-device chats…") : t("common:chatSidebar.search", "Search chats...")}
+                aria-label={currentTab === "local" ? t("common:chatSidebar.local.search", "Search on-device chats…") : t("common:chatSidebar.search", "Search chats...")}
                 value={searchQuery}
                 onChange={handleSearchChange}
                 size="small"
@@ -572,7 +580,7 @@ export function ChatSidebar({
                 options={tabOptions}
                 block
                 size="small"
-                className="w-full"
+                className="w-full [&_.ant-segmented-item-label]:px-2 [&_.ant-segmented-item-label]:whitespace-normal"
                 aria-labelledby="chat-sidebar-tab-label"
               />
             </div>
@@ -593,6 +601,11 @@ export function ChatSidebar({
                   readOnly={temporaryChat}
                   onConversationSelected={onConversationSelected}
                 />
+              )}
+
+              {currentTab === "local" && (
+                <LocalChatList searchQuery={debouncedSearchQuery} readOnly={temporaryChat}
+                  onSelectChat={() => onConversationSelected?.()} />
               )}
 
               {currentTab === "folders" && (

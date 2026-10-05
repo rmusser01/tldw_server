@@ -1,7 +1,7 @@
 ---
 id: TASK-13455
 title: 'Chat UX stage 2: focused composer and complete conversation discovery'
-status: To Do
+status: In Progress
 labels:
 - chat
 - ux
@@ -33,6 +33,8 @@ Resolve findings 3 and 10 and the navigation part of finding 1. Make the everyda
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Program: TASK-13453. Design: Docs/Design/2026-10-04-chat-conversation-ux-remediation-design.md. Base: origin/dev 75ab224081bf140ef52017c1a9b0a04f6878d488, verified 2026-10-04. User approved equal audience priority and all ten findings plus enhancements in five stages. Written-design approval and the requested critical review are recorded on 2026-10-04; application implementation has not begun. ADR required: no for the client remediation; ADR-049 and ADR-050 govern owner-bound history and native fork boundaries, ADR-059 governs canonical task editing. Reassess if implementation changes public APIs or persistence authority. Reuse existing shared UI, loaders, presets, and test harnesses; preserve temporary-chat privacy and account/workspace fences. Findings 3, 10 and history portion of 1. Reuse ChatSidebar, LocalChatList, useLoadLocalConversation, useServerChatHistory, and the existing command palette. #3178 supplies server content-search support when merged; do not duplicate it. No new search service or index.
 Pre-implementation review gate: deduplicate cached mirrors only against the same proven scoped identity actually visible in current successful server results. Outage, stale pages and filters must not hide the only reachable cached copy. Both groups expose loading/no conversations/no matches/unavailable/partial states; local DB failures cannot become successful empty pages. Duplicate titles need origin plus distinguishing character/mode/date/excerpt. Nested disclosure closes one layer and returns focus to a visible control. Reuse existing paged loaders and the existing character_id endpoint filter.
+Stage 2 work started in bounded child TASK-13455.1 for lazy owned On this device discovery, qualified Temporary preview and normal selection. Latest dev remains c2260945ee after fresh fetch on 2026-10-05. This child does not close complete discovery, history-first preferences, focused composer, older character-session search, offline mirrors/import, Temporary Q3 retention or remaining approved stages.
+TASK-13455.1 completed: qualified lazy On this device discovery and readonly Temporary preview, 326 bounded tests, frontend typecheck, no added touched lint, native IndexedDB evidence and two independent reviews. Remaining Stage 2 acceptance criteria and broader D7/program requirements remain open; continue with history-first navigation and complete active-character session paging.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

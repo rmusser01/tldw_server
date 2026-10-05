@@ -1262,3 +1262,34 @@ it("native recovery begins without canonical IDs and binds monotonically to owne
     })
   ).rejects.toThrow()
 })
+
+describe("on-device owner preparation", () => {
+  const reader = { profileId: "profile", serverScopeKey: "realm-A", isCurrent: () => true }
+  it("claims a current scope-only row under its captured profile", async () => {
+    await memory.userSettings.update("main", { history_profile_id: "profile" })
+    await memory.chatHistories.update("chat", { server_scope_key: "realm-A" })
+    expect(await history.getLocalHistoryOwner("chat", reader)).toMatchObject({ profile_id: "profile", owner_key: "local-history-v1:profile" })
+  })
+  it.each(["replaced profile", "foreign realm", "expired reader"])("does not stamp a row after %s", async reason => {
+    await memory.userSettings.update("main", { history_profile_id: reason === "replaced profile" ? "foreign" : "profile" })
+    await memory.chatHistories.update("chat", { server_scope_key: reason === "foreign realm" ? "realm-B" : "realm-A" })
+    const before = JSON.stringify([await memory.userSettings.get("main"), await memory.chatHistories.get("chat")])
+    await expect(history.getLocalHistoryOwner("chat", { ...reader, isCurrent: () => reason !== "expired reader" })).rejects.toMatchObject({ code: "owner_mismatch" })
+    expect(JSON.stringify([await memory.userSettings.get("main"), await memory.chatHistories.get("chat")])).toBe(before)
+  })
+  it("does not initialize a replacement profile for a stale qualified click", async () => {
+    await memory.userSettings.delete("main")
+    await memory.chatHistories.update("chat", { server_scope_key: "realm-A" })
+    await expect(history.getLocalHistoryOwner("chat", reader)).rejects.toMatchObject({ code: "owner_mismatch" })
+    expect(await memory.userSettings.get("main")).toBeUndefined()
+    expect((await memory.chatHistories.get("chat")).local_owner_key).toBeUndefined()
+  })
+})
+
+it.each(["missing", "replaced"])("verifies an expected profile without initializing after it is %s", async reason => {
+  if (reason === "missing") await memory.userSettings.delete("main")
+  else await memory.userSettings.update("main", { history_profile_id: "foreign" })
+  const before = JSON.stringify(await memory.userSettings.get("main"))
+  await expect(history.ensureLocalProfileId("profile")).rejects.toMatchObject({ code: "owner_mismatch" })
+  expect(JSON.stringify(await memory.userSettings.get("main"))).toBe(before)
+})

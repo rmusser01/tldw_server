@@ -258,4 +258,19 @@ describe("ChatSidebar lazy history loading", () => {
       expect.objectContaining({ enabled: false })
     )
   })
+it("lazily mounts On this device while leaving the server coordinator disabled", async () => {
+  activeTab.value = "local"
+  const view = render(<MemoryRouter><ChatSidebar collapsed={false} /></MemoryRouter>)
+  expect(screen.queryByTestId("local-chat-list")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+  expect(screen.getByTestId("local-chat-list")).toBeInTheDocument()
+  expect(screen.getByText("On this device")).toBeInTheDocument()
+  expect(useServerChatHistoryMock).toHaveBeenLastCalledWith("", expect.objectContaining({ enabled: false }))
+  expect(useChatSurfaceCoordinatorStore.getState().visiblePanels["server-history"]).toBe(false)
+  view.rerender(<MemoryRouter><ChatSidebar collapsed /></MemoryRouter>)
+  expect(screen.queryByTestId("local-chat-list")).toBeNull()
 })
+
+})
+
+vi.mock("../LocalChatList", () => ({ LocalChatList: () => <div data-testid="local-chat-list" /> }))

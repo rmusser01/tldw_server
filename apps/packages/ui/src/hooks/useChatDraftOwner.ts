@@ -1,4 +1,5 @@
 import React from "react"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
@@ -6,7 +7,7 @@ import { isServicePromptScopeUnresolvedError, resolveServicePromptScope } from "
 import type { ServicePromptScope } from "@/services/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
-type DraftOwner = { key: string }
+type DraftOwner = { key: string; serverScopeKey: string }
 
 /** The same credential-free locator is used by composer records and session handles. */
 export const chatDraftOwnerKey = (scope: Pick<ServicePromptScope, "config" | "userId">) =>
@@ -39,9 +40,10 @@ export const useChatDraftOwner = (clearComposer: () => void) => {
         if (!mounted || check !== generation) return
         // Include the full server identity and auth source; never put credentials in storage keys.
         const key = chatDraftOwnerKey(scope)
-        if (currentOwner.current?.key === key) return
+        const serverScopeKey = serverChatMirrorOwnerKey({ requestScope: scope })
+        if (currentOwner.current?.key === key && currentOwner.current.serverScopeKey === serverScopeKey) return
         if (currentOwner.current) clear()
-        const nextOwner = { key }
+        const nextOwner = { key, serverScopeKey }
         currentOwner.current = nextOwner
         setOwner(nextOwner)
       } catch (error) {
@@ -72,5 +74,5 @@ export const useChatDraftOwner = (clearComposer: () => void) => {
     () => owner !== null && currentOwner.current === owner,
     [owner]
   )
-  return { ownerKey: owner?.key ?? null, isCurrent }
+  return { ownerKey: owner?.key ?? null, serverScopeKey: owner?.serverScopeKey ?? null, isCurrent }
 }

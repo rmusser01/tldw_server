@@ -367,7 +367,7 @@ export const UI_MODE_SETTING = defineSetting(
   }
 )
 
-const SIDEBAR_TAB_VALUES = ["server", "folders"] as const
+const SIDEBAR_TAB_VALUES = ["server", "local", "folders"] as const
 type SidebarTabValue = (typeof SIDEBAR_TAB_VALUES)[number]
 
 export const SIDEBAR_ACTIVE_TAB_SETTING = defineSetting(

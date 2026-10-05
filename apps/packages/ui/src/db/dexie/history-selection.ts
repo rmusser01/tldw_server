@@ -28,6 +28,21 @@ import {
   selectionDigest
 } from "@/utils/history-selection"
 
+/** A captured reader lease, not permission to adopt or mutate a history. */
+export type OnDeviceHistoryScope = {
+  profileId: string | null;
+  serverScopeKey: string | null;
+  isCurrent: () => boolean;
+};
+
+export function isOnDeviceHistory(history: HistoryInfo, scope: OnDeviceHistoryScope): boolean {
+  if (history.id === "temp" || history.server_chat_id || history.message_source === "server") return false;
+  const profileKey = scope.profileId ? `local-history-v1:${scope.profileId}` : null;
+  if (history.local_owner_key && history.local_owner_key !== profileKey) return false;
+  if (history.server_scope_key) return !!scope.serverScopeKey && history.server_scope_key === scope.serverScopeKey;
+  return !!profileKey && history.local_owner_key === profileKey;
+}
+
 export type LocalHistoryOwnerV1 = {
   readonly kind: "local"
   readonly profile_id: string
@@ -98,8 +113,19 @@ export const sanitizeImportedMessage = (value: Message): Message => {
   return result
 }
 
-export const ensureLocalProfileId = async (): Promise<string> =>
-  db.transaction("rw", [db.userSettings], async () => {
+export const ensureLocalProfileId = async (
+  expectedProfileId?: string | null
+): Promise<string> => {
+  // A qualified reader can verify its existing profile but cannot create a
+  // replacement while its storage observer is still catching up.
+  if (expectedProfileId !== undefined)
+    return db.transaction("r", [db.userSettings], async () => {
+      const settings = await db.userSettings.get("main")
+      if (!expectedProfileId || settings?.history_profile_id !== expectedProfileId)
+        fail("owner_mismatch")
+      return expectedProfileId
+    })
+  return db.transaction("rw", [db.userSettings], async () => {
     const settings = await db.userSettings.get("main")
     if (settings?.history_profile_id) return settings.history_profile_id
     const profile = settings?.user_id?.trim() || crypto.randomUUID()
@@ -111,11 +137,16 @@ export const ensureLocalProfileId = async (): Promise<string> =>
     })
     return profile
   })
+}
 const localKey = (profile: string) => `local-history-v1:${profile}`
 export const getLocalHistoryOwner = async (
-  conversation_id: string
+  conversation_id: string,
+  readerScope?: OnDeviceHistoryScope
 ): Promise<LocalHistoryOwnerV1> => {
-  const profile_id = await ensureLocalProfileId()
+  // A qualified click already captured a profile. Do not initialize/adopt a
+  // replacement if that profile disappeared while the observer was pending.
+  const profile_id = readerScope ? readerScope.profileId : await ensureLocalProfileId()
+  if (!profile_id || (readerScope && !readerScope.isCurrent())) fail("owner_mismatch")
   const owner = {
     kind: "local" as const,
     profile_id,
@@ -124,6 +155,7 @@ export const getLocalHistoryOwner = async (
   }
   await db.transaction("rw", [db.chatHistories, db.userSettings], async () => {
     const record = await ownedHistory(owner)
+    if (readerScope && (!readerScope.isCurrent() || !isOnDeviceHistory(record, readerScope))) fail("owner_mismatch")
     if (!record.local_owner_key)
       await db.chatHistories.update(record.id, {
         local_owner_key: owner.owner_key
