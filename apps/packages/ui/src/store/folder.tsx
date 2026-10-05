@@ -104,7 +104,7 @@ interface FolderState {
   collapseAllFolders: () => void
 
   // Actions - Server operations
-  refreshFromServer: (operation?: FolderOperation) => Promise<void>
+  refreshFromServer: (operation?: FolderOperation) => Promise<void | "scope-changed">
   createFolder: (name: string, parentId?: number | null, operation?: FolderOperation) => Promise<Folder | null>
   updateFolder: (id: number, data: { name?: string; parent_id?: number | null }) => Promise<boolean>
   deleteFolder: (id: number) => Promise<boolean>
@@ -405,6 +405,11 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
           const anyError = responses.some((res) => !res.ok)
           const hasNotFound = responses.some((res) => res.status === 404)
 
+          if (operation && responses.some(res => res.status === 412)) {
+            get().releaseServerData(operation)
+            return "scope-changed"
+          }
+
           if (hasNotFound) {
             // Folder API not available (404) - disabling folder sync
             set({
@@ -472,6 +477,10 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
             typeof (error as { status?: number | string })?.status !== "undefined"
               ? Number((error as { status?: number | string }).status)
               : undefined
+          if (operation && errorStatus === 412) {
+            get().releaseServerData(operation)
+            return "scope-changed"
+          }
           const is404 = errorStatus === 404 || errorMsg.includes('404')
 
           if (is404) {
@@ -865,9 +874,11 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
 
       getConversationsForFolder: (folderId) => {
         const state = get()
-        // Get keyword IDs for this folder
+        if (!state.folders.some(folder => folder.id === folderId && !folder.deleted)) return []
+        const activeKeywordIds = new Set(state.keywords.filter(keyword => !keyword.deleted).map(keyword => keyword.id))
+        // Match the active keyword membership used by the visible folder tree.
         const keywordIds = state.folderKeywordLinks
-          .filter(l => l.folder_id === folderId)
+          .filter(l => l.folder_id === folderId && activeKeywordIds.has(l.keyword_id))
           .map(l => l.keyword_id)
 
         // Get conversation IDs that have these keywords

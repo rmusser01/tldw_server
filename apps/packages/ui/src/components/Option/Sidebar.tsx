@@ -102,7 +102,7 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
     useFolderActions()
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [folderPickerChatId, setFolderPickerChatId] = useState<string | null>(null)
-  const folderRefreshInFlightRef = React.useRef<Promise<void> | null>(null)
+  const folderRefreshInFlightRef = React.useRef<ReturnType<typeof refreshFromServer> | null>(null)
   // Load folders when the sidebar is open and folder view is active.
   useEffect(() => {
     if (isConnected && isOpen && viewMode === "folders") {

@@ -1888,5 +1888,32 @@
   },
   "chatSidebar_local_retryAccount": {
     "message": "Retry account verification"
+  },
+  "chatSidebar_folderConversationFallback": {
+    "message": "Conversation {{id}}"
+  },
+  "chatSidebar_folderAccountError": {
+    "message": "Unable to verify this account."
+  },
+  "chatSidebar_foldersUnavailable": {
+    "message": "Folders are unavailable on this server."
+  },
+  "chatSidebar_folderLoadError": {
+    "message": "Unable to load folders for this account."
+  },
+  "chatSidebar_folderReadOnly": {
+    "message": "Temporary chat can preview history. Switch to History to organize it."
+  },
+  "chatSidebar_folderTitlesLoading": {
+    "message": "Loading conversation details…"
+  },
+  "chatSidebar_folderTitlesPartial": {
+    "message": "Some conversation details are unavailable. Folder links remain visible."
+  },
+  "chatSidebar_foldersEmpty": {
+    "message": "No folders yet. Create a folder to organize your chats."
+  },
+  "chatSidebar_folderCreated": {
+    "message": "Folder created successfully"
   }
 }

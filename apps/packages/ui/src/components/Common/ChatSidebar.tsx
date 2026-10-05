@@ -27,6 +27,7 @@ import {
 import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import type { VisibleServerChats } from "@/db/dexie/chat"
 import { useClearChat } from "@/hooks/chat/useClearChat"
+import { useShallow } from "zustand/react/shallow"
 import { useFolderStore } from "@/store/folder"
 import { useStoreMessageOption } from "@/store/option"
 import { useRouteTransitionStore } from "@/store/route-transition"
@@ -135,12 +136,20 @@ export function ChatSidebar({
   const temporaryChat = useStoreMessageOption((state) => state.temporaryChat)
   const startRouteTransition = useRouteTransitionStore((state) => state.start)
 
-  // Folder conversation count for tab badge
-  const conversationKeywordLinks = useFolderStore((s) => s.conversationKeywordLinks)
-  const folderConversationCount = useMemo(
-    () => new Set(conversationKeywordLinks.map((link) => link.conversation_id)).size,
-    [conversationKeywordLinks]
-  )
+  // Count only the verified view's successful server folder snapshot.
+  const folderData = useFolderStore(useShallow(state => ({
+    folders: state.folders, keywords: state.keywords, folderKeywordLinks: state.folderKeywordLinks,
+    conversationKeywordLinks: state.conversationKeywordLinks, serverDataScope: state.serverDataScope,
+    isLoading: state.isLoading, error: state.error, folderApiAvailable: state.folderApiAvailable,
+    getConversationsForFolder: state.getConversationsForFolder
+  })))
+  const folderConversationCount = useMemo(() => {
+    if (!ownerReady || folderData.serverDataScope?.requestScope !== historyOwner?.requestScope ||
+      !folderData.serverDataScope?.isCurrent() || folderData.isLoading || folderData.error ||
+      folderData.folderApiAvailable !== true) return 0
+    return new Set(folderData.folders.filter(folder => !folder.deleted)
+      .flatMap(folder => folderData.getConversationsForFolder(folder.id))).size
+  }, [folderData, ownerReady, historyOwner])
 
   // Server chat count for tab badge
   const { total: serverChatCount = 0 } = useServerChatHistory("", {
@@ -588,13 +597,7 @@ export function ChatSidebar({
 
             {/* Tab Content. Temporary mode opens saved chats read-only (H1): rows stay
                 selectable without management actions, and folder management stays off. */}
-            <div
-              className={
-                temporaryChat && currentTab === "folders"
-                  ? "pointer-events-none opacity-50"
-                  : ""
-              }
-            >
+            <div>
               {(currentTab === "server" || currentTab === "all") && (
                 <section aria-label={t("common:chatSidebar.tabs.server", "Server")}>
                 {currentTab === "all" && <h3 className="px-3 pt-3 text-sm font-semibold">{t("common:chatSidebar.discovery.serverGroup", "Server results")}</h3>}
@@ -619,7 +622,9 @@ export function ChatSidebar({
               )}
 
               {currentTab === "folders" && (
-                <FolderChatList onConversationSelected={onConversationSelected} />
+                <FolderChatList owner={historyOwner} verificationState={readOwner.verificationState}
+                  onRetryVerification={readOwner.retryVerification} readOnly={temporaryChat}
+                  onConversationSelected={onConversationSelected} />
               )}
             </div>
           </div>

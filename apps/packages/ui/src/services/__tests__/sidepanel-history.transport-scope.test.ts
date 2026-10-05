@@ -51,7 +51,7 @@ describe("sidepanel history owner through the real transport", () => {
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
   })
-  it.each(["search", "list"])(
+  it.each(["search", "list", "get"])(
     "carries the captured account through %s",
     async (method) => {
       const client = new TldwApiClient()
@@ -60,12 +60,18 @@ describe("sidepanel history owner through the real transport", () => {
           { query: "private" },
           { requestScope }
         )
-      else await client.listChatsWithMeta({}, { requestScope })
-      const [, init] = boundary.fetch.mock.calls[0]
+      else if (method === "list") await client.listChatsWithMeta({}, { requestScope })
+      else await client.getChat("folder-chat", { requestScope, scope: { type: "global" }, signal: new AbortController().signal })
+      const [url, init] = boundary.fetch.mock.calls[0]
+      if (method === "get") {
+        expect(new URL(url).pathname).toBe("/api/v1/chats/folder-chat")
+        expect(new URL(url).searchParams.get("scope_type")).toBe("global")
+        expect(init.signal).toBeInstanceOf(AbortSignal)
+      }
       expect(new Headers(init.headers).get("X-TLDW-Expected-User-ID")).toBe("7")
     }
   )
-  it.each(["search", "list"])(
+  it.each(["search", "list", "get"])(
     "rejects an account replacement before %s dispatch",
     async (method) => {
       boundary.get.mockImplementation(async (key: string) =>
@@ -78,7 +84,9 @@ describe("sidepanel history owner through the real transport", () => {
               { query: "private" },
               { requestScope }
             )
-          : client.listChatsWithMeta({}, { requestScope })
+          : method === "list"
+            ? client.listChatsWithMeta({}, { requestScope })
+            : client.getChat("folder-chat", { requestScope, scope: { type: "global" } })
       await expect(read).rejects.toMatchObject({ status: 412 })
       expect(boundary.fetch).not.toHaveBeenCalled()
     }

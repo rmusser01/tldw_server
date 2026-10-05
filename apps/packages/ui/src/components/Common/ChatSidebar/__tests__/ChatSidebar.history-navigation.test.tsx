@@ -26,6 +26,12 @@ const io = vi.hoisted(() => ({
   writes: vi.fn(),
   history: vi.fn(),
   temporary: false,
+  ownerCurrent: true,
+  verificationState: "ready",
+  requestScope: {config: {serverUrl: "http://chat.test", authMode: "multi-user" as const}, userId: "A"},
+  folderData: {} as Record<string, unknown>,
+  folderProps: vi.fn(),
+  verify: vi.fn(),
 }));
 // Real useSetting, registry and Plasmo hook; the storage IO boundary is in memory.
 vi.mock("@/utils/safe-storage", () => ({
@@ -61,13 +67,10 @@ vi.mock("@/hooks/useChatDraftOwner", () => ({
   useChatDraftOwner: () => ({
     ownerKey: "A",
     serverScopeKey: "A",
-    requestScope: {
-      config: { serverUrl: "http://chat.test", authMode: "multi-user" },
-      userId: "A",
-    },
-    isCurrent: () => true,
-    verificationState: "ready",
-    retryVerification: vi.fn(),
+    requestScope: io.requestScope,
+    isCurrent: () => io.ownerCurrent,
+    verificationState: io.verificationState,
+    retryVerification: io.verify,
   }),
 }));
 vi.mock("@/hooks/useDebounce", () => ({
@@ -88,8 +91,8 @@ vi.mock("@/store/option", () => ({
 }));
 vi.mock("@/store/folder", () => ({
   useFolderStore: (
-    selector: (state: { conversationKeywordLinks: never[] }) => unknown,
-  ) => selector({ conversationKeywordLinks: [] }),
+    selector: (state: Record<string, unknown>) => unknown,
+  ) => selector(io.folderData),
 }));
 vi.mock("@/store/route-transition", () => ({
   useRouteTransitionStore: (
@@ -131,15 +134,12 @@ vi.mock("../LocalChatList", () => ({
   ),
 }));
 vi.mock("../FolderChatList", () => ({
-  FolderChatList: ({
-    onConversationSelected,
-  }: {
-    onConversationSelected?: () => void;
-  }) => (
-    <div data-testid="folder-chat-list">
-      <button onClick={onConversationSelected}>Accept folder selection</button>
-    </div>
-  ),
+  FolderChatList: (props: { onConversationSelected?: () => void; readOnly?: boolean }) => {
+    io.folderProps(props);
+    return <div data-testid="folder-chat-list" data-readonly={String(props.readOnly)}>
+      <button onClick={props.onConversationSelected}>Accept folder selection</button>
+    </div>;
+  },
 }));
 vi.mock("../../QuickChatHelper", () => ({ QuickChatHelperButton: () => null }));
 vi.mock("../../NotesDock", () => ({ NotesDockButton: () => null }));
@@ -182,6 +182,9 @@ describe("history-first sidebar navigation", () => {
     io.writes.mockClear();
     io.history.mockClear();
     io.temporary = false;
+    io.ownerCurrent = true; io.verificationState = "ready";
+    io.folderProps.mockClear(); io.verify.mockClear();
+    io.folderData = {conversationKeywordLinks: [], serverDataScope: null};
     io.values.set("tldw:sidebar:shortcutSelection", ["quick-ingest", "chat"]);
     useChatSurfaceCoordinatorStore.setState({
       routeId: null,
@@ -526,6 +529,31 @@ describe("history-first sidebar navigation", () => {
       io.writes.mock.calls.filter(([key]) => key === "tldw:sidebar:activeTab"),
     ).toEqual([]);
     expect(findInput()).toHaveValue("");
+  });
+
+  it.each(["current", "unqualified", "retired", "failed", "unverified"])(
+    "qualifies the Folders badge to a successful current parent snapshot (%s)", async (state) => {
+      const operation = {requestScope: io.requestScope, isCurrent: () => state !== "retired"};
+      io.folderData = { folders: [{id: 1, deleted: false}], keywords: [], folderKeywordLinks: [],
+        conversationKeywordLinks: [{conversation_id: "a"}, {conversation_id: "b"}],
+        getConversationsForFolder: () => ["a", "a", "b"],
+        serverDataScope: state === "unqualified" ? null : operation,
+        isLoading: false, error: state === "failed" ? "Unavailable" : null, folderApiAvailable: true };
+      if (state === "unverified") io.verificationState = "error";
+      io.values.set("tldw:sidebar:activeTab", "folders"); renderSidebar();
+      await screen.findByTestId("folder-chat-list");
+      expect(screen.queryByText("Folders (2)") !== null).toBe(state === "current");
+    },
+  );
+
+  it("forwards the verified parent owner and Temporary read-only guard to Folders", async () => {
+    io.temporary = true; io.values.set("tldw:sidebar:activeTab", "folders"); renderSidebar();
+    expect(await screen.findByTestId("folder-chat-list")).toHaveAttribute("data-readonly", "true");
+    const props = io.folderProps.mock.calls.at(-1)![0];
+    expect(props.owner.requestScope).toBe(io.requestScope);
+    expect(props.verificationState).toBe("ready");
+    expect(props.onRetryVerification).toBe(io.verify);
+    expect(screen.getByTestId("folder-chat-list").closest(".pointer-events-none")).toBeNull();
   });
 
   it("keeps all custom shortcuts in their saved order below history in one scroller", async () => {

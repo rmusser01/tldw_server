@@ -9,6 +9,13 @@ import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator
 
 const useSettingMock = vi.hoisted(() => vi.fn())
 const optionState = vi.hoisted(() => ({ temporaryChat: false }))
+const verifiedOwner = vi.hoisted(() => ({
+  ownerKey: "verified-lazy-owner", verificationState: "ready", isCurrent: () => true,
+  requestScope: {config: {serverUrl: "https://chat.test", authMode: "multi-user" as const}, userId: 7},
+  retryVerification: vi.fn()
+}))
+const folderListProps = vi.hoisted(() => vi.fn())
+vi.mock("@/hooks/useChatDraftOwner", () => ({ useChatDraftOwner: () => verifiedOwner }))
 const serverListProps = vi.hoisted(() => vi.fn())
 const activeTab = vi.hoisted(() => ({ value: "server" }))
 const useServerChatHistoryMock = vi.hoisted(() =>
@@ -76,7 +83,10 @@ vi.mock("../ServerChatList", () => ({
 }))
 
 vi.mock("../FolderChatList", () => ({
-  FolderChatList: () => <div data-testid="folder-chat-list" />
+  FolderChatList: (props: Record<string, unknown>) => {
+    folderListProps(props)
+    return <div data-testid="folder-chat-list" />
+  }
 }))
 
 vi.mock("../../QuickChatHelper", () => ({
@@ -94,6 +104,8 @@ vi.mock("@/components/Sidepanel/Chat/ModeToggle", () => ({
 describe("ChatSidebar lazy history loading", () => {
   beforeEach(() => {
     optionState.temporaryChat = false
+    verifiedOwner.verificationState = "ready"
+    folderListProps.mockClear()
     activeTab.value = "server"
     serverListProps.mockClear()
     useSettingMock.mockReset()
@@ -192,7 +204,8 @@ describe("ChatSidebar lazy history loading", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
 
-    expect(screen.getByTestId("folder-chat-list").closest(".pointer-events-none")).not.toBeNull()
+    expect(screen.getByTestId("folder-chat-list").closest(".pointer-events-none")).toBeNull()
+    expect(folderListProps).toHaveBeenLastCalledWith(expect.objectContaining({readOnly: true}))
   })
 
   it("enables server history overview after the user expands recent conversations", async () => {
@@ -242,6 +255,13 @@ describe("ChatSidebar lazy history loading", () => {
         })
       )
     })
+  })
+
+  it("does not authorize server history from expansion before account verification", () => {
+    verifiedOwner.verificationState = "pending"
+    render(<MemoryRouter><ChatSidebar collapsed={false} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole("button", {name: /Recent conversations/i}))
+    expect(useServerChatHistoryMock).toHaveBeenLastCalledWith("", expect.objectContaining({enabled: false, owner: undefined}))
   })
 
   it("does not fetch a server count badge on first expanded mount", () => {

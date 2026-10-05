@@ -161,6 +161,21 @@ describe("history folder operations retain captured ownership", () => {
     held.resolve(ok([folder])); await pending
     expect(useFolderStore.getState().serverDataScope).toBe(next)
   })
+  it("an owned organization refusal is returned without generic error or private snapshot", async () => {
+    const op = operation()
+    vi.mocked(api.fetchFolders).mockResolvedValue({ ok: false, status: 412, error: "Account changed" } as never)
+    vi.mocked(api.fetchKeywords).mockResolvedValue({ ok: false, status: 404, error: "Unsupported" } as never)
+    expect(await refreshOwned(op)).toBe("scope-changed")
+    expect(useFolderStore.getState().serverDataScope).toBeNull(); expect(useFolderStore.getState().folders).toEqual([])
+    expect(db.folders.toArray).not.toHaveBeenCalled()
+  })
+  it("folder conversation IDs exclude links whose keyword is absent or deleted", async () => {
+    const op = operation()
+    vi.mocked(api.fetchKeywords).mockResolvedValue(ok([{ ...keyword, deleted: true }]) as never)
+    vi.mocked(api.fetchConversationKeywordLinks).mockResolvedValue(ok([{ conversation_id: "stale-link", keyword_id: 9 }]) as never)
+    await refreshOwned(op)
+    expect(useFolderStore.getState().getConversationsForFolder(1)).toEqual([])
+  })
   it("closing an old operation cannot dispose a newer account's qualified view", async () => {
     const old = operation(); await refreshOwned(old)
     const next = operation(8); await refreshOwned(next)

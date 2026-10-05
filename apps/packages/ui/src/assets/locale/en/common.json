@@ -580,7 +580,16 @@
       "noServerMatches": "No matching chats on this Server page.",
       "foreignScope": "Some Server results were excluded because they belong to a different chat scope.",
       "page": "Page {{page}}"
-    }
+    },
+    "folderConversationFallback": "Conversation {{id}}",
+    "folderAccountError": "Unable to verify this account.",
+    "foldersUnavailable": "Folders are unavailable on this server.",
+    "folderLoadError": "Unable to load folders for this account.",
+    "folderReadOnly": "Temporary chat can preview history. Switch to History to organize it.",
+    "folderTitlesLoading": "Loading conversation details…",
+    "folderTitlesPartial": "Some conversation details are unavailable. Folder links remain visible.",
+    "foldersEmpty": "No folders yet. Create a folder to organize your chats.",
+    "folderCreated": "Folder created successfully"
   },
   "knowledgeSidebar": {
     "title": "Knowledge history"
