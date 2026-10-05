@@ -745,6 +745,32 @@ Fresh verification: Profile/Usage 546 passed, with one existing Usage aggregator
 
 Before publication, authoritative dev remains `ba553fdc51a16ba04330754671f0c2ee3398e17f` and remote PR head remains `8658dc4b8098bcd1771835ae9a1b51e4b8f0c7dd`. All previous Qodo conversations, reviews and four resolved inline threads are unchanged, pagination is complete, and no review requests changes. Old-head backend, security, coverage, e2e and container gates succeeded; frontend remained queued with no actionable failures. Those statuses do not qualify the new head. Publish with an explicit old-head lease, then require fresh exact-head Qodo and all seven required gates before merging. Human Change summary remains verbatim.
 
+### October 5 Privilege-Snapshot Dev Rebase
+
+## Stage 1: Preserve Reviewed Patches
+**Goal**: Replay WP2 onto authoritative dev `61589721bc` without changing runtime behavior.
+**Success Criteria**: All 28 reviewed patches remain equal; only the upstream privilege-route snapshot differs from the reviewed tree; runtime, executable tests, ADR and API fingerprint remain byte-identical.
+**Tests**: Clean rebase at `da90f7cf01`, range-diff and tree comparison.
+**Status**: Complete
+
+## Stage 2: Snapshot Integration Verification
+**Goal**: Requalify the only changed fixture and its live privilege registry contract.
+**Success Criteria**: Privileges, CI contracts and backend ratchets pass; Python 3.12 fingerprint and runtime Bandit remain unchanged; independent bounded rebase review finds no actionable issue.
+**Tests**: Privileges/CI/ratchets, API export, runtime Ruff/compile/Bandit, snapshot parity and independent review.
+**Status**: Complete
+
+The earlier October 5 Profile/Usage, writer/SQLite and live PostgreSQL evidence is carried forward because that implementation and its executable tests are byte-identical; these broader suites are not claimed as freshly rerun. No runtime edits or WP3 work are included.
+
+Fresh combined Privileges/CI/ratchet verification initially produced 511 passed, four host Bash 3 skips and one warm-schema guard failure: earlier app clients had already warmed the process memo before the guard installed its spy. The guard passed all four cases alone, but the reduced endpoint-before-guard ordering reproduced the positive-control failure (19 passed, one failed). Clearing the existing schema-verification test cache before warmup retains both assertions and fixes test isolation without changing runtime caching. The exact combined GREEN rerun passed 512 tests with the same four skips; fresh strict Docs passed 212 tests. Runtime/fixture Ruff and compileall, canonical task normalization and diff checks passed. Python 3.12 fingerprint remains `5cb6cf6736d7` (2107 paths, 3247 schemas). Runtime Bandit retains 20 baseline findings with no new findings or errors; guard-file Bandit retains its 10 baseline B101 assertions. Independent rebase and three-line fixture reviews found no actionable issues. Upstream snapshot remains exact; all 28 replayed patches are equal.
+
+## Stage 3: Publish and Exact-Head Merge
+**Goal**: Publish with an explicit lease, then require fresh exact-head Qodo and all seven merge gates.
+**Success Criteria**: Authoritative dev remains an ancestor; human Change summary is verbatim; review feedback is resolved and every required gate succeeds; expected-head merge and task finalization are verified.
+**Tests**: Remote refs, PR/review/check readbacks and merge verification.
+**Status**: In Progress
+
+Authoritative dev is still `61589721bc9e05c2be619a076cf5d575adea3d56`; remote PR head is still `5812eab045186b19d220d9d67ae52c6cde5c8448` before the explicit-lease push. Old-head Qodo is clear, all four threads resolved, and no review requests changes. Old-head security, coverage, e2e and license gates passed, with no actionable CI failures; old-head results do not qualify the new head. Human Change summary remains verbatim.
+
 ## Work Package 3: Typed Pipeline and Effects
 
 ### Task 9: Replace open payload contracts with frozen discriminated types
