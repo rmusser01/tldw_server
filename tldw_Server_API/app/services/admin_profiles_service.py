@@ -209,7 +209,7 @@ async def _build_bulk_update_before_values(
         "identity.is_verified",
         "identity.is_locked",
     }
-    needs_user_record = bool(key_set & (identity_keys | {"limits.storage_quota_mb"}))
+    needs_user_record = bool(key_set & identity_keys)
     user_row: dict[str, Any] | None = None
     if needs_user_record:
         user = await user_repo.get_user_by_id(int(user_id))
@@ -235,14 +235,6 @@ async def _build_bulk_update_before_values(
                     key,
                     value,
                 )
-
-    if user_row and "limits.storage_quota_mb" in key_set:
-        before["limits.storage_quota_mb"] = _mask_profile_diff_value(
-            profile_service,
-            catalog_map,
-            "limits.storage_quota_mb",
-            user_row.get("storage_quota_mb"),
-        )
 
     if any(key.startswith("memberships.") for key in key_set):
         org_memberships = await list_org_memberships_for_user(user_id)
@@ -301,10 +293,7 @@ async def _build_bulk_update_before_values(
                     )
 
     needs_effective = any(
-        key not in identity_keys
-        and not key.startswith("memberships.")
-        and key != "limits.storage_quota_mb"
-        for key in key_set
+        key not in identity_keys and not key.startswith("memberships.") for key in key_set
     )
     if needs_effective:
         effective = await profile_service._build_effective_config(
@@ -1075,7 +1064,9 @@ async def set_group_limit_override(
     """Set (or, with value None, remove) a team/org ``limits.*`` override (spec 2 §3).
 
     Platform admins only: a customer's org admin must not lift their own members.
-    The value is each member's allowance; storage stays per-user until PR C.
+    The value is each member's allowance: a team or org
+    ``limits.storage_quota_mb`` override is each member's personal storage
+    allowance, separate from the team/org's own shared storage pool.
     """
     # is_platform_admin() already grants single-user principals outside enterprise
     # mode; an extra `is_single_user_principal(...) or` here would bypass its
@@ -1083,7 +1074,7 @@ async def set_group_limit_override(
     if not admin_scope_service.is_platform_admin(principal):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Platform admin required")
     entry = {e.key: e for e in load_user_profile_catalog().entries}.get(key)
-    if entry is None or not key.startswith("limits.") or key == "limits.storage_quota_mb":
+    if entry is None or not key.startswith("limits."):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"error": "unsupported_key", "key": key})
     normalized = None
     if value is not None:

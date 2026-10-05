@@ -171,6 +171,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
         ensure_privilege_snapshots_table_pg=_make_pg_ensure("privilege_snapshots"),
         ensure_api_keys_tables_pg=_make_pg_ensure("api_keys"),
         ensure_usage_tables_pg=_make_pg_ensure("usage"),
+        ensure_storage_quota_overrides_backfill_pg=_make_pg_ensure("storage_quota_backfill"),
         ensure_virtual_key_counters_pg=_make_pg_ensure("virtual_key_counters"),
         ensure_llm_provider_overrides_pg=_make_pg_ensure("provider_overrides"),
     )
@@ -183,6 +184,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
     assert pg_calls == [
         "user_timestamps",
         "authnz_core",
+        "storage_quota_backfill",
         "admin_webhook_canonical",
         "sharing",
         "notification_permissions",
@@ -217,6 +219,7 @@ async def test_pg_ensure_false_emits_high_signal_warning(
         "ensure_privilege_snapshots_table_pg": _successful_ensure,
         "ensure_api_keys_tables_pg": _successful_ensure,
         "ensure_usage_tables_pg": _successful_ensure,
+        "ensure_storage_quota_overrides_backfill_pg": _successful_ensure,
         "ensure_virtual_key_counters_pg": _successful_ensure,
         "ensure_llm_provider_overrides_pg": _successful_ensure,
     }
@@ -258,6 +261,7 @@ async def test_pg_authnz_core_readiness_failure_blocks_startup(
         "ensure_privilege_snapshots_table_pg": _successful_ensure,
         "ensure_api_keys_tables_pg": _successful_ensure,
         "ensure_usage_tables_pg": _successful_ensure,
+        "ensure_storage_quota_overrides_backfill_pg": _successful_ensure,
         "ensure_virtual_key_counters_pg": _successful_ensure,
         "ensure_llm_provider_overrides_pg": _successful_ensure,
     }
@@ -302,6 +306,7 @@ async def test_pg_user_timestamp_readiness_failure_blocks_startup(
         "ensure_privilege_snapshots_table_pg": _successful_ensure,
         "ensure_api_keys_tables_pg": _successful_ensure,
         "ensure_usage_tables_pg": _successful_ensure,
+        "ensure_storage_quota_overrides_backfill_pg": _successful_ensure,
         "ensure_virtual_key_counters_pg": _successful_ensure,
         "ensure_llm_provider_overrides_pg": _successful_ensure,
     }
@@ -346,6 +351,7 @@ async def test_pg_sharing_readiness_failure_blocks_startup(
         "ensure_privilege_snapshots_table_pg": _successful_ensure,
         "ensure_api_keys_tables_pg": _successful_ensure,
         "ensure_usage_tables_pg": _successful_ensure,
+        "ensure_storage_quota_overrides_backfill_pg": _successful_ensure,
         "ensure_virtual_key_counters_pg": _successful_ensure,
         "ensure_llm_provider_overrides_pg": _successful_ensure,
     }

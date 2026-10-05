@@ -196,9 +196,9 @@ class UsageBreakdownResponse(BaseModel):
     by_folder: list[FolderInfo]
     total_bytes: int
     total_mb: float
-    quota_mb: int
-    available_mb: float
-    usage_percentage: float
+    quota_mb: int | None = Field(default=None, description="User quota in MB; null means unlimited")
+    available_mb: float | None = Field(default=None, description="Available quota in MB; null means unlimited")
+    usage_percentage: float | None = Field(default=None, description="Usage percentage; null means unlimited")
 
 
 # =========================================================================
@@ -247,6 +247,13 @@ class CombinedQuotaResponse(BaseModel):
 class SetQuotaRequest(BaseModel):
     """Request to set a quota."""
     quota_mb: int = Field(ge=100, description="Quota in MB (minimum 100)")
+    soft_limit_pct: int = Field(default=80, ge=0, le=100, description="Soft limit percentage")
+    hard_limit_pct: int = Field(default=100, ge=0, le=100, description="Hard limit percentage")
+
+
+class SetUserQuotaRequest(BaseModel):
+    """Set a user's own storage quota (MB); null removes it (unlimited unless a team/org value applies)."""
+    quota_mb: int | None = Field(..., ge=0, description="Quota in MB; 0 blocks uploads; null removes the user's value")
     soft_limit_pct: int = Field(default=80, ge=0, le=100, description="Soft limit percentage")
     hard_limit_pct: int = Field(default=100, ge=0, le=100, description="Hard limit percentage")
 
