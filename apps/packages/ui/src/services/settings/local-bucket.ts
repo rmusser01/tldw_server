@@ -17,8 +17,10 @@ export type LocalRegistryListing<T> = { records: Record<string, LocalRegistryRec
 export type LocalRegistryBucket<T> = {
   /** Read candidates without pinning unseen records or deleting stale ones. */
   list: () => Promise<LocalRegistryListing<T>>
-  get: (key: string) => Promise<LocalRegistryRecord<T> | null>
-  set: (key: string, value: T, updatedAt?: number, expected?: LocalRegistryRecord<T>) => Promise<boolean>
+  /** Fail-closed reads require an unpinned durable bucket and never delete unreadable records. */
+  get: (key: string, options?: { failClosed?: boolean }) => Promise<LocalRegistryRecord<T> | null>
+  /** Expected null claims absence; conditional writes require the existing Web Lock. */
+  set: (key: string, value: T, updatedAt?: number, expected?: LocalRegistryRecord<T> | null) => Promise<boolean>
   remove: (key: string) => Promise<void>
   cleanup: () => Promise<number>
   buildKey: (key: string) => string
@@ -102,9 +104,11 @@ export const createLocalRegistryBucket = <T>({
     }
   }
 
-  const get = async (key: string): Promise<LocalRegistryRecord<T> | null> => {
+  const get = async (key: string, options?: { failClosed?: boolean }): Promise<LocalRegistryRecord<T> | null> => {
     const storageKey = buildKey(key)
+    const failClosed = options?.failClosed === true
     try {
+      if (failClosed && (tabScoped || !hasDurableBackend())) throw new Error("registry_durable_read_unavailable")
       const pinned = readTab(storageKey)
       let raw: unknown
       if (pinned != null) {
@@ -116,34 +120,42 @@ export const createLocalRegistryBucket = <T>({
         if (current != null) raw = JSON.parse(current)
         else pinTab(storageKey, JSON.stringify(raw ?? null))
       }
-      if (raw == null) return null
+      if (raw === undefined || (!failClosed && raw === null)) return null
       const record = parseRecord<T>(raw)
-      if (!record) {
+      if (!record || (failClosed && !Number.isFinite(new Date(record.updatedAt).getTime()))) {
+        if (failClosed) throw new Error("registry_record_invalid")
         await remove(key, JSON.stringify(raw))
         return null
       }
       if (isStale(record.updatedAt, Date.now(), ttlMs)) {
+        if (failClosed) throw new Error("registry_record_expired")
         await remove(key, JSON.stringify(raw))
         return null
       }
       return record
-    } catch {
+    } catch (error) {
+      if (failClosed) throw error
       return null
     }
   }
 
-  const set = async (key: string, value: T, updatedAt = Date.now(), expected?: LocalRegistryRecord<T>): Promise<boolean> => {
+  const set = async (key: string, value: T, updatedAt = Date.now(), expected?: LocalRegistryRecord<T> | null): Promise<boolean> => {
     const storageKey = buildKey(key)
     try {
-      const previous = expected && JSON.stringify(expected)
-      if (expected && tabScoped && readTab(storageKey) !== previous) return false
+      const conditional = expected !== undefined
+      const previous = conditional ? JSON.stringify(expected) : undefined
+      if (expected === null && (tabScoped || !hasDurableBackend())) return false
+      if (conditional && tabScoped && readTab(storageKey) !== previous) return false
       const record = { value, updatedAt }
       pinTab(storageKey, JSON.stringify(record))
       // A conditional read/write must be serialized across physical contexts.
       // Without Web Locks, retire only this exact pin; keep the durable source.
-      if (expected && (typeof navigator === "undefined" || !navigator.locks?.request)) return false
+      if (conditional && (typeof navigator === "undefined" || !navigator.locks?.request)) return false
       return await withRecordLock(storageKey, async () => {
-        if (expected && JSON.stringify(await storage.get(storageKey) ?? null) !== previous) return false
+        if (conditional) {
+          const current = await storage.get(storageKey)
+          if (expected === null ? current !== undefined : JSON.stringify(current ?? null) !== previous) return false
+        }
         await storage.set(storageKey, record)
         return hasDurableBackend()
       })
