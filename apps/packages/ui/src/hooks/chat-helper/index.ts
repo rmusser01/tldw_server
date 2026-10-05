@@ -578,12 +578,13 @@ export const saveMessageOnSuccess = async ({
   if (historyTurn) {
     if (!historyTurn.admission) throw new Error("missing_history_admission")
     const native = historyTurn.owner.kind === "native"
+    // ponytail: native history retains full reasoning text, not client elapsed-time telemetry.
+    // Add a negotiated metadata field if cross-client timing becomes required.
     if (
       native &&
       (source?.length ||
         assistantMetadataExtra ||
-        generationInfo ||
-        reasoning_time_taken > 0)
+        generationInfo)
     ) {
       throw new Error("unsupported_history_native_result_metadata")
     }

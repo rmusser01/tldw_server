@@ -95,6 +95,7 @@ import { saveHistory } from "@/db/dexie/helpers"
 import { saveMessageOnSuccess, saveMessageOnError } from "@/hooks/chat-helper"
 import { captureHistorySnapshot } from "@/services/chat-history-selection"
 import { tldwChat } from "@/services/tldw"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useMcpToolsStore } from "@/store/mcp-tools"
@@ -116,6 +117,7 @@ const send = (controller: HistorySelectionController, options: {
   setHistoryId?: (id: string) => void
   toolChoice?: Parameters<typeof normalChatMode>[6]["toolChoice"]
   fixedOverrides?: boolean
+  setServerChatId?: (id: string) => void
 } = {}) => {
   const params: Parameters<typeof normalChatMode>[6] = {
     selectedModel: "test", selectedSystemPrompt: "", useOCR: false,
@@ -125,8 +127,9 @@ const send = (controller: HistorySelectionController, options: {
       model: options.fixedOverrides ? "explicit" : "global",
       toolChoice: options.fixedOverrides ? "explicit" : "global"
     },
-    historySelection: { controller, originIsCurrent: options.originIsCurrent ?? (() => true) },
+    historySelection: { controller, originIsCurrent: options.originIsCurrent ?? (() => true), createServerChat: Boolean(options.setServerChatId) },
     historyId: options.historyId ?? null,
+    setServerChatId: options.setServerChatId,
     setHistoryId: options.setHistoryId ?? (() => {}),
     setMessages: () => {}, setHistory: () => {}, setIsProcessing: () => {},
     setStreaming: () => {}, setAbortController: () => {},
@@ -137,8 +140,19 @@ const send = (controller: HistorySelectionController, options: {
 }
 const publicHistory = (id: string): HistoryInfo => ({ id, title: "Imported", createdAt: 1, is_rag: false, message_source: "web-ui" })
 const savedMessages = async (): Promise<Message[]> => await storage.tables.messages.toArray() as Message[]
+const emptyServerCapture = (request: Parameters<typeof tldwClient.captureHistorySelection>[1]) => {
+  const view = { ...request.view, owner_key: "server-owner" }
+  return {
+    status: "captured", purpose: request.purpose, view, rows: [], selected_content: [],
+    snapshot: { version: 1, owner_key: view.owner_key, conversation_id: "new-server", nodes: [],
+      fences: { conversation: "1", history: "1", settings: "1" }, source_digest: "source",
+      storage_context_digest: "storage", interpretation_status: { kind: "parent_graph_v1" } },
+    storage_context_digest: "storage"
+  } as never
+}
 
 beforeEach(() => {
+  vi.restoreAllMocks()
   Object.values(storage.tables).forEach(table => table.rows.clear())
   storage.control.beforeHistoryAdd = undefined
   prompt.scope.userId = "alice"
@@ -150,6 +164,181 @@ beforeEach(() => {
 })
 
 describe("normal Chat owned history creation and H1 admission", () => {
+  it.each(["Stop", "navigation", "account"])("does not adopt a native load completing after %s", async boundary => {
+    const mounted = renderHook(() => useHistorySelection())
+    const scoped = snapshot()
+    const stopped = new AbortController()
+    const auth = new AbortController()
+    Object.assign(scoped, { scopeSignal: stopped.signal, scopeInvalidatedSignal: auth.signal })
+    vi.spyOn(tldwClient, "createChat").mockResolvedValue({ id: "new-server" } as never)
+    let finish!: () => void
+    const waiting = new Promise<void>(resolve => { finish = resolve })
+    const capture = vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => {
+      await waiting
+      return emptyServerCapture(request)
+    })
+    const adopt = vi.fn()
+    let pending!: ReturnType<typeof send>
+    act(() => { pending = send(mounted.result.current, { snapshot: scoped, setServerChatId: adopt, originIsCurrent: mounted.result.current.fence() }) })
+    await waitFor(() => expect(capture).toHaveBeenCalledOnce())
+    await act(async () => {
+      if (boundary === "Stop") stopped.abort()
+      if (boundary === "account") auth.abort()
+      if (boundary === "navigation") mounted.result.current.reset()
+      finish()
+      await expect(pending).rejects.toThrow("stale_selection")
+    })
+    expect(adopt).not.toHaveBeenCalled()
+    expect(mounted.result.current.status).toBe("idle")
+    const owner = mounted.result.current.getCurrent().owner
+    if (owner?.kind === "native") expect(owner.validate_lease()).toBe(false)
+    expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
+    expect(await savedMessages()).toEqual([])
+    mounted.unmount()
+  })
+
+  it("does not publish a native receipt after an epoch-only load change", async () => {
+    const mounted = renderHook(() => useHistorySelection())
+    vi.spyOn(tldwClient, "createChat").mockResolvedValue({ id: "new-server" } as never)
+    const capture = vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => emptyServerCapture(request))
+    const admission = vi.spyOn(tldwClient, "addChatMessage").mockImplementation(async (_id, value) => {
+      const selection = value.tldw_history_selection_v1
+      return { id: value.id, ...(selection ? { tldw_history_admission_v1: {
+        version: 1, owner_key: "server-owner", conversation_id: "new-server", input_message_id: value.id,
+        input_message_revision: "1", selection_digest: selection.selection_digest,
+        messages: selection.messages, originating_selection_revision: selection.selection_revision
+      } } : {}) } as never
+    })
+    const controller = mounted.result.current
+    const load = controller.loadConversation
+    const changed = { ...controller, loadConversation: async (...args: Parameters<typeof load>) => {
+      const loaded = await load(...args)
+      controller.beginLoad()
+      return loaded
+    } }
+    const adopt = vi.fn()
+    await act(async () => { await expect(send(changed, { setServerChatId: adopt, originIsCurrent: controller.fence() })).rejects.toThrow("stale_selection") })
+    expect(adopt).not.toHaveBeenCalled()
+    expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
+    const owner = mounted.result.current.getCurrent().owner
+    expect(owner?.kind === "native" && owner.validate_lease()).toBe(false)
+    capture.mockClear()
+    await act(async () => { await expect(send(controller)).rejects.toThrow("stale_selection") })
+    expect(capture).not.toHaveBeenCalled()
+    expect(admission).not.toHaveBeenCalled()
+    expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
+    mounted.unmount()
+  })
+
+  it("keeps an enabled-tool first send local without creating an empty native chat", async () => {
+    const mounted = renderHook(() => useHistorySelection())
+    useStoreMessageOption.setState({ toolChoice: "auto" })
+    useMcpToolsStore.setState({ healthState: "healthy", chatTools: buildChatToolFilterState({ tools: [{
+      name: "lookup", canExecute: true, inputSchema: { type: "object", properties: {} }
+    }] }).chatTools })
+    const create = vi.spyOn(tldwClient, "createChat")
+    await act(async () => { expect(await send(mounted.result.current, { setServerChatId: vi.fn() })).toEqual({ status: "submitted" }) })
+    expect(create).not.toHaveBeenCalled()
+    expect(mounted.result.current.owner?.kind).toBe("local")
+    expect((await savedMessages()).map(row => row.role)).toEqual(["user", "assistant"])
+    mounted.unmount()
+  })
+
+  it.each(["navigation", "account", "Stop", "missing ACK", "creation failure"])(
+    "never adopts or generates after native creation crosses %s",
+    async boundary => {
+      const mounted = renderHook(() => useHistorySelection())
+      const scoped = snapshot()
+      const cancelled = new AbortController()
+      Object.assign(scoped, { scopeSignal: cancelled.signal, scopeInvalidatedSignal: cancelled.signal })
+      let finish!: () => void
+      const waiting = new Promise<void>(resolve => { finish = resolve })
+      let current = true
+      const create = vi.spyOn(tldwClient, "createChat").mockImplementation(async () => {
+        await waiting
+        if (boundary === "creation failure") throw new Error("create unavailable")
+        return { id: boundary === "missing ACK" ? "" : "late-chat" } as never
+      })
+      const adopt = vi.fn()
+      let pending!: ReturnType<typeof send>
+      act(() => { pending = send(mounted.result.current, { snapshot: scoped, setServerChatId: adopt, originIsCurrent: () => current }) })
+      await waitFor(() => expect(create).toHaveBeenCalledOnce())
+      await act(async () => {
+        if (boundary === "navigation") { current = false; mounted.result.current.reset() }
+        if (boundary === "account" || boundary === "Stop") cancelled.abort()
+        finish()
+        await expect(pending).rejects.toThrow()
+      })
+      expect(adopt).not.toHaveBeenCalled()
+      expect(mounted.result.current.getCurrent().owner).toBeNull()
+      expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
+      expect(await savedMessages()).toEqual([])
+      expect(await storage.tables.chatHistories.toArray()).toEqual([])
+      mounted.unmount()
+    }
+  )
+
+  it.each(["First answer", "<think>Reasoning text</think>First answer"])("creates a native owner and reopens its server pair, preserving %s", async answer => {
+    const stopped = new AbortController()
+    const scoped = { ...snapshot(), scopeSignal: stopped.signal }
+    const rows: Array<{ id: string; role: string; content: string; parent_message_id: string | null }> = []
+    const create = vi.spyOn(tldwClient, "createChat").mockResolvedValue({ id: "new-server" } as never)
+    vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => {
+      const view = { ...request.view, owner_key: "server-owner" }
+      const nodes = rows.map(row => ({ id: row.id, role: row.role, parent_id: row.parent_message_id, revision: "1", settled: true }))
+      return {
+        status: "captured", purpose: request.purpose, view,
+        snapshot: { version: 1, owner_key: view.owner_key, conversation_id: "new-server", nodes,
+          fences: { conversation: "1", history: "1", settings: "1" }, source_digest: "source",
+          storage_context_digest: "storage", interpretation_status: { kind: "parent_graph_v1" } },
+        rows: view.cursor.kind === "empty" ? [] : nodes,
+        selected_content: view.cursor.kind === "empty" ? [] : rows.map(row => ({ id: row.id, revision: "1", message: row.content, images: [] })),
+        storage_context_digest: "storage"
+      } as never
+    })
+    const append = vi.spyOn(tldwClient, "addChatMessage").mockImplementation(async (_id, body) => {
+      rows.push({ id: body.id!, role: body.role, content: body.content!, parent_message_id: body.parent_message_id ?? null })
+      const selection = body.tldw_history_selection_v1
+      return { id: body.id, ...(selection ? { tldw_history_admission_v1: {
+        version: 1, owner_key: "server-owner", conversation_id: "new-server", input_message_id: body.id,
+        input_message_revision: "1", selection_digest: selection.selection_digest,
+        messages: selection.messages, originating_selection_revision: selection.selection_revision
+      } } : {}) } as never
+    })
+    if (answer.startsWith("<think>")) {
+      vi.mocked(tldwChat.streamMessage).mockImplementation(async function* () {
+        yield "<think>Reasoning text"
+        await new Promise(resolve => setTimeout(resolve, 10))
+        yield "</think>First answer"
+      })
+    }
+    const mounted = renderHook(() => useHistorySelection())
+    const adopt = vi.fn()
+    await act(async () => {
+      expect(await send(mounted.result.current, { setServerChatId: adopt, snapshot: scoped })).toEqual({ status: "submitted" })
+    })
+    expect(create).toHaveBeenCalledOnce()
+    expect(create.mock.calls[0][1]).toMatchObject({ requestScope: prompt.scope, signal: expect.any(AbortSignal) })
+    expect(adopt).toHaveBeenCalledWith("new-server")
+    expect(mounted.result.current.owner).toMatchObject({ kind: "native", conversation_id: "new-server" })
+    stopped.abort()
+    const owner = mounted.result.current.getCurrent().owner
+    expect(owner?.kind === "native" && owner.validate_lease()).toBe(true)
+    expect(append).toHaveBeenCalledTimes(2)
+    expect(rows.map(row => [row.role, row.content, row.parent_message_id])).toEqual([
+      ["user", "First question", null], ["assistant", answer, "first-user"]
+    ])
+    expect(await savedMessages()).toEqual([])
+    expect(vi.mocked(tldwChat.streamMessage).mock.calls[0][1]?.preparedRequest).toMatchObject({ save_to_db: false })
+    const reference = mounted.result.current.getReference()!
+    mounted.unmount()
+    const reopened = renderHook(() => useHistorySelection())
+    await act(async () => { await reopened.result.current.loadConversation({ serverChatId: "new-server" }, reference) })
+    expect(reopened.result.current.status).toBe("ready")
+    expect(reopened.result.current.capture?.status === "captured" && reopened.result.current.capture.selected_content.map(row => row.message)).toEqual(["First question", answer])
+    reopened.unmount()
+  })
+
   it("dispatches explicit model and tool overrides despite unrelated global selector changes", async () => {
     const mounted = renderHook(() => useHistorySelection())
     const created = await saveHistory("Saved", false, "web-ui", undefined, undefined, snapshot().requestScope)
