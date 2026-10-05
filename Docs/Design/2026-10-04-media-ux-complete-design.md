@@ -38,7 +38,7 @@ Add supports a labeled extension-only Capture current tab action using the exist
 
 Wire existing Results per-item and Retry All callbacks. Requeue only requested retryable failures. Preserve successful outcomes and original source-specific options. File retries require an attached valid File or an explicit reattach action after reload. Ownership changes prevent old callbacks or retries from acting on a different account/server. Retrying does not silently repeat already successful jobs.
 
-Results presents a compact reconciling summary: added, excluded/skipped, succeeded/saved, failed and cancelled, with reasons linked to rows. A successful saved item remains openable through retries. Review these N saved items opens the existing multi-review route with unique saved media IDs, excluding errors, unsaved analysis and invalid queue entries. Reuse the existing review selection setting and route; do not add a parallel viewer.
+Results presents a compact reconciling summary: added, excluded/skipped, succeeded/saved, failed and cancelled, with reasons linked to rows. A successful saved item remains openable through retries. Review these N saved items opens the existing multi-review route with unique saved media IDs, excluding errors, unsaved analysis and invalid queue entries. Reuse the existing review selection setting and route; publish the owned IDs together in one versioned snapshot, with the raw legacy IDs only a compatibility mirror. Do not add a parallel viewer.
 
 Show Saved, Processing and Ready for Knowledge when supported by authoritative outcomes. Without indexing confirmation, say readiness is unconfirmed or indexing requested; never imply readiness from the chosen preset. Distinguish Review extracted content before saving from Review saved items. Preserve durable collection handoffs and per-item Open in Media.
 
@@ -46,7 +46,7 @@ Show Saved, Processing and Ready for Knowledge when supported by authoritative o
 
 Click and Enter preview the same item. Selection uses an accessible, named, tab-reachable checkbox; Space on the checkbox selects, with existing Shift range behavior retained. Copy describes these actual actions. Selecting a review set does not erase preview context, and preview content is visibly distinguished from the selected reading set.
 
-The active content title and navigation position use the active context: result preview or ordered selected IDs. Selected navigation is independent of the current search page and handles IDs present only on earlier pages. No Focus(0/N), mismatched item number or No item selected when content is displayed. Mobile preview/selection moves to Content with Back to results.
+The active content title and navigation position use the active context: result preview or ordered selected IDs. Selected navigation is independent of the current search page and handles IDs present only on earlier pages. No Focus(0/N), mismatched item number or No item selected when content is displayed. Mobile preview or starting selected review moves to Content with Back to results. Checkbox toggles keep Results visible while assembling a batch.
 
 Bulk selection may exceed 30. Only the active 30-item reading window is fetched/rendered; windows can be navigated without dropping selected IDs. Show selected total separately from reading-window count and its limit. Batch tags/trash/export/reprocessing act on the full explicit selection, with existing safeguards and bounded on-demand detail work. Do not prefetch full content for every checkbox selection.
 
@@ -72,23 +72,23 @@ Contextual batch guidance, distinct saved/index states, compact result summaries
 
 ## Coverage and verification
 
-| Accepted item | Stage | Required behavior check |
-| --- | --- | --- |
-| Empty URL handoff | 1 | Fresh and restored draft URL survives click/Enter in both callers |
-| Comma parsing | 1 | Two URLs split; legitimate comma URL remains one |
-| Invalid/duplicate accounting | 1–2 | One eligible count and an explained outcome for every input |
-| Retry | 2 | Retry failures only; prior successes and options persist |
-| Saved-batch handoff | 2 | Correct unique saved IDs reach multi-review |
-| Deep overwrite coupling/configure copy | 1 | Preset cannot silently authorize replacement; settings describe this run |
-| Preview/keyboard/navigation | 3 | Pointer and keyboard agree; title/position/Prev/Next match content across pages |
-| Larger metadata sets/reading cap | 3 | 40 selected; at most 30 detail fetch/render; window navigation retains all selections |
-| Grouped review controls | 3 | Reading/layout/selection controls remain findable with correct labels |
-| Inspector scope | 4 | Cross-page four-item set survives and bulk actions receive all four |
-| Mobile reading/bulk visibility | 4 | 390×844 shows content or selected count/primary action clearly |
-| Trash recovery | 4 | Cancel deletes nothing; confirmed partial outcomes retain failures and offer recovery |
-| Accessibility | 3–4 | Named keyboard controls, clear focus and practical mobile hit areas |
-| Active-tab capture | 1 | Packaged extension capture queues HTTP(S) and handles restricted tabs |
-| Recent imports | 5 | Submission/reload/resume/history and owner transitions are safe without manual IDs |
-| Contextual guidance/status/summary | 2,4,5 | Accurate displayed state and direct workflow continuation |
+| Accepted item                          | Stage | Required behavior check                                                               |
+| -------------------------------------- | ----- | ------------------------------------------------------------------------------------- |
+| Empty URL handoff                      | 1     | Fresh and restored draft URL survives click/Enter in both callers                     |
+| Comma parsing                          | 1     | Two URLs split; legitimate comma URL remains one                                      |
+| Invalid/duplicate accounting           | 1–2   | One eligible count and an explained outcome for every input                           |
+| Retry                                  | 2     | Retry failures only; prior successes and options persist                              |
+| Saved-batch handoff                    | 2     | Correct unique saved IDs reach multi-review                                           |
+| Deep overwrite coupling/configure copy | 1     | Preset cannot silently authorize replacement; settings describe this run              |
+| Preview/keyboard/navigation            | 3     | Pointer and keyboard agree; title/position/Prev/Next match content across pages       |
+| Larger metadata sets/reading cap       | 3     | 40 selected; at most 30 detail fetch/render; window navigation retains all selections |
+| Grouped review controls                | 3     | Reading/layout/selection controls remain findable with correct labels                 |
+| Inspector scope                        | 4     | Cross-page four-item set survives and bulk actions receive all four                   |
+| Mobile reading/bulk visibility         | 4     | 390×844 shows content or selected count/primary action clearly                        |
+| Trash recovery                         | 4     | Cancel deletes nothing; confirmed partial outcomes retain failures and offer recovery |
+| Accessibility                          | 3–4   | Named keyboard controls, clear focus and practical mobile hit areas                   |
+| Active-tab capture                     | 1     | Packaged extension capture queues HTTP(S) and handles restricted tabs                 |
+| Recent imports                         | 5     | Submission/reload/resume/history and owner transitions are safe without manual IDs    |
+| Contextual guidance/status/summary     | 2,4,5 | Accurate displayed state and direct workflow continuation                             |
 
 Use red–green unit/integration tests around shared functions and mounted components. Run the relevant existing Media/Quick Ingest family once per completed stage, typecheck/format checks on changed scope, and both platform builds at integration. Perform one batched browser pass covering desktop/mobile, single/mixed imports, failed retry, across-page selection, preview, saved batch and packaged extension; repair findings together, then one confirmation pass. Real backend checks use isolated safe content and must not mutate an existing user's library. Never describe simulated processing as real ML reliability.
