@@ -13,6 +13,7 @@ from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.Notes.wikilinks import (
     MAX_WIKILINK_TITLE_LENGTH,
+    WikilinkRewriteUnsafeError,
     WikilinkTokenReplacement,
     is_single_wikilink,
     iter_wikilink_tokens,
@@ -307,21 +308,31 @@ _FRAGMENTS = st.sampled_from(
 _REPLACEMENTS = st.sampled_from(
     [NEW_LINK, f"[[id:{NOTE_ID}]]", "[[[Draft] New]]", "[[New ]]]", "[[Old title 2]]"]
 )
+# Titles with brackets at either end: the hard cases for staying inside one token.
+_OLD_TITLES = st.sampled_from(["Old title", "[Old title", "Old title]", "[Old title]"])
 
 
-@settings(max_examples=300, deadline=None)
-@given(fragments=st.lists(_FRAGMENTS, max_size=12), replacement=_REPLACEMENTS)
-def test_rewrite_then_restore_is_the_identity(fragments: list[str], replacement: str) -> None:
+@settings(max_examples=600, deadline=None)
+@given(fragments=st.lists(_FRAGMENTS, max_size=12), replacement=_REPLACEMENTS, old_title=_OLD_TITLES)
+def test_rewrite_then_restore_is_the_identity(
+    fragments: list[str], replacement: str, old_title: str
+) -> None:
     content = "".join(fragments)
     before = list(iter_wikilink_tokens(content))
 
-    rewritten, replaced = rewrite_wikilink_title_tokens(
-        content, old_title="Old title", replacement=replacement
-    )
+    try:
+        rewritten, replaced = rewrite_wikilink_title_tokens(
+            content, old_title=old_title, replacement=replacement
+        )
+    except WikilinkRewriteUnsafeError:
+        # Refusing is always safe. It only happens when a link to a title that
+        # starts with "[" sits directly after another "[".
+        assert old_title.startswith("[")
+        return
     after = list(iter_wikilink_tokens(rewritten))
 
     replaced_indexes = {item.token_index for item in replaced}
-    old_key = normalize_wikilink_title("Old title")
+    old_key = normalize_wikilink_title(old_title)
     # Exactly the parser's links to the old title are replaced ...
     assert replaced_indexes == {
         token.index for token in before if token.title is not None and token.title.lower() == old_key
@@ -335,6 +346,27 @@ def test_rewrite_then_restore_is_the_identity(fragments: list[str], replacement:
         assert rewritten == content
     else:
         assert (
-            restore_wikilink_tokens(rewritten, replaced, old_title="Old title", replacement=replacement)
+            restore_wikilink_tokens(rewritten, replaced, old_title=old_title, replacement=replacement)
             == content
         )
+
+
+def test_a_rewrite_that_would_fuse_with_a_bracket_is_refused() -> None:
+    # "[" + "[[[Old]]" is a link to the title "[Old". Writing "[[New]]" after
+    # that "[" would read as a link to "[New", so it can't be rewritten in place.
+    content = "[[[[Old]]"
+    assert [token.title for token in iter_wikilink_tokens(content)] == ["[Old"]
+
+    with pytest.raises(WikilinkRewriteUnsafeError):
+        rewrite_wikilink_title_tokens(content, old_title="[Old", replacement="[[New]]")
+    with pytest.raises(WikilinkRewriteUnsafeError):
+        rewrite_wikilink_title_tokens(content, old_title="[Old", replacement=f"[[id:{NOTE_ID}]]")
+
+
+def test_a_bracket_title_is_rewritten_when_nothing_fuses() -> None:
+    rewritten, replaced = rewrite_wikilink_title_tokens(
+        "See [[[Old]] and [[[old]].", old_title="[Old", replacement="[[New]]"
+    )
+
+    assert rewritten == "See [[New]] and [[New]]."
+    assert [item.original for item in replaced] == ["[[[Old]]", "[[[old]]"]

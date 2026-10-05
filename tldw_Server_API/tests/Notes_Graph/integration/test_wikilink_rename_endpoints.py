@@ -351,6 +351,38 @@ def test_undo_skips_a_note_edited_since_the_rewrite(client_and_db) -> None:
     assert _get_note(client, ids["a"])["content"] == edited
 
 
+def test_rewrite_refuses_to_write_a_link_that_would_open_another_note(client_and_db) -> None:
+    client, db = client_and_db
+    # A note whose id is not a UUID has no [[id:...]] form.
+    created = client.post(
+        "/api/v1/notes/",
+        json={"id": "legacy-renamed", "title": "Old title", "content": "body"},
+        headers=_headers(),
+    )
+    assert created.status_code == 201, created.text
+    linker = _create_note(client, "Linker", "See [[Old title]].")
+    older_duplicate = _create_note(client, "New title", "an older note with the new title")
+    db.execute_query(
+        "UPDATE notes SET created_at = ? WHERE id = ?", ("2001-01-01T00:00:00.000Z", older_duplicate)
+    )
+    _put_note(client, "legacy-renamed", {"title": "New title"}, expected_version=1)
+
+    resp = client.post(
+        REWRITE,
+        json={
+            "note_id": "legacy-renamed",
+            "old_title": "Old title",
+            "notes": [{"id": linker, "expected_version": 1}],
+        },
+        headers=_headers(),
+    )
+
+    # [[New title]] would resolve to the older duplicate, so nothing is written.
+    assert resp.status_code == 400, resp.text
+    assert "would open that note" in resp.json()["detail"]
+    assert _get_note(client, linker)["content"] == "See [[Old title]]."
+
+
 def test_rewrite_needs_a_live_renamed_note_with_a_different_title(client_and_db) -> None:
     client, _db = client_and_db
     ids = _renamed_library(client)

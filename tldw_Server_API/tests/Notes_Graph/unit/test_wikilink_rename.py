@@ -63,6 +63,10 @@ def _content(db: CharactersRAGDB, note_id: str) -> str:
     return str(_note(db, note_id)["content"])
 
 
+def _set_created_at(db: CharactersRAGDB, note_id: str, created_at: str) -> None:
+    db.execute_query("UPDATE notes SET created_at = ? WHERE id = ?", (created_at, note_id))
+
+
 def _seed_renamed_library(db: CharactersRAGDB) -> None:
     """A note renamed from "Old title" to "New title", and the notes around it."""
 
@@ -218,18 +222,33 @@ def test_a_title_no_link_can_name_is_linked_by_id(db: CharactersRAGDB) -> None:
     assert (plan.link_form, plan.replacement) == ("id", f"[[id:{RENAMED_ID}]]")
 
 
-def test_a_note_without_a_uuid_id_falls_back_to_its_title(db: CharactersRAGDB) -> None:
+def test_a_note_without_a_uuid_id_keeps_a_title_link_only_when_it_resolves_to_it(
+    db: CharactersRAGDB,
+) -> None:
+    # No [[id:...]] form exists for a non-UUID id, so a shared title is only
+    # safe when [[New title]] resolves to this note: the oldest note wins.
     db.add_note("New title", "imported with a non-UUID id", note_id="legacy-note-1")
     db.add_note("New title", "duplicate", note_id=DUPLICATE_ID)
+    _set_created_at(db, "legacy-note-1", "2001-01-01T00:00:00.000Z")
+    _set_created_at(db, DUPLICATE_ID, "2002-01-01T00:00:00.000Z")
 
-    shared = plan_renamed_note_link(db, "legacy-note-1")
-    db.update_note("legacy-note-1", {"title": "a]]b"}, expected_version=1)
-    unlinkable = plan_renamed_note_link(db, "legacy-note-1")
+    older = plan_renamed_note_link(db, "legacy-note-1")
+    _set_created_at(db, "legacy-note-1", "2003-01-01T00:00:00.000Z")
+    newer = plan_renamed_note_link(db, "legacy-note-1")
 
-    assert shared is not None and unlinkable is not None
-    # No [[id:...]] form exists for this id: keep the title link and flag it as shared.
-    assert (shared.link_form, shared.replacement, shared.new_title_shared) == ("title", NEW_LINK, True)
-    assert (unlinkable.link_form, unlinkable.replacement) == (None, None)
+    assert older is not None and newer is not None
+    assert (older.link_form, older.replacement, older.new_title_shared) == ("title", NEW_LINK, True)
+    # [[New title]] would open the other note, and no id link exists: refuse.
+    assert (newer.link_form, newer.replacement, newer.new_title_shared) == (None, None, True)
+
+
+def test_a_note_no_link_form_can_name_has_no_replacement(db: CharactersRAGDB) -> None:
+    db.add_note("a]]b", "non-UUID id and a title no link can name", note_id="legacy-note-1")
+
+    plan = plan_renamed_note_link(db, "legacy-note-1")
+
+    assert plan is not None
+    assert (plan.link_form, plan.replacement) == (None, None)
 
 
 def test_a_missing_or_trashed_renamed_note_has_no_plan(db: CharactersRAGDB) -> None:
@@ -364,14 +383,13 @@ def test_the_batch_is_bounded(db: CharactersRAGDB) -> None:
         rewrite_title_links(db, old_title="Old title", replacement=NEW_LINK, targets=targets)
 
 
-def test_a_failed_save_leaves_that_note_whole_and_the_rest_updated(db: CharactersRAGDB) -> None:
+def test_a_failed_save_is_reported_and_the_rest_are_updated(db: CharactersRAGDB) -> None:
     _seed_renamed_library(db)
 
-    def save(note: dict, content: str) -> dict:
+    def save(note: dict, content: str) -> None:
         if note["id"] == LINKER_B_ID:
             raise CharactersRAGDBError("disk full")
         db.update_note(note["id"], {"content": content}, expected_version=int(note["version"]))
-        return db.get_note_by_id(note["id"])
 
     results = rewrite_title_links(
         db,
@@ -382,9 +400,78 @@ def test_a_failed_save_leaves_that_note_whole_and_the_rest_updated(db: Character
     )
 
     assert _statuses(results) == {LINKER_B_ID: "failed", LINKER_A_ID: "updated"}
+    assert _content(db, LINKER_B_ID) == LINKER_B_TEXT
+    assert _version(db, LINKER_B_ID) == 1
+
+
+def test_a_failure_inside_the_note_transaction_leaves_the_note_whole(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_renamed_library(db)
+    store = db.note_graph_projection_store
+    replace_projection = store.replace_projection
+
+    def fail_for_linker_b(*, note_id: str, **kwargs):
+        # The note row has already been updated in this transaction.
+        if note_id == LINKER_B_ID:
+            raise CharactersRAGDBError("projection write failed")
+        return replace_projection(note_id=note_id, **kwargs)
+
+    monkeypatch.setattr(store, "replace_projection", fail_for_linker_b)
+
+    results = rewrite_title_links(
+        db,
+        old_title="Old title",
+        replacement=NEW_LINK,
+        targets=_targets(db, LINKER_B_ID, LINKER_A_ID),
+    )
+
+    assert _statuses(results) == {LINKER_B_ID: "failed", LINKER_A_ID: "updated"}
     # Both of Linker B's links are intact: a note is rewritten whole or not at all.
     assert _content(db, LINKER_B_ID) == LINKER_B_TEXT
     assert _version(db, LINKER_B_ID) == 1
+    assert _content(db, LINKER_A_ID) == "Intro [[New title]] and plain Old title."
+
+
+def test_a_saved_note_is_reported_updated_even_if_it_cannot_be_read_back(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_renamed_library(db)
+    targets = _targets(db, LINKER_A_ID)
+    get_note_by_id = db.get_note_by_id
+    reads: list[str] = []
+
+    def fail_second_read(note_id: str, *args, **kwargs):
+        reads.append(note_id)
+        if len(reads) == 2:
+            raise CharactersRAGDBError("read failed after the write")
+        return get_note_by_id(note_id, *args, **kwargs)
+
+    monkeypatch.setattr(db, "get_note_by_id", fail_second_read)
+
+    results = rewrite_title_links(db, old_title="Old title", replacement=NEW_LINK, targets=targets)
+
+    monkeypatch.undo()
+    # The text did change, so the caller gets the new version and the undo data.
+    assert _content(db, LINKER_A_ID) == "Intro [[New title]] and plain Old title."
+    assert [(result.status, result.version) for result in results] == [("updated", 2)]
+    assert [item.original for item in results[0].replacements] == ["[[Old title]]"]
+
+
+def test_a_link_that_cannot_be_rewritten_in_place_fails_without_a_write(db: CharactersRAGDB) -> None:
+    db.add_note("[Old", "the renamed note", note_id=RENAMED_ID)
+    # "[" directly before the link: "[[New title]]" there would read as "[New title".
+    fused = "Bracketed [[[[Old]] link."
+    db.add_note("Linker A", fused, note_id=LINKER_A_ID)
+    db.update_note(RENAMED_ID, {"title": "New title"}, expected_version=1)
+
+    results = rewrite_title_links(
+        db, old_title="[Old", replacement=NEW_LINK, targets=_targets(db, LINKER_A_ID)
+    )
+
+    assert _statuses(results) == {LINKER_A_ID: "failed"}
+    assert _content(db, LINKER_A_ID) == fused
+    assert _version(db, LINKER_A_ID) == 1
 
 
 def test_an_edit_racing_the_save_is_a_conflict(db: CharactersRAGDB) -> None:
@@ -392,7 +479,7 @@ def test_an_edit_racing_the_save_is_a_conflict(db: CharactersRAGDB) -> None:
     targets = _targets(db, LINKER_A_ID)
     raced = "A concurrent edit landed first: [[Old title]]."
 
-    def save(note: dict, content: str) -> dict:
+    def save(note: dict, content: str) -> None:
         # Another writer commits between this note's read and its write.
         db.update_note(note["id"], {"content": raced}, expected_version=int(note["version"]))
         db.update_note(note["id"], {"content": content}, expected_version=int(note["version"]))
@@ -442,9 +529,7 @@ def test_a_shared_new_title_rewrites_links_to_the_renamed_notes_id(db: Character
     _seed_renamed_library(db)
     # An older note already has the new title: [[New title]] would resolve to it.
     db.add_note("New title", "the other New title", note_id=DUPLICATE_ID)
-    db.execute_query(
-        "UPDATE notes SET created_at = ? WHERE id = ?", ("2001-01-01T00:00:00.000Z", DUPLICATE_ID)
-    )
+    _set_created_at(db, DUPLICATE_ID, "2001-01-01T00:00:00.000Z")
     plan = plan_renamed_note_link(db, RENAMED_ID)
     assert plan is not None and plan.replacement is not None
 
@@ -548,7 +633,7 @@ def test_a_conflict_error_from_a_restore_save_is_a_conflict(db: CharactersRAGDB)
         db, old_title="Old title", replacement=NEW_LINK, targets=_targets(db, LINKER_A_ID)
     )
 
-    def save(note: dict, content: str) -> dict:
+    def save(note: dict, content: str) -> None:
         raise ConflictError("version changed", entity="notes", entity_id=note["id"])
 
     restored = restore_title_links(

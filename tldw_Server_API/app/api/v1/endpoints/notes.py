@@ -2789,21 +2789,19 @@ async def _require_note_rate_limit(rate_limiter: RateLimiter, current_user: User
         )
 
 
-def _wikilink_rename_saver(
-    db: CharactersRAGDB,
-    current_user: User,
-    task_service: NotesTaskService,
-) -> SaveNoteContent:
-    """Save one rewritten note the way ``PUT /notes/{id}`` saves a content edit.
+def _wikilink_rename_saver(db: CharactersRAGDB, current_user: User) -> SaveNoteContent:
+    """Write one rewritten note the way ``PUT /notes/{id}`` writes a content edit.
 
-    With Sync v2 active the change is captured as a server-origin mutation;
-    otherwise it is a version-checked update. Either way it is one transaction
-    per note, and the note's task rows are reconciled afterwards.
+    Without Sync the write is one version-checked transaction. With Sync v2
+    active it is captured as a server-origin mutation, like ``PUT``: the
+    caller has just compared the note's version, but the capture itself is not
+    conditional on it, and a capture that fails after it was accepted may
+    still be applied later.
     """
 
     sync_service = _active_notes_sync_service(current_user)
 
-    def save(note: dict[str, Any], content: str) -> dict[str, Any] | None:
+    def save(note: dict[str, Any], content: str) -> None:
         note_id = str(note["id"])
         if sync_service is not None:
             payload = _note_payload_from_row(note)
@@ -2817,13 +2815,31 @@ def _wikilink_rename_saver(
                 payload=payload,
                 source="server_api",
             )
-        else:
-            db.update_note(
-                note_id=note_id,
-                update_data={"content": content},
-                expected_version=int(note["version"]),
-            )
-        saved = db.get_note_by_id(note_id=note_id)
+            return
+        db.update_note(
+            note_id=note_id,
+            update_data={"content": content},
+            expected_version=int(note["version"]),
+        )
+
+    return save
+
+
+def _reconcile_tasks_for_rewritten_notes(
+    *,
+    db: CharactersRAGDB,
+    note_ids: list[str],
+    current_user: User,
+    task_service: NotesTaskService,
+) -> None:
+    """Reconcile checklist tasks for notes a wikilink rewrite or undo just saved."""
+
+    for note_id in note_ids:
+        try:
+            saved = db.get_note_by_id(note_id=note_id)
+        except _NOTES_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning("Could not re-read note {} for task reconciliation: {}", note_id, exc)
+            continue
         if saved:
             _reconcile_note_tasks_after_save(
                 db=db,
@@ -2831,9 +2847,6 @@ def _wikilink_rename_saver(
                 current_user=current_user,
                 task_service=task_service,
             )
-        return saved
-
-    return save
 
 
 @router.post(
@@ -2910,9 +2923,11 @@ async def rewrite_note_wikilinks(
 
     The new link is ``[[New title]]``. If another live note shares the new
     title, that link could resolve to the other note, so the links are written
-    as ``[[id:<UUID>]]`` instead (``link_form`` is ``id``). Each updated note
-    returns ``replacements``: send them to ``/wikilinks/rewrite/undo`` to
-    restore the previous text.
+    as ``[[id:<UUID>]]`` instead (``link_form`` is ``id``). A link that would
+    open another note is never written: the request is refused with 400 when
+    no link form can name the renamed note. Each updated note returns
+    ``replacements``: send them to ``/wikilinks/rewrite/undo`` to restore the
+    previous text.
     """
     try:
         await _require_note_rate_limit(rate_limiter, current_user, "notes.update")
@@ -2927,14 +2942,24 @@ async def rewrite_note_wikilinks(
         if plan.replacement is None or plan.link_form is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The note's title cannot be written as a wikilink.",
+                detail=(
+                    "Another note has the same title, so a link to this title would open that note."
+                    if plan.new_title_shared
+                    else "The note's title cannot be written as a wikilink."
+                ),
             )
         results = rewrite_title_links(
             db,
             old_title=payload.old_title,
             replacement=plan.replacement,
             targets=[WikilinkRewriteTarget(note.id.strip(), note.expected_version) for note in payload.notes],
-            save=_wikilink_rename_saver(db, current_user, task_service),
+            save=_wikilink_rename_saver(db, current_user),
+        )
+        _reconcile_tasks_for_rewritten_notes(
+            db=db,
+            note_ids=[result.note_id for result in results if result.status == "updated"],
+            current_user=current_user,
+            task_service=task_service,
         )
         updated_count = sum(1 for result in results if result.status == "updated")
         logger.info(
@@ -3012,7 +3037,13 @@ async def undo_note_wikilink_rewrite(
                 )
                 for note in payload.notes
             ],
-            save=_wikilink_rename_saver(db, current_user, task_service),
+            save=_wikilink_rename_saver(db, current_user),
+        )
+        _reconcile_tasks_for_rewritten_notes(
+            db=db,
+            note_ids=[result.note_id for result in results if result.status == "restored"],
+            current_user=current_user,
+            task_service=task_service,
         )
         restored_count = sum(1 for result in results if result.status == "restored")
         logger.info(

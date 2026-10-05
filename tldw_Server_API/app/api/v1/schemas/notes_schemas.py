@@ -860,7 +860,9 @@ class WikilinkRewriteNoteResult(BaseModel):
             "updated: the links were rewritten. skipped_conflict: the note changed since expected_version. "
             "skipped_no_match: it holds no link to the old title. skipped_not_found: it is missing or in the "
             "trash. skipped_resolved: another live note still has the old title, so the link is not broken. "
-            "failed: it could not be saved, or held more links than undo can restore; its text is unchanged."
+            "failed: it was not rewritten: the save failed, a link could not be rewritten in place, or it held "
+            "more links than undo can restore. Its text is unchanged; with Sync active, a save that failed "
+            "after it was accepted may still be applied later."
         ),
     )
     version: int | None = Field(None, description="The note's version after this request.")
@@ -878,7 +880,8 @@ class WikilinkRewriteResponse(BaseModel):
         ...,
         description=(
             "How the links were written. 'id' ([[id:UUID]]) is used when another live note shares the new "
-            "title, or when no title link can name it."
+            "title, or when no title link can name it. A note whose id is not a UUID keeps 'title' for a "
+            "shared title only when that link resolves to it."
         ),
     )
     replacement: str = Field(..., description="The link text written in place of each old link.")
@@ -942,7 +945,8 @@ class WikilinkRewriteUndoNoteResult(BaseModel):
         description=(
             "restored: the previous text is back. skipped_conflict: the note changed since the rewrite. "
             "skipped_no_match: its text does not hold the rewritten links. skipped_not_found: it is missing "
-            "or in the trash. failed: it could not be saved; its text is unchanged."
+            "or in the trash. failed: the save failed. Its text is unchanged; with Sync active, a save that "
+            "failed after it was accepted may still be applied later."
         ),
     )
     version: int | None = Field(None, description="The note's version after this request.")

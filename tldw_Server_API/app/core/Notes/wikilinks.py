@@ -113,6 +113,10 @@ class WikilinkTokenReplacement:
     original: str
 
 
+class WikilinkRewriteUnsafeError(ValueError):
+    """Rewriting a link in place would change which link the text holds."""
+
+
 def collapse_wikilink_title(title: str | None) -> str:
     """Trim a title and collapse internal whitespace runs to one space."""
 
@@ -272,7 +276,14 @@ def rewrite_wikilink_title_tokens(
     case and extra whitespace) are replaced; ``[[id:UUID]]`` links, similar
     titles and all other text are returned byte for byte. ``replacement`` must
     itself be exactly one link. The returned replacements are what
-    :func:`restore_wikilink_tokens` needs to undo the rewrite.
+    :func:`restore_wikilink_tokens` needs to undo the rewrite, and the result
+    is only returned if that undo is exact.
+
+    Raises:
+        WikilinkRewriteUnsafeError: a replacement would join neighbouring
+            brackets and read as a different link. This needs a link to a
+            title that starts with ``[`` directly after another ``[``
+            (``[[[[Old]]``); such text can't be rewritten in place.
     """
 
     if not is_single_wikilink(replacement):
@@ -293,7 +304,14 @@ def rewrite_wikilink_title_tokens(
     if not replaced:
         return source, ()
     pieces.append(source[cursor:])
-    return "".join(pieces), tuple(replaced)
+    rewritten = "".join(pieces)
+    replacements = tuple(replaced)
+    # Reading the result back must find the replacement at the same tokens.
+    if restore_wikilink_tokens(rewritten, replacements, old_title=old_title, replacement=replacement) != source:
+        raise WikilinkRewriteUnsafeError(
+            "a link to this title can't be rewritten in place: the new link would join neighbouring brackets"
+        )
+    return rewritten, replacements
 
 
 def restore_wikilink_tokens(
@@ -379,6 +397,7 @@ __all__ = [
     "MAX_WIKILINK_TOKEN_TEXT_LENGTH",
     "WIKILINK_PARSER_VERSION",
     "WikilinkProjection",
+    "WikilinkRewriteUnsafeError",
     "WikilinkTitleCandidate",
     "WikilinkToken",
     "WikilinkTokenReplacement",

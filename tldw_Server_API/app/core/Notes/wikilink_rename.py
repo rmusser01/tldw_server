@@ -14,11 +14,15 @@ Rules
   (``skipped_resolved``).
 * Each note is saved on its own under optimistic locking. A note edited since
   the caller read its version is skipped (``skipped_conflict``), never
-  overwritten, and a failed save leaves that note's text whole.
+  overwritten, and a failed save leaves that note's text whole. The default
+  save is one version-checked transaction (``update_note``). With Sync v2
+  active the API saves through a server-origin capture instead, which checks
+  the version just before capturing, as ``PUT /notes/{id}`` does.
 * The new link is ``[[New title]]``. When another live note shares the new
   title, that link could resolve to the other note, so the renamed note is
   linked by id instead: ``[[id:<UUID>]]``
-  (:func:`plan_renamed_note_link`).
+  (:func:`plan_renamed_note_link`). A link that would open another note is
+  never written.
 * Undo holds no server state. The rewrite returns each replaced token's
   ordinal and original text, and :func:`restore_title_links` puts exactly
   those tokens back if the note has not changed since.
@@ -37,7 +41,9 @@ from tldw_Server_API.app.core.Notes.wikilinks import (
     MAX_WIKILINK_RENAME_NOTES,
     MAX_WIKILINK_REPLACEMENTS_PER_NOTE,
     MAX_WIKILINK_TOKEN_TEXT_LENGTH,
+    WikilinkRewriteUnsafeError,
     WikilinkTokenReplacement,
+    collapse_wikilink_title,
     restore_wikilink_tokens,
     rewrite_wikilink_title_tokens,
     wikilink_id_link_text,
@@ -56,8 +62,10 @@ WikilinkRenameStatus = Literal[
     "skipped_resolved",
     "failed",
 ]
-# Saves one note's new content at the version just read, and returns the saved row.
-SaveNoteContent = Callable[[dict[str, Any], str], dict[str, Any] | None]
+# Writes one note's new content at the version just read. It raises
+# ``ConflictError`` when the note changed first, and any other error when the
+# write did not happen.
+SaveNoteContent = Callable[[dict[str, Any], str], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,24 +108,32 @@ class WikilinkNoteResult:
 def plan_renamed_note_link(db: CharactersRAGDB, note_id: str) -> RenamedNoteLink | None:
     """Choose the link text for a renamed note, or ``None`` if it is not a live note.
 
-    A title link is used when it is unambiguous. When another live note shares
-    the title, or no title link can name it, the note is linked by id. A note
-    whose id is not a UUID has no id link: it keeps the title link (flagged as
-    shared), or has no link form at all.
+    A title link is used when no other live note shares the title. Otherwise
+    the note is linked by id, which also covers a title no link can name. A
+    note whose id is not a UUID has no id link: it keeps a shared title only
+    when ``[[New title]]`` resolves to it (the ambiguity rule picks it), and
+    has no link form at all when that link would open another note.
     """
 
     note = db.get_note_by_id(note_id=note_id)
     if note is None:
         return None
+    own_id = str(note["id"])
     new_title = str(note.get("title") or "")
-    others = set(db.note_graph_projection_store.list_live_note_ids_titled(new_title)) - {str(note["id"])}
+    store = db.note_graph_projection_store
+    shared = bool(set(store.list_live_note_ids_titled(new_title)) - {own_id})
     title_link = wikilink_title_link_text(new_title)
-    id_link = wikilink_id_link_text(str(note["id"]))
-    if title_link is not None and (not others or id_link is None):
-        return RenamedNoteLink(str(note["id"]), new_title, "title", title_link, bool(others))
+    id_link = wikilink_id_link_text(own_id)
+    if title_link is not None and not shared:
+        return RenamedNoteLink(own_id, new_title, "title", title_link, False)
     if id_link is not None:
-        return RenamedNoteLink(str(note["id"]), new_title, "id", id_link, bool(others))
-    return RenamedNoteLink(str(note["id"]), new_title, None, None, bool(others))
+        return RenamedNoteLink(own_id, new_title, "id", id_link, shared)
+    if title_link is not None:
+        link_title = collapse_wikilink_title(new_title)
+        resolution = store.resolve_wikilink_titles([link_title]).get(link_title)
+        if resolution is not None and resolution.note_id == own_id:
+            return RenamedNoteLink(own_id, new_title, "title", title_link, shared)
+    return RenamedNoteLink(own_id, new_title, None, None, shared)
 
 
 def rewrite_title_links(
@@ -149,15 +165,19 @@ def rewrite_title_links(
             # Another live note still has the old title, so this link is not broken.
             results.append(_result(note, "skipped_resolved"))
             continue
-        content = str(note.get("content") or "")
-        new_content, replaced = rewrite_wikilink_title_tokens(
-            content, old_title=old_title, replacement=replacement
-        )
+        try:
+            new_content, replaced = rewrite_wikilink_title_tokens(
+                str(note.get("content") or ""), old_title=old_title, replacement=replacement
+            )
+        except WikilinkRewriteUnsafeError:
+            logger.warning("Wikilink rename skipped note {}: a link can't be rewritten in place", note["id"])
+            results.append(_result(note, "failed"))
+            continue
         if not replaced:
             results.append(_result(note, "skipped_no_match"))
             continue
-        if not _undoable(content, new_content, replaced, old_title=old_title, replacement=replacement):
-            logger.warning("Wikilink rename skipped note {}: undo could not restore it exactly", note["id"])
+        if not _undo_can_carry(replaced):
+            logger.warning("Wikilink rename skipped note {}: too many or too long links to undo", note["id"])
             results.append(_result(note, "failed"))
             continue
         results.append(_save(db, save_content, note, new_content, "updated", replaced))
@@ -198,22 +218,12 @@ def restore_title_links(
     return results
 
 
-def _undoable(
-    content: str,
-    new_content: str,
-    replaced: tuple[WikilinkTokenReplacement, ...],
-    *,
-    old_title: str,
-    replacement: str,
-) -> bool:
-    """Report whether the undo request can carry this rewrite and restore the text exactly."""
+def _undo_can_carry(replaced: tuple[WikilinkTokenReplacement, ...]) -> bool:
+    """Report whether one undo request can hold this note's replaced links."""
 
     if len(replaced) > MAX_WIKILINK_REPLACEMENTS_PER_NOTE:
         return False
-    if any(len(item.original) > MAX_WIKILINK_TOKEN_TEXT_LENGTH for item in replaced):
-        return False
-    restored = restore_wikilink_tokens(new_content, replaced, old_title=old_title, replacement=replacement)
-    return restored == content
+    return all(len(item.original) <= MAX_WIKILINK_TOKEN_TEXT_LENGTH for item in replaced)
 
 
 def _require_bounded(targets: Sequence[object]) -> None:
@@ -248,15 +258,30 @@ def _result(
 
 
 def _default_save(db: CharactersRAGDB) -> SaveNoteContent:
-    def save(note: dict[str, Any], content: str) -> dict[str, Any] | None:
+    def save(note: dict[str, Any], content: str) -> None:
+        # One transaction: the version-checked update and the note's projection.
         db.update_note(
             note_id=str(note["id"]),
             update_data={"content": content},
             expected_version=int(note["version"]),
         )
-        return db.get_note_by_id(note_id=str(note["id"]))
 
     return save
+
+
+def _read_again(
+    db: CharactersRAGDB,
+    note: dict[str, Any],
+    *,
+    unreadable: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Read a note after a save attempt. ``None`` means it is gone; ``unreadable`` stands in if the read fails."""
+
+    try:
+        return db.get_note_by_id(note_id=str(note["id"]))
+    except Exception as exc:  # noqa: BLE001 - the save's outcome is already decided.
+        logger.warning("Wikilink rename could not re-read note {}: {}", note["id"], exc)
+        return unreadable
 
 
 def _save(
@@ -267,20 +292,23 @@ def _save(
     done: WikilinkRenameStatus,
     replacements: tuple[WikilinkTokenReplacement, ...],
 ) -> WikilinkNoteResult:
-    """Save one note and report it. The save is one transaction: all of the note or none."""
+    """Save one note and report it. Only a failed write is reported as not saved."""
 
     try:
-        saved = save_content(note, content)
+        save_content(note, content)
     except ConflictError:
         # Edited between the read above and the write: report the note as it is now.
-        current = db.get_note_by_id(note_id=str(note["id"]))
+        current = _read_again(db, note, unreadable=note)
         if current is None:
             return WikilinkNoteResult(str(note["id"]), "skipped_not_found")
         return _result(current, "skipped_conflict")
     except Exception as exc:  # noqa: BLE001 - one note's failure must not stop the batch.
         logger.warning("Wikilink rename could not save note {}: {}", note["id"], exc)
         return _result(note, "failed")
-    return _result(saved or note, done, replacements)
+    # The write happened. If the note can't be read back, a version-checked
+    # update is known to have moved it exactly one version on.
+    written = {**note, "version": int(note["version"]) + 1}
+    return _result(_read_again(db, note, unreadable=written) or written, done, replacements)
 
 
 __all__ = [
