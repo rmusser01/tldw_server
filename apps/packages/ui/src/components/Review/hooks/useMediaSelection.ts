@@ -854,48 +854,97 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     t
   ])
 
-  const handleOpenSelectionInMultiReview = useCallback(async (items = bulkSelectedMediaItems) => {
-    const { isCurrent, authorityKey: capturedAuthority } = captureOperation()
-    if (!isCurrent()) return
-    if (items.length === 0) {
-      message.warning(
-        t('review:mediaPage.bulkOpenInMultiReviewNone', {
-          defaultValue: 'Select items to open in multi-review.'
+  const handleOpenSelectionInMultiReview = useCallback(
+    async (items = bulkSelectedMediaItems) => {
+      const { isCurrent, authorityKey: capturedAuthority } = captureOperation()
+      if (!isCurrent()) return
+      if (items.length === 0) {
+        message.warning(
+          t("review:mediaPage.bulkOpenInMultiReviewNone", {
+            defaultValue: "Select items to open in multi-review."
+          })
+        )
+        return
+      }
+      const mediaIds = items
+        .filter((item) => item.kind === "media")
+        .map((item) => String(item.id))
+      if (!mediaIds.length) return
+      try {
+        await setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, {
+          version: 1,
+          authorityKey: capturedAuthority!,
+          selectedIds: mediaIds
         })
-      )
-      return
-    }
-    const mediaIds = items.filter(item => item.kind === 'media').map(item => String(item.id))
-    if (!mediaIds.length) return
-    await setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, { version: 1, authorityKey: capturedAuthority!, selectedIds: mediaIds })
-    if (!isCurrent()) return
-    await setSetting(MEDIA_REVIEW_SELECTION_SETTING, mediaIds)
-    if (!isCurrent()) return
-    await setSetting(LAST_MEDIA_ID_SETTING, String(mediaIds[0]))
-    if (!isCurrent()) return
-    navigate('/media-multi')
-  }, [bulkSelectedMediaItems, captureOperation, message, navigate, t])
+        if (!isCurrent()) return
+        // The owned snapshot is authoritative; legacy mirrors are best-effort.
+        await setSetting(MEDIA_REVIEW_SELECTION_SETTING, mediaIds).catch(() => {
+          console.warn("Could not update a legacy Media review setting.")
+        })
+        if (!isCurrent()) return
+        await setSetting(LAST_MEDIA_ID_SETTING, String(mediaIds[0])).catch(() => {
+          console.warn("Could not update a legacy Media review setting.")
+        })
+        if (!isCurrent()) return
+        navigate("/media-multi")
+      } catch {
+        if (!isCurrent()) return
+        message.error(
+          t("review:mediaPage.reviewSelectionSaveFailed", {
+            defaultValue:
+              "Could not save the selection for Review. Please try again."
+          })
+        )
+      }
+    },
+    [bulkSelectedMediaItems, captureOperation, message, navigate, t]
+  )
 
   const handleOpenCollectionInMultiReview = useCallback(async () => {
     const { isCurrent, authorityKey: capturedAuthority } = captureOperation()
     if (!isCurrent()) return
     if (!activeCollection || activeCollection.itemIds.length === 0) {
       message.warning(
-        t('review:mediaPage.collectionEmpty', {
-          defaultValue: 'No items in this collection.'
+        t("review:mediaPage.collectionEmpty", {
+          defaultValue: "No items in this collection."
         })
       )
       return
     }
-    const collectionIds = activeCollection.itemIds.filter(id => !id.startsWith('note:')).map(id => id.replace(/^media:/, ''))
+    const collectionIds = activeCollection.itemIds
+      .filter((id) => !id.startsWith("note:"))
+      .map((id) => id.replace(/^media:/, ""))
     if (!collectionIds.length) return
-    await setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, { version: 1, authorityKey: capturedAuthority!, selectedIds: collectionIds })
-    if (!isCurrent()) return
-    await setSetting(MEDIA_REVIEW_SELECTION_SETTING, collectionIds)
-    if (!isCurrent()) return
-    await setSetting(LAST_MEDIA_ID_SETTING, String(collectionIds[0]))
-    if (!isCurrent()) return
-    navigate('/media-multi')
+    try {
+      await setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, {
+        version: 1,
+        authorityKey: capturedAuthority!,
+        selectedIds: collectionIds
+      })
+      if (!isCurrent()) return
+      // The owned snapshot is authoritative; legacy mirrors are best-effort.
+      await setSetting(MEDIA_REVIEW_SELECTION_SETTING, collectionIds).catch(
+        () => {
+          console.warn("Could not update a legacy Media review setting.")
+        }
+      )
+      if (!isCurrent()) return
+      await setSetting(LAST_MEDIA_ID_SETTING, String(collectionIds[0])).catch(
+        () => {
+          console.warn("Could not update a legacy Media review setting.")
+        }
+      )
+      if (!isCurrent()) return
+      navigate("/media-multi")
+    } catch {
+      if (!isCurrent()) return
+      message.error(
+        t("review:mediaPage.reviewSelectionSaveFailed", {
+          defaultValue:
+            "Could not save the selection for Review. Please try again."
+        })
+      )
+    }
   }, [activeCollection, captureOperation, message, navigate, t])
 
   const handleDeleteItem = useCallback(

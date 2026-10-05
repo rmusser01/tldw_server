@@ -418,6 +418,8 @@
     "previousReadingWindow": "Previous reading window",
     "nextReadingWindow": "Next reading window",
     "selectNamedItem": "Select {{title}}",
+    "statusReading": "Reading item {{current}} of {{total}}",
+    "reviewSelectionSaveFailed": "Could not save the selection for Review. Please try again.",
     "selectionLoadFailed": "Could not load the saved selection. Reopen Review to try again.",
     "bulkSelectedCount": "{{count}} selected",
     "selectAllVisible": "Select this page",

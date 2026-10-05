@@ -46,7 +46,7 @@ import { FloatingProgressWidget } from "./QuickIngest/FloatingProgressWidget"
 import {
   IngestWizardProvider,
   type IngestWizardState,
-useIngestWizard
+  useIngestWizard
 } from "./QuickIngest/IngestWizardContext"
 import { IngestWizardStepper } from "./QuickIngest/IngestWizardStepper"
 import { ProcessingStep } from "./QuickIngest/ProcessingStep"

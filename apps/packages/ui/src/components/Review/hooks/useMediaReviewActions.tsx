@@ -39,20 +39,54 @@ import {
 import React from "react"
 
 export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions & { _fetchList: () => Promise<MediaItem[]> } {
-  const actionLifetime = React.useRef<AbortController | null>(null)
+  // A retained callback belongs to this rendered owner generation, even if the
+  // same owner is verified again after an account transition or remount.
+  let authorityRevision: number | null = null
+  try {
+    authorityRevision = quickIngestAuthority.capture({
+      sessionBound: false
+    }).authorityRevision
+  } catch {
+    /* Unverified views cannot start actions. */
+  }
+  const actionGeneration = React.useMemo(
+    () => ({
+      authorityKey: s.authorityKey,
+      authorityRevision,
+      operation: null as ReturnType<typeof quickIngestAuthority.capture> | null,
+      lifetime: null as AbortController | null
+    }),
+    [s.authorityKey, authorityRevision]
+  )
   React.useLayoutEffect(() => {
     const lifetime = new AbortController()
-    actionLifetime.current = lifetime
-    return () => lifetime.abort()
-  }, [s.authorityKey])
-  const captureOperation = React.useCallback(() => {
-    const lifetime = actionLifetime.current
-    if (!lifetime || lifetime.signal.aborted) return null
+    actionGeneration.lifetime = lifetime
     try {
-      const operation = quickIngestAuthority.capture({sessionBound: false})
-      return {...operation, isCurrent: () => operation.isCurrent() && !lifetime.signal.aborted}
-    } catch { return null }
-  }, [])
+      actionGeneration.operation = quickIngestAuthority.capture({
+        sessionBound: false
+      })
+    } catch {
+      actionGeneration.operation = null
+    }
+    return () => lifetime.abort()
+  }, [actionGeneration])
+  const captureOperation = React.useCallback(() => {
+    const { lifetime, operation, authorityKey } = actionGeneration
+    if (
+      !authorityKey ||
+      !lifetime ||
+      lifetime.signal.aborted ||
+      operation?.authorityKey !== authorityKey ||
+      operation.authorityRevision !== actionGeneration.authorityRevision ||
+      !operation.isCurrent()
+    )
+      return null
+    return {
+      ...operation,
+      isCurrent: () => operation.isCurrent() && !lifetime.signal.aborted
+    }
+  }, [actionGeneration])
+
   const detailRequests = React.useRef(new Map<string, Promise<MediaDetail>>())
   const ownerScope = useHomeMilestoneScope()
   const handoffBoundaryRevision = React.useRef(0)
@@ -94,31 +128,39 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   } = s
 
   // Reading, comparison, content filtering and export share the same request ceiling.
-  const fetchDetail = React.useCallback(async (id: string | number, operation = captureOperation()): Promise<MediaDetail> => {
-    if (!operation?.isCurrent()) throw new Error('Review owner is unavailable')
-    const key = `${authorityKey}:${id}`
+  const fetchDetail = React.useCallback(
+    async (
+      id: string | number,
+      operation = captureOperation()
+    ): Promise<MediaDetail> => {
+      if (!operation?.isCurrent()) throw new Error("Review owner is unavailable")
+      const key = `${authorityKey}:${id}`
       while (
-        detailRequests.current.size >= openAllLimit && !detailRequests.current.has(key)
+        detailRequests.current.size >= openAllLimit &&
+        !detailRequests.current.has(key)
       ) {
         await Promise.race(
           [...detailRequests.current.values()].map((promise) =>
             promise.catch(() => null)
           )
         )
-        if (!operation.isCurrent()) throw new Error('Review owner changed')
+        if (!operation.isCurrent()) throw new Error("Review owner changed")
       }
       const existing = detailRequests.current.get(key)
       if (existing) return existing
       const pending = bgRequest<MediaDetail>({
-      path: `/api/v1/media/${id}?include_content=true&include_versions=false` as any,
-      method: 'GET' as any,
-      abortSignal: operation.signal,
-      ...requestScopeFields(operation.requestScope)
-    }).then((detail) => {
-      if (!operation.isCurrent()) throw new Error('Review owner changed')
-      return detail
-    })
-        .finally(() => {detailRequests.current.delete(key)})
+        path: `/api/v1/media/${id}?include_content=true&include_versions=false` as any,
+        method: "GET" as any,
+        abortSignal: operation.signal,
+        ...requestScopeFields(operation.requestScope)
+      })
+        .then((detail) => {
+          if (!operation.isCurrent()) throw new Error("Review owner changed")
+          return detail
+        })
+        .finally(() => {
+          detailRequests.current.delete(key)
+        })
       detailRequests.current.set(key, pending)
       return pending
     },
@@ -126,12 +168,14 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   )
 
   const cancelContentFiltering = React.useCallback(() => {
+    if (!captureOperation()) return
     contentFilterRunRef.current += 1
     setContentLoading(false)
     setContentFilterProgress(IDLE_CONTENT_FILTER_PROGRESS)
-  }, [contentFilterRunRef, setContentLoading, setContentFilterProgress])
+  }, [captureOperation, contentFilterRunRef, setContentLoading, setContentFilterProgress])
 
-  const runContentFiltering = React.useCallback(async (items: MediaItem[]): Promise<MediaItem[]> => {
+  const runContentFiltering = React.useCallback(async (items: MediaItem[], operation = captureOperation()): Promise<MediaItem[]> => {
+    if (!operation?.isCurrent()) return []
     const hasQuery = query.trim().length > 0
     const tokens = keywordTokens.map((k) => k.toLowerCase())
     if (!includeContent || (!hasQuery && tokens.length === 0)) {
@@ -140,8 +184,6 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       return items
     }
 
-    const operation = captureOperation()
-    if (!operation) return []
     const runId = contentFilterRunRef.current + 1
     contentFilterRunRef.current = runId
     setContentLoading(true)
@@ -161,15 +203,16 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     const enriched: Array<{ m: MediaItem; content: string }> = []
 
     for (let idx = 0; idx < items.length; idx += 1) {
-      if (contentFilterRunRef.current !== runId) return []
+      if (!operation.isCurrent() || contentFilterRunRef.current !== runId) return []
       const m = items[idx]
       let d = details[m.id]
       if (!d) {
         try {
           d = await fetchDetail(m.id, operation)
-          if (contentFilterRunRef.current !== runId) return []
+          if (!operation.isCurrent() || contentFilterRunRef.current !== runId) return []
           setDetails((prev) => (prev[m.id] ? prev : { ...prev, [m.id]: d! }))
         } catch {
+          if (!operation.isCurrent()) return []
           // Failed detail fetch should not terminate full list filtering.
         }
       }
@@ -183,7 +226,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       }
     }
 
-    if (contentFilterRunRef.current !== runId) return []
+    if (!operation.isCurrent() || contentFilterRunRef.current !== runId) return []
 
     const filtered = enriched.filter(({ m, content }) => {
       const hay = `${m.title || ''} ${m.snippet || ''} ${content}`.toLowerCase()
@@ -216,51 +259,76 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   )
 
   const ensureDetail = React.useCallback(
-    async (id: string | number, isRetry = false) => {
-      if (details[id] || detailLoading[id]) return
-      const operation = captureOperation()
-      if (!operation) return
+    async (
+      id: string | number,
+      isRetry = false,
+      operation = captureOperation()
+    ) => {
+      if (!operation?.isCurrent()) return
+      if ((!isRetry && details[id]) || detailLoading[id]) return
       setDetailLoading((prev) => ({ ...prev, [id]: true }))
       if (isRetry) {
-      setFailedIds((prev) => {
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
-    }
+        setFailedIds((prev) => {
+          const next = new Set(prev)
+          next.delete(id)
+          return next
+        })
+      }
       try {
-      const d = await fetchDetail(id, operation)
-      if (!operation.isCurrent()) return
-      const base = Array.isArray(data) ? (data as MediaItem[]).find((x) => idsEqual(x.id, id)) : undefined
-      const enriched = { ...d, id, title: (d as any)?.title ?? base?.title, type: (d as any)?.type ?? base?.type, created_at: (d as any)?.created_at ?? base?.created_at } as any
-      setDetails((prev) => ({ ...prev, [id]: enriched }))
-      setFailedIds((prev) => {
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
-    } catch (error) {
+        const d = await fetchDetail(id, operation)
+        if (!operation.isCurrent()) return
+        const base = Array.isArray(data)
+          ? data.find((x) => idsEqual(x.id, id))
+          : undefined
+        const enriched = {
+          ...d,
+          id,
+          title: d?.title ?? base?.title,
+          type: d?.type ?? base?.type,
+          created_at: d?.created_at ?? base?.created_at
+        }
+        setDetails((prev) => ({ ...prev, [id]: enriched }))
+        setFailedIds((prev) => {
+          const next = new Set(prev)
+          next.delete(id)
+          return next
+        })
+      } catch (error) {
         if (!operation.isCurrent()) return
         setFailedIds((prev) => new Set(prev).add(id))
         const statusCode = getErrorStatusCode(error)
         if (statusCode === 404 || statusCode === 410) {
           setSelectedIds((prev) => {
-          const next = prev.filter((candidateId) => String(candidateId) !== String(id))
-          return next.length === prev.length ? prev : next
-        })
+            const next = prev.filter(
+              (candidateId) => String(candidateId) !== String(id)
+            )
+            return next.length === prev.length ? prev : next
+          })
           setFocusedId((prev) =>
             prev != null && String(prev) === String(id) ? null : prev
           )
         }
       } finally {
-      if (operation.isCurrent()) setDetailLoading((prev) => {
-        const next = { ...prev }
-        delete next[id]
-        return next
-      })
-    }
+        if (operation.isCurrent())
+          setDetailLoading((prev) => {
+            const next = { ...prev }
+            delete next[id]
+            return next
+          })
+      }
     },
-    [captureOperation, fetchDetail, data, detailLoading, details, setDetailLoading, setDetails, setFailedIds, setSelectedIds, setFocusedId]
+    [
+      captureOperation,
+      fetchDetail,
+      data,
+      detailLoading,
+      details,
+      setDetailLoading,
+      setDetails,
+      setFailedIds,
+      setSelectedIds,
+      setFocusedId
+    ]
   )
 
   // Keep ref in sync
@@ -269,17 +337,20 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   }, [ensureDetail, ensureDetailRef])
 
   const retryFetch = React.useCallback((id: string | number) => {
+    const operation = captureOperation()
+    if (!operation) return
     setDetails((prev) => {
       const next = { ...prev }
       delete next[id]
       return next
     })
-    void ensureDetail(id, true)
-  }, [ensureDetail, setDetails])
+    void ensureDetail(id, true, operation)
+  }, [captureOperation, ensureDetail, setDetails])
 
   const clearSelectionWithGuard = React.useCallback(() => {
     if (selectedIds.length === 0) return
     const operation = captureOperation()
+    if (!operation) return
     const selectionToRestore = [...selectedIds]
     const focusToRestore = focusedId
     const activeElement = document.activeElement as HTMLElement | null
@@ -333,7 +404,8 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     )
   }, [captureOperation, selectedIds, focusedId, t, message, setSelectedIds, setFocusedId, listParentRef, pendingRestoreFocusIdRef])
 
-  const focusViewerSoon = React.useCallback(() => {
+  const focusViewerSoon = React.useCallback((operation: NonNullable<ReturnType<typeof captureOperation>>) => {
+    if (!operation.isCurrent()) return
     if (typeof window === "undefined") {
       viewerRef.current?.focus()
       return
@@ -341,45 +413,51 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
 
     // Browsers can re-focus the clicked result row after the click handler runs.
     window.setTimeout(() => {
+      if (!operation.isCurrent()) return
       viewerRef.current?.focus()
     }, 0)
   }, [viewerRef])
 
   const previewItem = React.useCallback((id: string | number, preserveContext = false) => {
-    if (!authorityKey) return
+    const operation = captureOperation()
+    if (!operation) return
     setReadingActive(false)
     if (isMobileViewport) setMobileTab(2)
     if (!preserveContext) setPreviewNavigationIds(allResults.map(item => item.id))
     setPreviewedId(id)
-    focusViewerSoon()
-    void ensureDetail(id)
-  }, [allResults, setPreviewNavigationIds, authorityKey, setReadingActive, isMobileViewport, setMobileTab, setPreviewedId, focusViewerSoon, ensureDetail])
+    focusViewerSoon(operation)
+    void ensureDetail(id, false, operation)
+  }, [allResults, setPreviewNavigationIds, captureOperation, setReadingActive, isMobileViewport, setMobileTab, setPreviewedId, focusViewerSoon, ensureDetail])
 
   const startSelectedReview = React.useCallback((id?: string | number) => {
-    if (!authorityKey || selectedIds.length === 0) return
+    const operation = captureOperation()
+    if (!operation || selectedIds.length === 0) return
     const target = id != null && includesId(selectedIds, id) ? id : selectedIds[0]
     const index = selectedIds.findIndex(candidate => idsEqual(candidate, target))
     setReadingWindowStart(Math.floor(index / openAllLimit) * openAllLimit)
     setFocusedId(target)
     setReadingActive(true)
     if (isMobileViewport) setMobileTab(2)
-    focusViewerSoon()
-  }, [authorityKey, selectedIds, openAllLimit, setFocusedId, setReadingWindowStart, setReadingActive, isMobileViewport, setMobileTab, focusViewerSoon])
+    focusViewerSoon(operation)
+  }, [captureOperation, selectedIds, openAllLimit, setFocusedId, setReadingWindowStart, setReadingActive, isMobileViewport, setMobileTab, focusViewerSoon])
 
   const returnToPreview = React.useCallback(() => {
+    const operation = captureOperation()
+    if (!operation) return
     setReadingActive(false)
-    if (previewedId != null) void ensureDetail(previewedId)
-  }, [setReadingActive, previewedId, ensureDetail])
+    if (previewedId != null) void ensureDetail(previewedId, false, operation)
+  }, [captureOperation, setReadingActive, previewedId, ensureDetail])
 
   const changeReadingWindow = React.useCallback((delta: number) => {
+    if (!captureOperation()) return
     const lastStart = Math.max(0, Math.floor((selectedIds.length - 1) / openAllLimit) * openAllLimit)
     const next = Math.max(0, Math.min(lastStart, readingWindowStart + delta * openAllLimit))
     startSelectedReview(selectedIds[next])
-  }, [selectedIds, openAllLimit, readingWindowStart, startSelectedReview])
+  }, [captureOperation, selectedIds, openAllLimit, readingWindowStart, startSelectedReview])
 
   const toggleSelect = React.useCallback(
     async (id: string | number, event?: React.MouseEvent) => {
-      if (!authorityKey) return
+      if (!captureOperation()) return
       if (event?.shiftKey && lastClickedRef.current != null) {
         const lastIdx = allResults.findIndex((r) =>
           idsEqual(r.id, lastClickedRef.current!)
@@ -398,17 +476,17 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         includesId(prev, id) ? prev.filter(x => !idsEqual(x, id)) : [...prev, id]
       )
     },
-    [authorityKey, allResults, setSelectedIds, lastClickedRef]
+    [captureOperation, allResults, setSelectedIds, lastClickedRef]
   )
 
   // Checkbox selection is metadata only. Fetch just the active reading window.
   React.useEffect(() => {
-    if (!readingActive) return
+    if (!readingActive || !captureOperation()) return
     readingIds.forEach(id => { void ensureDetailRef.current(id) })
-  }, [readingIds, readingActive, authorityKey, ensureDetailRef])
+  }, [captureOperation, readingIds, readingActive, authorityKey, ensureDetailRef])
 
   React.useEffect(() => {
-    if (!readingActive) return
+    if (!readingActive || !captureOperation()) return
     const index = selectedIds.findIndex(id => focusedId != null && idsEqual(id, focusedId))
     if (index < 0) {
       setFocusedId(readingIds[0] ?? null)
@@ -416,17 +494,17 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     }
     const start = Math.floor(index / openAllLimit) * openAllLimit
     if (start !== readingWindowStart) setReadingWindowStart(start)
-  }, [readingActive, selectedIds, focusedId, readingIds, readingWindowStart, setReadingWindowStart, openAllLimit, setFocusedId])
+  }, [captureOperation, readingActive, selectedIds, focusedId, readingIds, readingWindowStart, setReadingWindowStart, openAllLimit, setFocusedId])
 
   const addVisibleToSelection = React.useCallback(() => {
-    if (!authorityKey) return
+    if (!captureOperation()) return
     setSelectedIds(prev => [...prev, ...allResults.map(item => item.id).filter(id => !includesId(prev, id))])
-  }, [authorityKey, allResults, setSelectedIds])
+  }, [captureOperation, allResults, setSelectedIds])
 
   const replaceSelectionWithVisible = React.useCallback(() => {
-    if (!authorityKey || allResults.length === 0) return
-    const previousSelection = [...selectedIds]
     const operation = captureOperation()
+    if (!operation || allResults.length === 0) return
+    const previousSelection = [...selectedIds]
     setSelectedIds(allResults.map(item => item.id))
     setReadingWindowStart(0)
     setFocusedId(allResults[0]?.id ?? null)
@@ -434,19 +512,20 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       <span>
         {t('mediaPage.selectionReplaced', 'Selection replaced with current visible items.')}{" "}
         <Button type="link" size="small" className="!p-0" onClick={() => {
-      if (!operation?.isCurrent()) return
-      setSelectedIds(previousSelection)
-      message.success(t('mediaPage.selectionRestored', 'Selection restored'))
-    }}>
+          if (!operation.isCurrent()) return
+          setSelectedIds(previousSelection)
+          message.success(t('mediaPage.selectionRestored', 'Selection restored'))
+        }}>
           {t("mediaPage.undo", "Undo")}
         </Button>
       </span>,
       UNDO_DURATION_SECONDS
     )
-  }, [captureOperation, authorityKey, setReadingWindowStart, allResults, selectedIds, message, t, setSelectedIds, setFocusedId])
+  }, [captureOperation, setReadingWindowStart, allResults, selectedIds, message, t, setSelectedIds, setFocusedId])
 
   const removeFromSelection = React.useCallback(
     (id: string | number) => {
+      if (!captureOperation()) return
       setSelectedIds((prev) => {
         const next = prev.filter((candidate) => !idsEqual(candidate, id))
         if (next.length !== prev.length) {
@@ -458,11 +537,12 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         return next
       })
     },
-    [setSelectedIds, setFocusedId]
+    [captureOperation, setSelectedIds, setFocusedId]
   )
 
   const scrollToCard = React.useCallback(
     (id: string | number) => {
+      if (!captureOperation()) return
       const anchor = cardRefs.current[String(id)]
       if (anchor) {
         anchor.scrollIntoView({
@@ -476,10 +556,11 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         if (idx >= 0) viewerVirtualizer.scrollToIndex(idx, { align: "start" })
       }
     },
-    [viewMode, viewerItems, viewerVirtualizer, prefersReducedMotion, cardRefs]
+    [captureOperation, viewMode, viewerItems, viewerVirtualizer, prefersReducedMotion, cardRefs]
   )
 
   const goRelative = React.useCallback((delta: number) => {
+    if (!captureOperation()) return
     const ids = readingActive ? selectedIds : previewNavigationIds
     if (!ids.length) return
     const activeId = readingActive ? focusedId : previewedId
@@ -487,11 +568,11 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     const nextIndex = Math.max(0, Math.min(ids.length - 1, Math.max(0, currentIndex) + delta))
     if (readingActive) startSelectedReview(ids[nextIndex])
     else previewItem(ids[nextIndex], true)
-  }, [readingActive, previewNavigationIds, selectedIds, focusedId, previewedId, startSelectedReview, previewItem])
+  }, [captureOperation, readingActive, previewNavigationIds, selectedIds, focusedId, previewedId, startSelectedReview, previewItem])
 
   // Pending initial media restoration
   React.useEffect(() => {
-    if (!pendingInitialMediaId) return
+    if (!pendingInitialMediaId || !captureOperation()) return
     if (!Array.isArray(allResults) || allResults.length === 0) return
     const match = allResults.find((m) => String(m.id) === pendingInitialMediaId)
     if (!match) return
@@ -501,7 +582,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     scrollToCard(match.id)
     setPendingInitialMediaId(null)
     void clearSetting(LAST_MEDIA_ID_SETTING)
-  }, [pendingInitialMediaId, allResults, ensureDetail, scrollToCard, setSelectedIds, setFocusedId, setPendingInitialMediaId])
+  }, [captureOperation, pendingInitialMediaId, allResults, ensureDetail, scrollToCard, setSelectedIds, setFocusedId, setPendingInitialMediaId])
 
   // Content filtering effects
   React.useEffect(() => {
@@ -628,6 +709,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       }
       navigate(buildMediaChatHandoffRoute(token))
     } catch {
+      if (!operation.isCurrent() || boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted) return
       message.error(t('mediaPage.chatPrepareFailed', 'Could not prepare this source for Chat. Please try again.'))
       return
     }
@@ -660,11 +742,12 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   }, [selectedIds])
 
   const openTrashFromBatch = React.useCallback(
-    (deletedIds: Array<string | number>) => {
+    (deletedIds: Array<string | number>, operation = captureOperation()) => {
+      if (!operation?.isCurrent()) return
       setBatchTrashHandoffIds([])
       navigate(`/media-trash${buildMediaTrashHandoffSearch(deletedIds)}`)
     },
-    [navigate, setBatchTrashHandoffIds]
+    [captureOperation, navigate, setBatchTrashHandoffIds]
   )
 
   const handleBatchAddTags = React.useCallback(async () => {
@@ -801,7 +884,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
             type="link"
             size="small"
             className="!p-0"
-            onClick={() => openTrashFromBatch(deletedIds)}
+            onClick={() => openTrashFromBatch(deletedIds, operation)}
           >
             {t("mediaPage.openTrash", "Open trash")}
           </Button>
@@ -909,13 +992,21 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   }, [captureOperation, getSelectedNumericIds, message, t, setBatchActionLoading])
 
   const expandAllContent = React.useCallback(() => {
+    if (!captureOperation()) return
     setContentExpandedIds(new Set(visibleIds.map((id) => String(id))))
-  }, [visibleIds, setContentExpandedIds])
-  const collapseAllContent = React.useCallback(() => setContentExpandedIds(new Set()), [setContentExpandedIds])
+  }, [captureOperation, visibleIds, setContentExpandedIds])
+  const collapseAllContent = React.useCallback(() => {
+    if (!captureOperation()) return
+    setContentExpandedIds(new Set())
+  }, [captureOperation, setContentExpandedIds])
   const expandAllAnalysis = React.useCallback(() => {
+    if (!captureOperation()) return
     setAnalysisExpandedIds(new Set(visibleIds.map((id) => String(id))))
-  }, [visibleIds, setAnalysisExpandedIds])
-  const collapseAllAnalysis = React.useCallback(() => setAnalysisExpandedIds(new Set()), [setAnalysisExpandedIds])
+  }, [captureOperation, visibleIds, setAnalysisExpandedIds])
+  const collapseAllAnalysis = React.useCallback(() => {
+    if (!captureOperation()) return
+    setAnalysisExpandedIds(new Set())
+  }, [captureOperation, setAnalysisExpandedIds])
 
   // fetchList function for the query
   const fetchList = React.useCallback(async (): Promise<MediaItem[]> => {
@@ -953,7 +1044,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       const typeSet = new Set(availableTypes)
       for (const it of mapped) if (it.type) typeSet.add(it.type)
       setAvailableTypes(Array.from(typeSet))
-      return runContentFiltering(mapped)
+      return runContentFiltering(mapped, operation)
     }
 
     const params = new URLSearchParams({
@@ -977,7 +1068,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     const typeSet = new Set(availableTypes)
     for (const it of mapped) if (it.type) typeSet.add(it.type)
     setAvailableTypes(Array.from(typeSet))
-    return runContentFiltering(mapped)
+    return runContentFiltering(mapped, operation)
   }, [captureOperation, query, page, pageSize, types, keywordTokens, sortBy, dateRange, availableTypes, mapMediaItems, runContentFiltering, setTotal, setAvailableTypes])
 
   return {

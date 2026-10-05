@@ -30,8 +30,7 @@ import {
   MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING,
   MEDIA_REVIEW_ORIENTATION_SETTING,
   MEDIA_REVIEW_SELECTION_SETTING,
-  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING
-,
+  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING,
   MEDIA_REVIEW_VIEW_MODE_SETTING
 } from "@/services/settings/ui-settings"
 import { useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
@@ -128,7 +127,8 @@ export function useMediaReviewState(
   const [viewModeState, setViewModeState] = React.useState<"spread" | "list" | "all">("spread")
   const shouldHideTranscriptTimings = hideTranscriptTimings ?? true
   const viewMode = isMobileViewport
-    ? viewModeState === "all" && selectedIds.length > 1 ? "all" : "list": viewModeState
+    ? viewModeState === "all" && selectedIds.length > 1 ? "all" : "list"
+    : viewModeState
   const setViewMode = React.useCallback((mode: "spread" | "list" | "all") => {
     if (isMobileViewport) {
       setViewModeState(mode === "all" && selectedIds.length > 1 ? "all" : "list")

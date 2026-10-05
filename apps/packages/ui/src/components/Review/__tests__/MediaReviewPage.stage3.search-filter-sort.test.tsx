@@ -56,7 +56,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/services/tldw/quick-ingest-authority', () => ({
   useQuickIngestAuthority: () => mocks.authorityKey,
-  quickIngestAuthority: { capture: () => ({isCurrent: () => true, signal: new AbortController().signal}) }
+  quickIngestAuthority: { capture: () => ({authorityKey: mocks.authorityKey, isCurrent: () => true, signal: new AbortController().signal}) }
 }))
 
 const applySearchPayload = (items: typeof sourceItems, body: Record<string, unknown>) => {

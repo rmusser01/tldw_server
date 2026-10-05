@@ -6,8 +6,7 @@ import {
   type ApiMediaCollectionListResponse,
   type MediaCollection,
   type MediaCollectionItem,
-  type MediaCollectionList
-,
+  type MediaCollectionList,
   normalizeMediaCollectionItem,
   normalizeMediaCollectionListResponse,
   normalizeMediaCollectionResponse
@@ -883,33 +882,33 @@ export const mediaMethods = {
         ? `&search=${encodeURIComponent(options.search.trim())}`
         : ""
     return await bgRequest<{
-    media_id: number
-    has_references: boolean
-    references: Array<{
-      raw_text: string
-      title?: string
-      authors?: string
-      year?: number
-      venue?: string
-      doi?: string
-      arxiv_id?: string
-      url?: string
-      citation_count?: number
-      semantic_scholar_id?: string
-      open_access_pdf?: string
-    }>
-    enrichment_source?: string
-    enriched_count?: number
-    enrichment_limited?: boolean
-    total_detected?: number
-    truncated?: boolean
-    offset?: number
-    limit?: number
-    returned_count?: number
-    total_available?: number
-    has_more?: boolean
-    next_offset?: number | null
-  }>({
+      media_id: number
+      has_references: boolean
+      references: Array<{
+        raw_text: string
+        title?: string
+        authors?: string
+        year?: number
+        venue?: string
+        doi?: string
+        arxiv_id?: string
+        url?: string
+        citation_count?: number
+        semantic_scholar_id?: string
+        open_access_pdf?: string
+      }>
+      enrichment_source?: string
+      enriched_count?: number
+      enrichment_limited?: boolean
+      total_detected?: number
+      truncated?: boolean
+      offset?: number
+      limit?: number
+      returned_count?: number
+      total_available?: number
+      has_more?: boolean
+      next_offset?: number | null
+    }>({
       path: `/api/v1/media/${id}/references?enrich=${enrich}${referenceIndex}${offset}${limit}${parseCap}${search}`,
       method: "GET",
       abortSignal: options?.signal,

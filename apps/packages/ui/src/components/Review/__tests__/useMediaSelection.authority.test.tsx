@@ -7,12 +7,13 @@ import { useConnectionStore } from '@/store/connection'
 import { bgRequest } from '@/services/background-proxy'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { setSetting } from '@/services/settings/registry'
-import { MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING } from '@/services/settings/ui-settings'
+import { MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, MEDIA_REVIEW_SELECTION_SETTING, LAST_MEDIA_ID_SETTING } from '@/services/settings/ui-settings'
 import { useMediaSelection } from '../hooks/useMediaSelection'
 import type { MediaResultItem } from '@/components/Media/types'
 
-const mocks = vi.hoisted(() => ({ undo: vi.fn(), download: vi.fn(), authority: 'verified-a' }))
+const mocks = vi.hoisted(() => ({ undo: vi.fn(), download: vi.fn(), authority: 'verified-a', navigate: vi.fn() }))
 vi.mock('@/services/tldw/quick-ingest-authority', () => ({ useQuickIngestAuthority: () => mocks.authority, quickIngestAuthority: { capture: () => { const authorityKey = mocks.authority; return { authorityKey, requestScope: { config: { serverUrl: 'http://fixture.invalid', authMode: 'multi-user' }, userId: 'alice' }, isCurrent: () => mocks.authority === authorityKey } } } }))
+vi.mock('react-router-dom', async original => ({ ...await original<typeof import('react-router-dom')>(), useNavigate: () => mocks.navigate }))
 vi.mock('@/utils/download-blob', () => ({ downloadBlob: mocks.download }))
 vi.mock('@/hooks/useUndoNotification', () => ({ useUndoNotification: () => ({ showUndoNotification: mocks.undo }) }))
 vi.mock('@/services/background-proxy', () => ({ bgRequest: vi.fn() }))
@@ -62,6 +63,7 @@ beforeEach(() => {
   } })
   mocks.authority = 'verified-a'
   localStorage.clear(); vi.clearAllMocks()
+  vi.mocked(setSetting).mockReset().mockResolvedValue(undefined)
   Reflect.deleteProperty(tldwClient, "getCurrentUserStorageQuota")
   Reflect.deleteProperty(tldwClient, "getCurrentUserProfile")
   vi.mocked(bgRequest).mockResolvedValue({ version: 1 })
@@ -343,4 +345,103 @@ describe('media selection authority', () => {
     expect(view.result.current.favorites).toEqual([])
     expect(JSON.stringify(localStorage)).not.toContain('Unknown private project')
   })
+  describe.each(["selection", "single", "collection"] as const)(
+    "%s review publication",
+    (producer) => {
+      const prepare = async () => {
+        const view = mount()
+        select(view)
+        if (producer === "collection") {
+          await act(async () => {})
+          act(() => view.result.current.setCollectionDraftName("Exact saved set"))
+          await act(async () =>
+            view.result.current.handleAddSelectionToCollection()
+          )
+          await waitFor(() =>
+            expect(view.result.current.activeCollection?.itemIds).toEqual([
+              "media:1",
+              "media:2"
+            ])
+          )
+        }
+        view.feedback.error.mockClear()
+        const open = () =>
+          producer === "collection"
+            ? view.result.current.handleOpenCollectionInMultiReview()
+            : producer === "single"
+              ? view.result.current.handleOpenSelectionInMultiReview([items[1]])
+              : view.result.current.handleOpenSelectionInMultiReview()
+        return { view, open, ids: producer === "single" ? ["2"] : ["1", "2"] }
+      }
+
+      it.each([MEDIA_REVIEW_SELECTION_SETTING, LAST_MEDIA_ID_SETTING])(
+        "continues the exact owned snapshot when optional $key fails",
+        async (failed) => {
+          const { view, open, ids } = await prepare()
+          vi.mocked(setSetting).mockImplementation(async (setting) => {
+            if (setting.key === failed.key)
+              throw new Error("Optional storage failure")
+          })
+          await act(async () => {
+            await expect(open()).resolves.toBeUndefined()
+          })
+          expect(setSetting).toHaveBeenCalledWith(
+            MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING,
+            { version: 1, authorityKey: "verified-a", selectedIds: ids }
+          )
+          expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith("/media-multi")
+          expect(view.feedback.error).not.toHaveBeenCalled()
+        }
+      )
+
+      it("handles authoritative snapshot failure with retryable current-owner feedback", async () => {
+        const { view, open } = await prepare()
+        vi.mocked(setSetting).mockRejectedValue(
+          new Error("Required storage failure")
+        )
+        await act(async () => {
+          await expect(open()).resolves.toBeUndefined()
+        })
+        expect(mocks.navigate).not.toHaveBeenCalled()
+        expect(setSetting).toHaveBeenCalledTimes(1)
+        expect(view.feedback.error).toHaveBeenCalledWith(
+          "review:mediaPage.reviewSelectionSaveFailed"
+        )
+      })
+
+      it.each([
+        MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING,
+        MEDIA_REVIEW_SELECTION_SETTING,
+        LAST_MEDIA_ID_SETTING
+      ])(
+        "retires navigation and later writes during pending $key",
+        async (pendingSetting) => {
+          const { view, open } = await prepare()
+          let finish!: () => void
+          vi.mocked(setSetting).mockImplementation(async (setting) => {
+            if (setting.key === pendingSetting.key)
+              await new Promise<void>((resolve) => {
+                finish = resolve
+              })
+          })
+          let pending!: Promise<void>
+          act(() => {
+            pending = open()
+          })
+          await waitFor(() => expect(finish).toBeTypeOf("function"))
+          const count = vi.mocked(setSetting).mock.calls.length
+          mocks.authority = "verified-b"
+          await act(async () => {
+            finish()
+            await pending
+          })
+          expect(setSetting).toHaveBeenCalledTimes(count)
+          expect(mocks.navigate).not.toHaveBeenCalled()
+          expect(view.feedback.error).not.toHaveBeenCalled()
+        }
+      )
+    }
+  )
+
+
 })

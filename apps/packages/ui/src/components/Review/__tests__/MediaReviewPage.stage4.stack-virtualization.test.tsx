@@ -48,7 +48,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/services/tldw/quick-ingest-authority', () => ({
   useQuickIngestAuthority: () => 'verified-alice',
-  quickIngestAuthority: { capture: () => ({ isCurrent: () => true, signal: new AbortController().signal }) }
+  quickIngestAuthority: { capture: () => ({ authorityKey: 'verified-alice', isCurrent: () => true, signal: new AbortController().signal }) }
 }))
 
 const interpolate = (template: string, values?: Record<string, unknown>) =>

@@ -26,6 +26,7 @@ vi.mock('@/hooks/useHomeMilestoneScope', () => ({ useHomeMilestoneScope: () => '
 
 const mocks = vi.hoisted(() => ({
   authorityKey: 'verified-alice' as string | null,
+  authorityRevision: 0,
   locationKey: 'initial',
   realFocusDropdown: false,
   items: null as any,
@@ -65,7 +66,8 @@ vi.mock('@/services/tldw/quick-ingest-authority', () => ({
   quickIngestAuthority: { capture: () => {
     const owner = mocks.authorityKey
     if (!owner) throw new Error('Unverified owner')
-    return { isCurrent: () => owner === mocks.authorityKey, signal: new AbortController().signal }
+    const revision = mocks.authorityRevision
+    return { authorityKey: owner, authorityRevision: revision, requestScope: { config: { serverUrl: 'http://fixture.invalid', authMode: 'multi-user' }, userId: owner }, isCurrent: () => owner === mocks.authorityKey && revision === mocks.authorityRevision, signal: new AbortController().signal }
   } }
 }))
 
@@ -421,6 +423,7 @@ vi.mock("@/components/Media/diff-worker-client", () => ({
 describe('MediaReviewPage active reading context', () => {
   beforeEach(() => {
     mocks.authorityKey = 'verified-alice'
+    mocks.authorityRevision = 0
     mocks.locationKey = 'initial'
     mocks.realFocusDropdown = false
     mocks.items = null
@@ -791,5 +794,404 @@ describe('MediaReviewPage active reading context', () => {
     await screen.findByText('Content 4')
     expect(screen.getByText('Item 4 of 40')).toBeInTheDocument()
   })
+
+  it("keeps the footer aligned with preview, selected reading, the next window and restored preview", async () => {
+    render(<MediaReviewPage />)
+    fireEvent.click(getResultRowByTitle("Item 3"))
+    await screen.findByText("Content 3")
+    const footer = screen.getByTestId("media-review-status-bar")
+    expect(footer).toHaveTextContent("Previewing 3 of 40")
+    for (let id = 1; id <= 40; id++) selectItemByCheckbox(`Item ${id}`)
+    fireEvent.click(screen.getByRole("button", { name: "Review selected (40)" }))
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("media-review-reading-context")
+      ).toHaveTextContent("Selected reading: Item 1")
+    )
+    expect(footer).toHaveTextContent("Reading item 1 of 40")
+    expect(footer).not.toHaveTextContent("Previewing")
+    fireEvent.click(screen.getByRole("button", { name: "Next reading window" }))
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("media-review-reading-context")
+      ).toHaveTextContent("Selected reading: Item 31")
+    )
+    expect(footer).toHaveTextContent("40 selected")
+    expect(footer).toHaveTextContent("Reading item 31 of 40")
+    fireEvent.click(screen.getByRole("button", { name: "Return to preview" }))
+    expect(screen.getByTestId("media-review-reading-context")).toHaveTextContent(
+      "Result preview: Item 3"
+    )
+    expect(footer).toHaveTextContent("Previewing 3 of 40")
+  })
+
+  const retainedActions = [
+    [
+      "tags",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.handleBatchAddTags()
+    ],
+    [
+      "trash",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.handleBatchMoveToTrash()
+    ],
+    [
+      "export",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.handleBatchExport()
+    ],
+    [
+      "reprocess",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.handleBatchReprocess()
+    ],
+    [
+      "compare",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.handleCompareContent()
+    ],
+    [
+      "chat",
+      (a: ReturnType<typeof useMediaReviewActions>) =>
+        a.handleChatAboutSelection()
+    ],
+    [
+      "ensure",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.ensureDetail(9)
+    ],
+    ["retry", (a: ReturnType<typeof useMediaReviewActions>) => a.retryFetch(7)],
+    [
+      "filter",
+      (a: ReturnType<typeof useMediaReviewActions>) =>
+        a.runContentFiltering(mediaItems)
+    ],
+    [
+      "filter bypass",
+      (a: ReturnType<typeof useMediaReviewActions>) =>
+        a.runContentFiltering(mediaItems)
+    ],
+    [
+      "cancel filter",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.cancelContentFiltering()
+    ],
+    [
+      "cached compare",
+      (a: ReturnType<typeof useMediaReviewActions>) =>
+        a.resolveDetailForCompare(7)
+    ],
+    [
+      "list",
+      (a: ReturnType<typeof useMediaReviewActions>) =>
+        a._fetchList().catch(() => null)
+    ],
+    [
+      "clear",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.clearSelectionWithGuard()
+    ],
+    [
+      "replace",
+      (a: ReturnType<typeof useMediaReviewActions>) =>
+        a.replaceSelectionWithVisible()
+    ],
+    [
+      "toggle",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.toggleSelect(9)
+    ],
+    [
+      "add visible",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.addVisibleToSelection()
+    ],
+    [
+      "remove",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.removeFromSelection(7)
+    ],
+    [
+      "preview",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.previewItem(9)
+    ],
+    [
+      "start reading",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.startSelectedReview()
+    ],
+    [
+      "return preview",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.returnToPreview()
+    ],
+    [
+      "window",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.changeReadingWindow(1)
+    ],
+    [
+      "relative",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.goRelative(1)
+    ],
+    [
+      "expand content",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.expandAllContent()
+    ],
+    [
+      "collapse content",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.collapseAllContent()
+    ],
+    [
+      "expand analysis",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.expandAllAnalysis()
+    ],
+    [
+      "collapse analysis",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.collapseAllAnalysis()
+    ],
+    [
+      "scroll",
+      (a: ReturnType<typeof useMediaReviewActions>) => a.scrollToCard(7)
+    ],
+    [
+      "open trash",
+      (a: ReturnType<typeof useMediaReviewActions>) =>
+        a.openTrashFromBatch([7, 8])
+    ]
+  ] as const
+
+  describe.each([
+    "before commit",
+    "after commit",
+    "round trip",
+    "round trip before commit"
+  ] as const)("retained initiating-owner actions %s", (phase) => {
+    it.each(retainedActions)(
+      "rejects %s before any request, cache, progress, selection or navigation change",
+      async (_label, invoke) => {
+        const tags = vi
+          .spyOn(tldwClient, "bulkUpdateMediaKeywords")
+          .mockResolvedValue({ updated: 2 } as any)
+        const trash = vi
+          .spyOn(tldwClient, "deleteMedia")
+          .mockResolvedValue({} as any)
+        const reprocess = vi
+          .spyOn(tldwClient, "reprocessMedia")
+          .mockResolvedValue({} as any)
+        const handoff = vi
+          .spyOn(mediaHandoff, "createMediaChatHandoff")
+          .mockResolvedValue("retained-token")
+        const mutations = new Map<string, ReturnType<typeof vi.fn>>()
+        const scroll = vi.fn()
+        const { result, rerender } = renderHook(() => {
+          const state = useMediaReviewState(React.useRef(null))
+          const guardedState = {
+            ...state,
+            data: mediaItems,
+            allResults: mediaItems,
+            visibleIds: [7, 8],
+            viewerItems: [{ id: 7 }],
+            cardRefs: { current: { "7": { scrollIntoView: scroll } } }
+          } as typeof state
+          for (const key of Object.keys(state).filter((key) =>
+            key.startsWith("set")
+          )) {
+            if (!mutations.has(key)) mutations.set(key, vi.fn())
+            ;(guardedState as any)[key] = mutations.get(key)
+          }
+          return { state, actions: useMediaReviewActions(guardedState) }
+        })
+        await act(async () => {})
+        act(() => {
+          result.current.state.setSelectedIds([7, 8])
+          result.current.state.setBatchKeywordsDraft("private")
+          result.current.state.setPreviewedId(7)
+          result.current.state.setPreviewNavigationIds([7, 8, 9])
+          result.current.state.setDetails({
+            7: { id: 7, content: "Cached A content" }
+          })
+          result.current.state.setQuery("private")
+          result.current.state.setIncludeContent(_label !== "filter bypass")
+        })
+        const retained = result.current.actions
+        mocks.authorityKey = "verified-bob"
+        mocks.authorityRevision++
+        if (phase === "after commit" || phase === "round trip") rerender()
+        if (phase === "round trip" || phase === "round trip before commit") {
+          mocks.authorityKey = "verified-alice"
+          mocks.authorityRevision++
+          if (phase === "round trip") rerender()
+        }
+        mutations.forEach((spy) => spy.mockClear())
+        mocks.bgRequest.mockClear()
+        mocks.setSetting.mockClear()
+        let value: unknown
+        await act(async () => {
+          value = await invoke(retained)
+        })
+        expect(
+          [...mutations.entries()]
+            .filter(([, spy]) => spy.mock.calls.length)
+            .map(([key]) => key)
+        ).toEqual([])
+        expect(mocks.bgRequest).not.toHaveBeenCalled()
+        expect(tags).not.toHaveBeenCalled()
+        expect(trash).not.toHaveBeenCalled()
+        expect(reprocess).not.toHaveBeenCalled()
+        expect(handoff).not.toHaveBeenCalled()
+        expect(mocks.downloadBlob).not.toHaveBeenCalled()
+        expect(mocks.navigate).not.toHaveBeenCalled()
+        expect(scroll).not.toHaveBeenCalled()
+        if (_label === "cached compare") expect(value).toBeNull()
+      }
+    )
+  })
+
+  it.each(["clear", "replace", "trash"] as const)(
+    "retires the retained %s toast continuation through A to B to A",
+    async (action) => {
+      vi.spyOn(tldwClient, "deleteMedia").mockResolvedValue({} as any)
+      const { result, rerender } = renderHook(() => {
+        const state = useMediaReviewState(React.useRef(null))
+        return {
+          state,
+          actions: useMediaReviewActions({ ...state, allResults: mediaItems })
+        }
+      })
+      await act(async () => {})
+      act(() => result.current.state.setSelectedIds([7, 8]))
+      await act(async () => {
+        if (action === "clear") result.current.actions.clearSelectionWithGuard()
+        else if (action === "replace")
+          result.current.actions.replaceSelectionWithVisible()
+        else await result.current.actions.handleBatchMoveToTrash()
+      })
+      const toast = (
+        action === "trash" ? mocks.messageSuccess : mocks.messageInfo
+      ).mock.calls.at(-1)![0]
+      const toastView = render(toast)
+      mocks.authorityKey = "verified-bob"
+      mocks.authorityRevision++
+      rerender()
+      mocks.authorityKey = "verified-alice"
+      mocks.authorityRevision++
+      rerender()
+      act(() => result.current.state.setSelectedIds([9]))
+      fireEvent.click(within(toastView.container).getByRole("button"))
+      expect(result.current.state.selectedIds).toEqual([9])
+      expect(mocks.navigate).not.toHaveBeenCalled()
+    }
+  )
+
+  it("keeps same-owner actions usable on initial StrictMode mount and fences deferred viewer focus", async () => {
+    const focus = vi.fn()
+    const { result, rerender } = renderHook(
+      () => {
+        const state = useMediaReviewState(React.useRef(null))
+        return {
+          state,
+          actions: useMediaReviewActions({
+            ...state,
+            viewerRef: { current: { focus } } as any
+          })
+        }
+      },
+      { wrapper: React.StrictMode }
+    )
+    await act(async () => {})
+    act(() => result.current.state.setSelectedIds([7, 8]))
+    act(() => result.current.actions.startSelectedReview())
+    expect(result.current.state.readingActive).toBe(true)
+    mocks.authorityKey = "verified-bob"
+    mocks.authorityRevision++
+    rerender()
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    })
+    expect(focus).not.toHaveBeenCalled()
+  })
+
+  it("does not publish filtering cache or progress after a verified owner changes during detail loading", async () => {
+    let finish!: (detail: unknown) => void
+    mocks.bgRequest.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const { result } = renderHook(() => {
+      const state = useMediaReviewState(React.useRef(null))
+      return { state, actions: useMediaReviewActions(state) }
+    })
+    await act(async () => {})
+    act(() => {
+      result.current.state.setQuery("private")
+      result.current.state.setIncludeContent(true)
+    })
+    let pending!: Promise<unknown>
+    act(() => {
+      pending = result.current.actions.runContentFiltering(mediaItems.slice(6, 8))
+    })
+    expect(result.current.state.contentFilterProgress.completed).toBe(0)
+    mocks.authorityKey = "verified-bob"
+    mocks.authorityRevision++
+    await act(async () => {
+      finish({ id: 7, content: "private" })
+      await pending
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    expect(result.current.state.details).toEqual({})
+    expect(result.current.state.contentFilterProgress.completed).toBe(0)
+  })
+
+  it("does not revive retained actions when the same owner remounts the review hook", async () => {
+    const mount = () =>
+      renderHook(() => {
+        const state = useMediaReviewState(React.useRef(null))
+        return { state, actions: useMediaReviewActions(state) }
+      })
+    const first = mount()
+    await act(async () => {})
+    act(() => first.result.current.state.setSelectedIds([7, 8]))
+    const retained = first.result.current.actions
+    first.unmount()
+    const second = mount()
+    await act(async () => {})
+    mocks.bgRequest.mockClear()
+    await act(async () => {
+      await retained.handleBatchExport()
+      retained.openTrashFromBatch([7, 8])
+    })
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(mocks.downloadBlob).not.toHaveBeenCalled()
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    expect(second.result.current.state.selectedIds).toEqual([])
+  })
+
+  it("keeps fresh actions usable after a batched A to B to A verification without reviving retained actions", async () => {
+    const tags = vi
+      .spyOn(tldwClient, "bulkUpdateMediaKeywords")
+      .mockResolvedValue({ updated: 2 } as any)
+    const { result, rerender } = renderHook(
+      () => {
+        const state = useMediaReviewState(React.useRef(null))
+        return { state, actions: useMediaReviewActions(state) }
+      },
+      { wrapper: React.StrictMode }
+    )
+    await act(async () => {})
+    act(() => {
+      result.current.state.setSelectedIds([7, 8])
+      result.current.state.setBatchKeywordsDraft("same-owner")
+    })
+    const retained = result.current.actions
+    mocks.authorityKey = "verified-bob"
+    mocks.authorityRevision++
+    mocks.authorityKey = "verified-alice"
+    mocks.authorityRevision++
+    rerender()
+    await act(async () => {
+      await retained.handleBatchAddTags()
+    })
+    expect(tags).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current.actions.handleBatchAddTags()
+    })
+    expect(tags).toHaveBeenCalledExactlyOnceWith(
+      { media_ids: [7, 8], keywords: ["same-owner"], mode: "add" },
+      expect.objectContaining({
+        requestScope: expect.objectContaining({ userId: "verified-alice" })
+      })
+    )
+  })
+
 
 })

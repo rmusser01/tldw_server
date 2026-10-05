@@ -246,7 +246,14 @@ export const MediaReviewPage: React.FC = () => {
               ? t('mediaPage.statusSelected', '{{count}} selected', { count: selectedIds.length })
               : t('mediaPage.statusNoneSelected', 'No selection')}
           </span>
-          {previewIndex >= 0 && (
+          {fullState.readingActive && fullState.focusIndex >= 0 ? (
+            <span>
+              {t('mediaPage.statusReading', 'Reading item {{current}} of {{total}}', {
+                current: fullState.focusIndex + 1,
+                total: selectedIds.length
+              })}
+            </span>
+          ) : !fullState.readingActive && previewIndex >= 0 && (
             <span>
               {t('mediaPage.statusPreview', 'Previewing {{current}} of {{total}}', {
                 current: previewIndex + 1,
