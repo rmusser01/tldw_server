@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { normalChatMode } from "@/hooks/chat-modes/normalChatMode"
 import type { BaseMessage } from "@/types/messages"
 import { CurrentChatModelSettings } from "../CurrentChatModelSettings"
+import { getAllModelSettings } from "@/services/model-settings"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useActorStore } from "@/store/actor"
 import { buildCockpitProviderRouteSummary } from "@/components/Option/Playground/playground-cockpit-summaries"
@@ -219,21 +220,35 @@ describe("Conversation prompt editor through real model settings Save", () => {
       temperature: 0.25,
       apiProvider: "llama.cpp",
     })
-    reopened.unmount()
+  })
+
+  it("does not revive a cached default after explicitly clearing a numeric setting", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    await client.prefetchQuery({
+      queryKey: ["fetchModelConfig2", true, null],
+      queryFn: getAllModelSettings,
+    })
+    useStoreChatModelSettings.getState().setTemperature(0.25)
     const clearing = await mountSettings(undefined, client)
     fireEvent.click(screen.getByRole("tab", { name: "Model" }))
-    fireEvent.change(screen.getByLabelText("modelSettings.form.numPredict.label"), {
+    expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.25")
+    fireEvent.change(screen.getByLabelText("modelSettings.form.temperature.label"), {
       target: { value: "" },
     })
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
     await waitFor(() =>
-      expect(useStoreChatModelSettings.getState().numPredict).toBeUndefined(),
+      expect(useStoreChatModelSettings.getState().temperature).toBeUndefined(),
     )
     clearing.unmount()
-    await mountSettings(undefined, client)
+    const reopened = await mountSettings(undefined, client)
     fireEvent.click(screen.getByRole("tab", { name: "Model" }))
-    expect(screen.getByLabelText("modelSettings.form.numPredict.label")).toHaveValue("")
-  }, 15000)
+    expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("")
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(reopened.close).toHaveBeenCalledWith(false))
+    expect(useStoreChatModelSettings.getState().temperature).toBeUndefined()
+  })
 
   it.each(["saved", "reset-default", "reset-template", "owner-changed"])(
     "shows the current prompt when the dialog remounts with the existing query cache (%s)",
