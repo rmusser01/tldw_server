@@ -53,7 +53,7 @@ Plan file: Docs/superpowers/plans/2026-05-12-persona-chat-judge-calibration-poli
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 GitHub issue: https://github.com/rmusser01/tldw_server/issues/1586
 
 Draft PR: https://github.com/rmusser01/tldw_server/pull/1588
@@ -76,7 +76,7 @@ Known failure modes and residual risks:
 - The current packaged fixture is intentionally too small for production calibration; policy results remain advisory until a reviewed held-out set meets aggregate and per-dimension thresholds.
 - The policy classifies already-produced reports only. It does not parse model output, execute providers, persist reports, or prove future adapter behavior.
 - The V1 review-command report does not yet include per-dimension sample counts, so aggregate pass/fail counts alone cannot produce a production-calibrated policy result.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

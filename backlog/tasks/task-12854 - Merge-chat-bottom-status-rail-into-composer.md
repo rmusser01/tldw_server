@@ -30,7 +30,7 @@ Remove the separate bottom status rail on the chat cockpit surface, merge its st
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation notes:
 - Removed the standalone chat cockpit status strip from PlaygroundCockpitShell/Playground.
 - Merged model health, character/context, message count, token usage, saved state, and advanced controls into the composer context row.
@@ -44,7 +44,7 @@ Verification:
 - Browser QA at 1440x960 and 390x844: composer region bottom gap 0, status strip absent, merged context row visible.
 - git diff --check
 - Bandit on touched frontend scope wrote /tmp/bandit_task12096.json with zero findings (0 Python LOC in touched TS scope).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

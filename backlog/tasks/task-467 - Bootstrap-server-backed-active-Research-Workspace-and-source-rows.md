@@ -35,7 +35,7 @@ Docs/superpowers/plans/2026-05-23-research-workspace-server-bootstrap-sync-plan.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added a Research Workspace server reconciliation helper that upserts the active workspace, lists backend source rows, adds missing valid local sources, skips invalid/duplicate source rows, and returns bounded errors without throwing.
 - Wired reconciliation into the Research Workspace trust refresh path before source status and capability fetches. Failures surface as bounded trust warnings while status/capability calls still run.
 - Made duplicate workspace source POSTs idempotent in ChaChaNotesDB by returning the existing row for the same workspace/source id. This avoids dev StrictMode/racing bootstrap requests becoming 500s.
@@ -44,7 +44,7 @@ Docs/superpowers/plans/2026-05-23-research-workspace-server-bootstrap-sync-plan.
 
 - Focused code review found one P2 issue: reconciliation errors were not actually bounded for repeated source-add failures. Added a red/green regression test and capped returned error metadata at five messages with a single omission summary while preserving continued add attempts.
 - Post-review verification: focused Vitest now passes 28 tests, backend workspace pytest passes 4 tests, live CDP route/API-order validation passes, Bandit reports 0 findings, and diff checks report no whitespace diagnostics.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

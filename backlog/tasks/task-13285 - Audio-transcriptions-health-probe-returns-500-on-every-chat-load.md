@@ -29,11 +29,11 @@ A health probe for audio transcriptions returns 500 on every cold load of the ch
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 AC2 reworded 2026-09-23: 'a cold load produces no failed requests' covers every request on the page, which this task does not own and a live browser run was not repeated; the reworded AC is the part this probe controls, verified at the endpoint.
 
 Fixed in 9b6560d07d. Root cause: get_stt_health imported Audio_Files outside any try; Audio_Files imports yt_dlp (and other ingestion deps) at module level, so on an install missing one the ImportError escaped as a 500. Reproduced in the shared .venv (no yt_dlp): all 4 existing health tests fail with ModuleNotFoundError: yt_dlp; with a stub yt_dlp they pass, so the import is the only failure. The probe now returns its normal payload shape with available/usable false and an 'STT not available' message. /transcriptions/capabilities had the same unguarded import and now reports availability unknown. Regression test test_transcriptions_health_reports_unavailable_when_stt_deps_missing: red on ea1cbc6941 (ModuleNotFoundError), green after. tests/STT + tests/Audio + Setup/test_audio_health_helpers.py: 15 failed/1551 passed before vs 14/1552 after; the only difference is the new test (remaining 14 pre-existing, unrelated). Bandit clean. Live browser cold-load not re-run.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

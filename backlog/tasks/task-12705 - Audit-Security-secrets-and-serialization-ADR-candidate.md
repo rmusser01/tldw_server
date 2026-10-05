@@ -37,7 +37,7 @@ Create a focused adoption audit for the remaining secrets/serialization portion 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a focused Security secrets/serialization adoption audit for INV-029. The audit records helper availability for SecretManager, Security crypto, and safe_pickle; bounded consumer adoption for AES-GCM JSON envelopes and restricted legacy pickle compatibility; and insufficient repository-wide SecretManager/serialization adoption for an accepted ADR. Updated the main decision inventory and Security confirmation audit to keep the slice inventory-only for now.
 
 Verification recorded on 2026-06-07:
@@ -46,7 +46,7 @@ Verification recorded on 2026-06-07:
 - Portability artifact scan: no developer-machine absolute paths or temporary Bandit report artifact names found in touched docs/task files.
 
 Bandit: not run because this branch only touches Markdown ADR inventory/audit and Backlog task records; no Python files were changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

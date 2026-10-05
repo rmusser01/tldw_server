@@ -35,13 +35,13 @@ Create the design spec for GitHub issue #1463: expose backend-owned VN Play Stor
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created the VN Play branch navigation API design spec for issue #1463. The design keeps the navigation read model backend-owned and derived from branches/events/scene state, adds a branch-navigation endpoint, extends event listing with optional branch-aware filtering, and includes guarded branch restore with stale-scene checks, active-turn checks, idempotent session action rows, lease recovery, and scene-version compare-and-swap. Self-review tightened the restore target model from branch_start to choice_point plus branch_latest because restoring immediately after choice_selected would leave many completed Story branches with no visible choices.
 
 Reopened after design review. Follow-up fixes needed: shared session mutation lock between turns and restore actions, branch ownership semantics, action idempotency key scope, bounded branch-aware event filtering, stable warning payload shape, and choice_point parent/sibling semantics.
 
 Addressed design review findings: required a shared session mutation gate via active_session_action_id so turns and restore actions cannot race; defined direct event_range versus subtree_event_range ownership; made restore idempotency keys session-global across restore action types with action_type in the request hash; bounded branch-aware event filtering fallback replay; added stable warning payload schema; and specified choice_point restore returns the parent choice-presented state with parent active branch rather than the selected branch.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

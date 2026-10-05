@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import inspect
-import re
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
@@ -17,7 +16,6 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
     ProfileVersionNotFound,
     VersionedUserWriteGateway,
 )
-from tldw_Server_API.app.core.deprecations import log_runtime_deprecation
 
 _USER_ROW_FALLBACK_COLUMNS = (
     "id",
@@ -36,9 +34,6 @@ _USER_ROW_FALLBACK_COLUMNS = (
 )
 
 
-_SQL_PARAM_RE = re.compile(r"\$\d+")
-
-
 def _normalize_user_row(row: Any) -> dict[str, Any] | None:
     if not row:
         return None
@@ -54,35 +49,19 @@ def _normalize_user_row(row: Any) -> dict[str, Any] | None:
     }
 
 
-def _normalize_sqlite_placeholders(query: str) -> str:
-    return _SQL_PARAM_RE.sub("?", query)
+async def _fetchrow(db: Any, query: str, *params: Any) -> Any:
+    """Fetch a single row through the connection's backend-specific adapter.
 
-
-async def _execute_compat(db: Any, query: str, *params: Any) -> Any:
-    execute = db.execute
-    try:
-        return await execute(query, *params)
-    except TypeError:
-        log_runtime_deprecation(
-            "auth_db_execute_compat",
-            message=(
-                "Auth DB execute compatibility adapter was used for sqlite-like "
-                "execute(query, tuple(params)) signature."
-            ),
-        )
-        # Compatibility for sqlite-like execute(query, tuple(params))
-        return await execute(_normalize_sqlite_placeholders(query), tuple(params))
-
-
-async def _fetchrow_compat(db: Any, query: str, *params: Any) -> Any:
+    Postgres-style connections (asyncpg and the request-scoped test adapter)
+    expose ``fetchrow`` with variadic parameters. SQLite-style adapters
+    (e.g. AuthNZ's guarded connection) expose variadic ``execute`` returning
+    a cursor with ``fetchone``; they normalize ``$N`` placeholders internally,
+    so callers always pass postgres-dialect SQL with variadic parameters.
+    """
     fetchrow = getattr(db, "fetchrow", None)
     if callable(fetchrow):
         return await fetchrow(query, *params)
-    log_runtime_deprecation(
-        "auth_db_execute_compat",
-        message="Auth DB fetchrow compatibility adapter used execute()+fetchone() path.",
-    )
-    cursor = await _execute_compat(db, query, *params)
+    cursor = await db.execute(query, *params)
     return await cursor.fetchone()
 
 
@@ -184,7 +163,7 @@ async def fetch_user_by_login_identifier(db, identifier: str) -> dict[str, Any] 
     """Fetch a user row by username or email (case-insensitive)."""
     ident_l = identifier.strip().lower()
     try:
-        row = await _fetchrow_compat(
+        row = await _fetchrow(
             db,
             "SELECT * FROM users WHERE lower(username) = $1 OR lower(email) = $2",
             ident_l,
@@ -199,8 +178,7 @@ async def fetch_user_by_login_identifier(db, identifier: str) -> dict[str, Any] 
 async def update_user_password_hash(db, user_id: int, new_hash: str) -> None:
     """Persist a new password hash for the user."""
     try:
-        await _execute_compat(
-            db,
+        await db.execute(
             "UPDATE users SET password_hash = $1 WHERE id = $2",
             new_hash,
             user_id,
@@ -242,7 +220,7 @@ async def update_user_last_login(db, user_id: int, now: datetime | None = None) 
 async def fetch_active_user_by_id(db, user_id: int) -> dict[str, Any] | None:
     """Fetch an active user by id, normalized to dict, or None if not found."""
     try:
-        row = await _fetchrow_compat(
+        row = await _fetchrow(
             db,
             "SELECT * FROM users WHERE id = $1 AND is_active = $2",
             user_id,
@@ -261,7 +239,7 @@ async def fetch_user_by_email_for_password_reset(db: Any, email: str) -> dict[st
     """Fetch reset-eligible user fields by email, case-insensitive."""
     email_l = str(email or "").strip().lower()
     try:
-        row = await _fetchrow_compat(
+        row = await _fetchrow(
             db,
             "SELECT id, username, email, is_active FROM users WHERE lower(email) = $1",
             email_l,
@@ -285,8 +263,7 @@ async def store_password_reset_token(
 ) -> None:
     """Insert a password reset token record."""
     try:
-        await _execute_compat(
-            db,
+        await db.execute(
             """
             INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, ip_address)
             VALUES ($1, $2, $3, $4)
@@ -322,7 +299,7 @@ async def fetch_password_reset_token_record(
             LIMIT 1
         """
         query = query_template.format_map(locals())  # nosec B608
-        row = await _fetchrow_compat(db, query, user_id, *hash_candidates)
+        row = await _fetchrow(db, query, user_id, *hash_candidates)
         if not row:
             return None, None
         token_record_id = _extract_row_value(row, "id", 0)
@@ -345,15 +322,13 @@ async def apply_password_reset(
     try:
         backend = _versioned_user_gateway(db).backend
         now_utc = _normalize_datetime_for_backend(now_utc, backend=backend)
-        await _execute_compat(
-            db,
+        await db.execute(
             "UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3",
             new_password_hash,
             now_utc,
             user_id,
         )
-        await _execute_compat(
-            db,
+        await db.execute(
             "UPDATE password_reset_tokens SET used_at = $1 WHERE id = $2",
             now_utc,
             token_record_id,
@@ -415,7 +390,7 @@ async def fetch_user_by_email_for_verification(db: Any, email: str) -> dict[str,
     """Fetch email-verification fields by email, case-insensitive."""
     email_l = str(email or "").strip().lower()
     try:
-        row = await _fetchrow_compat(
+        row = await _fetchrow(
             db,
             "SELECT id, username, email, is_verified FROM users WHERE lower(email) = $1",
             email_l,

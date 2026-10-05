@@ -33,11 +33,11 @@ Align the Getting Started docs, published onboarding manifest parity, CLI verifi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Aligned source and published Getting Started docs around one obvious start command, peer local/Docker solo choices, first chat as the setup completion gate, and adding the first source as the immediate next milestone.
 Updated Makefile status copy and profile verification to surface backend first-run chat state.
 Verification: focused docs/Makefile/CLI tests passed; full planned docs/Makefile/CLI test set passed; adjacent docs contract tests passed; Bandit reported zero findings for profile_verify.py.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

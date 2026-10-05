@@ -52,7 +52,7 @@ Reason: durable schema, Sync versioning, tenancy, API, restore, and blob-deletio
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Completed the ADR-038 work stream through all four atomic child tasks, all now Done.
 
 - TASK-13005.1 established strict attachment.ref v2 negotiation, schema-v59 SQLite/PostgreSQL registry/RLS, immutable revision bindings, versioned cursors/acks, per-dataset namespaces, and default-off capability gating.
@@ -63,7 +63,7 @@ Completed the ADR-038 work stream through all four atomic child tasks, all now D
 Architecture: existing ADR-038 governs the full schema, ownership, API, restore, namespace, and garbage-collection contract; no additional ADR was required. Public M1/M2/M3 and ADR documentation now reflect the implemented behavior.
 
 Aggregate evidence recorded by the children includes: live PostgreSQL/affected 178 passed, schema migration/store/RLS 116 passed, broad Sync 571 passed for the foundation; mutation matrix 464 passed with 4 optional PG skips; bootstrap gate 651 passed with 2 optional PG skips; restore/operations affected gate 506 passed with 3 optional PG skips and final boundary gate 32 passed with 3 skips. All server-free PostgreSQL catalog/query contracts and SQLite integrations are green; live PostgreSQL fixtures are committed and skip only when a server is unavailable. Ruff/static, Bandit, py_compile, diff checks, security/authorization, integrity, resume, size-limit, corruption/quarantine, concurrency, retention, and physical-GC scenarios are recorded across the child tasks. No new lessons file was invented: no additional general repository trap remained after applying the existing testing/live-verification guidance.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

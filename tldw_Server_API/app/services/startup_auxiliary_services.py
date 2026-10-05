@@ -5,6 +5,7 @@ Auxiliary startup-service helpers extracted from the application lifespan.
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -94,12 +95,11 @@ def _claims_alerts_scheduler_enabled(context: WorkerLifecycleContext) -> bool:
 def _claims_review_metrics_scheduler_enabled(
     context: WorkerLifecycleContext,
 ) -> bool:
-    return _env_flag_enabled("CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED") or bool(
-        _legacy_get(
-            "CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED",
-            context.settings.get("CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED", False),
-        )
-    )
+    key = "CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED"
+    raw = os.getenv(key)
+    if raw is None:
+        raw = _legacy_get(key, context.settings.get(key, False))
+    return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 async def start_auxiliary_services(

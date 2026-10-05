@@ -24,11 +24,11 @@ Full PostgreSQL startup logs MCP media module health failure because check_healt
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Diagnostic full-app PostgreSQL probe recorded INSERT OR REPLACE INTO _mcp_healthcheck during optional MCP media startup; PostgreSQL backend rejects this SQLite-only syntax. A targeted check_health regression will reject that statement and require database_writable to stay true with portable SQL.
 
 Portable ON CONFLICT health upsert passed focused regression and final PostgreSQL and SQLite live probes; PostgreSQL log had no MCP media health SQL failure. Bandit 0 findings; fatal Ruff clean. Skip: no production deployment tested.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

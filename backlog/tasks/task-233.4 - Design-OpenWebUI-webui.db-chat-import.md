@@ -40,7 +40,7 @@ Create a repo-grounded design spec for v2 OpenWebUI import from an uploaded Open
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created a design spec at `Docs/superpowers/specs/2026-05-10-openwebui-db-chat-import-design.md`.
 
 The spec recommends extending Chatbooks with `source_format=openwebui_db` instead of creating a separate endpoint. It requires uploaded SQLite files only, explicit selected OpenWebUI user import, folder mirroring through existing visible tldw folder support, metadata-only attachment/file/artifact preservation, duplicate compatibility with the JSON importer, and security controls for uploaded private SQLite databases.
@@ -54,7 +54,7 @@ Verification: `git diff --cached --check` completed with no whitespace errors.
 Bandit skip: docs/backlog-only design slice; no Python source changed.
 
 Known skips/blockers: implementation plan and runtime code remain future work.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

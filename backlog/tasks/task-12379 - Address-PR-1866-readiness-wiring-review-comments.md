@@ -26,9 +26,9 @@ Address the second live PR #1866 review batch for Character Chat readiness wirin
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified Qodo and CodeRabbit comments against current Playground wiring. Added Character Chat readiness catalog loading in Playground via fetchChatModels({ returnEmpty: true }), passed availableModels and send-blocked state into buildCharacterChatReadiness, split model settings and server settings recovery so server recovery dispatches an unscoped settings event, and wrapped global listener assertions in try/finally.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

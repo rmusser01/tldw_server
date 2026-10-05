@@ -30,11 +30,7 @@ Migrate the Flashcards VoiceTranscriptComposer unsupported-browser voice notice 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented test-first: added VoiceTranscriptComposer product-state coverage for the unsupported browser notice and confirmed RED failure because the visible message was not inside a canonical data-ds-component="Alert" wrapper. Migrated the unsupported notice from AntD Alert to the design-system Alert while leaving the surrounding AntD form controls unchanged. Removed the matching VoiceTranscriptComposer Alert baseline exception.
 
 Verification:
@@ -45,7 +41,7 @@ Verification:
 - git diff --check passed.
 - Full bunx tsc --noEmit --pretty false still exits 2 from inherited repo-wide TypeScript debt; /tmp/tsc_design_system_next_slice_18.log has 252 lines and touched-file filter for VoiceTranscriptComposer/baseline/task-456 matched 0 lines.
 - Bandit skipped because this slice changes TypeScript UI/test, JSON baseline, and task metadata only; no Python code touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

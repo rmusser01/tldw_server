@@ -42,9 +42,9 @@ Route AudioSourcePicker's remembered missing-device unavailable label through th
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation notes: Added RED coverage by partially mocking @/design-system so getDesignSystemState("unavailable") returns a distinct label. The focused AudioSourcePicker test first failed because the missing-device option still rendered the hardcoded Unavailable label. Updated AudioSourcePicker to use getDesignSystemState("unavailable").label as the i18n fallback for remembered missing-device unavailable labels, preserving option structure and source fallback messaging. Removed canonical-state-label:src/components/Common/AudioSourcePicker.tsx:Unavailable from the product-state baseline. Verification: focused AudioSourcePicker Vitest passed 6 tests; product-state guard Vitest passed 52 tests; bun run verify:design-system-state exited 0 with 509 baseline exceptions; git diff --check passed; repo-wide bunx tsc --noEmit --pretty false exited 2 on existing unrelated UI TypeScript debt, and rg found no touched-file/design-system matches in the tsc output. Bandit skipped because the touched scope is UI TypeScript, JSON, and Backlog markdown only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

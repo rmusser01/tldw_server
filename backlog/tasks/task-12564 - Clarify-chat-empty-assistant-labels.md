@@ -30,13 +30,13 @@ Address /chat UX rebaseline F9 by qualifying empty assistant labels by region so
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Starting focused /chat F9 copy/a11y slice. Investigation found the empty assistant phrase No assistant selected still appeared in composition preview and runtime rail paths.
 
 Implemented region-specific empty assistant labels: composition uses No assistant attached to next message, runtime uses No runtime assistant selected, and old generic detail text is suppressed or replaced with the existing explanatory detail.
 
 Verification: RED focused run failed as expected on the generic labels. GREEN focused run passed 65 tests across playground-composition-preview, PlaygroundCompositionPreview, PlaygroundRuntimeInspector.first-slice, Playground.cockpit-a11y, and Playground.cockpit-controls. Final diff check passed. UI tsc remains blocked by the known unrelated CharacterListContent.design-system.test.tsx GalleryCardDensity baseline mismatch. Bandit skipped because touched code is TS/TSX UI only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

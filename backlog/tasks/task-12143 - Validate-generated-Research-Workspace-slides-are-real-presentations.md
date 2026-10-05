@@ -28,9 +28,9 @@ Tighten slides generation verification so Research Workspace slides artifacts ar
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Research Workspace slides validation on both frontend and backend. Frontend slides generation now requires a Slides API presentation id and rejects empty or placeholder slide bodies, including markdown fallback text. Backend SlidesGenerator now rejects placeholder or empty normalized slide content before persistence. Added regression tests for placeholder API output, markdown fallback completion prevention, and backend placeholder rejection. Full-app validation ran against FastAPI on 127.0.0.1:18001 using the user-provided llama.cpp endpoint at 127.0.0.1:9099 with model gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf. The generated presentation id was 404b283b-d113-45c8-bf2c-a2aecde514f7 with 8 structured slides, application/json export, and 0 placeholder failures in generated, fetched, and exported payloads. Initial full-app attempt failed closed because egress blocked port 9099 and did not persist a fake artifact; validation retry used temporary local-only egress override.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

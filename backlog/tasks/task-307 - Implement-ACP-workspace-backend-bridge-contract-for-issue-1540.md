@@ -47,7 +47,7 @@ Implement Slice 1 from Docs/Design/ACP_Workspace_Integration_Decision_2026_05.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation evidence:
 - Added ACP workspace metadata bridge helpers in OrchestrationDB: get_workspace_by_canonical_workspace_id and link_workspace_to_canonical.
 - Added POST /api/v1/agent-orchestration/workspaces/canonical-bridge to validate canonical workspace existence, enforce ACP root allowlisting, reuse existing links, link existing unlinked roots, and reject conflicting root/canonical links.
@@ -65,7 +65,7 @@ PR review sweep started for PR #1615. Actionable review findings to address: asy
 PR 1615 review sweep addressed unresolved comments for async canonical DB lookup atomic bridge binding canonical uniqueness direct canonical lookup batched project workspace lookup type hints and helper docstrings. Added relink conflict prevention for existing ACP roots.
 
 Final verification after review fixes: focused Agent Orchestration pytest 86 passed; Ruff touched-file check passed; git diff --check clean; Bandit touched backend scan 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

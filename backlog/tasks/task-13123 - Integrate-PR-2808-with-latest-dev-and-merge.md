@@ -33,11 +33,11 @@ Resolve the final merge conflict caused by PR #2818 advancing dev after PR #2808
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: PR #2818 advanced dev from d3c07a5a to 4091735b after PR #2808 head a025982f completed validation. git merge-tree identified one manual conflict, the generated OpenAPI fingerprint; ChaChaNotes_DB.py and other Notes/Sync overlap auto-merge.
 
 Local integration evidence: merged origin/dev 4091735b into PR head a025982f; the only manual conflict was regenerated from the combined FastAPI schema. Fingerprint now has paths=2039, schemas=3025, sha256=3deff3be1f96... and the canonical OpenAPI drift check passes. Focused overlap suite passed 95 tests with 3 PostgreSQL-service skips: ChaCha task store, SQLite v61 migration, PostgreSQL v61 migration contracts, and sharing schema ownership. Combined ChaChaNotes_DB.py retains both PR #2808 v61 shared-chat migration/store wiring and PR #2818 task-projection drift delegation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

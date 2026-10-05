@@ -35,9 +35,12 @@ See IMPLEMENTATION_PLAN_audiobook_core_review_fixes.md.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation completed inline after red tests confirmed the reviewed failures. Verification: direct core regression script passed; python -m compileall passed for touched runtime/test files; Bandit on touched runtime scope reported 0 findings. Pytest targeted commands were attempted, but the local harness stalled in setup/cleanup on this Python 3.14 environment after confirming red failures and two later passing tests.
-<!-- SECTION:NOTES:END -->
+
+2026-06-24: Reopened to address PR #2443 review feedback after rebasing onto latest origin/dev. Action items: refine generated chapter collision warnings, add required docstrings, refresh worker tag marker metadata after warning mutation, and strip next-line timing candidates defensively.
+2026-06-24 PR #2443 review pass: rebased branch onto latest origin/dev and addressed review feedback. Generated chapter ID warnings now only report explicit-ID collisions instead of cascading from prior generated IDs. Added required docstrings to modified audiobook helpers, refreshed worker tag marker metadata after chapter planning mutates warnings, and stripped next-line timing candidates defensively. Verification: targeted Audiobooks unit subset passed (45 passed); compileall passed; Bandit on touched runtime scope reported 0 findings; git diff --check passed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -54,10 +57,3 @@ Fixed audiobook core review findings and PR #2443 review feedback: chapter IDs a
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-2026-06-24: Reopened to address PR #2443 review feedback after rebasing onto latest origin/dev. Action items: refine generated chapter collision warnings, add required docstrings, refresh worker tag marker metadata after warning mutation, and strip next-line timing candidates defensively.
-2026-06-24 PR #2443 review pass: rebased branch onto latest origin/dev and addressed review feedback. Generated chapter ID warnings now only report explicit-ID collisions instead of cascading from prior generated IDs. Added required docstrings to modified audiobook helpers, refreshed worker tag marker metadata after chapter planning mutates warnings, and stripped next-line timing candidates defensively. Verification: targeted Audiobooks unit subset passed (45 passed); compileall passed; Bandit on touched runtime scope reported 0 findings; git diff --check passed.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

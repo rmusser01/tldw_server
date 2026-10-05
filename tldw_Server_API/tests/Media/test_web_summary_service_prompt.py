@@ -112,10 +112,6 @@ def context(
     monkeypatch.setattr(
         service, "scrape_from_sitemap", lambda *args, **kwargs: [article(), article("https://example.com/b")]
     )
-    monkeypatch.setattr(
-        service, "scrape_by_url_level", lambda *args, **kwargs: [article(), article("https://example.com/b")]
-    )
-    monkeypatch.setattr(service, "recursive_scrape", pages)
     monkeypatch.setattr(summary, "loaded_config_data", {"openai_api": {"model": "test-model"}})
     monkeypatch.setattr(
         prompt_loader, "_prompts_dir", lambda: str(Path(__file__).resolve().parents[2] / "Config_Files" / "Prompts")
@@ -179,22 +175,13 @@ def ingest(context: SimpleNamespace, method: str = "individual", **options: Any)
 
 
 @pytest.mark.parametrize("method", INGEST_METHODS)
-@pytest.mark.parametrize("fallback", [False, True])
 def test_ingest_saved_pair_and_real_crawl_results(
-    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, method: str, fallback: bool
+    context: SimpleNamespace, method: str
 ) -> None:
     """Saved owner instructions must reach every article, including stored crawl results."""
     save(context, 1)
     save(context, 2)
     context.owner = 2
-    if fallback:
-
-        def unavailable() -> None:
-            """Select the compatibility engine without mocking its result envelope."""
-            raise RuntimeError("enhanced unavailable")
-
-        monkeypatch.setattr(service, "get_web_scraping_service", unavailable)
-        monkeypatch.setenv("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK", "1")
     result = ingest(context, method)
     assert [item["analysis"] for item in result["results"]] == ["Summary result."] * 2
     assert all(item.get("ingested_at") for item in result["results"])
@@ -283,20 +270,9 @@ def test_ingest_reset_restores_engine_defaults(context: SimpleNamespace, method:
 
 
 @pytest.mark.parametrize("method", METHODS)
-@pytest.mark.parametrize("fallback", [False, True])
-def test_saved_pair_reaches_all_pages(
-    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, method: str, fallback: bool
-) -> None:
+def test_saved_pair_reaches_all_pages(context: SimpleNamespace, method: str) -> None:
     """Every supported engine/method must consume both owner instructions."""
     save(context)
-    if fallback:
-
-        def unavailable() -> None:
-            """Select the existing compatibility engine."""
-            raise RuntimeError("enhanced unavailable")
-
-        monkeypatch.setattr(service, "get_web_scraping_service", unavailable)
-        monkeypatch.setenv("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK", "1")
     result = process(context, method)
     assert [item["summary"] for item in result["articles"]] == ["Summary result."] * 2
     assert len(context.calls) == 2
@@ -445,25 +421,24 @@ def test_saved_pair_does_not_load_unused_deployment_defaults(
 
 
 @pytest.mark.parametrize("method", METHODS)
-def test_legacy_reset_preserves_existing_defaults(
-    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, method: str
-) -> None:
-    """Compatibility-engine defaults remain distinct from deployed crawl prompts."""
+def test_reset_restores_builtin_defaults(context: SimpleNamespace, method: str) -> None:
+    """After reset, the enhanced engine serves its builtin defaults (no saved pair)."""
     row = save(context)
     context.databases[1].reset_service_prompt_override(PROMPT_ID, row.revision)
-
-    def unavailable() -> None:
-        """Force selection of the legacy scraping engine."""
-        raise RuntimeError("enhanced unavailable")
-
-    monkeypatch.setattr(service, "get_web_scraping_service", unavailable)
-    monkeypatch.setenv("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK", "1")
     process(context, method)
-    expected = "Act as a professional summarizer and summarize this article." if method == "Individual URLs" else ""
-    assert {call["system_message"] for call in context.calls} == {expected}
-    assert {call["messages"][0]["content"] for call in context.calls} == {
-        "Article facts." + ("\n\n\n\n" + expected if expected else "")
-    }
+    if method == "Individual URLs":
+        expected_system = "Summarize this article concisely."
+        expected_user = "Article facts."
+    else:
+        expected_system = (
+            "You are a professional summarizer who produces accurate, concise summaries of web content."
+        )
+        expected_user = (
+            "Article facts.\n\n\n\n"
+            "Summarize this article concisely. Focus on the main points, facts, and any actionable insights."
+        )
+    assert {call["system_message"] for call in context.calls} == {expected_system}
+    assert {call["messages"][0]["content"] for call in context.calls} == {expected_user}
 
 
 def test_missing_deployment_assets_preserves_builtin_defaults(

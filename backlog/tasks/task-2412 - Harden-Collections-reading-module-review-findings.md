@@ -36,13 +36,15 @@ Implement the accepted review findings for the Collections reading module: bound
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented bounded reading metadata and embedding job payloads, shared reading status normalization, http/https import filtering, inert unsafe digest links, safe READING_IMPORT_MAX_BYTES parsing, and ReadingArchiveService/ReadingImportService helpers behind ReadingService.
 
 Verification: direct behavioral script passed for digest unsafe-link rendering, invalid import env fallback, embedding payload truncation, save/update status normalization, bounded metadata, helper wiring, and non-http import skip. compileall passed for touched Collections code/tests. git diff --check passed. Bandit on touched Collections files produced 0 findings at /tmp/bandit_task_2412_collections.json.
 
 Focused pytest limitation: targeted pytest timed out during repo-wide autouse fixture setup before executing the Collections test body. Timeout stack was in tests/conftest.py importing character_chat_sessions -> Research/RAG -> nltk/scipy, not in the changed Collections code.
-<!-- SECTION:NOTES:END -->
+
+Review follow-up: addressed PR comments by adding docstrings to new helpers, adding type hints/docstrings to new tests, hardening default markdown digest rendering against link/summary injection, and verifying skipped import counts still count unsupported raw URLs once. Verification before commit: git diff --check passed; compileall on touched files passed; Bandit on touched Collections core files reported 0 findings; direct behavior checks passed for markdown escaping, embedding content bounding, unsupported URL skip count, and invalid import-size env fallback.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -61,9 +63,3 @@ Hardened the Collections reading module against the review findings: content is 
 - [ ] #7 Focused pytest coverage passes for Collections reading service/import/digest/embedding queue behavior.
 - [x] #8 Bandit runs clean on touched Collections files.
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Review follow-up: addressed PR comments by adding docstrings to new helpers, adding type hints/docstrings to new tests, hardening default markdown digest rendering against link/summary injection, and verifying skipped import counts still count unsupported raw URLs once. Verification before commit: git diff --check passed; compileall on touched files passed; Bandit on touched Collections core files reported 0 findings; direct behavior checks passed for markdown escaping, embedding content bounding, unsupported URL skip count, and invalid import-size env fallback.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

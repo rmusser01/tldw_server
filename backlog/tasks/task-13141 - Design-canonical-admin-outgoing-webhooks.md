@@ -34,7 +34,7 @@ Write and review the canonical public design for one secure admin outgoing-webho
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Replacement for the webhook design record originally created as TASK-12950 on 2026-07-12. Current dev independently assigned TASK-12950 to Quick Ingest while this branch was open, so this task preserves the webhook history under a unique ID. Conversational design and three automated review iterations are recorded in the linked specification and predecessor record. A 2026-08-21 manual revalidation against current dev is in progress before implementation planning.
 
 2026-07-12: Conversational design approved and written to Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md. The spec records one final router, server-generated one-time secrets, encrypted target URLs and secrets under a dedicated key ring, new canonical tables, legacy JSON/DB import, six privacy-bounded events, Jobs-only retry, cross-database enqueue recovery, published HMAC protocol, egress controls, feature modes, rollback boundaries, upstream review units, and verification gates. Independent written-spec review was pending; no product code changed.
@@ -58,7 +58,7 @@ Fresh documentation verification on 2026-08-21: origin/dev resolves to 2e0815c1e
 2026-08-21 approval gate: user approved the reviewed design, including the registration bounds, fail-closed mode-on source mutation policy, three-PR upstream activation sequence, and conditional hosted compatibility approach. Implementation planning may proceed; runtime implementation remains out of scope for this task.
 
 2026-08-28 TASK-13013.10 identity normalization: this completed canonical webhook design moved from legacy TASK-13013 to canonical TASK-13141. The public release-readiness program remains the sole TASK-13013 record. Historical commits may retain the legacy ID; current design and implementation links use TASK-13141.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

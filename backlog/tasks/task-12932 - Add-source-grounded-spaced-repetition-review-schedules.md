@@ -59,17 +59,15 @@ Execute Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-impl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the approved first slice using TDD across scheduling helpers, SQLite/PostgreSQL persistence, Flashcards-owned REST APIs, typed WebUI clients/hooks, Flashcards planner and due-review surfaces, and tokenized Quiz/Flashcards handoffs. Source snapshots remain on the server/sessionStorage rather than in URLs; starting a review does not auto-generate artifacts. Independent review findings were addressed in c669d2b545 and e694a3b08b: nonexistent civil dates are rejected, due rows receive bounded source summaries and 60-second refresh, storage failures remain recoverable, multi-source generation budgets are fair, and ambiguous card provenance is omitted. The approved Quiz first-slice limitation remains explicit: one media source and note IDs are selectable; messages and additional media remain visible as read-only snapshot context.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Reopened after independent PR review 019f4c90-66ed-7f21-ae05-a29786459650. Confirmed findings: missing PostgreSQL RLS for source review tables; oversized timezone OSError; unbounded source IDs, labels, and aggregate bundle; incomplete reread provenance fallback; non-consuming handoff storage; form a11y associations; untranslated source-review UI copy.
 
 Final PR follow-up: rebased onto dev c588c3b8b521f9411e9ae08c42b3365e886846c8 and addressed all 15 CodeRabbit threads in 3b5f5bb0da. The due poll now stays thin and resume hydration reuses the existing nested start action; optimistic state, handoff validation, error telemetry, provenance cleanup, typed not-found errors, shared caps, schema docs, stored-metadata handling, and PostgreSQL role teardown were also hardened. All 15 threads were answered inline and resolved.
 
 2026-07-10 latest-dev PR follow-up: rebased 22 commits onto origin/dev 5eee656a6455c3476ed7e767e4fde46e84b4b052; updated the PR template sections while preserving the required human-authored Change summary gate; documented the new production API surface; addressed all five unresolved Qodo threads (rate limiting, validator types, pytest markers, delete-response semantics, and logout handoff cleanup). Verification: backend 96 passed/2 skipped; frontend 116 passed; Ruff, compileall, OpenAPI guard, diff checks, and Bandit passed with 0 findings. Full UI tsc reports only unrelated baseline diagnostics. All review threads resolved; final GitHub CI remained queued with no failures at handoff.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

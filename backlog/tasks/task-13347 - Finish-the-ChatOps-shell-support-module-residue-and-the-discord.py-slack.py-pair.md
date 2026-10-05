@@ -38,9 +38,9 @@ Source: TASK-13326, synthesis F25.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-23: 3cbee3a79a stage 2c (_chatops/settings.py; PolicyStore/resolve_actor_id); e3c31fc40b stage 3 (_chatops/ingress.py). Signature verification and command parsing remain per protocol. ADR-050 table updated.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

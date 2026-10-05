@@ -35,7 +35,7 @@ Write the approved design spec for issue #1434: persist Story/CYOA choice select
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created design draft in Docs/superpowers/specs/2026-05-09-vn-play-story-branch-persistence-design.md inside the isolated worktree. Local review tightened the design to preserve existing custom-action behavior, require atomic branch+choice-selected persistence, and require retry-last-turn to reuse existing choice branches.
 
 Verification before commit: git diff --check in the isolated worktree exited 0. This is a docs/task-only spec change, so Bandit is not applicable until implementation touches Python code.
@@ -45,7 +45,7 @@ Committed the design spec on codex/vn-play-story-branch-persistence. No Python c
 Reopened after design review. Follow-up fixes needed: keep branch_path API-compatible, persist accepted choice scene state before model work, pin retry source-of-truth, scope parent choice lookup, make Story custom-action behavior explicit, and require a repository helper for atomic accepted-choice persistence.
 
 Addressed design review findings in the spec: branch_path_json remains list-shaped for VNPlayBranchResponse compatibility; accepted choices persist replay-derived scene state before model work; retry-last-turn is failure-retry only and uses the failed turn request input_event_id; parent_event_id lookup is bounded to the active replay window; Story custom_action is explicitly non-branching; implementation must use a repository helper for atomic branch+choice_selected+turn-request+scene-state persistence. Verification: git diff --check exited 0 in the isolated worktree.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

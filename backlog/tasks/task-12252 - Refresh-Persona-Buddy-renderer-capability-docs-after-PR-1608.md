@@ -44,9 +44,9 @@ Refresh Persona/Buddy visual-pack product and code documentation after PR #1608 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation notes: PR 1608 is merged, so documentation was changed from future capability wording to current registry wording. Scope stayed docs-only and records sprite_frames as the only enabled V1 renderer. Verification: git diff --check passed. Stale future-prerequisite wording probe found no matches. Local absolute path probe found no matches. Bandit skipped because the touched scope is documentation and Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

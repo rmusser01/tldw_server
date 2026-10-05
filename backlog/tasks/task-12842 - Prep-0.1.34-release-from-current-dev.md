@@ -29,12 +29,12 @@ Prepare release metadata, changelog, README, and documentation version reference
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Prepared 0.1.34 from current origin/dev tip 30495536d3 after PR #2557 and PR #2568 merged.
 - Updated pyproject package version, Docs/mkdocs version metadata, README current release line/rollup, and CHANGELOG 0.1.34 entry.
 - Added release-helper regression coverage so the helper updates the repository README wording now used by the docs contract. Red/green: the new test first failed with Missing README anchor for beyond-release reference, then passed after Helper_Scripts/release.py was patched.
 - Verification passed: release/docs/helper test slice (54 passed), git diff --check, Bandit on Helper_Scripts/release.py and the release docs contract test with B101 skipped for pytest asserts, pre-commit on touched files, package build, twine check, and wheel metadata check showing tldw-server 0.1.34.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

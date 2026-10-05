@@ -31,7 +31,7 @@ Resolve actionable review feedback on PR 1688 for the VN script playtest preflig
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added regression coverage for missing playtest choice targets, cross-branch convergence, failed turn-lock lease updates, and stale active-turn recovery before idempotency replay.
 
 Implemented fixes for PR 1688 review findings: path-local playtest state tracking, choice target diagnostics, conditional lease-update failure rollback, stale-lock recovery before idempotency lookup, supplied draft shape guard before audio ref resolution, stored draft reuse in playtest_draft, __getattr__ return typing, _parse_datetime_utc docstring, and wrapped playtest_version signature.
@@ -39,7 +39,7 @@ Implemented fixes for PR 1688 review findings: path-local playtest state trackin
 Verification so far: focused 4-test red/green run passed; VN_Play db+turn suites passed with 84 passed; VN_Scripts playtest+API suites passed with 46 passed; py_compile passed; git diff --check passed; Bandit touched backend scope passed with 0 findings.
 
 GitHub check review: existing Full Suite entries on PR 1688 were from a cancelled workflow run, not new local test failures. The updated PR commit will trigger a fresh CI pass.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

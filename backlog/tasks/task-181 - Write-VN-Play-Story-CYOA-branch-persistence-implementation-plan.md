@@ -34,13 +34,13 @@ Create the implementation plan for issue #1434 based on the reviewed VN Play Sto
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-05-09-vn-play-story-branch-persistence-implementation-plan.md with exact file map, TDD tasks, test commands, docs updates, Bandit command, and commit checkpoints.
 
 Local plan review checked the reviewed design constraints: list-shaped branch_path, pre-model scene-state persistence, failure-only retry source of truth, bounded parent lookup, non-branching custom_action, and atomic accepted-choice persistence.
 
 Verification for this planning-only task: git diff --check passed. Bandit is not applicable until runtime code is changed by the implementation task.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -48,14 +48,14 @@ Extract the Jobs create/admission transaction path behind backend-specific opera
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/superpowers/plans/2026-07-04-jobs-admission-operations-extraction-plan.md
 PR: https://github.com/rmusser01/tldw_server/pull/2611
 Original implementation extracted SQLite/Postgres admission operation modules while keeping JobManager.create_job as facade for validation, policy, metrics, audit/fanout, and public row mapping. Review feedback addressed request_id/trace_id propagation for SQLite idempotent replay in-process events and Postgres non-idempotent durable job.created events.
 Latest rebase: rebased codex/jobs-admission-operations-extraction onto origin/dev 20d96055e8a4fbe99a0394ca11015977167e1f26. Verification after rebase: focused Jobs/Chatbooks matrix passed with 64 passed, 13 skipped, 246 warnings; skips were explicit local Postgres fixture-unavailable skips. Operation import-boundary scan had no JobManager references in app/core/Jobs/operations. git diff --check passed. py_compile passed for Jobs manager/contracts/sqlite admission/postgres admission. Bandit exited 0 on touched scope with only existing #nosec B608 warnings in manager.py.
 
 Qodo review follow-up: validated four new comments after the rebase. Fixed side-effect/audit suppression by logging non-critical create-event failures with safe job context; preserved best-effort behavior for event fanout/audit. Fixed Postgres replay side-effects to use durable event request_id/trace_id instead of stale row context. Fixed SQLite counter updates to stay non-fatal and log failures, matching existing counter semantics. Added regressions for SQLite counter failure not aborting admission and Postgres idempotent replay side-effects using current context. Verification after fixes: targeted regressions first failed, then passed; focused Jobs/Chatbooks matrix passed with 66 passed, 13 skipped, 250 warnings; skips were explicit local Postgres fixture-unavailable skips. py_compile, git diff --check, operation import-boundary scan, and Bandit on touched scope passed; Bandit emitted only existing #nosec B608 notices in manager.py.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

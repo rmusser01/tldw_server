@@ -37,9 +37,9 @@ Docs/superpowers/plans/2026-06-28-pr2512-review-rebase.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased the PR branch on origin/dev; implemented review fixes for exception centralization, fallback dedupe and eligibility, model_required 400 mapping, BYOK endpoint/cache identity propagation, adapter async/log-sanitization, cache-hit metrics, test markers, shard coverage, and test cleanup. Verification passed: targeted pytest suites (72 passed), cache identity/request contract tests (16 passed), compileall on touched production modules, git diff --check, Bandit touched production scope (0 findings), and shard coverage.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -35,11 +35,11 @@ Stage 6 of the moderation remediation plan. Make moderation review decisions tru
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 6 implemented. Focused backend verification: python -m pytest test_moderation_review_store.py test_moderation_review_service.py test_moderation_review_audit.py -q => 12 passed. Focused frontend verification: vitest AuditTimeline.test.tsx ModerationReviewShell.test.tsx => 8 passed. Audit export was not added because no export endpoint exists; filtered audit listing is the documented v1 surface pending Stage 8 docs.
 
 Stage 6 security scan: bandit on moderation review store/service/schemas/endpoint wrote /tmp/bandit_moderation_stage6.json and exited 0 after suppressing a false-positive B105 on the explicit null undo_token response field.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

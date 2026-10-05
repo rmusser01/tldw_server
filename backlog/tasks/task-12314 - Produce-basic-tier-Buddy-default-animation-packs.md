@@ -184,7 +184,7 @@ Docs/superpowers/plans/2026-05-16-basic-buddy-default-assets-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Search Lens checkpoint:
 - Approved source sheet processed with fixed global crop/scale into 12 transparent 96x96 frames.
 - Runtime starter now uses package-backed PNG resources for search-lens-basic.
@@ -197,27 +197,7 @@ Verification:
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile tldw_Server_API/app/core/Persona/visual_starter_fixtures.py -> passed.
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visual_starter_fixtures.py -f json -o /tmp/bandit_search_lens_basic.json -> 0 findings.
 - git diff --check -> passed.
-<!-- SECTION:NOTES:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the six-pack basic Buddy default slice. The catalog now exposes Search Lens, Index Card, Archive Cube, Paperclip, Terminal Tile, and Migu Marker as art-ready starter packs with package-backed 96x96 frame resources, required-state loops, neutral/preview assets, inactive draft copy semantics, and reaction.success coverage. Docs now include the final six review packets plus Persona Visual draft-pack and Codex-compatible creation guidance.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
-## Checkpoint Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Current checkpoint wires the approved Search Lens Buddy v2 frame packet into the starter catalog. Remaining work is the next approved basic buddies: index card, archive cube, paperclip, terminal tile, then Migu review against the six-basic-pack direction.
 Index Card checkpoint:
 - Approved source sheet processed into 12 transparent 96x96 frames with one global scale and component-mask extraction because the generated sheet had irregular gutters.
@@ -358,3 +338,21 @@ Verification:
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python package resource/image validation script -> validated search-lens-basic, index-card-basic, archive-cube-basic, paperclip-basic, terminal-tile-basic, and migu-marker-basic package resources and manifests.
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visual_service.py tldw_Server_API/app/core/Persona/visual_starter_fixtures.py tldw_Server_API/app/core/Persona/visual_portability/codex_pet.py tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py -f json -o /tmp/bandit_basic_buddy_defaults.json -> 0 findings, 0 errors.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the six-pack basic Buddy default slice. The catalog now exposes Search Lens, Index Card, Archive Cube, Paperclip, Terminal Tile, and Migu Marker as art-ready starter packs with package-backed 96x96 frame resources, required-state loops, neutral/preview assets, inactive draft copy semantics, and reaction.success coverage. Docs now include the final six review packets plus Persona Visual draft-pack and Codex-compatible creation guidance.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->
+
+## Checkpoint Notes

@@ -20,32 +20,8 @@
       },
       {
         "import_kind": "from",
-        "imported_name": "recursive_scrape",
-        "line": 38,
-        "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
-        "path": "tldw_Server_API/app/services/web_scraping_service.py",
-        "target_name": "Article_Extractor_Lib"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "scrape_and_summarize_multiple",
-        "line": 38,
-        "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
-        "path": "tldw_Server_API/app/services/web_scraping_service.py",
-        "target_name": "Article_Extractor_Lib"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "scrape_by_url_level",
-        "line": 38,
-        "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
-        "path": "tldw_Server_API/app/services/web_scraping_service.py",
-        "target_name": "Article_Extractor_Lib"
-      },
-      {
-        "import_kind": "from",
         "imported_name": "scrape_from_sitemap",
-        "line": 38,
+        "line": 21,
         "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
         "path": "tldw_Server_API/app/services/web_scraping_service.py",
         "target_name": "Article_Extractor_Lib"
@@ -400,14 +376,6 @@
         "line": 1225,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_article_orchestration.py",
-        "target_name": "Article_Extractor_Lib"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "scrape_and_summarize_multiple",
-        "line": 11,
-        "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
-        "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_consumer_imports.py",
         "target_name": "Article_Extractor_Lib"
       },
       {
@@ -999,7 +967,7 @@
       {
         "import_kind": "from",
         "imported_name": "WebSearch_APIs",
-        "line": 3,
+        "line": 4,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase3_3_sanitizers.py",
         "target_name": "WebSearch_APIs"
@@ -1026,6 +994,14 @@
         "line": 3,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_websearch_searx_json.py",
+        "target_name": "WebSearch_APIs"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "WebSearch_APIs",
+        "line": 21,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_websearch_smoke.py",
         "target_name": "WebSearch_APIs"
       }
     ],

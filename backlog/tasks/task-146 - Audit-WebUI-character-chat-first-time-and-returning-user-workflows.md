@@ -35,13 +35,13 @@ Run a browser-observed UX/HCI walkthrough of the WebUI for users primarily inter
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created UX/HCI audit document at Docs/Reviews/CHARACTER_CHAT_WEBUI_UX_AUDIT_2026_05_09.md with Puppeteer evidence and screenshots under Docs/Reviews/assets/2026-05-09-character-chat-ux/.
 
 Verified default Databases/user_databases/1/ChaChaNotes.db corruption directly with sqlite3 immutable-mode integrity_check/quick_check. .recover emitted a SQL stream and importing it to /private/tmp/chacha_notes_user1_recovered_20260509.db produced integrity_check ok, but no in-place recovery was performed.
 
 Verification: frontend run with bun run dev -- -p 8080; backend default failed on malformed ChaChaNotes.db; temporary backend config used for live WebUI audit; Puppeteer launched Chrome for Testing; no LLM model/provider configured, so final message generation was documented as blocked. Bandit skipped because this is a documentation/screenshots-only audit with no production code changes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

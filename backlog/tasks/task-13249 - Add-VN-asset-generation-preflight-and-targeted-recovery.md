@@ -32,7 +32,7 @@ First productization slice for issue 2021: expose server-owned generation prefli
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented advisory owner-scoped preflight, stable generation keys, targeted retry, active progress polling and pack-switch guards. Mobile browser QA found and fixed implicit grid overflow. Independent review identified four refresh races; failing regressions reproduced each and all are fixed. Final re-review found no remaining issues in those fixes. Verification: 90 backend tests, 31 frontend tests, 3 Chromium smoke tests; touched ESLint and Bandit clean. Full typecheck fails identically on unchanged dev (90 existing diagnostics). See evidence document for commands, before/after observations and limits. Draft PR packaging in progress; human-written Change summary required before merge.
 
 Draft PR #2954 opened against dev. Implementation and verification complete; task remains In Progress pending PR review/merge. Required human-written Change summary is explicitly outstanding in the draft. Temporary execution plan removed after all four stages completed; design and verification evidence are retained.
@@ -44,7 +44,7 @@ PR #2954 Qodo review: fixed pack-scoped command locking, finite authenticated pr
 Independent review also found JWT and API-key principals could receive separate preflight budgets for one user. Added opt-in per_user buckets to the shared RBAC factory/enforcer, enabled only for VN preflight; legacy endpoint semantics remain unchanged. Reproduced with failing API identity assertions, then verified 136 auth-hardening/VN API/core/model tests passing, including frozen-clock aggregate-budget and cross-user isolation tests. Scoped production Ruff and expanded Bandit both clean; final OpenAPI check still passes. All original required PR checks except the repaired fingerprint passed.
 
 Qodo re-reviewed code head cad6d3b465 and confirmed zero active findings, seven implemented dispositions and the matrix/preflight finding dismissed based on code and regression evidence: https://github.com/rmusser01/tldw_server/pull/2954#issuecomment-5655592729 . All eight review threads are resolved. Independent follow-up review also found no further issue. Task acceptance/verification/documentation are complete; PR merge remains gated on final-head CI. The requester has explicitly authorized merge after checks, without bypassing protection.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

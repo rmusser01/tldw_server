@@ -23,7 +23,6 @@ from typing import Any, Optional
 #
 # Import Local libraries
 from tldw_Server_API.app.core.config import load_and_log_configs
-from tldw_Server_API.app.core.deprecations import log_runtime_deprecation
 
 #
 # Import 3rd-Party Libraries
@@ -78,14 +77,8 @@ class _SessionShim:
 
     def post(self, url, *, headers=None, json=None, stream: bool = False, timeout=None, **kwargs):
         if stream:
-            log_runtime_deprecation(
-                "llm_chat_legacy_session",
-                message=(
-                    "LLM chat streaming path used legacy requests Session compatibility "
-                    "facade for iter_lines behavior."
-                ),
-            )
-            # For streaming, use legacy requests session to preserve iter_lines semantics
+            # Streaming goes through the http_helpers facade (http_client underneath),
+            # which exposes the iter_lines() shape the provider stream readers expect.
             self._delegate_session = _legacy_create_session_with_retries(
                 total=1,
             )

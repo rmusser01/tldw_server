@@ -30,9 +30,9 @@ Create a fresh dev-targeted branch from current origin/dev, replay only the PR #
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created codex/pr-2702-dev-rebase from origin/dev d28c16bfa3 and replayed the eight PR #2702-specific commits while preserving newer dev changes. Eight tracking/review commits bring the branch to 16 commits and 43 changed files relative to dev. Independent and GitHub review fixes cover snapshot archive-first deletion, logical-session quota aggregation across current/legacy directories, shared maintenance locking, deferral of unidentified snapshot directories that cannot be safely locked, SQLite draft read/connection behavior, abortable duplicate/stale document preparation with accepted ingest-job cancellation, strict recovery capability checks, accurate localized statuses/errors, visible completed-import scope refresh coverage, and narrow test corrections. GitHub Actions queue: max was rejected because the concurrency schema does not support it. Fresh validation: 70 frontend tests and 78 backend tests passed; extension compile, Playwright discovery, workflow validation, Bandit zero findings, and git diff checks passed. Full WebUI typecheck still reports only the pre-existing untouched QuickIngestWizardModal.tsx overflowY type error. Branch is 0 behind origin/dev.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

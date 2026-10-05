@@ -32,10 +32,8 @@ Implement Stage 4 of the WebUI audit remediation roadmap: ensure the global sear
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created after Stage 3 commit 5c03cbcf5d. Planned files: CommandPalette, CommandPaletteHost, WebLayout/header search trigger, Stage 4 smoke specs, route responsive governance, and any remaining diagnostics redaction helpers.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Implemented Stage 4 accessibility/governance remediation. Added stable command palette trigger labeling, palette search input labeling, focus return on Escape for event and keyboard open flows, and route metadata/inventory coverage for health/admin/model settings routes. Expanded responsive and Axe high-risk route governance lists and confirmed health diagnostics redaction coverage remains active.
 
@@ -48,14 +46,12 @@ Verification:
 - PASS: git diff --check.
 - N/A: Bandit, because touched implementation files are TS/TSX and docs/test metadata only.
 - BLOCKED: full focused browser interaction smoke. Default Turbopack dev server failed on the worktree node_modules symlink; webpack dev server started but hit EMFILE watcher warnings, then Chromium launch failed in this sandbox with MachPort permission denied.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed WebUI command palette accessibility and Stage 4 route governance. The header search trigger now has a stable accessible name, the palette search input is labeled, Escape restores focus to the opener, command palette route labels are metadata-aligned, health/admin/model routes are first-class metadata-backed inventory entries, and high-risk responsive/Axe route lists cover the requested routes. Focused unit and governance checks pass; full browser interaction smoke is blocked by sandbox/browser launch restrictions.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

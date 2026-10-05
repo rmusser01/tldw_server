@@ -33,7 +33,7 @@ Follow-up review-fix task for PR #1418. Resolve the review feedback on SessionHi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-09: Reproduced Qodo finding with fake timers before fixing the i18n mock. The focused test failed with React's "Objects are not valid as a React child" error when formatRelativeTime passed { count, defaultValue } to t().
 
 2026-05-09: Fixed the test mock to return string fallbacks and options.defaultValue fallbacks. Kept vi.useFakeTimers()/vi.setSystemTime() around the test for deterministic relative-time rendering.
@@ -41,7 +41,7 @@ Follow-up review-fix task for PR #1418. Resolve the review feedback on SessionHi
 Verification: bunx vitest run src/components/Agent/__tests__/SessionHistoryPanel.status-badge.test.tsx --reporter=dot -> 1 passed. bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot -> 46 passed. bun run verify:design-system-state -> passed with existing baseline exceptions. git diff --check -> passed. bunx tsc --noEmit --pretty false | rg touched files -> no touched-file diagnostics (rg exit 1/no matches).
 
 Bandit skip: touched files are TSX test code and Backlog metadata only; no Python runtime/security surface changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

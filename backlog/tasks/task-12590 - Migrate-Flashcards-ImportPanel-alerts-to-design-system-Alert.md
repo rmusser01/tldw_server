@@ -38,7 +38,7 @@ Migrate the direct Flashcards import workflow alert states in ImportPanel from A
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Replaced ImportPanel direct Ant Design Alert usage with the shared design-system Alert primitive for preflight warnings, structured preview warnings, and last import results.
 - Preserved existing copy, conditional warning/success semantics, help-link behavior, and test ids.
 - Added focused import workflow assertions that the preflight warning, structured preview warning, and last-result states render with data-ds-component="Alert".
@@ -51,7 +51,7 @@ Verification:
 - rg confirmed no Flashcards ImportPanel entries remain in design-system-product-state-baseline.json.
 - Bandit skipped: no Python files touched.
 - bun run verify:design-system-state still exits 1 on unrelated existing non-Flashcards blocked/stale findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

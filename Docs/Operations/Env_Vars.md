@@ -822,9 +822,12 @@ Notes:
   - `CLAIMS_REBUILD_MAX_QUEUE_ALERT`: Queue size threshold for rebuild alerts.
   - `CLAIMS_REBUILD_HEARTBEAT_WARN_SEC`: Heartbeat staleness threshold.
   - `CLAIMS_PROVIDER_COST_MULTIPLIERS`: Cost map for provider metrics.
-  - `CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED`: Enable nightly review metrics aggregation.
-  - `CLAIMS_REVIEW_METRICS_INTERVAL_SEC`: Review metrics scheduler interval (seconds).
-  - `CLAIMS_REVIEW_METRICS_LOOKBACK_DAYS`: Days of review log to aggregate per run.
+  - `CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED`: Enable recurring review metrics production (default `false`).
+  - `CLAIMS_REVIEW_METRICS_INTERVAL_SEC`: Interval in seconds (default `86400`, minimum `60`). Invalid/nonpositive values use the default; numeric values outside supported datetime bounds disable this scheduler.
+  - `CLAIMS_REVIEW_METRICS_LOOKBACK_DAYS`: Inclusive UTC days per run (default `2`, capped at `366`). Invalid/nonpositive values use the default.
+  - `CLAIMS_REVIEW_METRICS_JOBS_ENABLED`: Route aggregation through shared Jobs when `CLAIMS_JOBS_ENABLED` is also true (default `false`). Otherwise the one-release compatibility-local route remains active. Routing is captured at startup; restart after changes.
+  - `CLAIMS_JOBS_MAX_RETRIES_REVIEW_METRICS`: Shared Jobs execution retry budget (default `3`, valid range `0..100`). Independent of the producer's three transient-only admission attempts.
+  - The producer uses `CLAIMS_JOBS_QUEUE` (default `default`) and does not require a local worker: `CLAIMS_JOBS_WORKER_ENABLED` only controls local worker startup. Deploy a Claims worker on the same Jobs database and queue before cutover. See [Claims monitoring rollout](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Product/Claims_Module/Claims_Monitoring_Implementation.md#review-metrics-aggregation).
   - Email delivery uses `EMAIL_PROVIDER` (default `mock`) and SMTP settings when enabled.
 
 ## Watchlists Module

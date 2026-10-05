@@ -29,13 +29,13 @@ Resolve actionable review findings on PR #1412 for the Persona Buddy visual work
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: bunx vitest run src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx failed because Open Visuals still rendered with href /persona?tab=visuals when active_persona_id was null and no selectedAssistant fallback existed.
 GREEN: bunx vitest run src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx passed with 17 tests after switching Open Visuals to react-router Link and hiding it without a normalized persona id.
 RELATED VERIFICATION: bunx vitest run src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/components/Common/PersonaBuddy/__tests__/personaVisualState.test.ts src/components/Common/PersonaBuddy/__tests__/SpriteFrameRenderer.test.tsx src/utils/__tests__/persona-garden-route.test.ts passed with 38 tests.
 HYGIENE: git diff --check passed.
 BANDIT: not applicable; touched code is frontend TypeScript plus Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -40,7 +40,7 @@ PR #1373 review fix pass: remove local absolute paths from the task record, scop
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py::test_inventory_no_longer_lists_host_local_warning_ui_as_missing -q failed because the inventory still contained `future UI/operator dashboards`.
 
 GREEN: Updated `Docs/Sandbox/sandbox-runtime-capability-inventory.md` to say host-local isolation warnings now flow through public discovery, cross-runtime admin diagnostics, and the admin Monitoring page `Sandbox Runtime Isolation` card. Removed the stale current-gap row while keeping seatbelt/worktree weaker-isolation and not-untrusted-eligible guidance.
@@ -50,7 +50,7 @@ Verification: focused RED/GREEN guard passed after the doc update; full python -
 Reopened for PR #1373 review comments. Gemini and Qodo findings were valid against the reviewed code/task text: task notes contained local absolute paths; the stale phrase assertion scanned the whole document; the new guard test had no docstring; and the host-local phrase check was case-sensitive against capitalized inventory text.
 
 PR #1373 review fix validation: focused host-local inventory guard passed; full python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -q passed with 5 tests; py_compile passed; Ruff passed; Bandit on the touched test with -s B101 reported zero findings; git diff --check passed. Review fixes removed local absolute paths from task verification text, scoped the stale-gap assertion to Current Gaps, added the test docstring, and made the host-local warning assertion case-insensitive within Recovery And Diagnostics Support.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -28,7 +28,7 @@ Each points at shared process state (patched builtins, middleware or env) that a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 More xdist pollution seen in the final-fix run, reproduced at 2d62baa055:
 - test_legacy_openai_transient_failure_retains_retry_policy: the system_log_buffer writer thread's 0.05 s flock poll lands in the test's patched global time.sleep.
 - 3 test_orchestrator_summary nodes: the redis_client fixture runs flushdb on the shared localhost:6379/0 while other workers are mid-test.
@@ -75,7 +75,7 @@ Verified (5) and (7) directly: drove reset_singletons.__wrapped__ as a plain asy
 (1)-(4) Added type hints (test_trace_headers.py's middleware helper + its Iterator[None] return, the _ScopedTime proxy in test_embeddings_create_credential_policy.py, the rg_backend fixture's request/monkeypatch params in test_e2e_domains_headers.py) and a docstring on the _InMemoryRedisGovernor test double explaining why it's a subclass rather than an instance patch.
 
 Re-ran: all 5 changed files alone (131 passed) plus test_orchestrator_summary_endpoint.py (9 passed); the tokens_daily_cap victim in the polluted order (2 passed); the AuthNZ_Unit + trace_headers + utils_general polluted-order combo in full (1218 passed, 1 skipped, 0 failed) and the fast 4-file subset of it (35 passed). No regressions.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

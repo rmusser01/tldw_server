@@ -41,13 +41,11 @@ Docs/superpowers/plans/2026-06-25-context-integrity-foundation-implementation-pl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created after user approved the amended context integrity design spec on 2026-06-25.
 
 PR #2523 review follow-up: renumbered from TASK-2365 to TASK-12016 after the dev rebase exposed a duplicate TASK-2365 record.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

@@ -39,7 +39,7 @@ Docs/superpowers/plans/2026-07-03-webui-setup-choice-implementation-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation started in isolated worktree .worktrees/codex-webui-setup-choice-impl on branch codex/webui-setup-choice-impl. Baseline focused Vitest passed: setup-status and option-setup-readiness, 19 tests.
 
 Task 1 complete: helper and resolver committed in f8adf59740. Spec-compliance and code-quality reviews approved. Focused helper Vitest passed: 12 tests.
@@ -63,7 +63,9 @@ Verification after repair: bun run typecheck passed from apps/tldw-frontend; foc
 User requested investigation of the remaining ScheduledTasksPage diagnostics-copy expectation failures. Root cause: ScheduledTasksPage tests still assert raw API paths, while shared buildCapabilityState intentionally sanitizes diagnostic values to [server-endpoint]/[server-url] and has unit coverage for that behavior.
 
 ScheduledTasksPage diagnostics-copy failures fixed. The tests now assert the sanitized diagnostic copy produced by buildCapabilityState: [server-endpoint] and messages containing [server-endpoint], matching the existing capability-state sanitizer contract. Verification: ScheduledTasksPage Vitest passed 48/48; bun run typecheck passed; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+
+PR #2615 follow-up complete after rebase onto latest origin/dev. Addressed still-valid review comments by preserving API setup base paths, adding optional metadata connection guards, covering public dotted hostnames, link-local IPv4, and IPv6 API origins, making the /setup wizard exclusive from manual recovery panels, surfacing setup refresh errors, replacing the direct DOM focus query by deleting the now-unneeded co-rendered recovery action, and switching the Playwright milestone helper to real waitFor visibility checks. The Gemini voice-cloning comment was already addressed by the rebased dev implementation using exact-byte copyBytes instead of Uint8Array.from. Also fixed the post-rebase scheduled-task editor type regression by keeping ScheduledTaskDefinitionResponse for the save result.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -80,9 +82,3 @@ Rebased PR #2615 onto latest origin/dev and addressed the actionable PR review c
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR #2615 follow-up complete after rebase onto latest origin/dev. Addressed still-valid review comments by preserving API setup base paths, adding optional metadata connection guards, covering public dotted hostnames, link-local IPv4, and IPv6 API origins, making the /setup wizard exclusive from manual recovery panels, surfacing setup refresh errors, replacing the direct DOM focus query by deleting the now-unneeded co-rendered recovery action, and switching the Playwright milestone helper to real waitFor visibility checks. The Gemini voice-cloning comment was already addressed by the rebased dev implementation using exact-byte copyBytes instead of Uint8Array.from. Also fixed the post-rebase scheduled-task editor type regression by keeping ScheduledTaskDefinitionResponse for the save result.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

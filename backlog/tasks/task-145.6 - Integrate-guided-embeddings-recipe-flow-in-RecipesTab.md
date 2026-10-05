@@ -38,7 +38,7 @@ Implement Task 5 from the embeddings RAG recipe implementation plan: wire the gu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/RecipesTab.launch.test.tsx failed after Task 5 test updates. Failures showed RecipesTab still lacked Expected media IDs 1 from the guided embeddings component and recommendation-first embeddings report cards.
 
 GREEN: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/RecipesTab.launch.test.tsx src/components/Option/Evaluations/__tests__/EvaluationsPage.recipe-tab.test.tsx passed 22 tests. Component label touch verified with bunx vitest run src/components/Option/Evaluations/tabs/__tests__/EmbeddingsModelSelectionConfig.test.tsx passing 4 tests.
@@ -50,7 +50,7 @@ Review fix RED: after moving embeddings apply fixture fields under slot.metadata
 Review fix GREEN: RecipesTab now reads preview eligibility from slot.metadata.apply_eligible and blocked copy from slot.metadata.apply_warnings or explicit metadata blocked fields. Focused RecipesTab launch test passed 22 tests.
 
 Review fix verification: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/RecipesTab.launch.test.tsx src/components/Option/Evaluations/__tests__/EvaluationsPage.recipe-tab.test.tsx src/components/Option/Evaluations/tabs/__tests__/EmbeddingsModelSelectionConfig.test.tsx passed 27 tests. git diff --check exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -67,27 +67,13 @@ Verify current MCP Unified module review findings, address validated issues with
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification pass completed before implementation. Validated findings: MCP legacy refresh/revocation state is process-local; fs.write_text bypasses structured fs.write preimage/receipt protections and virtual CLI write maps to it; metadata category web/utility falls back to read rate bucket; fallback RBAC USER role wildcard-executes arbitrary tools; stale WebSocket cleanup removes connections without decrementing per-IP counts; MCP configure_logging removes existing global Loguru sinks; invalid tool names return INTERNAL_ERROR despite being invalid params. Focused existing suite: selected MCP tests passed 9/9 in 229.16s, with live WebSocket test slow but completed.
 
 Implemented remediation for validated MCP Unified findings: gated legacy refresh behind demo auth, routed fs.write_text through structured preimage-checked writer, moved virtual CLI write to fs.write create mode, preserved network/utility metadata categories for rate limiting, narrowed fallback RBAC user/moderator tool execution, decremented WS per-IP counts during stale cleanup, preserved non-MCP Loguru sinks, and mapped invalid tool names to INVALID_PARAMS. Verification: focused MCP regression slice passed (21 passed); HTTP refresh gate tests passed (2 passed); touched modules py_compile passed; direct logging preservation check passed; Bandit on touched implementation files passed with 0 findings.
 
 Protocol.py refactor brainstorming completed. Approved direction: security-pipeline extraction for tools/call, keeping MCPProtocol as JSON-RPC facade. Design spec written at Docs/superpowers/specs/2026-06-23-mcp-protocol-tool-execution-refactor-design.md and self-reviewed for placeholders, contradictions, scope drift, and ambiguity.
-<!-- SECTION:NOTES:END -->
 
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec review fixes applied to Docs/superpowers/specs/2026-06-23-mcp-protocol-tool-execution-refactor-design.md: added a compatibility callback ledger requirement, made Stage 3 introduce a ToolExecutionReporter facade, clarified coarse-vs-deep authorization characterization tests, and resolved IdempotencyManager ownership expectations before/during runtime extraction.
 Follow-up spec review fixes applied: added the reporter facade to ToolExecutionDependencies and required an import-boundary test so tool_execution modules cannot import MCPProtocol or MCP_unified.protocol.
 Implementation plan written at Docs/superpowers/plans/2026-06-24-mcp-protocol-tool-execution-refactor.md. Plan covers characterization tests, shared type extraction, coordinator delegation, security/hooks/runtime/reporting extraction, callback ledger removal, focused verification, and Bandit. Idempotency ownership is resolved by keeping IdempotencyManager import-compatible from protocol.py while injecting the manager instance into runtime.
@@ -111,6 +97,16 @@ PR #2513 rebased onto latest origin/dev and review comments addressed. Validated
 Reopened after PR #2513 follow-up check: GitHub review threads still show unresolved conversations. Re-verifying code-backed fixes and applying a small marker/type-hint cleanup in the changed idempotency/category tests before resolving threads and waiting for checks.
 Follow-up PR issue cleanup completed: verified unresolved GitHub review threads against the current code, tightened idempotency/category test marker and type-hint coverage, and reran verification. Results: py_compile on the edited test file passed; test_idempotency_and_category.py passed 14 tests; expanded focused MCP slice passed 384 tests; Ruff F/I/UP passed for the edited test file; git diff --check passed; Bandit touched production scope reported 0 findings in /tmp/bandit_mcp_unified_pr_all_issues.json.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->
 
 ## Final Summary
 

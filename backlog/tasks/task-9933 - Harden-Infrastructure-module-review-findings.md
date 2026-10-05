@@ -34,7 +34,7 @@ Address validated review findings in tldw_Server_API/app/core/Infrastructure. Sc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Touched files:
 - IMPLEMENTATION_PLAN_infrastructure_hardening_task_9933.md
 - tldw_Server_API/app/core/Infrastructure/distributed_lock.py
@@ -57,7 +57,21 @@ Verification from isolated worktree .worktrees/infrastructure-review-fixes-9933 
 - Bandit touched Infrastructure files: exit 0, JSON report at /tmp/bandit_infrastructure_task_9933_rebased.json.
 
 Known skips/blockers: full repository pytest was not run; focused Infrastructure regression tests were run for the review fixes. Pytest cleanup is slow in this repo because global app teardown loads full app services.
-<!-- SECTION:NOTES:END -->
+
+PR review follow-up after latest dev rebase:
+- Rebased branch onto origin/dev and addressed PR comments on migration-lock fallback scope, Redis URL redaction error handling, Redis factory tests using private internals, and pool metrics broad-exception logging.
+- Added regression coverage that Redis-backed acquire_migration_lock propagates caller exceptions, does not rerun caller blocks through file fallback, and still closes the Redis client.
+- Moved Redis factory redaction checks behind public create_*_redis_client behavior and warning-output assertions.
+- Added debug logging assertion for pool metric accessor failures.
+- Added tldw_Server_API/tests/Agent_Client_Protocol/test_acp_hardening_helpers.py to the existing shard coverage baseline because the rebased PR's Shard coverage guard found it newly unshared.
+
+Fresh verification after review follow-up:
+- py_compile passed for touched Infrastructure modules.
+- git diff --check passed.
+- Shard coverage guard passed: new_uncovered=0.
+- pytest focused Infrastructure suite: 38 passed, 88 warnings.
+- Bandit touched Infrastructure files: exit 0, 0 results, JSON report at /tmp/bandit_infrastructure_task_9933_review_followup.json.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -77,21 +91,3 @@ Hardened Infrastructure review findings: migration locks now fail closed when Re
 - [x] #8 Tests or verification recorded
 - [x] #9 Bandit run for touched code
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR review follow-up after latest dev rebase:
-- Rebased branch onto origin/dev and addressed PR comments on migration-lock fallback scope, Redis URL redaction error handling, Redis factory tests using private internals, and pool metrics broad-exception logging.
-- Added regression coverage that Redis-backed acquire_migration_lock propagates caller exceptions, does not rerun caller blocks through file fallback, and still closes the Redis client.
-- Moved Redis factory redaction checks behind public create_*_redis_client behavior and warning-output assertions.
-- Added debug logging assertion for pool metric accessor failures.
-- Added tldw_Server_API/tests/Agent_Client_Protocol/test_acp_hardening_helpers.py to the existing shard coverage baseline because the rebased PR's Shard coverage guard found it newly unshared.
-
-Fresh verification after review follow-up:
-- py_compile passed for touched Infrastructure modules.
-- git diff --check passed.
-- Shard coverage guard passed: new_uncovered=0.
-- pytest focused Infrastructure suite: 38 passed, 88 warnings.
-- Bandit touched Infrastructure files: exit 0, 0 results, JSON report at /tmp/bandit_infrastructure_task_9933_review_followup.json.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

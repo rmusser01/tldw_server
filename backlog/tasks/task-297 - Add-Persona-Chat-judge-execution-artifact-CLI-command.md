@@ -35,11 +35,11 @@ Implement GitHub issue #1601: expose the trace-safe Persona Chat judge execution
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the offline persona-chat-judge artifact command for issue #1601. The command loads redaction-safe Persona Chat quality inputs, rebuilds bounded PersonaChatJudgeExecutionResult data from JSON, reuses build_persona_chat_judge_execution_artifact(), and emits stdout/output-file artifact JSON without provider execution or persistence.
 
 TDD: new CLI artifact tests first failed with no such command artifact, then passed after implementation. Validation: focused Persona Chat judge suite passed with 58 tests; py_compile for persona_chat_judge_cli.py passed; Bandit on touched Python scope wrote /tmp/bandit_persona_chat_judge_artifact_cli.json with 0 findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

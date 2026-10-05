@@ -46,12 +46,12 @@ Docs/superpowers/plans/2026-05-23-sync-v2-m2-restore-completeness-blobs-implemen
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added Docs/API/Sync_V2_M2.md describing M2 capabilities, upload/download flows, quota accounting, restore completeness statuses, key recovery readiness, and M3 deferred encryption modes.
 - Added a restore e2e scenario for uploaded blobs that drives resumable upload, restore preview blob_incomplete/content_complete/verified_complete transitions, download manifest, and byte download.
 - Updated TASK-490.12 and TASK-490.12.7 modified-file/documentation metadata through Backlog.
 - Final verification passed: Sync suite 313 passed, restore e2e 5 passed, Ruff passed for the touched e2e file, Bandit reported 0 findings at /tmp/bandit_sync_v2_m2_final.json, and git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

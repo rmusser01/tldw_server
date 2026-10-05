@@ -39,7 +39,6 @@ Docs/superpowers/plans/2026-07-12-research-discovery-phase2a-pdf-media-handoff.m
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Revised the discovery chokepoint spec and recreated the Phase 2A implementation plan after the old uncommitted plan disappeared and TASK-12083 collided on latest dev. Phase 2A is now PDF-only through /api/v1/media/add; HTML is gated behind a later Phase 2B. The design uses one Research selection-resolution function, corrects existing ingest_eligible/recommended_candidate_id semantics, requires media_type=pdf, branches before normal URL/file validation, keeps Media processing controls, rejects competing sources/credentials, performs Media-owned pre-download duplicate checks, composes streamed byte/MIME limits, preserves the existing results envelope, and adds no handoff-specific idempotency store or unsafe hard parser timeout claim.
 
@@ -47,7 +46,6 @@ Plan review corrections: use the worktree skill with an ignored-directory fallba
 
 Verification: git diff --check passed; trailing-whitespace awk check passed; the plan has 30 balanced Markdown fence lines and five stages with explicit statuses; stale resolver-class, duplicate eligibility-field, and removed timeout references were absent. Bandit and pytest are not applicable because this task changed Markdown planning documents only. No implementation code was changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

@@ -46,9 +46,9 @@ Implement Stage 6 Step 4 from the Sync v2 M3 plan: prevent server-origin/server-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 6 Step 4 for client-private server-front-end limitations. Added a shared blocker code/message, profile dataset/domain mutation flags, capabilities warning/compatibility flag, and a server-origin fail-closed exception that fires before envelope append or materialization. Notes and Chat endpoint error mappers now return 409 with the stable blocker code. Updated M3 API/design docs and roadmap status. Code-review follow-up: added Chat conversation and message endpoint regressions for client_private_v1 409 behavior, including no materialization and no envelope append assertions.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

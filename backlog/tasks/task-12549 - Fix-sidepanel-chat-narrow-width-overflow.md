@@ -31,17 +31,13 @@ Prevent horizontal overflow in the browser-extension sidepanel chat workflow at 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Root cause: the sidepanel chat shell and composer used nested flex children without min-w-0 and the control/action rows did not consistently wrap, so min-content width could exceed the 390px sidepanel viewport.
 
 Implementation: constrained the shell, main region, dropzone, message rail, sticky composer, form card, textarea shell, and action groups with min-w-0 and overflow-safe flex wrapping while preserving existing controls and labels.
 
 Verification: RED contract failed before layout fixes, then passed after implementation. Focused sidepanel Vitest suite passed with 8 files and 25 tests. Targeted extension Playwright 390px layout test passed. git diff --check passed. TypeScript still fails on the pre-existing CharacterListContent GalleryCardDensity baseline outside this slice. Bandit skipped because no Python files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

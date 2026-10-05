@@ -47,7 +47,7 @@ PR #1272 review-fix pass: 1) remove substrate leaks and invalid HTML wrappers in
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Worker 3 started Task 5 in .worktrees/tldw-web-design-system-proof-surface on branch codex/tldw-web-design-system-proof-surface. Shared state primitives and design-system registry are already present; this slice will only touch the owned setup/onboarding/health/admin files.
 
 Final verification recorded on 2026-05-04: focused proof-surface Vitest suite passed from apps/tldw-frontend with 12 files / 38 tests; admin media-budget regression passed with 1 file / 3 tests; git diff --check passed. WebUI compile passed with NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 and token sync OK. Extension Chrome dev build passed with token sync OK; extension bun run compile is blocked before touched code by existing wxt.config.ts missing a declaration for ./scripts/post-build-tasks.mjs. Browser smoke opened http://localhost:18081/settings/health; canonical Degraded and Unavailable states rendered. Console errors were expected missing local backend/API key requests. Bandit skipped because this task touched frontend TypeScript/TSX/docs/task files only and no Python code.
@@ -59,7 +59,7 @@ PR #1272 review pass complete on rebased branch codex/tldw-web-design-system-pro
 2026-05-05 follow-up PR review refresh: Qodo added two actionable findings on PR #1272 after the prior review pass. Planned narrow fixes: replace tldw-frontend deep UI state imports with the exported @tldw/ui package root, and add noopener to ServerAdminPage external documentation links. CI is still queued/pending with no failures to debug yet.
 
 Validation update: package-root imports failed local Vitest/Vite resolution because current tldw-frontend aliases map @tldw/ui to apps/packages/ui/src rather than apps/packages/ui/index.ts. Using the reviewer-supported alternative instead: keep the established deep imports and add an explicit @tldw/ui ./components/ui/state subpath export in apps/packages/ui/package.json.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
