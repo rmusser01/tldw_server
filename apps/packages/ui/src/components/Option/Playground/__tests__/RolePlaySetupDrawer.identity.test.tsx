@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -10,7 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDefaultActorSettings } from "@/types/actor";
 import { useActorStore } from "@/store/actor";
-import { RolePlaySetupDrawer } from "../RolePlaySetupDrawer";
+import { RolePlaySetupDrawer, type RolePlayApplyContext, type RolePlaySetupApplyPayload } from "../RolePlaySetupDrawer";
 import type { RolePlayState } from "../role-play-state";
 
 const mocks = vi.hoisted(() => ({
@@ -19,8 +20,8 @@ const mocks = vi.hoisted(() => ({
   saveScene: vi.fn(async () => true),
   loadScene: vi.fn(),
   option: {
-    historyId: "history-1",
-    serverChatId: "server-1",
+    historyId: "history-1" as string | null,
+    serverChatId: "server-1" as string | null,
     serverChatAssistantKind: "character",
     serverChatAssistantId: "char-mira",
     serverChatCharacterId: "char-mira",
@@ -139,12 +140,33 @@ const choosePersona = async () => {
 describe("conversation setup identity", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.option.historyId = "history-1";
+    mocks.option.serverChatId = "server-1";
     mocks.loadScene.mockResolvedValue({
       ...createDefaultActorSettings(),
       notes: "Original scene",
     });
     mocks.saveScene.mockResolvedValue(true);
     useActorStore.getState().reset();
+  });
+
+  it("captures the notified destination after deferred preparation before saving scene", async () => {
+    let resume!: () => void;
+    const ready = new Promise<void>(resolve => { resume = resolve; });
+    const onApply = vi.fn(async (_payload: RolePlaySetupApplyPayload, options?: RolePlayApplyContext) => {
+      await ready;
+      mocks.option.historyId = null;
+      mocks.option.serverChatId = null;
+      options?.onDestination?.({ historyId: null, serverChatId: null, isCurrent: () => true });
+      return true;
+    });
+    const { onClose } = renderDrawer({ onApply });
+    const user = await choosePersona();
+    await user.click(screen.getByRole("button", { name: "Apply", exact: true }));
+    expect(mocks.saveScene).not.toHaveBeenCalled();
+    await act(async () => { resume(); });
+    await waitFor(() => expect(mocks.saveScene).toHaveBeenCalledWith(expect.objectContaining({ historyId: null, serverChatId: null })));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("previews the staged Persona and applies it once without picker side effects", async () => {
@@ -171,6 +193,7 @@ describe("conversation setup identity", () => {
           name: "Guide Persona",
         }),
       }),
+      expect.objectContaining({ isCurrent: expect.any(Function), onDestination: expect.any(Function) }),
     );
   });
 

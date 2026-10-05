@@ -194,6 +194,38 @@ const renderAssistantSelect = (
 }
 
 describe("AssistantSelect behavior", () => {
+  it("waits for a root tracked-selection decision before closing or replacing chat", async () => {
+    let decide!: (accepted: boolean) => void
+    const onTrackedSelection = vi.fn(() => new Promise<boolean>(resolve => { decide = resolve }))
+    const user = userEvent.setup()
+    renderAssistantSelect({ onTrackedSelection })
+    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    await user.click(await screen.findByRole("button", { name: "Alpha" }))
+    expect(screen.getByTestId("assistant-select-menu")).toBeInTheDocument()
+    expect(onTrackedSelection).toHaveBeenCalledOnce()
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(state.option.setServerChatId).not.toHaveBeenCalled()
+    await act(async () => { decide(false) })
+    expect(screen.getByTestId("assistant-select-menu")).toBeInTheDocument()
+  })
+  it("does not close a reopened picker after an obsolete tracked decision", async () => {
+    let decide!: (accepted: boolean) => void
+    let callerIsCurrent!: () => boolean
+    const onTrackedSelection = vi.fn((_selection, isCurrent) => {
+      callerIsCurrent = isCurrent!
+      return new Promise<boolean>(resolve => { decide = resolve })
+    })
+    const user = userEvent.setup()
+    renderAssistantSelect({ onTrackedSelection })
+    const trigger = screen.getByRole("button", { name: "Select character or persona" })
+    await user.click(trigger)
+    await user.click(await screen.findByRole("button", { name: "Alpha" }))
+    await user.click(trigger)
+    await user.click(trigger)
+    expect(callerIsCurrent()).toBe(false)
+    await act(async () => { decide(true) })
+    expect(screen.getByTestId("assistant-select-menu")).toBeInTheDocument()
+  })
   beforeEach(() => {
     localStorage.clear()
     vi.clearAllMocks()

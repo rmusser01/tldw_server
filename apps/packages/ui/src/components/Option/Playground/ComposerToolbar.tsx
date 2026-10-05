@@ -16,6 +16,7 @@ import {
   Users
 } from "lucide-react"
 import React from "react"
+import type { AssistantSelection } from "@/types/assistant-selection"
 import { useTranslation } from "react-i18next"
 
 import { useStorage } from "@plasmohq/storage/hook"
@@ -106,6 +107,7 @@ export type ComposerToolbarProps = {
   onFocusConnectionCard: () => void
   contextItems?: ComposerContextItem[]
   rolePlayActions?: ComposerToolbarRolePlayActions
+  onTrackedAssistantSelection?: (selection: AssistantSelection, isCurrent?: () => boolean) => boolean | Promise<boolean>
 }
 
 export type ComposerContextItem = {
@@ -559,12 +561,13 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     () => (
       <AssistantSelect
         variant="dropdown"
+        onTrackedSelection={props.onTrackedAssistantSelection}
         showLabel={isProMode ? undefined : false}
         iconClassName="h-4 w-4"
         className="text-text-muted hover:text-text"
       />
     ),
-    [isProMode]
+    [isProMode, props.onTrackedAssistantSelection]
   )
 
   const rolePlaySetupButton = React.useMemo(() => {

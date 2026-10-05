@@ -38,6 +38,7 @@ type Props = {
   initialTab?: AssistantSelectTab
   selection?: AssistantSelection | null
   onSelectionChange?: (selection: AssistantSelection) => void | Promise<void>
+  onTrackedSelection?: (selection: AssistantSelection, isCurrent?: () => boolean) => boolean | void | Promise<boolean | void>
   onSelectionComplete?: (
     selection: AssistantSelection
   ) => void | Promise<void>
@@ -126,13 +127,15 @@ export const AssistantSelect: React.FC<Props> = ({
   initialTab,
   selection,
   onSelectionChange,
+  onTrackedSelection,
   onSelectionComplete
 }) => {
   const { t } = useTranslation(["option", "common"])
   const [storedAssistant, setSelectedAssistant, assistantMeta] =
     useSelectedAssistant(null)
   const selectedAssistant = selection === undefined ? storedAssistant : selection
-  const selectionPending = !onSelectionChange && Boolean(assistantMeta?.isLoading)
+  const [trackedSelectionPending, setTrackedSelectionPending] = React.useState(false)
+  const selectionPending = !onSelectionChange && (Boolean(assistantMeta?.isLoading) || trackedSelectionPending)
   const historyId = useStoreMessageOption((state) => state.historyId)
   const serverChatId = useStoreMessageOption((state) => state.serverChatId)
   const setHistoryId = useStoreMessageOption((state) => state.setHistoryId)
@@ -168,6 +171,13 @@ export const AssistantSelect: React.FC<Props> = ({
     serverChatId
   })
   const [open, setOpen] = React.useState(false)
+  const trackedSelectionPendingRef = React.useRef(false)
+  const selectionLifetimeRef = React.useRef(0)
+  const invalidateSelectionLifetime = React.useCallback(() => { selectionLifetimeRef.current++ }, [])
+  React.useLayoutEffect(() => {
+    invalidateSelectionLifetime()
+    return invalidateSelectionLifetime
+  }, [open, invalidateSelectionLifetime])
   const [searchText, setSearchText] = React.useState("")
   const selectionModeIntentRef = React.useRef<"tracked" | "overlay">(
     selectionModePreference
@@ -526,7 +536,7 @@ export const AssistantSelect: React.FC<Props> = ({
 
   const handleSelect = React.useCallback(
     async (entry: AssistantSelection) => {
-      if (selectionPending) return
+      if (selectionPending || trackedSelectionPendingRef.current) return
       const nextMode =
         pendingSelectionModeIntentRef.current ?? selectionModeIntentRef.current
       const isTrackedMode =
@@ -541,11 +551,6 @@ export const AssistantSelect: React.FC<Props> = ({
         return
       }
 
-      setOpen(false)
-      setSearchText("")
-      selectionModeIntentRef.current = selectionModePreference
-      pendingSelectionModeIntentRef.current = null
-      restoreReturnFocus()
       const nextEntry: AssistantSelection = {
         ...entry,
         metadata: {
@@ -553,6 +558,30 @@ export const AssistantSelect: React.FC<Props> = ({
           selectionMode: nextMode
         }
       }
+      if (!onSelectionChange && nextMode === "tracked" && onTrackedSelection) {
+        trackedSelectionPendingRef.current = true
+        setTrackedSelectionPending(true)
+        const lifetime = selectionLifetimeRef.current
+        try {
+          if (await onTrackedSelection(nextEntry, () => selectionLifetimeRef.current === lifetime) === false || selectionLifetimeRef.current !== lifetime) return
+          await onSelectionComplete?.(nextEntry)
+          if (selectionLifetimeRef.current !== lifetime) return
+        } finally {
+          trackedSelectionPendingRef.current = false
+          setTrackedSelectionPending(false)
+        }
+        setOpen(false)
+        setSearchText("")
+        selectionModeIntentRef.current = selectionModePreference
+        pendingSelectionModeIntentRef.current = null
+        restoreReturnFocus()
+        return
+      }
+      setOpen(false)
+      setSearchText("")
+      selectionModeIntentRef.current = selectionModePreference
+      pendingSelectionModeIntentRef.current = null
+      restoreReturnFocus()
       if (onSelectionChange) {
         await onSelectionChange(nextEntry)
         return
@@ -600,6 +629,7 @@ export const AssistantSelect: React.FC<Props> = ({
       effectiveAssistantState.mode,
       clearActiveServerChat,
       onSelectionChange,
+      onTrackedSelection,
       onSelectionComplete,
       restoreReturnFocus,
       selectionModePreference,
@@ -737,8 +767,10 @@ export const AssistantSelect: React.FC<Props> = ({
     ) : (
       <div
         data-testid="assistant-select-menu"
+        aria-busy={selectionPending}
         className="max-h-80 overflow-y-auto px-2 py-2"
       >
+        {trackedSelectionPending && <p role="status" className="px-2 pb-2 text-sm text-text-subtle">{t("option:assistant.checkingSetup", "Checking setup…")}</p>}
         <div className="flex flex-col gap-1">
           {activeTabEntries.map((entry) => {
             const isActive =

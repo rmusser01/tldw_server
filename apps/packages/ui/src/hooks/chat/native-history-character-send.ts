@@ -31,10 +31,7 @@ import {
   type ChatCompletionRequest
 } from "@/services/tldw/TldwApiClient"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
-import {
-  parseProviderQualifiedModelSelection,
-  resolveExplicitProviderForSelectedModel
-} from "@/utils/resolve-api-provider"
+import { validateNativeCharacterConfiguration } from "./native-character-preflight"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 
 export type NativeHistoryCharacterSendParams = {
@@ -65,81 +62,21 @@ export const sendNativeHistoryCharacter = async (
   params: NativeHistoryCharacterSendParams
 ): Promise<void> => {
   const { controller, signal } = params
-  if (params.temporary || params.historyId === "temp")
-    throw new Error("temporary_history_unavailable")
-  if (params.image) throw new Error("native_history_assets_unsupported")
-  if (params.unsupportedContext)
-    throw new Error("native_history_explicit_context_unsupported")
   if (!params.message.trim()) throw new Error("native_history_input_required")
   const settingsState = useStoreChatModelSettings.getState()
   const toolsState = useMcpToolsStore.getState()
-  if (
-    params.toolChoice === "required" ||
-    (toolsState.tools.length && params.toolChoice !== "none")
-  )
-    throw new Error("native_history_client_tools_unsupported")
-  // Preserve saved sampling defaults when the composer has no explicit override.
-  const settings = { ...params.settings }
-  const unsupportedSettings: Array<keyof ChatModelSettings> = [
-    "f16KV",
-    "keepAlive",
-    "logitsAll",
-    "mirostat",
-    "mirostatEta",
-    "mirostatTau",
-    "numBatch",
-    "numCtx",
-    "numGpu",
-    "numGqa",
-    "numKeep",
-    "numThread",
-    "penalizeNewline",
-    "repeatLastN",
-    "repeatPenalty",
-    "ropeFrequencyBase",
-    "ropeFrequencyScale",
-    "tfsZ",
-    "topK",
-    "typicalP",
-    "useMLock",
-    "useMMap",
-    "useMlock",
-    "vocabOnly",
-    "seed",
-    "minP",
-    "thinking",
-    "historyMessageLimit",
-    "historyMessageOrder"
-  ]
-  const unsupportedSetting = unsupportedSettings.find(
-    (key) => settings[key] !== undefined && settings[key] !== null
-  )
-  if (unsupportedSetting)
-    throw new Error(`native_history_setting_unsupported:${unsupportedSetting}`)
-  if (
-    settings.reasoningEffort &&
-    !["low", "medium", "high"].includes(settings.reasoningEffort)
-  )
-    throw new Error("native_history_reasoning_effort_unsupported")
-  if (settings.extraBody?.trim() || settings.extraHeaders?.trim())
-    throw new Error("native_history_extra_parameters_unsupported")
-  if (settings.systemPromptTemplateId)
-    throw new Error("native_history_prompt_template_unsupported")
+  const capturedSettings = { ...params.settings }
   const actor = await getActorSettingsForChat({
     historyId: params.historyId ?? null,
     serverChatId: params.serverChatId ?? null
   })
-  if (actor?.isEnabled)
-    throw new Error("native_history_actor_context_unsupported")
-  const selected = parseProviderQualifiedModelSelection(params.model)
-  const model = selected.modelId.replace(/^tldw:/, "").trim()
-  const provider = resolveExplicitProviderForSelectedModel({
-    currentSelectedModel: params.currentModel ?? params.model,
-    requestedSelectedModel: params.model,
-    explicitProvider: settings.apiProvider
+  const { model, provider, settings } = validateNativeCharacterConfiguration({
+    ...params,
+    settings: capturedSettings,
+    temporary: params.temporary || params.historyId === "temp",
+    clientToolCount: toolsState.tools.length,
+    actorEnabled: actor?.isEnabled
   })
-  if (!model || !provider)
-    throw new Error("native_history_explicit_model_provider_required")
   if (!params.originIsCurrent()) throw new Error("stale_selection")
   const initialOwner = controller.getCurrent().owner
   if (initialOwner?.kind === "local")

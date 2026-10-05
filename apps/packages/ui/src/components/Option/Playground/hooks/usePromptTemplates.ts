@@ -16,6 +16,8 @@ import { detectCurrentPreset, getPresetByKey } from "../ParameterPresets";
 import type { PromptTemplate } from "../SystemPromptTemplates";
 import type { Prompt } from "@/db/dexie/types";
 import type { ChatModelSettings } from "@/store/model";
+import { createDefaultActorSettings, type ActorSettings } from "@/types/actor";
+import type { RolePlayApplyContext } from "../RolePlaySetupDrawer";
 import {
   personaToAssistantSelection,
   characterToAssistantSelection,
@@ -49,6 +51,7 @@ export interface UsePromptTemplatesDeps {
   /** Explicit identity action: detach a different saved target before persistence. */
   applyAssistantSelection: (
     assistant: AssistantSelection | null,
+    options?: AssistantSetupApplyOptions,
   ) => Promise<boolean | void> | boolean | void;
   setRagPinnedResults: (results: any[]) => void;
   updateChatModelSettings: (settings: Partial<ChatModelSettings>) => void;
@@ -62,6 +65,15 @@ export interface UsePromptTemplatesDeps {
   /** i18n */
   t: (key: string, ...args: any[]) => string;
 }
+
+export type AssistantSetupApplyOptions = RolePlayApplyContext & {
+  model?: string | null;
+  settings?: Partial<ChatModelSettings>;
+  selectedSystemPrompt?: string | null;
+  sceneSettings?: ActorSettings;
+  hasExplicitContext?: boolean;
+  applyIdentity?: boolean;
+};
 
 export type SaveRolePlaySetupInput = {
   name: string;
@@ -295,7 +307,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
   );
 
   const applyStartupTemplateBundle = React.useCallback(
-    async (template: StartupTemplateBundle) => {
+    async (template: StartupTemplateBundle, context?: RolePlayApplyContext) => {
       const rolePlayIdentity = template.rolePlay?.identity;
       const selection = rolePlayIdentity?.kind === "persona"
         ? personaToAssistantSelection({ id: String(rolePlayIdentity.id), name: rolePlayIdentity.name })
@@ -304,7 +316,6 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
               ? { id: String(rolePlayIdentity.id), name: rolePlayIdentity.name } as Character
               : null)
           );
-      if (await applyAssistantSelection(selection) === false) return false;
       const promptResolution = resolveStartupTemplatePrompt(
         template,
         promptLibrary,
@@ -312,6 +323,20 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       const resolvedPromptContent =
         promptResolution.prompt?.content ?? template.systemPrompt;
       const resolvedPromptId = promptResolution.prompt?.id || null;
+      const preset = getPresetByKey(template.presetKey);
+      const settings = {
+        ...(preset && preset.key !== "custom" ? preset.settings : {}),
+        systemPrompt: resolvedPromptContent,
+        systemPromptTemplateId: template.rolePlay?.behavior?.templateId?.trim() || undefined,
+      };
+      if (await applyAssistantSelection(selection, {
+        ...context,
+        model: template.selectedModel || selectedModel,
+        settings,
+        selectedSystemPrompt: resolvedPromptId,
+        sceneSettings: template.rolePlay ? template.rolePlay.scene ?? createDefaultActorSettings() : undefined,
+        hasExplicitContext: Boolean(template.ragPinnedResults?.length),
+      }) === false || context?.isCurrent?.() === false) return false;
 
       if (template.selectedModel) {
         setSelectedModel(template.selectedModel);
@@ -331,13 +356,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       }
       setSystemPrompt(resolvedPromptContent);
 
-      const preset = getPresetByKey(template.presetKey);
-      const behaviorTemplateId =
-        template.rolePlay?.behavior?.templateId?.trim() || undefined;
-      updateChatModelSettings({
-        ...(preset && preset.key !== "custom" ? preset.settings : {}),
-        systemPromptTemplateId: behaviorTemplateId,
-      });
+      updateChatModelSettings(settings);
 
       setRagPinnedResults(template.ragPinnedResults || []);
       return true;
@@ -345,6 +364,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     [
       compareModeActive,
       promptLibrary,
+      selectedModel,
       setCompareSelectedModels,
       setRagPinnedResults,
       applyAssistantSelection,
@@ -374,8 +394,8 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
   ]);
 
   const handleApplySavedRolePlaySetup = React.useCallback(
-    async (template: StartupTemplateBundle) => {
-      if (await applyStartupTemplateBundle(template) === false) return false;
+    async (template: StartupTemplateBundle, context?: RolePlayApplyContext) => {
+      if (await applyStartupTemplateBundle(template, context) === false) return false;
       setStartupTemplatePreview(null);
       setModeAnnouncement(
         t(

@@ -188,4 +188,20 @@ describe("provider:model scoped chat model settings", () => {
     expect(useStoreChatModelSettings.getState().temperature).toBe(0.6)
     expect(useStoreChatModelSettings.getState().topK).toBe(12)
   })
+
+  it("projects updates with commit normalization and inheritance without changing the source", () => {
+    const store = useStoreChatModelSettings.getState()
+    store.updateSettings({ temperature: 0.6, systemPromptTemplateId: "global-template" })
+    store.updateScopedSetting("openai:target", "temperature", 0.2)
+    store.updateScopedSetting("openai:target", "systemPromptTemplateId", "target-template")
+    store.setActiveSettingsScope("openai:source")
+    const before = useStoreChatModelSettings.getState()
+    const updates = { temperature: undefined, systemPrompt: "" }
+    const projected = before.getEffectiveSettings("openai:target", updates)
+    expect(projected).toMatchObject({ temperature: 0.6, systemPrompt: "", systemPromptTemplateId: "global-template" })
+    expect(useStoreChatModelSettings.getState()).toBe(before)
+    before.setActiveSettingsScope("openai:target")
+    useStoreChatModelSettings.getState().updateSettings(updates)
+    expect(useStoreChatModelSettings.getState().getEffectiveSettings("openai:target")).toEqual(projected)
+  })
 })

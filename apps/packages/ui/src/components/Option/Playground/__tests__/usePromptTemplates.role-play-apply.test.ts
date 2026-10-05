@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { usePromptTemplates, type UsePromptTemplatesDeps } from "../hooks"
 import { createStartupTemplateBundle } from "../startup-template-bundles"
+import type { Character } from "@/types/character"
 
 const createDeps = (
   overrides: Partial<UsePromptTemplatesDeps> = {}
@@ -32,6 +33,19 @@ const createDeps = (
 })
 
 describe("usePromptTemplates role-play setup apply", () => {
+  it("projects a saved setup before identity preflight rejects it", async () => {
+    const applyAssistantSelection = vi.fn(async () => false)
+    const deps = createDeps({ applyAssistantSelection })
+    const setup = createStartupTemplateBundle({ name: "Projected", selectedModel: "ollama:gemma3:4b", systemPrompt: "Proposed prompt", presetKey: "precise", character: { id: "new", name: "New" } as Character, ragPinnedResults: [{ id: "source-1", snippet: "Pinned source excerpt" }] as Parameters<typeof createStartupTemplateBundle>[0]["ragPinnedResults"] })
+    const { result } = renderHook(() => usePromptTemplates(deps))
+    await act(async () => { expect(await result.current.applyStartupTemplateBundle(setup)).toBe(false) })
+    expect(applyAssistantSelection).toHaveBeenCalledWith(expect.objectContaining({ id: "new" }), expect.objectContaining({
+      model: "ollama:gemma3:4b", settings: expect.objectContaining({ systemPrompt: "Proposed prompt", temperature: 0.2, topK: 20 }), hasExplicitContext: true
+    }))
+    expect(deps.setSelectedModel).not.toHaveBeenCalled()
+    expect(deps.updateChatModelSettings).not.toHaveBeenCalled()
+    expect(deps.setSystemPrompt).not.toHaveBeenCalled()
+  })
   it("preserves behavior template identity when applying a saved setup", async () => {
     const deps = createDeps()
     const setup = createStartupTemplateBundle({
@@ -84,7 +98,8 @@ describe("usePromptTemplates role-play setup apply", () => {
         kind: "character",
         id: "char-mira",
         name: "Mira"
-      })
+      }),
+      expect.objectContaining({ model: "openai:gpt-4.1" })
     )
     expect(deps.applyAssistantSelection).toHaveBeenCalledTimes(1)
   })
@@ -124,7 +139,8 @@ describe("usePromptTemplates role-play setup apply", () => {
         kind: "persona",
         id: "persona-guide",
         name: "Patient Guide"
-      })
+      }),
+      expect.objectContaining({ sceneSettings: expect.objectContaining({ isEnabled: false }) })
     )
     expect(applyAssistantSelection).toHaveBeenCalledTimes(1)
   })
