@@ -505,7 +505,7 @@ async def update_user(
             quota_resolver.invalidate_user(int(user_id))
 
         if reason is not None or quota_requested:
-            metadata: dict[str, Any] = {"reason": reason}
+            metadata: dict[str, Any] = {} if reason is None else {"reason": reason}
             if request.role is not None:
                 metadata["role"] = request.role
             if request.is_active is not None:
