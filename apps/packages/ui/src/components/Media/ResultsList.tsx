@@ -1,3 +1,4 @@
+import { mediaResultKey } from './types'
 import { useState, useCallback } from 'react'
 import { CheckCircle2, Circle, Clock, FileText, List, LayoutGrid, Loader2, Star, User, AlertCircle, Upload } from 'lucide-react'
 import { Tooltip, Button, Input } from 'antd'
@@ -390,7 +391,7 @@ export function ResultsList({
             const relativeDate = result.meta?.created_at
               ? formatRelativeTime(result.meta.created_at, t, { compact: true })
               : null
-            const bulkSelected = selectedIds?.has(String(result.id)) === true
+            const bulkSelected = selectedIds?.has(mediaResultKey(result)) === true
             const showSelectedStyle = selectionMode ? bulkSelected : selectedId === result.id
             const processingStatus = normalizeProcessingStatus(result.meta?.status)
             const progress = readingProgress?.get(String(result.id))
@@ -401,10 +402,10 @@ export function ResultsList({
               <div
               role="button"
               tabIndex={0}
-              key={result.id}
+              key={mediaResultKey(result)}
               onClick={() => {
                 if (selectionMode && onToggleSelected) {
-                  onToggleSelected(result.id)
+                  onToggleSelected(mediaResultKey(result))
                   return
                 }
                 onSelect(result.id)
@@ -413,7 +414,7 @@ export function ResultsList({
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault()
                   if (selectionMode && onToggleSelected) {
-                    onToggleSelected(result.id)
+                    onToggleSelected(mediaResultKey(result))
                     return
                   }
                   onSelect(result.id)
@@ -423,7 +424,7 @@ export function ResultsList({
                 type: result.kind,
                 title: result.title || `${result.kind} ${result.id}`
               })}
-              aria-selected={showSelectedStyle}
+
               className={`w-full ${isCompact ? 'py-2' : 'py-3'} text-left hover:bg-surface2/80 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset cursor-pointer ${
                 showSelectedStyle
                   ? 'bg-surface2/90 border-l-4 border-l-primary px-3.5'
@@ -432,11 +433,13 @@ export function ResultsList({
             >
               <div className="flex items-start gap-3">
                 {selectionMode && (
+                  <label className="flex min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 items-center justify-center" onClick={event => event.stopPropagation()}>
                   <input
                     type="checkbox"
                     checked={bulkSelected}
-                    onChange={() => onToggleSelected?.(result.id)}
+                    onChange={() => onToggleSelected?.(mediaResultKey(result))}
                     onClick={(event) => event.stopPropagation()}
+                    onKeyDown={event => event.stopPropagation()}
                     className="mt-1 h-4 w-4 rounded border-border bg-surface"
                     aria-label={t('mediaPage.selectResultCheckbox', {
                       defaultValue: 'Select {{title}}',
@@ -444,6 +447,7 @@ export function ResultsList({
                     })}
                     data-testid={`results-select-${String(result.id)}`}
                   />
+                  </label>
                 )}
                 <div className="mt-0.5 flex flex-col items-center gap-1">
                   <FileText className="w-4 h-4 text-text-subtle" />

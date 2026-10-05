@@ -1,4 +1,7 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { quickIngestAuthority, useQuickIngestAuthority } from '@/services/tldw/quick-ingest-authority'
+import { requestScopeFields } from '@/services/tldw/domains/service-prompts'
+import { mediaResultKey } from '@/components/Media/types'
 import { useNavigate } from 'react-router-dom'
 import { useStorage } from '@plasmohq/storage/hook'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
@@ -6,6 +9,7 @@ import { clearSetting, setSetting } from '@/services/settings/registry'
 import { bgRequest } from '@/services/background-proxy'
 import {
   LAST_MEDIA_ID_SETTING,
+  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING,
   MEDIA_REVIEW_SELECTION_SETTING
 } from '@/services/settings/ui-settings'
 import { downloadBlob } from '@/utils/download-blob'
@@ -127,12 +131,17 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     refetch
   } = deps
   const navigate = useNavigate()
+  const authorityKey = useQuickIngestAuthority()
+  const selectedMetadata = useRef(new Map<string, MediaResultItem>())
+  const authorityRef = useRef(authorityKey)
+  authorityRef.current = authorityKey
   const { showUndoNotification } = useUndoNotification()
 
   const ownerRef = useRef(ownerScope)
   ownerRef.current = ownerScope
   const lifetime = useMediaRequestLifetime(() => {
-    setBulkSelectedIds([])
+    updateBulkSelectedIds([])
+    selectedMetadata.current.clear()
     setBulkKeywordsDraft('')
     setCollectionDraftName('')
     setActiveCollectionId(null)
@@ -141,16 +150,20 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     setLibraryStorageUsage({ ...DEFAULT_MEDIA_LIBRARY_STORAGE_USAGE, loading: false })
   })
   const captureOperation = useCallback(() => {
-    const signal = lifetime.current.signal
-    const isCurrent = () => Boolean(ownerScope && ownerRef.current === ownerScope && !signal.aborted)
+    const localSignal = lifetime.current.signal
+    let verified: ReturnType<typeof quickIngestAuthority.capture> | null = null
+    try { verified = quickIngestAuthority.capture({ sessionBound: false }) } catch { /* Unverified authority disables actions. */ }
+    const signal = verified?.signal ? AbortSignal.any([localSignal, verified.signal]) : localSignal
+    const isCurrent = () => Boolean(verified?.authorityKey === authorityKey && verified?.isCurrent() && ownerScope && ownerRef.current === ownerScope && !signal.aborted)
     const request = async <T,>(init: Parameters<typeof bgRequest<T>>[0]): Promise<T> => {
       if (!isCurrent()) throw new DOMException('Media account changed', 'AbortError')
-      const result = await bgRequest<T>({ ...init, abortSignal: signal })
+      const scoped = requestScopeFields(verified!.requestScope)
+      const result = await bgRequest<T>({ ...init, ...scoped, headers: { ...init.headers, ...scoped.headers }, abortSignal: signal })
       if (!isCurrent()) throw new DOMException('Media account changed', 'AbortError')
       return result
     }
-    return { signal, isCurrent, request }
-  }, [lifetime, ownerScope])
+    return { signal, isCurrent, request, authorityKey: verified?.authorityKey }
+  }, [authorityKey, lifetime, ownerScope])
   const isOwnerCurrent = useCallback(() => captureOperation().isCurrent(), [captureOperation])
 
   // Favorites
@@ -160,7 +173,23 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
 
   // Bulk selection
   const [bulkSelectionMode, setBulkSelectionMode] = useState(false)
-  const [bulkSelectedIds, setBulkSelectedIds] = useState<string[]>([])
+  const [bulkSelectedIds, updateBulkSelectedIds] = useState<string[]>([])
+  const setBulkSelectedIds = useCallback((value: React.SetStateAction<string[]>) => {
+    if (!ownerScope || ownerRef.current !== ownerScope || !authorityKey || authorityRef.current !== authorityKey) return
+    updateBulkSelectedIds(previous => {
+      const next = typeof value === 'function' ? value(previous) : value
+      return next.map(id => {
+        const item = displayResults.find(row => mediaResultKey(row) === id) || displayResults.find(row => String(row.id) === id)
+        if (item) { const key = mediaResultKey(item); selectedMetadata.current.set(key, item); return key }
+        return id
+      })
+    })
+  }, [authorityKey, displayResults, ownerScope])
+  useLayoutEffect(() => {
+    updateBulkSelectedIds(previous => previous.length ? [] : previous)
+    selectedMetadata.current.clear()
+    setBulkSelectionMode(false)
+  }, [authorityKey, ownerScope])
   const [bulkKeywordsDraft, setBulkKeywordsDraft] = useState('')
   const [bulkExportFormat, setBulkExportFormat] = useState<'json' | 'markdown' | 'text'>(
     'json'
@@ -216,9 +245,18 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     () => new Set(bulkSelectedIds),
     [bulkSelectedIds]
   )
+  useEffect(() => {
+    for (const key of selectedMetadata.current.keys()) {
+      if (!bulkSelectedIdSet.has(key)) selectedMetadata.current.delete(key)
+    }
+    for (const item of displayResults) {
+      const key = mediaResultKey(item)
+      if (bulkSelectedIdSet.has(key)) selectedMetadata.current.set(key, item)
+    }
+  }, [bulkSelectedIdSet, displayResults])
   const bulkSelectedItems = useMemo(
-    () => displayResults.filter((item) => bulkSelectedIdSet.has(String(item.id))),
-    [bulkSelectedIdSet, displayResults]
+    () => bulkSelectedIds.map(id => displayResults.find(item => mediaResultKey(item) === id) || selectedMetadata.current.get(id)).filter((item): item is MediaResultItem => Boolean(item)),
+    [bulkSelectedIds, displayResults]
   )
   const bulkSelectedMediaItems = useMemo(
     () => bulkSelectedItems.filter((item) => item.kind === 'media'),
@@ -231,20 +269,10 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     [activeCollectionId, mediaCollections]
   )
 
-  // Sync bulk selection with visible results
-  useEffect(() => {
-    if (bulkSelectedIds.length === 0) return
-    const visibleIdSet = new Set(displayResults.map((item) => String(item.id)))
-    setBulkSelectedIds((prev) => {
-      const next = prev.filter((id) => visibleIdSet.has(id))
-      return next.length === prev.length ? prev : next
-    })
-  }, [bulkSelectedIds.length, displayResults])
-
   useEffect(() => {
     if (bulkSelectionMode || bulkSelectedIds.length === 0) return
     setBulkSelectedIds([])
-  }, [bulkSelectedIds.length, bulkSelectionMode])
+  }, [bulkSelectedIds.length, bulkSelectionMode, setBulkSelectedIds])
 
   useEffect(() => {
     if (!activeCollectionId) return
@@ -392,7 +420,9 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
   }, [])
 
   const toggleBulkItemSelection = useCallback((id: string | number) => {
-    const idStr = String(id)
+    const item = displayResults.find(row => mediaResultKey(row) === String(id)) || displayResults.find(row => String(row.id) === String(id))
+    if (!item) return
+    const idStr = mediaResultKey(item)
     setBulkSelectedIds((prev) => {
       const next = new Set(prev)
       if (next.has(idStr)) {
@@ -402,15 +432,15 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       }
       return Array.from(next)
     })
-  }, [])
+  }, [displayResults, setBulkSelectedIds])
 
   const handleSelectAllVisibleItems = useCallback(() => {
-    setBulkSelectedIds(displayResults.map((item) => String(item.id)))
-  }, [displayResults])
+    setBulkSelectedIds(previous => Array.from(new Set([...previous, ...displayResults.map(mediaResultKey)])))
+  }, [displayResults, setBulkSelectedIds])
 
   const handleClearBulkSelection = useCallback(() => {
     setBulkSelectedIds([])
-  }, [])
+  }, [setBulkSelectedIds])
 
   const handleBulkAddKeywords = useCallback(async () => {
     const { request, isCurrent } = captureOperation()
@@ -463,7 +493,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
 
     if (updatedKeywordMap.size > 0) {
       setSelected((prev) => {
-        if (!prev) return prev
+        if (!prev || prev.kind !== 'media') return prev
         const nextKeywords = updatedKeywordMap.get(String(prev.id))
         if (!nextKeywords) return prev
         return { ...prev, keywords: nextKeywords }
@@ -557,7 +587,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
             method: 'DELETE' as any
           })
         }
-        deletedIdSet.add(String(item.id))
+        deletedIdSet.add(mediaResultKey(item))
         deletedCount += 1
       } catch {
         if (!isCurrent()) return
@@ -567,11 +597,11 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
 
     if (deletedIdSet.size > 0) {
       setFavorites((prev: string[] | undefined) =>
-        (prev || []).filter((favoriteId) => !deletedIdSet.has(String(favoriteId)))
+        (prev || []).filter((favoriteId) => !deletedIdSet.has(`media:${favoriteId}`))
       )
       setSelected((prev) => {
         if (!prev) return prev
-        if (!deletedIdSet.has(String(prev.id))) return prev
+        if (!deletedIdSet.has(mediaResultKey(prev))) return prev
         return null
       })
       setBulkSelectedIds((prev) => prev.filter((id) => !deletedIdSet.has(id)))
@@ -586,7 +616,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     if (failedCount > 0) {
       message.warning(
         t('review:mediaPage.bulkDeletePartial', {
-          defaultValue: 'Deleted {{deleted}} item(s), {{failed}} failed.',
+          defaultValue: 'Moved {{deleted}} item(s) to trash, {{failed}} failed.',
           deleted: deletedCount,
           failed: failedCount
         })
@@ -596,7 +626,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
 
     message.success(
       t('review:mediaPage.bulkDeleteSuccess', {
-        defaultValue: 'Deleted {{count}} item(s).',
+        defaultValue: 'Moved {{count}} item(s) to trash.',
         count: deletedCount
       })
     )
@@ -611,6 +641,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     setSelected,
     setSelectedContent,
     setSelectedDetail,
+    setBulkSelectedIds,
     t
   ])
 
@@ -709,7 +740,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       return
     }
 
-    const selectedItemIds = bulkSelectedItems.map((item) => String(item.id))
+    const selectedItemIds = bulkSelectedItems.map(mediaResultKey)
     const now = new Date().toISOString()
     const normalizedName = targetCollectionName.toLowerCase()
     const existing = mediaCollections.find(
@@ -767,10 +798,10 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     t
   ])
 
-  const handleOpenSelectionInMultiReview = useCallback(async () => {
-    const { isCurrent } = captureOperation()
+  const handleOpenSelectionInMultiReview = useCallback(async (items = bulkSelectedMediaItems) => {
+    const { isCurrent, authorityKey: capturedAuthority } = captureOperation()
     if (!isCurrent()) return
-    if (bulkSelectedIds.length === 0) {
+    if (items.length === 0) {
       message.warning(
         t('review:mediaPage.bulkOpenInMultiReviewNone', {
           defaultValue: 'Select items to open in multi-review.'
@@ -778,15 +809,19 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       )
       return
     }
-    await setSetting(MEDIA_REVIEW_SELECTION_SETTING, bulkSelectedIds)
+    const mediaIds = items.filter(item => item.kind === 'media').map(item => String(item.id))
+    if (!mediaIds.length) return
+    await setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, { version: 1, authorityKey: capturedAuthority!, selectedIds: mediaIds })
     if (!isCurrent()) return
-    await setSetting(LAST_MEDIA_ID_SETTING, String(bulkSelectedIds[0]))
+    await setSetting(MEDIA_REVIEW_SELECTION_SETTING, mediaIds)
+    if (!isCurrent()) return
+    await setSetting(LAST_MEDIA_ID_SETTING, String(mediaIds[0]))
     if (!isCurrent()) return
     navigate('/media-multi')
-  }, [bulkSelectedIds, captureOperation, message, navigate, t])
+  }, [bulkSelectedMediaItems, captureOperation, message, navigate, t])
 
   const handleOpenCollectionInMultiReview = useCallback(async () => {
-    const { isCurrent } = captureOperation()
+    const { isCurrent, authorityKey: capturedAuthority } = captureOperation()
     if (!isCurrent()) return
     if (!activeCollection || activeCollection.itemIds.length === 0) {
       message.warning(
@@ -796,7 +831,10 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       )
       return
     }
-    const collectionIds = activeCollection.itemIds.map((id) => String(id))
+    const collectionIds = activeCollection.itemIds.filter(id => !id.startsWith('note:')).map(id => id.replace(/^media:/, ''))
+    if (!collectionIds.length) return
+    await setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, { version: 1, authorityKey: capturedAuthority!, selectedIds: collectionIds })
+    if (!isCurrent()) return
     await setSetting(MEDIA_REVIEW_SELECTION_SETTING, collectionIds)
     if (!isCurrent()) return
     await setSetting(LAST_MEDIA_ID_SETTING, String(collectionIds[0]))
@@ -909,11 +947,11 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       if (!isCurrent()) return
 
       const remainingResults = displayResults.filter(
-        (r) => String(r.id) !== idStr
+        (r) => mediaResultKey(r) !== mediaResultKey(item)
       )
       if (remainingResults.length > 0) {
         const currentIndex = displayResults.findIndex(
-          (r) => String(r.id) === idStr
+          (r) => mediaResultKey(r) === mediaResultKey(item)
         )
         const nextIndex =
           currentIndex >= 0

@@ -822,7 +822,7 @@
     "message": "{{selected}} selected · {{open}} open"
   },
   "mediaPage_clearSelection": {
-    "message": "Deselect all"
+    "message": "Clear selection"
   },
   "mediaPage_itemsLabel": {
     "message": "Items"
@@ -1921,5 +1921,53 @@
   },
   "mediaPage_selectionLoadFailed": {
     "message": "Could not load the saved selection. Reopen Review to try again."
+  },
+  "mediaPage_bulkSelectedCount": {
+    "message": "{{count}} selected"
+  },
+  "mediaPage_selectAllVisible": {
+    "message": "Select this page"
+  },
+  "mediaPage_moveSelectionToTrash": {
+    "message": "Move {{count}} items to trash"
+  },
+  "mediaPage_moveToTrash": {
+    "message": "Move to trash"
+  },
+  "mediaPage_trashRecoveryHint": {
+    "message": "You can restore items from Trash. Items that fail remain selected."
+  },
+  "mediaPage_openTrashRecovery": {
+    "message": "Open Trash"
+  },
+  "mediaPage_moreSelectionActions": {
+    "message": "Tags, collections and export"
+  },
+  "mediaPage_exportFormat": {
+    "message": "Export format"
+  },
+  "mediaPage_resultsView": {
+    "message": "Results"
+  },
+  "mediaPage_contentView": {
+    "message": "Content"
+  },
+  "mediaPage_addMedia": {
+    "message": "Add media"
+  },
+  "mediaPage_batchHintTitle": {
+    "message": "Review a batch"
+  },
+  "mediaPage_batchHintDescription": {
+    "message": "Add media accepts multiple URLs or files. Select across pages, then open your saved Media selection to review it together."
+  },
+  "mediaPage_bulkDeletePartial": {
+    "message": "Moved {{deleted}} item(s) to trash, {{failed}} failed."
+  },
+  "mediaPage_bulkDeleteSuccess": {
+    "message": "Moved {{count}} item(s) to trash."
+  },
+  "mediaPage_notesReviewScope": {
+    "message": "Review opens Media only; Notes stay selected."
   }
 }

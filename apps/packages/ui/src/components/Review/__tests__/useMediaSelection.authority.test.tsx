@@ -6,10 +6,14 @@ import { Storage } from '@plasmohq/storage'
 import { useConnectionStore } from '@/store/connection'
 import { bgRequest } from '@/services/background-proxy'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
+import { setSetting } from '@/services/settings/registry'
+import { MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING } from '@/services/settings/ui-settings'
 import { useMediaSelection } from '../hooks/useMediaSelection'
 import type { MediaResultItem } from '@/components/Media/types'
 
-const mocks = vi.hoisted(() => ({ undo: vi.fn() }))
+const mocks = vi.hoisted(() => ({ undo: vi.fn(), download: vi.fn(), authority: 'verified-a' }))
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({ useQuickIngestAuthority: () => mocks.authority, quickIngestAuthority: { capture: () => { const authorityKey = mocks.authority; return { authorityKey, requestScope: { config: { serverUrl: 'http://fixture.invalid', authMode: 'multi-user' }, userId: 'alice' }, isCurrent: () => mocks.authority === authorityKey } } } }))
+vi.mock('@/utils/download-blob', () => ({ downloadBlob: mocks.download }))
 vi.mock('@/hooks/useUndoNotification', () => ({ useUndoNotification: () => ({ showUndoNotification: mocks.undo }) }))
 vi.mock('@/services/background-proxy', () => ({ bgRequest: vi.fn() }))
 vi.mock('@/services/tldw/TldwApiClient', () => ({ tldwClient: {} }))
@@ -21,10 +25,14 @@ const wrapper = ({ children }: React.PropsWithChildren) => <MemoryRouter>{childr
 const mount = (ownerScope: string | null = 'account-a') => {
   const feedback = { error: vi.fn(), warning: vi.fn(), success: vi.fn() }
   const refetch = vi.fn().mockResolvedValue({ data: items })
-  const view = renderHook(({ owner }) => useMediaSelection({
-    ownerScope: owner, t: key => key, message: feedback, displayResults: items, selected: null,
-    setSelected: vi.fn(), setSelectedContent: vi.fn(), setSelectedDetail: vi.fn(), setLastFetchedId: vi.fn(), refetch
-  }), { wrapper, initialProps: { owner: ownerScope } })
+  const view = renderHook(({ owner, rows }) => {
+    const [inspectorItem, setInspectorItem] = React.useState<MediaResultItem | null>(null)
+    const selection = useMediaSelection({
+    ownerScope: owner, t: key => key, message: feedback, displayResults: rows, selected: inspectorItem,
+    setSelected: setInspectorItem, setSelectedContent: vi.fn(), setSelectedDetail: vi.fn(), setLastFetchedId: vi.fn(), refetch
+    })
+    return { ...selection, inspectorItem, setInspectorItem }
+  }, { wrapper, initialProps: { owner: ownerScope, rows: items } })
   return { ...view, feedback, refetch }
 }
 const select = (view: ReturnType<typeof mount>) => act(() => {
@@ -52,6 +60,7 @@ beforeEach(() => {
       removeListener: (listener: (changes: Changes, area: string) => void) => listeners.delete(listener)
     }
   } })
+  mocks.authority = 'verified-a'
   localStorage.clear(); vi.clearAllMocks()
   Reflect.deleteProperty(tldwClient, "getCurrentUserStorageQuota")
   Reflect.deleteProperty(tldwClient, "getCurrentUserProfile")
@@ -61,6 +70,65 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('media selection authority', () => {
+  it('rejects retained actions when verified authority changes before React receives the owner update', async () => {
+    const view = mount(); select(view)
+    const staleDelete = view.result.current.handleBulkDelete
+    mocks.authority = 'verified-b'
+    await act(async () => staleDelete())
+    expect(bgRequest).not.toHaveBeenCalled()
+  })
+
+  it('uses refreshed selected metadata after changing page and preserves same-ID Note tags', async () => {
+    const view = mount()
+    const note = { ...items[0], kind: 'note' as const, keywords: ['note-only'] }
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.toggleBulkItemSelection('media:1'); view.result.current.setInspectorItem(note) })
+    act(() => view.rerender({ owner: 'account-a', rows: [{ ...items[0], keywords: ['latest-server-tag'] }] }))
+    act(() => view.rerender({ owner: 'account-a', rows: [items[1]] }))
+    act(() => view.result.current.setBulkKeywordsDraft('extra'))
+    await act(async () => view.result.current.handleBulkAddKeywords())
+    expect(bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/media/1', body: { keywords: ['latest-server-tag', 'extra'] } }))
+    expect(view.result.current.inspectorItem).toEqual(note)
+  })
+
+  it('keeps four kind-qualified selections across pages for export and owned media opening', async () => {
+    const pageOne = [{ ...items[0] }, { ...items[0], kind: 'note' as const, title: 'Same ID note' }]
+    const pageTwo = [{ ...items[1] }, { ...items[1], id: 3, title: 'Third media' }]
+    const view = mount()
+    act(() => view.rerender({ owner: 'account-a', rows: pageOne }))
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.toggleBulkItemSelection('media:1'); view.result.current.toggleBulkItemSelection('note:1') })
+    act(() => view.rerender({ owner: 'account-a', rows: pageTwo }))
+    act(() => view.result.current.handleSelectAllVisibleItems())
+    expect(view.result.current.bulkSelectedItems.map(row => `${row.kind}:${row.id}`)).toEqual(['media:1', 'note:1', 'media:2', 'media:3'])
+    act(() => view.result.current.setBulkKeywordsDraft('full-set'))
+    await act(async () => view.result.current.handleBulkAddKeywords())
+    expect(vi.mocked(bgRequest).mock.calls.filter(([request]) => request.method === 'PUT').map(([request]) => request.path)).toEqual(['/api/v1/media/1', '/api/v1/media/2', '/api/v1/media/3'])
+    act(() => view.result.current.setCollectionDraftName('Four selected records'))
+    await act(async () => view.result.current.handleAddSelectionToCollection())
+    await waitFor(() => expect(view.result.current.activeCollection?.itemIds).toEqual(['media:1', 'note:1', 'media:2', 'media:3']))
+    act(() => view.result.current.handleBulkExport())
+    const payload = JSON.parse(await mocks.download.mock.calls[0][0].text())
+    expect(payload.items.map((row: MediaResultItem) => `${row.kind}:${row.id}`)).toEqual(['media:1', 'note:1', 'media:2', 'media:3'])
+    await act(async () => view.result.current.handleOpenSelectionInMultiReview())
+    expect(setSetting).toHaveBeenCalledWith(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, { version: 1, authorityKey: 'verified-a', selectedIds: ['1', '2', '3'] })
+    expect(view.result.current.bulkSelectedNoteCount).toBe(1)
+    act(() => view.rerender({ owner: 'account-b', rows: pageTwo }))
+    expect(view.result.current.bulkSelectedItems).toEqual([])
+  })
+
+  it('retains a failed note when same-ID Media successfully moves to trash', async () => {
+    const view = mount()
+    act(() => view.rerender({ owner: 'account-a', rows: [items[0], { ...items[0], kind: 'note' as const }] }))
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.toggleBulkItemSelection('media:1'); view.result.current.toggleBulkItemSelection('note:1') })
+    vi.mocked(bgRequest).mockImplementation(async request => {
+      if (request.method === 'DELETE' && request.path === '/api/v1/notes/1') throw new Error('Conflict')
+      return { version: 7 }
+    })
+    await act(async () => view.result.current.handleBulkDelete())
+    expect(view.result.current.bulkSelectedItems.map(row => `${row.kind}:${row.id}`)).toEqual(['note:1'])
+    expect(bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/notes/1', method: 'DELETE', headers: expect.objectContaining({ 'expected-version': '7', 'X-TLDW-Expected-User-ID': 'alice' }), abortSignal: expect.any(AbortSignal), servicePromptConfig: expect.objectContaining({ expectedUserId: 'alice' }) }))
+    expect(view.feedback.warning).toHaveBeenCalled()
+  })
+
   it('loads and parses the current owner quota through the guarded transport', async () => {
     Object.assign(tldwClient, { getCurrentUserStorageQuota: vi.fn() })
     vi.mocked(bgRequest).mockResolvedValue({ storage_used_mb: '15', storage_quota_mb: 100, usage_percentage: '15', warning: 'Near quota' })
@@ -187,7 +255,7 @@ describe('media selection authority', () => {
     await act(async () => { view.result.current.toggleFavorite('1') })
     expect(view.result.current.favorites).toEqual(['1'])
     const staleToggle = view.result.current.toggleFavorite
-    act(() => view.rerender({ owner: 'account-b' }))
+    act(() => view.rerender({ owner: 'account-b', rows: items }))
     expect(view.result.current.favorites).toEqual([])
     await act(async () => { staleToggle('2') })
     expect(view.result.current.favorites).toEqual([])

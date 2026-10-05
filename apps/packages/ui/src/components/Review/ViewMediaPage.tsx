@@ -29,16 +29,15 @@ import { ResultsList } from '@/components/Media/ResultsList'
 import { ContentViewer } from '@/components/Media/ContentViewer'
 import { Pagination } from '@/components/Media/Pagination'
 import { FilterChips } from '@/components/Media/FilterChips'
+import { mediaResultKey } from '@/components/Media/types'
+import FeatureHint from '@/components/Common/FeatureHint'
+import { useMobile } from '@/hooks/useMediaQuery'
 import type { MediaResultItem } from '@/components/Media/types'
 import {
   useMediaNavigation
 } from '@/hooks/useMediaNavigation'
 import { bgRequest } from '@/services/background-proxy'
 import { requestQuickIngestOpen } from '@/utils/quick-ingest-open'
-import { setSetting } from '@/services/settings/registry'
-import {
-  LAST_MEDIA_ID_SETTING,
-} from '@/services/settings/ui-settings'
 import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from '@/services/tldw/media-chat-handoff'
 import {
   hasDefaultMediaSearchFields,
@@ -313,6 +312,20 @@ const ViewMediaPage: React.FC = () => {
 
 const MediaPageContent: React.FC = () => {
   const ownerScope = useHomeMilestoneScope()
+  const isMobile = useMobile()
+  const [mobileTab, setMobileTab] = useState<1 | 2>(1)
+  const returnFocus = useRef<HTMLElement | null>(null)
+  const backButton = useRef<HTMLButtonElement>(null)
+  const showContent = () => {
+    returnFocus.current = document.activeElement as HTMLElement
+    setMobileTab(2)
+    requestAnimationFrame(() => backButton.current?.focus())
+  }
+  const backToResults = () => {
+    setMobileTab(1)
+    requestAnimationFrame(() => returnFocus.current?.focus())
+  }
+  useEffect(() => setMobileTab(1), [ownerScope])
   const handoffOwnerRef = useRef(ownerScope)
   handoffOwnerRef.current = ownerScope
   const transferFlashcards = useFlashcardsGenerateTransfer()
@@ -365,7 +378,7 @@ const MediaPageContent: React.FC = () => {
         return []
       }
       const allowedIdSet = new Set(collection.itemIds.map((id) => String(id)))
-      nextResults = nextResults.filter((item) => allowedIdSet.has(String(item.id)))
+      nextResults = nextResults.filter((item) => allowedIdSet.has(mediaResultKey(item)) || allowedIdSet.has(String(item.id)))
     }
     return nextResults
   }, [
@@ -394,7 +407,7 @@ const MediaPageContent: React.FC = () => {
   }, [search, selection])
 
   const handleSelectAllVisibleItems = useCallback(() => {
-    selection.setBulkSelectedIds(displayResults.map((item) => String(item.id)))
+    selection.setBulkSelectedIds(previous => Array.from(new Set([...previous, ...displayResults.map(mediaResultKey)])))
   }, [displayResults, selection])
 
   const hasJumpTo = displayResults.length > 5
@@ -1083,11 +1096,11 @@ const MediaPageContent: React.FC = () => {
     }
   }, [nav.selected, message, navigate])
 
+  const { handleOpenSelectionInMultiReview } = selection
   const handleOpenInMultiReview = useCallback(() => {
-    if (!nav.selected) return
-    void setSetting(LAST_MEDIA_ID_SETTING, String(nav.selected.id))
-    navigate('/media-multi')
-  }, [nav.selected, navigate])
+    if (!nav.selected || nav.selected.kind !== 'media') return
+    void handleOpenSelectionInMultiReview([nav.selected])
+  }, [nav.selected, handleOpenSelectionInMultiReview])
 
   const handleSendAnalysisToChat = useCallback(async (text: string) => {
     const boundaryRevision = handoffBoundaryRevision.current
@@ -1128,6 +1141,8 @@ const MediaPageContent: React.FC = () => {
   // When the library is truly empty (no results, no search/filters active, not loading),
   // render a single-column centered onboarding view instead of the two-column split.
   const isEmptyLibrary =
+    !selection.bulkSelectionMode &&
+    selection.bulkSelectedItems.length === 0 &&
     search.activeTotalCount === 0 &&
     displayResults.length === 0 &&
     !nav.selected &&
@@ -1170,7 +1185,7 @@ const MediaPageContent: React.FC = () => {
             <h1 className="mb-3 px-4 text-center text-base font-semibold text-text">
               {t('review:mediaPage.mediaInspector', { defaultValue: 'Media Inspector' })}
             </h1>
-            <div className="mb-3 flex justify-center">{trashNavigation}</div>
+            <div className="mb-3 flex justify-center gap-2"><button type="button" onClick={() => requestQuickIngestOpen({ source: 'manual' })} className="min-h-[44px] rounded-md border border-border px-3 text-sm">{t('review:mediaPage.addMedia', { defaultValue: 'Add media' })}</button>{trashNavigation}</div>
             {staleSelectionNotice}
             <ResultsList
               results={displayResults}
@@ -1203,33 +1218,41 @@ const MediaPageContent: React.FC = () => {
 
   return (
     <div
-      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"
+      className="relative flex flex-col md:flex-row min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"
     >
+      <div className="md:hidden flex shrink-0 border-b border-border bg-surface">
+        <button type="button" onClick={backToResults} aria-pressed={mobileTab === 1} className="flex-1 min-h-[44px] text-sm">{t('review:mediaPage.resultsView', { defaultValue: 'Results' })}</button>
+        <button type="button" onClick={showContent} aria-pressed={mobileTab === 2} className="flex-1 min-h-[44px] text-sm">{t('review:mediaPage.contentView', { defaultValue: 'Content' })}</button>
+      </div>
       {/* Left Sidebar */}
       <div
-        className={`absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto ${
-          viewPrefs.sidebarCollapsedValue ? 'w-0' : 'w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]'
+        data-testid="inspector-results-view"
+        hidden={isMobile && mobileTab !== 1}
+        className={`relative bg-surface border-r border-border flex flex-1 md:flex-none h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out ${
+          !isMobile && viewPrefs.sidebarCollapsedValue ? 'w-0' : 'w-full md:w-[22rem] lg:w-[25rem]'
         }`}
         style={{
+          display: isMobile && mobileTab !== 1 ? 'none' : undefined,
           overflowX: 'hidden',
           overflowY: 'auto'
         }}
       >
         <div
-          className="flex min-h-full flex-col bg-surface"
-          hidden={viewPrefs.sidebarCollapsedValue}
-          aria-hidden={viewPrefs.sidebarCollapsedValue}
+          className="flex h-full min-h-0 md:h-auto md:min-h-full flex-col bg-surface"
+          hidden={!isMobile && viewPrefs.sidebarCollapsedValue}
+          aria-hidden={!isMobile && viewPrefs.sidebarCollapsedValue}
         >
           {/* Header */}
           <div className="shrink-0 border-b border-border/80 bg-surface px-4 py-3.5">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h1 className="text-text text-base font-semibold">
                 {t('review:mediaPage.mediaInspector', { defaultValue: 'Media Inspector' })}
               </h1>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] font-medium tabular-nums text-text-muted">
                   {displayResults.length} / {search.activeTotalCount}
                 </span>
+                <button type="button" onClick={() => requestQuickIngestOpen({ source: 'manual' })} className="min-h-[44px] md:min-h-8 rounded-md border border-border px-2 text-xs">{t('review:mediaPage.addMedia', { defaultValue: 'Add media' })}</button>
                 {trashNavigation}
                 <button
                   type="button"
@@ -1298,7 +1321,8 @@ const MediaPageContent: React.FC = () => {
 
           {/* Controls: Find Media + Jump To + Bulk Toolbar */}
           <div
-            className="min-h-0 shrink overflow-y-auto border-b border-border/80"
+            data-testid="inspector-filter-controls"
+            className="min-h-0 max-h-[40%] shrink overflow-y-auto border-b border-border/80"
           >
 
           {/* Find Media */}
@@ -1515,6 +1539,9 @@ const MediaPageContent: React.FC = () => {
             )}
           </div>
 
+          </div>
+          {/* end Controls wrapper */}
+
           {selection.bulkSelectionMode ? (
             <React.Suspense fallback={null}>
               <LazyMediaBulkToolbar
@@ -1528,22 +1555,21 @@ const MediaPageContent: React.FC = () => {
             </React.Suspense>
           ) : null}
 
-          </div>
-          {/* end Controls wrapper */}
+          <FeatureHint featureKey="media-inspector-batch" show={selection.bulkSelectionMode} title={t('review:mediaPage.batchHintTitle', { defaultValue: 'Review a batch' })} description={t('review:mediaPage.batchHintDescription', { defaultValue: 'Add media accepts multiple URLs or files. Select across pages, then open your saved Media selection to review it together.' })} />
 
           {/* Results + pagination flow */}
           <div
             className="flex min-h-0 flex-1 flex-col bg-surface"
             data-sidebar-target-min-height={sidebarDimensions.sidebarResultsPanelMinHeightPx}
             style={{
-              minHeight: `${sidebarDimensions.sidebarResultsPanelMinHeightPx}px`
+              minHeight: isMobile ? 'min(8rem, 20dvh)' : `${sidebarDimensions.sidebarResultsPanelMinHeightPx}px`
             }}
           >
             <div
               className="min-h-0 flex-1 overflow-y-auto"
               data-sidebar-target-list-height={sidebarDimensions.sidebarResultsListMinHeightPx}
               style={{
-                minHeight: `${sidebarDimensions.sidebarResultsListMinHeightPx}px`
+                minHeight: isMobile ? 0 : `${sidebarDimensions.sidebarResultsListMinHeightPx}px`
               }}
             >
               <ResultsList
@@ -1554,8 +1580,8 @@ const MediaPageContent: React.FC = () => {
                     selection.toggleBulkItemSelection(id)
                     return
                   }
-                  const item = displayResults.find((r) => r.id === id)
-                  if (item) nav.setSelected(item)
+                  const item = displayResults.find((r) => mediaResultKey(r) === String(id)) || displayResults.find((r) => r.id === id)
+                  if (item) { nav.setSelected(item); if (isMobile) showContent() }
                 }}
                 totalCount={search.activeTotalCount}
                 loadedCount={displayResults.length}
@@ -1694,7 +1720,7 @@ const MediaPageContent: React.FC = () => {
       {/* Collapse Button */}
       <button
         onClick={() => viewPrefs.setSidebarCollapsed(!viewPrefs.sidebarCollapsedValue)}
-        className={`absolute inset-y-0 z-20 w-6 shrink-0 self-stretch bg-surface border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors md:relative md:inset-auto md:z-auto ${
+        className={`hidden md:flex absolute inset-y-0 z-20 w-6 shrink-0 self-stretch bg-surface border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors md:relative md:inset-auto md:z-auto ${
           viewPrefs.sidebarCollapsedValue ? 'left-0' : 'left-[calc(100%-1.5rem)]'
         } md:left-auto`}
         aria-label={viewPrefs.sidebarCollapsedValue ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -1709,7 +1735,8 @@ const MediaPageContent: React.FC = () => {
       </button>
 
       {/* Main Content Area */}
-      <div className="ml-6 flex-1 flex min-h-0 min-w-0 flex-col md:ml-0">
+      <div hidden={isMobile && mobileTab !== 2} style={{ display: isMobile && mobileTab !== 2 ? 'none' : undefined }} data-testid="inspector-content-view" className="flex-1 flex min-h-0 min-w-0 flex-col">
+        <button ref={backButton} type="button" onClick={backToResults} className="md:hidden shrink-0 min-h-[44px] border-b border-border text-sm">{t('review:mediaPage.backToResults', { defaultValue: 'Back to results' })}</button>
         {navigationEnabled ? (
           <div className="border-b border-border bg-surface px-3 py-2">
             <div className="flex flex-wrap items-center gap-3 text-xs text-text-muted">

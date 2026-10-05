@@ -8,6 +8,8 @@ vi.mock("@/utils/safe-storage", () => ({
 }))
 vi.mock("@/services/tldw/runtime-auth-override", () => ({ getRuntimeSingleUserApiKeyOverride: () => null, isCookieSessionConfigInvalidated: () => false }))
 import { TldwApiClient, tldwClient } from "../tldw/TldwApiClient"
+import { bgRequest } from "../background-proxy"
+import { requestScopeFields } from "../tldw/domains/service-prompts"
 import { mediaMethods } from "../tldw/domains/media"
 
 
@@ -15,6 +17,10 @@ const config = (user = 1, serverUrl = "https://ingest.test") => ({ serverUrl, au
 const options = { requestScope: { config: { serverUrl: "https://ingest.test", authMode: "multi-user" as const }, userId: 1 } }
 let client: TldwApiClient
 const operations = [
+  ['Inspector quota', () => bgRequest({ path: '/api/v1/users/storage', method: 'GET', ...requestScopeFields(options.requestScope) })],
+  ['Inspector note trash', () => bgRequest({ path: '/api/v1/notes/7', method: 'DELETE', headers: { 'expected-version': '7' }, ...requestScopeFields(options.requestScope) })],
+  ['Inspector note restore', () => bgRequest({ path: '/api/v1/notes/7/restore?expected_version=8', method: 'POST', ...requestScopeFields(options.requestScope) })],
+  ['Inspector media restore', () => bgRequest({ path: '/api/v1/media/7/restore', method: 'POST', ...requestScopeFields(options.requestScope) })],
   ['bulk tags', () => client.bulkUpdateMediaKeywords({media_ids:[7], keywords:['owned']}, options)],
   ['trash', () => client.deleteMedia(7, options)],
   ['reprocess', () => client.reprocessMedia(7, {perform_chunking:true}, options)],

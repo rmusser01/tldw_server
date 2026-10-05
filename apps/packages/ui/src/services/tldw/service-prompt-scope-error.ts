@@ -103,6 +103,7 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "POST" && pathname === "/api/v1/media/bulk/keyword-update") return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/metadata$/.test(pathname)) return true
   if (requestMethod === "POST" && /^\/api\/v1\/media\/[0-9]+\/reprocess$/.test(pathname)) return true
+  if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
   if (requestMethod === "GET" && (pathname === "/api/v1/notes/tasks/activity" || /^\/api\/v1\/notes\/[^/]+\/tasks$/.test(pathname))) return true
@@ -128,9 +129,10 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "GET" && (/^\/api\/v1\/media\/ingest\/jobs\/[0-9]+$/.test(pathname) || /^\/api\/v1\/media\/[0-9]+\/file$/.test(pathname) || pathname === "/api/v1/media")) return true
   if (requestMethod === "POST" && (/^\/api\/v1\/media\/(?:ingest\/jobs(?:\/cancel)?|process-(?:audios|videos|pdfs|ebooks|documents|web-scraping)|search|collections)$/.test(pathname) || /^\/api\/v1\/media\/collections\/[0-9]+\/items$/.test(pathname))) return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/collections\/[0-9]+\/items\/[0-9]+$/.test(pathname)) return true
+  if (requestMethod === "POST" && (/^\/api\/v1\/media\/[0-9]+\/restore$/.test(pathname) || /^\/api\/v1\/notes\/(?!tasks\/|collections\/|trash\/|purge\/|permanent\/|keywords\/|folders\/|moodboards\/|templates\/|import\/|export(?:\.csv)?\/|search\/)[^/]+\/restore$/.test(pathname))) return true
   if (pathname === "/api/v1/notes/") return requestMethod === "POST"
   if (/^\/api\/v1\/notes\/[^/]+$/.test(pathname)) {
-    return ["GET", "PUT"].includes(requestMethod)
+    return ["GET", "PUT"].includes(requestMethod) || (requestMethod === "DELETE" && !/^\/api\/v1\/notes\/(?:tasks|collections|trash|purge|permanent|keywords|folders|moodboards|templates|import|export(?:\.csv)?|search)$/.test(pathname))
   }
   if (pathname === "/api/v1/service-prompts") {
     return requestMethod === "GET"

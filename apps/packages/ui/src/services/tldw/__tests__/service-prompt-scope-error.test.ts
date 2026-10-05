@@ -69,7 +69,7 @@ describe("Service Prompt scope policy", () => {
     ["/api/v1/notes/private-note", "GET", true],
     ["/api/v1/notes/private-note", "PUT", true],
     ["/api/v1/notes/", "GET", false],
-    ["/api/v1/notes/private-note", "DELETE", false],
+    ["/api/v1/notes/private-note", "DELETE", true],
     ["/api/v1/notes/private-note", "PATCH", false],
     ["/api/v1/notes/private-note/attachments", "POST", false],
     ["/api/v1/notes/%2e%2e", "PUT", false],
@@ -279,5 +279,26 @@ it.each([
   ['/api/v1/media/bulk/keyword-update/extra', 'POST', false],
   ['/api/v1/media/bulk/keyword-update', 'DELETE', false],
 ] as const)('bounds owned Review action %s %s', (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})
+
+it.each([
+  ['/api/v1/users/storage', 'GET', true],
+  ['/api/v1/users/storage', 'POST', false],
+  ['/api/v1/users/storage/other', 'GET', false],
+  ['/api/v1/notes/7', 'DELETE', true],
+  ['/api/v1/notes/a9b7-uuid', 'DELETE', true],
+  ['/api/v1/notes/a9b7-uuid/restore?expected_version=8', 'POST', true],
+  ['/api/v1/media/7/restore', 'POST', true],
+  ['/api/v1/notes/tasks', 'DELETE', false],
+  ['/api/v1/notes/collections', 'DELETE', false],
+  ['/api/v1/notes/trash', 'DELETE', false],
+  ['/api/v1/notes/tasks/restore', 'POST', false],
+  ['/api/v1/notes/collections/restore', 'POST', false],
+  ['/api/v1/notes/7/permanent', 'DELETE', false],
+  ['/api/v1/notes/7/restore', 'DELETE', false],
+  ['/api/v1/media/word/restore', 'POST', false],
+  ['/api/v1/media/7/permanent', 'DELETE', false],
+] as const)('bounds Inspector recovery %s %s', (path, method, allowed) => {
   expect(isServicePromptRequestPath(path, method)).toBe(allowed)
 })
