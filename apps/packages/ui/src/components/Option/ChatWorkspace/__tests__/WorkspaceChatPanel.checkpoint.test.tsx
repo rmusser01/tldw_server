@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   ownerKey: "native-A", conversationId: "chat-A" as string | null, messages: [] as Message[],
   recoveries: [] as Array<{ turn: HistoryTurnRecovery }>, temporaryChat: false,
   checkpointActive: true, restoring: false,
+  restoreError: null as string | null,
   selectionStatus: "ready" as HistorySelectionController["status"],
   selectionError: null as string | null
 }))
@@ -44,6 +45,7 @@ const finalizedSelection = {
 vi.mock("@/hooks/chat/useWorkspaceChatCheckpoint", () => ({
   useWorkspaceChatCheckpoint: (options: { setDraft: (value: string) => void }) => ({
     active: state.checkpointActive, restoring: state.restoring, setDraft: options.setDraft, referenceId: state.referenceId,
+    restoreError: state.restoreError,
     controller: {
       status: state.selectionStatus, error: state.selectionError, settingsQualified: true, recoveries: state.recoveries,
       inspectRecovery: state.inspectRecovery,
@@ -99,6 +101,7 @@ beforeEach(() => {
   state.temporaryChat = false
   state.checkpointActive = true
   state.restoring = false
+  state.restoreError = null
   state.selectionStatus = "ready"
   state.selectionError = null
   state.recoveries = [{ turn }]
@@ -133,6 +136,28 @@ function expectRailStatus(label: string) {
   expect(within(screen.getByLabelText("Chat workspace status")).getByRole("status")).toHaveTextContent(label)
   expect(within(screen.getByRole("complementary", { name: "Chat workspace inspector" })).getByText(label)).toBeInTheDocument()
 }
+
+it("blocks typed and staged sends for a checkpoint restoration error even with an idle controller", () => {
+  state.conversationId = null
+  state.recoveries = []
+  state.selectionStatus = "idle"
+  const surface = render(<RuntimeSurface stagedSources={[stagedSource]} />)
+  fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), { target: { value: "Retained draft" } })
+  state.restoreError = "Workspace chat restoration failed"
+  surface.rerender(<RuntimeSurface stagedSources={[stagedSource]} />)
+  expectRailStatus("Chat history unavailable")
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Send with staged context" })).toBeDisabled()
+  fireEvent.submit(screen.getByRole("textbox", { name: "Chat workspace message" }).closest("form")!)
+  expect(state.onSubmit).not.toHaveBeenCalled()
+  expect(screen.getByRole("textbox", { name: "Chat workspace message" })).toHaveValue("Retained draft")
+  state.restoreError = null
+  surface.rerender(<RuntimeSurface stagedSources={[stagedSource]} />)
+  expectRailStatus("Ready")
+  expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled()
+  expect(screen.getByRole("button", { name: "Send with staged context" })).toBeEnabled()
+  expect(state.onSubmit).not.toHaveBeenCalled()
+})
 
 it.each([
   ["unsupported_history_capability", "invalid_history_reference"],

@@ -907,3 +907,80 @@ load receipt remain unproven causes; route hydration is only a hypothesis. The
 exploratory fixture is preserved in evidence and removed from repository source.
 No speculative guard weakening, fourth local reproduction or native send follows.
 Mandatory fresh candidate CI remains qualification, not a claimed root-cause fix.
+
+## Stage 19: Checkpoint Restoration Error Reporting
+**Goal**: Address exact-head Qodo thread PRRT_kwDOL1aGf86o4bW2 without changing
+checkpoint authority or admitting a send after an unexplained restoration failure.
+**Success Criteria**: Unexpected current scope/read failures expose a safe error
+through existing workspace history status; cancellation and superseded failures
+stay silent. Retain saved checkpoints, drafts and the existing write fence.
+**Tests**: Focused hook/panel RED/GREEN covering rejected scope/read, cancellation,
+stale completion and recovery; owning frontend, types/lint/build and PR hooks.
+**Status**: Complete
+
+Original scope/read/panel RED has102 passes/4 failures. Revision1 exposes errors
+but incorrectly reports DOMException cancellation (105 passes/1 failure).
+Revision2 handles structural AbortError and passes106 focused tests; its broader
+88-file run passes1493 tests. Halley identifies a same-workspace newer-capture
+race, reproduced separately (106 passes/1 failure). Revision3 respects the
+pre-load H1 fence and passes107 focused tests. Types8GB, four-file lint with0
+errors/warnings, fourteen-file production Bandit0findings/errors and all286
+full PR-range hooks pass. Immutable production build/token/unchanged budgets pass.
+The initial isolated types run lacks the reused apps-level dependency link and
+remains failed; complete-dependency runs retain separate source-bound evidence.
+
+Hypatia's final independent review identifies the inverse ordering: a scope/read
+failure occurs before lease assignment, so a later valid same-workspace capture
+cannot clear the latched error. This remains unresolved, not a fourth test or
+production revision. The three-revision limit is reached; the candidate remains
+uncommitted/unpublished and no review thread is resolved for it. One explicit
+bounded rework approval is requested: bind the displayed failure to the H1
+selection fence, test both orderings, and preserve the failed-read save fence.
+Compared existing H1 epoch-qualified error publication, loader request/selection
+fencing and HistorySelectionReview's controller-scoped status. Replacing controller
+authority or logging alone would broaden behavior or leave misleading UI readiness.
+Full hook-to-panel lifecycle coverage remains an explicit test gap.
+No native sends/inference or additional Character-root reproduction occurs.
+
+2026-10-05 direct human instruction to fix the issues authorizes this bounded
+rework. Reproduce the inverse ordering and mounted real hook/panel lifecycle,
+bind display-error validity to the existing H1 selection fence, and verify both
+orderings while retaining failed-read save denial. No new controller abstraction,
+native send/inference or speculative Character guard change is included.
+
+The authorized fourth revision reproduces both scope/read failure-before-capture
+and the real hook-to-panel blocked-Send lifecycle (corrected RED108/3), then passes
+111 focused and1664 owning tests across91 files with no failures/skips. Displayed
+errors now carry the existing H1 fence; save authority remains separate and denied
+after a failed scope/read. Types, lint,14-file Bandit and286 PR-range hooks pass.
+Independent review and immutable production build are still required. Retain the
+initial collector failures; the build's historical cache path was missing before
+compilation, and the first protected readback was sandbox-blocked.
+
+Independent review found the fourth revision dismissed errors when a replacement
+load advanced the epoch before publishing its capture. The real pending-load RED
+retains111 passes/2 failures. The final fifth revision requires a distinct qualified
+capture before dismissing the failure:113 focused and1666 owning tests/91 files,
+zero failures/skips. Pending, failed and mismatched replacement captures stay
+blocked; both valid failure/capture orderings recover without saves or sends.
+Types8GB, matched four-file lint0errors/0warnings,14-file Bandit0findings/errors,
+286 full PR-range hooks and immutable production build/token/unchanged budgets
+pass with exact source bindings. Banach's final independent review reports no
+actionable findings. All prior failures remain attributed separately. Complete
+locally only: not yet published, Qodo-resolved or native acceptance; fullUatPassed
+remains false. No native input, inference or shared service mutation occurred.
+
+## Stage 20: Current Dev Functional Batch
+**Goal**: Integrate independently verified actual latest dev without losing the
+qualified checkpoint correction or mutating the original running API source.
+**Success Criteria**: Latest dev is an ancestor; whole-tree equality with the
+independent conflict-free integration; fresh relevant frontend/runtime/PG checks,
+normal hooks, exact publication lease, then fresh hosted/Qodo qualification.
+**Tests**: Claims/config/startup/shared SQLite/MediaDB, durable chat, official
+PostgreSQL fixtures, cached model settings, owning frontend, types/lint/build.
+**Status**: In Progress
+
+Actual dev025627214c3aeda1b2e9af5c6a9f85c636a2ec02 adds PR3193's cached model
+settings fix after c226. Published d912 plus this base is conflict-free; runtime
+PR3093 remains pending integration. Preserve existing history using a normal
+latest-dev merge when conflict-free; a history rewrite is unnecessary.

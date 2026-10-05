@@ -99,6 +99,7 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
   const draftRevision = useRef(0)
   const [scopeRevision, setScopeRevision] = useState(0)
   const [restoring, setRestoring] = useState(false)
+  const [restoreError, setRestoreError] = useState<{ message: string; isCurrent: () => boolean } | null>(null)
   const workspaceId = options.workspaceId?.trim() || null
   const ready = Boolean(control && hydrated && options.workspaceReady && workspaceId && referenceId)
   const setDraft = useCallback<Dispatch<SetStateAction<string>>>((value) => {
@@ -144,6 +145,7 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
       selection.current?.reset()
       clearView()
       setRestoring(false)
+      setRestoreError(null)
       setScopeRevision(value => value + 1)
     }
     const unsubscribe = subscribeToServicePromptConfigChanges(invalidateScope)
@@ -194,11 +196,13 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
       request.abort()
       controller.beginLoad()
       setRestoring(false)
+      setRestoreError(null)
       if (event.type === "popstate") setRouteRevision(value => value + 1)
     }
     window.addEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, routeChanged)
     window.addEventListener("popstate", routeChanged)
     setRestoring(true)
+    setRestoreError(null)
     void (async () => {
       try {
         const scope = await resolveServicePromptScope({ signal: request.signal })
@@ -273,8 +277,20 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
         if (!isCurrent()) return
         if (draftRevision.current === revision) latest.current.setDraft(stored.checkpoint!.draft)
         owned.settled = true
-      } catch {
+      } catch (error) {
         // Keep a rejected checkpoint intact; a failed read never grants save authority.
+        const cancelled = typeof error === "object" && error !== null && "name" in error && error.name === "AbortError"
+        if (isCurrent() && !cancelled && (capturedOwnerKey !== null || beforeLoad())) {
+          const failedCapture = controller.getCurrent().capture
+          const errorFence = controller.fence()
+          setRestoreError({ message: "Workspace chat restoration failed", isCurrent: () => {
+            const current = controller.getCurrent()
+            return errorFence() || current.capture === failedCapture || current.owner?.kind !== "native" ||
+              !qualifiedReference(controller, latest.current.chat, {
+                ownerKey: serverChatMirrorOwnerKey({ requestScope: current.owner.request_scope }), workspaceId, referenceId
+              })
+          } })
+        }
       } finally {
         if (token === generation.current) setRestoring(false)
       }
@@ -302,6 +318,7 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
       if (!reference || control.getCurrent().owner?.kind !== "native") return
       owned.settled = true
       setRestoring(false)
+      setRestoreError(null)
     }
     if (!reference && (!owned.allowEmpty || control.getReference() || chat.messages.length || chat.history.length || chat.historyId || chat.serverChatId)) return
     const session: WorkspaceChatSession = {
@@ -340,5 +357,6 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
     owned.snapshot = getSession(owned.key)
   }, [active, legacySessionKey, chat.messages, chat.history, chat.historyId, chat.serverChatId, getSession, saveSession])
 
-  return { active, restoring, setDraft, controller: control, referenceId, fence }
+  return { active, restoring, restoreError: restoreError?.isCurrent() ? restoreError.message : null,
+    setDraft, controller: control, referenceId, fence }
 }

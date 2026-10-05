@@ -73,6 +73,7 @@ import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useWorkspaceStore, type WorkspaceChatSession } from "@/store/workspace"
 import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { ChatPane } from "@/components/Option/ResearchWorkspace/ChatPane"
+import { WorkspaceChatPanel } from "@/components/Option/ChatWorkspace/WorkspaceChatPanel"
 
 const scope = (userId = 1, serverUrl = "http://owner.test") => ({
   config: { serverUrl, authMode: "multi-user" as const, authSource: "manual" as const },
@@ -106,8 +107,9 @@ function seed(name = "A", draft = `Draft ${name}`, owner = scope()) {
 }
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => { resolve = done })
-  return { promise, resolve }
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail })
+  return { promise, resolve, reject }
 }
 const capture = (owner: { conversation_id: string }, view: HistoryViewSelectionV1) => {
   const name = owner.conversation_id.replace("chat-", "")
@@ -152,6 +154,7 @@ function Surface({ legacySessionKey, routeSearch, watchSessions = false }: { leg
     <input aria-label="Draft" value={draft} onChange={event => checkpoint.setDraft(event.target.value)} />
     <output aria-label="Transcript">{chat.messages.map(row => row.message).join(" / ")}</output>
     <output aria-label="Restoring">{String(checkpoint.restoring)}</output>
+    <output aria-label="Restoration error">{checkpoint.restoreError}</output>
   </>
 }
 function RoutedSurface({ viaContext = false }: { viaContext?: boolean }) {
@@ -221,6 +224,74 @@ beforeEach(() => {
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks() })
 
 describe("qualified workspace checkpoint handoff", () => {
+  it("reports an unexpected scope failure without exposing details or changing its saved checkpoint", async () => {
+    seed()
+    const original = structuredClone(checkpoint())
+    const pending = deferred<ReturnType<typeof scope>>()
+    mocks.scope.mockReturnValueOnce(pending.promise)
+    mount()
+    fireEvent.change(draft(), { target: { value: "Newer unsent draft" } })
+    await act(async () => { pending.reject(new Error("token=private-secret database failed")) })
+    await waitFor(() => expect(screen.getByLabelText("Restoration error")).toHaveTextContent("Workspace chat restoration failed"))
+    expect(screen.getByLabelText("Restoration error")).not.toHaveTextContent("private-secret")
+    expect(screen.getByLabelText("Restoring")).toHaveTextContent("false")
+    expect(draft().value).toBe("Newer unsent draft")
+    expect(checkpoint()).toEqual(original)
+    expect(checkpointFence!()()).toBe(false)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("reports an unexpected checkpoint read failure without granting save authority", async () => {
+    seed()
+    const original = structuredClone(checkpoint())
+    vi.spyOn(useWorkspaceStore.getState(), "getWorkspaceChatSession").mockImplementation(() => { throw new Error("storage failed") })
+    const surface = mount()
+    await waitFor(() => expect(screen.getByLabelText("Restoration error")).toHaveTextContent("Workspace chat restoration failed"))
+    expect(checkpointFence!()()).toBe(false)
+    surface.unmount()
+    expect(checkpoint()).toEqual(original)
+    expect(mocks.capture).not.toHaveBeenCalled()
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("keeps expected scope cancellation silent and preserves its saved checkpoint", async () => {
+    seed()
+    const original = structuredClone(checkpoint())
+    mocks.scope.mockRejectedValueOnce(new DOMException("Cancelled", "AbortError"))
+    mount()
+    await waitFor(() => expect(screen.getByLabelText("Restoring")).toHaveTextContent("false"))
+    expect(screen.getByLabelText("Restoration error")).toBeEmptyDOMElement()
+    expect(checkpoint()).toEqual(original)
+    expect(checkpointFence!()()).toBe(false)
+  })
+
+  it("does not publish a superseded workspace rejection into the current restored workspace", async () => {
+    seed(); seed("B")
+    const original = structuredClone(checkpoint())
+    const pending = deferred<ReturnType<typeof scope>>()
+    mocks.scope.mockReturnValueOnce(pending.promise)
+    mount()
+    changeWorkspace("B")
+    await waitFor(() => expect(draft().value).toBe("Draft B"))
+    await act(async () => { pending.reject(new Error("Late workspace A failure")) })
+    expect(screen.getByLabelText("Restoration error")).toBeEmptyDOMElement()
+    expect(draft().value).toBe("Draft B")
+    expect(checkpoint()).toEqual(original)
+    expect(checkpointFence!()()).toBe(true)
+  })
+
+  it("clears the restoration error after a fresh qualified restore without sending", async () => {
+    seed()
+    mocks.scope.mockRejectedValueOnce(new Error("Unavailable"))
+    mount()
+    await waitFor(() => expect(screen.getByLabelText("Restoration error")).toHaveTextContent("Workspace chat restoration failed"))
+    act(() => { mocks.listeners.forEach(listener => listener()) })
+    await waitFor(() => expect(draft().value).toBe("Draft A"))
+    expect(screen.getByLabelText("Restoration error")).toBeEmptyDOMElement()
+    expect(checkpointFence!()()).toBe(true)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
   it.each([true, false])("does not autosave-loop when Research observes persisted sessions (H1 %s)", async active => {
     if (active) seed()
     else {
@@ -901,6 +972,123 @@ describe("qualified workspace checkpoint handoff", () => {
     expect(transcript()).toBe("Verified B")
     expect(draft().value).toBe("Current capture draft")
     expect(checkpoint().checkpoint?.historySelectionReference?.conversation_id).toBe("chat-B")
+  })
+
+  it("does not publish a rejected scope lookup over a newer captured selection in the same workspace", async () => {
+    seed()
+    const original = structuredClone(checkpoint())
+    const pending = deferred<ReturnType<typeof scope>>()
+    mocks.scope.mockReturnValueOnce(pending.promise).mockResolvedValue(scope())
+    mount()
+    await act(async () => {
+      await controller!.loadConversation({ serverChatId: "chat-B", scope: { type: "workspace", workspaceId: "workspace-A" } })
+      useStoreMessageOption.getState().setServerChatId("chat-B")
+    })
+    fireEvent.change(draft(), { target: { value: "Current capture draft" } })
+    await act(async () => { pending.reject(new Error("Superseded scope failure")) })
+    expect(screen.getByLabelText("Restoration error")).toBeEmptyDOMElement()
+    expect(transcript()).toBe("Verified B")
+    expect(draft().value).toBe("Current capture draft")
+    expect(checkpoint()).toEqual(original)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["scope", "read"])("retires a %s failure after a newer capture without granting checkpoint save authority", async failure => {
+    seed()
+    const original = structuredClone(checkpoint())
+    if (failure === "scope") mocks.scope.mockRejectedValueOnce(new Error("Unavailable"))
+    else vi.spyOn(useWorkspaceStore.getState(), "getWorkspaceChatSession").mockImplementationOnce(() => { throw new Error("storage failed") })
+    const surface = mount()
+    await waitFor(() => expect(screen.getByLabelText("Restoration error")).toHaveTextContent("Workspace chat restoration failed"))
+    fireEvent.change(draft(), { target: { value: "Retained unsent draft" } })
+    await act(async () => {
+      await controller!.loadConversation({ serverChatId: "chat-B", scope: { type: "workspace", workspaceId: "workspace-A" } })
+      useStoreMessageOption.getState().setServerChatId("chat-B")
+    })
+    expect(screen.getByLabelText("Restoration error")).toBeEmptyDOMElement()
+    expect(transcript()).toBe("Verified B")
+    expect(draft().value).toBe("Retained unsent draft")
+    expect(checkpointFence!()()).toBe(false)
+    surface.unmount()
+    expect(checkpoint()).toEqual(original)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["before", "after"])("mounted workspace panel remains usable when capture occurs %s checkpoint rejection", async ordering => {
+    seed()
+    const original = structuredClone(checkpoint())
+    const pending = deferred<ReturnType<typeof scope>>()
+    mocks.scope.mockReturnValueOnce(pending.promise).mockResolvedValue(scope())
+    useStoreMessageOption.setState({ selectedModel: "test-model", serverChatLoadState: "idle" })
+    const runtime = vi.fn()
+    const surface = render(<HistorySelectionProvider onCapture={result => {
+      useStoreMessageOption.getState().setMessages(result.selected_content.map(row => ({ id: row.id, name: "Assistant", isBot: true, message: row.message, sources: [] })))
+      useStoreMessageOption.getState().setHistory(result.selected_content.map(row => ({ role: "assistant", content: row.message })))
+    }}><SelectionObserver /><WorkspaceChatPanel workspaceId="workspace-A" workspaceReady backendAvailable
+      stagedSources={[]} onClearStagedSources={() => {}} onRuntimeStateChange={runtime} /></HistorySelectionProvider>)
+    const composer = screen.getByRole("textbox", { name: "Chat workspace message" })
+    fireEvent.change(composer, { target: { value: "Retained unsent draft" } })
+    if (ordering === "after") {
+      await act(async () => { pending.reject(new Error("Unavailable")) })
+      expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
+      expect(runtime.mock.lastCall?.[0].historyLoadError).toBe("Workspace chat restoration failed")
+    }
+    await act(async () => {
+      await controller!.loadConversation({ serverChatId: "chat-B", scope: { type: "workspace", workspaceId: "workspace-A" } })
+      useStoreMessageOption.getState().setServerChatId("chat-B")
+      useStoreMessageOption.getState().setServerChatLoadState("loaded")
+    })
+    if (ordering === "before") await act(async () => { pending.reject(new Error("Unavailable")) })
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled()
+    expect(runtime.mock.lastCall?.[0].historyLoadError).toBeNull()
+    expect(composer).toHaveValue("Retained unsent draft")
+    expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual(["Verified B"])
+    surface.unmount()
+    expect(checkpoint()).toEqual(original)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["scope", "read"])("keeps a %s restoration failure blocking Send until replacement capture succeeds", async failure => {
+    seed()
+    const original = structuredClone(checkpoint())
+    useStoreMessageOption.setState({ selectedModel: "test-model", serverChatLoadState: "idle" })
+    const onCapture: NonNullable<React.ComponentProps<typeof HistorySelectionProvider>["onCapture"]> = result => {
+      useStoreMessageOption.getState().setMessages(result.selected_content.map(row => ({ id: row.id, name: "Assistant", isBot: true, message: row.message, sources: [] })))
+      useStoreMessageOption.getState().setHistory(result.selected_content.map(row => ({ role: "assistant", content: row.message })))
+    }
+    const surface = render(<HistorySelectionProvider onCapture={onCapture}><SelectionObserver /></HistorySelectionProvider>)
+    await act(async () => {
+      await controller!.loadConversation({ serverChatId: "chat-B", scope: { type: "workspace", workspaceId: "workspace-A" } })
+      useStoreMessageOption.getState().setServerChatId("chat-B")
+      useStoreMessageOption.getState().setServerChatLoadState("loaded")
+    })
+    if (failure === "scope") mocks.scope.mockRejectedValueOnce(new Error("Unavailable"))
+    else vi.spyOn(useWorkspaceStore.getState(), "getWorkspaceChatSession").mockImplementationOnce(() => { throw new Error("storage failed") })
+    const runtime = vi.fn()
+    surface.rerender(<HistorySelectionProvider onCapture={onCapture}><SelectionObserver />
+      <WorkspaceChatPanel workspaceId="workspace-A" workspaceReady backendAvailable stagedSources={[]}
+        onClearStagedSources={() => {}} onRuntimeStateChange={runtime} /></HistorySelectionProvider>)
+    await waitFor(() => expect(runtime.mock.lastCall?.[0].historyLoadError).toBe("Workspace chat restoration failed"))
+    const pending = deferred<ReturnType<typeof scope>>()
+    mocks.scope.mockReturnValueOnce(pending.promise)
+    let loading!: Promise<boolean>
+    act(() => { loading = controller!.loadConversation({ serverChatId: "chat-C", scope: { type: "workspace", workspaceId: "workspace-A" } }) })
+    await waitFor(() => expect(mocks.scope.mock.results.at(-1)?.value).toBe(pending.promise))
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), { target: { value: "Retained while loading" } })
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
+    expect(runtime.mock.lastCall?.[0].historyLoadError).toBe("Workspace chat restoration failed")
+    await act(async () => {
+      pending.resolve(scope())
+      await loading
+      useStoreMessageOption.getState().setServerChatId("chat-C")
+      useStoreMessageOption.getState().setServerChatLoadState("loaded")
+    })
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled()
+    expect(runtime.mock.lastCall?.[0].historyLoadError).toBeNull()
+    expect(screen.getByRole("textbox", { name: "Chat workspace message" })).toHaveValue("Retained while loading")
+    surface.unmount()
+    expect(checkpoint()).toEqual(original)
+    expect(mocks.submit).not.toHaveBeenCalled()
   })
 
   it("keeps the legacy Research session path only when no controller is mounted", async () => {

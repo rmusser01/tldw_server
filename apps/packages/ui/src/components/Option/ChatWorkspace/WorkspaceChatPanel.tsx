@@ -330,6 +330,7 @@ export const WorkspaceChatPanel = ({
   const historyLoadError =
     serverChatLoadError ||
     (serverChatLoadState === "failed" ? "Chat history unavailable" : null) ||
+    (checkpoint.active ? checkpoint.restoreError : null) ||
     checkpointLoadError
   const sending = isLoading || isProcessing || preparationPending || recoveryPending
   const isSending = streaming || sending
