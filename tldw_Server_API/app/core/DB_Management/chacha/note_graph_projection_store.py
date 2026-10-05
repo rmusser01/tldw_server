@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.Notes.wikilinks import (
+    MAX_WIKILINK_RENAME_NOTES,
     WikilinkProjection,
     WikilinkTitleCandidate,
     is_wikilink_title_reference_key,
@@ -67,8 +68,29 @@ class WikilinkTitleResolution:
     candidate_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class WikilinkTitleReferrer:
+    """One live note whose text holds a ``[[Title]]`` link to some title."""
+
+    note_id: str
+    title: str
+    version: int
+
+
+@dataclass(frozen=True, slots=True)
+class WikilinkTitleReferrerPage:
+    """One page of referrers, ordered by note id, and the count across all pages."""
+
+    total: int
+    notes: tuple[WikilinkTitleReferrer, ...]
+    # More referrers follow the last note of this page.
+    has_more: bool = False
+
+
 # Titles are matched in batches of LIKE prefilters; the exact rule runs in Python.
 _TITLE_LOOKUP_BATCH = 100
+# Notes one referrer page may list: what one rename rewrite request may name.
+MAX_TITLE_REFERRER_PAGE = MAX_WIKILINK_RENAME_NOTES
 # Notes re-projected inline when a title changes. Any remainder is queued for
 # the maintenance worker, so one rename can't make a request unbounded.
 MAX_INLINE_TITLE_REFERRER_REFRESH = 200
@@ -356,6 +378,81 @@ class NoteGraphProjectionStore:
             params += (self._db.client_id,)
         row = conn.execute(query, params).fetchone()
         return None if row is None else str(row["title"] or "")
+
+    def list_live_note_ids_titled(self, title: str | None) -> tuple[str, ...]:
+        """List the owner's live notes whose title matches ``title`` as a link would.
+
+        Matching ignores case and extra whitespace, like ``[[Title]]`` links.
+        """
+
+        key = normalize_wikilink_title(title)
+        if not key:
+            return ()
+        candidates = self._title_candidates(self._db.execute_query, [key], exclude_note_id=None)
+        return tuple(sorted(candidate.note_id for candidate in candidates.get(key, ())))
+
+    def list_title_referrers(
+        self,
+        title: str | None,
+        *,
+        exclude_note_id: str | None = None,
+        unresolved_only: bool = False,
+        after_note_id: str | None = None,
+        limit: int = MAX_TITLE_REFERRER_PAGE,
+    ) -> WikilinkTitleReferrerPage:
+        """Page through the owner's live notes that hold a ``[[Title]]`` link to ``title``.
+
+        The projection's title reference keys answer this without reading note
+        text. Trashed notes are never listed. ``unresolved_only`` keeps only
+        notes where the link names no live note, which is what a rename leaves
+        behind; a note never answers its own link. ``total`` ignores the
+        ``after_note_id`` cursor.
+        """
+
+        if not 1 <= limit <= MAX_TITLE_REFERRER_PAGE:
+            raise ValueError(f"limit must be between 1 and {MAX_TITLE_REFERRER_PAGE}")
+        if not normalize_wikilink_title(title):
+            return WikilinkTitleReferrerPage(0, ())
+        clauses = ["edge.target_note_id = ?", "note.deleted = ?"]
+        params: list[object] = [wikilink_title_reference_key(title), False if self._postgres else 0]
+        if self._postgres:
+            clauses.append("edge.owner_user_id = ? AND note.client_id = ?")
+            params.extend((self._db.client_id,) * 2)
+        if exclude_note_id:
+            clauses.append("note.id <> ?")
+            params.append(exclude_note_id)
+        if unresolved_only:
+            answering = self.list_live_note_ids_titled(title)
+            if len(answering) > 1:
+                return WikilinkTitleReferrerPage(0, ())
+            if answering:
+                # Only that note's own link is unresolved: it can't answer itself.
+                clauses.append("note.id = ?")
+                params.append(answering[0])
+        source = (
+            "FROM note_wikilink_edges edge JOIN notes note ON note.id = edge.source_note_id "
+            f"WHERE {' AND '.join(clauses)}"
+        )
+        total_row = self._db.execute_query(
+            f"SELECT COUNT(*) AS referrer_count {source}",  # nosec B608 - fixed fragments; values stay bound.
+            tuple(params),
+        ).fetchone()
+        total = int(total_row["referrer_count"]) if total_row else 0
+        if total == 0:
+            return WikilinkTitleReferrerPage(0, ())
+        page_query = f"SELECT note.id, note.title, note.version {source}"  # nosec B608
+        page_params = list(params)
+        if after_note_id:
+            page_query += " AND note.id > ?"
+            page_params.append(after_note_id)
+        page_query += " ORDER BY note.id LIMIT ?"
+        # One row beyond the page tells whether another page follows.
+        page_params.append(limit + 1)
+        notes = tuple(
+            WikilinkTitleReferrer(str(row["id"]), str(row["title"] or ""), int(row["version"]))
+            for row in self._db.execute_query(page_query, tuple(page_params)).fetchall()
+        )
+        return WikilinkTitleReferrerPage(total, notes[:limit], has_more=len(notes) > limit)
 
     def refresh_title_referrers(
         self,
@@ -800,11 +897,14 @@ class NoteGraphProjectionStore:
 
 __all__ = [
     "MAX_INLINE_TITLE_REFERRER_REFRESH",
+    "MAX_TITLE_REFERRER_PAGE",
     "DirtyProjection",
     "NoteGraphProjectionStore",
     "NoteProjectionSource",
     "NoteProjectionState",
     "ProjectionStatus",
     "WikilinkProjectionEdge",
+    "WikilinkTitleReferrer",
+    "WikilinkTitleReferrerPage",
     "WikilinkTitleResolution",
 ]

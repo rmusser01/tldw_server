@@ -39,6 +39,8 @@ import {
   useNotesExport,
   useNotesImport,
   useNotesWikilinks,
+  useNotesWikilinkRename,
+  type NoteRenamedEvent,
 } from "@/components/Notes/hooks"
 import type { NoteListItem } from "@/components/Notes/notes-manager-types"
 import { parseWikilinkHref } from "@/components/Notes/wikilinks"
@@ -191,6 +193,8 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
   const setSaveIndicatorRef = React.useRef<(state: any) => void>(() => {})
   const setMonitoringNoticeRef = React.useRef<(notice: any) => void>(() => {})
   const markGeneratedEditRef = React.useRef<(action: NotesAssistAction) => void>(() => {})
+  // The rename offer hook is initialized after the editor hook that reports renames.
+  const noteRenamedRef = React.useRef<(event: NoteRenamedEvent) => void>(() => {})
 
   const list = useNotesListManagement({
     authorityScope: notesGraphAuthorityScope,
@@ -269,6 +273,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     setKeywordSuggestionOptions: kw.setKeywordSuggestionOptions,
     setKeywordSuggestionSelection: kw.setKeywordSuggestionSelection,
     editorDisabled,
+    onNoteRenamed: (event) => noteRenamedRef.current(event),
   })
   const [hasActiveDraft, setHasActiveDraft] = React.useState(false)
   const resetEditorToEmptyState = React.useCallback(() => {
@@ -755,6 +760,26 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     data: list.data,
     noteRelations,
   })
+
+  // ---- Offer to update [[Old title]] links after a rename (#3110) ----
+  const wikilinkRename = useNotesWikilinkRename({
+    isOnline,
+    authorityScope: notesGraphAuthorityScope,
+    connectionConfig: canonicalConnectionConfig,
+    message,
+    t,
+    selectedId: ed.selectedId,
+    isDirty: ed.isDirty,
+    hasQueuedDraft: (noteId) => Boolean(ed.offlineDraftQueue[`note:${noteId}`]),
+    reloadSelectedNote: () => (ed.selectedId == null ? undefined : ed.loadDetail(ed.selectedId)),
+    onLinksChanged: () => {
+      void list.refetch()
+      ed.setGraphMutationTick((tick) => tick + 1)
+    },
+  })
+  noteRenamedRef.current = (event) => {
+    void wikilinkRename.handleNoteRenamed(event)
+  }
 
   // ---- Export hook ----
   const exp = useNotesExport({

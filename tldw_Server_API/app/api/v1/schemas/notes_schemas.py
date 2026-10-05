@@ -11,6 +11,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.core.Notes.wikilinks import (
+    MAX_WIKILINK_RENAME_NOTES,
+    MAX_WIKILINK_REPLACEMENTS_PER_NOTE,
+    MAX_WIKILINK_TITLE_LENGTH,
+    MAX_WIKILINK_TOKEN_TEXT_LENGTH,
+    is_single_wikilink,
+)
 
 from .notes_studio import NoteStudioDocumentSummaryResponse
 
@@ -725,6 +732,230 @@ class WikilinkIdResolution(BaseModel):
 class WikilinkResolveResponse(BaseModel):
     titles: list[WikilinkTitleResolution] = Field(default_factory=list)
     ids: list[WikilinkIdResolution] = Field(default_factory=list)
+
+
+# --- Updating [[Old title]] links after a rename -----------------------------
+
+_NOTE_ID_MAX_LENGTH = 200
+
+
+class WikilinkReferrersRequest(BaseModel):
+    """Ask which live notes hold a ``[[Title]]`` link to a title."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_WIKILINK_TITLE_LENGTH,
+        description="The linked title. Matching ignores case and extra whitespace.",
+    )
+    exclude_note_id: str | None = Field(
+        None,
+        max_length=_NOTE_ID_MAX_LENGTH,
+        description="A note to leave out, such as the note that was just renamed.",
+    )
+    unresolved_only: bool = Field(
+        False,
+        description=(
+            "If true, only count notes where the link names no live note: the links a rename broke. "
+            "A link that another live note with this title still answers is left out."
+        ),
+    )
+    after_note_id: str | None = Field(
+        None,
+        max_length=_NOTE_ID_MAX_LENGTH,
+        description="Cursor: list notes after this id. Pass the previous page's next_after_note_id.",
+    )
+    limit: int = Field(
+        MAX_WIKILINK_RENAME_NOTES,
+        ge=1,
+        le=MAX_WIKILINK_RENAME_NOTES,
+        description="Notes to list per page.",
+    )
+
+
+class WikilinkReferrerNote(BaseModel):
+    id: str = Field(..., description="The linking note.")
+    title: str = Field(..., description="The linking note's title.")
+    version: int = Field(..., description="Its version now. Send it back as expected_version to rewrite it.")
+
+
+class WikilinkReferrersResponse(BaseModel):
+    title: str = Field(..., description="The linked title, as sent.")
+    count: int = Field(..., ge=0, description="Linking notes across all pages.")
+    notes: list[WikilinkReferrerNote] = Field(default_factory=list, description="This page, ordered by note id.")
+    next_after_note_id: str | None = Field(
+        None,
+        description="Cursor for the next page, or null when this page is the last.",
+    )
+
+
+class WikilinkRewriteNote(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(..., min_length=1, max_length=_NOTE_ID_MAX_LENGTH, description="A linking note.")
+    expected_version: int = Field(
+        ...,
+        ge=1,
+        description="The version the caller read. A note at another version is skipped, not overwritten.",
+    )
+
+
+class WikilinkRewriteRequest(BaseModel):
+    """Rewrite ``[[Old title]]`` links so they point at a renamed note again."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=_NOTE_ID_MAX_LENGTH,
+        description="The renamed note. Links are rewritten to its current title.",
+    )
+    old_title: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_WIKILINK_TITLE_LENGTH,
+        description="The title the note had before the rename.",
+    )
+    notes: list[WikilinkRewriteNote] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_WIKILINK_RENAME_NOTES,
+        description="The linking notes to rewrite, from the referrers endpoint.",
+    )
+
+
+class WikilinkTokenReplacement(BaseModel):
+    """One rewritten link: undo data, to be sent back unchanged."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    token_index: int = Field(..., ge=0, description="The link's position among the note's [[...]] tokens.")
+    original: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_WIKILINK_TOKEN_TEXT_LENGTH,
+        description="The link text that was replaced.",
+    )
+
+
+WikilinkRewriteStatus = Literal[
+    "updated",
+    "skipped_conflict",
+    "skipped_no_match",
+    "skipped_not_found",
+    "skipped_resolved",
+    "failed",
+]
+
+
+class WikilinkRewriteNoteResult(BaseModel):
+    id: str
+    title: str | None = Field(None, description="The note's title, when the note was found.")
+    status: WikilinkRewriteStatus = Field(
+        ...,
+        description=(
+            "updated: the links were rewritten. skipped_conflict: the note changed since expected_version. "
+            "skipped_no_match: it holds no link to the old title. skipped_not_found: it is missing or in the "
+            "trash. skipped_resolved: another live note still has the old title, so the link is not broken. "
+            "failed: it was not rewritten: the save failed, a link could not be rewritten in place, or it held "
+            "more links than undo can restore. Its text is unchanged; with Sync active, a save that failed "
+            "after it was accepted may still be applied later."
+        ),
+    )
+    version: int | None = Field(None, description="The note's version after this request.")
+    replaced_count: int = Field(0, ge=0)
+    replacements: list[WikilinkTokenReplacement] = Field(
+        default_factory=list,
+        description="Undo data for an updated note.",
+    )
+
+
+class WikilinkRewriteResponse(BaseModel):
+    old_title: str
+    new_title: str = Field(..., description="The renamed note's current title.")
+    link_form: Literal["title", "id"] = Field(
+        ...,
+        description=(
+            "How the links were written. 'id' ([[id:UUID]]) is used when another live note shares the new "
+            "title, or when no title link can name it. A note whose id is not a UUID keeps 'title' for a "
+            "shared title only when that link resolves to it."
+        ),
+    )
+    replacement: str = Field(..., description="The link text written in place of each old link.")
+    new_title_shared: bool = Field(
+        ...,
+        description="Another live note has the new title, ignoring case and extra whitespace.",
+    )
+    updated_count: int = Field(..., ge=0)
+    skipped_count: int = Field(..., ge=0)
+    results: list[WikilinkRewriteNoteResult] = Field(default_factory=list)
+
+
+class WikilinkRewriteUndoNote(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(..., min_length=1, max_length=_NOTE_ID_MAX_LENGTH)
+    expected_version: int = Field(
+        ...,
+        ge=1,
+        description="The version the rewrite returned. A note edited since is skipped.",
+    )
+    replacements: list[WikilinkTokenReplacement] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_WIKILINK_REPLACEMENTS_PER_NOTE,
+        description="The rewrite's undo data for this note.",
+    )
+
+
+class WikilinkRewriteUndoRequest(BaseModel):
+    """Restore the text a wikilink rewrite replaced."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    old_title: str = Field(..., min_length=1, max_length=MAX_WIKILINK_TITLE_LENGTH)
+    replacement: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_WIKILINK_TITLE_LENGTH + 4,
+        description="The link text the rewrite wrote, as it returned it.",
+    )
+    notes: list[WikilinkRewriteUndoNote] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_WIKILINK_RENAME_NOTES,
+    )
+
+    @field_validator("replacement")
+    @classmethod
+    def _replacement_is_one_link(cls, value: str) -> str:
+        if not is_single_wikilink(value):
+            raise ValueError("replacement must be exactly one [[Title]] or [[id:UUID]] link")
+        return value
+
+
+class WikilinkRewriteUndoNoteResult(BaseModel):
+    id: str
+    title: str | None = None
+    status: Literal["restored", "skipped_conflict", "skipped_no_match", "skipped_not_found", "failed"] = Field(
+        ...,
+        description=(
+            "restored: the previous text is back. skipped_conflict: the note changed since the rewrite. "
+            "skipped_no_match: its text does not hold the rewritten links. skipped_not_found: it is missing "
+            "or in the trash. failed: the save failed. Its text is unchanged; with Sync active, a save that "
+            "failed after it was accepted may still be applied later."
+        ),
+    )
+    version: int | None = Field(None, description="The note's version after this request.")
+
+
+class WikilinkRewriteUndoResponse(BaseModel):
+    restored_count: int = Field(..., ge=0)
+    skipped_count: int = Field(..., ge=0)
+    results: list[WikilinkRewriteUndoNoteResult] = Field(default_factory=list)
 
 
 # Resolve forward references for nested schemas.

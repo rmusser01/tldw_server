@@ -22,6 +22,15 @@ Title resolution rules
   specific duplicate with ``[[id:<UUID>]]``.
 * A title with no live candidate is unresolved: it creates no edge, and the
   WebUI offers to create the note.
+
+Rewriting links after a rename
+------------------------------
+Links follow titles, so renaming a note leaves ``[[Old title]]`` links
+unresolved. :func:`rewrite_wikilink_title_tokens` replaces exactly the tokens
+this parser reads as a link to the old title (:func:`iter_wikilink_tokens`),
+and :func:`restore_wikilink_tokens` puts the original tokens back. There is no
+alias form (``[[Title|label]]`` is the title ``Title|label``) and code spans
+are not special: a link inside code is a link here, so it is rewritten too.
 """
 
 from __future__ import annotations
@@ -29,13 +38,20 @@ from __future__ import annotations
 import hashlib
 import re
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 WIKILINK_PARSER_VERSION = 2
 MAX_WIKILINK_TARGETS = 1_024
 MAX_WIKILINK_TITLE_LENGTH = 1_024
+# Bounds for the rename rewrite and its undo (``wikilink_rename.py``).
+# Notes one rewrite or undo request may name; callers page through more.
+MAX_WIKILINK_RENAME_NOTES = 200
+# Links to one title that one note may have rewritten, and the longest token
+# text undo carries back. A note beyond either is reported, not rewritten.
+MAX_WIKILINK_REPLACEMENTS_PER_NOTE = 1_000
+MAX_WIKILINK_TOKEN_TEXT_LENGTH = 4_096
 
 # ``[[`` + content without a newline or a nested ``[[`` + the first ``]]`` that
 # is not followed by another ``]``. The WebUI tokenizer uses the same pattern.
@@ -69,6 +85,36 @@ class WikilinkTitleCandidate:
     note_id: str
     title: str
     created_at: Any = None
+
+
+@dataclass(frozen=True, slots=True)
+class WikilinkToken:
+    """One ``[[...]]`` token, classified the way the projection reads it.
+
+    ``note_id`` is set for a valid ``[[id:UUID]]`` link and ``title`` (trimmed,
+    whitespace collapsed) for a ``[[Title]]`` link. Both are ``None`` for a
+    token that is not a link: a malformed id, a blank or an over-long title.
+    ``index`` counts every token in the content, link or not.
+    """
+
+    index: int
+    start: int
+    end: int
+    raw: str
+    note_id: str | None = None
+    title: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WikilinkTokenReplacement:
+    """One rewritten token: its ordinal in the content and its original text."""
+
+    token_index: int
+    original: str
+
+
+class WikilinkRewriteUnsafeError(ValueError):
+    """Rewriting a link in place would change which link the text holds."""
 
 
 def collapse_wikilink_title(title: str | None) -> str:
@@ -145,11 +191,10 @@ def parse_wikilinks(
     targets: list[str] = []
     titles: list[str] = []
     truncated = False
-    for match in _WIKILINK_TOKEN_RE.finditer(content or ""):
-        inner = match.group(1).strip()
-        if inner.startswith(_ID_PREFIX):
-            target = canonical_wikilink_note_id(inner[len(_ID_PREFIX):])
-            if target is None or target == normalized_source or target in seen_ids:
+    for token in iter_wikilink_tokens(content):
+        if token.note_id is not None:
+            target = token.note_id
+            if target == normalized_source or target in seen_ids:
                 continue
             seen_ids.add(target)
             if len(targets) + len(titles) == max_targets:
@@ -157,16 +202,175 @@ def parse_wikilinks(
                 continue
             targets.append(target)
             continue
-        title = collapse_wikilink_title(inner)
-        title_key = title.lower()
-        if not title or len(title) > MAX_WIKILINK_TITLE_LENGTH or title_key in seen_titles:
+        if token.title is None:
+            continue
+        title_key = token.title.lower()
+        if title_key in seen_titles:
             continue
         seen_titles.add(title_key)
         if len(targets) + len(titles) == max_targets:
             truncated = True
             continue
-        titles.append(title)
+        titles.append(token.title)
     return WikilinkProjection(tuple(targets), truncated, target_titles=tuple(titles))
+
+
+def iter_wikilink_tokens(content: str | None) -> Iterator[WikilinkToken]:
+    """Yield every ``[[...]]`` token in ``content``, in order.
+
+    This is the one place that decides what a link is. ``parse_wikilinks`` and
+    the rename rewrite both read tokens through it, so they can't disagree.
+    """
+
+    for index, match in enumerate(_WIKILINK_TOKEN_RE.finditer(content or "")):
+        inner = match.group(1).strip()
+        note_id: str | None = None
+        title: str | None = None
+        if inner.startswith(_ID_PREFIX):
+            # The prefix is reserved: a malformed id is not a link at all.
+            note_id = canonical_wikilink_note_id(inner[len(_ID_PREFIX):])
+        else:
+            collapsed = collapse_wikilink_title(inner)
+            if collapsed and len(collapsed) <= MAX_WIKILINK_TITLE_LENGTH:
+                title = collapsed
+        yield WikilinkToken(index, match.start(), match.end(), match.group(0), note_id, title)
+
+
+def wikilink_title_link_text(title: str | None) -> str | None:
+    """Return ``[[Title]]`` when the parser reads it back as a link to ``title``.
+
+    ``None`` means no title link can name this title: it is blank, too long,
+    starts with the reserved ``id:`` prefix, or contains ``[[`` or ``]]``.
+    """
+
+    collapsed = collapse_wikilink_title(title)
+    if not collapsed:
+        return None
+    text = f"[[{collapsed}]]"
+    token = _only_wikilink_token(text)
+    return text if token is not None and token.title == collapsed else None
+
+
+def wikilink_id_link_text(note_id: str | None) -> str | None:
+    """Return ``[[id:<uuid>]]`` for a canonical note id, else ``None``."""
+
+    canonical = canonical_wikilink_note_id(note_id)
+    return None if canonical is None else f"[[{_ID_PREFIX}{canonical}]]"
+
+
+def is_single_wikilink(text: str | None) -> bool:
+    """Report whether ``text`` is exactly one ``[[Title]]`` or ``[[id:UUID]]`` link."""
+
+    return _only_wikilink_token(text) is not None
+
+
+def rewrite_wikilink_title_tokens(
+    content: str,
+    *,
+    old_title: str,
+    replacement: str,
+) -> tuple[str, tuple[WikilinkTokenReplacement, ...]]:
+    """Replace every ``[[old_title]]`` link in ``content`` with ``replacement``.
+
+    Only whole tokens the parser reads as a link to ``old_title`` (ignoring
+    case and extra whitespace) are replaced; ``[[id:UUID]]`` links, similar
+    titles and all other text are returned byte for byte. ``replacement`` must
+    itself be exactly one link. The returned replacements are what
+    :func:`restore_wikilink_tokens` needs to undo the rewrite, and the result
+    is only returned if that undo is exact.
+
+    Raises:
+        WikilinkRewriteUnsafeError: a replacement would join neighbouring
+            brackets and read as a different link. This needs a link to a
+            title that starts with ``[`` directly after another ``[``
+            (``[[[[Old]]``); such text can't be rewritten in place.
+    """
+
+    if not is_single_wikilink(replacement):
+        raise ValueError("replacement must be exactly one [[Title]] or [[id:UUID]] link")
+    source = content or ""
+    old_key = normalize_wikilink_title(old_title)
+    if not old_key:
+        return source, ()
+    pieces: list[str] = []
+    replaced: list[WikilinkTokenReplacement] = []
+    cursor = 0
+    for token in iter_wikilink_tokens(source):
+        if token.title is None or token.title.lower() != old_key:
+            continue
+        pieces.extend((source[cursor:token.start], replacement))
+        cursor = token.end
+        replaced.append(WikilinkTokenReplacement(token.index, token.raw))
+    if not replaced:
+        return source, ()
+    pieces.append(source[cursor:])
+    rewritten = "".join(pieces)
+    replacements = tuple(replaced)
+    # Reading the result back must find the replacement at the same tokens.
+    if restore_wikilink_tokens(rewritten, replacements, old_title=old_title, replacement=replacement) != source:
+        raise WikilinkRewriteUnsafeError(
+            "a link to this title can't be rewritten in place: the new link would join neighbouring brackets"
+        )
+    return rewritten, replacements
+
+
+def restore_wikilink_tokens(
+    content: str,
+    replacements: Sequence[WikilinkTokenReplacement],
+    *,
+    old_title: str,
+    replacement: str,
+) -> str | None:
+    """Undo :func:`rewrite_wikilink_title_tokens`, or return ``None`` if it can't be exact.
+
+    Each named token must still be ``replacement``, and each original must be
+    one ``[[old_title]]`` link, so this can only turn the rewritten links back
+    into links to the old title.
+    """
+
+    source = content or ""
+    old_key = normalize_wikilink_title(old_title)
+    originals = {item.token_index: item.original for item in replacements}
+    if not old_key or not originals or len(originals) != len(replacements):
+        return None
+    if not is_single_wikilink(replacement):
+        return None
+    for original_text in originals.values():
+        original_token = _only_wikilink_token(original_text)
+        if (
+            original_token is None
+            or original_token.title is None
+            or original_token.title.lower() != old_key
+        ):
+            return None
+    pieces: list[str] = []
+    cursor = 0
+    restored = 0
+    for token in iter_wikilink_tokens(source):
+        original = originals.get(token.index)
+        if original is None:
+            continue
+        if token.raw != replacement:
+            return None
+        pieces.extend((source[cursor:token.start], original))
+        cursor = token.end
+        restored += 1
+    if restored != len(originals):
+        return None
+    pieces.append(source[cursor:])
+    return "".join(pieces)
+
+
+def _only_wikilink_token(text: str | None) -> WikilinkToken | None:
+    """Return the link ``text`` is, when it is exactly one link and nothing else."""
+
+    tokens = list(iter_wikilink_tokens(text))
+    if len(tokens) != 1:
+        return None
+    token = tokens[0]
+    if token.start != 0 or token.end != len(text or ""):
+        return None
+    return token if token.note_id is not None or token.title is not None else None
 
 
 def canonical_wikilink_note_id(value: str | None) -> str | None:
@@ -186,16 +390,28 @@ def _normalized_uuid(value: str | None) -> str | None:
 
 
 __all__ = [
+    "MAX_WIKILINK_RENAME_NOTES",
+    "MAX_WIKILINK_REPLACEMENTS_PER_NOTE",
     "MAX_WIKILINK_TARGETS",
     "MAX_WIKILINK_TITLE_LENGTH",
+    "MAX_WIKILINK_TOKEN_TEXT_LENGTH",
     "WIKILINK_PARSER_VERSION",
     "WikilinkProjection",
+    "WikilinkRewriteUnsafeError",
     "WikilinkTitleCandidate",
+    "WikilinkToken",
+    "WikilinkTokenReplacement",
     "canonical_wikilink_note_id",
     "collapse_wikilink_title",
+    "is_single_wikilink",
     "is_wikilink_title_reference_key",
+    "iter_wikilink_tokens",
     "normalize_wikilink_title",
     "parse_wikilinks",
+    "restore_wikilink_tokens",
+    "rewrite_wikilink_title_tokens",
     "select_wikilink_title_target",
+    "wikilink_id_link_text",
+    "wikilink_title_link_text",
     "wikilink_title_reference_key",
 ]
