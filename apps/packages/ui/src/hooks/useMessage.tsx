@@ -5,6 +5,7 @@ import {
 } from "@/hooks/chat/chat-action-utils";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
+import { SidepanelSendGateContext } from "@/hooks/chat/sidepanel-send-gate";
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { systemPromptForNonRag } from "~/services/tldw-server";
@@ -132,6 +133,7 @@ type ServerBackedMessage = Message & {
 
 export const useMessage = () => {
   const historySelection = useHistorySelectionContext();
+  const sendGate = React.useContext(SidepanelSendGateContext);
   // Controllers come from Context (for aborting streaming requests)
   const {
     controller: abortController,
@@ -2415,6 +2417,19 @@ export const useMessage = () => {
     historyIdOverride?: string | null;
     assertQueuedDispatchCurrent?: QueuedDispatchGuard;
   }) => {
+    // XP-08: a side-panel tab whose server chat changed elsewhere is refreshed
+    // onto the chat's latest message (or the send is held) before a new turn,
+    // so the turn never silently forks the conversation. This runs before the
+    // history fence below because a refresh moves the history selection.
+    if (sendGate?.current && !isRegenerate && !chatHistory && !memory) {
+      const gate = await sendGate.current({ message });
+      if (!gate.proceed) return;
+      if (gate.refreshed) {
+        const refreshed = useStoreMessageOption.getState();
+        chatHistory = refreshed.messages;
+        memory = refreshed.history;
+      }
+    }
     const historyOriginIsCurrent = historySelection?.fence();
     assertQueuedDispatchCurrent?.();
     const setTurnHistoryId = historySetterForQueuedTurn(assertQueuedDispatchCurrent);

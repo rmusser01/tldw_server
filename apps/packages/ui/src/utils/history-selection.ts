@@ -51,6 +51,20 @@ const indexNodes = (nodes: readonly HistoryNodeV1[], validateGraph = false): Map
   return byId
 }
 
+/**
+ * The conversation's latest leaf: the last node, in owner order, that no other
+ * node replies to. A view opened without a bookmark starts here.
+ */
+export const latestHistoryTipId = (
+  nodes: readonly Pick<HistoryNodeV1, "id" | "parent_id">[]
+): string | null => {
+  const parents = new Set(nodes.map((node) => node.parent_id))
+  for (let index = nodes.length - 1; index >= 0; index--) {
+    if (!parents.has(nodes[index].id)) return nodes[index].id
+  }
+  return null
+}
+
 /** Resolve only explicit parent IDs. Source order, content and timestamps have no authority. */
 export const resolveParentPath = (
   nodes: readonly HistoryNodeV1[], cursor: HistoryCursorV1
