@@ -160,7 +160,10 @@ export const useDraftPersistence = ({
   const pendingPersistRef = React.useRef<(() => void) | null>(null)
   const setValueRef = React.useRef(setValue)
   const setValueWithMetadataRef = React.useRef(setValueWithMetadata)
-  const getMetadataRef = React.useRef(getMetadata)
+  const currentValue = getValue()
+  const committedDraftRef = React.useRef<DraftPayload>({ content: currentValue })
+  const draftRevisionRef = React.useRef(0)
+  const hydrationEditsRef = React.useRef({ identity, changed: false })
   const lastPersistedSignatureRef = React.useRef<string | null>(null)
 
   React.useEffect(() => {
@@ -172,14 +175,36 @@ export const useDraftPersistence = ({
   }, [setValueWithMetadata])
 
   React.useLayoutEffect(() => {
-    getMetadataRef.current = getMetadata
-  }, [getMetadata])
+    let metadata: DraftMetadata | undefined
+    try {
+      const value = getMetadata?.()
+      if (value && isPlainObject(value) && isJsonSafe(value)) {
+        metadata = JSON.parse(JSON.stringify(value)) as DraftMetadata
+      }
+    } catch {
+      // Invalid or unavailable metadata must not prevent retaining the text.
+    }
+    const previous = committedDraftRef.current
+    if (hydrationEditsRef.current.identity !== identity) {
+      hydrationEditsRef.current = {
+        identity,
+        changed: !hydrationEditsRef.current.identity.enabled && enabled && currentValue.length > 0
+      }
+    } else if (previous.content !== currentValue) {
+      hydrationEditsRef.current.changed = true
+    }
+    if (previous.content !== currentValue) {
+      draftRevisionRef.current++
+    }
+    committedDraftRef.current = { content: currentValue, metadata }
+  }, [currentValue, getMetadata, identity, enabled])
 
   // Restore unsent draft on mount
   React.useEffect(() => {
     if (!enabled) return
     let cancelled = false
     const current = () => !cancelled && (!isCurrent || isCurrent())
+    const restoreRevision = draftRevisionRef.current
     setHydrated(null)
     setDraftSaved(false)
     lastPersistedSignatureRef.current = null
@@ -221,12 +246,14 @@ export const useDraftPersistence = ({
         lastPersistedSignatureRef.current = null
       }
 
-      if (current() && hasDraftContent(draftValue)) {
+      if (current() && draftRevisionRef.current === restoreRevision && !hydrationEditsRef.current.changed) {
+        const content = hasDraftContent(draftValue) ? draftValue.content : ""
+        const metadata = hasDraftContent(draftValue) ? draftValue.metadata : undefined
         const setValueWithMetadata = setValueWithMetadataRef.current
         if (setValueWithMetadata) {
-          setValueWithMetadata(draftValue.content, draftValue.metadata)
+          setValueWithMetadata(content, metadata)
         } else {
-          setValueRef.current(draftValue.content)
+          setValueRef.current(content)
         }
       }
 
@@ -246,19 +273,18 @@ export const useDraftPersistence = ({
     void draftBucket.cleanup()
   }, [enabled, draftBucket])
 
-  // Get current value for effect dependency
-  const currentValue = getValue()
-
   React.useLayoutEffect(() => () => {
     // In-app navigation has no pagehide event. Flush before the persistence
     // cleanup cancels this write and passive owner teardown revokes its lease.
     pendingPersistRef.current?.()
-  }, [])
+  }, [identity])
 
   // Persist draft whenever the message changes
   React.useLayoutEffect(() => {
     if (!enabled) return
-    if (hydrated !== identity || (isCurrent && !isCurrent())) return
+    // Only genuine edits belong to an unhydrated destination; carried source
+    // text must remain untouched until that destination's read completes.
+    if ((hydrated !== identity && !hydrationEditsRef.current.changed) || (isCurrent && !isCurrent())) return
     let cancelled = false
     const current = () => !cancelled && (!isCurrent || isCurrent())
     const value = currentValue
@@ -282,26 +308,20 @@ export const useDraftPersistence = ({
       return
     }
     const persist = () => {
-      if (pendingPersistRef.current === persist) pendingPersistRef.current = null
       if (persistTimeoutRef.current) {
         clearTimeout(persistTimeoutRef.current)
         persistTimeoutRef.current = null
       }
       void (async () => {
         if (!current()) return
-        let metadata: DraftMetadata | undefined
-        try {
-          metadata = getMetadataRef.current?.() ?? undefined
-        } catch {
-          metadata = undefined
-        }
-        if (metadata && (!isPlainObject(metadata) || !isJsonSafe(metadata))) {
-          metadata = undefined
-        }
+        // Key-change cleanup runs before the destination layout updates this
+        // snapshot, retaining source text and metadata as one committed draft.
+        const metadata = committedDraftRef.current.metadata
         const nextSignature = buildDraftSignature(value, metadata)
         if (nextSignature === lastPersistedSignatureRef.current) {
           return
         }
+        if (draftSavedTimeoutRef.current) clearTimeout(draftSavedTimeoutRef.current)
         setDraftSaved(false)
         const nextValue: DraftValue =
           metadata === undefined ? value : { content: value, metadata }
@@ -316,6 +336,8 @@ export const useDraftPersistence = ({
         }, COMPOSER_CONSTANTS.DRAFT_SAVED_DISPLAY_MS)
       })()
     }
+    // Retain the callback after debounce so departure also flushes later
+    // collapse-only changes without autosaving on metadata callback changes.
     pendingPersistRef.current = persist
     persistTimeoutRef.current = setTimeout(persist, COMPOSER_CONSTANTS.DRAFT_SAVE_DEBOUNCE_MS)
 
@@ -362,6 +384,7 @@ export const useDraftPersistence = ({
 
   const clearDraft = React.useCallback(() => {
     if (currentIdentityRef.current !== identity || (isCurrent && !isCurrent())) return
+    draftRevisionRef.current++
     pendingPersistRef.current = null
     if (persistTimeoutRef.current) {
       clearTimeout(persistTimeoutRef.current)

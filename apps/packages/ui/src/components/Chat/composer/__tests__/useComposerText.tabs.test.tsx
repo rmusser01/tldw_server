@@ -2,6 +2,7 @@ import React from "react"
 import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { COMPOSER_CONSTANTS } from "@/config/ui-constants"
+import { Storage as PlasmoStorage } from "@plasmohq/storage"
 
 const authority = vi.hoisted(() => ({ user: "alice" }))
 vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
@@ -50,6 +51,160 @@ const enter = async (view: ReturnType<typeof mount>, text: string) => {
 describe("Playground drafts in distinct native tab storage areas", () => {
   beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); authority.user = "alice" })
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers() })
+
+  it("recovers the latest source text and collapse metadata after switching keys before debounce", async () => {
+    const tab = makeTabStorage()
+    const destination = mount(tab, false, "saved-B")
+    await settle(); await enter(destination, "B DRAFT"); destination.unmount()
+    vi.stubGlobal("sessionStorage", tab)
+    let metadata = { wasExpanded: false, collapsedRange: { start: 10, end: 50 } }
+    const view = renderHook(({ draftKey }) => useComposerText({ draftKey, tabScopedDraft: true, textareaRef: React.createRef<HTMLTextAreaElement>(),
+      getDraftMetadata: () => metadata,
+      restoreWithMetadata: (_text, restored) => { if (restored) metadata = restored as typeof metadata }
+    }), { initialProps: { draftKey: "saved-A" } })
+    await settle()
+    act(() => view.result.current.setMessageValue("LATEST A"))
+    view.rerender({ draftKey: "saved-B" })
+    await settle()
+    expect(view.result.current.form.values.message).toBe("B DRAFT")
+    metadata = { wasExpanded: true, collapsedRange: { start: 20, end: 60 } }
+    view.rerender({ draftKey: "saved-A" })
+    await settle()
+    expect(view.result.current.form.values.message).toBe("LATEST A")
+    expect(metadata).toEqual({ wasExpanded: false, collapsedRange: { start: 10, end: 50 } })
+  })
+
+  it("restores an absent destination as empty instead of copying source text", async () => {
+    const view = mount(makeTabStorage(), false, "saved-A")
+    await settle(); await enter(view, "SOURCE DRAFT")
+    view.rerender({ draftKey: "empty-B" })
+    await settle()
+    expect(view.result.current.form.values.message).toBe("")
+  })
+
+  it("does not replace a new destination edit when its storage read finishes late", async () => {
+    const destination = mount(makeTabStorage(), false, "held-B")
+    await settle(); await enter(destination, "STORED B"); destination.unmount()
+    const view = mount(makeTabStorage(), false, "saved-A")
+    await settle(); await enter(view, "SOURCE DRAFT")
+    let finish!: () => void
+    const pending = new Promise<void>(resolve => { finish = resolve })
+    const original = PlasmoStorage.prototype.get
+    const read = vi.spyOn(PlasmoStorage.prototype, "get").mockImplementation(async function (key) {
+      if (String(key).includes("held-B")) await pending
+      return original.call(this, key)
+    })
+    try {
+      view.rerender({ draftKey: "held-B" })
+      await act(async () => { await Promise.resolve(); await Promise.resolve() })
+      act(() => view.result.current.setMessageValue("NEW B EDIT"))
+      await act(async () => { finish(); await pending })
+      await settle()
+      expect(view.result.current.form.values.message).toBe("NEW B EDIT")
+      expect(view.result.current.draftReady).toBe(true)
+    } finally { finish?.(); read.mockRestore() }
+  })
+
+  it("retains a destination edit when leaving before hydration finishes", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab, false, "saved-A")
+    await settle(); await enter(view, "SOURCE DRAFT")
+    let finish!: () => void
+    const pending = new Promise<void>(resolve => { finish = resolve })
+    const original = PlasmoStorage.prototype.get
+    const read = vi.spyOn(PlasmoStorage.prototype, "get").mockImplementation(async function (key) {
+      if (String(key).includes("held-B")) await pending
+      return original.call(this, key)
+    })
+    try {
+      view.rerender({ draftKey: "held-B" })
+      await act(async () => { await Promise.resolve(); await Promise.resolve() })
+      act(() => view.result.current.setMessageValue("NEW B BEFORE LEAVING"))
+      expect(view.result.current.draftReady).toBe(false)
+      view.unmount()
+      await act(async () => { finish(); await pending })
+      const restored = mount(tab, false, "held-B")
+      await settle()
+      expect(restored.result.current.form.values.message).toBe("NEW B BEFORE LEAVING")
+    } finally { finish?.(); read.mockRestore() }
+  })
+
+  it("does not retain carried source text when an untouched destination read is pending", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab, false, "saved-A")
+    await settle(); await enter(view, "SOURCE ONLY")
+    let finish!: () => void
+    const pending = new Promise<void>(resolve => { finish = resolve })
+    const original = PlasmoStorage.prototype.get
+    const read = vi.spyOn(PlasmoStorage.prototype, "get").mockImplementation(async function (key) {
+      if (String(key).includes("held-B")) await pending
+      return original.call(this, key)
+    })
+    try {
+      view.rerender({ draftKey: "held-B" })
+      await act(async () => { await Promise.resolve(); await Promise.resolve() })
+      view.unmount()
+      await act(async () => { finish(); await pending })
+      const restored = mount(tab, false, "held-B")
+      await settle()
+      expect(restored.result.current.form.values.message).toBe("")
+      restored.unmount()
+      const source = mount(tab, false, "saved-A")
+      await settle()
+      expect(source.result.current.form.values.message).toBe("SOURCE ONLY")
+    } finally { finish?.(); read.mockRestore() }
+  })
+
+  it("retains collapse-only changes on departure after the text has saved", async () => {
+    const tab = makeTabStorage()
+    vi.stubGlobal("sessionStorage", tab)
+    let metadata = { wasExpanded: false }
+    const view = renderHook(({ draftKey }) => useComposerText({ draftKey, tabScopedDraft: true, textareaRef: React.createRef<HTMLTextAreaElement>(),
+      getDraftMetadata: () => metadata,
+      restoreWithMetadata: (_text, restored) => { if (restored) metadata = restored as typeof metadata }
+    }), { initialProps: { draftKey: "saved-A" } })
+    await settle()
+    act(() => view.result.current.setMessageValue("LONG A DRAFT"))
+    await settle()
+    metadata = { wasExpanded: true }
+    view.rerender({ draftKey: "saved-A" })
+    view.rerender({ draftKey: "empty-B" })
+    await settle()
+    metadata = { wasExpanded: false }
+    view.rerender({ draftKey: "saved-A" })
+    await settle()
+    expect(view.result.current.form.values.message).toBe("LONG A DRAFT")
+    expect(metadata).toEqual({ wasExpanded: true })
+  })
+
+  it("restores destination text when only inherited collapse metadata changes during hydration", async () => {
+    const destination = mount(makeTabStorage(), false, "held-B")
+    await settle(); await enter(destination, "STORED B"); destination.unmount()
+    vi.stubGlobal("sessionStorage", makeTabStorage())
+    let metadata = { wasExpanded: false }
+    const view = renderHook(({ draftKey }) => useComposerText({ draftKey, tabScopedDraft: true, textareaRef: React.createRef<HTMLTextAreaElement>(),
+      getDraftMetadata: () => metadata
+    }), { initialProps: { draftKey: "saved-A" } })
+    await settle()
+    act(() => view.result.current.setMessageValue("SOURCE A"))
+    await settle()
+    let finish!: () => void
+    const pending = new Promise<void>(resolve => { finish = resolve })
+    const original = PlasmoStorage.prototype.get
+    const read = vi.spyOn(PlasmoStorage.prototype, "get").mockImplementation(async function (key) {
+      if (String(key).includes("held-B")) await pending
+      return original.call(this, key)
+    })
+    try {
+      view.rerender({ draftKey: "held-B" })
+      await act(async () => { await Promise.resolve(); await Promise.resolve() })
+      metadata = { wasExpanded: true }
+      view.rerender({ draftKey: "held-B" })
+      await act(async () => { finish(); await pending })
+      await settle()
+      expect(view.result.current.form.values.message).toBe("STORED B")
+    } finally { finish?.(); read.mockRestore() }
+  })
 
   it("retains the next draft when an older submitted attempt finishes", async () => {
     const tab = makeTabStorage()
