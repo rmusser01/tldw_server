@@ -256,6 +256,7 @@ Checked with `gh variable get MERGE_QUEUE`.
   evaluate and publish scripts equal the `pull_request_target` job's.
 - Existing contract tests under `tldw_Server_API/tests/CI` and `tests/Infrastructure` stay green. The license-first
   contract excludes `merge-queue.yml` by name and exempts `queue-tick` from its no-write-credentials rule, each behind a
-  test that pins the whole exempted shape.
+  test that pins the whole exempted shape. The owner chose to keep both on 2026-10-05, over dropping `queue-tick`:
+  without it a front PR whose gate went red holds up the line until an unrelated event wakes the queue.
 - `backend-required` runs the six `test_merge_queue_*` files in its contract step, so they are enforced by a required
   check.
