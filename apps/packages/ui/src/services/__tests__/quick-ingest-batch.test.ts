@@ -1458,6 +1458,21 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
+  it.each([false, true])("submits a process-again playlist duplicate while preserving overwrite=%s", async overwrite => {
+    mocks.bgUpload.mockResolvedValue({ batch_id: "repeat-batch", jobs: [{ id: 501 }] })
+    mocks.bgRequest.mockImplementation(async ({ path, body }: { path: string, body?: any }) => {
+      if (path === "/api/v1/media/collections") return { id: 7, name: "Repeat batch", kind: "conference", items: [] }
+      if (path === "/api/v1/media/collections/7/items") return { id: 11, collection_id: 7, source_url: body.source_url, status: body.status, duplicate_status: body.duplicate_status }
+      if (path === "/api/v1/media/collections/7/items/11") return { id: 11, collection_id: 7, status: body.status }
+      if (path === "/api/v1/media/ingest/jobs/501") return { ok: true, data: { status: "completed", result: { media_id: 901 } } }
+      throw new Error(`Unexpected path: ${path}`)
+    })
+    const result = await submitQuickIngestBatch({ entries: [{ id: "repeat-talk", url: "https://youtube.com/watch?v=repeat", type: "video", playlist: { duplicateStatus: "duplicate_existing" }, conferenceOverride: { selected: true, duplicatePolicy: "skip" }, processAgain: true }], files: [], storeRemote: true, processOnly: false, common: { perform_analysis: false, perform_chunking: false, overwrite_existing: overwrite }, conferenceBatchMetadata: { collectionName: "Repeat batch", sharedTags: [] } })
+    expect(mocks.bgUpload).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/media/ingest/jobs", fields: expect.objectContaining({ overwrite_existing: overwrite }) }))
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/media/collections/7/items", method: "POST", body: expect.objectContaining({ status: "planned" }) }))
+    expect(result.results?.[0]).toMatchObject({ id: "repeat-talk", status: "ok", mediaId: 901 })
+  })
+
   it("creates planned conference collection items before direct job submission", async () => {
     const onTrackingMetadata = vi.fn()
 

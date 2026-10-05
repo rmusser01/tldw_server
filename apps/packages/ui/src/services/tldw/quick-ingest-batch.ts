@@ -62,6 +62,7 @@ type QuickIngestEntry = {
   defaults?: TypeDefaults;
   keywords?: string;
   playlist?: PlaylistQueueMetadata;
+  processAgain?: boolean;
   conferenceOverride?: ConferenceItemMetadataOverride;
   audio?: { language?: string; diarize?: boolean };
   document?: { ocr?: boolean };
@@ -678,6 +679,7 @@ const createPlannedConferenceCollection = async (
           id: entry.id,
           url: entry.url,
           playlist: entry.playlist,
+          processAgain: entry.processAgain,
           conferenceOverride: entry.conferenceOverride,
         }),
         timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
@@ -827,6 +829,7 @@ const runDirectQuickIngestBatch = async (
       const duplicatePolicyResolution = resolveConferenceDuplicatePolicy(
         entry.playlist?.duplicateStatus,
         entry.conferenceOverride?.duplicatePolicy,
+        entry.processAgain,
       );
       let jobSubmitted = false;
       let localProcessingAttempted = false;

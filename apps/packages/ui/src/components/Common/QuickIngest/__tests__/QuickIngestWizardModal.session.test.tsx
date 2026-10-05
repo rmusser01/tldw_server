@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useQuickIngestEvents } from "@/components/Layouts/QuickIngestButton"
+import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
+import { getEligibleQueueItems } from "../queue-items"
 import { useMediaSearch } from "@/components/Review/hooks/useMediaSearch"
 
 const mocks = vi.hoisted(() => ({
@@ -39,6 +42,8 @@ const mocks = vi.hoisted(() => ({
     offlineBypass: false,
   },
 }))
+
+vi.mock("@plasmohq/storage/hook", () => ({ useStorage: () => [undefined, vi.fn(), { isLoading: false }] }))
 
 vi.mock("@/db/dexie/drafts", () => ({
   DRAFT_STORAGE_CAP_BYTES: 100 * 1024 * 1024,
@@ -240,6 +245,9 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
       const { state, setQueueItems } = context
       return (
         <div>
+          <output data-testid="eligible-count">{getEligibleQueueItems(state.queueItems).length}</output>
+          <button onClick={() => setQueueItems([{ id: "attached-file", kind: "file", fileName: mocks.queuedReviewFile!.name, file: mocks.queuedReviewFile!, detectedType: "document", icon: "FileText", fileSize: mocks.queuedReviewFile!.size, validation: { valid: true } }])}>Attach source file</button>
+          <button onClick={onQuickProcess}>Submit current queue</button>
           {quickProcessWarning ? <div role="alert">{quickProcessWarning}</div> : null}
           <button
             onClick={() => {
@@ -498,6 +506,36 @@ function CatalogueProbe() {
 }
 
 describe("QuickIngestWizardModal session runtime", () => {
+  it("keeps the attached live File eligible when an ordinary URL handoff remounts the real modal", async () => {
+    const file = new NodeFile(["Attached source"], "source.txt", { type: "text/plain" }) as unknown as File
+    mocks.queuedReviewFile = file
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-direct-handoff" })
+    mocks.submitQuickIngestBatch.mockResolvedValue({ ok: true, results: [{ id: "attached-file", type: "document", status: "ok" }] })
+    function RealModalHost() {
+      const events = useQuickIngestEvents()
+      return <QuickIngestWizardModal open={events.quickIngestOpen} openRevision={events.openRevision} presetMap={events.presetMap} onClose={events.closeQuickIngest} />
+    }
+    useQuickIngestSessionStore.getState().createDraftSession()
+    render(<RealModalHost />)
+    await screen.findByRole("button", { name: "Attach source file" })
+    fireEvent.click(screen.getByRole("button", { name: "Attach source file" }))
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.queueItems).toHaveLength(1))
+    act(() => { requestQuickIngestOpen({ source: "manual", url: "https://example.com/article" }) })
+    await waitFor(() => expect(screen.getByTestId("eligible-count")).toHaveTextContent("2"))
+    fireEvent.click(screen.getByRole("button", { name: "Submit current queue" }))
+    await waitFor(() => expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1))
+    expect(mocks.submitQuickIngestBatch.mock.calls[0][0]).toMatchObject({ files: [{ id: "attached-file", name: "source.txt", data: Array.from(new Uint8Array(await file.arrayBuffer())) }], entries: [{ url: "https://example.com/article" }] })
+  })
+
+  it("carries explicit playlist repetition through the modal submission contract", async () => {
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-direct-repeat" })
+    mocks.submitQuickIngestBatch.mockResolvedValue({ ok: true, results: [{ id: "repeat-talk", type: "video", status: "ok" }] })
+    useQuickIngestSessionStore.getState().createDraftSession({ queueItems: [{ id: "repeat-talk", kind: "url", url: "https://youtube.com/watch?v=repeat", detectedType: "video", icon: "Film", fileSize: 0, validation: { valid: true }, playlist: { duplicateStatus: "duplicate_existing" }, conferenceOverride: { selected: true, duplicatePolicy: "skip" }, processAgain: true }] })
+    render(<QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />)
+    await waitFor(() => expect(mocks.submitQuickIngestBatch).toHaveBeenCalled())
+    expect(mocks.submitQuickIngestBatch.mock.calls[0][0]).toMatchObject({ entries: [{ processAgain: true }], common: { overwrite_existing: false } })
+  })
+
   it.each([false, true])("refreshes the actual catalogue for current wizard completion (before mount=%s)", async beforeMount => {
     let saved = false
     mocks.bgRequest.mockImplementation(async ({ path }: { path: string }) => path.startsWith('/api/v1/media/?')

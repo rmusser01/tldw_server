@@ -97,6 +97,7 @@ type QuickIngestRequestPayload = {
     defaults?: TypeDefaults
     playlist?: PlaylistQueueMetadata
     conferenceOverride?: ConferenceItemMetadataOverride
+    processAgain?: boolean
   }>
   files: Array<{
     id: string
@@ -838,6 +839,7 @@ const buildQuickIngestPayload = async (
       defaults: buildDefaultsForQueueItem(item, options.typeDefaults),
       playlist: item.playlist,
       conferenceOverride: item.conferenceOverride,
+      processAgain: item.processAgain,
     }))
 
   const files = await Promise.all(
@@ -1879,10 +1881,40 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
       }))
     )
 
-  const initialState = useMemo(
-    () => (session ? buildInitialWizardState(session) : undefined),
-    [session]
-  )
+  // Keep attached files in this modal only; persisted stubs still require reattach after reload.
+  const liveQueueRef = useRef<{
+    authorityKey: string
+    sessionId: string
+    items: WizardQueueItem[]
+  } | null>(null)
+  const initialState = useMemo(() => {
+    if (!session) {
+      liveQueueRef.current = null
+      return undefined
+    }
+    const initial = buildInitialWizardState(session)
+    const live = liveQueueRef.current
+    if (
+      !live ||
+      live.authorityKey !== authorityKey ||
+      live.sessionId !== session.id
+    ) {
+      liveQueueRef.current = null
+      return initial
+    }
+    const attached = new Map(
+      live.items.filter((item) => item.file).map((item) => [item.id, item])
+    )
+    return {
+      ...initial,
+      queueItems: initial.queueItems.map((item) => {
+        const current = attached.get(item.id)
+        return current
+          ? { ...item, file: current.file, validation: current.validation }
+          : item
+      })
+    }
+  }, [authorityKey, session])
   const boundSessionId = session?.id
   const sessionRef = useRef(session)
   const lastPersistedSignatureRef = useRef<{
@@ -1907,7 +1939,15 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
   const persistWizardState = useCallback(
     (state: IngestWizardState) => {
       const currentSession = sessionRef.current
-      if (!currentSession || currentSession.id !== boundSessionId) return
+      if (
+        !authorityKey || !currentSession || currentSession.id !== boundSessionId ||
+        useQuickIngestSessionStore.getState().authorityKey !== authorityKey
+      ) return
+      liveQueueRef.current = {
+        authorityKey,
+        sessionId: currentSession.id,
+        items: state.queueItems,
+      }
       const patch = buildSessionPatchFromWizardState(state, currentSession)
       if (patch.completedAt == null) {
         lastPersistedSignatureRef.current = null
@@ -1929,7 +1969,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
       }
       upsertSession(patch)
     },
-    [boundSessionId, upsertSession]
+    [authorityKey, boundSessionId, upsertSession]
   )
 
   if (!authorityKey || !session || !initialState) return null

@@ -1041,7 +1041,10 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
 
   it("Step 2 — remains editable when provider discovery fails", async () => {
     const catalogError = new Error("catalog unavailable")
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const originalWarn = console.warn
+    const warn = vi.spyOn(console, "warn").mockImplementation((...args) => {
+      if (args[0] !== "[QuickIngest] Failed to load analysis providers" || args[1] !== catalogError) originalWarn(...args)
+    })
     getProvidersStatusMock.mockRejectedValue(catalogError)
     const user = userEvent.setup()
     try {

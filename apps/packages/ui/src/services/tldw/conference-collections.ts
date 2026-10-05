@@ -172,6 +172,7 @@ export type ConferenceCollectionItemMergeInput = {
   id: string
   url: string
   playlist?: PlaylistQueueMetadata
+  processAgain?: boolean
   conferenceOverride?: ConferenceItemMetadataOverride
 }
 
@@ -202,7 +203,8 @@ const isDuplicateStatus = (value: unknown): boolean => {
 
 export const resolveConferenceDuplicatePolicy = (
   duplicateStatus: unknown,
-  policy: unknown
+  policy: unknown,
+  processAgain = false
 ): ConferenceDuplicatePolicyResolution => {
   const resolvedPolicy = normalizeConferenceDuplicatePolicy(policy)
   if (!isDuplicateStatus(duplicateStatus)) {
@@ -225,8 +227,8 @@ export const resolveConferenceDuplicatePolicy = (
 
   return {
     policy: resolvedPolicy,
-    plannedStatus: "skipped_existing",
-    shouldSubmitJob: false,
+    plannedStatus: processAgain === true ? "planned" : "skipped_existing",
+    shouldSubmitJob: processAgain === true,
     forceOverwrite: false,
   }
 }
@@ -370,7 +372,8 @@ export const buildConferenceCollectionItemPayload = (
   )
   const duplicateResolution = resolveConferenceDuplicatePolicy(
     playlist?.duplicateStatus,
-    duplicatePolicy
+    duplicatePolicy,
+    item.processAgain
   )
   const ordinal = playlist?.ordinal
   const metadata: Record<string, unknown> = {

@@ -745,8 +745,15 @@ describe("IngestWizardContext", () => {
 
   describe("useIngestWizard outside provider", () => {
     it("throws an error when used outside IngestWizardProvider", () => {
-      // Suppress React error boundary console output
-      const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+      const expected = "useIngestWizard must be used within an IngestWizardProvider"
+      const originalError = console.error
+      const spy = vi.spyOn(console, "error").mockImplementation((...args) => {
+        if (!args.some(value => String(value).includes(expected) || String(value).includes("<BadConsumer>"))) originalError(...args)
+      })
+      const handleExpectedError = (event: ErrorEvent) => {
+        if (event.error?.message === expected) event.preventDefault()
+      }
+      window.addEventListener("error", handleExpectedError)
 
       function BadConsumer() {
         useIngestWizard()
@@ -757,6 +764,7 @@ describe("IngestWizardContext", () => {
         "useIngestWizard must be used within an IngestWizardProvider"
       )
 
+      window.removeEventListener("error", handleExpectedError)
       spy.mockRestore()
     })
   })
