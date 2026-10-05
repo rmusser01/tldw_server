@@ -1,5 +1,5 @@
 ---
-id: TASK-13452
+id: TASK-13462
 title: Build the in-repo merge queue for dev
 status: Done
 labels:
@@ -46,6 +46,7 @@ Decisions made during the build (spec sections 4.1, 4.6, 4.8, 4.9):
 Verification: tldw_Server_API/tests/CI plus tests/Infrastructure/test_workflow_concurrency_policy.py, with xdist: dev 75ab2240 473 passed / 4 skipped; branch 753 passed / 5 skipped / 0 failed. Mutation checks on the queue script, the gate workflows, the license dispatch job and the contract allowances were all detected. pre-commit over the diff, actionlint 1.7.12 with shellcheck over all workflows, and Bandit on the script are clean.
 
 Not verifiable without a real queue run on this repository (spec section 8, step 4): the rebase mutation with branch updates switched off; that a GITHUB_TOKEN dispatch reports actor github-actions[bot]; the license dispatch on dev; dependency review with explicit refs on a dispatch; queue-tick's job-level write permissions; the result a timed-out gate job reports.
+Renumbered 2026-10-05 from TASK-13452 when PR #3188 was rebased onto dev: dev gained an unrelated TASK-13452 ("Preserve model settings when cached chat dialog remounts") while this PR was open. This repository has no older-arrival rule, and that record is merged and owned by another workstream, so this unmerged record moved to the next free id. Commit messages and code references use the new id.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -50,7 +50,7 @@ and check current behaviour rather than assuming.
 
 - If relevant paths changed, the gate executes its full checks.
 - If relevant paths did not change, the gate exits with an explicit no-op success message.
-- If the change-detection job itself fails, the gate reports failure. Before TASK-13452 the gate job was skipped in
+- If the change-detection job itself fails, the gate reports failure. Before TASK-13462 the gate job was skipped in
   that case, and GitHub counts a skipped required job as satisfied.
 
 Examples:
@@ -239,7 +239,7 @@ Three traps worth stating outright:
 
 ## Merge Queue
 
-Tracked as TASK-13452, decided in [ADR-063](../ADR/063-in-repo-merge-queue.md), designed in
+Tracked as TASK-13462, decided in [ADR-063](../ADR/063-in-repo-merge-queue.md), designed in
 `Docs/superpowers/specs/2026-10-04-merge-queue-design.md`.
 
 Strict enforcement means one merge puts every other ready PR behind, and without a queue each of them rebases and

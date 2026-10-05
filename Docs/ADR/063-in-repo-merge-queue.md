@@ -4,7 +4,7 @@
 **Date:** 2026-10-04
 **Backfilled from:** not backfilled
 **Decision owner:** Repository owner (direction given 2026-10-04; becomes Accepted when `MERGE_QUEUE` is set to `on`)
-**Related task:** TASK-13452
+**Related task:** TASK-13462
 **Related spec/plan:** `Docs/superpowers/specs/2026-10-04-merge-queue-design.md`; `Docs/Development/CI_REQUIRED_GATES.md`
 
 ## Decision

@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-04
 - **Status:** Owner-approved direction (2026-10-04: "PRs shouldn't have to race each other"); ships switched off
-- **Task:** TASK-13452. **ADR:** 063.
+- **Task:** TASK-13462. **ADR:** 063.
 - **Origin:** port of the tldw_chatbook queue (tldw_chatbook PR #2996, ADR-218 there). The queue rules and safety
   invariants are the same; section 4 is what this repository's CI forces to be different.
 - **Related:** `Docs/Development/CI_REQUIRED_GATES.md`, TASK-13355.

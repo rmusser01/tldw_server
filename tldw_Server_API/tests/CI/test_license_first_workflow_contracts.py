@@ -54,13 +54,13 @@ ORDINARY_WORKFLOW_NAMES = (
 )
 # Not ordinary PR workflows. Everything in this file freezes the workflows that run a pull
 # request's own code, so that none of them can hold write credentials or skip the license
-# audit. The merge queue (TASK-13452, ADR-063) is the opposite kind of workflow: it reacts to a
+# audit. The merge queue (TASK-13462, ADR-063) is the opposite kind of workflow: it reacts to a
 # PR being armed, disarmed or closed, never to a push of PR code, checks out `dev` only, and
 # exists to hold the write credentials the ordinary workflows must not have.
 # test_queue_control_workflows_never_run_pull_request_code pins exactly that, and
 # test_merge_queue_workflow.py pins the rest of its shape.
 QUEUE_CONTROL_WORKFLOWS = ("merge-queue.yml",)
-# The one job in an ordinary workflow that may hold write credentials (TASK-13452, ADR-063):
+# The one job in an ordinary workflow that may hold write credentials (TASK-13462, ADR-063):
 # `queue-tick` wakes the merge queue after its workflow's required gate failed. It is exempt
 # from the per-job rules below only in exactly the shape _assert_exact_queue_tick pins: it
 # cannot run on the admitted (workflow_run) path or for a fork, nothing depends on it, it checks
@@ -367,7 +367,7 @@ def _assert_exact_queue_tick(name: str, data: dict[str, Any]) -> None:
 
 
 def _assert_fails_when_change_detection_did_not_succeed(name: str, job: dict[str, Any]) -> None:
-    """TASK-13452: a skipped required job counts as satisfied, so these gates run and fail instead."""
+    """TASK-13462: a skipped required job counts as satisfied, so these gates run and fail instead."""
     guards = [step for step in job["steps"][:2] if "CHANGES_RESULT" in step.get("env", {})]
     assert len(guards) == 1, name
     guard = guards[0]
@@ -627,7 +627,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                         "needs.changes.outputs.tldw_frontend_changed == 'true'"
                     )
                 # The three required gates here carry no `needs.changes.result == 'success'`
-                # term (TASK-13452): they run whenever change detection was started and fail
+                # term (TASK-13462): they run whenever change detection was started and fail
                 # in a guard step if it did not succeed, instead of being skipped.
                 if (name, job_name) in {
                     ("backend-required.yml", "backend-required"),
@@ -691,7 +691,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 }:
                     # `changes` is skipped exactly when it was not admitted. Any other
                     # result means the gate was supposed to run, so it runs, and fails in
-                    # its guard step unless change detection succeeded (TASK-13452).
+                    # its guard step unless change detection succeeded (TASK-13462).
                     assert _normalized(job.get("if")) == _normalized(
                         "always() && !cancelled() && needs.changes.result != 'skipped'"
                     )
@@ -897,7 +897,7 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         if step.get("name") == "Dependency review (high/critical)"
     ]
     assert len(pull_request_only_steps) == 1
-    # The third arm is the merge queue's dispatch (TASK-13452): without it a queue-dispatched
+    # The third arm is the merge queue's dispatch (TASK-13462): without it a queue-dispatched
     # security-required would pass without the dependency review every pull_request run gets.
     assert pull_request_only_steps[0]["if"] == (
         "github.event_name == 'pull_request' || github.event_name == 'workflow_run' || "

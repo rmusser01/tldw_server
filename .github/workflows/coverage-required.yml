@@ -110,7 +110,7 @@ jobs:
     # Runs whenever `changes` ran, not only when it succeeded: when change
     # detection failed this job was skipped, and GitHub counts a skipped
     # required job as satisfied. It now runs and the first step fails it
-    # (TASK-13452). `changes` is skipped only when it was not admitted
+    # (TASK-13462). `changes` is skipped only when it was not admitted
     # (workflow_run admission declined, or no passing license verdict), and
     # then this job is skipped with it, as before.
     if: >-
@@ -202,7 +202,7 @@ jobs:
             tldw_Server_API/tests/AuthNZ_SQLite \
             --cov=tldw_Server_API/app/core/AuthNZ --cov-report=term --cov-fail-under=35
 
-  # Wakes the merge queue when the gate above fails (TASK-13452, section 4.6 of
+  # Wakes the merge queue when the gate above fails (TASK-13462, section 4.6 of
   # Docs/superpowers/specs/2026-10-04-merge-queue-design.md). A red gate causes
   # none of the events merge-queue.yml listens for, so without this a failed
   # front PR would never be retried or removed from the line.

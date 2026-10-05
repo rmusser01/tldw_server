@@ -1,6 +1,6 @@
 name: Merge Queue
 
-# One-at-a-time merge queue for dev (TASK-13452).
+# One-at-a-time merge queue for dev (TASK-13462).
 # Spec: Docs/superpowers/specs/2026-10-04-merge-queue-design.md
 #
 # Wakes when a PR into dev is armed for auto-merge, disarmed or closed, and on every push to

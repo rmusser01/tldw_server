@@ -440,7 +440,7 @@ def test_manual_dispatch_cannot_publish_the_required_check_name() -> None:
     """Keep diagnostic manual ratchets from satisfying branch protection.
 
     The one dispatch that may publish the protected name is the merge queue's, which is made
-    with GITHUB_TOKEN and therefore runs as `github-actions[bot]` (TASK-13452, spec 4.8).
+    with GITHUB_TOKEN and therefore runs as `github-actions[bot]` (TASK-13462, spec 4.8).
     """
 
     workflow = yaml.safe_load(
