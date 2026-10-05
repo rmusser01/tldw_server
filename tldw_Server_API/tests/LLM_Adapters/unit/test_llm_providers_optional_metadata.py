@@ -5,6 +5,7 @@ import configparser
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import llm_providers
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 
 pytestmark = pytest.mark.unit
 
@@ -40,7 +41,7 @@ def _patch_catalog_dependencies(
     monkeypatch.setattr(llm_providers, "load_comprehensive_config", lambda: config)
     monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {})
     monkeypatch.setattr(llm_providers, "get_provider_manager", lambda: None)
-    monkeypatch.setattr(llm_providers, "list_provider_models", lambda _provider: [])
+    monkeypatch.setattr(llm_providers, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("gpt-4o-mini",)))
     monkeypatch.setattr(llm_providers, "_llm_registry_capability_envelopes", lambda: {})
     monkeypatch.setattr(llm_providers, "_configured_endpoint_probe_enabled", lambda: False)
     monkeypatch.setattr(

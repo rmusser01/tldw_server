@@ -512,6 +512,9 @@ async def test_privacy_safe_policy_removes_echoed_body_from_logs_and_exception(
 async def test_deepseek_policy_uses_one_post_without_logging_echoed_body(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("deepseek-chat",)))
     request = httpx.Request(
         "POST", "https://provider.invalid/v1/chat/completions"
     )
@@ -571,6 +574,9 @@ async def test_deepseek_policy_uses_one_post_without_logging_echoed_body(
 async def test_cohere_policy_does_not_log_malformed_success_body(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("command-r",)))
     emitted: list[str] = []
 
     class FakeSession:

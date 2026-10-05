@@ -2798,14 +2798,23 @@ def _should_enforce_strict_model_selection() -> bool:
     return not _shared_is_test_mode()
 
 
-def _validate_explicit_model_availability(provider: str, model: str) -> dict[str, Any] | None:
+def _validate_explicit_model_availability(
+    provider: str, model: str, *, api_key: str | None = None,
+    app_config: dict[str, Any] | None = None, credentials_resolved: bool = False,
+) -> dict[str, Any] | None:
     """Validate explicit model selection against known provider inventory when available."""
     provider_name = (provider or "").strip()
     model_name = (model or "").strip()
     if not provider_name or not model_name:
         return None
 
-    availability = is_model_known_for_provider(provider_name, model_name)
+    if credentials_resolved:
+        availability = is_model_known_for_provider(
+            provider_name, model_name, api_key=api_key,
+            app_config=app_config, credentials_resolved=True,
+        )
+    else:
+        availability = is_model_known_for_provider(provider_name, model_name)
     if availability is None or availability:
         return None
 
@@ -4577,7 +4586,11 @@ async def create_chat_completion(
                         },
                     )
                 if strict_model_selection and explicit_model_requested:
-                    availability_error = _validate_explicit_model_availability(target_api_provider, model)
+                    availability_error = await asyncio.to_thread(
+                        _validate_explicit_model_availability, target_api_provider, model,
+                        api_key=provider_api_key, app_config=app_config_override,
+                        credentials_resolved=True,
+                    )
                     if availability_error:
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,

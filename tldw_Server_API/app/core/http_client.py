@@ -19,6 +19,7 @@ import hashlib  # noqa: E402
 import inspect  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
+import math  # noqa: E402
 import os  # noqa: E402
 import random  # noqa: E402
 
@@ -38,6 +39,7 @@ import ssl  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping  # noqa: E402
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
 from contextlib import asynccontextmanager, contextmanager, nullcontext, suppress  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
@@ -856,6 +858,8 @@ class TransportAdapter(Protocol):
         cert_pinning: dict[str, set[str]] | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
+        max_response_bytes: int | None = None,
+        deadline: float | None = None,
     ) -> SyncResponseLike: ...
 
     async def arequest(
@@ -945,7 +949,16 @@ class HttpxAdapter:
         cert_pinning: dict[str, set[str]] | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
+        max_response_bytes: int | None = None,
+        deadline: float | None = None,
     ) -> httpx.Response:
+        response_limit_kwargs = (
+            {"max_response_bytes": max_response_bytes}
+            if max_response_bytes is not None
+            else {}
+        )
+        if deadline is not None:
+            response_limit_kwargs["deadline"] = deadline
         return _fetch_httpx_response(
             method=method,
             url=url,
@@ -963,6 +976,7 @@ class HttpxAdapter:
             cert_pinning=cert_pinning,
             configured_endpoint=configured_endpoint,
             sensitive_observability=sensitive_observability,
+            **response_limit_kwargs,
         )
 
     @_with_sensitive_http_log_context_async
@@ -2668,6 +2682,39 @@ def create_client(
 # Transport-only IO helpers (no policy enforcement)
 # --------------------------------------------------------------------------------------
 
+def _httpx_request_with_deadline(
+    *,
+    client: httpx.Client,
+    deadline: float,
+    proxies: str | dict[str, str] | None = None,
+    **kwargs: Any,
+) -> httpx.Response:
+    """Run cancellable bounded I/O without retaining a client on a closed loop."""
+    async def read() -> httpx.Response:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Request deadline exceeded")
+        async with _stream_timeout(remaining):
+            async with create_async_client(
+                timeout=kwargs.get("timeout"),
+                proxies=proxies,
+                cert_pinning=_get_client_cert_pins(client),
+            ) as async_client:
+                return await _httpx_arequest_io(client=async_client, **kwargs)
+
+    def run() -> httpx.Response:
+        return asyncio.run(read())
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return run()
+    # A sync caller may already be on an event-loop thread. Join the bridge
+    # worker, and preserve request-local logging/tracing context there.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(contextvars.copy_context().run, run).result()
+
+
 def _httpx_request_io(
     *,
     client: httpx.Client,
@@ -2682,6 +2729,7 @@ def _httpx_request_io(
     timeout: float | httpx.Timeout | None = None,
     follow_redirects: bool = False,
     accepted_resolved_ips: tuple[str, ...] = (),
+    max_response_bytes: int | None = None,
 ) -> httpx.Response:
     method_upper = str(method).upper()
     transport_url, headers, sni_hostname = _prepare_pinned_transport_target(
@@ -2689,6 +2737,46 @@ def _httpx_request_io(
         headers,
         accepted_resolved_ips,
     )
+    if max_response_bytes is not None:
+        if type(max_response_bytes) is not int or max_response_bytes < 0:
+            raise ValueError("max_response_bytes must be a non-negative integer")
+        headers = _force_identity_accept_encoding(headers)
+        stream_kwargs: dict[str, Any] = {
+            "headers": headers,
+            "cookies": cookies,
+            "params": params,
+            "json": json,
+            "data": data,
+            "files": files,
+            "timeout": timeout,
+            "follow_redirects": follow_redirects,
+            "extensions": {_BOUNDED_RESPONSE_EXTENSION: True},
+        }
+        if accepted_resolved_ips:
+            stream_kwargs["extensions"]["sni_hostname"] = sni_hostname
+        with client.stream(method_upper, transport_url, **stream_kwargs) as streamed:
+            body = b""
+            if 200 <= int(streamed.status_code) < 300:
+                if _uses_compressed_content_encoding(streamed.headers):
+                    raise NetworkError(
+                        "Compressed responses are not allowed with max_response_bytes"
+                    )
+                try:
+                    body = _read_bounded_chunks(streamed.iter_raw(), max_response_bytes)
+                except ValueError as exc:
+                    raise NetworkError("Response exceeds max_response_bytes limit") from exc
+            copied_headers = httpx.Headers(streamed.headers)
+            response = httpx.Response(
+                status_code=streamed.status_code,
+                content=body,
+                request=streamed.request,
+                extensions=streamed.extensions,
+                history=streamed.history,
+            )
+            response.headers = copied_headers
+        if accepted_resolved_ips:
+            _restore_httpx_response_url(response, url)
+        return response
     if accepted_resolved_ips:
         response = client.request(
             method_upper,
@@ -4106,8 +4194,15 @@ def _fetch_httpx_response(
     cert_pinning: dict[str, set[str]] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
+    max_response_bytes: int | None = None,
+    deadline: float | None = None,
 ) -> httpx.Response:
     """Sync httpx request with retries and egress enforcement.
+
+    ``max_response_bytes`` bounds successful raw bodies, requests identity
+    encoding, and skips non-success bodies, matching the async response API.
+    ``deadline`` is an absolute monotonic network deadline for bounded reads
+    using an owned client; it does not change ordinary inactivity timeouts.
 
     Raises ValueError when retries are enabled and a file-like object in `files`
     is not seekable: "File-like object must be seekable when retries are enabled.
@@ -4115,6 +4210,11 @@ def _fetch_httpx_response(
     """
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
+    if deadline is not None:
+        if type(deadline) not in (int, float) or not math.isfinite(deadline):
+            raise ValueError("deadline must be a finite monotonic timestamp")
+        if client is not None or max_response_bytes is None:
+            raise ValueError("deadline requires max_response_bytes and an owned client")
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
     )
@@ -4137,6 +4237,15 @@ def _fetch_httpx_response(
     method_upper = str(method).upper()
     _head_disable_h2_tried = False
     _head_get_range_tried = False
+    response_limit_kwargs = (
+        {"max_response_bytes": max_response_bytes}
+        if max_response_bytes is not None
+        else {}
+    )
+    request_io = _httpx_request_io
+    if deadline is not None:
+        request_io = _httpx_request_with_deadline
+        response_limit_kwargs.update(deadline=deadline, proxies=proxies)
 
     def _do_once(sc: httpx.Client, target_url: str) -> tuple[httpx.Response | None, str]:
         req_headers = _inject_trace_headers(headers)
@@ -4172,7 +4281,7 @@ def _fetch_httpx_response(
                 raise
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                 return None, e.__class__.__name__
-            r = _httpx_request_io(
+            r = request_io(
                 client=sc,
                 method=method_upper,
                 url=target_url,
@@ -4188,6 +4297,7 @@ def _fetch_httpx_response(
                     dns_pin_cache,
                     target_url,
                 ),
+                **response_limit_kwargs,
             )
             return r, "ok"  # noqa: TRY300
         except EgressPolicyError:
@@ -4268,7 +4378,7 @@ def _fetch_httpx_response(
                                         _head_fb_to = float(os.getenv("HTTP_HEAD_RANGE_FALLBACK_TIMEOUT", "5"))
                                     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                         _head_fb_to = 5.0
-                                    r2 = _httpx_request_io(
+                                    r2 = request_io(
                                         client=sc,
                                         method="GET",
                                         url=cur_url,
@@ -4284,6 +4394,7 @@ def _fetch_httpx_response(
                                             dns_pin_cache,
                                             cur_url,
                                         ),
+                                        **response_limit_kwargs,
                                     )
                                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         tm.set_attributes({"http.status_code": int(r2.status_code)})

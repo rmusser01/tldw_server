@@ -16,6 +16,7 @@ import httpx
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 from tldw_Server_API.app.core.Slides.standalone_html_config import (
     CLOSED_ADAPTER_CATALOG,
     ResolvedExecutionTarget,
@@ -100,6 +101,15 @@ def provider_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
         return httpx.AsyncClient(*args, **kwargs)
 
     monkeypatch.setattr(module, "_AsyncClient", isolated_test_client)
+
+    def test_inventory(provider: str, api_key: str, *, base_url: str, call_policy):
+        assert provider in {"openai", "anthropic"}
+        assert api_key
+        assert call_policy.required_endpoint_scope.matches(base_url)
+        assert call_policy.maximum_timeout_seconds > 0
+        return ModelDiscoveryResult("ready", ("CaseSensitive-Model", "gpt-4o-mini", "gpt-5"))
+
+    monkeypatch.setattr(module.provider_model_inventory, "discover_provider_models", test_inventory)
     return module
 
 
@@ -759,7 +769,7 @@ async def test_current_configuration_is_rechecked_immediately_before_request(
         current_config_loader=load_config,
     )
 
-    assert order == ["config", "config", "network"]
+    assert order == ["config", "config", "config", "network"]
 
 
 @pytest.mark.asyncio
@@ -890,7 +900,7 @@ async def test_dispatch_does_not_yield_after_fresh_recheck_before_transport(
     def load_config() -> SlidesStandaloneHtmlConfig:
         nonlocal loader_calls
         loader_calls += 1
-        if loader_calls == 2:
+        if loader_calls == 3:
             asyncio.get_running_loop().call_soon(flip_config)
         return config
 
@@ -908,7 +918,7 @@ async def test_dispatch_does_not_yield_after_fresh_recheck_before_transport(
     await config_flipped.wait()
 
     assert result == DOCUMENT.encode()
-    assert loader_calls == 2
+    assert loader_calls == 3
     assert order == ["network", "config-flipped"]
 
 
@@ -920,7 +930,7 @@ async def test_fresh_attempt_snapshot_solely_controls_overall_timeout(
     target = _target("openai_official_chat_v1")
     initial = _config(target, overall_timeout=0.01)
     fresh = _config(target, overall_timeout=1.0)
-    snapshots = iter((initial, fresh))
+    snapshots = iter((initial, fresh, fresh))
     loader_calls = 0
     network_calls = 0
 
@@ -958,7 +968,7 @@ async def test_fresh_attempt_snapshot_solely_controls_overall_timeout(
     )
 
     assert result == DOCUMENT.encode()
-    assert loader_calls == 2
+    assert loader_calls == 3
     assert network_calls == 1
 
 

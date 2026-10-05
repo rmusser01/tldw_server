@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import messages as messages_endpoint
 from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+from tldw_Server_API.app.core.Chat import chat_service
 
 
 def _build_openai_response(text: str) -> dict:
@@ -199,6 +202,9 @@ def test_messages_llamacpp_base_url_normalized_completions(client_user_only, mon
 @pytest.mark.integration
 def test_messages_count_tokens_anthropic(client_user_only, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(chat_service, "discover_provider_models", lambda *args, **kwargs: SimpleNamespace(
+        status="ready", models=("claude-3-sonnet-20240229",),
+    ))
     monkeypatch.setattr(
         messages_endpoint,
         "http_client_factory",

@@ -8,6 +8,7 @@ import contextlib
 import json
 import os
 from collections.abc import AsyncIterator
+from functools import partial
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, status
@@ -34,8 +35,15 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
     mark_provider_credential_used,
 )
-from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    DaemonCapacityError,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError, ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_service import (
+    _validate_provider_model_selection,
     perform_chat_api_call_async,
     resolve_provider_and_model,
 )
@@ -2010,6 +2018,28 @@ async def _resolve_messages_credentials(
                 },
             )
         )
+    if provider == "anthropic":
+        inventory_request = {
+            "model": model,
+            "api_key": credentials.api_key,
+            "app_config": credentials.app_config or {},
+            "credentials_resolved": True,
+            "base_url": _resolve_messages_base_url(provider, credentials.app_config or {}),
+        }
+        try:
+            await await_bounded_sync_call(
+                partial(_validate_provider_model_selection, provider, inventory_request),
+                pool=SYNC_ADAPTER_CALL_POOL,
+                exhaustion_message="Provider model discovery capacity is exhausted",
+            )
+        except ChatBadRequestError:
+            raise_detached_error(HTTPException(
+                status_code=400, detail="Selected model is not available for this provider.",
+            ))
+        except (ChatConfigurationError, DaemonCapacityError):
+            raise_detached_error(HTTPException(
+                status_code=503, detail="Provider model inventory is unavailable.",
+            ))
     return credentials
 
 

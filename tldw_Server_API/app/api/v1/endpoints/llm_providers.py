@@ -18,8 +18,15 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ALL_SUPPORTED_PROVIDER_NAMES_LIST,
     get_api_keys,
 )
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    ServerFallbackCredentials,
+    resolve_static_server_fallback,
+)
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    ProviderOverrideCallSnapshot,
     apply_llm_provider_overrides_to_listing,
+    get_llm_provider_overrides_snapshot,
 )
 from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
 from tldw_Server_API.app.core.config import load_comprehensive_config
@@ -57,6 +64,10 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     PROVIDER_CAPABILITIES,
     provider_requires_api_key,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
+    discover_provider_models,
+    resolve_provider_models_base_url,
+)
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
     ModelDiscoveryResult,
 )
@@ -86,7 +97,6 @@ from tldw_Server_API.app.core.Security.egress import (
     URLPolicyResult,
     evaluate_url_policy,
 )
-from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 
 #######################################################################################################################
 #
@@ -1526,6 +1536,7 @@ def get_configured_providers(
     """
     try:
         config_parser = load_comprehensive_config()
+        provider_overrides = get_llm_provider_overrides_snapshot()
         runtime_context = _build_runtime_context(config_parser)
         providers = []
 
@@ -1538,6 +1549,7 @@ def get_configured_providers(
             not config_parser.has_section('API')
             and not config_parser.has_section('Local-API')
             and not has_env_custom_openai
+            and not provider_overrides
         ):
             logger.warning("No API or Local-API sections found in config")
             return {
@@ -1817,14 +1829,15 @@ def get_configured_providers(
         # Process each provider
         for provider_name, provider_info in provider_mappings.items():
             section_name = provider_info.get('section')
+            override = provider_overrides.get(_normalize_catalog_provider_for_chat(provider_name))
 
             config_section_exists = bool(section_name and config_parser.has_section(section_name))
             custom_env_configured = has_custom_openai_env_configuration(provider_name)
             # Allow MLX to surface even when only env-based config exists
-            if not config_section_exists and provider_name != "mlx" and not custom_env_configured:
+            if not config_section_exists and provider_name != "mlx" and not custom_env_configured and override is None:
                 continue
             # For MLX, proceed even if the [MLX] section is absent to allow env-only configs or to show as disabled
-            section_exists = config_section_exists or provider_name == "mlx" or custom_env_configured
+            section_exists = config_section_exists or provider_name == "mlx" or custom_env_configured or override is not None
             if not section_exists:
                 continue
 
@@ -1839,7 +1852,7 @@ def get_configured_providers(
                 api_key = None
                 if api_key_field and config_section_exists and config_parser.has_option(section_name, api_key_field):
                     api_key = config_parser.get(section_name, api_key_field, fallback='')
-                api_key = valid_provider_api_key(api_key) or valid_provider_api_key(api_keys_by_provider.get(provider_name))
+                api_key = valid_provider_api_key(api_keys_by_provider.get(provider_name)) or valid_provider_api_key(api_key)
                 if api_key:
                     is_configured = True
                     api_key_value = api_key
@@ -1909,6 +1922,47 @@ def get_configured_providers(
                     )
 
             discovery_result: ModelDiscoveryResult | None = None
+            if provider_info['type'] == 'commercial':
+                models = []
+                blocked = override is not None and (
+                    override.is_enabled is False or override.credentials_invalid
+                )
+                if blocked:
+                    if override.credentials_invalid:
+                        api_key_value = None
+                        is_configured = False
+                    discovery_result = ModelDiscoveryResult("auth_failed")
+                else:
+                    try:
+                        static = resolve_static_server_fallback(provider_name)
+                        fallback = ProviderOverrideCallSnapshot(provider_name, override).server_fallback(
+                            ServerFallbackCredentials(
+                                api_key=api_key_value, credential_fields={},
+                                app_config=static.app_config,
+                            )
+                        )
+                        if fallback is not None:
+                            api_key_value = valid_provider_api_key(fallback.api_key)
+                        is_configured = bool(api_key_value)
+                        if is_configured:
+                            base_url = resolve_provider_models_base_url(
+                                provider_name, fallback.app_config if fallback is not None else static.app_config,
+                                credentials_resolved=True,
+                            )
+                            discovery_result = (
+                                discover_provider_models(
+                                    provider_name, api_key_value, base_url=base_url,
+                                    force_refresh=refresh_openrouter and provider_name == "openrouter",
+                                ) if base_url is not None else ModelDiscoveryResult("unsupported")
+                            )
+                            if discovery_result.status == "ready":
+                                models = list(discovery_result.models)
+                    except ByokResolutionError as error:
+                        if error.code != "invalid_provider_credentials":
+                            raise
+                        api_key_value = None
+                        is_configured = False
+                        discovery_result = ModelDiscoveryResult("auth_failed")
             should_discover = (
                 provider_info['type'] == 'local'
                 and is_configured
@@ -1941,9 +1995,13 @@ def get_configured_providers(
                 endpoint_url=endpoint_url,
                 api_key_value=api_key_value,
                 current_availability=(
-                    provider_envelope.get("availability")
-                    if isinstance(provider_envelope, dict)
-                    else None
+                    "disabled"
+                    if override is not None and override.is_enabled is False
+                    else (
+                        provider_envelope.get("availability")
+                        if isinstance(provider_envelope, dict)
+                        else None
+                    )
                 ),
                 health_entry=health_report.get(provider_name),
                 supported_chat_providers=supported_chat_providers,
@@ -1953,32 +2011,6 @@ def get_configured_providers(
                 endpoint_probe_enabled=endpoint_probe_enabled,
             )
 
-            # Augment or seed with models from the pricing catalog for commercial providers.
-            # This makes model_pricing.json the primary reference for available models,
-            # while still honoring any explicit config.txt entries.
-            if provider_info['type'] == 'commercial':
-                try:
-                    pricing_models = list_provider_models(provider_name)
-                    # Heuristic: exclude obvious embedding model ids from chat model lists
-                    pricing_models = [m for m in pricing_models if 'embed' not in m.lower() and 'embedding' not in m.lower()]
-                except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
-                    pricing_models = []
-
-                if provider_name == "openrouter" and is_configured and api_key_value:
-                    live_openrouter_models = discover_openrouter_models(
-                        api_key_value,
-                        force_refresh=refresh_openrouter,
-                    )
-                    if live_openrouter_models:
-                        pricing_models = _dedupe_preserve_order(
-                            live_openrouter_models + pricing_models
-                        )
-
-                if pricing_models:
-                    # Preserve order: config models first, then pricing extras
-                    seen = {m.strip() for m in models}
-                    extras = [m for m in pricing_models if m not in seen]
-                    models = models + extras
             # Build models and metadata
             models_info = [get_model_metadata(provider_name, m) for m in models]
             if (
@@ -2003,7 +2035,7 @@ def get_configured_providers(
                             **model_info["modalities"],
                             "input": [*inputs, "image"] if vision else inputs,
                         }
-            if not include_deprecated:
+            if not include_deprecated and provider_info['type'] != 'commercial':
                 # Filter out deprecated models by default
                 filtered = [mi for mi in models_info if not mi.get('deprecated', False)]
                 models_info = filtered
@@ -2073,6 +2105,7 @@ def get_configured_providers(
                 'name': provider_name,
                 'display_name': provider_info['display_name'],
                 'models': models,
+                'model_inventory_source': 'provider' if provider_info['type'] == 'commercial' else 'configured',
                 # New: detailed metadata per model
                 'models_info': models_info,
                 'type': provider_info['type'],
@@ -2157,6 +2190,14 @@ def get_configured_providers(
             'total_configured': len(providers)
         }
 
+    except ByokResolutionError:
+        logger.error("Provider credential store is unavailable")
+        return {
+            'providers': [],
+            'default_provider': 'openai',
+            'total_configured': 0,
+            'error': 'Provider credential store is unavailable.',
+        }
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
         logger.error("Error getting configured providers")
         return {
@@ -2624,6 +2665,7 @@ async def get_provider_details(provider_name: str, include_deprecated: bool = Fa
     """
     try:
         result = await get_configured_providers_async(include_deprecated=include_deprecated)
+        result = apply_llm_provider_overrides_to_listing(result)
 
         # Find the specific provider
         for provider in result['providers']:
@@ -2680,6 +2722,7 @@ async def get_all_models(
         input_filters = _normalize_filter_values(input_modality)
         output_filters = _normalize_filter_values(output_modality)
         result = await get_configured_providers_async(include_deprecated=include_deprecated)
+        result = apply_llm_provider_overrides_to_listing(result)
         models: list[str] = []
         for provider in result.get('providers', []):
             provider_name = provider.get('name') or "unknown"

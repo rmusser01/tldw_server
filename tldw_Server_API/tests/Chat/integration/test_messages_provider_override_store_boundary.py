@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -19,6 +20,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCallCredentials,
     is_runtime_issued_provider_call_credentials,
 )
+from tldw_Server_API.app.core.Chat import chat_service
 
 pytestmark = pytest.mark.integration
 
@@ -46,7 +48,7 @@ def _openai_response() -> dict[str, Any]:
 
 
 @pytest.fixture(autouse=True)
-def healthy_override_cache_between_tests():
+def healthy_override_cache_between_tests(monkeypatch):
     # Capture raw test state: the public getter correctly fails closed when a
     # background refresh has marked the cache unhealthy, which must not make
     # this test module order-dependent.
@@ -55,6 +57,9 @@ def healthy_override_cache_between_tests():
         original_healthy = overrides_module._OVERRIDE_CACHE_HEALTHY
         original_ttl_enabled = not overrides_module._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
     overrides_module.set_llm_provider_overrides_cache_for_tests(original)
+    monkeypatch.setattr(chat_service, "discover_provider_models", lambda *args, **kwargs: SimpleNamespace(
+        status="ready", models=("claude-3-sonnet-20240229", "claude-3-5-sonnet-latest", "gpt-4o-mini"),
+    ))
     try:
         yield
     finally:

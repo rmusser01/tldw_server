@@ -11,8 +11,15 @@ from dataclasses import dataclass
 from typing import Any, NoReturn
 
 import httpx
-from anyio import fail_after
+from anyio import current_time, fail_after
 
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+)
+from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Slides.standalone_html_config import (
     CLOSED_ADAPTER_CATALOG,
     MAX_DOCUMENT_BYTES,
@@ -465,6 +472,47 @@ def _document_bytes(text: str, *, max_document_bytes: int) -> bytes:
     return document
 
 
+async def _verify_model_inventory(
+    target: ResolvedExecutionTarget,
+    provider_api_key: str,
+    *,
+    deadline: float,
+) -> None:
+    remaining = deadline - current_time()
+    if remaining <= 0:
+        _fail("standalone_html_provider_timeout")
+    # The closed manifest was checked before this call; do not resolve a
+    # different endpoint or credential from global provider configuration.
+    suffix = "/messages" if target.provider == "anthropic" else "/chat/completions"
+    base_url = target.endpoint_identity.removesuffix(suffix)
+    policy = ProviderCallPolicy(
+        max_transport_attempts=1,
+        maximum_timeout_seconds=remaining,
+        required_endpoint_scope=ConfiguredEndpointScope.from_url(target.endpoint_identity),
+        privacy_safe_errors=True,
+    )
+    failed = False
+    try:
+        result = await await_bounded_sync_call(
+            lambda: provider_model_inventory.discover_provider_models(
+                target.provider,
+                provider_api_key,
+                base_url=base_url,
+                call_policy=policy,
+            ),
+            pool=SYNC_ADAPTER_CALL_POOL,
+            exhaustion_message="Standalone HTML model discovery capacity unavailable.",
+        )
+    except Exception:  # noqa: BLE001 - redact every inventory/worker failure at this boundary.
+        failed = True
+    if current_time() >= deadline:
+        _fail("standalone_html_provider_timeout")
+    if failed or result.status != "ready":
+        _fail("standalone_html_provider_unavailable")
+    if target.model not in result.models:
+        _fail("standalone_html_model_not_allowed")
+
+
 async def _request_once(
     *,
     target: ResolvedExecutionTarget,
@@ -482,7 +530,8 @@ async def _request_once(
         current = _load_current_config(current_config_loader)
         response_limit, document_limit = _validated_runtime_limits(current)
         limits = current.provider_limits
-        with fail_after(limits.overall_timeout_seconds):
+        attempt_started = current_time()
+        with fail_after(limits.overall_timeout_seconds) as deadline_scope:
             headers, payload = _build_request(
                 target,
                 system_prompt=system_prompt,
@@ -490,6 +539,31 @@ async def _request_once(
                 provider_api_key=provider_api_key,
                 max_output_tokens=limits.max_output_tokens,
             )
+            current = _verify_current_target(target, current)
+            if target.provider in {"openai", "anthropic"}:
+                await _verify_model_inventory(
+                    target,
+                    provider_api_key,
+                    deadline=deadline_scope.deadline,
+                )
+                # Discovery yields: reload permissions and limits, then keep
+                # the fresh authorization check adjacent to the POST.
+                current = _load_current_config(current_config_loader)
+                response_limit, document_limit = _validated_runtime_limits(current)
+                limits = current.provider_limits
+                deadline_scope.deadline = min(
+                    deadline_scope.deadline,
+                    attempt_started + limits.overall_timeout_seconds,
+                )
+                if current_time() >= deadline_scope.deadline:
+                    _fail("standalone_html_provider_timeout")
+                headers, payload = _build_request(
+                    target,
+                    system_prompt=system_prompt,
+                    user_content=user_content,
+                    provider_api_key=provider_api_key,
+                    max_output_tokens=limits.max_output_tokens,
+                )
             request_timeout = _provider_timeout(current)
             current = _verify_current_target(target, current)
             async with client.stream(
