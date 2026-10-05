@@ -41,10 +41,10 @@
       "state": "notes-editor",
       "rule": "color-contrast",
       "impact": "serious",
-      "nodes": 4,
+      "nodes": 8,
       "reviewIds": ["AX-07"],
       "issue": 3124,
-      "note": "Selected 'Notes' and 'List' view buttons, the 'Search tips' link and the 'Filter by tag' placeholder. Measured after the notes save-state, WYSIWYG and list fixes (#3164, #3133, #3148): 'Save', 'Create study pack' and the 'Edit' / 'Markdown' mode buttons no longer fail with a note open."
+      "note": "The empty-library nodes, with 'Create study pack' in place of 'Create note'. 'Save' no longer fails: it is primary only while there are unsaved edits (#3164). Scanned after the editor finishes loading; earlier, its disabled toolbar is skipped and the count varies."
     },
     {
       "state": "notes-editor",

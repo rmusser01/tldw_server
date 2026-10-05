@@ -142,6 +142,10 @@ test.describe("Accessibility ratchet", () => {
     await authedPage.getByTestId(`notes-open-button-${note.id}`).click()
     const editor = authedPage.getByPlaceholder(NOTE_EDITOR_PLACEHOLDER)
     await expect(editor).toHaveValue(/Seeded by the UX regression harness/, { timeout: UX_ROUTE_TIMEOUT_MS })
+    // The text shows before the note finishes loading; until then the editor's
+    // toolbar is disabled, and axe skips disabled controls, so scanning early
+    // under-counts by a varying amount.
+    await expect(authedPage.getByTestId("notes-input-mode-markdown")).toBeEnabled({ timeout: UX_ROUTE_TIMEOUT_MS })
     await expectA11yMatchesBaseline(authedPage, "notes-editor", testInfo)
   })
 
