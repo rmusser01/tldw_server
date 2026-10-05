@@ -18,7 +18,7 @@ from tldw_Server_API.app.api.v1.schemas.pagination import (
     default_offset_pagination_aliases,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.exceptions import UserNotFoundError
+from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError, UserNotFoundError
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
     AuthnzStorageQuotasRepo,
     DEFAULT_HARD_LIMIT_PCT,
@@ -137,21 +137,25 @@ async def get_user_storage_quota(user_id: int) -> StorageQuotaResponse:
 
 @router.put(
     "/users/{user_id}",
-    response_model=dict[str, Any],
+    response_model=StorageQuotaResponse,
     summary="Update user storage quota",
 )
 async def update_user_storage_quota(
     user_id: int,
     body: UpdateUserQuotaRequest,
-) -> dict[str, Any]:
+) -> StorageQuotaResponse:
     """Set (or, with null, remove) a user's own storage quota (limits.storage_quota_mb)."""
     try:
         service = await get_storage_service()
-        return await service.set_user_quota(user_id, body.quota_mb, updated_by=None)
+        await service.set_user_quota(user_id, body.quota_mb, updated_by=None)
+        return StorageQuotaResponse(**await service.user_quota_status(user_id))
     except UserNotFoundError as exc:
         raise HTTPException(status_code=404, detail="User not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StorageError as exc:
+        logger.warning("Failed to update user storage quota")
+        raise HTTPException(status_code=500, detail="Failed to update storage quota") from exc
     except _NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Failed to update user storage quota")
         raise HTTPException(
