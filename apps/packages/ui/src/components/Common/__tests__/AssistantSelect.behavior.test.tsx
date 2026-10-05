@@ -1,6 +1,13 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -12,13 +19,11 @@ const mocks = vi.hoisted(() => ({
   getPersonaProfile: vi.fn(async () => null),
   getCharacter: vi.fn(async () => null),
   selectedAssistant: {
-    value: null as
-      | null
-      | {
-          kind: "character" | "persona"
-          id: string
-          name: string
-        }
+    value: null as null | {
+      kind: "character" | "persona"
+      id: string
+      name: string
+    }
   },
   setSelectedAssistant: vi.fn(async () => undefined),
   updateSettings: vi.fn(async () => null)
@@ -49,15 +54,29 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@plasmohq/storage", () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
-vi.mock("@plasmohq/storage/hook", () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage-hook"))
-vi.mock("@/services/service-prompts", async importOriginal => ({
-  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+vi.mock(
+  "@plasmohq/storage",
+  () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage")
+)
+vi.mock(
+  "@plasmohq/storage/hook",
+  () =>
+    import("../../../../../../tldw-frontend/extension/shims/plasmo-storage-hook")
+)
+vi.mock("@/services/service-prompts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/service-prompts")>()),
   resolveServicePromptScope: async () => {
     await mocks.ownerReady
-    return { scopeKey: "alice", userId: "alice", config: {
-      serverUrl: "http://localhost:8000", authMode: "multi-user", authSource: "manual", orgId: 2
-    } }
+    return {
+      scopeKey: "alice",
+      userId: "alice",
+      config: {
+        serverUrl: "http://localhost:8000",
+        authMode: "multi-user",
+        authSource: "manual",
+        orgId: 2
+      }
+    }
   }
 }))
 
@@ -71,18 +90,25 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-vi.mock("@/hooks/useSelectedAssistant", async importOriginal => {
-  const actual = await importOriginal<typeof import("@/hooks/useSelectedAssistant")>()
-  return { useSelectedAssistant: () => mocks.realSelection ? actual.useSelectedAssistant() : [
-    mocks.selectedAssistant.value,
-    mocks.setSelectedAssistant,
-    { isLoading: false, setRenderValue: vi.fn() }
-  ] }
+vi.mock("@/hooks/useSelectedAssistant", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/useSelectedAssistant")>()
+  return {
+    useSelectedAssistant: () =>
+      mocks.realSelection
+        ? actual.useSelectedAssistant()
+        : [
+            mocks.selectedAssistant.value,
+            mocks.setSelectedAssistant,
+            { isLoading: false, setRenderValue: vi.fn() }
+          ]
+  }
 })
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: Object.assign(
-    (selector: (state: Record<string, unknown>) => unknown) => selector(state.option),
+    (selector: (state: Record<string, unknown>) => unknown) =>
+      selector(state.option),
     { getState: () => state.option }
   )
 }))
@@ -109,14 +135,11 @@ vi.mock("antd", async () => {
     />
   ))
 
-  const Tooltip = ({ children }: { children: React.ReactNode }) => <>{children}</>
+  const Tooltip = ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  )
 
-  const Dropdown = ({
-    open,
-    onOpenChange,
-    popupRender,
-    children
-  }: any) => {
+  const Dropdown = ({ open, onOpenChange, popupRender, children }: any) => {
     const containerRef = React.useRef<HTMLDivElement | null>(null)
 
     React.useEffect(() => {
@@ -194,18 +217,52 @@ const renderAssistantSelect = (
 }
 
 describe("AssistantSelect behavior", () => {
+  it("owns Escape throughout the real popup before an enclosing disclosure can see it", async () => {
+    const parentEscape = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <div
+        onKeyDown={(event) => {
+          if (event.key === "Escape") parentEscape()
+        }}>
+        <AssistantSelect variant="dropdown" />
+      </div>
+    )
+    const trigger = screen.getByRole("button", {
+      name: "Select character or persona"
+    })
+    await user.click(trigger)
+    const tab = await screen.findByRole("tab", { name: "Characters" })
+    tab.focus()
+    await user.keyboard("{Escape}")
+    expect(parentEscape).not.toHaveBeenCalled()
+    expect(
+      screen.queryByTestId("assistant-select-panel")
+    ).not.toBeInTheDocument()
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
   it("waits for a root tracked-selection decision before closing or replacing chat", async () => {
     let decide!: (accepted: boolean) => void
-    const onTrackedSelection = vi.fn(() => new Promise<boolean>(resolve => { decide = resolve }))
+    const onTrackedSelection = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          decide = resolve
+        })
+    )
     const user = userEvent.setup()
     renderAssistantSelect({ onTrackedSelection })
-    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    await user.click(
+      screen.getByRole("button", { name: "Select character or persona" })
+    )
     await user.click(await screen.findByRole("button", { name: "Alpha" }))
     expect(screen.getByTestId("assistant-select-menu")).toBeInTheDocument()
     expect(onTrackedSelection).toHaveBeenCalledOnce()
     expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
     expect(state.option.setServerChatId).not.toHaveBeenCalled()
-    await act(async () => { decide(false) })
+    await act(async () => {
+      decide(false)
+    })
     expect(screen.getByTestId("assistant-select-menu")).toBeInTheDocument()
   })
   it("does not close a reopened picker after an obsolete tracked decision", async () => {
@@ -213,17 +270,23 @@ describe("AssistantSelect behavior", () => {
     let callerIsCurrent!: () => boolean
     const onTrackedSelection = vi.fn((_selection, isCurrent) => {
       callerIsCurrent = isCurrent!
-      return new Promise<boolean>(resolve => { decide = resolve })
+      return new Promise<boolean>((resolve) => {
+        decide = resolve
+      })
     })
     const user = userEvent.setup()
     renderAssistantSelect({ onTrackedSelection })
-    const trigger = screen.getByRole("button", { name: "Select character or persona" })
+    const trigger = screen.getByRole("button", {
+      name: "Select character or persona"
+    })
     await user.click(trigger)
     await user.click(await screen.findByRole("button", { name: "Alpha" }))
     await user.click(trigger)
     await user.click(trigger)
     expect(callerIsCurrent()).toBe(false)
-    await act(async () => { decide(true) })
+    await act(async () => {
+      decide(true)
+    })
     expect(screen.getByTestId("assistant-select-menu")).toBeInTheDocument()
   })
   beforeEach(() => {
@@ -273,43 +336,58 @@ describe("AssistantSelect behavior", () => {
     localStorage.clear()
     mocks.realSelection = true
     let release!: () => void
-    mocks.ownerReady = new Promise<void>(resolve => { release = resolve })
+    mocks.ownerReady = new Promise<void>((resolve) => {
+      release = resolve
+    })
     const complete = vi.fn()
     const user = userEvent.setup()
     renderAssistantSelect({ onSelectionComplete: complete })
-    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    await user.click(
+      screen.getByRole("button", { name: "Select character or persona" })
+    )
     const choice = await screen.findByRole("button", { name: "Alpha" })
     expect(choice).toBeDisabled()
     await user.click(choice)
     expect(state.option.setServerChatId).not.toHaveBeenCalled()
     expect(complete).not.toHaveBeenCalled()
-    await act(async () => { release() })
+    await act(async () => {
+      release()
+    })
     await waitFor(() => expect(choice).toBeEnabled())
     await user.click(choice)
-    await waitFor(() => expect(complete).toHaveBeenCalledWith(expect.objectContaining({ id: "char-1" })))
+    await waitFor(() =>
+      expect(complete).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "char-1" })
+      )
+    )
   })
 
-  it.each(["javascript:alert(1)", "data:image/svg+xml,<svg onload='alert(1)'/>"])(
-    "does not render an unsafe assistant avatar: %s",
-    async (avatar_url) => {
-      mocks.listAllCharacters.mockResolvedValue([
-        { id: "char-1", name: "Alpha", avatar_url }
-      ])
-      renderAssistantSelect({ variant: "inline" })
+  it.each([
+    "javascript:alert(1)",
+    "data:image/svg+xml,<svg onload='alert(1)'/>"
+  ])("does not render an unsafe assistant avatar: %s", async (avatar_url) => {
+    mocks.listAllCharacters.mockResolvedValue([
+      { id: "char-1", name: "Alpha", avatar_url }
+    ])
+    renderAssistantSelect({ variant: "inline" })
 
-      await screen.findByRole("button", { name: "Alpha" })
-      expect(screen.queryByRole("img", { name: "Alpha" })).not.toBeInTheDocument()
-    }
-  )
+    await screen.findByRole("button", { name: "Alpha" })
+    expect(screen.queryByRole("img", { name: "Alpha" })).not.toBeInTheDocument()
+  })
 
   it("renders an allowed assistant avatar", async () => {
     mocks.listAllCharacters.mockResolvedValue([
-      { id: "char-1", name: "Alpha", avatar_url: "https://example.com/alpha.png" }
+      {
+        id: "char-1",
+        name: "Alpha",
+        avatar_url: "https://example.com/alpha.png"
+      }
     ])
     renderAssistantSelect({ variant: "inline" })
 
     expect(await screen.findByRole("img", { name: "Alpha" })).toHaveAttribute(
-      "src", "https://example.com/alpha.png"
+      "src",
+      "https://example.com/alpha.png"
     )
   })
 
@@ -318,22 +396,32 @@ describe("AssistantSelect behavior", () => {
     const onSelectionChange = vi.fn()
     state.option.serverChatAssistantKind = "character"
     state.option.serverChatCharacterId = "char-1"
-    mocks.selectedAssistant.value = { kind: "character", id: "char-1", name: "Alpha" }
+    mocks.selectedAssistant.value = {
+      kind: "character",
+      id: "char-1",
+      name: "Alpha"
+    }
     const { rerenderAssistantSelect } = renderAssistantSelect({
       selection: null,
       onSelectionChange
     })
 
-    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    await user.click(
+      screen.getByRole("button", { name: "Select character or persona" })
+    )
     await user.click(await screen.findByRole("tab", { name: "Personas" }))
-    await user.click(await screen.findByRole("button", { name: "Guide Persona" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Guide Persona" })
+    )
 
-    expect(onSelectionChange).toHaveBeenCalledWith(expect.objectContaining({
-      kind: "persona",
-      id: "persona-1",
-      name: "Guide Persona",
-      metadata: { selectionMode: "tracked" }
-    }))
+    expect(onSelectionChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "persona",
+        id: "persona-1",
+        name: "Guide Persona",
+        metadata: { selectionMode: "tracked" }
+      })
+    )
     expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
     expect(mocks.updateSettings).not.toHaveBeenCalled()
     expect(state.option.setHistoryId).not.toHaveBeenCalled()
@@ -342,7 +430,9 @@ describe("AssistantSelect behavior", () => {
       selection: { kind: "persona", id: "persona-1", name: "Guide Persona" },
       onSelectionChange
     })
-    expect(screen.getByTestId("character-select")).toHaveAccessibleName("Guide Persona")
+    expect(screen.getByTestId("character-select")).toHaveAccessibleName(
+      "Guide Persona"
+    )
   })
 
   it("does not load dropdown catalogs until the selector opens", async () => {
@@ -384,11 +474,15 @@ describe("AssistantSelect behavior", () => {
     )
 
     await user.type(
-      await screen.findByRole("textbox", { name: /search characters and personas/i }),
+      await screen.findByRole("textbox", {
+        name: /search characters and personas/i
+      }),
       "beta"
     )
 
-    expect(await screen.findByRole("button", { name: "Beta" })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("button", { name: "Beta" })
+    ).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Alpha" })).toBeNull()
   })
 
@@ -410,7 +504,9 @@ describe("AssistantSelect behavior", () => {
   })
 
   it("shows a retryable character catalog failure instead of an empty list", async () => {
-    mocks.listAllCharacters.mockRejectedValueOnce(new Error("characters failed"))
+    mocks.listAllCharacters.mockRejectedValueOnce(
+      new Error("characters failed")
+    )
 
     const user = userEvent.setup()
     renderAssistantSelect()
@@ -428,7 +524,9 @@ describe("AssistantSelect behavior", () => {
   })
 
   it("keeps loaded characters usable when persona catalog loading fails", async () => {
-    mocks.listPersonaProfiles.mockRejectedValueOnce(new Error("personas failed"))
+    mocks.listPersonaProfiles.mockRejectedValueOnce(
+      new Error("personas failed")
+    )
 
     const user = userEvent.setup()
     renderAssistantSelect()
@@ -437,7 +535,9 @@ describe("AssistantSelect behavior", () => {
       await screen.findByRole("button", { name: "Select character or persona" })
     )
 
-    expect(await screen.findByRole("button", { name: "Alpha" })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("button", { name: "Alpha" })
+    ).toBeInTheDocument()
     await user.click(await screen.findByRole("tab", { name: "Personas" }))
     expect(
       await screen.findByText(/could not load personas/i)
@@ -477,6 +577,106 @@ describe("AssistantSelect behavior", () => {
     )
   })
 
+  it("finishes the explicit selector return in its qualified frame without stealing later task focus", async () => {
+    renderAssistantSelect()
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: {
+          tab: "character",
+          returnFocusSelector: "#assistant-rail-trigger"
+        }
+      })
+    )
+    const tab = await screen.findByRole("tab", { name: "Characters" })
+    tab.focus()
+    const callbacks: FrameRequestCallback[] = []
+    const frame = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        callbacks.push(callback)
+        return callbacks.length
+      })
+    try {
+      fireEvent.keyDown(tab, { key: "Escape" })
+      act(() => {
+        callbacks.shift()?.(0)
+      })
+      const other = document.createElement("button")
+      document.body.appendChild(other)
+      try {
+        other.focus()
+        act(() => {
+          while (callbacks.length) callbacks.shift()?.(0)
+        })
+        expect(other).toHaveFocus()
+      } finally {
+        other.remove()
+      }
+    } finally {
+      frame.mockRestore()
+    }
+  })
+
+  it.each(["unmount", "reopen"] as const)(
+    "retires an explicit selector return after %s",
+    async (transition) => {
+      const view = renderAssistantSelect()
+      const intent = () =>
+        window.dispatchEvent(
+          new CustomEvent("tldw:open-assistant-select", {
+            detail: {
+              tab: "character",
+              returnFocusSelector: "#assistant-rail-trigger"
+            }
+          })
+        )
+      intent()
+      const tab = await screen.findByRole("tab", { name: "Characters" })
+      tab.focus()
+      const callbacks: FrameRequestCallback[] = []
+      const frame = vi
+        .spyOn(window, "requestAnimationFrame")
+        .mockImplementation((callback) => {
+          callbacks.push(callback)
+          return callbacks.length
+        })
+      const cancel = vi
+        .spyOn(window, "cancelAnimationFrame")
+        .mockImplementation(() => {})
+      try {
+        fireEvent.keyDown(tab, { key: "Escape" })
+        if (transition === "unmount") view.unmount()
+        else
+          act(() => {
+            intent()
+          })
+        const replacement = document.createElement("button")
+        replacement.id = "assistant-rail-trigger"
+        if (transition === "unmount") document.body.appendChild(replacement)
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur()
+        }
+        try {
+          act(() => {
+            while (callbacks.length) callbacks.shift()?.(0)
+          })
+          if (transition === "unmount") expect(document.body).toHaveFocus()
+          else
+            expect(
+              screen.getByRole("textbox", {
+                name: "Search characters and personas"
+              })
+            ).toHaveFocus()
+        } finally {
+          replacement.remove()
+        }
+      } finally {
+        frame.mockRestore()
+        cancel.mockRestore()
+      }
+    }
+  )
+
   it("returns focus to the requested rail trigger after selection", async () => {
     const user = userEvent.setup()
     renderAssistantSelect()
@@ -494,7 +694,9 @@ describe("AssistantSelect behavior", () => {
       })
     )
 
-    await user.click(await screen.findByRole("button", { name: "Guide Persona" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Guide Persona" })
+    )
 
     await waitFor(() => {
       expect(document.activeElement).toBe(railTrigger)
@@ -533,7 +735,11 @@ describe("AssistantSelect behavior", () => {
       expect(document.activeElement).toBe(railTrigger)
     })
     expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "character", id: "char-1", name: "Alpha" })
+      expect.objectContaining({
+        kind: "character",
+        id: "char-1",
+        name: "Alpha"
+      })
     )
 
     resolveSelection?.()
@@ -555,7 +761,9 @@ describe("AssistantSelect behavior", () => {
       })
     )
 
-    expect(await screen.findByRole("button", { name: "Alpha" })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("button", { name: "Alpha" })
+    ).toBeInTheDocument()
 
     fireEvent.keyDown(document, { key: "Escape" })
 
@@ -637,10 +845,9 @@ describe("AssistantSelect behavior", () => {
     const personaButton = await screen.findByRole("button", {
       name: "Guide Persona"
     })
-    expect(within(personaButton).getByRole("img", { name: "Guide Persona" })).toHaveAttribute(
-      "src",
-      "https://example.com/guide.png"
-    )
+    expect(
+      within(personaButton).getByRole("img", { name: "Guide Persona" })
+    ).toHaveAttribute("src", "https://example.com/guide.png")
 
     await user.click(personaButton)
 
@@ -682,7 +889,11 @@ describe("AssistantSelect behavior", () => {
     },
     {
       label: "persona to character",
-      source: { kind: "persona" as const, id: "persona-1", name: "Guide Persona" },
+      source: {
+        kind: "persona" as const,
+        id: "persona-1",
+        name: "Guide Persona"
+      },
       targetTab: "Characters",
       targetName: "Alpha",
       expected: { kind: "character", id: "char-1", name: "Alpha" }
@@ -701,26 +912,29 @@ describe("AssistantSelect behavior", () => {
       targetName: "Alpha",
       expected: { kind: "character", id: "char-1", name: "Alpha" }
     }
-  ])("supports $label from the assistant selector", async ({ source, targetTab, targetName, expected }) => {
-    const user = userEvent.setup()
-    mocks.selectedAssistant.value = source
-    renderAssistantSelect()
+  ])(
+    "supports $label from the assistant selector",
+    async ({ source, targetTab, targetName, expected }) => {
+      const user = userEvent.setup()
+      mocks.selectedAssistant.value = source
+      renderAssistantSelect()
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: source?.name ?? "Select character or persona"
-      })
-    )
+      await user.click(
+        await screen.findByRole("button", {
+          name: source?.name ?? "Select character or persona"
+        })
+      )
 
-    await user.click(await screen.findByRole("tab", { name: targetTab }))
-    mocks.setSelectedAssistant.mockClear()
-    await user.click(await screen.findByRole("button", { name: targetName }))
+      await user.click(await screen.findByRole("tab", { name: targetTab }))
+      mocks.setSelectedAssistant.mockClear()
+      await user.click(await screen.findByRole("button", { name: targetName }))
 
-    expect(mocks.setSelectedAssistant).toHaveBeenCalledTimes(1)
-    expect(mocks.setSelectedAssistant).toHaveBeenLastCalledWith(
-      expect.objectContaining(expected)
-    )
-  })
+      expect(mocks.setSelectedAssistant).toHaveBeenCalledTimes(1)
+      expect(mocks.setSelectedAssistant).toHaveBeenLastCalledWith(
+        expect.objectContaining(expected)
+      )
+    }
+  )
 
   it("moves a favorited character ahead of other characters and closes on escape", async () => {
     const user = userEvent.setup()
@@ -790,9 +1004,7 @@ describe("AssistantSelect behavior", () => {
 
   it("refreshes character detail for overlay snapshots when summary prompt material is missing", async () => {
     const user = userEvent.setup()
-    mocks.listAllCharacters.mockResolvedValue([
-      { id: "char-2", name: "Beta" }
-    ])
+    mocks.listAllCharacters.mockResolvedValue([{ id: "char-2", name: "Beta" }])
     mocks.getCharacter.mockResolvedValue({
       id: "char-2",
       name: "Beta",
@@ -811,9 +1023,7 @@ describe("AssistantSelect behavior", () => {
         }
       })
     )
-    await user.click(
-      await screen.findByRole("button", { name: "Beta" })
-    )
+    await user.click(await screen.findByRole("button", { name: "Beta" }))
 
     await waitFor(() => {
       expect(mocks.getCharacter).toHaveBeenCalledWith("char-2", {
@@ -873,7 +1083,9 @@ describe("AssistantSelect behavior", () => {
 
   it("still applies local selection when overlay settings persistence fails", async () => {
     const user = userEvent.setup()
-    mocks.updateSettings.mockRejectedValueOnce(new Error("settings write failed"))
+    mocks.updateSettings.mockRejectedValueOnce(
+      new Error("settings write failed")
+    )
 
     renderAssistantSelect()
 
@@ -945,7 +1157,9 @@ describe("AssistantSelect behavior", () => {
     await user.click(
       await screen.findByRole("button", { name: "Apply assistant" })
     )
-    expect(await screen.findByRole("button", { name: "Alpha" })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("button", { name: "Alpha" })
+    ).toBeInTheDocument()
 
     rerenderAssistantSelect({
       selectionModePreference: "tracked",
@@ -981,10 +1195,9 @@ describe("AssistantSelect behavior", () => {
     await user.click(
       await screen.findByRole("button", { name: "Apply assistant" })
     )
-    expect(await screen.findByRole("tab", { name: "Characters" })).toHaveAttribute(
-      "aria-selected",
-      "true"
-    )
+    expect(
+      await screen.findByRole("tab", { name: "Characters" })
+    ).toHaveAttribute("aria-selected", "true")
 
     rerenderAssistantSelect({
       initialTab: "persona",
@@ -1009,9 +1222,7 @@ describe("AssistantSelect behavior", () => {
     await user.click(
       await screen.findByRole("button", { name: "Apply overlay" })
     )
-    await user.click(
-      await screen.findByRole("tab", { name: "Personas" })
-    )
+    await user.click(await screen.findByRole("tab", { name: "Personas" }))
     await user.click(
       await screen.findByRole("button", { name: "Guide Persona" })
     )
@@ -1063,9 +1274,7 @@ describe("AssistantSelect behavior", () => {
     await user.click(
       await screen.findByRole("button", { name: "Apply overlay" })
     )
-    await user.click(
-      await screen.findByRole("tab", { name: "Personas" })
-    )
+    await user.click(await screen.findByRole("tab", { name: "Personas" }))
     await user.click(
       await screen.findByRole("button", { name: "Guide Persona" })
     )
@@ -1113,7 +1322,9 @@ describe("AssistantSelect behavior", () => {
     expect(state.option.setServerChatCharacterId).toHaveBeenCalledWith(null)
     expect(state.option.setServerChatAssistantKind).toHaveBeenCalledWith(null)
     expect(state.option.setServerChatAssistantId).toHaveBeenCalledWith(null)
-    expect(state.option.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(null)
+    expect(state.option.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(
+      null
+    )
     expect(state.option.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
     expect(state.option.setServerChatId).toHaveBeenCalledWith(null)
     expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
@@ -1125,5 +1336,4 @@ describe("AssistantSelect behavior", () => {
       })
     )
   })
-
 })

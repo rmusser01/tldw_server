@@ -1,5 +1,5 @@
-import React from "react"
 import { Loader2 } from "lucide-react"
+import React from "react"
 
 type ButtonVariant =
   | "primary"
@@ -20,6 +20,7 @@ type ButtonProps = {
   icon?: React.ReactNode
   children: React.ReactNode
   onClick?: React.MouseEventHandler<HTMLButtonElement>
+  onKeyDown?: React.KeyboardEventHandler<HTMLButtonElement>
   disabled?: boolean
   loading?: boolean
   className?: string
@@ -33,10 +34,8 @@ type ButtonProps = {
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
     "bg-primary text-white hover:bg-primaryStrong active:bg-primaryStrong",
-  secondary:
-    "bg-surface2 text-text hover:bg-surface active:bg-surface",
-  danger:
-    "bg-danger text-white hover:bg-danger active:bg-danger",
+  secondary: "bg-surface2 text-text hover:bg-surface active:bg-surface",
+  danger: "bg-danger text-white hover:bg-danger active:bg-danger",
   ghost:
     "bg-transparent text-text-muted hover:bg-surface2 hover:text-text active:bg-surface2",
   text: "bg-transparent text-primary hover:text-primaryStrong hover:underline",
@@ -74,6 +73,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       icon,
       children,
       onClick,
+      onKeyDown,
       disabled,
       loading,
       className,
@@ -90,9 +90,10 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       (type && Object.prototype.hasOwnProperty.call(variantStyles, type)
         ? (type as ButtonVariant)
         : "secondary")
-    const resolvedSize = size === "small" ? "sm" : size ?? "md"
+    const resolvedSize = size === "small" ? "sm" : (size ?? "md")
     const resolvedType =
-      htmlType ?? (type === "button" || type === "submit" || type === "reset"
+      htmlType ??
+      (type === "button" || type === "submit" || type === "reset"
         ? type
         : "button")
     const isDisabled = disabled || loading
@@ -113,11 +114,11 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           .join(" ")}
         disabled={isDisabled}
         onClick={onClick}
+        onKeyDown={onKeyDown}
         aria-label={ariaLabel}
         aria-busy={loading}
         title={title ?? ariaLabel}
-        data-testid={dataTestId}
-      >
+        data-testid={dataTestId}>
         {loading && <Loader2 className="h-4 w-4 animate-spin" />}
         {icon}
         {children}

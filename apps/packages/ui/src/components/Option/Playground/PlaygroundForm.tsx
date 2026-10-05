@@ -679,8 +679,6 @@ export const PlaygroundForm = ({
 
   const [autoSubmitVoiceMessage] = useStorage("autoSubmitVoiceMessage", false);
   const isMobileViewport = useMobile();
-  const suppressComposerToolbarForMobileCockpit =
-    mobileCockpitModeActive && isMobileViewport;
   const mobileComposerViewport = useMobileComposerViewport(isMobileViewport);
   const [viewportHeightPx, setViewportHeightPx] = React.useState(() =>
     typeof window === "undefined" ? 0 : window.innerHeight,
@@ -707,6 +705,7 @@ export const PlaygroundForm = ({
         document.querySelector<HTMLElement>(
           '[data-testid="composer-role-play-setup"]',
         ) ??
+        document.querySelector<HTMLElement>('[data-testid="composer-casual-advanced-chip"]') ??
         textareaRef.current;
     }
     setRolePlaySetupOpen(true);
@@ -1130,6 +1129,8 @@ export const PlaygroundForm = ({
   // showServerPersistenceHint and serverSaveInFlightRef moved to usePlaygroundPersistence
   const uiMode = useUiModeStore((state) => state.mode);
   const isProMode = uiMode === "pro";
+  const suppressComposerToolbarForMobileCockpit =
+    mobileCockpitModeActive && isMobileViewport && isProMode;
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -4675,8 +4676,7 @@ export const PlaygroundForm = ({
     />
   );
 
-  const externalPinSources =
-    contextToolsOpen ||
+  const composerOverlayOpen =
     contextWindowModalOpen ||
     sessionInsightsOpen ||
     imageGenerateModalOpen ||
@@ -4692,6 +4692,7 @@ export const PlaygroundForm = ({
     toolsPopoverOpen ||
     attachmentMenuOpen ||
     sendMenuOpen;
+  const externalPinSources = contextToolsOpen || composerOverlayOpen;
 
   const {
     actionBarVisible,
@@ -4699,7 +4700,7 @@ export const PlaygroundForm = ({
     actionBarVisibilityClass,
     handlers: actionBarHandlers,
   } = useActionBarVisibility({ externalPinSources });
-  const keepComposerToolbarVisible = !isMobileViewport;
+  const keepComposerToolbarVisible = !isMobileViewport || !isProMode;
   const [composerOptionsExpanded, setComposerOptionsExpanded] = useStorage(
     "playgroundComposerOptionsExpanded",
     true,
@@ -5926,7 +5927,7 @@ export const PlaygroundForm = ({
                                   : "flex items-end gap-2"
                               }
                             >
-                              <button
+                              {isProMode && <button
                                 type="button"
                                 data-testid="composer-options-toggle"
                                 aria-controls="composer-options-panel"
@@ -5974,10 +5975,12 @@ export const PlaygroundForm = ({
                                   }`}
                                   aria-hidden="true"
                                 />
-                              </button>
+                              </button>}
                               <div
                                 className={
-                                  isMobileViewport
+                                  !isProMode
+                                    ? "min-w-0 flex-1 col-span-2"
+                                    : isMobileViewport
                                     ? suppressComposerToolbarForMobileCockpit
                                       ? "col-span-2 min-w-0"
                                       : "min-w-0"
@@ -6262,10 +6265,12 @@ export const PlaygroundForm = ({
                                 ? false
                                 : !actionBarVisible
                             }
-                            className={`w-full transition-all duration-200 overflow-hidden ${
-                              keepComposerToolbarVisible
-                                ? "max-h-[480px] opacity-100 visible"
-                                : actionBarVisibilityClass
+                            className={`w-full transition-all duration-200 ${
+                              !isProMode
+                                ? "opacity-100 visible"
+                                : keepComposerToolbarVisible
+                                  ? "max-h-[480px] overflow-hidden opacity-100 visible"
+                                  : `overflow-hidden ${actionBarVisibilityClass}`
                             }`}
                           >
                             {wrapComposerProfile(
@@ -6279,6 +6284,10 @@ export const PlaygroundForm = ({
                                 modeLauncherButton={modeLauncherButton}
                                 compareControl={compareControl}
                                 openUIRequestButton={openUIRequestButton}
+                                openUIRequestMode={openUIRequestMode}
+                                toolChoice={toolChoice}
+                                nestedDisclosureOpen={composerOverlayOpen}
+                                focusFallbackRef={textareaRef}
                                 modelSelectButton={modelSelectButton}
                                 mcpControl={mcpControl}
                                 sendControl={sendControl}

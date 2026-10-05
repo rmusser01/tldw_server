@@ -58,6 +58,7 @@ type Props = {
   promptAssistBackendKey?: string | null
   promptAssistAuthorizationRevision?: string | null
   onSelectModel?: () => void
+  onOpenChange?: (open: boolean) => void
   className?: string
   iconClassName?: string
 }
@@ -83,6 +84,7 @@ export const PromptSelect: React.FC<Props> = ({
   promptAssistBackendKey = null,
   promptAssistAuthorizationRevision = null,
   onSelectModel,
+  onOpenChange,
   className = "text-text-muted",
   iconClassName = "size-5"
 }) => {
@@ -91,6 +93,8 @@ export const PromptSelect: React.FC<Props> = ({
   const [searchText, setSearchText] = useState("")
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
+  const disclosureOpen = dropdownOpen || editorOpen
+  useEffect(() => { onOpenChange?.(disclosureOpen) }, [disclosureOpen, onOpenChange])
   const [editorLoading, setEditorLoading] = useState(false)
   const [editorDraft, setEditorDraft] = useState("")
   const [editorTemplateContent, setEditorTemplateContent] = useState("")

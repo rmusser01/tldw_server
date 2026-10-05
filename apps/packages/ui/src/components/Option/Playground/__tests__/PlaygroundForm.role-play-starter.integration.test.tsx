@@ -46,7 +46,7 @@ vi.mock("@/services/service-prompts", async importOriginal => ({
   loadServicePromptSnapshot: nativeSetupFixture.snapshot
 }))
 const savedSetupFixture = vi.hoisted(() => ({ raw: "[]" }))
-const viewportState = vi.hoisted(() => ({ mobile: false }))
+const viewportState = vi.hoisted(() => ({ mobile: false, mode: "pro", realToolbar: false }))
 const onSubmitMock = vi.hoisted(() => vi.fn(async (_payload: unknown) => null))
 const createChatCompletionMock = vi.hoisted(() =>
   vi.fn(async () => ({
@@ -770,8 +770,9 @@ vi.mock("../ComposerTextarea", () => ({
   )
 }))
 
-vi.mock("../ComposerToolbar", () => ({
-  ComposerToolbar: ({
+vi.mock("../ComposerToolbar", async importOriginal => {
+  const actual = await importOriginal<typeof import("../ComposerToolbar")>()
+  const StubToolbar = ({
     modelSelectButton,
     researchLaunchButton,
     toolsButton,
@@ -807,6 +808,16 @@ vi.mock("../ComposerToolbar", () => ({
       </button>
     </div>
   )
+
+  return { ComposerToolbar: (props: React.ComponentProps<typeof actual.ComposerToolbar>) =>
+    viewportState.realToolbar ? <actual.ComposerToolbar {...props} /> : <StubToolbar {...props} /> }
+})
+
+vi.mock("@/components/Common/PromptSelect", () => ({ PromptSelect: () => <button>System prompt selector</button> }))
+vi.mock("@/components/Layouts/ConnectionStatus", () => ({ ConnectionStatus: () => <span>Connection status</span> }))
+vi.mock("../SystemPromptTemplates", async importOriginal => ({
+  ...await importOriginal<typeof import("../SystemPromptTemplates")>(),
+  SystemPromptTemplatesModal: () => null
 }))
 
 vi.mock("../CompareToggle", () => ({
@@ -923,7 +934,7 @@ vi.mock("@/components/Common/Playground/DocumentGeneratorDrawer", () => ({
 
 vi.mock("@/store/ui-mode", () => ({
   useUiModeStore: (selector: (state: { mode: string }) => unknown) =>
-    selector({ mode: "pro" })
+    selector({ mode: viewportState.mode })
 }))
 
 vi.mock("../TokenProgressBar", () => ({
@@ -1130,6 +1141,7 @@ vi.mock("@/hooks/playground", () => ({
 }))
 
 beforeEach(() => {
+  localStorage.clear()
   nativeSetupFixture.realSettings = false
   nativeSetupFixture.formattingGuide = false
   nativeSetupFixture.identityGuard = null
@@ -1146,6 +1158,8 @@ beforeEach(() => {
   savedSetupFixture.raw = "[]"
   saveActorSettingsMock.mockReset().mockResolvedValue(true)
   viewportState.mobile = false
+  viewportState.mode = "pro"
+  viewportState.realToolbar = false
   useBuddyManagementStore.getState().close()
   onSubmitMock.mockClear()
   createChatCompletionMock.mockClear()
@@ -1196,6 +1210,62 @@ const prepareNativeSource = () => {
 }
 
 describe("PlaygroundForm role-play starter", () => {
+  it.each([false, true])("keeps one real Casual customization trigger and primary controls in the mobile cockpit: %s", async mobile => {
+    viewportState.mobile = mobile
+    viewportState.mode = "casual"
+    viewportState.realToolbar = true
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} mobileCockpitModeActive />)
+    expect(screen.queryByRole("button", { name: /(?:Hide|Show) composer options/ })).not.toBeInTheDocument()
+    const trigger = screen.getByRole("button", { name: "Customize chat" })
+    expect(trigger).toBeVisible()
+    expect(screen.getByRole("button", { name: /Select model|deepseek-chat/i })).toBeVisible()
+    expect(screen.getByTestId("composer-inline-send-control")).toBeVisible()
+    await user.click(trigger)
+    expect(screen.getByRole("region", { name: "Customize chat" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Buddy & Persona" })).toBeVisible()
+    expect(within(screen.getByRole("group", { name: "Character & your role" })).getByRole("button", { name: "Role-play setup" })).toBeVisible()
+  })
+
+  it("allows Customize Escape while the real embedded Search & Context section remains open", async () => {
+    viewportState.mode = "casual"
+    viewportState.realToolbar = true
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    const trigger = screen.getByRole("button", { name: "Customize chat" })
+    await user.click(trigger)
+    await user.click(screen.getByRole("button", { name: "Search & Context" }))
+    const search = screen.getByRole("button", { name: "Close Search & Context" })
+    search.focus()
+    await user.keyboard("{Escape}")
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    expect(trigger).toHaveFocus()
+    expect(screen.getByTestId("knowledge-ask")).toBeVisible()
+  })
+
+  it("keeps the actual character starter event and popup keyboard layers when Customize begins closed", async () => {
+    viewportState.mode = "casual"
+    viewportState.realToolbar = true
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    const trigger = screen.getByRole("button", { name: "Customize chat" })
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    act(() => window.dispatchEvent(new CustomEvent("tldw:open-assistant-select", { detail: { tab: "character" } })))
+    const tab = await screen.findByRole("tab", { name: "Characters" })
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    expect(tab).toHaveAttribute("aria-selected", "true")
+    tab.focus()
+    await user.keyboard("{Escape}")
+    expect(screen.queryByTestId("assistant-select-panel")).not.toBeInTheDocument()
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    await waitFor(() => expect(screen.getByTestId("character-select")).toHaveFocus())
+    await user.keyboard("{Escape}")
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    expect(trigger).toHaveFocus()
+    expect(selectedAssistantMock.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(playgroundFormMessageOptionState.value.setMessages).not.toHaveBeenCalled()
+  })
+
   it.each(["accepted", "topK", "formatting guide"])("preflights a fresh character before leaving a local source (%s)", async blocker => {
     const { reset, source, owner } = prepareNativeSource()
     const blocked = blocker !== "accepted"

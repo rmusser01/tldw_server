@@ -3931,5 +3931,29 @@
   },
   "characterChatSessions_sessionReference": {
     "message": "Session {{id}}"
+  },
+  "composer_customizeChat": {
+    "message": "Customize chat"
+  },
+  "composer_mcpSelectedSummary": {
+    "message": "MCP tools selected: {{choice}}"
+  },
+  "composer_formattingGuideActive": {
+    "message": "Formatting guide on"
+  },
+  "composer_interactiveResponseActive": {
+    "message": "Interactive response on"
+  },
+  "composer_customizePreferenceUnavailable": {
+    "message": "Display preference unavailable. Customize chat still works for this visit."
+  },
+  "composer_groups_researchContext": {
+    "message": "Research & context"
+  },
+  "composer_groups_characterRole": {
+    "message": "Character & your role"
+  },
+  "composer_groups_responseSettings": {
+    "message": "Response settings"
   }
 }

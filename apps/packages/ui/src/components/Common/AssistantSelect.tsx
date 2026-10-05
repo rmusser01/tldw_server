@@ -22,7 +22,7 @@ import {
   personaToAssistantSelection,
   type AssistantSelection
 } from "@/types/assistant-selection"
-import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
+import { focusFirstVisibleElement } from "@/utils/focus-return"
 import {
   buildAssistantOverlaySnapshotFromSelection,
   resolveAssistantOverlaySnapshot
@@ -32,16 +32,18 @@ type Props = {
   className?: string
   iconClassName?: string
   showLabel?: boolean
+  onOpenChange?: (open: boolean) => void
   variant?: "inline" | "dropdown"
   labelOverride?: string
   selectionModePreference?: "tracked" | "overlay"
   initialTab?: AssistantSelectTab
   selection?: AssistantSelection | null
   onSelectionChange?: (selection: AssistantSelection) => void | Promise<void>
-  onTrackedSelection?: (selection: AssistantSelection, isCurrent?: () => boolean) => boolean | void | Promise<boolean | void>
-  onSelectionComplete?: (
-    selection: AssistantSelection
-  ) => void | Promise<void>
+  onTrackedSelection?: (
+    selection: AssistantSelection,
+    isCurrent?: () => boolean
+  ) => boolean | void | Promise<boolean | void>
+  onSelectionComplete?: (selection: AssistantSelection) => void | Promise<void>
 }
 
 type CharacterSummary = Record<string, unknown> & {
@@ -87,8 +89,7 @@ const normalizeCharacterSelection = (
 const normalizePersonaSelection = (
   persona: PersonaInfo
 ): AssistantSelection | null => {
-  const normalizedId =
-    persona.id != null ? String(persona.id) : null
+  const normalizedId = persona.id != null ? String(persona.id) : null
   const normalizedName =
     typeof persona.name === "string" && persona.name.trim().length > 0
       ? persona.name.trim()
@@ -107,8 +108,7 @@ const byAssistantName = (left: AssistantSelection, right: AssistantSelection) =>
 const normalizeFavoriteEntry = (
   favorite: FavoriteCharacter
 ): FavoriteCharacter | null => {
-  const name =
-    typeof favorite.name === "string" ? favorite.name.trim() : ""
+  const name = typeof favorite.name === "string" ? favorite.name.trim() : ""
   if (!name) return null
   return {
     id: typeof favorite.id === "string" ? favorite.id : undefined,
@@ -121,6 +121,7 @@ export const AssistantSelect: React.FC<Props> = ({
   className = "text-text-muted",
   iconClassName = "size-5",
   showLabel = true,
+  onOpenChange,
   variant = "inline",
   labelOverride,
   selectionModePreference = "tracked",
@@ -133,15 +134,21 @@ export const AssistantSelect: React.FC<Props> = ({
   const { t } = useTranslation(["option", "common"])
   const [storedAssistant, setSelectedAssistant, assistantMeta] =
     useSelectedAssistant(null)
-  const selectedAssistant = selection === undefined ? storedAssistant : selection
-  const [trackedSelectionPending, setTrackedSelectionPending] = React.useState(false)
-  const selectionPending = !onSelectionChange && (Boolean(assistantMeta?.isLoading) || trackedSelectionPending)
+  const selectedAssistant =
+    selection === undefined ? storedAssistant : selection
+  const [trackedSelectionPending, setTrackedSelectionPending] =
+    React.useState(false)
+  const selectionPending =
+    !onSelectionChange &&
+    (Boolean(assistantMeta?.isLoading) || trackedSelectionPending)
   const historyId = useStoreMessageOption((state) => state.historyId)
   const serverChatId = useStoreMessageOption((state) => state.serverChatId)
   const setHistoryId = useStoreMessageOption((state) => state.setHistoryId)
   const setHistory = useStoreMessageOption((state) => state.setHistory)
   const setMessages = useStoreMessageOption((state) => state.setMessages)
-  const setServerChatId = useStoreMessageOption((state) => state.setServerChatId)
+  const setServerChatId = useStoreMessageOption(
+    (state) => state.setServerChatId
+  )
   const serverChatAssistantKind = useStoreMessageOption(
     (state) => state.serverChatAssistantKind
   )
@@ -171,9 +178,14 @@ export const AssistantSelect: React.FC<Props> = ({
     serverChatId
   })
   const [open, setOpen] = React.useState(false)
+  React.useEffect(() => {
+    onOpenChange?.(open)
+  }, [open, onOpenChange])
   const trackedSelectionPendingRef = React.useRef(false)
   const selectionLifetimeRef = React.useRef(0)
-  const invalidateSelectionLifetime = React.useCallback(() => { selectionLifetimeRef.current++ }, [])
+  const invalidateSelectionLifetime = React.useCallback(() => {
+    selectionLifetimeRef.current++
+  }, [])
   React.useLayoutEffect(() => {
     invalidateSelectionLifetime()
     return invalidateSelectionLifetime
@@ -224,20 +236,38 @@ export const AssistantSelect: React.FC<Props> = ({
     ]
   )
 
+  const popupRef = React.useRef<HTMLDivElement>(null)
+  const returnFrameRef = React.useRef<number | null>(null)
+  const returnLifetimeRef = React.useRef(0)
+  const retireReturnFocus = React.useCallback(() => {
+    returnLifetimeRef.current++
+    if (returnFrameRef.current !== null) {
+      window.cancelAnimationFrame(returnFrameRef.current)
+      returnFrameRef.current = null
+    }
+  }, [])
+  React.useLayoutEffect(() => {
+    if (open) retireReturnFocus()
+  }, [open, retireReturnFocus])
+  React.useLayoutEffect(() => () => retireReturnFocus(), [retireReturnFocus])
   const restoreReturnFocus = React.useCallback(() => {
+    retireReturnFocus()
+    const lifetime = returnLifetimeRef.current
     const selector = returnFocusSelectorRef.current
     returnFocusSelectorRef.current = null
-    if (!selector) {
-      if (variant === "dropdown" && typeof window !== "undefined") {
-        window.requestAnimationFrame(() => {
-          triggerButtonRef.current?.focus()
-        })
-      }
-      return
-    }
-
-    scheduleFocusFirstVisibleElement(selector)
-  }, [variant])
+    const ownedFocus = () =>
+      document.activeElement === document.body ||
+      document.activeElement === triggerButtonRef.current ||
+      Boolean(popupRef.current?.contains(document.activeElement))
+    if (!ownedFocus()) return
+    returnFrameRef.current = window.requestAnimationFrame(() => {
+      if (returnLifetimeRef.current !== lifetime) return
+      returnFrameRef.current = null
+      if (!ownedFocus()) return
+      if (selector) focusFirstVisibleElement(selector)
+      else if (variant === "dropdown") triggerButtonRef.current?.focus()
+    })
+  }, [variant, retireReturnFocus])
 
   const trackedSelectionMatchesActiveChat = React.useCallback(
     (entry: AssistantSelection) => {
@@ -281,7 +311,10 @@ export const AssistantSelect: React.FC<Props> = ({
   ])
 
   React.useEffect(() => {
-    if (selectedAssistant?.kind === "character" || selectedAssistant?.kind === "persona") {
+    if (
+      selectedAssistant?.kind === "character" ||
+      selectedAssistant?.kind === "persona"
+    ) {
       setActiveTab(selectedAssistant.kind)
     }
   }, [selectedAssistant?.kind])
@@ -360,7 +393,9 @@ export const AssistantSelect: React.FC<Props> = ({
         }
         const result = await tldwClient.listAllCharacters()
         if (!isCancelled()) {
-          setCharacters(Array.isArray(result) ? (result as CharacterSummary[]) : [])
+          setCharacters(
+            Array.isArray(result) ? (result as CharacterSummary[]) : []
+          )
         }
       } catch {
         if (!isCancelled()) {
@@ -484,7 +519,8 @@ export const AssistantSelect: React.FC<Props> = ({
         const list = Array.isArray(previousFavorites) ? previousFavorites : []
         const nextFavorites = list.filter((favorite) => {
           if (nextFavorite.id && favorite.id === nextFavorite.id) return false
-          if (nextFavorite.slug && favorite.slug === nextFavorite.slug) return false
+          if (nextFavorite.slug && favorite.slug === nextFavorite.slug)
+            return false
           if (favorite.name === nextFavorite.name) return false
           return true
         })
@@ -563,7 +599,14 @@ export const AssistantSelect: React.FC<Props> = ({
         setTrackedSelectionPending(true)
         const lifetime = selectionLifetimeRef.current
         try {
-          if (await onTrackedSelection(nextEntry, () => selectionLifetimeRef.current === lifetime) === false || selectionLifetimeRef.current !== lifetime) return
+          if (
+            (await onTrackedSelection(
+              nextEntry,
+              () => selectionLifetimeRef.current === lifetime
+            )) === false ||
+            selectionLifetimeRef.current !== lifetime
+          )
+            return
           await onSelectionComplete?.(nextEntry)
           if (selectionLifetimeRef.current !== lifetime) return
         } finally {
@@ -601,7 +644,8 @@ export const AssistantSelect: React.FC<Props> = ({
       }
       await setSelectedAssistant(nextEntry)
       if (nextMode === "overlay") {
-        let overlaySnapshot = buildAssistantOverlaySnapshotFromSelection(nextEntry)
+        let overlaySnapshot =
+          buildAssistantOverlaySnapshotFromSelection(nextEntry)
         try {
           overlaySnapshot = await resolveAssistantOverlaySnapshot(nextEntry)
         } catch (error) {
@@ -640,23 +684,26 @@ export const AssistantSelect: React.FC<Props> = ({
     ]
   )
 
-  const handleOpenChange = React.useCallback((nextOpen: boolean) => {
-    setOpen(nextOpen)
-    if (nextOpen) {
-      if (eventOpenIntentRef.current) {
-        eventOpenIntentRef.current = false
-      } else if (pendingSelectionModeIntentRef.current) {
-        selectionModeIntentRef.current = pendingSelectionModeIntentRef.current
-      } else {
-        selectionModeIntentRef.current = selectionModePreference
+  const handleOpenChange = React.useCallback(
+    (nextOpen: boolean) => {
+      setOpen(nextOpen)
+      if (nextOpen) {
+        if (eventOpenIntentRef.current) {
+          eventOpenIntentRef.current = false
+        } else if (pendingSelectionModeIntentRef.current) {
+          selectionModeIntentRef.current = pendingSelectionModeIntentRef.current
+        } else {
+          selectionModeIntentRef.current = selectionModePreference
+        }
       }
-    }
-    if (!nextOpen) {
-      setSearchText("")
-      eventOpenIntentRef.current = false
-      restoreReturnFocus()
-    }
-  }, [restoreReturnFocus, selectionModePreference])
+      if (!nextOpen) {
+        setSearchText("")
+        eventOpenIntentRef.current = false
+        restoreReturnFocus()
+      }
+    },
+    [restoreReturnFocus, selectionModePreference]
+  )
 
   const openActorSettings = React.useCallback(() => {
     setOpen(false)
@@ -691,7 +738,10 @@ export const AssistantSelect: React.FC<Props> = ({
       key: "character" as const,
       label: t("option:assistant.charactersTab", "Characters"),
       emptyLabel: searchText.trim()
-        ? t("option:assistant.noCharacterMatches", "No characters match your search.")
+        ? t(
+            "option:assistant.noCharacterMatches",
+            "No characters match your search."
+          )
         : t("option:assistant.noCharacters", "No characters available."),
       entries: sortedCharacterEntries,
       showFavorites: true
@@ -700,13 +750,17 @@ export const AssistantSelect: React.FC<Props> = ({
       key: "persona" as const,
       label: t("option:assistant.personasTab", "Personas"),
       emptyLabel: searchText.trim()
-        ? t("option:assistant.noPersonaMatches", "No personas match your search.")
+        ? t(
+            "option:assistant.noPersonaMatches",
+            "No personas match your search."
+          )
         : t("option:assistant.noPersonas", "No personas available."),
       entries: sortedPersonaEntries,
       showFavorites: false
     }
   ]
-  const activeTabDefinition = tabs.find((tab) => tab.key === activeTab) ?? tabs[0]
+  const activeTabDefinition =
+    tabs.find((tab) => tab.key === activeTab) ?? tabs[0]
   const activeTabEntries = activeTabDefinition?.entries ?? []
   const activeTabEmptyLabel =
     activeTabDefinition?.emptyLabel ??
@@ -720,10 +774,7 @@ export const AssistantSelect: React.FC<Props> = ({
     activeTab === "character" ? loadCharacters : loadPersonas
   const activeTabErrorLabel =
     activeTab === "character"
-      ? t(
-          "option:assistant.charactersLoadError",
-          "Could not load characters."
-        )
+      ? t("option:assistant.charactersLoadError", "Could not load characters.")
       : t("option:assistant.personasLoadError", "Could not load personas.")
   const activeTabRetryLabel =
     activeTab === "character"
@@ -738,136 +789,143 @@ export const AssistantSelect: React.FC<Props> = ({
     "Loading characters and personas"
   )
 
-  const activeTabContent =
-    activeTabLoading ? (
-      <div
-        role="status"
-        aria-label={catalogLoadingLabel}
-        className="px-3 py-4 text-center text-sm text-text-subtle"
-      >
-        {activeTabLoadingLabel}
-      </div>
-    ) : activeTabError ? (
-      <div className="space-y-2 px-3 py-4 text-center text-sm text-text-subtle">
-        <p>{activeTabErrorLabel}</p>
-        <button
-          type="button"
-          className="rounded-md border border-border bg-surface px-2 py-1 text-xs font-medium text-text hover:bg-surface2"
-          onClick={() => {
-            void retryActiveTabLoad()
-          }}
-        >
-          {activeTabRetryLabel}
-        </button>
-      </div>
-    ) : activeTabEntries.length === 0 ? (
-      <div className="px-3 py-4 text-center text-sm text-text-subtle">
-        {activeTabEmptyLabel}
-      </div>
-    ) : (
-      <div
-        data-testid="assistant-select-menu"
-        aria-busy={selectionPending}
-        className="max-h-80 overflow-y-auto px-2 py-2"
-      >
-        {trackedSelectionPending && <p role="status" className="px-2 pb-2 text-sm text-text-subtle">{t("option:assistant.checkingSetup", "Checking setup…")}</p>}
-        <div className="flex flex-col gap-1">
-          {activeTabEntries.map((entry) => {
-            const isActive =
-              selectedAssistant?.kind === entry.kind &&
-              selectedAssistant?.id === entry.id
-            const isFavorite =
-              activeTabShowsFavorites && isFavoriteCharacter(entry)
-            const favoriteLabel = isFavorite
-              ? t(
-                  "option:assistant.favoriteRemove",
-                  `Remove ${entry.name} from favorites`
-                )
-              : t(
-                  "option:assistant.favoriteAdd",
-                  `Add ${entry.name} to favorites`
-                )
+  const activeTabContent = activeTabLoading ? (
+    <div
+      role="status"
+      aria-label={catalogLoadingLabel}
+      className="px-3 py-4 text-center text-sm text-text-subtle">
+      {activeTabLoadingLabel}
+    </div>
+  ) : activeTabError ? (
+    <div className="space-y-2 px-3 py-4 text-center text-sm text-text-subtle">
+      <p>{activeTabErrorLabel}</p>
+      <button
+        type="button"
+        className="rounded-md border border-border bg-surface px-2 py-1 text-xs font-medium text-text hover:bg-surface2"
+        onClick={() => {
+          void retryActiveTabLoad()
+        }}>
+        {activeTabRetryLabel}
+      </button>
+    </div>
+  ) : activeTabEntries.length === 0 ? (
+    <div className="px-3 py-4 text-center text-sm text-text-subtle">
+      {activeTabEmptyLabel}
+    </div>
+  ) : (
+    <div
+      data-testid="assistant-select-menu"
+      aria-busy={selectionPending}
+      className="max-h-80 overflow-y-auto px-2 py-2">
+      {trackedSelectionPending && (
+        <p role="status" className="px-2 pb-2 text-sm text-text-subtle">
+          {t("option:assistant.checkingSetup", "Checking setup…")}
+        </p>
+      )}
+      <div className="flex flex-col gap-1">
+        {activeTabEntries.map((entry) => {
+          const isActive =
+            selectedAssistant?.kind === entry.kind &&
+            selectedAssistant?.id === entry.id
+          const isFavorite =
+            activeTabShowsFavorites && isFavoriteCharacter(entry)
+          const favoriteLabel = isFavorite
+            ? t(
+                "option:assistant.favoriteRemove",
+                `Remove ${entry.name} from favorites`
+              )
+            : t(
+                "option:assistant.favoriteAdd",
+                `Add ${entry.name} to favorites`
+              )
 
-            return (
-              <div
-                key={`${entry.kind}:${entry.id}`}
-                className="flex items-center gap-2"
-              >
-                <button
-                  type="button"
-                  aria-label={entry.name}
-                  disabled={selectionPending}
-                  className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
-                    isActive
-                      ? "border-primary bg-primary/10 text-text"
-                      : "border-border bg-background text-text hover:bg-surface2"
-                  }`}
-                  onPointerDown={(event) => {
-                    event.stopPropagation()
-                  }}
-                  onMouseDown={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                  }}
-                  onClick={() => {
-                    void handleSelect(entry)
-                  }}
-                >
-                  {entry.avatar_url ? (
-                    <img
-                      src={entry.avatar_url}
-                      alt={entry.name}
-                      className="h-5 w-5 rounded-full"
+          return (
+            <div
+              key={`${entry.kind}:${entry.id}`}
+              className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-label={entry.name}
+                disabled={selectionPending}
+                className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
+                  isActive
+                    ? "border-primary bg-primary/10 text-text"
+                    : "border-border bg-background text-text hover:bg-surface2"
+                }`}
+                onPointerDown={(event) => {
+                  event.stopPropagation()
+                }}
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                }}
+                onClick={() => {
+                  void handleSelect(entry)
+                }}>
+                {entry.avatar_url ? (
+                  <img
+                    src={entry.avatar_url}
+                    alt={entry.name}
+                    className="h-5 w-5 rounded-full"
+                  />
+                ) : (
+                  <UserCircle2 className="h-5 w-5 flex-shrink-0 text-text-subtle" />
+                )}
+                <span className="min-w-0 flex-1 truncate font-medium">
+                  {entry.name}
+                </span>
+                <span aria-hidden="true" className="text-xs text-text-subtle">
+                  {entry.kind === "persona" ? "Persona" : "Character"}
+                </span>
+              </button>
+              {activeTabShowsFavorites ? (
+                <Tooltip title={favoriteLabel}>
+                  <button
+                    type="button"
+                    className="rounded-md p-1.5 text-text-subtle transition hover:bg-surface2"
+                    aria-label={favoriteLabel}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      toggleFavoriteCharacter(entry)
+                    }}>
+                    <Star
+                      className={`h-4 w-4 ${
+                        isFavorite ? "fill-warn text-warn" : "text-text-subtle"
+                      }`}
                     />
-                  ) : (
-                    <UserCircle2 className="h-5 w-5 flex-shrink-0 text-text-subtle" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate font-medium">
-                    {entry.name}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className="text-xs text-text-subtle"
-                  >
-                    {entry.kind === "persona" ? "Persona" : "Character"}
-                  </span>
-                </button>
-                {activeTabShowsFavorites ? (
-                  <Tooltip title={favoriteLabel}>
-                    <button
-                      type="button"
-                      className="rounded-md p-1.5 text-text-subtle transition hover:bg-surface2"
-                      aria-label={favoriteLabel}
-                      onMouseDown={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                      }}
-                      onClick={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        toggleFavoriteCharacter(entry)
-                      }}
-                    >
-                      <Star
-                        className={`h-4 w-4 ${
-                          isFavorite ? "fill-warn text-warn" : "text-text-subtle"
-                        }`}
-                      />
-                    </button>
-                  </Tooltip>
-                ) : null}
-              </div>
-            )
-          })}
-        </div>
+                  </button>
+                </Tooltip>
+              ) : null}
+            </div>
+          )
+        })}
       </div>
-    )
+    </div>
+  )
 
   const content = (
     <div
+      ref={popupRef}
       data-testid="assistant-select-panel"
-      className="w-[320px] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-surface text-text shadow-lg"
-    >
+      onKeyDown={(event) => {
+        if (
+          variant !== "dropdown" ||
+          event.key !== "Escape" ||
+          event.defaultPrevented ||
+          event.nativeEvent.isComposing
+        )
+          return
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+        restoreReturnFocus()
+      }}
+      className="w-[320px] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-surface text-text shadow-lg">
       <div className="border-b border-border p-2">
         <Input
           ref={searchInputRef}
@@ -891,8 +949,7 @@ export const AssistantSelect: React.FC<Props> = ({
       <div
         role="tablist"
         aria-label={t("option:assistant.tabList", "Character or persona")}
-        className="flex items-center gap-1 border-b border-border px-2 pt-2"
-      >
+        className="flex items-center gap-1 border-b border-border px-2 pt-2">
         {tabs.map((tab) => {
           const isActive = tab.key === activeTab
           return (
@@ -908,8 +965,7 @@ export const AssistantSelect: React.FC<Props> = ({
                   ? "bg-surface2 font-medium text-text"
                   : "text-text-subtle hover:text-text"
               }`}
-              onClick={() => setActiveTab(tab.key)}
-            >
+              onClick={() => setActiveTab(tab.key)}>
               {tab.label}
             </button>
           )
@@ -918,16 +974,14 @@ export const AssistantSelect: React.FC<Props> = ({
       <div
         id={`assistant-tabpanel-${activeTab}`}
         role="tabpanel"
-        aria-labelledby={`assistant-tab-${activeTab}`}
-      >
+        aria-labelledby={`assistant-tab-${activeTab}`}>
         {activeTabContent}
       </div>
       <div className="border-t border-border p-2">
         <button
           type="button"
           className="w-full rounded-md px-3 py-2 text-left text-sm font-medium text-text transition hover:bg-surface2"
-          onClick={openActorSettings}
-        >
+          onClick={openActorSettings}>
           {actorLabel}
         </button>
       </div>
@@ -948,8 +1002,7 @@ export const AssistantSelect: React.FC<Props> = ({
         root: "assistant-select-dropdown bg-surface text-text shadow-lg"
       }}
       placement="topLeft"
-      trigger={["click"]}
-    >
+      trigger={["click"]}>
       <Tooltip title={buttonLabel}>
         <button
           ref={triggerButtonRef}
@@ -961,11 +1014,12 @@ export const AssistantSelect: React.FC<Props> = ({
           onClick={() => {
             pendingSelectionModeIntentRef.current = null
             selectionModeIntentRef.current = selectionModePreference
-          }}
-        >
+          }}>
           <UserCircle2 className={iconClassName} />
           {showLabel ? (
-            <span className="max-w-[180px] truncate text-sm">{buttonLabel}</span>
+            <span className="max-w-[180px] truncate text-sm">
+              {buttonLabel}
+            </span>
           ) : null}
         </button>
       </Tooltip>

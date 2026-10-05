@@ -690,7 +690,17 @@
       "rolePlayPinnedExternal": "{{count}} pinned + external",
       "rolePlayPinnedCount": "{{count}} pinned",
       "rolePlayExternal": "External"
-    }
+    },
+    "customizeChat": "Customize chat",
+    "mcpSelectedSummary": "MCP tools selected: {{choice}}",
+    "formattingGuideActive": "Formatting guide on",
+    "interactiveResponseActive": "Interactive response on",
+    "groups": {
+      "researchContext": "Research & context",
+      "characterRole": "Character & your role",
+      "responseSettings": "Response settings"
+    },
+    "customizePreferenceUnavailable": "Display preference unavailable. Customize chat still works for this visit."
   },
   "tour": {
     "modelTitle": "Choose a Model",
