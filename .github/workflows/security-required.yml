@@ -113,6 +113,9 @@ jobs:
     # and did not succeed, this job was skipped, and GitHub counts a skipped
     # required job as satisfied. It now runs and the first step fails it
     # (TASK-13462).
+    # The last arm makes a license wait that was cancelled, failed or negative
+    # reach the refusal step below and go red. Without it this job is skipped,
+    # and GitHub counts a skipped required job as satisfied (TASK-13502).
     if: >-
       always() && !cancelled() &&
       (
@@ -127,12 +130,26 @@ jobs:
             needs.await_license.result == 'skipped' ||
             needs.await_license.outputs.license_passed == 'true'
           )
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
         )
       )
     timeout-minutes: 20
     steps:
       # Stays first: no later step uses a status function, so none runs once
       # this has failed.
+      - name: Require the license audit to have passed
+        if: >-
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        run: |
+          echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
+          exit 1
+
       - name: Require change detection to have succeeded
         if: needs.changes.result != 'success'
         env:
