@@ -9,6 +9,11 @@ import MediaReviewPage from '../MediaReviewPage'
 import { useMediaReviewState } from '../hooks/useMediaReviewState'
 import { useMediaReviewActions } from '../hooks/useMediaReviewActions'
 
+// Test-only view of the protected runtime boundary; production Storage stays unchanged.
+type RawGetTestStorage = {
+  rawGet: (key: string) => Promise<string | null | undefined>
+}
+
 const mediaItems = Array.from({ length: 40 }).map((_, idx) => ({
   id: idx + 1,
   title: `Item ${idx + 1}`,
@@ -738,7 +743,7 @@ describe('MediaReviewPage active reading context', () => {
   it('keeps an unread snapshot intact when the real registry storage read fails', async () => {
     const registry = await vi.importActual<typeof import('@/services/settings/registry')>('@/services/settings/registry')
     const storage = registry.getStorageForSetting({key:'media-review-selection-snapshot', defaultValue:null})
-    vi.spyOn(storage, 'rawGet').mockRejectedValue(new Error('Storage unavailable'))
+    vi.spyOn(storage as unknown as RawGetTestStorage, 'rawGet').mockRejectedValue(new Error('Storage unavailable'))
     mocks.getSetting.mockImplementation(registry.getSetting)
     render(<MediaReviewPage />)
     await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith('Could not load the saved selection. Reopen Review to try again.'))
@@ -750,7 +755,7 @@ describe('MediaReviewPage active reading context', () => {
   it('persists an empty owned set after successful absence at the real registry boundary', async () => {
     const registry = await vi.importActual<typeof import('@/services/settings/registry')>('@/services/settings/registry')
     const storage = registry.getStorageForSetting({key:'media-review-selection-snapshot', defaultValue:null})
-    vi.spyOn(storage, 'rawGet').mockResolvedValue(undefined)
+    vi.spyOn(storage as unknown as RawGetTestStorage, 'rawGet').mockResolvedValue(undefined)
     mocks.getSetting.mockImplementation(registry.getSetting)
     render(<MediaReviewPage />)
     await waitFor(() => expect(mocks.setSetting).toHaveBeenCalledWith(expect.objectContaining({key:'media-review-selection-snapshot'}), {version:1, authorityKey:'verified-alice', selectedIds:[]}))
