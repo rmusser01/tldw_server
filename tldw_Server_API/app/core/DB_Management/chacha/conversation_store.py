@@ -1408,6 +1408,13 @@ class ConversationStore:
             raise CharactersRAGDBError(f"Unexpected error during update_conversation: {exc}") from exc  # noqa: TRY003
 
     def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None:
+        """Move a conversation to Trash by flagging only its own row deleted.
+
+        Messages are deliberately left as they are. Message reads join on the
+        conversation's ``deleted`` flag, so they stay hidden while it is in
+        Trash, and ``restore_conversation`` brings back exactly the messages
+        that were active when it was trashed.
+        """
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
         query = (
@@ -1481,7 +1488,11 @@ class ConversationStore:
     def restore_conversation(
         self, conversation_id: str, expected_version: int, *, require_already_active: bool = False
     ) -> bool | None:
-        """Restore under current native and permanent receipt-association admission."""
+        """Restore under current native and permanent receipt-association admission.
+
+        Only the conversation row is undeleted. Message ``deleted`` flags are
+        not touched, so messages deleted individually stay deleted.
+        """
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
         query = (
