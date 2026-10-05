@@ -405,6 +405,7 @@ export const Playground = () => {
 
 const PlaygroundContent = () => {
   const historySelection = useHistorySelectionContext()!;
+  const resetHistorySelection = historySelection.reset;
   const drop = React.useRef<HTMLDivElement>(null);
   const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null);
   const artifactsEdgeExpandRef = React.useRef<HTMLButtonElement>(null);
@@ -984,6 +985,7 @@ const PlaygroundContent = () => {
         detail.historyId !== current.historyId ||
         detail.restoreRevision !== session.restoreRevision) return;
       if (detail.characterId === undefined) {
+        resetHistorySelection();
         setCharacterModeIntentActive(false);
         void setChatWorkflowMode("standard");
       }
@@ -1020,7 +1022,7 @@ const PlaygroundContent = () => {
     };
     window.addEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, handleReplacement);
     return () => window.removeEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, handleReplacement);
-  }, [location.hash, location.pathname, location.search, navigate, rawRouteCharacterIntent, routeLocationKey, setChatWorkflowMode]);
+  }, [location.hash, location.pathname, location.search, navigate, rawRouteCharacterIntent, resetHistorySelection, routeLocationKey, setChatWorkflowMode]);
 
   React.useEffect(() => {
     if (!routeRequestsCharacterMode) return;

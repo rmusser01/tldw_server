@@ -17,6 +17,7 @@ import { Header } from "@/components/Layouts/Header"
 import { CHAT_ROUTE_REPLACEMENT_EVENT } from "@/utils/character-chat-mode-intent"
 import { SETTINGS_NAVIGATION_REQUEST_EVENT } from "@/utils/settings-return"
 import { useClearChat } from "@/hooks/chat/useClearChat"
+import { useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
 import { selectedAssistantStorage } from "@/utils/selected-assistant-storage"
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
@@ -59,7 +60,22 @@ const OrdinarySend = () => {
 }
 
 const useMessageOptionMock = vi.hoisted(() => vi.fn())
-const realLoader = vi.hoisted(() => ({ enabled: false, webStorage: false, session: false, route: false, additionalLoader: false, storageBarrier: null as Promise<void> | null, storageWrites: 0, invalidated: new AbortController(), setSelection: null as null | ReturnType<typeof useSelectedAssistant>[1] }))
+const realLoader = vi.hoisted(() => ({ enabled: false, webStorage: false, session: false, route: false, additionalLoader: false, selectionProbe: false, storageBarrier: null as Promise<void> | null, storageWrites: 0, invalidated: new AbortController(), setSelection: null as null | ReturnType<typeof useSelectedAssistant>[1] }))
+let observedSelection: HistorySelectionController | null = null
+function SharedClear({ label }: { label: string }) {
+  const clear = useClearChat()
+  return <button onClick={() => clear()}>{label}</button>
+}
+function HistoryOwnerProbe() {
+  const selection = useHistorySelectionContext()!
+  React.useEffect(() => { observedSelection = selection }, [selection])
+  return <>
+    <output aria-label="Selected history owner">
+      {selection.owner?.kind === "unavailable" ? "unavailable" : selection.owner?.conversation_id ?? "none"}
+    </output>
+    <SharedClear label="Clear inside view" />
+  </>
+}
 const selectionOwner = () => createHash("sha256").update(JSON.stringify(["http://chat.test", "multi-user", "manual", null, ordinaryCompletion.owner, null])).digest("hex")
 const selectionKey = () => `selectedAssistant:owner:${selectionOwner()}`
 const setOwnedAssistant = (selection: unknown) => selectedAssistantStorage.set(selectionKey(), { ownerKey: selectionOwner(), selection })
@@ -190,7 +206,7 @@ const stableTranslation = vi.hoisted(() => (key: string, fallback?: string | { d
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: stableTranslation }) }))
 
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
-  PlaygroundForm: ({ characterWorkflowActive, characterChatSendBlocker }: { characterWorkflowActive?: boolean; characterChatSendBlocker?: unknown }) => <div data-testid="playground-form" data-character-workflow={String(characterWorkflowActive)} data-character-blocked={String(Boolean(characterChatSendBlocker))}>{realLoader.additionalLoader ? Array.from({ length: realLoader.webStorage ? 5 : 1 }, (_, index) => <AdditionalServerLoader key={index} />) : null}</div>
+  PlaygroundForm: ({ characterWorkflowActive, characterChatSendBlocker }: { characterWorkflowActive?: boolean; characterChatSendBlocker?: unknown }) => <div data-testid="playground-form" data-character-workflow={String(characterWorkflowActive)} data-character-blocked={String(Boolean(characterChatSendBlocker))}>{realLoader.selectionProbe ? <HistoryOwnerProbe /> : null}{realLoader.additionalLoader ? Array.from({ length: realLoader.webStorage ? 5 : 1 }, (_, index) => <AdditionalServerLoader key={index} />) : null}</div>
 }))
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
@@ -431,7 +447,85 @@ class RouteTestBoundary extends React.Component<{ children: React.ReactNode }, {
   render() { return this.state.failed ? <p role="alert">Chat route crashed</p> : this.props.children }
 }
 
+function prepareSharedClearFixture() {
+  realLoader.enabled = true
+  realLoader.selectionProbe = true
+  useMessageOptionMock.mockImplementation(useRealServerConversation)
+  useStoreMessageOption.setState({ serverChatId: "robot", historyId: null,
+    messages: [], history: [], serverChatMetaLoaded: false,
+    serverChatCharacterId: null, serverChatAssistantKind: null,
+    serverChatAssistantId: null, temporaryChat: false, streaming: false,
+    isProcessing: false })
+  tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat",
+    character_id: 5, assistant_kind: "character", assistant_id: "5",
+    source: "webui-character-chat", scope_type: "global" })
+  tldwClientState.listChatMessages.mockResolvedValue([
+    { id: "answer", role: "assistant", content: "BEEP BOOP", version: 1 }
+  ])
+}
+
 describe("Playground coordinator integration", () => {
+  it.each(["inside", "outside"] as const)("releases the selected owner on shared clear %s the provider", async origin => {
+    prepareSharedClearFixture()
+    const view = render(<><Playground /><SharedClear label="Clear outside view" /></>)
+    try {
+      await waitFor(() => expect(observedSelection?.status).toBe("ready"))
+      expect(screen.getByLabelText("Selected history owner")).toHaveTextContent("robot")
+      const previousFence = observedSelection!.fence()
+      fireEvent.click(screen.getByRole("button", { name: `Clear ${origin} view` }))
+      await waitFor(() => expect(screen.getByLabelText("Selected history owner")).toHaveTextContent("none"))
+      expect(observedSelection!.getCurrent().status).toBe("idle")
+      expect(previousFence()).toBe(false)
+      expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+    } finally { view.unmount() }
+  })
+
+  it.each(["inside", "outside"] as const)("retains the selected owner when shared clear %s the provider is declined", async origin => {
+    prepareSharedClearFixture()
+    const decline = (event: Event) => event.preventDefault()
+    const view = render(<><Playground /><SharedClear label="Clear outside view" /></>)
+    try {
+      await waitFor(() => expect(observedSelection?.status).toBe("ready"))
+      const previousFence = observedSelection!.fence()
+      window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, decline)
+      fireEvent.click(screen.getByRole("button", { name: `Clear ${origin} view` }))
+      expect(screen.getByLabelText("Selected history owner")).toHaveTextContent("robot")
+      expect(observedSelection!.getCurrent().status).toBe("ready")
+      expect(previousFence()).toBe(true)
+      expect(useStoreMessageOption.getState().serverChatId).toBe("robot")
+    } finally {
+      window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, decline)
+      view.unmount()
+    }
+  })
+
+  it("rejects a late capture after shared clear outside the provider", async () => {
+    prepareSharedClearFixture()
+    let release!: () => void
+    let captured = false
+    const held = new Promise<void>(resolve => { release = resolve })
+    const capture = tldwClientState.captureHistorySelection.getMockImplementation()!
+    tldwClientState.captureHistorySelection.mockImplementationOnce(async (chatId, request) => {
+      const response = await capture(chatId, request)
+      captured = true
+      await held
+      return response
+    })
+    const view = render(<><Playground /><SharedClear label="Clear outside view" /></>)
+    try {
+      await waitFor(() => expect(captured).toBe(true))
+      expect(observedSelection!.getCurrent().status).toBe("loading")
+      const previousFence = observedSelection!.fence()
+      fireEvent.click(screen.getByRole("button", { name: "Clear outside view" }))
+      await act(async () => { release(); await held })
+      await waitFor(() => expect(screen.getByLabelText("Selected history owner")).toHaveTextContent("none"))
+      expect(observedSelection!.getCurrent().status).toBe("idle")
+      expect(previousFence()).toBe(false)
+      expect(useStoreMessageOption.getState().messages).toEqual([])
+      expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+    } finally { release(); view.unmount() }
+  })
+
   it.each(["logout", "unmount"])("does not republish a recent cached Chat after %s during its read", async boundary => {
     vi.mocked(formatToChatHistory).mockReturnValue([])
     vi.mocked(formatToMessage).mockReturnValue([])
@@ -468,6 +562,8 @@ describe("Playground coordinator integration", () => {
     realLoader.enabled = false
     realLoader.webStorage = false
     realLoader.additionalLoader = false
+    realLoader.selectionProbe = false
+    observedSelection = null
     realLoader.storageBarrier = null
     realLoader.storageWrites = 0
     useMessageOptionMock.mockImplementation(() => messageOptionState.value)

@@ -608,7 +608,7 @@ it("does not create a durable profile for temporary history", async () => {
   expect(mocks.profile).not.toHaveBeenCalled()
   expect(result.current.reference).toBeNull()
 })
-it("keeps logical tab identities stable and refuses a result captured in another tab", async () => {
+it("keeps another logical tab's selection after reset and refuses its stale results", async () => {
   const { result } = renderHook(() => useHistorySelection())
   await act(async () => {
     result.current.activate("A")
@@ -621,6 +621,8 @@ it("keeps logical tab identities stable and refuses a result captured in another
     await result.current.choose({ kind: "empty" })
   })
   const second = result.current.view!
+  act(() => { result.current.reset() })
+  expect(result.current.owner).toBeNull()
   await act(async () => {
     result.current.activate("A")
   })

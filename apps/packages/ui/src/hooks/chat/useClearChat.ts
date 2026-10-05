@@ -4,6 +4,7 @@ import { Modal } from "antd"
 import { shallow } from "zustand/shallow"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useChatBaseState } from "@/hooks/chat/useChatBaseState"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { focusTextArea } from "@/hooks/utils/messageHelpers"
 import { useStoreMessageOption } from "@/store/option"
 import { useStoreMessage } from "@/store"
@@ -33,6 +34,7 @@ type ResettableChatBase = {
 
 export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   const navigate = useNavigate()
+  const resetHistorySelection = useHistorySelectionContext()?.reset
   const currentChatModelSettings = useStoreChatModelSettings()
   const [defaultInternetSearchOn] = useStorage("defaultInternetSearchOn", false)
 
@@ -93,6 +95,7 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   return React.useCallback(() => {
     const destination = resolveClearChatPath()
     if (!requestSettingsNavigation(destination)) return false
+    resetHistorySelection?.()
     const current = useStoreMessageOption.getState()
     dispatchChatRouteReplacement({
       serverChatId: current.serverChatId,
@@ -154,6 +157,7 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     currentChatModelSettings,
     defaultInternetSearchOn,
     navigate,
+    resetHistorySelection,
     resolveClearChatPath,
     setActionInfo,
     setCompareMode,
