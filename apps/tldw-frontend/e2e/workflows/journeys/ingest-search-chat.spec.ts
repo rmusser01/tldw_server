@@ -12,7 +12,7 @@ import { ChatPage, KnowledgeQAPage } from '../../utils/page-objects';
 import { ingestAndWaitForReady, waitForStreamComplete } from '../../utils/journey-helpers';
 import { TEST_CONFIG, fetchWithApiKey, waitForConnection } from '../../utils/helpers';
 import { readStore } from '../../../../extension/tests/e2e/utils/history-selection';
-import type { HistoryBookmark, HistoryInfo, Message } from '../../../../packages/ui/src/db/dexie/types';
+import type { HistoryBookmark } from '../../../../packages/ui/src/db/dexie/types';
 import {
   ROWAN_SOURCE,
   LARCH_SOURCE,
@@ -27,6 +27,10 @@ import {
   normalizeSourceText,
   readSavedMessages,
 } from './uat390-grounding';
+
+type CanonicalTurnMessage = {
+  id: string; conversation_id: string; content: string; sender: string; parent_message_id: string | null;
+};
 
 test.describe('Ingest -> Search -> Chat journey', () => {
   test('retains the exact owned Rowan source through cited QA, Chat and reload', async ({
@@ -302,16 +306,28 @@ test.describe('Ingest -> Search -> Chat journey', () => {
         expect(draft).toContain(source.title);
         await chat.selectModel(model!);
         const prompt = `${draft}\n\nUsing only this source, answer: ${ROWAN_QUESTION}`;
-        const nativeWrites: string[] = [];
-        const recordNativeWrite = (request: import('@playwright/test').Request) => {
-          if (request.method() === 'POST' && /\/api\/v1\/(?:chats(?:\/|$)|chat\/conversations(?:\/|$))/.test(request.url()))
-            nativeWrites.push(request.url());
-        };
-        page.on('request', recordNativeWrite);
+        const createdChat = page.waitForResponse(response =>
+          response.request().method() === 'POST' && /\/api\/v1\/chats\/?$/.test(response.url())
+        );
+        const admittedUser = page.waitForResponse(response =>
+          response.request().method() === 'POST' && /\/api\/v1\/chats\/[^/]+\/messages(?:\?|$)/.test(response.url()) &&
+          response.request().postDataJSON().role === 'user'
+        );
+        const settledAssistant = page.waitForResponse(response =>
+          response.request().method() === 'POST' && /\/api\/v1\/chats\/[^/]+\/messages(?:\?|$)/.test(response.url()) &&
+          response.request().postDataJSON().role === 'assistant',
+          { timeout: 90_000 }
+        );
         const completionResponse = page.waitForResponse(response =>
           response.request().method() === 'POST' && /\/api\/v1\/chat\/completions(?:\?|$)/.test(response.url())
         );
-        const [completion] = await Promise.all([completionResponse, chat.sendMessage(prompt)]);
+        const [creation, userWrite, completion, assistantWrite] = await Promise.all([
+          createdChat, admittedUser, completionResponse, settledAssistant, chat.sendMessage(prompt),
+        ]);
+        expect(creation.status()).toBe(201);
+        const chatId = (await creation.json()).id;
+        expect(chatId).toEqual(expect.any(String));
+        expect(chatId).not.toMatch(/^(?:local[-_]|$)/);
         expect(completion.status()).toBe(200);
         const sent = completion.request().postDataJSON();
         expect(sent.model).toBe(model);
@@ -326,62 +342,76 @@ test.describe('Ingest -> Search -> Chat journey', () => {
         await chat.waitForResponse();
         const visibleAnswer = (await chat.getMessages()).filter(message => message.role === 'assistant').at(-1)!.content;
         assertRowanFacts(visibleAnswer);
-        let users: Message[] = [];
+        expect(userWrite.status()).toBe(201);
+        expect(assistantWrite.status()).toBe(201);
+        for (const write of [userWrite, assistantWrite])
+          expect(new URL(write.url()).pathname).toBe(`/api/v1/chats/${chatId}/messages`);
+        const userReceipt = await userWrite.json();
+        const assistantReceipt = await assistantWrite.json();
+        const userRequest = userWrite.request().postDataJSON();
+        const selection = userRequest.tldw_history_selection_v1;
+        expect(selection).toMatchObject({ version: 1, conversation_id: chatId,
+          owner_key: expect.stringMatching(/^native-history-v1:sha256:/), cursor: { kind: 'empty' }, messages: [] });
+        const admission = userReceipt.tldw_history_admission_v1;
+        expect(admission).toMatchObject({ version: 1, conversation_id: chatId,
+          owner_key: selection.owner_key, input_message_id: userReceipt.id,
+          selection_digest: selection.selection_digest, messages: selection.messages,
+          originating_selection_revision: selection.selection_revision });
+        expect(admission.input_message_revision).toEqual(expect.any(String));
+        expect(admission.input_message_revision).not.toBe('');
+        expect(userRequest).toMatchObject({ id: userReceipt.id, role: 'user', content: prompt, parent_message_id: null });
+        const assistantRequest = assistantWrite.request().postDataJSON();
+        expect(assistantRequest).toMatchObject({ id: assistantReceipt.id, role: 'assistant',
+          content: visibleAnswer, parent_message_id: userReceipt.id });
+        expect(assistantRequest.tldw_history_admission_v1).toEqual({ version: 1,
+          owner_key: admission.owner_key, conversation_id: chatId, input_message_id: userReceipt.id,
+          input_message_revision: admission.input_message_revision, selection_digest: admission.selection_digest });
+        let saved: CanonicalTurnMessage[] = [];
         await expect.poll(async () => {
-          users = ((await readStore(page, 'messages')) as Message[])
-            .filter(row => row.role === 'user' && row.content === prompt);
-          return users.length;
-        }).toBe(1);
-        const user = users[0];
-        const historyId = user.history_id;
-        const history = ((await readStore(page, 'chatHistories')) as HistoryInfo[]).find(row => row.id === historyId)!;
-        const keyScope = createHash('sha256').update('tldw:service-prompt-single-user-api-key:v1\0' + TEST_CONFIG.apiKey.trim()).digest('hex');
-        expect(history.server_scope_key).toBe(JSON.stringify([TEST_CONFIG.serverUrl, 'single-user', 'manual', null, null, 'key:sha256:' + keyScope]));
-        expect(history.server_chat_id).toBeUndefined();
-        expect(history.local_owner_key).toMatch(/^local-history-v1:/);
-        const saved = ((await readStore(page, 'messages')) as Message[]).filter(row => row.history_id === historyId);
-        expect(saved).toHaveLength(2);
-        const assistant = saved.find(row => row.role === 'assistant')!;
+          saved = (await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages;
+          return saved.length;
+        }).toBe(2);
+        const user = saved.find(row => row.id === userReceipt.id)!;
+        const assistant = saved.find(row => row.id === assistantReceipt.id)!;
+        expect(user).toMatchObject({ sender: 'user', content: prompt, conversation_id: chatId, parent_message_id: null });
+        expect(assistant).toMatchObject({ sender: 'assistant', content: visibleAnswer, conversation_id: chatId, parent_message_id: user.id });
         assertRowanFacts(assistant.content);
-        expect(assistant.content).toBe(visibleAnswer);
-        assertSavedTurn([user, assistant], prompt, visibleAnswer);
-        expect(user.parent_message_id).toBeNull();
-        expect(assistant.parent_message_id).toBe(user.id);
-        expect(user.history_admission).toMatchObject({ owner_key: history.local_owner_key, conversation_id: historyId, input_message_id: user.id });
-        expect(assistant.history_settlement?.input_message_id).toBe(user.id);
-        expect(saved.every(row => row.history_provenance?.owner_key === history.local_owner_key)).toBe(true);
-        expect(saved.every(row => !row.serverMessageId)).toBe(true);
+        assertSavedTurn(readSavedMessages(saved, chatId), prompt, visibleAnswer);
         let bookmarks: HistoryBookmark[] = [];
         await expect.poll(async () => {
           bookmarks = ((await readStore(page, 'historySelections')) as HistoryBookmark[])
-            .filter(row => row.conversation_id === historyId && row.view.cursor.kind === 'after_message' && row.view.cursor.message_id === assistant.id);
+            .filter(row => row.conversation_id === chatId && row.owner_key === admission.owner_key &&
+              row.view.cursor.kind === 'after_message' && row.view.cursor.message_id === assistant.id);
           return bookmarks.length;
         }).toBe(1);
         const bookmark = bookmarks[0];
-        expect(history.local_owner_key).toBe('local-history-v1:' + bookmark.profile_id);
-        expect(bookmark.view.owner_key).toBe(history.local_owner_key);
+        expect(bookmark.view.owner_key).toBe(admission.owner_key);
+        expect(bookmark.view.conversation_id).toBe(chatId);
         expect(bookmark.view.interpretation).toEqual({ kind: 'parent_graph_v1' });
         const reference = { profile_id: bookmark.profile_id, client_session_id: bookmark.client_session_id,
-          owner_key: bookmark.owner_key, conversation_id: historyId, owner_kind: 'local' };
-        evidence.chatConversationId = historyId;
-        evidence.chatHistory = history;
+          owner_key: bookmark.owner_key, conversation_id: chatId, owner_kind: 'native' };
+        evidence.chatConversationId = chatId;
+        evidence.chatAdmission = admission;
+        evidence.chatSettlement = assistantReceipt;
         evidence.chatMessages = saved;
         evidence.chatSelection = reference;
+        // The page object normalizes rendered whitespace; canonical source text stays exact above.
+        const visiblePair = [{ role: 'user', content: prompt }, { role: 'assistant', content: visibleAnswer }]
+          .map(({ role, content }) => ({ role, content: content.replace(/\s+/g, ' ').trim() }));
         await page.goto('/chat?historySelection=' + encodeURIComponent(JSON.stringify(reference)), { waitUntil: 'domcontentloaded' });
         await waitForConnection(page);
         await chat.waitForReady();
-        await expect.poll(async () => (await chat.getMessages()).filter(message => message.role === 'assistant').at(-1)?.content).toBe(visibleAnswer);
+        await expect.poll(async () => (await chat.getMessages())
+          .map(({ role, content }) => ({ role, content: content.replace(/\s+/g, ' ').trim() }))).toEqual(visiblePair);
         await expect(page).toHaveURL(/\/chat$/);
         await page.reload({ waitUntil: 'domcontentloaded' });
         await waitForConnection(page);
         await chat.waitForReady();
-        await expect.poll(async () => (await chat.getMessages()).filter(message => message.role === 'assistant').at(-1)?.content).toBe(visibleAnswer);
-        const reloaded = ((await readStore(page, 'messages')) as Message[]).filter(row => row.history_id === historyId);
+        await expect.poll(async () => (await chat.getMessages())
+          .map(({ role, content }) => ({ role, content: content.replace(/\s+/g, ' ').trim() }))).toEqual(visiblePair);
+        const reloaded: CanonicalTurnMessage[] = (await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages;
         expect(reloaded).toEqual(saved);
-        expect(((await readStore(page, 'chatHistories')) as HistoryInfo[]).find(row => row.id === historyId)).toEqual(history);
-        assertFullSourceHandoff(reloaded.find(row => row.role === 'user')!.content, source.text);
-        expect(nativeWrites).toEqual([]);
-        page.off('request', recordNativeWrite);
+        assertFullSourceHandoff(reloaded.find(row => row.id === user.id)!.content, source.text);
       });
       await test.step('Ask an absent fact without inventing a price', async () => {
         await page.goto(`/knowledge/thread/${encodeURIComponent(qaId)}`, {
