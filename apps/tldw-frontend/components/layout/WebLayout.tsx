@@ -544,7 +544,9 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
               }
               className={classNames(
                 hideHeader
-                  ? 'relative flex min-h-screen flex-1 flex-col'
+                  ? hideHeaderViewportShell
+                    ? 'relative flex min-h-0 flex-1 flex-col'
+                    : 'relative flex min-h-screen flex-1 flex-col'
                   : 'relative flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col',
                 hideHeader
                   ? hideHeaderViewportShell

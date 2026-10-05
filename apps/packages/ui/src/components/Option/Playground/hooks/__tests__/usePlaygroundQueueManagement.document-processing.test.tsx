@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { buildQueuedRequest } from "@/utils/chat-request-queue"
 import type { UploadedFile } from "@/db/dexie/types"
-import { usePlaygroundQueueManagement } from "../usePlaygroundQueueManagement"
+import { usePlaygroundQueueManagement, type UsePlaygroundQueueManagementDeps } from "../usePlaygroundQueueManagement"
 
 const prepareChatDocumentAttachmentsForSend = vi.hoisted(() => vi.fn())
 const queueMock = vi.hoisted(() => ({
@@ -67,7 +68,7 @@ const t = (_key: string, fallback?: string) => fallback || _key
 
 const baseDeps = (overrides: Record<string, unknown> = {}) => ({
   composerModels: [],
-  isConnectionReady: false,
+  isConnectionReady: true,
   isSending: false,
   selectedModel: "openai:gpt-4o-mini",
   chatMode: "normal",
@@ -217,7 +218,7 @@ describe("usePlaygroundQueueManagement document processing", () => {
         sourceContext: {
           uploadedFiles: [makeFile()]
         }
-      })
+      }, () => {})
     })
 
     expect(prepareChatDocumentAttachmentsForSend).toHaveBeenCalledWith(
@@ -283,7 +284,7 @@ describe("usePlaygroundQueueManagement document processing", () => {
           sourceContext: {
             uploadedFiles: [makeFile()]
           }
-        })
+        }, () => {})
       })
     ).rejects.toThrow("Ingest is unavailable")
 
@@ -298,4 +299,24 @@ describe("usePlaygroundQueueManagement document processing", () => {
     expect(deps.setUseOCR).not.toHaveBeenCalled()
     expect(deps.setLastSubmittedContext).not.toHaveBeenCalled()
   })
+})
+
+it("qualifies the real queued document continuation before publishing settings or sending", async () => {
+  let release!: (value: unknown) => void
+  const waiting = new Promise(resolve => { release = resolve })
+  prepareChatDocumentAttachmentsForSend.mockReset()
+  prepareChatDocumentAttachmentsForSend.mockReturnValue(waiting)
+  const deps = baseDeps({ uploadedFiles: [] })
+  let ready = true
+  const guard = vi.fn(() => { if (!ready) throw new Error("connection_unavailable") })
+  renderHook(() => usePlaygroundQueueManagement(deps as UsePlaygroundQueueManagementDeps))
+  const pending = queueMock.args.sendQueuedRequest(buildQueuedRequest({ promptText: "KEEP QUEUED DOCUMENT", sourceContext: { uploadedFiles: [makeFile()] }, snapshot: { selectedModel: "openai:gpt-4o-mini" } }), guard)
+  expect(prepareChatDocumentAttachmentsForSend).toHaveBeenCalledOnce()
+  ready = false
+  release({ blockedFiles: [], failedFiles: [], requestOverrides: {}, contextFiles: [], turnMetadata: {} })
+  await expect(pending).rejects.toThrow("connection_unavailable")
+  expect(guard).toHaveBeenCalledTimes(2)
+  expect(deps.sendMessage).not.toHaveBeenCalled()
+  expect(deps.setSelectedModel).not.toHaveBeenCalled()
+  expect(deps.setLastSubmittedContext).not.toHaveBeenCalled()
 })

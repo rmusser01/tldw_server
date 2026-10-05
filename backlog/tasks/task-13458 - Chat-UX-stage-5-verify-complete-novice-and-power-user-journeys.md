@@ -1,7 +1,7 @@
 ---
 id: TASK-13458
 title: 'Chat UX stage 5: verify complete novice and power-user journeys'
-status: To Do
+status: In Progress
 labels:
 - chat
 - ux
@@ -36,6 +36,8 @@ Validate all ten findings and enhancements end to end, then apply bounded polish
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Program: TASK-13453. Design: Docs/Design/2026-10-04-chat-conversation-ux-remediation-design.md. Base: origin/dev 75ab224081bf140ef52017c1a9b0a04f6878d488, verified 2026-10-04. User approved equal audience priority and all ten findings plus enhancements in five stages. Written-design approval and the requested critical review are recorded on 2026-10-04; application implementation has not begun. ADR required: no for the client remediation; ADR-049 and ADR-050 govern owner-bound history and native fork boundaries, ADR-059 governs canonical task editing. Reassess if implementation changes public APIs or persistence authority. Reuse existing shared UI, loaders, presets, and test harnesses; preserve temporary-chat privacy and account/workspace fences. All findings and named enhancements. Run the real server persistence/ownership lifecycle with a deterministic mock provider; do not treat mocked browser success as server proof. Reuse existing harnesses from #3139/#3137/#3136 when available. No new telemetry, study recruitment, or test framework.
 Pre-implementation review adds integrated checks for lost creation/append acknowledgements and reload, greeting preview versus committed stored rows/context, settings local success/server failure/unknown and unresolved-only retries, outage-safe cached mirrors/local DB unavailable, and each transfer mechanism including destination conflicts and partial import. Source-derived scenarios are risks to test, not newly observed incidents. Report native-shell and participant checks only when actually performed.
+Begin actual UI walkthrough during ongoing implementation to verify first-visit and character-opening behavior rather than relying on source/test doubles. Latest dev27ce976387 integrated in ca39b897de; fetch unchanged. Use a separate local worktree dev server/port and fresh-origin browser storage; do not disturb existing runtime or primary checkout. Broad Stage5 acceptance remains open.
+TASK13454.9 live IAB /chat: absent backend19765 retains two-line input through Retry/re-failure; primary Send disabled; compact readiness banner keeps composer visible at1280x720. Screenshot /private/tmp/chat-ux-readiness-draft-retained.jpg. No backend/provider, native packaged extension, VoiceOver, mobile/zoom or uncoached-study closure is claimed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

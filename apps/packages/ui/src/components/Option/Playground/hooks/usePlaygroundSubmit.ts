@@ -181,6 +181,12 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     notificationApi,
     t
   } = deps
+  const connectionReadyRef = React.useRef(isConnectionReady)
+  const connectionGenerationRef = React.useRef(0)
+  React.useLayoutEffect(() => {
+    if (connectionReadyRef.current && !isConnectionReady) connectionGenerationRef.current += 1
+    connectionReadyRef.current = isConnectionReady
+  }, [isConnectionReady])
   const draftReadyRef = React.useRef(draftReady)
   draftReadyRef.current = draftReady
 
@@ -201,10 +207,10 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
   React.useEffect(() => {
     const active = activeDocumentPreparationRef.current
-    if (active && active.selectionKey !== currentDocumentSelectionKey) {
+    if (active && (active.selectionKey !== currentDocumentSelectionKey || !isConnectionReady)) {
       active.controller.abort()
     }
-  }, [currentDocumentSelectionKey])
+  }, [currentDocumentSelectionKey, isConnectionReady])
 
   React.useEffect(
     () => () => activeDocumentPreparationRef.current?.controller.abort(),
@@ -228,13 +234,18 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
   const submitForm = (options?: { ignorePinnedResults?: boolean }) => {
     form.onSubmit(async (value: any) => {
+      if (!connectionReadyRef.current) {
+        notificationApi.info({ message: t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") })
+        return
+      }
       if (!draftReadyRef.current) {
         notificationApi.info({ message: t("playground:draftLoading", "Draft still loading"),
           description: t("playground:draftLoadingWait", "Wait for this conversation's draft to finish loading before sending.") })
         return
       }
+      const connectionGeneration = connectionGenerationRef.current
       const draftRevision = useStoreMessageOption.getState().chatDraftRevision
-      const currentDraft = () => draftReadyRef.current && useStoreMessageOption.getState().chatDraftRevision === draftRevision
+      const currentDraft = () => connectionReadyRef.current && connectionGenerationRef.current === connectionGeneration && draftReadyRef.current && useStoreMessageOption.getState().chatDraftRevision === draftRevision
       if (activeDocumentPreparationRef.current) return
       let documentPreparation: {
         controller: AbortController
@@ -304,7 +315,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       ) {
         return
       }
-      const shouldQueueInsteadOfSend = isSending || !isConnectionReady
+      const shouldQueueInsteadOfSend = isSending
       if (!intent.isImageCommand) {
         if (!compareModeActive) {
           const normalizedSelectedModel = normalizeChatModelId(selectedModel)

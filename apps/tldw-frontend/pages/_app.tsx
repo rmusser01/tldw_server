@@ -521,6 +521,7 @@ export default function App({ Component, pageProps }: AppProps) {
           <ErrorBoundary>
             <ServerReadinessGate
               bypass={shouldBypassGates}
+              blocking={routePath !== "/chat"}
               allowDegraded={shouldAllowDegradedReadiness}
               configuredServerUrl={configuredServerUrl}>
               {gatedContent}

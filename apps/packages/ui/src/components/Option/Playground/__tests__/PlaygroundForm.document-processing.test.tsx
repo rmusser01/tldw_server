@@ -76,6 +76,8 @@ const t = (_key: string, fallback?: any) =>
 
 const baseDeps = (overrides: Record<string, unknown> = {}) => ({
   form: makeForm(),
+  draftReady: true,
+  restorePromptAssistAttempt: vi.fn(),
   beginPromptAssistReset: vi.fn(() => 1),
   markPromptAssistAttemptSaved: vi.fn(),
   isSending: false,

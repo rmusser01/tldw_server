@@ -339,7 +339,8 @@ export function usePlaygroundQueueManagement(
   )
 
   const sendQueuedRequest = React.useCallback(
-    async (item: QueuedRequest) => {
+    async (item: QueuedRequest, assertDispatchReady: () => void) => {
+      assertDispatchReady()
       const validationError = validateQueuedRequest(item)
       if (validationError) {
         form.setFieldError("message", validationError)
@@ -390,6 +391,7 @@ export function usePlaygroundQueueManagement(
         )
       }
 
+      assertDispatchReady()
       setSelectedModel(item.snapshot.selectedModel)
       setChatMode(item.snapshot.chatMode)
       setWebSearch(item.snapshot.webSearch)

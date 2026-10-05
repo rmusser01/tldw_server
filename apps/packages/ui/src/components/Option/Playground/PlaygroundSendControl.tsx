@@ -228,7 +228,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
 
     const activeCharacterSendBlocker =
       characterChatSendBlocker?.active === true
-    const shouldQueuePrimaryAction = isSending || !isConnectionReady
+    const shouldQueuePrimaryAction = isSending && isConnectionReady
     const primaryActionLabel = activeCharacterSendBlocker
       ? characterChatSendBlocker.actionLabel
       : isPreparingDocuments
@@ -249,21 +249,15 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
         ) as string)
       : activeCharacterSendBlocker
         ? characterChatSendBlocker.title
+        : !isConnectionReady
+          ? (t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") as string)
         : isPreparingDocuments
           ? (t(
               "playground:documentProcessing.preparingForSend",
               "Preparing documents"
             ) as string)
       : shouldQueuePrimaryAction
-        ? ((isSending
-            ? t(
-                "playground:composer.queue.primaryWhileBusy",
-                "Queue this request to run after the current response."
-              )
-            : t(
-                "playground:composer.queue.primaryWhileOffline",
-                "Queue this request until your tldw server reconnects."
-              )) as string)
+        ? (t("playground:composer.queue.primaryWhileBusy", "Queue this request to run after the current response.") as string)
         : sendWhenEnter
           ? (t(
               "playground:composer.submitAriaEnter",
@@ -326,7 +320,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 : "submit"
             }
             onClick={handlePrimaryButtonClick}
-            disabled={compareNeedsMoreModels || isPreparingDocuments}
+            disabled={compareNeedsMoreModels || isPreparingDocuments || (!isConnectionReady && !activeCharacterSendBlocker)}
             className={
               isMobileViewport
                 ? "min-h-[44px] min-w-[44px]"

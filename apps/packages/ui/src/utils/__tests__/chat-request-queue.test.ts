@@ -38,7 +38,7 @@ describe("chat request queue helpers", () => {
     expect(blocked.snapshot.selectedModel).toBe("gpt-4o-mini")
   })
 
-  it("downgrades restored sending requests back to queued", () => {
+  it("requires review of restored sending requests", () => {
     const restored = restoreQueuedRequests([
       buildQueuedRequest({
         promptText: "resume after refresh",
@@ -50,9 +50,14 @@ describe("chat request queue helpers", () => {
     expect(restored).toEqual([
       expect.objectContaining({
         promptText: "resume after refresh",
-        status: "queued",
-        blockedReason: null
+        status: "blocked",
+        blockedReason: "restored_request"
       })
     ])
   })
+})
+
+it("keeps an existing restored blocked reason", () => {
+  expect(restoreQueuedRequests([buildQueuedRequest({ promptText: "KEEP", status: "blocked", blockedReason: "missing_attachment" })]))
+    .toMatchObject([{ status: "blocked", blockedReason: "missing_attachment", promptText: "KEEP" }])
 })

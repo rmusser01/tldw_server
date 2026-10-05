@@ -34,14 +34,14 @@ visit(ast)
 if (!callback) throw new Error("Missing actual compact queue callback")
 const code = ts.transpileModule(
   `return function useCompactQueue(scope) {
-  const { sendMessage, setQueue, queue } = scope;
+  const { sendMessage, setQueue, queue, isConnectionReady = true, stopListening = async () => {} } = scope;
   const captureQueuedDispatchGuard = () => () => {};
   const validateQueuedRequest = () => null;
   const form = { setFieldError: () => {} };
   const setSelectedModel = () => {}, setChatMode = () => {}, setWebSearch = () => {}, setSelectedSystemPrompt = () => {}, setSelectedQuickPrompt = () => {}, setToolChoice = () => {}, setUseOCR = () => {};
-  const stopListening = async () => {}, stopServerDictation = () => {};
+  const stopServerDictation = () => {};
   const sendQueuedRequest = ${callback.getText(ast)};
-  return useQueuedRequests({ isConnectionReady: true, isStreaming: false, queue, setQueue, sendQueuedRequest, stopStreamingRequest: () => {} });
+  return useQueuedRequests({ isConnectionReady, isStreaming: false, queue, setQueue, sendQueuedRequest, stopStreamingRequest: () => {} });
 }`,
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } }
 ).outputText
@@ -52,6 +52,8 @@ const useCompactQueue = new Function(
   code
 )(React, useQueuedRequests, throwIfChatSubmitUnsuccessful) as (scope: {
   sendMessage: (payload: unknown) => Promise<ChatSubmitResult>
+  isConnectionReady?: boolean
+  stopListening?: () => Promise<void>
   queue: QueuedRequest[]
   setQueue: (
     value: QueuedRequest[] | ((previous: QueuedRequest[]) => QueuedRequest[])
@@ -123,5 +125,32 @@ describe("actual compact queued submission outcome", () => {
       await hook.result.current.flushNext()
     })
     expect(queue.current.map((item) => item.id)).toEqual([second.id])
+  })
+})
+
+describe("actual compact queued preparation during a disconnect", () => {
+  it.each([false, true])("blocks held dictation preparation even if reconnected=%s", async reconnect => {
+    let release!: () => void
+    const waiting = new Promise<void>(resolve => { release = resolve })
+    const stopListening = vi.fn(() => waiting)
+    const sendMessage = vi.fn(async () => ({ status: "submitted" as const }))
+    const first = buildQueuedRequest({ promptText: "KEEP PREPARED" })
+    let queue = [first]
+    const setQueue = (value: QueuedRequest[] | ((previous: QueuedRequest[]) => QueuedRequest[])) => {
+      queue = typeof value === "function" ? value(queue) : value
+    }
+    const hook = renderHook(({ ready }) => useCompactQueue({ sendMessage, stopListening, setQueue, queue, isConnectionReady: ready }), { initialProps: { ready: true } })
+    let pending!: Promise<unknown>
+    act(() => { pending = hook.result.current.flushNext() })
+    expect(stopListening).toHaveBeenCalledOnce()
+    hook.rerender({ ready: false })
+    if (reconnect) hook.rerender({ ready: true })
+    await act(async () => { release(); await pending })
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(queue).toMatchObject([{ promptText: "KEEP PREPARED", status: "blocked", blockedReason: "connection_unavailable" }])
+    hook.rerender({ ready: true })
+    await act(async () => { await hook.result.current.runNow(first.id); await hook.result.current.flushNext() })
+    expect(sendMessage).toHaveBeenCalledOnce()
+    expect(queue).toEqual([])
   })
 })

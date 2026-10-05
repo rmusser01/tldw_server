@@ -254,6 +254,12 @@ export const SidepanelForm = ({
   )
   const { phase, isConnected, serverUrl } = useConnectionState()
   const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED
+  const connectionReadyRef = React.useRef(isConnectionReady)
+  const connectionGenerationRef = React.useRef(0)
+  React.useLayoutEffect(() => {
+    if (connectionReadyRef.current && !isConnectionReady) connectionGenerationRef.current += 1
+    connectionReadyRef.current = isConnectionReady
+  }, [isConnectionReady])
   const { data: chatModels } = useQuery({
     queryKey: ["getAllModelsForSelect"],
     queryFn: async () => fetchChatModels({ returnEmpty: true }),
@@ -491,10 +497,10 @@ export const SidepanelForm = ({
   currentDocumentSelectionKeyRef.current = currentDocumentSelectionKey
   React.useEffect(() => {
     const active = sidepanelDocumentPreparationRef.current
-    if (active && active.selectionKey !== currentDocumentSelectionKey) {
+    if (active && (active.selectionKey !== currentDocumentSelectionKey || !isConnectionReady)) {
       active.controller.abort()
     }
-  }, [currentDocumentSelectionKey])
+  }, [currentDocumentSelectionKey, isConnectionReady])
   React.useEffect(
     () => () => sidepanelDocumentPreparationRef.current?.controller.abort(),
     []
@@ -1757,7 +1763,8 @@ export const SidepanelForm = ({
     image: string,
     options?: { ignorePinnedResults?: boolean }
   ): Promise<void> {
-    if (sidepanelDocumentPreparationRef.current) return
+    if (!connectionReadyRef.current || sidepanelDocumentPreparationRef.current) return
+    const connectionGeneration = connectionGenerationRef.current
     const intent = resolveSubmissionIntent(rawMessage, options)
     if (intent.invalidImageCommand) {
       notification.error({
@@ -1939,6 +1946,7 @@ export const SidepanelForm = ({
         : preparedDocumentAttachments.contextFiles
       }
 
+      if (!connectionReadyRef.current || connectionGenerationRef.current !== connectionGeneration) return
       let promptAssistAttemptId: number | null = null
       await submitDispatch(
       {
@@ -2067,10 +2075,7 @@ export const SidepanelForm = ({
       }
     }
     if (!isConnectionReady) {
-      if (e.key === "Enter") {
-        e.preventDefault()
-        void submitForm()
-      }
+      if (handleChatInputKeyDown({ e, sendWhenEnter, typing, isSending: false })) e.preventDefault()
       return
     }
     if (e.key === "Process" || e.key === "229") return
@@ -2573,7 +2578,8 @@ export const SidepanelForm = ({
   )
 
   const sendQueuedRequest = React.useCallback(
-    async (item: QueuedRequest) => {
+    async (item: QueuedRequest, assertDispatchReady: () => void) => {
+      assertDispatchReady()
       const assertQueuedDispatchCurrent = captureQueuedDispatchGuard(item.conversationId)
       const validationError = validateQueuedRequest(item)
       if (validationError) {
@@ -2597,6 +2603,7 @@ export const SidepanelForm = ({
 
       await stopListening()
       assertQueuedDispatchCurrent()
+      assertDispatchReady()
       stopServerDictation()
 
       const sourceContext = (item.sourceContext ??
@@ -2775,6 +2782,11 @@ export const SidepanelForm = ({
       image: string,
       options?: { ignorePinnedResults?: boolean }
     ) => {
+      if (!connectionReadyRef.current) {
+        notification.info({ message: t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") })
+        return
+      }
+      const connectionGeneration = connectionGenerationRef.current
       const intent = resolveSubmissionIntent(rawMessage, options)
       if (intent.invalidImageCommand) {
         notification.error({
@@ -2840,9 +2852,10 @@ export const SidepanelForm = ({
         }
       }
 
-      const shouldQueueInsteadOfSend = isSending || !isConnectionReady
+      const shouldQueueInsteadOfSend = isSending
       if (shouldQueueInsteadOfSend) {
         await stopListening()
+        if (!connectionReadyRef.current || connectionGenerationRef.current !== connectionGeneration) return
         stopServerDictation()
         queueSubmission({
           promptText: trimmed,
@@ -2859,7 +2872,6 @@ export const SidepanelForm = ({
       contextFiles.length,
       draftReady,
       form,
-      isConnectionReady,
       isSending,
       notification,
       queueSubmission,
@@ -2881,21 +2893,15 @@ export const SidepanelForm = ({
     [form, submitCurrentRequest]
   )
 
-  const shouldQueuePrimaryAction = isSending || !isConnectionReady
+  const shouldQueuePrimaryAction = isSending && isConnectionReady
   const primaryActionLabel = shouldQueuePrimaryAction
     ? t("common:queue", "Queue")
     : t("common:send", "Send")
-  const primaryActionTitle = shouldQueuePrimaryAction
-    ? (isSending
-        ? t(
-            "playground:composer.queue.primaryWhileBusy",
-            "Queue this request to run after the current response."
-          )
-        : t(
-            "playground:composer.queue.primaryWhileOffline",
-            "Queue this request until your tldw server reconnects."
-          )) as string
-    : sendButtonTitle
+  const primaryActionTitle = !isConnectionReady
+    ? t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") as string
+    : shouldQueuePrimaryAction
+      ? t("playground:composer.queue.primaryWhileBusy", "Queue this request to run after the current response.") as string
+      : sendButtonTitle
   const primaryActionAriaLabel = shouldQueuePrimaryAction
     ? (t("playground:composer.queue.primaryAria", "Queue request") as string)
     : (t("playground:composer.submitAria", "Send message") as string)
@@ -3066,7 +3072,6 @@ export const SidepanelForm = ({
         className={`relative z-10 flex w-full min-w-0 flex-col items-center justify-center ${composerGap} text-body`}>
         <div className="relative flex w-full min-w-0 flex-row justify-center gap-2">
           <div
-            aria-disabled={!isConnectionReady}
             className={composerCardClass}>
             <div>
               {/* Inline Model Parameters Panel (Pro mode only) */}
@@ -3238,22 +3243,8 @@ export const SidepanelForm = ({
                             onKeyDown={(e) => handleKeyDown(e)}
                             ref={textareaRef}
                             data-testid="chat-input"
-                            className={`w-full resize-none border-0 bg-transparent px-3 py-2 text-body text-text placeholder:text-text-muted/80 focus-within:outline-none focus:ring-0 focus-visible:ring-0 ring-0 dark:ring-0 ${
-                              !isConnectionReady
-                                ? "cursor-not-allowed text-text-muted placeholder:text-text-subtle"
-                                : ""
-                            }`}
-                            readOnly={!isConnectionReady}
-                            aria-readonly={!isConnectionReady}
-                            aria-disabled={!isConnectionReady}
-                            aria-label={
-                              !isConnectionReady
-                                ? t(
-                                    "sidepanel:composer.disconnectedAriaLabel",
-                                    "Message input (read-only: not connected to server)"
-                                  )
-                                : t("sidepanel:composer.messageAriaLabel", "Message input")
-                            }
+                            className="w-full resize-none border-0 bg-transparent px-3 py-2 text-body text-text placeholder:text-text-muted/80 focus-within:outline-none focus:ring-0 focus-visible:ring-0 ring-0 dark:ring-0"
+                            aria-label={t("sidepanel:composer.messageAriaLabel", "Message input")}
                             onPaste={handlePaste}
                             rows={1}
                             style={{ minHeight: `${textareaMinHeight}px` }}
@@ -3636,6 +3627,7 @@ export const SidepanelForm = ({
                                   <Space.Compact>
                                   <button
                                     aria-label={primaryActionAriaLabel}
+                                    disabled={!isConnectionReady}
                                     data-testid="chat-send"
                                     title={primaryActionTitle}
                                     type={shouldQueuePrimaryAction ? "button" : "submit"}
@@ -4001,6 +3993,7 @@ export const SidepanelForm = ({
                               variant="primary"
                               size="sm"
                               ariaLabel={primaryActionAriaLabel}
+                              disabled={!isConnectionReady}
                               title={primaryActionTitle}
                               className="min-h-[44px] rounded-full px-4 text-[11px] font-semibold uppercase tracking-[0.12em]"
                             >
@@ -4318,6 +4311,7 @@ export const SidepanelForm = ({
                             size="sm"
                             shape="pill"
                             ariaLabel={primaryActionAriaLabel}
+                            disabled={!isConnectionReady}
                             title={primaryActionTitle}
                             data-testid="chat-send"
                             className="min-h-10 whitespace-nowrap px-3 text-[11px] font-semibold uppercase tracking-[0.08em]"

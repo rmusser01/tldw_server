@@ -27,6 +27,10 @@ const formatBlockedReason = (
   t: TFunction
 ) => {
   switch (blockedReason) {
+    case "connection_unavailable":
+      return t("playground:composer.queueConnectionUnavailable", "Connection was interrupted. Review this request and run it after reconnecting.")
+    case "restored_request":
+      return t("playground:composer.queueRestoredRequest", "This request was restored. Review the conversation for an existing response before running it.")
     case "unsupported_attachment":
       return t(
         "playground:composer.queue.unsupportedAttachment",

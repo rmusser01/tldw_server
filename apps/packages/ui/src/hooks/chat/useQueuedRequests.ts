@@ -17,7 +17,7 @@ type UseQueuedRequestsOptions = {
       | QueuedRequest[]
       | ((prev: QueuedRequest[]) => QueuedRequest[])
   ) => void
-  sendQueuedRequest: (item: QueuedRequest) => Promise<void>
+  sendQueuedRequest: (item: QueuedRequest, assertDispatchReady: () => void) => Promise<void>
   canCommitDispatchResult?: () => boolean
   stopStreamingRequest: (options?: { discardTurn?: boolean }) => void
 }
@@ -31,8 +31,16 @@ export function useQueuedRequests({
   canCommitDispatchResult,
   stopStreamingRequest
 }: UseQueuedRequestsOptions) {
+  const connectionReadyRef = React.useRef(isConnectionReady)
+  const connectionGenerationRef = React.useRef(0)
+  React.useLayoutEffect(() => {
+    if (connectionReadyRef.current && !isConnectionReady) connectionGenerationRef.current += 1
+    connectionReadyRef.current = isConnectionReady
+  }, [isConnectionReady])
+
   const enqueue = React.useCallback(
     (partial: QueuedRequestInput) => {
+      if (!connectionReadyRef.current) return null
       const nextItem = buildQueuedRequest(partial)
       setQueue((prev) => [...prev, nextItem])
       return nextItem
@@ -102,6 +110,7 @@ export function useQueuedRequests({
 
   const runNow = React.useCallback(
     async (requestId: string) => {
+      if (!connectionReadyRef.current) return null
       let promotedItem: QueuedRequest | null = null
       setQueue((prev) => {
         const reordered: QueuedRequest[] = moveQueuedRequestToFront(
@@ -129,10 +138,16 @@ export function useQueuedRequests({
   )
 
   const flushNext = React.useCallback(async () => {
-    if (!isConnectionReady || isStreaming) {
+    if (!connectionReadyRef.current || isStreaming) {
       return null
     }
 
+    const connectionGeneration = connectionGenerationRef.current
+    const assertDispatchReady = () => {
+      if (!connectionReadyRef.current || connectionGenerationRef.current !== connectionGeneration) {
+        throw new Error("connection_unavailable")
+      }
+    }
     let sendingItem: QueuedRequest | null = null
     setQueue((prev) => {
       const next = prev[0]
@@ -159,7 +174,8 @@ export function useQueuedRequests({
     }
 
     try {
-      await sendQueuedRequest(sendingItem)
+      assertDispatchReady()
+      await sendQueuedRequest(sendingItem, assertDispatchReady)
       if (canCommitDispatchResult && !canCommitDispatchResult()) return null
       setQueue((prev) => prev.filter((item) => item.id !== sendingItem?.id))
       return sendingItem
@@ -176,7 +192,7 @@ export function useQueuedRequests({
       )
       return null
     }
-  }, [canCommitDispatchResult, isConnectionReady, isStreaming, sendQueuedRequest, setQueue])
+  }, [canCommitDispatchResult, isStreaming, sendQueuedRequest, setQueue])
 
   return {
     clear,

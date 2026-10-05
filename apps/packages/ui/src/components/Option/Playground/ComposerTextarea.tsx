@@ -65,7 +65,6 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
   placeholder,
   isProMode,
   isMobile,
-  isConnectionReady,
   isCollapsed,
   ariaExpanded,
   compactWhenInactive = false,
@@ -124,11 +123,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         }}
         onFocus={onFocus}
         ref={textareaRef}
-        className={`w-full resize-none bg-transparent text-base leading-6 text-text placeholder:text-text-muted/80 focus-within:outline-none focus:ring-0 focus-visible:ring-0 ring-0 border-0 ${
-          !isConnectionReady
-            ? "cursor-not-allowed text-text-muted placeholder:text-text-subtle"
-            : ""
-        } ${isProMode ? "px-3 py-2.5" : "px-3 py-2"}`}
+        className={`w-full resize-none bg-transparent text-base leading-6 text-text placeholder:text-text-muted/80 focus-within:outline-none focus:ring-0 focus-visible:ring-0 ring-0 border-0 ${isProMode ? "px-3 py-2.5" : "px-3 py-2"}`}
         onPaste={(e) => {
           try {
             onPaste(e)
@@ -143,6 +138,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         }}
         tabIndex={0}
         placeholder={placeholder}
+        aria-label={t("sidepanel:composer.messageAriaLabel", "Message input")}
         {...formInputProps}
         value={displayValue}
         onChange={onChange}

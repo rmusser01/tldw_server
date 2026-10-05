@@ -868,6 +868,7 @@ vi.mock("../hooks", async () => {
 
       return {
         form,
+        restorePromptAssistAttempt: vi.fn(),
         beginPromptAssistReset: vi.fn(() => 1),
         markPromptAssistAttemptSaved: vi.fn(),
         typing: false,

@@ -68,7 +68,7 @@ const mockRouter = {
 const mockGetConfig = vi.fn()
 const mockGetCurrentUser = vi.fn()
 const mockLogout = vi.fn()
-const firstRun = vi.hoisted(() => ({ realGate: false, profiles: vi.fn() }))
+const firstRun = vi.hoisted(() => ({ realGate: false, realReadiness: false, profiles: vi.fn() }))
 let mockLogoutAvailable = true
 let currentConfig: Record<string, unknown> | null = null
 let useCanonicalAuthStorage = false
@@ -153,22 +153,15 @@ vi.mock("@/components/Common/PageAssistLoader", () => ({
   )
 }))
 
-vi.mock("@web/components/networking/ServerReadinessGate", () => ({
-  ServerReadinessGate: ({
-    children,
-    allowDegraded
-  }: {
-    children: React.ReactNode
-    allowDegraded?: boolean
-  }) => (
-    <div
-      data-testid="server-readiness-gate"
-      data-allow-degraded={String(Boolean(allowDegraded))}
-    >
-      {children}
-    </div>
-  )
-}))
+vi.mock("@web/components/networking/ServerReadinessGate", async (original) => {
+  const actual = await original<typeof import("@web/components/networking/ServerReadinessGate")>()
+  return { ServerReadinessGate: (props: React.ComponentProps<typeof actual.ServerReadinessGate>) =>
+    firstRun.realReadiness ? <actual.ServerReadinessGate {...props} /> : (
+      <div data-testid="server-readiness-gate" data-allow-degraded={String(Boolean(props.allowDegraded))}>
+        {props.children}
+      </div>
+    ) }
+})
 
 vi.mock("@/services/tldw/request-core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/tldw/request-core")>()
@@ -245,6 +238,7 @@ const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
 
 beforeEach(() => {
   firstRun.realGate = false
+  firstRun.realReadiness = false
   firstRun.profiles.mockReset().mockResolvedValue({ ok: true, data: [{}] })
   buddyLifetime.mounted.mockClear()
   buddyLifetime.unmounted.mockClear()
@@ -276,6 +270,59 @@ afterAll(() => {
 })
 
 describe("App layout routing", () => {
+  describe("actual chat readiness presentation", () => {
+    const DraftPage = () => {
+      const [text, setText] = React.useState("")
+      return <textarea aria-label="Chat draft probe" value={text} onChange={event => setText(event.target.value)} />
+    }
+    const mountDraftPage = () => {
+      firstRun.realReadiness = true
+      firstRun.realGate = true
+      firstRun.profiles.mockResolvedValue({ ok: true, data: [] })
+      mockRouter.pathname = "/chat"
+      mockRouter.asPath = "/chat"
+      return render(<App Component={DraftPage} pageProps={{}} />)
+    }
+    it("mounts an unconfigured chat immediately while the real health request stalls", async () => {
+      const health = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}))
+      try {
+        mountDraftPage()
+        const editor = await screen.findByRole("textbox", { name: "Chat draft probe" })
+        fireEvent.change(editor, { target: { value: "Keep this idea" } })
+        expect(editor).toHaveValue("Keep this idea")
+        expect(health).toHaveBeenCalled()
+        expect(mockRouter.push).not.toHaveBeenCalledWith("/login")
+      } finally { health.mockRestore() }
+    })
+    it("preserves the editor after failed health, retry and degraded recovery", async () => {
+      const health = vi.spyOn(globalThis, "fetch").mockResolvedValue({ status: 503, json: async () => ({ status: "unhealthy" }) } as Response)
+      try {
+        currentConfig = { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "test-key" }
+        vi.useFakeTimers()
+        await act(async () => { mountDraftPage() })
+        const editor = screen.getByRole("textbox", { name: "Chat draft probe" })
+        fireEvent.change(editor, { target: { value: "Do not remount me" } })
+        await act(async () => { await vi.advanceTimersByTimeAsync(16_000) })
+        expect(screen.getByRole("textbox", { name: "Chat draft probe" })).toBe(editor)
+        health.mockResolvedValue({ status: 206, json: async () => ({ status: "degraded", checks: { rag: { status: "unavailable" } } }) } as Response)
+        fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+        await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+        expect(editor).toHaveValue("Do not remount me")
+        expect(screen.getByRole("textbox", { name: "Chat draft probe" })).toBe(editor)
+        expect(screen.getByText("Server partially degraded")).toBeInTheDocument()
+      } finally { vi.useRealTimers(); health.mockRestore() }
+    })
+    it("keeps signed-out multi-user private chat hidden without relying on health", async () => {
+      currentConfig = { serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "" }
+      const health = vi.spyOn(globalThis, "fetch")
+      try {
+        mountDraftPage()
+        await screen.findByRole("heading", { name: "Signed out" })
+        expect(screen.queryByRole("textbox", { name: "Chat draft probe" })).not.toBeInTheDocument()
+        expect(health).not.toHaveBeenCalled()
+      } finally { health.mockRestore() }
+    })
+  })
   describe("UAT159 actual first-run request boundary", () => {
     beforeEach(() => { firstRun.realGate = true })
 

@@ -53,7 +53,7 @@ describe("useQueuedRequests", () => {
     ])
   })
 
-  it("enqueues normalized queued requests and only flushes when connection is ready", async () => {
+  it("refuses offline enqueue and only flushes after an explicit connected call", async () => {
     const sendQueuedRequest = vi.fn().mockResolvedValue(undefined)
     const queueRef = {
       current: [buildQueuedRequest({ promptText: "existing" })]
@@ -82,10 +82,10 @@ describe("useQueuedRequests", () => {
     )
 
     await act(async () => {
-      result.current.enqueue({ message: "queued later" })
+      expect(result.current.enqueue({ message: "queued later" })).toBeNull()
     })
 
-    expect(queueRef.current.at(-1)?.promptText).toBe("queued later")
+    expect(queueRef.current.map(item => item.promptText)).toEqual(["existing"])
 
     await act(async () => {
       await result.current.flushNext()
@@ -96,14 +96,17 @@ describe("useQueuedRequests", () => {
     rerender({ ready: true, streaming: false })
 
     await act(async () => {
+      result.current.enqueue({ message: "queued later" })
       await result.current.flushNext()
     })
+    expect(queueRef.current.at(-1)?.promptText).toBe("queued later")
 
     expect(sendQueuedRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         promptText: "existing",
         status: "sending"
-      })
+      }),
+      expect.any(Function)
     )
   })
 
@@ -135,7 +138,8 @@ describe("useQueuedRequests", () => {
       expect.objectContaining({
         id: first.id,
         status: "sending"
-      })
+      }),
+      expect.any(Function)
     )
     expect(queueRef.current.map((item) => item.id)).toEqual([second.id])
   })

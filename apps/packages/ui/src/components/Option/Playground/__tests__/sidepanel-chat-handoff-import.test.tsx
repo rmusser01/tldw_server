@@ -186,6 +186,8 @@ const baseSubmitDeps = (overrides: Record<string, unknown> = {}) => ({
     setFieldError: vi.fn(),
     reset: vi.fn(),
   },
+  draftReady: true,
+  restorePromptAssistAttempt: vi.fn(),
   beginPromptAssistReset: vi.fn(() => 1),
   markPromptAssistAttemptSaved: vi.fn(),
   isSending: false,

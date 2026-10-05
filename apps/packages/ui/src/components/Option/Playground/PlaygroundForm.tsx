@@ -4219,9 +4219,7 @@ export const PlaygroundForm = ({
     }
 
     if (!isConnectionReady) {
-      if (e.key === "Enter") {
-        e.preventDefault();
-      }
+      if (handleChatInputKeyDown({ e, sendWhenEnter, typing, isSending: false })) e.preventDefault();
       return;
     }
 
