@@ -211,9 +211,13 @@ export class SidePanelChat {
     await this.searchInput.fill("")
   }
 
-  /** A history-search result: a server chat or a local copy of one. */
+  /**
+   * A history-search result: a server chat or a local copy of one. A result
+   * found by what was said in the chat shows that text between the title and
+   * the source label (CS-02), and it is part of the button's name.
+   */
   searchResult(title: string): Locator {
-    return this.sidebar.getByRole("button", { name: new RegExp(`^${escapeRegExp(title)} (Server|Local)\\b`) })
+    return this.sidebar.getByRole("button", { name: new RegExp(`^${escapeRegExp(title)}(?: .+)? (Server|Local)\\b`) })
   }
 
   /** An open tab's row in the sidebar's tab list (shown while the search is empty). */
@@ -228,7 +232,7 @@ export class SidePanelChat {
    */
   async openServerChatFromSearch(title: string, chatId: string) {
     await this.search(title)
-    const result = this.sidebar.getByRole("button", { name: `${title} Server`, exact: true })
+    const result = this.sidebar.getByRole("button", { name: new RegExp(`^${escapeRegExp(title)}(?: .+)? Server$`) })
     await expect(result).toBeVisible()
     await result.click()
     await expect
