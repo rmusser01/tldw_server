@@ -6,43 +6,19 @@
  * "dlrow olleH". These are regression tests for the fix.
  *
  * Runs in the ux-regression project against an isolated real backend
- * (bun run e2e:ux-regression -- --grep NE-01). That project and its runner
- * arrive with the UX regression harness (#3125, PR #3136); this spec only
- * needs the shared e2e fixtures, so it does not import the harness's
- * e2e/utils/seed-api.ts and carries its own copy of warmBackendOnce.
+ * (bun run e2e:ux-regression -- --grep NE-01).
  */
 import type { APIRequestContext, Page } from "@playwright/test"
 import { test, expect, skipIfServerUnavailable } from "../utils/fixtures"
 import { NotesPage } from "../utils/page-objects"
 import { TEST_CONFIG, generateTestId } from "../utils/helpers"
+import { createSeedApi, warmBackendOnce } from "../utils/seed-api"
 
 /** Roughly a fast human typist. */
 const KEY_DELAY_MS = 150
 
 const apiUrl = (path: string) => `${TEST_CONFIG.serverUrl.replace(/\/$/, "")}${path}`
 const apiHeaders = () => ({ "X-API-KEY": TEST_CONFIG.apiKey })
-
-let backendWarmed: Promise<void> | null = null
-
-/**
- * Pay the backend's cold-start cost once per worker before driving the UI.
- * A cold backend freezes for ~30 s on its first /openapi.json build (#3135),
- * long enough for the page's auth check to fail and every save with it.
- * Same as warmBackendOnce in the harness's e2e/utils/seed-api.ts.
- */
-function warmBackendOnce(request: APIRequestContext): Promise<void> {
-  const warmups = [
-    { path: "/openapi.json", timeout: 120_000 },
-    { path: "/api/v1/llm/models/metadata", timeout: 60_000 },
-  ]
-  backendWarmed ??= (async () => {
-    for (const { path, timeout } of warmups) {
-      const response = await request.get(apiUrl(path), { headers: apiHeaders(), timeout })
-      if (!response.ok()) throw new Error(`Warming ${path} failed: HTTP ${response.status()}`)
-    }
-  })()
-  return backendWarmed
-}
 
 const isNoteCreate = (url: string, method: string) =>
   method === "POST" && /\/api\/v1\/notes\/?$/.test(new URL(url).pathname)
@@ -89,7 +65,7 @@ test.describe("Notes WYSIWYG editor (NE-01)", () => {
     request,
   }) => {
     skipIfServerUnavailable(serverInfo)
-    await warmBackendOnce(request)
+    await warmBackendOnce(createSeedApi(request))
     const { editor, createdId } = await startWysiwygNote(authedPage, generateTestId("uxr-ne01"))
 
     await authedPage.keyboard.type("Hello world", { delay: KEY_DELAY_MS })
@@ -108,7 +84,7 @@ test.describe("Notes WYSIWYG editor (NE-01)", () => {
     request,
   }) => {
     skipIfServerUnavailable(serverInfo)
-    await warmBackendOnce(request)
+    await warmBackendOnce(createSeedApi(request))
     const detailReads: string[] = []
     authedPage.on("response", (response) => {
       if (response.request().method() === "GET") detailReads.push(new URL(response.url()).pathname)
@@ -141,7 +117,7 @@ test.describe("Notes WYSIWYG editor (NE-01)", () => {
     request,
   }) => {
     skipIfServerUnavailable(serverInfo)
-    await warmBackendOnce(request)
+    await warmBackendOnce(createSeedApi(request))
     const { editor, createdId } = await startWysiwygNote(authedPage, generateTestId("uxr-ne01-toolbar"))
 
     await authedPage.keyboard.type("Plan", { delay: KEY_DELAY_MS })
