@@ -208,6 +208,10 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
 
   const chatSummary = (chat: FakeChat) => ({
     id: chat.id,
+    // The real ChatSessionResponse always carries its scope ("global" by
+    // default); the server-chat loader refuses a chat whose scope is missing.
+    scope_type: "global",
+    workspace_id: null,
     title: chat.title,
     created_at: chat.created_at,
     last_modified: chat.last_modified,
