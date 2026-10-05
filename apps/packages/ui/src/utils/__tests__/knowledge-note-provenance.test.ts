@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   stripKnowledgeNoteProvenance,
+  validateKnowledgeNoteProvenance,
   readKnowledgeNoteProvenance,
   retainKnowledgeNoteProvenance,
 } from "../knowledge-note-provenance"
@@ -62,3 +63,38 @@ it("hides only recognized provenance while preserving user comments and text", (
 it("keeps malformed provenance-like user comments when saving recognized original provenance", () => {
   expect(retainKnowledgeNoteProvenance("Body\n<!-- tldw-knowledge:v1:invalid -->", original)).toContain("<!-- tldw-knowledge:v1:invalid -->")
 })
+
+it.each([
+  ["", true],
+  [null, true],
+  [[], true],
+  [["topic"], true],
+  ["topic", true],
+  ["x".repeat(513), false],
+  [[""], false],
+  [{ arbitrary: "value" }, false],
+])(
+  "validates bounded keyword filter %j (valid=%s)",
+  (keyword_filter, valid) => {
+    const provenance = validateKnowledgeNoteProvenance({
+      ...original,
+      research: {
+        workspace_id: "workspace-a",
+        import_id: "current-import",
+        sources: [
+          {
+            mediaId: 7,
+            evidence: {
+              importId: "current-import",
+              threadId: "thread-a",
+              snapshot: false,
+              sources: [],
+              scope: { keyword_filter, collection_id: null },
+            },
+          },
+        ],
+      },
+    })
+    expect(provenance !== null).toBe(valid)
+  },
+)

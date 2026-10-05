@@ -1,5 +1,6 @@
 import {
   readKnowledgeNoteProvenance,
+  retainKnowledgeNoteProvenance,
   stripKnowledgeNoteProvenance,
 } from "../knowledge-note-provenance"
 import {
@@ -11,6 +12,9 @@ import {
   waitFor,
 } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { AnswerPanel } from "@/components/Option/KnowledgeQA/AnswerPanel"
+import { MediaKnowledgeActions } from "@/components/Review/MediaKnowledgeActions"
+import { DEFAULT_RAG_SETTINGS } from "@/services/rag/unified-rag"
 import { ResearchWorkspace } from "@/components/Option/ResearchWorkspace"
 import { useWorkspaceStore } from "@/store/workspace"
 import {
@@ -22,6 +26,8 @@ import { useResearchWorkspacePrefill } from "../use-research-workspace-prefill"
 
 const mocks = vi.hoisted(() => ({
   owner: "alice",
+  answerState: {} as any,
+  navigate: vi.fn(),
   multiUser: false,
   values: new Map<string, unknown>(),
   upload: vi.fn(),
@@ -96,6 +102,27 @@ vi.mock("react-i18next", () => ({
       typeof options === "string" ? options : options?.defaultValue || key,
   }),
 }))
+vi.mock("@/components/Option/KnowledgeQA/KnowledgeQAProvider", () => ({
+  useKnowledgeQA: () => mocks.answerState,
+}))
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({
+  useHomeMilestoneScope: () => mocks.owner,
+}))
+vi.mock("@/hooks/useAntdMessage", () => ({
+  useAntdMessage: () => ({ open: vi.fn(), error: vi.fn() }),
+}))
+vi.mock("@/services/feedback", () => ({
+  getFeedbackSessionId: () => "session-a",
+  submitExplicitFeedback: vi.fn(),
+}))
+vi.mock("@/utils/knowledge-qa-search-metrics", () => ({
+  trackKnowledgeQaSearchMetric: async () => {},
+}))
+vi.mock("react-router-dom", async () => ({
+  ...(await vi.importActual("react-router-dom")),
+  useNavigate: () => mocks.navigate,
+}))
+
 vi.mock("@/hooks/useMediaQuery", () => ({ useMobile: () => false }))
 vi.mock("@/hooks/useFeatureFlags", () => ({
   FEATURE_FLAGS: {},
@@ -155,6 +182,7 @@ const payload = () =>
     ],
   })
 beforeEach(() => {
+  mocks.navigate.mockReset()
   mocks.persistent = true
   mocks.multiUser = false
   mocks.owner = "alice"
@@ -1368,3 +1396,423 @@ it.each([
     receiver.unmount()
   },
 )
+
+const canonicalNoteId = "1467b10d-1d40-46eb-9b55-d6c7a413a43c"
+const originalNoteId = "b905bb24-0657-45de-af47-6c8a4d5db498"
+const previousProvenance = {
+  origin: "reviewed_sources",
+  research: {
+    workspace_id: "workspace-a",
+    import_id: "previous-review-import",
+    sources: [],
+  },
+}
+const markMigrated = () =>
+  localStorage.setItem(
+    "tldw:research-workspace:migration:tombstone:workspace-a",
+    JSON.stringify({
+      legacyWorkspaceId: "workspace-a",
+      serverWorkspaceId: "workspace-a",
+      migrationId: "migration-a",
+      serverScopeKey: "alice",
+      contentRetained: false,
+      deletedAt: "2026-10-03T00:00:00Z",
+    }),
+  )
+const checkpoint = (id: string) =>
+  [...mocks.values.values()].find((value: any) => value.id === id) as any
+
+it.each([false, true])(
+  "persists the actual AnswerPanel default scope and current import over old marker=%s through canonical restore",
+  async (withOldMarker) => {
+    markMigrated()
+    let canonical: any = withOldMarker
+      ? {
+          id: canonicalNoteId,
+          title: "Review draft",
+          content: retainKnowledgeNoteProvenance(
+            "Earlier reviewed source body",
+            previousProvenance,
+          ),
+          keywords: ["workspace:workspace-a"],
+          version: 1,
+        }
+      : null
+    if (canonical) useWorkspaceStore.getState().loadNote(canonical)
+    const sources = [7, 101].map((mediaId, position) => ({
+      id: `server-source-${mediaId}`,
+      workspace_id: "workspace-a",
+      media_id: mediaId,
+      title: `Source ${mediaId}`,
+      source_type: "text",
+      url: null,
+      position,
+      selected: true,
+      state: "queryable",
+      added_at: "2026-10-01T00:00:00Z",
+      version: 1,
+    }))
+    mocks.request.mockImplementation(async (request: any) => {
+      const { path, method, body, headers } = request
+      if (path.endsWith("/context"))
+        return {
+          workspace_id: "workspace-a",
+          workspace: {
+            id: "workspace-a",
+            name: "Research",
+            created_at: "2026-10-01T00:00:00Z",
+            version: 1,
+          },
+          sources: { items: sources },
+          partial_errors: [],
+        }
+      if (path.startsWith("/api/v1/notes/search/"))
+        return { notes: canonical ? [canonical] : [] }
+      if (!path.startsWith("/api/v1/notes/")) return []
+      if (method === "POST") canonical = { ...body, version: 1 }
+      if (method === "PUT") {
+        if (headers?.["expected-version"] !== String(canonical.version))
+          throw Object.assign(new Error("version required"), { status: 422 })
+        canonical = { ...canonical, ...body, version: canonical.version + 1 }
+      }
+      if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
+      return canonical
+    })
+    mocks.upload.mockResolvedValue({ media_id: 101 })
+    mocks.answerState = {
+      isAuthorityCurrent: () => true,
+      answerTrustState: "uncited_degraded_answer",
+      answerEvidenceOrigin: "local_library",
+      answerTrustReasonCodes: ["missing_citations"],
+      settings: { ...DEFAULT_RAG_SETTINGS },
+      answer: "Qualified answer [1].",
+      citations: [{ index: 1 }, { index: 2 }],
+      isSearching: false,
+      error: null,
+      searchDetails: null,
+      query: "What is supported?",
+      currentThreadId: "thread-current",
+      messages: [],
+      scrollToSource: vi.fn(),
+      results: [
+        {
+          id: "7",
+          content: "Native source excerpt",
+          metadata: { title: "Native source", source_type: "pdf" },
+        },
+        {
+          id: "chunk-note",
+          content: "Original note excerpt",
+          metadata: {
+            title: "Original note",
+            source_type: "notes",
+            note_id: originalNoteId,
+          },
+        },
+      ],
+    }
+    const caller = render(<AnswerPanel />)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue in Research Workspace" }),
+    )
+    await waitFor(() =>
+      expect(mocks.navigate).toHaveBeenCalledWith("/research-workspace"),
+    )
+    const transfer = (await consumeResearchWorkspacePrefill("alice"))!
+    expect(transfer.scope).toMatchObject({
+      keyword_filter: "",
+      collection_id: null,
+    })
+    caller.unmount()
+    const receiver = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    await waitFor(() => expect(checkpoint(transfer.id)?.completed).toBe(true))
+    expect(receiver.result.current.error).toBeNull()
+    expect(checkpoint(transfer.id).draftRetained).toBe(true)
+    const provenance = readKnowledgeNoteProvenance(canonical.content)!
+    expect(provenance.research?.import_id).toBe(transfer.id)
+    expect(provenance.research?.sources).toMatchObject([
+      {
+        mediaId: 7,
+        evidence: {
+          importId: transfer.id,
+          snapshot: false,
+          scope: transfer.scope,
+          sources: [
+            {
+              originalId: "7",
+              sourceType: "pdf",
+              excerpt: "Native source excerpt",
+            },
+          ],
+        },
+      },
+      {
+        mediaId: 101,
+        evidence: {
+          importId: transfer.id,
+          snapshot: true,
+          scope: transfer.scope,
+          trustState: "uncited_degraded_answer",
+          sources: [
+            {
+              originalId: originalNoteId,
+              sourceType: "notes",
+              excerpt: "Original note excerpt",
+            },
+          ],
+        },
+      },
+    ])
+    expect(canonical.content.match(/<!-- tldw-knowledge:v1:/g)).toHaveLength(1)
+    if (withOldMarker)
+      expect(canonical.content).toContain("Earlier reviewed source body")
+    expect(useWorkspaceStore.getState().currentNote.content).toBe(
+      canonical.content,
+    )
+    receiver.unmount()
+    useWorkspaceStore.setState({
+      workspaceId: null,
+      sources: [],
+      currentNote: { title: "", content: "", keywords: [], isDirty: false },
+      workspaceSnapshots: {},
+      selectedSourceIds: [],
+    })
+    const { restoreMigratedResearchWorkspace } =
+      await import("@/components/Option/ResearchWorkspace/workspace-server-restore")
+    await restoreMigratedResearchWorkspace({
+      signal: new AbortController().signal,
+      apply: useWorkspaceStore.getState().restoreServerWorkspace,
+    })
+    expect(useWorkspaceStore.getState().currentNote.content).toBe(
+      canonical.content,
+    )
+    expect(
+      useWorkspaceStore
+        .getState()
+        .sources.map((source) => source.knowledgeQaEvidence),
+    ).toEqual(provenance.research!.sources.map((source) => source.evidence))
+    const reopened = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mocks.upload).toHaveBeenCalledTimes(1)
+    expect(checkpoint(transfer.id).completed).toBe(true)
+    reopened.unmount()
+  },
+)
+
+it("rejects invalid required current-import provenance before writing an older marker", async () => {
+  markMigrated()
+  const oldContent = retainKnowledgeNoteProvenance(
+    "Human draft",
+    previousProvenance,
+  )
+  const canonical = {
+    id: canonicalNoteId,
+    title: "Human title",
+    content: oldContent,
+    version: 2,
+    keywords: [],
+  }
+  useWorkspaceStore.getState().loadNote(canonical)
+  const transfer = payload()
+  transfer.sources = transfer.sources.slice(0, 2)
+  transfer.scope = { keyword_filter: "x".repeat(513) }
+  mocks.upload.mockResolvedValue({ media_id: 101 })
+  mocks.request.mockResolvedValue(canonical)
+  await queueResearchWorkspacePrefill(transfer)
+  const receiver = renderHook(() =>
+    useResearchWorkspacePrefill("workspace-a", true),
+  )
+  await waitFor(() =>
+    expect(receiver.result.current.error).toContain("could not be saved"),
+  )
+  expect(
+    mocks.request.mock.calls.filter(([request]) =>
+      ["POST", "PUT"].includes(request.method),
+    ),
+  ).toEqual([])
+  expect(checkpoint(transfer.id)?.completed).not.toBe(true)
+  expect(useWorkspaceStore.getState().currentNote.content).toContain(
+    "Human draft",
+  )
+  expect(useWorkspaceStore.getState().currentNote.content).toContain(
+    "Unsupported draft",
+  )
+  await act(async () => {
+    await receiver.result.current.retry()
+  })
+  await waitFor(() =>
+    expect(receiver.result.current.error).toContain("could not be saved"),
+  )
+  expect(mocks.upload).toHaveBeenCalledTimes(1)
+  expect(
+    mocks.request.mock.calls.filter(([request]) =>
+      ["POST", "PUT"].includes(request.method),
+    ),
+  ).toEqual([])
+  receiver.unmount()
+})
+
+it.each(["web_document", "web"])(
+  "imports the actual Review caller's stored %s directly without snapshots",
+  async (type) => {
+    const caller = render(
+      <MediaKnowledgeActions
+        items={[{ id: 7, title: "Stored article", type }]}
+        navigate={mocks.navigate}
+      />,
+    )
+    fireEvent.click(
+      screen.getByRole("button", { name: "Research with this source" }),
+    )
+    await waitFor(() =>
+      expect(mocks.navigate).toHaveBeenCalledWith("/research-workspace"),
+    )
+    const transfer = (await consumeResearchWorkspacePrefill("alice"))!
+    caller.unmount()
+    const receiver = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    await waitFor(() => expect(receiver.result.current.attached).toBe(1))
+    expect(transfer.sources[0]).toMatchObject({
+      mediaId: 7,
+      originalId: 7,
+      sourceType: type,
+      type: "website",
+    })
+    expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
+      mediaId: 7,
+      knowledgeQaEvidence: {
+        snapshot: false,
+        sources: [{ mediaId: 7, sourceType: type }],
+      },
+    })
+    expect(mocks.upload).not.toHaveBeenCalled()
+    receiver.unmount()
+  },
+)
+
+it.each([false, true])(
+  "retains the scoped principal through canonical GET/PUT/readback with changed principal=%s",
+  async (changePrincipal) => {
+    markMigrated()
+    mocks.multiUser = true
+    let principal = "user-a"
+    let canonical = {
+      id: canonicalNoteId,
+      title: "Human title",
+      content: "Human draft",
+      keywords: ["workspace:workspace-a"],
+      version: 2,
+    }
+    useWorkspaceStore.getState().loadNote(canonical)
+    const transfer = payload()
+    transfer.sources = [transfer.sources[3]]
+    let mutations = 0
+    let capturedDraft: unknown
+    const seen: any[] = []
+    mocks.request.mockImplementation(async (request: any) => {
+      seen.push(request)
+      const expectedUser = request.headers?.["X-TLDW-Expected-User-ID"]
+      if (expectedUser && expectedUser !== principal)
+        throw Object.assign(new Error("request_config_scope_changed"), {
+          status: 412,
+        })
+      if (request.method === "PUT") {
+        if (request.headers?.["expected-version"] !== "2")
+          throw Object.assign(new Error("version required"), { status: 422 })
+        mutations += 1
+        canonical = { ...canonical, ...request.body, version: 3 }
+      } else if (changePrincipal) {
+        capturedDraft = useWorkspaceStore.getState().currentNote
+        principal = "user-b"
+      }
+      return canonical
+    })
+    await queueResearchWorkspacePrefill(transfer, "alice:user-a")
+    const receiver = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    if (changePrincipal) {
+      await waitFor(() =>
+        expect(receiver.result.current.error).toContain("could not be saved"),
+      )
+      expect(mutations).toBe(0)
+      expect(canonical.content).toBe("Human draft")
+      expect(useWorkspaceStore.getState().currentNote).toBe(capturedDraft)
+      expect(checkpoint(transfer.id)?.completed).not.toBe(true)
+      expect(checkpoint(transfer.id)?.draftRetained).not.toBe(true)
+    } else {
+      await waitFor(() => expect(checkpoint(transfer.id)?.completed).toBe(true))
+      expect(seen.map((request) => request.method)).toEqual([
+        "GET",
+        "PUT",
+        "GET",
+      ])
+      for (const request of seen)
+        expect(request.headers?.["X-TLDW-Expected-User-ID"]).toBe("user-a")
+      expect(seen[1].headers["expected-version"]).toBe("2")
+      expect(
+        readKnowledgeNoteProvenance(canonical.content)?.research?.import_id,
+      ).toBe(transfer.id)
+    }
+    receiver.unmount()
+  },
+)
+
+it("imports an external web result's arbitrary numeric ID as a snapshot, not stored media", async () => {
+  useWorkspaceStore
+    .getState()
+    .addSources([{ mediaId: 7, title: "Unrelated stored item", type: "text" }])
+  const transfer = buildKnowledgeQaWorkspacePrefill({
+    threadId: "thread-web",
+    query: "External evidence",
+    answer: "Qualified web answer",
+    citations: [1],
+    results: [
+      {
+        id: "7",
+        content: "External web excerpt",
+        metadata: {
+          source_type: "web",
+          title: "External article",
+          url: "https://example.com/article",
+        },
+      },
+    ],
+  })
+  mocks.upload.mockResolvedValue({ media_id: 101 })
+  await queueResearchWorkspacePrefill(transfer)
+  const receiver = renderHook(() =>
+    useResearchWorkspacePrefill("workspace-a", true),
+  )
+  await waitFor(() => expect(checkpoint(transfer.id)?.completed).toBe(true))
+  expect(
+    useWorkspaceStore.getState().sources.map((source) => source.mediaId),
+  ).toEqual([7, 101])
+  expect(useWorkspaceStore.getState().sources[1]).toMatchObject({
+    mediaId: 101,
+    knowledgeQaEvidence: {
+      snapshot: true,
+      sources: [
+        {
+          originalId: "7",
+          mediaId: null,
+          sourceType: "web",
+          excerpt: "External web excerpt",
+          url: "https://example.com/article",
+        },
+      ],
+    },
+  })
+  expect(
+    useWorkspaceStore.getState().getEffectiveSelectedMediaIds(),
+  ).not.toContain(7)
+  expect(mocks.upload).toHaveBeenCalledTimes(1)
+  receiver.unmount()
+})

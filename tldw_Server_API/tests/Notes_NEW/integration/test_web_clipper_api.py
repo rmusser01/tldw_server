@@ -10,7 +10,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.api.v1.endpoints import web_clipper as web_clipper_endpoint
-from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import WebClipperSaveResponse
+from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import WebClipperSaveRequest, WebClipperSaveResponse
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
@@ -212,7 +212,10 @@ def test_web_clipper_save_retry_reuses_note_and_attachment(client_with_web_clipp
     assert first.status_code == 200, first.text
     assert second.status_code == 200, second.text
     assert first.json()["note"]["id"] == second.json()["note"]["id"] == expected_note_id
-    assert first.json()["workspace_placement"]["workspace_note_id"] == second.json()["workspace_placement"]["workspace_note_id"]
+    assert (
+        first.json()["workspace_placement"]["workspace_note_id"]
+        == second.json()["workspace_placement"]["workspace_note_id"]
+    )
 
     status_response = client.get("/api/v1/web-clipper/clip-123")
     assert status_response.status_code == 200, status_response.text
@@ -298,3 +301,55 @@ def test_web_clipper_save_returns_500_for_failed_canonical_save_payload(
 
     assert response.status_code == 500, response.text
     assert response.json()["detail"] == "Canonical note save failed."
+
+
+@pytest.mark.parametrize(
+    ("expected_user_id", "authenticated_user_id", "expected_status"),
+    [("1", 1, 200), (None, 1, 200), ("2", 1, 412), ("1", 2, 412)],
+    ids=["matching-principal", "legacy-without-header", "mismatched-principal", "changed-principal"],
+)
+def test_web_clipper_save_expected_principal_boundary(
+    client_with_web_clipper_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    expected_user_id: str | None,
+    authenticated_user_id: int,
+    expected_status: int,
+) -> None:
+    """Check the captured principal before any canonical clip save or side effect."""
+    client = client_with_web_clipper_db
+
+    async def authenticated_user() -> User:
+        return User(id=authenticated_user_id, username="tester", email="t@e.com", is_active=True, is_admin=True)
+
+    client.app.dependency_overrides[get_request_user] = authenticated_user
+    saved_payloads: list[WebClipperSaveRequest] = []
+    original_save = web_clipper_endpoint.WebClipperService.save_clip
+
+    def track_save(
+        service: web_clipper_endpoint.WebClipperService, payload: WebClipperSaveRequest
+    ) -> WebClipperSaveResponse:
+        saved_payloads.append(payload)
+        return original_save(service, payload)
+
+    monkeypatch.setattr(web_clipper_endpoint.WebClipperService, "save_clip", track_save)
+    headers = {"X-TLDW-Expected-User-ID": expected_user_id} if expected_user_id is not None else {}
+    response = client.post(
+        "/api/v1/web-clipper/save",
+        json=_save_payload(clip_id="clip-owner-boundary", include_attachment=True),
+        headers=headers,
+    )
+    assert response.status_code == expected_status, response.text
+    db = client.app.state.web_clipper_db
+    document = db.get_note_clipper_document_by_clip_id("clip-owner-boundary")
+    if expected_status == 412:
+        assert response.json()["detail"]["code"] == "request_config_scope_changed"
+        assert response.headers["Cache-Control"] == "no-store"
+        assert saved_payloads == []
+        assert document is None
+        assert db.list_workspace_sources("ws-1") == []
+        assert client.app.state.web_clipper_job_manager.created_jobs == []
+    else:
+        assert len(saved_payloads) == 1
+        expected_note_id = stable_note_id("web-clipper", f"{authenticated_user_id}\0clip-owner-boundary")
+        assert response.json()["note_id"] == document["note_id"] == expected_note_id
+        assert response.json()["status"] == "saved"

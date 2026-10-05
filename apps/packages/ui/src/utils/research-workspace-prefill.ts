@@ -132,14 +132,14 @@ const toWorkspaceSourceType = (
 
 const resolveMediaId = (result: KnowledgeQaResultLike): number | null => {
   const metadata = result.metadata || {}
-  if (/note|web|url/i.test(String(metadata.source_type || ""))) return null
-  const candidates = [
-    metadata.media_id,
-    metadata.mediaId,
-    metadata.document_id,
-    metadata.doc_id,
-    result.id,
-  ]
+  if (/note/i.test(String(metadata.source_type || ""))) return null
+  // Stored web articles carry explicit media identity; external result IDs do not.
+  for (const candidate of [metadata.media_id, metadata.mediaId]) {
+    const parsed = parseNumber(candidate)
+    if (parsed != null) return parsed
+  }
+  if (/web|url/i.test(String(metadata.source_type || ""))) return null
+  const candidates = [metadata.document_id, metadata.doc_id, result.id]
   for (const candidate of candidates) {
     const parsed = parseNumber(candidate)
     if (parsed != null) return parsed

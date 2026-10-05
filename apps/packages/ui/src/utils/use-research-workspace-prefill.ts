@@ -4,6 +4,7 @@ import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
 import {
   retainKnowledgeNoteProvenance,
   readKnowledgeNoteProvenance,
+  validateKnowledgeNoteProvenance,
 } from "./knowledge-note-provenance"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
@@ -395,7 +396,7 @@ export function useResearchWorkspacePrefill(
             const preferDraft =
               !alreadyRetained || (!draftDiscarded && draftWasDirty)
             const body = preferDraft ? draft.content : existing!.content
-            const content = retainKnowledgeNoteProvenance(body, {
+            const requiredProvenance = validateKnowledgeNoteProvenance({
               origin:
                 payload.threadId || payload.query || payload.answer
                   ? "knowledge_qa"
@@ -414,12 +415,24 @@ export function useResearchWorkspacePrefill(
                   })),
               },
             })
+            // A required checkpoint cannot fall back to an older note marker.
+            if (!requiredProvenance)
+              throw new Error("Current research provenance is invalid")
+            const content = retainKnowledgeNoteProvenance(
+              body,
+              requiredProvenance,
+            )
             const saved = await bgRequest<CanonicalNote>({
               ...request,
               path: existing ? path : "/api/v1/notes/",
               method: existing ? "PUT" : "POST",
               ...(existing
-                ? { headers: { "expected-version": String(existing.version) } }
+                ? {
+                    headers: {
+                      ...request.headers,
+                      "expected-version": String(existing.version),
+                    },
+                  }
                 : {}),
               body: {
                 ...(existing ? {} : { id: payload.canonicalNoteId }),

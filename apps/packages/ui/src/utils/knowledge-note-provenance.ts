@@ -91,7 +91,12 @@ const validateResearch = (
           if (key === "collection_id")
             return item !== null && !shortString(item) && !positiveId(item)
           if (key === "keyword_filter")
-            return item !== null && !shortString(item) && !stringList(item)
+            return (
+              item !== null &&
+              item !== "" &&
+              !shortString(item) &&
+              !stringList(item)
+            )
           return true
         }))
     )

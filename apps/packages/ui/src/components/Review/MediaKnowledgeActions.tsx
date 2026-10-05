@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Button } from "antd"
+import { useTranslation } from "react-i18next"
 import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
@@ -23,6 +24,7 @@ export function MediaKnowledgeActions({
   selection?: boolean
   isCurrent?: () => boolean
 }) {
+  const { t } = useTranslation("review")
   const ownerScope = useHomeMilestoneScope()
   const message = useAntdMessage()
   const [pending, setPending] = useState(false)
@@ -73,7 +75,12 @@ export function MediaKnowledgeActions({
         results: items.map((item, index) => ({
           metadata: {
             media_id: mediaIds[index],
-            title: item.title ?? `Media ${mediaIds[index]}`,
+            title:
+              item.title ??
+              t("review:mediaPage.knowledgeMediaFallbackTitle", {
+                defaultValue: "Media {{id}}",
+                id: mediaIds[index],
+              }),
             source_type: item.type ?? "document",
           },
         })),
@@ -91,7 +98,10 @@ export function MediaKnowledgeActions({
     } catch {
       if (mounted.current && !invalidated.current && isCurrent())
         message.error(
-          "Could not prepare these sources for Research Workspace. Please try again.",
+          t("review:mediaPage.researchPrepareError", {
+            defaultValue:
+              "Could not prepare these sources for Research Workspace. Please try again.",
+          }),
         )
     } finally {
       if (mounted.current && !invalidated.current) setPending(false)
@@ -107,7 +117,13 @@ export function MediaKnowledgeActions({
           navigate(buildKnowledgeMediaScopePath(mediaIds))
         }}
       >
-        {selection ? "Ask selected items" : "Ask this item"}
+        {selection
+          ? t("review:mediaPage.askSelectedItems", {
+              defaultValue: "Ask selected items",
+            })
+          : t("review:mediaPage.askThisItem", {
+              defaultValue: "Ask this item",
+            })}
       </Button>
       <Button
         size="small"
@@ -118,8 +134,12 @@ export function MediaKnowledgeActions({
         }}
       >
         {selection
-          ? "Research with selected sources"
-          : "Research with this source"}
+          ? t("review:mediaPage.researchWithSelectedSources", {
+              defaultValue: "Research with selected sources",
+            })
+          : t("review:mediaPage.researchWithThisSource", {
+              defaultValue: "Research with this source",
+            })}
       </Button>
     </>
   )
