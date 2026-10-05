@@ -1,6 +1,10 @@
+import { createChatWithRecovery, markChatCreationBound, readChatCreationRecovery, markChatCreationSettled } from "@/services/pending-chat-promotion"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
+import { chatDraftAddressKey, type ChatDraftHandle } from "@/utils/chat-draft-address"
 import type { Dispatch, SetStateAction } from "react"
 import { captureChatDraftLoad } from "./chat-draft-transition"
 import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import type { TFunction } from "i18next"
 import { buildCharacterChatAssistantErrorContent } from "./useCharacterChatMode"
 import type { Message, ToolChoice } from "@/store/option"
@@ -39,6 +43,7 @@ import { extractStreamTransportInterruption } from "@/utils/extract-token-from-c
 
 export type NativeHistoryCharacterSendParams = {
   controller: HistorySelectionController
+  surface: "playground" | "sidepanel"
   originIsCurrent: () => boolean
   signal: AbortSignal
   temporary: boolean
@@ -65,6 +70,9 @@ export const sendNativeHistoryCharacter = async (
   params: NativeHistoryCharacterSendParams
 ): Promise<void> => {
   const { controller, signal } = params
+  const sourceAddress = useStoreMessageOption.getState().chatDraftAddress
+  const sourceDraft = sourceAddress ? structuredClone(sourceAddress) : null
+  const creationScope = params.scope ? structuredClone(params.scope) : undefined
   const acceptDraftBind = !params.historyId && !params.serverChatId && useStoreMessageOption.getState().chatDraftAddress?.kind === "fresh" ? captureChatDraftLoad("bind") : null
   if (!params.message.trim()) throw new Error("native_history_input_required")
   const settingsState = useStoreChatModelSettings.getState()
@@ -101,6 +109,7 @@ export const sendNativeHistoryCharacter = async (
   try {
     if (!params.originIsCurrent() || !leaseValid())
       throw new Error("stale_selection")
+    let creationHandle: ChatDraftHandle | undefined
     let current = controller.getCurrent()
     let selectionCurrent = params.originIsCurrent
     let targetChatId = params.serverChatId
@@ -112,7 +121,14 @@ export const sendNativeHistoryCharacter = async (
       if (!chatId && !params.historyId) {
         if (!params.characterId)
           throw new Error("native_history_character_required")
-        const created = await tldwClient.createChat(
+        if (!sourceDraft || sourceDraft.kind !== "fresh") throw new Error("chat_creation_source_invalid")
+        creationHandle = { address: sourceDraft, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
+        const created = await createChatWithRecovery({
+          snapshot, handle: creationHandle, scope: creationScope, surface: params.surface,
+          inputText: params.message, setup: { characterId: params.characterId, provider, model,
+            temperature: settings.temperature, topP: settings.topP },
+          isCurrent: () => params.originIsCurrent() && leaseValid(),
+          create: () => tldwClient.createChat(
           {
             character_id: params.characterId,
             provider,
@@ -121,11 +137,12 @@ export const sendNativeHistoryCharacter = async (
             ...(settings.topP != null ? { top_p: settings.topP } : {})
           },
           {
-            scope: params.scope,
+            scope: creationScope,
             signal: snapshot.scopeSignal,
             requestScope: snapshot.requestScope
           }
-        )
+          )
+        })
         // A late creation ACK must never bind the newly opened view or account.
         if (!params.originIsCurrent() || !leaseValid())
           throw new Error("stale_selection")
@@ -179,6 +196,8 @@ export const sendNativeHistoryCharacter = async (
       )
         throw new Error("owner_conversation_mismatch")
       selectionCurrent = controller.fence()
+      if (creationHandle && chatId) await markChatCreationBound(creationHandle, chatId)
+      if (!leaseValid() || !selectionCurrent() || controller.getCurrent().owner !== receipt.owner || controller.getCurrent().view !== receipt.view) throw new Error("stale_selection")
       targetChatId = chatId
     }
     if (current.owner?.kind !== "native")
@@ -368,6 +387,7 @@ export const sendNativeHistoryCharacter = async (
       if (!admission || !resultId)
         throw new Error("native_history_persistence_unacknowledged")
       await dismissHistoryTurnRecovery(scope, view, operationId, "completed")
+      if (creationHandle) await markChatCreationSettled(creationHandle, owner.conversation_id)
       if (sameView()) {
         followAttempted = true
         await controller.followResult(view, resultId)
@@ -376,6 +396,7 @@ export const sendNativeHistoryCharacter = async (
       if (admission && resultId) {
         // A later disconnect cannot erase an already verified owner settlement.
         await dismissHistoryTurnRecovery(scope, view, operationId, "completed")
+        if (creationHandle) await markChatCreationSettled(creationHandle, owner.conversation_id)
         if (sameView() && !followAttempted)
           await controller.followResult(view, resultId)
         return
@@ -407,4 +428,58 @@ export const sendNativeHistoryCharacter = async (
     snapshot.release()
     params.releaseActivity()
   }
+}
+
+
+/** Explicit recovery only loads actual owned rows; it never creates or submits retained input. */
+export const reviewNativeChatCreation = async (params: {
+  controller: HistorySelectionController
+  handle: ChatDraftHandle
+  isCurrent: () => boolean
+  onAccepted: (chat: Awaited<ReturnType<typeof tldwClient.getChat>>) => void
+  retainInput?: () => Promise<boolean>
+}) => {
+  const source = useStoreMessageOption.getState()
+  const address = source.chatDraftAddress
+  if (!address || address.kind !== "fresh" || chatDraftAddressKey(address) !== chatDraftAddressKey(params.handle.address)) return false
+  const session = usePlaygroundSessionStore.getState()
+  if (session.serverChatSelectionIntent) return false
+  const sourceFence = params.controller.fence()
+  const navigationCurrent = () => useStoreMessageOption.getState().serverChatId === source.serverChatId &&
+    usePlaygroundSessionStore.getState().serverChatSelectionIntent === session.serverChatSelectionIntent &&
+    usePlaygroundSessionStore.getState().restoreRevision === session.restoreRevision &&
+    usePlaygroundSessionStore.getState().sourceSelectionRevision === session.sourceSelectionRevision
+  const bind = captureChatDraftLoad("bind")
+  if (params.retainInput && !(await params.retainInput())) return false
+  if (!bind.isCurrent() || !params.isCurrent() || !sourceFence() || !navigationCurrent()) return false
+  const snapshot = await loadServicePromptSnapshot([])
+  const authCurrent = () => !snapshot.scopeSignal.aborted && !snapshot.scopeInvalidatedSignal.aborted
+  const current = () => bind.isCurrent() && params.isCurrent() && authCurrent() && navigationCurrent()
+  const preparing = () => sourceFence() && current()
+  try {
+    if (!preparing() || chatDraftOwnerKey(snapshot.requestScope) !== params.handle.ownerHash || params.handle.address.kind !== "fresh") return false
+    const attempt = await readChatCreationRecovery(params.handle)
+    if (!attempt?.chatId || attempt.state === "unconfirmed" || !preparing()) return false
+    const scope = structuredClone(params.handle.address.scope)
+    const chat = await tldwClient.getChat(attempt.chatId, { scope, requestScope: snapshot.requestScope, signal: snapshot.scopeSignal })
+    if (!preparing() || chat.id !== attempt.chatId) return false
+    let acceptedReceipt: HistoryLoadReceipt | undefined
+    let phase: "preparing" | "accepted" | "rejected" = "preparing"
+    const loaded = await params.controller.loadConversation({ serverChatId: attempt.chatId, scope, isCurrent: () => bind.isCurrent() && (phase === "accepted" || (phase === "preparing" && current())) }, null, receipt => {
+      phase = "rejected"
+      const now = params.controller.getCurrent()
+      if (!current() || receipt.owner !== now.owner || receipt.view !== now.view || receipt.owner.kind !== "native" ||
+        receipt.owner.conversation_id !== attempt.chatId || chatDraftOwnerKey(receipt.owner.request_scope) !== params.handle.ownerHash) return
+      phase = "preparing"
+      if (!receipt.owner.validate_lease() || !bind(receipt)) { phase = "rejected"; return }
+      acceptedReceipt = receipt
+      phase = "accepted"
+      params.onAccepted(chat)
+    })
+    if (!loaded || !acceptedReceipt || !bind.isCurrent()) return false
+    const destination = params.controller.fence()
+    await markChatCreationBound(attempt.handle, attempt.chatId)
+    const now = params.controller.getCurrent()
+    return destination() && bind.isCurrent() && now.owner === acceptedReceipt.owner && now.view === acceptedReceipt.view
+  } finally { snapshot.release() }
 }

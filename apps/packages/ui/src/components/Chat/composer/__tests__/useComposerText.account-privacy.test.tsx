@@ -40,7 +40,7 @@ const switchTo = async (user: string) => {
 describe.each([false, true])("composer account ownership using the real draft registry (tabScoped=%s)", tabScopedDraft => {
   const mount = () => renderHook(() => useComposerText({ draftKey, tabScopedDraft, textareaRef: React.createRef<HTMLTextAreaElement>() }))
   beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); sessionStorage.clear(); authority.user = "alice"; authority.org = null; authority.error = null })
-  afterEach(() => vi.useRealTimers())
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
 
   it("rejects unowned raw and registry drafts from earlier releases", async () => {
     localStorage.setItem(draftKey, "UNOWNED PRIVATE")
@@ -238,5 +238,66 @@ describe.each([false, true])("composer account ownership using the real draft re
     await switchTo("alice")
     await settle()
     expect(view.result.current.form.values.message).toBe("ALICE PENDING WRITE")
+  })
+})
+
+
+describe("owned original creation text uses its displayed source fence", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks(); vi.useFakeTimers(); localStorage.clear(); sessionStorage.clear()
+    authority.user = "alice"; authority.org = null; authority.error = null
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } })
+    const tails = new Map<string, Promise<unknown>>()
+    Object.defineProperty(navigator, "locks", { configurable: true, value: { request: (key: string, work: () => unknown) => {
+      const next = (tails.get(key) ?? Promise.resolve()).then(work); tails.set(key, next.catch(() => undefined)); return next
+    } } })
+  })
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
+  const mountCreation = async (seed = true) => {
+    const { useStoreMessageOption: store } = await import("@/store/option")
+    store.getState().startNewChatDraft(false)
+    const address = store.getState().chatDraftAddress!
+    const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
+    const { createChatWithRecovery } = await import("@/services/pending-chat-promotion")
+    const requestScope = await (await import("@/services/service-prompts")).resolveServicePromptScope()
+    const snapshot = { requestScope, scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal, release: vi.fn() } as unknown as import("@/services/service-prompts").ServicePromptSnapshot
+    const retainCreation = () => createChatWithRecovery({ snapshot, handle: { address, ownerHash: chatDraftOwnerKey(requestScope) }, surface: "playground",
+      inputText: "ALICE ORIGINAL ATTEMPT", setup: {}, isCurrent: () => true, create: async () => { throw new Error("lost ACK") } }).catch(() => undefined)
+    if (seed) await retainCreation()
+    const view = renderHook(() => useComposerText({ draftKey, draftAddress: address, recoverySurface: "playground", textareaRef: React.createRef<HTMLTextAreaElement>() }))
+    await settle()
+    expect(view.result.current.creationRecovery.active?.inputText).toBe(seed ? "ALICE ORIGINAL ATTEMPT" : undefined)
+    return { view, store, address, retainCreation, copy: view.result.current.copyCreationText }
+  }
+  it.each(["new", "ABA", "logout"])("does not copy an old displayed attempt after %s before rerender", async boundary => {
+    const { store, address, copy } = await mountCreation()
+    await act(async () => {
+      if (boundary === "logout") { authority.user = null; window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })) }
+      else { store.getState().startNewChatDraft(false); if (boundary === "ABA") store.getState().setChatDraftAddress(address) }
+      expect(await copy()).toBe(false)
+    })
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
+  })
+  it("observes a new uncertain creation after a same-object source ABA without a prior marker", async () => {
+    const { store, address, view, retainCreation } = await mountCreation(false)
+    act(() => { store.getState().startNewChatDraft(false); store.getState().setChatDraftAddress(address) })
+    await settle()
+    await act(async () => { await retainCreation() })
+    await settle()
+    expect(view.result.current.creationRecovery.active).toMatchObject({ state: "unconfirmed", inputText: "ALICE ORIGINAL ATTEMPT" })
+    expect(await view.result.current.copyCreationText()).toBe(true)
+  })
+  it("copies the owned original text and suppresses a late clipboard error after New", async () => {
+    const { store, copy } = await mountCreation()
+    expect(await copy()).toBe(true)
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("ALICE ORIGINAL ATTEMPT")
+    let reject!: (reason: Error) => void
+    vi.mocked(navigator.clipboard.writeText).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+    const pending = copy()
+    await act(async () => { await vi.dynamicImportSettled() })
+    expect(reject).toBeTypeOf("function")
+    act(() => store.getState().startNewChatDraft(false))
+    reject(new Error("Clipboard unavailable"))
+    expect(await pending).toBe(false)
   })
 })

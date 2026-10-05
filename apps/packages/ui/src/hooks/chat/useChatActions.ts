@@ -3883,6 +3883,7 @@ export const useChatActions = ({
             }
             if (historySelection) {
               await sendNativeHistoryCharacter({
+                  surface: "playground",
                 t,
                 controller: historySelection,
                 originIsCurrent: historyOriginIsCurrent!,

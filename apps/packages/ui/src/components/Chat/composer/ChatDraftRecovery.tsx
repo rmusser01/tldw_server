@@ -1,3 +1,4 @@
+import type { ChatCreationRecovery } from "@/services/pending-chat-promotion"
 import { Button } from "@/components/Common/Button"
 import { useStoreMessageOption } from "@/store/option"
 import type { ChatDraftAddress } from "@/utils/chat-draft-address"
@@ -22,6 +23,10 @@ export function ChatDraftRecovery({
   listDrafts,
   copyDraft,
   onRestore,
+  creationRecovery,
+  onReviewCreatedChat,
+  onCopyCreationText,
+  onFindConversations,
   disabled = false
 }: {
   listDrafts: () => Promise<ChatDraftRecoveryListing>
@@ -31,6 +36,10 @@ export function ChatDraftRecovery({
     destination?: Extract<ChatDraftAddress, { kind: "fresh" }>
   ) => Promise<boolean>
   onRestore?: RestoreChatDraft
+  creationRecovery?: { active: ChatCreationRecovery | null; unavailable: boolean }
+  onReviewCreatedChat?: () => Promise<boolean>
+  onCopyCreationText?: () => Promise<boolean>
+  onFindConversations?: () => void
   disabled?: boolean
 }) {
   const { t } = useTranslation("playground")
@@ -125,8 +134,42 @@ export function ChatDraftRecovery({
       if (token === generation.current) setBusy(false)
     }
   }
+  const review = async () => {
+    if (!onReviewCreatedChat || busy || disabled) return
+    const token = ++generation.current
+    setBusy(true)
+    setError(null)
+    try {
+      const accepted = await onReviewCreatedChat()
+      if (token === generation.current && !accepted) setError(text("creationReviewFailed", "Could not verify the created chat. Your draft and recovery record are kept."))
+    } catch {
+      if (token === generation.current) setError(text("creationReviewFailed", "Could not verify the created chat. Your draft and recovery record are kept."))
+    } finally { if (token === generation.current) setBusy(false) }
+  }
   return (
-    <>
+    <div className="w-full">
+      {!disabled && creationRecovery?.active && <div role="status" className="mb-2 rounded border border-border p-3 text-sm">
+        <p className="font-medium">{["bound", "settled"].includes(creationRecovery.active.state) ? text("creationBound", "Chat already created") : creationRecovery.active.state === "prepared" ? text("creationPrepared", "Chat creation not started") : text("creationUnconfirmed", "Server save unconfirmed")}</p>
+        <p>{creationRecovery.active.state === "prepared" ? text("creationPreparedHelp", "No chat creation was dispatched. Review your setup and send when ready; your attempted text is retained.") : ["bound", "settled"].includes(creationRecovery.active.state) ? text("creationBoundHelp", "This chat was already created. Review it before sending retained text again; starting another chat may create a duplicate.") : text("creationHelp", "The server may have created this chat. Review conversations before starting again; another chat may create a duplicate. Your original attempted text is retained.")}</p>
+        {creationRecovery.active.state !== "settled" && <details className="mt-2">
+          <summary>{text("creationOriginalText", "Original attempted text")}</summary>
+          <p className="max-h-40 overflow-auto whitespace-pre-wrap break-words">{creationRecovery.active.inputText || text("creationEmptyText", "No user message was submitted with this creation.")}</p>
+          {creationRecovery.active.inputText && onCopyCreationText && <Button size="sm" disabled={busy} onClick={async () => {
+            const token = ++generation.current
+            setBusy(true)
+            try { await onCopyCreationText() }
+            catch { if (token === generation.current) setError(text("creationCopyFailed", "Could not copy the text. You can select and copy it above.")) }
+            finally { if (token === generation.current) setBusy(false) }
+          }}>{text("creationCopy", "Copy attempted text")}</Button>}
+        </details>}
+        <div className="mt-2 flex flex-wrap gap-2">
+          {onFindConversations && <Button size="sm" onClick={onFindConversations}>{text("findConversations", "Find conversations")}</Button>}
+          {creationRecovery.active.chatId && onReviewCreatedChat && <Button size="sm" disabled={busy} onClick={() => void review()}>{text("reviewCreated", "Review created chat")}</Button>}
+        </div>
+        {error && <p role="alert" className="mt-2 text-danger">{error}</p>}
+      </div>}
+      {!disabled && creationRecovery?.unavailable && <p role="status" className="mb-2 text-sm">{text("creationStorageUnavailable", "Creation recovery could not be read. Keep your draft and check retained drafts before starting again.")}</p>}
+      <div className="flex justify-end">
       <Button
         variant="text"
         size="sm"
@@ -137,6 +180,7 @@ export function ChatDraftRecovery({
         }}>
         {text("open", "Recover drafts")}
       </Button>
+      </div>
       <Modal
         open={open && !disabled}
         title={text("title", "Retained drafts")}
@@ -185,6 +229,7 @@ export function ChatDraftRecovery({
                       ? text("temporary", "Temporary draft")
                       : text("saved", "New chat draft")}
                   </span>
+                  {draft.creationAttempt && <span className="block text-sm text-text-muted">{draft.creationAttempt.state === "bound" ? text("creationBound", "Chat already created") : draft.creationAttempt.state === "prepared" ? text("creationPrepared", "Chat creation not started") : text("creationUnconfirmed", "Server save unconfirmed")}. {text("creationDraftHelp", "Open this draft to review its creation before sending. Starting another chat may create a duplicate.")}</span>}
                   <span className="block break-words text-sm">
                     {draft.content.slice(0, 160)}
                     {draft.content.length > 160 ? "…" : ""}
@@ -199,6 +244,6 @@ export function ChatDraftRecovery({
             ))}
         </ul>
       </Modal>
-    </>
+    </div>
   )
 }

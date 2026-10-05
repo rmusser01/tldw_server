@@ -2793,6 +2793,7 @@ export const useMessage = () => {
             if (historySelection) {
               try {
                 await sendNativeHistoryCharacter({
+                  surface: "sidepanel",
                   t,
                   controller: historySelection,
                   originIsCurrent: historyOriginIsCurrent!,

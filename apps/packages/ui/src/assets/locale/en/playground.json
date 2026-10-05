@@ -1409,7 +1409,22 @@
     "retry": "Retry",
     "empty": "No other retained drafts on this browser.",
     "temporary": "Temporary draft",
-    "saved": "New chat draft"
+    "saved": "New chat draft",
+    "creationReviewFailed": "Could not verify the created chat. Your draft and recovery record are kept.",
+    "creationBound": "Chat already created",
+    "creationPrepared": "Chat creation not started",
+    "creationUnconfirmed": "Server save unconfirmed",
+    "creationPreparedHelp": "No chat creation was dispatched. Review your setup and send when ready; your attempted text is retained.",
+    "creationBoundHelp": "This chat was already created. Review it before sending retained text again; starting another chat may create a duplicate.",
+    "creationHelp": "The server may have created this chat. Review conversations before starting again; another chat may create a duplicate. Your original attempted text is retained.",
+    "creationOriginalText": "Original attempted text",
+    "creationEmptyText": "No user message was submitted with this creation.",
+    "creationCopyFailed": "Could not copy the text. You can select and copy it above.",
+    "creationCopy": "Copy attempted text",
+    "findConversations": "Find conversations",
+    "reviewCreated": "Review created chat",
+    "creationStorageUnavailable": "Creation recovery could not be read. Keep your draft and check retained drafts before starting again.",
+    "creationDraftHelp": "Open this draft to review its creation before sending. Starting another chat may create a duplicate."
   },
   "characterChatSessions": {
     "regionLabel": "Character chat sessions",

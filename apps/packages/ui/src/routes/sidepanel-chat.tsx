@@ -2760,6 +2760,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
                   onHeightChange={setComposerHeight}
                   draftKey={draftKey}
                   onRecoverDraft={handleRecoverDraft}
+                  onFindConversations={requestSidebarSearchFocus}
                   onOpenChatInWebUi={browser.runtime.id ? undefined : openChatInWebUi}
                 />
               </div>
@@ -2793,6 +2794,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
                 onHeightChange={setComposerHeight}
                 draftKey={draftKey}
                 onRecoverDraft={handleRecoverDraft}
+                  onFindConversations={requestSidebarSearchFocus}
                 onOpenChatInWebUi={browser.runtime.id ? undefined : openChatInWebUi}
               />
             </div>

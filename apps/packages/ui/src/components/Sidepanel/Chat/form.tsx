@@ -186,6 +186,7 @@ type Props = {
   onHeightChange?: (height: number) => void
   draftKey?: string
   onRecoverDraft?: RestoreChatDraft
+  onFindConversations?: () => void
   onOpenChatInWebUi?: (
     overrides?: SidepanelChatWebUiHandoffOverrides
   ) => Promise<void> | void
@@ -207,6 +208,7 @@ export const SidepanelForm = ({
   onHeightChange,
   draftKey,
   onRecoverDraft,
+  onFindConversations,
   onOpenChatInWebUi
 }: Props) => {
   const formContainerRef = React.useRef<HTMLDivElement>(null)
@@ -375,6 +377,9 @@ export const SidepanelForm = ({
     draftSaved,
     draftReady,
     clearDraft,
+    creationRecovery,
+    reviewCreatedChat,
+    copyCreationText,
     listRetainedDrafts,
     copyRetainedDraft
   } = useComposerText({
@@ -3056,7 +3061,7 @@ export const SidepanelForm = ({
       <div
         ref={formContainerRef}
         className={`flex w-full min-w-0 flex-col items-center ${composerPadding}`}>
-      <div className="flex w-full justify-end"><ChatDraftRecovery listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={onRecoverDraft} disabled={!draftReady} /></div>
+      <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={onFindConversations} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={onRecoverDraft} disabled={!draftReady} /></div>
       <div
         className={`relative z-10 flex w-full min-w-0 flex-col items-center justify-center ${composerGap} text-body`}>
         <div className="relative flex w-full min-w-0 flex-row justify-center gap-2">

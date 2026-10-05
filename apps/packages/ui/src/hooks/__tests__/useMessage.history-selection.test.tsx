@@ -582,6 +582,16 @@ const makeController = () => {
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  localStorage.clear()
+  sessionStorage.clear()
+  const lockTails = new Map<string, Promise<unknown>>()
+  Object.defineProperty(navigator, "locks", { configurable: true, value: {
+    request: (key: string, work: () => unknown) => {
+      const next = (lockTails.get(key) ?? Promise.resolve()).then(work)
+      lockTails.set(key, next.catch(() => undefined))
+      return next
+    }
+  } })
   mocks.draftFields = null
   h1.auth = new AbortController()
   h1.native = false

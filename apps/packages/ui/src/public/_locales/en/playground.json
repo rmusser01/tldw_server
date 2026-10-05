@@ -3955,5 +3955,50 @@
   },
   "composer_groups_responseSettings": {
     "message": "Response settings"
+  },
+  "draftRecovery_creationReviewFailed": {
+    "message": "Could not verify the created chat. Your draft and recovery record are kept."
+  },
+  "draftRecovery_creationBound": {
+    "message": "Chat already created"
+  },
+  "draftRecovery_creationPrepared": {
+    "message": "Chat creation not started"
+  },
+  "draftRecovery_creationUnconfirmed": {
+    "message": "Server save unconfirmed"
+  },
+  "draftRecovery_creationPreparedHelp": {
+    "message": "No chat creation was dispatched. Review your setup and send when ready; your attempted text is retained."
+  },
+  "draftRecovery_creationBoundHelp": {
+    "message": "This chat was already created. Review it before sending retained text again; starting another chat may create a duplicate."
+  },
+  "draftRecovery_creationHelp": {
+    "message": "The server may have created this chat. Review conversations before starting again; another chat may create a duplicate. Your original attempted text is retained."
+  },
+  "draftRecovery_creationOriginalText": {
+    "message": "Original attempted text"
+  },
+  "draftRecovery_creationEmptyText": {
+    "message": "No user message was submitted with this creation."
+  },
+  "draftRecovery_creationCopyFailed": {
+    "message": "Could not copy the text. You can select and copy it above."
+  },
+  "draftRecovery_creationCopy": {
+    "message": "Copy attempted text"
+  },
+  "draftRecovery_findConversations": {
+    "message": "Find conversations"
+  },
+  "draftRecovery_reviewCreated": {
+    "message": "Review created chat"
+  },
+  "draftRecovery_creationStorageUnavailable": {
+    "message": "Creation recovery could not be read. Keep your draft and check retained drafts before starting again."
+  },
+  "draftRecovery_creationDraftHelp": {
+    "message": "Open this draft to review its creation before sending. Starting another chat may create a duplicate."
   }
 }

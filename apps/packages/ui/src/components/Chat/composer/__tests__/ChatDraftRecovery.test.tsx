@@ -183,3 +183,48 @@ describe("retained composer recovery choices", () => {
     expect(screen.queryByText("MY UNSENT TEXT")).not.toBeInTheDocument()
   })
 })
+
+
+it("shows active unknown creation without requiring a nonempty draft and offers Find conversations", async () => {
+  const onFind = vi.fn()
+  render(<ChatDraftRecovery listDrafts={vi.fn().mockResolvedValue({ drafts: [], unavailable: false })} copyDraft={vi.fn()}
+    onRestore={vi.fn()} onFindConversations={onFind} creationRecovery={{ unavailable: false, active: {
+      version: 1, operationId: "c".repeat(36), handle: { ...draft.handle, address: { ...draft.handle.address, temporary: false } },
+      surface: "playground", createdAt: 1, inputText: "", state: "unconfirmed"
+    } }} />)
+  expect(screen.getByText("Server save unconfirmed")).toBeInTheDocument()
+  expect(screen.getByText(/another chat may create a duplicate/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Find conversations" }))
+  expect(onFind).toHaveBeenCalledOnce()
+  expect(screen.queryByRole("button", { name: "Review created chat" })).not.toBeInTheDocument()
+})
+
+it("offers known-ID review only as an explicit action and retains uncertainty when review fails", async () => {
+  const review = vi.fn().mockResolvedValue(false)
+  render(<ChatDraftRecovery listDrafts={vi.fn()} copyDraft={vi.fn()} onRestore={vi.fn()}
+    onReviewCreatedChat={review} creationRecovery={{ unavailable: false, active: {
+      version: 1, operationId: "c".repeat(36), handle: { ...draft.handle, address: { ...draft.handle.address, temporary: false } },
+      surface: "playground", createdAt: 1, inputText: "original unsent text", state: "acknowledged", chatId: "saved-id"
+    } }} />)
+  expect(review).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "Review created chat" }))
+  await waitFor(() => expect(review).toHaveBeenCalledOnce())
+  expect(await screen.findByText(/Could not verify the created chat/)).toBeInTheDocument()
+  expect(screen.getByText("Server save unconfirmed")).toBeInTheDocument()
+})
+
+
+it("uses the owned Copy action and ignores its late failure after New", async () => {
+  let reject!: (reason: Error) => void
+  const copy = vi.fn(() => new Promise<boolean>((_resolve, fail) => { reject = fail }))
+  render(<ChatDraftRecovery listDrafts={vi.fn()} copyDraft={vi.fn()} onRestore={vi.fn()}
+    onCopyCreationText={copy} creationRecovery={{ unavailable: false, active: {
+      version: 1, operationId: "c".repeat(36), handle: { ...draft.handle, address: { ...draft.handle.address, temporary: false } },
+      surface: "playground", createdAt: 1, inputText: "owned original attempt", state: "unconfirmed"
+    } }} />)
+  expect(copy).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "Copy attempted text" }))
+  expect(copy).toHaveBeenCalledOnce()
+  await act(async () => { useStoreMessageOption.getState().startNewChatDraft(); reject(new Error("Clipboard unavailable")) })
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+})
