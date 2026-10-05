@@ -134,16 +134,33 @@ export const sendNativeHistoryCharacter = async (
         if (!chatId) throw new Error("native_history_creation_unacknowledged")
       }
       let receipt: HistoryLoadReceipt | undefined
+      let loadPhase: "preparing" | "accepted" | "rejected" = "preparing"
       const loaded = await controller.loadConversation(
         {
           historyId: params.historyId,
           serverChatId: chatId,
           scope: params.scope,
-          isCurrent: acceptDraftBind?.isCurrent
+          // Preparation ends at the qualified bind; later settings or Stop
+          // must not revoke the saved owner's independent account lease.
+          isCurrent: () => acceptDraftBind?.isCurrent() !== false &&
+            (loadPhase === "accepted" || (loadPhase === "preparing" && leaseValid()))
         },
         null,
         (value) => {
+          loadPhase = "rejected"
+          const now = controller.getCurrent()
+          if (!leaseValid() || now.owner !== value.owner || now.view !== value.view ||
+            (chatId && (value.owner.kind !== "native" || value.owner.conversation_id !== chatId))) return
+          // The binding receipt validates the owner through this same guard.
+          loadPhase = "preparing"
+          if (acceptDraftBind && !acceptDraftBind(value)) {
+            loadPhase = "rejected"
+            return
+          }
           receipt = value
+          loadPhase = "accepted"
+          if (chatId) params.setServerChatId(chatId)
+          if (createdCharacterId != null) params.onCreated?.(createdCharacterId)
         }
       )
       current = controller.getCurrent()
@@ -161,11 +178,8 @@ export const sendNativeHistoryCharacter = async (
           receipt.owner.conversation_id !== chatId)
       )
         throw new Error("owner_conversation_mismatch")
-      if (acceptDraftBind && !acceptDraftBind(receipt)) throw new Error("stale_selection")
       selectionCurrent = controller.fence()
       targetChatId = chatId
-      if (chatId) params.setServerChatId(chatId)
-      if (createdCharacterId != null) params.onCreated?.(createdCharacterId)
     }
     if (current.owner?.kind !== "native")
       throw new Error("native_history_requires_server_owner")

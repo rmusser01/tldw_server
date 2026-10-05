@@ -299,6 +299,11 @@ vi.mock("@/db/dexie/history-selection", async (original) => ({
 }))
 vi.mock("@/services/service-prompts", async (original) => ({
   ...(await original<any>()),
+  resolveServicePromptScope: async () => ({
+    config: { serverUrl: "https://server.test", authMode: "multi-user" },
+    userId: "alice"
+  }),
+  subscribeToServicePromptConfigChanges: () => () => {},
   loadServicePromptSnapshot: vi.fn(async () => ({
     requestScope: {
       config: { serverUrl: "https://server.test", authMode: "multi-user" },
@@ -2068,4 +2073,135 @@ it("mounted native fork without local history retains an unknown create and neve
   expect(createChatMock).toHaveBeenCalledTimes(1)
   expect(localForks.commit).not.toHaveBeenCalled()
   expect([...memory.forkOperations.rows.values()][0].request.operation_id).toBe(first.operation_id)
+})
+
+
+const openingCapture = (id: string, request: import("@/types/history-selection").HistoryCaptureRequestV1) => {
+  const view = { ...request.view, owner_key: "native-key" }
+  const node = { id: "opening-" + id, revision: "opening-r", parent_id: null, role: "assistant", settled: true }
+  const rows = view.cursor.kind === "empty" ? [] : [node]
+  const base = captureFor(view)
+  return { ...base, view, purpose: request.purpose, rows,
+    selected_content: rows.map(row => ({ id: row.id, revision: row.revision, message: "Saved opening", images: [] })),
+    snapshot: { ...base.snapshot, conversation_id: id, nodes: [node] } }
+}
+
+const mountedNativeOpening = async () => {
+  const { useStoreMessageOption: draftStore } = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+  const { useStoreChatModelSettings: modelStore } = await import("@/store/model")
+  const { useMcpToolsStore: toolsStore } = await import("@/store/mcp-tools")
+  toolsStore.getState().setTools([])
+  draftStore.getState().startNewChatDraft()
+  const sourceDraft = draftStore.getState().chatDraftAddress
+  messageStoreState.draftFields = () => {
+    const state = draftStore.getState()
+    return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision, setChatDraftAddress: state.setChatDraftAddress }
+  }
+  const { memory } = await import("./local-history-fixture")
+  for (const name of ["forkOperations", "historySelections"]) memory[name].rows.clear()
+  const { useHistorySelection } = await import("../useHistorySelection")
+  const onCapture = vi.fn()
+  const selection = renderHook(() => useHistorySelection({ onCapture }))
+  h1.controller = selection.result.current
+  const options = { ...createHookOptions(), historyId: null, serverChatId: null, serverChatCharacterId: null,
+    selectedAssistant: { kind: "character", id: "12", name: "Saved", metadata: { selectionMode: "tracked" } } }
+  createChatMock.mockResolvedValue({ id: "tracked-chat-1" })
+  h1.capture.mockImplementation(async (id, request) => openingCapture(id, request))
+  h1.wire.mockImplementation(async function* (request) {
+    yield { tldw_history_admission_v1: nativeAdmission(request) }
+    yield { tldw_message_id: "native-result", tldw_conversation_id: "tracked-chat-1" }
+  })
+  const hook = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+  return { draftStore, modelStore, toolsStore, sourceDraft, memory, onCapture, selection, options, hook }
+}
+
+it.each(["capture", "bookmark"].flatMap(stage =>
+  ["settings", "tools", "stop", "new"].map(boundary => ({ stage, boundary }))
+))("native first-load $stage rejects $boundary drift before publication and retires only its candidate", async ({ stage, boundary }) => {
+  const mounted = await mountedNativeOpening()
+  let entered!: () => void, release!: () => void
+  const ready = new Promise<void>(resolve => { entered = resolve })
+  const held = new Promise<void>(resolve => { release = resolve })
+  let bookmarkSpy: ReturnType<typeof vi.spyOn> | undefined
+  if (stage === "capture") {
+    h1.capture.mockImplementation(async (id, request) => {
+      if (h1.capture.mock.calls.length === 1) { entered(); await held }
+      return openingCapture(id, request)
+    })
+  } else {
+    const original = mounted.memory.historySelections.put
+    bookmarkSpy = vi.spyOn(mounted.memory.historySelections, "put").mockImplementation(async (...args: unknown[]) => {
+      entered(); await held
+      return original(...args)
+    })
+  }
+  let pending!: Promise<unknown>
+  await act(async () => {
+    pending = mounted.hook.result.current.onSubmit({ message: "first", image: "" })
+    await ready
+  })
+  act(() => {
+    if (boundary === "settings") mounted.modelStore.setState({ temperature: 0.71 })
+    else if (boundary === "tools") mounted.toolsStore.getState().setTools([])
+    else if (boundary === "stop") mounted.options.setAbortController.mock.calls[0][0].abort()
+    else mounted.draftStore.getState().startNewChatDraft()
+  })
+  await act(async () => { release(); await pending })
+  bookmarkSpy?.mockRestore()
+  expect(mounted.onCapture).not.toHaveBeenCalled()
+  expect(mounted.selection.result.current.getCurrent()).toMatchObject({ owner: null, capture: null, status: "stale_selection", error: null })
+  expect(mounted.selection.result.current.canAutomaticallyLoad()).toBe(false)
+  expect(mounted.options.setServerChatId).not.toHaveBeenCalled()
+  if (boundary === "new") expect(mounted.draftStore.getState().chatDraftAddress).not.toBe(mounted.sourceDraft)
+  else expect(mounted.draftStore.getState().chatDraftAddress).toBe(mounted.sourceDraft)
+  expect(mounted.draftStore.getState().chatDraftAddress?.kind).toBe("fresh")
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(createChatMock).toHaveBeenCalledOnce()
+  mounted.hook.unmount()
+  mounted.selection.unmount()
+})
+
+it.each(["tracked-chat-1", "newer-chat"])("late native first-load retirement preserves a newer load of %s", async nextId => {
+  const mounted = await mountedNativeOpening()
+  let entered!: () => void, release!: () => void
+  const ready = new Promise<void>(resolve => { entered = resolve })
+  const held = new Promise<void>(resolve => { release = resolve })
+  h1.capture.mockImplementation(async (id, request) => {
+    if (h1.capture.mock.calls.length === 1) { entered(); await held }
+    return openingCapture(id, request)
+  })
+  let pending!: Promise<unknown>
+  await act(async () => {
+    pending = mounted.hook.result.current.onSubmit({ message: "first", image: "" })
+    await ready
+    expect(await mounted.selection.result.current.loadConversation({ serverChatId: nextId })).toBe(true)
+  })
+  const accepted = mounted.selection.result.current.getCurrent()
+  await act(async () => { release(); await pending })
+  expect(mounted.selection.result.current.getCurrent().owner).toBe(accepted.owner)
+  expect(mounted.selection.result.current.getCurrent().view).toBe(accepted.view)
+  expect(accepted.owner?.kind === "native" && accepted.owner.validate_lease()).toBe(true)
+  expect(mounted.onCapture).toHaveBeenCalledOnce()
+  expect(mounted.options.setServerChatId).not.toHaveBeenCalled()
+  expect(mounted.draftStore.getState().chatDraftAddress).toBe(mounted.sourceDraft)
+  expect(h1.wire).not.toHaveBeenCalled()
+  mounted.hook.unmount()
+  mounted.selection.unmount()
+})
+
+it("an accepted native first load keeps its saved owner after later settings and completed-turn Stop", async () => {
+  const mounted = await mountedNativeOpening()
+  await act(async () => { await mounted.hook.result.current.onSubmit({ message: "first", image: "" }) })
+  const accepted = mounted.selection.result.current.getCurrent().owner
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(mounted.options.setServerChatId).toHaveBeenCalledWith("tracked-chat-1")
+  expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+  act(() => {
+    mounted.modelStore.setState({ temperature: 0.42 })
+    mounted.toolsStore.getState().setTools([])
+    mounted.options.setAbortController.mock.calls[0][0].abort()
+  })
+  expect(accepted?.kind === "native" && accepted.validate_lease()).toBe(true)
+  mounted.hook.unmount()
+  mounted.selection.unmount()
 })

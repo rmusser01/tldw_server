@@ -203,26 +203,25 @@ export function useHistorySelection(
       releaseOwnerLease.current?.()
     }
   }, [invalidate])
+  const reset = useCallback(() => {
+    invalidate()
+    releaseOwnerLease.current?.()
+    releaseOwnerLease.current = null
+    publish(initialState())
+    if (storageKey.current) sessionStorage.removeItem(storageKey.current)
+  }, [invalidate, publish])
+  const retireCancelledLoad = useCallback((token: number, owner: HistoryOwnerV1, view?: HistoryViewSelectionV1) => {
+    if (token !== epoch.current || live.current.owner !== owner || (view && live.current.view !== view)) return
+    reset()
+    // Retiring provisional ownership is not consent to replay the old load.
+    publish({ ...initialState(), status: "stale_selection" })
+  }, [publish, reset])
   const persist = useCallback(
-    async (scope: HistoryBookmarkScope, view: HistoryViewSelectionV1) => {
+    async (scope: HistoryBookmarkScope, view: HistoryViewSelectionV1, isCurrent: () => boolean) => {
       const operation = saves.current
         .catch(() => {})
         .then(async () => {
-          await saveHistoryBookmark(scope, view)
-          if (storageKey.current && sameView(live.current.view, view)) {
-            sessionStorage.setItem(
-              storageKey.current,
-              JSON.stringify({
-                ...scope,
-                owner_key: view.owner_key,
-                conversation_id: view.conversation_id,
-                owner_kind: live.current.owner?.kind,
-                pending_confirmation_reference: pendingReference(
-                  live.current.pending
-                )
-              })
-            )
-          }
+          if (isCurrent()) await saveHistoryBookmark(scope, view)
         })
       saves.current = operation
       await operation
@@ -259,6 +258,8 @@ export function useHistorySelection(
           ? await readNativeForkSettings(owner, request.current?.signal)
           : null
       if (!current()) return false
+      await persist(scope, result.view, current)
+      if (!current()) return false
       publish({
         settingsQualified: true,
         forkCandidate,
@@ -275,8 +276,16 @@ export function useHistorySelection(
             : result.status,
         error: result.status === "captured" ? null : result.code
       })
+      if (storageKey.current && sameView(live.current.view, result.view)) {
+        sessionStorage.setItem(storageKey.current, JSON.stringify({
+          ...scope,
+          owner_key: result.view.owner_key,
+          conversation_id: result.view.conversation_id,
+          owner_kind: owner.kind,
+          pending_confirmation_reference: pendingReference(pending)
+        }))
+      }
       if (result.status === "captured") onCapture.current?.(result)
-      await persist(scope, result.view)
       return current()
     },
     [persist, publish]
@@ -469,9 +478,13 @@ export function useHistorySelection(
           error: errorCode(error)
         })
         return true
+      } finally {
+        // Only this opening epoch may retire its provisional candidate.
+        // A newer load of the same ID owns a different epoch and owner.
+        if (!isCurrentLoad()) retireCancelledLoad(operation.epoch, owner)
       }
     },
-    [install, invalidate, publish]
+    [install, invalidate, publish, retireCancelledLoad]
   )
 
   const choose = useCallback(
@@ -684,7 +697,7 @@ export function useHistorySelection(
   )
   const canAutomaticallyLoad = useCallback(() => {
     const current = live.current
-    return current.error !== "request_config_scope_changed" && ownerLeaseValid(current.owner)
+    return current.error !== "request_config_scope_changed" && current.status !== "stale_selection" && ownerLeaseValid(current.owner)
   }, [])
   const loadConversation = useCallback(
     async (
@@ -724,6 +737,7 @@ export function useHistorySelection(
       }
       const operation = invalidate()
       let releaseCandidateLease: (() => void) | null = null
+      let releaseLoadLease: (() => void) | null = null
       if (target.temporary || target.historyId === "temp")
         return open({
           kind: "unavailable",
@@ -803,6 +817,7 @@ export function useHistorySelection(
           unsubscribe()
           stopAccountWatch()
         }
+        releaseLoadLease = releaseLease
         // A qualified discovery click does not retire A while B is still being
         // verified. Failed preflight cleans B's subscriptions and leaves A usable.
         if (target.onDeviceScope) releaseCandidateLease = releaseLease
@@ -889,18 +904,18 @@ export function useHistorySelection(
         if (operation.epoch !== epoch.current || !isCurrent() || target.onDeviceScope) return false
         return open({ kind: "unavailable", code: errorCode(error) })
       } finally {
+        if (!isCurrent()) {
+          if (openedReceipt && openedEpoch != null) retireCancelledLoad(openedEpoch, openedReceipt.owner, openedReceipt.view)
+          if (releaseLoadLease && releaseOwnerLease.current === releaseLoadLease) {
+            releaseLoadLease()
+            releaseOwnerLease.current = null
+          }
+        }
         releaseCandidateLease?.()
       }
     },
-    [invalidate, open, publish]
+    [invalidate, open, publish, retireCancelledLoad]
   )
-  const reset = useCallback(() => {
-    invalidate()
-    releaseOwnerLease.current?.()
-    releaseOwnerLease.current = null
-    publish(initialState())
-    if (storageKey.current) sessionStorage.removeItem(storageKey.current)
-  }, [invalidate, publish])
   const fence = useCallback(() => {
     const token = epoch.current
     return () => mounted.current && token === epoch.current
