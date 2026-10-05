@@ -1,7 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { Modal } from "antd"
 
 import { usePlaygroundPersistence } from "../usePlaygroundPersistence"
+import { useTemporaryChatToggle } from "@/hooks/useTemporaryChatToggle"
 
 const selectedHistory = vi.hoisted(() => ({ value: null as any }))
 vi.mock('@/hooks/chat/useHistorySelection', () => ({ useHistorySelectionContext: () => selectedHistory.value }))
@@ -17,6 +19,17 @@ const mocks = vi.hoisted(() => ({
   savePlaygroundSession: vi.fn(),
   buildChatSurfaceScopeKeyFromConfig: vi.fn(),
   usePersistenceMode: vi.fn()
+}))
+
+const modeNotification = vi.hoisted(() => ({
+  error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn()
+}))
+vi.mock("@/hooks/useAntdNotification", () => ({
+  useAntdNotification: () => modeNotification
+}))
+vi.mock("@/utils/is-private-mode", () => ({ isFireFoxPrivateMode: false }))
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string, fallback?: string) => fallback || key })
 }))
 
 const translate = (
@@ -108,6 +121,7 @@ const buildDeps = (overrides: Record<string, unknown> = {}) => ({
 
 describe("usePlaygroundPersistence", () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     selectedHistory.value = null
     mocks.initialize.mockReset()
     mocks.searchCharacters.mockReset()
@@ -137,6 +151,33 @@ describe("usePlaygroundPersistence", () => {
       focusConnectionCard: vi.fn(),
       getPersistenceModeLabel: vi.fn(() => "Saved to server")
     })
+  })
+
+  it.each([
+    ["playground", false], ["playground", true],
+    ["sidepanel", false], ["sidepanel", true]
+  ] as const)("%s respects clear acceptance (%s) before changing mode", (surface, accepted) => {
+    const events: string[] = []
+    const clearChat = vi.fn(() => { events.push("clear"); return accepted })
+    const setTemporaryChat = vi.fn(() => { events.push("mode") })
+    const notificationApi = surface === "sidepanel" ? modeNotification : buildDeps().notificationApi
+    const confirm = vi.spyOn(Modal, "confirm").mockReturnValue({ destroy: vi.fn(), update: vi.fn() })
+    try {
+      const deps = buildDeps({ serverChatId: "source-chat", clearChat, setTemporaryChat, notificationApi })
+      const { result } = renderHook(() => {
+        const playground = usePlaygroundPersistence(deps)
+        const sidepanel = useTemporaryChatToggle({ temporaryChat: false, setTemporaryChat, messagesLength: 1, clearChat })
+        return surface === "playground" ? playground : sidepanel
+      })
+
+      act(() => { result.current.handleToggleTemporaryChat(true) })
+      expect(setTemporaryChat).not.toHaveBeenCalled()
+      expect(clearChat).not.toHaveBeenCalled()
+      act(() => { confirm.mock.calls[0][0].onOk?.() })
+
+      expect(events).toEqual(accepted ? ["clear", "mode"] : ["clear"])
+      expect(notificationApi.info).toHaveBeenCalledTimes(accepted ? 1 : 0)
+    } finally { confirm.mockRestore() }
   })
 
   it("does not autosave tracked character greetings before the send path owns persistence", async () => {

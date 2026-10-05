@@ -8,7 +8,7 @@ export interface UseTemporaryChatToggleOptions {
   temporaryChat: boolean
   setTemporaryChat: (value: boolean) => void
   messagesLength: number
-  clearChat: () => void
+  clearChat: () => boolean | void
 }
 
 export interface UseTemporaryChatToggleResult {
@@ -101,8 +101,8 @@ export const useTemporaryChatToggle = (
           okText: t("common:confirm", "Confirm"),
           cancelText: t("common:cancel", "Cancel"),
           onOk: () => {
+            if (clearChat() === false) return
             setTemporaryChat(next)
-            clearChat()
             notification.info({
               message: t(
                 "sidepanel:composer.tempChatClearedMessages",
@@ -130,8 +130,8 @@ export const useTemporaryChatToggle = (
           okText: t("common:confirm", "Confirm"),
           cancelText: t("common:cancel", "Cancel"),
           onOk: () => {
+            if (clearChat() === false) return
             setTemporaryChat(next)
-            clearChat()
             notification.info({
               message: t(
                 "sidepanel:composer.tempChatDisabledClearedMessages",
@@ -146,10 +146,8 @@ export const useTemporaryChatToggle = (
       }
 
       // No confirmation needed when toggling with no messages
+      if (hadMessages && clearChat() === false) return
       setTemporaryChat(next)
-      if (hadMessages) {
-        clearChat()
-      }
 
       const modeLabel = getPersistenceModeLabel(next)
       notification.info({

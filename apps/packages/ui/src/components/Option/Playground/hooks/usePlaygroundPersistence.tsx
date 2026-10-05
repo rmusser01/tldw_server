@@ -48,7 +48,7 @@ export interface UsePlaygroundPersistenceDeps {
   messages?: Message[]
   setMessages?: (updater: (messages: Message[]) => Message[]) => void
   history: Array<{ role: string; content?: string; image?: string }>
-  clearChat: () => void
+  clearChat: () => boolean | void
   selectedCharacter: Character | null
   selectedAssistantMode: AssistantSelectionMode | null
   characterWorkflowActive?: boolean
@@ -198,8 +198,8 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
           okText: t("common:confirm", "Confirm"),
           cancelText: t("common:cancel", "Cancel"),
           onOk: () => {
+            if (clearChat() === false) return
             setTemporaryChat(next)
-            clearChat()
             const modeLabel = getPersistenceModeLabel(
               t,
               next,
@@ -216,10 +216,8 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         return
       }
 
+      if (hasExistingHistory && clearChat() === false) return
       setTemporaryChat(next)
-      if (hasExistingHistory) {
-        clearChat()
-      }
 
       const modeLabel = getPersistenceModeLabel(
         t,
