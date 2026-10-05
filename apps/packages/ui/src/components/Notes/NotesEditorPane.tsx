@@ -45,12 +45,20 @@ import type { NotesTitleSuggestStrategy } from '@/services/settings/ui-settings'
 import {
   NOTES_EDITOR_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
+  NOTES_WYSIWYG_INPUT_ENABLED,
   NOTE_TEMPLATES,
   normalizeNotesTitleStrategy,
+  replaceEditableHtml,
   toSafeTestId,
 } from './notes-manager-utils'
 import { NOTES_TITLE_SUGGEST_STRATEGY_SETTING } from '@/services/settings/ui-settings'
 import { setSetting } from '@/services/settings/registry'
+
+// Headings and lists need the typography styles to be visible: Tailwind's
+// preflight resets <h2> to body text and removes list bullets. Matches the
+// Markdown preview (MarkdownPreview size="sm").
+const WYSIWYG_EDITOR_TYPOGRAPHY_CLASS =
+  'prose prose-sm dark:prose-invert max-w-none break-words prose-p:leading-relaxed'
 
 const LazyMarkdownPreview = React.lazy(() =>
   import('@/components/Common/MarkdownPreview').then((module) => ({
@@ -187,8 +195,10 @@ export interface NotesEditorPaneProps {
   usesLargePreviewGuardrails: boolean
   largePreviewReady: boolean
 
-  // WYSIWYG
+  // WYSIWYG (uncontrolled editor, NE-01): the document is written into the DOM
+  // only when the revision changes or the editor node mounts.
   wysiwygHtml: string
+  wysiwygRevision: number
 
   // Wikilinks
   activeWikilinkQuery: ActiveWikilinkQuery | null
@@ -205,7 +215,7 @@ export interface NotesEditorPaneProps {
   // Refs
   titleInputRef: React.Ref<InputRef>
   contentTextareaRef: React.Ref<HTMLTextAreaElement>
-  richEditorRef: React.Ref<HTMLDivElement>
+  richEditorRef: React.RefObject<HTMLDivElement>
   attachmentInputRef: React.Ref<HTMLInputElement>
 
   // Setters used in inline handlers
@@ -378,6 +388,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   usesLargePreviewGuardrails,
   largePreviewReady,
   wysiwygHtml,
+  wysiwygRevision,
   activeWikilinkQuery,
   wikilinkSuggestions,
   wikilinkSuggestionDisplayCounts,
@@ -448,6 +459,21 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   })
   const saveStatusRef = React.useRef<HTMLSpanElement | null>(null)
   const saveStatusDescriptionId = saveIndicatorText ? NOTES_SAVE_STATUS_MESSAGE_ID : null
+
+  // NE-01: React never owns the WYSIWYG editor's children (no
+  // dangerouslySetInnerHTML), so re-renders caused by typing leave the DOM and
+  // the caret alone. The document is written only into a newly mounted editor
+  // node or when the hook publishes an external revision. No dependency array:
+  // the editor can mount or remount on any render (mode, layout, loading).
+  const appliedWysiwygRef = React.useRef<{ node: HTMLDivElement; revision: number } | null>(null)
+  React.useLayoutEffect(() => {
+    const node = richEditorRef.current
+    if (!node) return
+    const applied = appliedWysiwygRef.current
+    if (applied && applied.node === node && applied.revision === wysiwygRevision) return
+    replaceEditableHtml(node, wysiwygHtml)
+    appliedWysiwygRef.current = { node, revision: wysiwygRevision }
+  })
   const contentDescribedBy = joinAriaIds(NOTES_EDITOR_CONTENT_HELP_ID, saveStatusDescriptionId)
 
   React.useEffect(() => {
@@ -1300,37 +1326,39 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         )}
         {editorMode !== 'preview' && (
           <div className="mt-3 flex items-center flex-wrap gap-1 rounded-lg border border-border bg-surface2 p-2">
-            <div
-              className="mr-2 inline-flex items-center gap-1 rounded-md border border-border bg-surface px-1 py-0.5"
-              role="group"
-              aria-label={t('option:notesSearch.inputModeGroup', {
-                defaultValue: 'Input mode'
-              })}
-              data-testid="notes-input-mode-toggle"
-            >
-              <Button
-                size="small"
-                type={editorInputMode === 'markdown' ? 'primary' : 'text'}
-                onClick={() => handleEditorInputModeChange('markdown')}
-                disabled={editorDisabled}
-                data-testid="notes-input-mode-markdown"
-              >
-                {t('option:notesSearch.inputModeMarkdown', {
-                  defaultValue: 'Markdown'
+            {NOTES_WYSIWYG_INPUT_ENABLED && (
+              <div
+                className="mr-2 inline-flex items-center gap-1 rounded-md border border-border bg-surface px-1 py-0.5"
+                role="group"
+                aria-label={t('option:notesSearch.inputModeGroup', {
+                  defaultValue: 'Input mode'
                 })}
-              </Button>
-              <Button
-                size="small"
-                type={editorInputMode === 'wysiwyg' ? 'primary' : 'text'}
-                onClick={() => handleEditorInputModeChange('wysiwyg')}
-                disabled={editorDisabled}
-                data-testid="notes-input-mode-wysiwyg"
+                data-testid="notes-input-mode-toggle"
               >
-                {t('option:notesSearch.inputModeWysiwyg', {
-                  defaultValue: 'WYSIWYG'
-                })}
-              </Button>
-            </div>
+                <Button
+                  size="small"
+                  type={editorInputMode === 'markdown' ? 'primary' : 'text'}
+                  onClick={() => handleEditorInputModeChange('markdown')}
+                  disabled={editorDisabled}
+                  data-testid="notes-input-mode-markdown"
+                >
+                  {t('option:notesSearch.inputModeMarkdown', {
+                    defaultValue: 'Markdown'
+                  })}
+                </Button>
+                <Button
+                  size="small"
+                  type={editorInputMode === 'wysiwyg' ? 'primary' : 'text'}
+                  onClick={() => handleEditorInputModeChange('wysiwyg')}
+                  disabled={editorDisabled}
+                  data-testid="notes-input-mode-wysiwyg"
+                >
+                  {t('option:notesSearch.inputModeWysiwyg', {
+                    defaultValue: 'WYSIWYG'
+                  })}
+                </Button>
+              </div>
+            )}
             <Typography.Text
               type="secondary"
               className="text-[11px] mr-1 uppercase tracking-[0.08em]"
@@ -1589,7 +1617,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     aria-multiline="true"
                     contentEditable={!editorDisabled}
                     suppressContentEditableWarning
-                    className="w-full min-h-[220px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus"
+                    className={`w-full min-h-[220px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus ${WYSIWYG_EDITOR_TYPOGRAPHY_CLASS}`}
                     onInput={handleWysiwygInput}
                     onPaste={handleWysiwygPaste}
                     onBlur={() => setEditorCursorIndex(null)}
@@ -1598,7 +1626,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     })}
                     aria-describedby={contentDescribedBy}
                     data-testid="notes-wysiwyg-editor"
-                    dangerouslySetInnerHTML={{ __html: wysiwygHtml }}
                   />
                 ) : (
                   <>
@@ -1728,7 +1755,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   aria-multiline="true"
                   contentEditable={!editorDisabled}
                   suppressContentEditableWarning
-                  className="w-full min-h-[280px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus"
+                  className={`w-full min-h-[280px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus ${WYSIWYG_EDITOR_TYPOGRAPHY_CLASS}`}
                   onInput={handleWysiwygInput}
                   onPaste={handleWysiwygPaste}
                   onBlur={() => setEditorCursorIndex(null)}
@@ -1737,7 +1764,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   })}
                   aria-describedby={contentDescribedBy}
                   data-testid="notes-wysiwyg-editor"
-                  dangerouslySetInnerHTML={{ __html: wysiwygHtml }}
                 />
               ) : (
                 <>

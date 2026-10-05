@@ -395,6 +395,13 @@ export type SaveRecoveryNotice = {
 }
 export type NotesEditorMode = 'edit' | 'split' | 'preview'
 export type NotesInputMode = 'markdown' | 'wysiwyg'
+
+/**
+ * Shows the Markdown/WYSIWYG input-mode toggle. It was hidden (decision D5,
+ * #3102) while NE-01 made the WYSIWYG editor type backwards; the editor is now
+ * uncontrolled, so the toggle is back. Set to false to hide WYSIWYG again.
+ */
+export const NOTES_WYSIWYG_INPUT_ENABLED = true
 export type NotesSortOption = 'modified_desc' | 'created_desc' | 'title_asc' | 'title_desc'
 export type KeywordPickerSortMode = 'frequency_desc' | 'alpha_asc' | 'alpha_desc'
 export type KeywordFrequencyTone = 'none' | 'low' | 'medium' | 'high'
@@ -892,6 +899,9 @@ export const markdownInlineToHtml = (value: string): string => {
   return html
 }
 
+/** The WYSIWYG document for an empty note: one empty paragraph to put the caret in. */
+export const EMPTY_WYSIWYG_HTML = '<p><br/></p>'
+
 export const markdownToWysiwygHtml = (markdown: string): string => {
   const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n')
   const slugCounts = new Map<string, number>()
@@ -932,14 +942,14 @@ export const markdownToWysiwygHtml = (markdown: string): string => {
 
     closeList()
     if (line.length === 0) {
-      out.push('<p><br/></p>')
+      out.push(EMPTY_WYSIWYG_HTML)
       continue
     }
     out.push(`<p>${markdownInlineToHtml(line)}</p>`)
   }
 
   closeList()
-  if (out.length === 0) return '<p><br/></p>'
+  if (out.length === 0) return EMPTY_WYSIWYG_HTML
   return out.join('')
 }
 
@@ -1009,6 +1019,117 @@ export const wysiwygHtmlToMarkdown = (html: string): string => {
     .filter(Boolean)
 
   return blocks.join('\n\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/** Characters of text before the selection's end inside `root`, or null when the selection is elsewhere. */
+export const getEditableCaretOffset = (root: HTMLElement): number | null => {
+  const selection = root.ownerDocument.defaultView?.getSelection()
+  if (!selection || selection.rangeCount === 0) return null
+  const range = selection.getRangeAt(0)
+  if (!root.contains(range.endContainer)) return null
+  const prefix = root.ownerDocument.createRange()
+  prefix.selectNodeContents(root)
+  prefix.setEnd(range.endContainer, range.endOffset)
+  return prefix.toString().length
+}
+
+/** Collapse the selection `offset` characters into `root`'s text, or at its end if the text is shorter. */
+export const setEditableCaretOffset = (root: HTMLElement, offset: number): void => {
+  const ownerDocument = root.ownerDocument
+  const selection = ownerDocument.defaultView?.getSelection()
+  if (!selection) return
+  const range = ownerDocument.createRange()
+  range.selectNodeContents(root)
+  range.collapse(false)
+  const walker = ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let remaining = Math.max(0, offset)
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const length = node.textContent?.length ?? 0
+    if (remaining <= length) {
+      range.setStart(node, remaining)
+      range.collapse(true)
+      break
+    }
+    remaining -= length
+  }
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
+/**
+ * Write an external revision into the uncontrolled WYSIWYG editor (NE-01).
+ * Never call this for the user's own input: replacing the nodes moves the caret.
+ * When the editor has focus the caret keeps its text offset, so reloading the
+ * same text (for example after a new note's first autosave) does not throw it
+ * back to the start of the document.
+ */
+export const replaceEditableHtml = (root: HTMLElement, html: string): void => {
+  const caretOffset =
+    root.ownerDocument.activeElement === root ? getEditableCaretOffset(root) : null
+  root.innerHTML = html
+  if (caretOffset != null) setEditableCaretOffset(root, caretOffset)
+}
+
+const WYSIWYG_BLOCK_TAGS = new Set(['P', 'DIV', 'PRE', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'])
+
+/** The block (paragraph, heading, list item…) holding the selection's start inside `root`, or null. */
+export const getEditableSelectionBlock = (root: HTMLElement): HTMLElement | null => {
+  const selection = root.ownerDocument.defaultView?.getSelection()
+  if (!selection || selection.rangeCount === 0) return null
+  let node: Node | null = selection.getRangeAt(0).startContainer
+  if (!root.contains(node)) return null
+  while (node && node !== root) {
+    if (node instanceof HTMLElement && WYSIWYG_BLOCK_TAGS.has(node.tagName)) return node
+    node = node.parentNode
+  }
+  return null
+}
+
+export const isHeadingElement = (element: Element | null): boolean =>
+  Boolean(element && /^H[1-6]$/.test(element.tagName))
+
+/**
+ * Chrome's insertUnorderedList builds the list inside the paragraph or heading
+ * it came from (`<p><ul><li>…</li></ul></p>`). That is invalid HTML, shows no
+ * list and converts to Markdown without the "- ". Move such lists out to the
+ * top level, splitting the block around them, and keep the selection in place.
+ */
+export const unwrapListsFromBlocks = (root: HTMLElement): void => {
+  const nested = Array.from(root.querySelectorAll('ul, ol')).filter((list) => {
+    const parent = list.parentElement
+    if (!parent || parent === root) return false
+    return isHeadingElement(parent) || parent.tagName === 'P' ||
+      (parent.tagName === 'DIV' && parent.parentElement === root)
+  })
+  if (nested.length === 0) return
+  const selection = root.ownerDocument.defaultView?.getSelection()
+  const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
+  const saved = range && root.contains(range.startContainer)
+    ? {
+        startContainer: range.startContainer,
+        startOffset: range.startOffset,
+        endContainer: range.endContainer,
+        endOffset: range.endOffset
+      }
+    : null
+  for (const list of nested) {
+    const parent = list.parentElement
+    if (!parent) continue
+    const tail = parent.cloneNode(false) as HTMLElement
+    while (list.nextSibling) tail.appendChild(list.nextSibling)
+    parent.after(list)
+    if (tail.textContent?.trim()) list.after(tail)
+    if (!parent.textContent?.trim() && !parent.querySelector('img')) parent.remove()
+  }
+  if (saved && selection && root.contains(saved.startContainer) && root.contains(saved.endContainer)) {
+    const clamp = (node: Node, offset: number) =>
+      Math.min(offset, node.nodeType === Node.TEXT_NODE ? (node.textContent?.length ?? 0) : node.childNodes.length)
+    const restored = root.ownerDocument.createRange()
+    restored.setStart(saved.startContainer, clamp(saved.startContainer, saved.startOffset))
+    restored.setEnd(saved.endContainer, clamp(saved.endContainer, saved.endOffset))
+    selection.removeAllRanges()
+    selection.addRange(restored)
+  }
 }
 
 export const detectImportFormatFromFileName = (fileName: string): ImportFormat => {

@@ -220,6 +220,25 @@ describe("NotesManagerPage stage 38 productivity extensions", () => {
     expect(mockMessageSuccess).toHaveBeenCalledWith("Applied template: Research Brief")
   })
 
+  it("writes an applied template into the open WYSIWYG editor", async () => {
+    renderPage()
+
+    fireEvent.click(await screen.findByTestId("notes-input-mode-wysiwyg"))
+    const editor = await screen.findByTestId("notes-wysiwyg-editor")
+    expect(editor.querySelector("h2")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("notes-apply-template-research-brief"))
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Title")).toHaveValue("Research Brief")
+    })
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("notes-wysiwyg-editor").querySelector("h2")?.textContent
+      ).toBe("Research Question")
+    })
+  })
+
   it("duplicates the current draft as a copy", async () => {
     renderPage()
 
