@@ -22,8 +22,10 @@ permissions:
 concurrency:
   # The dispatch input is reached only when there is no pull request event, so a
   # pull_request_target run keeps the group it always had, and a dispatch for pull
-  # request N shares N's group.
-  group: frontend-license-gate-${{ github.event.pull_request.number || inputs.pr }}
+  # request N shares N's group. It is read through github.event, which exists on every
+  # event: this file runs for every pull request from dev's copy, so an expression that
+  # failed to evaluate here would stop every license audit, and only after merging.
+  group: frontend-license-gate-${{ github.event.pull_request.number || github.event.inputs.pr }}
   cancel-in-progress: true
 
 jobs:

@@ -101,7 +101,7 @@ def assert_exact_privileged_job_surface(data: dict[str, Any]) -> None:
     assert set(data) == {"name", trigger_key, "permissions", "concurrency", "jobs"}
     assert data["name"] == "Frontend License Gate Audit"
     assert data["concurrency"] == {
-        "group": "frontend-license-gate-${{ github.event.pull_request.number || inputs.pr }}",
+        "group": "frontend-license-gate-${{ github.event.pull_request.number || github.event.inputs.pr }}",
         "cancel-in-progress": True,
     }
     assert set(job) == {"if", "runs-on", "timeout-minutes", "env", "steps"}

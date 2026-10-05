@@ -285,6 +285,12 @@ jobs:
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py \
             tldw_Server_API/tests/CI/test_frontend_license_gate_workflow.py \
+            tldw_Server_API/tests/CI/test_merge_queue_rules.py \
+            tldw_Server_API/tests/CI/test_merge_queue_actions.py \
+            tldw_Server_API/tests/CI/test_merge_queue_workflow.py \
+            tldw_Server_API/tests/CI/test_merge_queue_gate_workflows.py \
+            tldw_Server_API/tests/CI/test_merge_queue_frontend_required.py \
+            tldw_Server_API/tests/CI/test_merge_queue_license_dispatch.py \
             tldw_Server_API/tests/lint/test_private_coercion_ratchet.py \
             tldw_Server_API/tests/lint/test_first_party_source_pinning.py \
             tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py \

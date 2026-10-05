@@ -60,14 +60,28 @@ ORDINARY_WORKFLOW_NAMES = (
 # test_queue_control_workflows_never_run_pull_request_code pins exactly that, and
 # test_merge_queue_workflow.py pins the rest of its shape.
 QUEUE_CONTROL_WORKFLOWS = ("merge-queue.yml",)
+# The one job in an ordinary workflow that may hold write credentials (TASK-13452, ADR-063):
+# `queue-tick` wakes the merge queue after its workflow's required gate failed. It is exempt
+# from the per-job rules below only in exactly the shape _assert_exact_queue_tick pins: it
+# cannot run on the admitted (workflow_run) path or for a fork, nothing depends on it, it checks
+# out `dev` rather than the pull request, and it runs one fixed command. A job that is merely
+# named queue-tick, or one in a workflow not listed here, fails that assertion.
+QUEUE_TICK_GATES = {
+    "backend-required.yml": "backend-required",
+    "container-build-check.yml": "container-build-check",
+    "coverage-required.yml": "coverage-required",
+    "e2e-required.yml": "e2e-required",
+    "frontend-required.yml": "frontend-required",
+    "security-required.yml": "security-required",
+}
 DIRECT_TRIGGER_DIGESTS = {
     "actionlint.yml": "d31daa2c3e010b3a70dcbd640ef24f573bea18619228e7548c50992c54df0e99",
-    "backend-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
+    "backend-required.yml": "fb341ef464350d2452158092d89e13407ab5f67eee9425df77d3dc7a9b5ce648",
     "ci.yml": "a2ef246f468b2b946f6fa5f9805497d9c8a1c4ca7f3ef395172a290a17a3b3a6",
     "codeql.yml": "8592a8565d97d233d6b27fb13d9a563f673550f3d8220d0b262487346a70e25f",
     "container-build-check.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
-    "coverage-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
-    "e2e-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
+    "coverage-required.yml": "fb341ef464350d2452158092d89e13407ab5f67eee9425df77d3dc7a9b5ce648",
+    "e2e-required.yml": "fb341ef464350d2452158092d89e13407ab5f67eee9425df77d3dc7a9b5ce648",
     "e2e-smoke.yml": "47fa5c3b099aeee7d744da19e5c8db6f403d82963b9d19b9f60292f0377d7180",
     "frontend-e2e-tiers.yml": "c157a675e397e879a8b394b26a99e472dfbe87f5f3f6236c63907d6d21897a79",
     "frontend-required.yml": "3b0371351439f7a458a405b3238da9cc540d34fdb377423c1a39f3978e601978",
@@ -79,7 +93,7 @@ DIRECT_TRIGGER_DIGESTS = {
     "pre-commit.yml": "d3d381eead20326078cb0268da7340f8217d95336af86c8d9701419c5e67d3be",
     "pypi-package.yml": "1faf356cfe858d94100ea61d578f0b9d132c73533277c552fd03f1e3ac141823",
     "sbom.yml": "6ba4774ab2129a605bb160c5ee6f48ebc51544881592ad60ad5268b910fcfbde",
-    "security-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
+    "security-required.yml": "fb341ef464350d2452158092d89e13407ab5f67eee9425df77d3dc7a9b5ce648",
     "ui-characters-harness-tests.yml": "8977899d9903b59c454c686e1fda272a7b919f63782d84ec8c24973449f2eee6",
     "ui-dictionaries-tests.yml": "f191b9920abca964265ff7ff4510cc9ac554770d4e4a0b8b172854147c0c0dbe",
     "ui-playground-quality-gates.yml": "af4b03b1d48dd12b93e1bd39a8036109b26a7890ee5cd8ef8ed57b7d2da3008a",
@@ -92,7 +106,7 @@ DIRECT_TRIGGER_DIGESTS = {
 }
 ORIGINAL_JOB_NAMES = {
     "actionlint.yml": ("actionlint",),
-    "backend-required.yml": ("changes", "backend-required"),
+    "backend-required.yml": ("changes", "backend-required", "queue-tick"),
     "ci.yml": (
         "http-client-patch-guard",
         "syntax-check",
@@ -115,12 +129,12 @@ ORIGINAL_JOB_NAMES = {
         "character-chat-rate-limits",
     ),
     "codeql.yml": ("analyze",),
-    "container-build-check.yml": ("build", "container-build-check"),
-    "coverage-required.yml": ("changes", "coverage-required"),
-    "e2e-required.yml": ("changes", "e2e-required"),
+    "container-build-check.yml": ("build", "container-build-check", "queue-tick"),
+    "coverage-required.yml": ("changes", "coverage-required", "queue-tick"),
+    "e2e-required.yml": ("changes", "e2e-required", "queue-tick"),
     "e2e-smoke.yml": ("e2e-smoke",),
     "frontend-e2e-tiers.yml": ("critical", "features", "admin"),
-    "frontend-required.yml": ("changes", "frontend-unit-tests", "frontend-required"),
+    "frontend-required.yml": ("changes", "frontend-unit-tests", "frontend-required", "queue-tick"),
     "frontend-ux-gates.yml": ("onboarding-gate", "smoke-gate"),
     "jobs-suite.yml": ("jobs-sqlite", "jobs-postgres"),
     "mcp-unified-rc.yml": ("internal-rc", "portable-stdio"),
@@ -129,7 +143,7 @@ ORIGINAL_JOB_NAMES = {
     "pre-commit.yml": ("run-pre-commit",),
     "pypi-package.yml": ("build-and-check",),
     "sbom.yml": ("build-sbom",),
-    "security-required.yml": ("changes", "security-required"),
+    "security-required.yml": ("changes", "security-required", "queue-tick"),
     "ui-characters-harness-tests.yml": ("characters-harness",),
     "ui-dictionaries-tests.yml": ("dictionaries-vitest",),
     "ui-playground-quality-gates.yml": ("playground-quality",),
@@ -145,6 +159,7 @@ ORIGINAL_JOB_NAMES = {
 }
 ORIGINAL_DEPENDENCIES = {
     ("backend-required.yml", "backend-required"): ("changes",),
+    ("backend-required.yml", "queue-tick"): ("backend-required",),
     ("ci.yml", "full-suite-linux-312-shards"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-linux-312-summary"): ("full-suite-linux-312-shards", "changes"),
     ("ci.yml", "full-suite-linux-313-shards"): ("lint", "syntax-check", "changes"),
@@ -159,15 +174,20 @@ ORIGINAL_DEPENDENCIES = {
         "changes",
     ),
     ("container-build-check.yml", "container-build-check"): ("build",),
+    ("container-build-check.yml", "queue-tick"): ("container-build-check",),
     ("coverage-required.yml", "coverage-required"): ("changes",),
+    ("coverage-required.yml", "queue-tick"): ("coverage-required",),
     ("e2e-required.yml", "e2e-required"): ("changes",),
+    ("e2e-required.yml", "queue-tick"): ("e2e-required",),
     ("frontend-required.yml", "frontend-unit-tests"): ("changes",),
     ("frontend-required.yml", "frontend-required"): (
         "changes",
         "frontend-unit-tests",
     ),
+    ("frontend-required.yml", "queue-tick"): ("frontend-required",),
     ("jobs-suite.yml", "jobs-postgres"): ("jobs-sqlite",),
     ("security-required.yml", "security-required"): ("changes",),
+    ("security-required.yml", "queue-tick"): ("security-required",),
 }
 ALWAYS_ROLLUPS = {
     ("container-build-check.yml", "container-build-check"),
@@ -300,6 +320,65 @@ def _normalized(expression: object) -> str:
     if text.startswith("${{") and text.endswith("}}"):
         text = text[3:-2]
     return re.sub(r"\s+", "", text)
+
+
+def _assert_exact_queue_tick(name: str, data: dict[str, Any]) -> None:
+    """Pin the whole queue-tick job, so its exemption cannot be widened by editing the job."""
+    gate = QUEUE_TICK_GATES[name]
+    job = dict(data["jobs"]["queue-tick"])
+    assert _normalized(job.pop("if")) == _normalized(
+        f"""
+        always() && !cancelled() &&
+        needs.{gate}.result == 'failure' &&
+        (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
+        (github.event_name == 'workflow_dispatch' ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository))
+        """
+    ), name
+    assert job == {
+        "name": "Merge queue tick",
+        "needs": [gate],
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 10,
+        "permissions": {
+            "contents": "write",
+            "pull-requests": "write",
+            "actions": "write",
+            "checks": "read",
+            "statuses": "read",
+        },
+        "steps": [
+            {
+                "name": "Checkout dev",
+                "uses": CHECKOUT_ACTION,
+                "with": {"ref": "dev", "persist-credentials": False},
+            },
+            {
+                "name": "Advance the queue",
+                "env": {"GH_TOKEN": "${{ github.token }}", "MERGE_QUEUE": "${{ vars.MERGE_QUEUE }}"},
+                "run": "python3 -m Helper_Scripts.ci.merge_queue",
+            },
+        ],
+    }, name
+    # Nothing may wait on it: it can then never delay a required check or turn it red.
+    for other_name, other in data["jobs"].items():
+        assert "queue-tick" not in _needs(other), (name, other_name)
+
+
+def _assert_fails_when_change_detection_did_not_succeed(name: str, job: dict[str, Any]) -> None:
+    """TASK-13452: a skipped required job counts as satisfied, so these gates run and fail instead."""
+    guards = [step for step in job["steps"][:2] if "CHANGES_RESULT" in step.get("env", {})]
+    assert len(guards) == 1, name
+    guard = guards[0]
+    assert guard["env"] == {"CHANGES_RESULT": "${{ needs.changes.result }}"}, name
+    assert guard.get("if") in (None, "needs.changes.result != 'success'"), name
+    assert "::error::" in guard["run"], name
+    assert re.search(r"(?m)^\s*exit 1\s*$", guard["run"]), name
+    # No later step may run after the guard failed.
+    for step in job["steps"]:
+        assert "always()" not in str(step.get("if", "")) or "needs.changes.outputs." in str(step["if"]), name
+        assert "failure()" not in str(step.get("if", "")), name
 
 
 def _admission_job(data: dict[str, Any]) -> dict[str, Any]:
@@ -518,6 +597,12 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             # wait for the license verdict, or the pull_request path runs it unordered.
             assert ("admission" in needs) == ("await_license" in needs), (name, job_name)
 
+            if job_name == "queue-tick":
+                # Exempt from the admission and checkout rules below, and not counted among
+                # the pull-request checkouts: pinned whole instead.
+                _assert_exact_queue_tick(name, data)
+                continue
+
             root = not original_needs
             directly_guarded = (name, job_name) in DIRECT_ADMISSION_JOBS
             non_admitted_root = (name, job_name) in NON_ADMITTED_ROOT_JOBS
@@ -536,20 +621,20 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     extra_condition = non_pr
                 elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
                     extra_condition = backend_changed
-                elif (name, job_name) in {
+                elif (name, job_name) == ("frontend-required.yml", "frontend-unit-tests"):
+                    extra_condition = (
+                        "needs.changes.result == 'success' && "
+                        "needs.changes.outputs.tldw_frontend_changed == 'true'"
+                    )
+                # The three required gates here carry no `needs.changes.result == 'success'`
+                # term (TASK-13452): they run whenever change detection was started and fail
+                # in a guard step if it did not succeed, instead of being skipped.
+                if (name, job_name) in {
                     ("backend-required.yml", "backend-required"),
-                    ("frontend-required.yml", "frontend-unit-tests"),
                     ("frontend-required.yml", "frontend-required"),
                     ("security-required.yml", "security-required"),
                 }:
-                    extra_condition = "needs.changes.result == 'success'"
-                    if (name, job_name) == (
-                        "frontend-required.yml",
-                        "frontend-unit-tests",
-                    ):
-                        extra_condition += (
-                            " && needs.changes.outputs.tldw_frontend_changed == 'true'"
-                        )
+                    _assert_fails_when_change_detection_did_not_succeed(name, job)
                 expected_condition = admission_clause
                 if extra_condition:
                     expected_condition += f" && ({extra_condition})"
@@ -560,12 +645,10 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                         always() && !cancelled() && (
                           (github.event_name == 'workflow_run' &&
                            needs.admission.result == 'success' &&
-                           needs.admission.outputs.should_run == 'true' &&
-                           needs.changes.result == 'success') ||
+                           needs.admission.outputs.should_run == 'true') ||
                           (github.event_name != 'workflow_run' &&
                            (needs.await_license.result == 'skipped' ||
-                            needs.await_license.outputs.license_passed == 'true') &&
-                           needs.changes.result == 'success') ||
+                            needs.await_license.outputs.license_passed == 'true')) ||
                           (github.event_name != 'workflow_run' &&
                            needs.await_license.result != 'skipped' &&
                            needs.await_license.outputs.license_passed != 'true')
@@ -606,9 +689,13 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     ("coverage-required.yml", "coverage-required"),
                     ("e2e-required.yml", "e2e-required"),
                 }:
+                    # `changes` is skipped exactly when it was not admitted. Any other
+                    # result means the gate was supposed to run, so it runs, and fails in
+                    # its guard step unless change detection succeeded (TASK-13452).
                     assert _normalized(job.get("if")) == _normalized(
-                        "always() && !cancelled() && needs.changes.result == 'success'"
+                        "always() && !cancelled() && needs.changes.result != 'skipped'"
                     )
+                    _assert_fails_when_change_detection_did_not_succeed(name, job)
                 else:
                     assert job.get("if") is None, (name, job_name)
 
@@ -810,11 +897,17 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         if step.get("name") == "Dependency review (high/critical)"
     ]
     assert len(pull_request_only_steps) == 1
+    # The third arm is the merge queue's dispatch (TASK-13452): without it a queue-dispatched
+    # security-required would pass without the dependency review every pull_request run gets.
     assert pull_request_only_steps[0]["if"] == (
-        "github.event_name == 'pull_request' || github.event_name == 'workflow_run'"
+        "github.event_name == 'pull_request' || github.event_name == 'workflow_run' || "
+        "(github.event_name == 'workflow_dispatch' && inputs.base_sha != '')"
     )
     assert pull_request_only_steps[0]["with"] == {
-        "base-ref": "${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha }}",
+        "base-ref": (
+            "${{ inputs.base_sha || needs.admission.outputs.base_sha || "
+            "github.event.pull_request.base.sha }}"
+        ),
         "head-ref": (
             "${{ needs.admission.outputs.head_sha || "
             "github.event.pull_request.head.sha || github.sha }}"
@@ -858,6 +951,10 @@ def test_admitted_jobs_have_no_secrets_or_write_scoped_credentials() -> None:
         assert "write" not in data.get("permissions", {}).values(), name
 
         for job_name, job in data["jobs"].items():
+            if job_name == "queue-tick":
+                # The single exemption, valid only in the exact pinned shape.
+                _assert_exact_queue_tick(name, data)
+                continue
             permissions = job.get("permissions", {})
             assert "write" not in permissions.values(), (name, job_name, permissions)
 

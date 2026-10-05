@@ -189,7 +189,7 @@ def test_pr_input_reaches_the_shell_only_through_env() -> None:
     script = resolve["run"]
 
     assert [expression for expression in EXPRESSION.findall(text) if "inputs" in expression] == [
-        "${{ github.event.pull_request.number || inputs.pr }}",
+        "${{ github.event.pull_request.number || github.event.inputs.pr }}",
         "${{ inputs.pr }}",
     ]
     assert resolve["env"] == {"PR_INPUT": "${{ inputs.pr }}"}
@@ -279,7 +279,7 @@ def test_shared_evaluate_script_runs_on_what_the_dispatch_job_provides(tmp_path:
 
 def test_concurrency_group_keys_a_dispatch_on_its_pull_request() -> None:
     assert load_workflow()["concurrency"] == {
-        "group": "frontend-license-gate-${{ github.event.pull_request.number || inputs.pr }}",
+        "group": "frontend-license-gate-${{ github.event.pull_request.number || github.event.inputs.pr }}",
         "cancel-in-progress": True,
     }
 
