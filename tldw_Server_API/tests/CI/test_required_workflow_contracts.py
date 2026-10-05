@@ -374,7 +374,7 @@ def test_watchlists_extension_spec_uses_built_extension_launcher() -> None:
 
 def test_frontend_e2e_tiers_install_portaudio_before_backend_dependency_setup() -> None:
     workflow = _load(".github/workflows/frontend-e2e-tiers.yml")
-    for job_name in ("critical", "features", "admin"):
+    for job_name in ("critical", "features", "admin", "ux-regression"):
         _assert_portaudio_installed_before_python_setup(
             ".github/workflows/frontend-e2e-tiers.yml",
             job_name,
@@ -2106,3 +2106,186 @@ def test_selected_full_suite_summaries_reject_unexecuted_shards(tmp_path: Path) 
                 cwd=tmp_path, capture_output=True, text=True, timeout=5, check=False,
             )
             assert (process.returncode == 0) is (result == "success"), (name, result, process.stdout)
+
+
+_UX_REGRESSION_WORKFLOW = ".github/workflows/frontend-e2e-tiers.yml"
+_UX_REGRESSION_MERGE_SHA = "a" * 40
+
+
+def _ux_regression_scope_step() -> dict:
+    return _get_step(
+        _load(_UX_REGRESSION_WORKFLOW)["jobs"]["ux-regression"]["steps"],
+        "Detect notes/chat UX changes",
+    )
+
+
+def _run_ux_regression_scope(
+    tmp_path: Path,
+    *,
+    event_name: str,
+    changed_files: tuple[str, ...] = (),
+    diff_fails: bool = False,
+) -> tuple[str, list[str], str]:
+    """Execute the ux-regression scope step with git stubbed.
+
+    Returns the step's ``run`` output, the git invocations and the step stdout.
+    """
+    import os
+    import shutil
+    import subprocess  # nosec B404 - execute a checked-in workflow step against a stubbed git
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    git = bin_dir / "git"
+    git.write_text(
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$*" >> "$GIT_CALLS"\n'
+        'case "$1" in\n'
+        "  fetch) exit 0 ;;\n"
+        '  diff) [ "$DIFF_FAILS" = 1 ] && exit 128; cat "$CHANGED_FIXTURE" ;;\n'
+        "esac\n"
+    )
+    git.chmod(0o700)
+    fixture = tmp_path / "changed.txt"
+    fixture.write_text("".join(f"{name}\n" for name in changed_files))
+    calls = tmp_path / "git-calls.txt"
+    calls.touch()
+    output = tmp_path / "github-output"
+    bash = shutil.which("bash")
+    assert bash is not None, "Workflow shell bash is required"
+    result = subprocess.run(  # nosec B603 - trusted repository YAML with a stubbed git on PATH
+        [bash, "-e", "-c", _ux_regression_scope_step()["run"]],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "EVENT_NAME": event_name,
+            "MERGE_SHA": _UX_REGRESSION_MERGE_SHA if event_name == "pull_request" else "",
+            "ADMITTED_BASE_SHA": "b" * 40 if event_name == "workflow_run" else "",
+            "ADMITTED_HEAD_SHA": "c" * 40 if event_name == "workflow_run" else "",
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(output),
+            "GIT_CALLS": str(calls),
+            "CHANGED_FIXTURE": str(fixture),
+            "DIFF_FAILS": "1" if diff_fails else "0",
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = output.read_text().splitlines()
+    assert len(lines) == 1 and lines[0].startswith("run="), lines
+    return lines[0].removeprefix("run="), calls.read_text().splitlines(), result.stdout
+
+
+def test_ux_regression_scope_step_reads_only_event_scoped_shas() -> None:
+    """The merge commit is read only on pull_request; workflow_run uses the admitted SHAs."""
+    step = _ux_regression_scope_step()
+    assert step["id"] == "scope"
+    assert step["shell"] == "bash"
+    assert step["env"] == {
+        "EVENT_NAME": "${{ github.event_name }}",
+        "MERGE_SHA": "${{ github.event_name == 'pull_request' && github.sha || '' }}",
+        "ADMITTED_BASE_SHA": "${{ needs.admission.outputs.base_sha }}",
+        "ADMITTED_HEAD_SHA": "${{ needs.admission.outputs.head_sha }}",
+    }
+
+
+def test_ux_regression_runs_only_when_notes_or_chat_paths_change(tmp_path: Path) -> None:
+    """Execute the scope step: relevant paths at any depth run it, near misses skip it."""
+    cases = {
+        "unrelated": ((
+            "README.md",
+            "apps/packages/ui/src/components/Option/Settings/GeneralSettings.tsx",
+            "apps/packages/ui/src/components/NotesDock.tsx",
+            "apps/packages/ui/src/entries/options/main.tsx",
+            "apps/packages/ui/src/routes/option-settings.tsx",
+            "apps/extension-docs/README.md",
+            "tldw_Server_API/app/api/v1/endpoints/media.py",
+            "tldw_Server_API/app/api/v1/endpoints/media/notes.py",
+            ".github/workflows/frontend-required.yml",
+        ), "false"),
+        "empty diff": ((), "false"),
+        "notes component": (("apps/packages/ui/src/components/Notes/NotesListPanel.tsx",), "true"),
+        "nested common": (("apps/packages/ui/src/components/Common/NotesDock/NotesDockPanel.tsx",), "true"),
+        "playground": (("apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx",), "true"),
+        "side-panel chat route": (("apps/packages/ui/src/routes/sidepanel-chat.tsx",), "true"),
+        "side-panel entry": (("apps/packages/ui/src/entries/sidepanel/main.tsx",), "true"),
+        "extension background": (("apps/packages/ui/src/entries/background.ts",), "true"),
+        "nested extension": (("apps/extension/entrypoints/sidepanel/main.tsx",), "true"),
+        "extension build config": (("apps/extension/wxt.config.ts",), "true"),
+        "chat messages endpoint": (("tldw_Server_API/app/api/v1/endpoints/character_messages.py",), "true"),
+        "shared service": (("apps/packages/ui/src/services/tldw/TldwApiClient.ts",), "true"),
+        "harness spec": (("apps/tldw-frontend/e2e/ux-regression/notes-p0.spec.ts",), "true"),
+        "live-tier runner": (("apps/tldw-frontend/scripts/live-tier-uat/run.mjs",), "true"),
+        "notes endpoint": (("tldw_Server_API/app/api/v1/endpoints/notes_graph.py",), "true"),
+        "chat endpoint": (("tldw_Server_API/app/api/v1/endpoints/chat.py",), "true"),
+        "character chat endpoint": (("tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",), "true"),
+        "nested db management": (("tldw_Server_API/app/core/DB_Management/media_db/api.py",), "true"),
+        "this job": ((".github/workflows/frontend-e2e-tiers.yml",), "true"),
+    }
+    for index, (case, (changed_files, expected)) in enumerate(cases.items()):
+        case_dir = tmp_path / str(index)
+        case_dir.mkdir()
+        run, _, stdout = _run_ux_regression_scope(
+            case_dir, event_name="pull_request", changed_files=changed_files
+        )
+        assert run == expected, (case, stdout)
+
+
+def test_ux_regression_scope_diffs_the_pull_request_change_set(tmp_path: Path) -> None:
+    """A pull_request diffs the test-merge commit against its first parent, not the base tip."""
+    _, calls, _ = _run_ux_regression_scope(tmp_path, event_name="pull_request")
+    merge = _UX_REGRESSION_MERGE_SHA
+    assert calls == [
+        f"fetch --no-tags --depth=2 origin {merge}",
+        f"diff --name-only {merge}^1 {merge}",
+    ]
+
+
+def test_ux_regression_scope_uses_admitted_shas_for_workflow_run(tmp_path: Path) -> None:
+    """An admitted workflow_run diffs the audited base/head pair."""
+    _, calls, _ = _run_ux_regression_scope(tmp_path, event_name="workflow_run")
+    base, head = "b" * 40, "c" * 40
+    assert calls == [
+        f"fetch --no-tags --depth=1 origin {base} {head}",
+        f"diff --name-only {base} {head}",
+    ]
+
+
+def test_ux_regression_scope_runs_when_the_diff_is_unavailable(tmp_path: Path) -> None:
+    """An unknown change set must run the suite, never silently skip it."""
+    run, _, stdout = _run_ux_regression_scope(
+        tmp_path, event_name="pull_request", diff_fails=True
+    )
+    assert run == "true"
+    assert "::warning" in stdout
+
+
+def test_ux_regression_dispatch_runs_without_a_path_check(tmp_path: Path) -> None:
+    """Manual dispatch has no pull request to diff, so it always runs."""
+    run, calls, _ = _run_ux_regression_scope(tmp_path, event_name="workflow_dispatch")
+    assert run == "true"
+    assert calls == []
+
+
+def test_ux_regression_job_is_scoped_and_keeps_evidence_within_its_deadline() -> None:
+    """Every step after the scope check honours it, and a failed run uploads its evidence."""
+    job = _load(_UX_REGRESSION_WORKFLOW)["jobs"]["ux-regression"]
+    assert not job.get("continue-on-error", False)
+    assert "services" not in job, "the live-tier runner owns its backend, mock LLM and web UI"
+    steps = job["steps"]
+    scope = _get_step(steps, "Detect notes/chat UX changes")
+    for step in steps[steps.index(scope) + 1:]:
+        assert "steps.scope.outputs.run == 'true'" in step.get("if", ""), step.get("name")
+        assert not step.get("continue-on-error", False), step.get("name")
+    run = _get_step(steps, "Run UX regression reproductions")
+    assert run["run"] == 'bun run e2e:ux-regression -- --run-id="$RUN_ID"'
+    assert run["working-directory"] == "apps/tldw-frontend"
+    assert run["timeout-minutes"] < job["timeout-minutes"] - 5
+    upload = _get_step(steps, "Upload UX regression artifacts")
+    assert upload["if"].startswith("failure()")
+    assert steps.index(run) < steps.index(upload)
+    assert upload["with"]["path"].rstrip("/") == "apps/tldw-frontend/test-results"

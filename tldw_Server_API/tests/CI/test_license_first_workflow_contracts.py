@@ -111,7 +111,7 @@ ORIGINAL_JOB_NAMES = {
     "coverage-required.yml": ("changes", "coverage-required"),
     "e2e-required.yml": ("changes", "e2e-required"),
     "e2e-smoke.yml": ("e2e-smoke",),
-    "frontend-e2e-tiers.yml": ("critical", "features", "admin"),
+    "frontend-e2e-tiers.yml": ("critical", "features", "admin", "ux-regression"),
     "frontend-required.yml": ("changes", "frontend-unit-tests", "frontend-required"),
     "frontend-ux-gates.yml": ("onboarding-gate", "smoke-gate"),
     "jobs-suite.yml": ("jobs-sqlite", "jobs-postgres"),
@@ -459,6 +459,13 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             "github.event_name == 'workflow_dispatch' && "
             "contains(fromJSON('[\"admin\",\"all-tiers\"]'), github.event.inputs.tier)"
         ),
+        # Pull requests (path-scoped inside the job) and the all-tiers dispatch.
+        "ux-regression": (
+            "(github.event_name == 'pull_request' || "
+            "github.event_name == 'workflow_run') || "
+            "(github.event_name == 'workflow_dispatch' && "
+            "github.event.inputs.tier == 'all-tiers')"
+        ),
     }
 
     for name, (data, _) in _load_ordinary_workflows().items():
@@ -600,7 +607,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 54
+    assert checkout_count == 55
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -640,12 +647,12 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     combined_text = "\n".join(text for _, text in workflows.values())
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 54
-    assert combined_text.count("github.event.pull_request.head.sha") == 51
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 55
+    assert combined_text.count("github.event.pull_request.head.sha") == 52
     # +1 each: backend-required passes the admitted-or-PR base to the backlog
     # task-format ratchet (TASK-13440), admission's base first, as the mypy step does.
     assert combined_text.count("github.event.pull_request.base.sha") == 6
-    assert combined_text.count("needs.admission.outputs.base_sha") == 12
+    assert combined_text.count("needs.admission.outputs.base_sha") == 13
 
     for name, output_names in CHANGE_CLASSIFIER_OUTPUTS.items():
         changes_job = workflows[name][0]["jobs"]["changes"]
@@ -913,7 +920,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 23
+    assert setup_helper_count == 24
     assert setup_python_cache_count == 1
     assert cache_save_count == 6
     assert cache_restore_count == 6
