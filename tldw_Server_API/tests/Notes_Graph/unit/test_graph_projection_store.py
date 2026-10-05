@@ -219,3 +219,28 @@ def test_orphan_query_plan_uses_endpoint_indexes_without_relationship_scans(
     assert any("idx_note_edges_from_live" in detail for detail in details)
     assert any("idx_note_edges_to_live" in detail for detail in details)
     assert any("idx_note_wikilink_edges_target" in detail for detail in details)
+
+
+# ---------------------------------------------------------------------------
+# UX review 2026-10 contract reproductions (NE-02, #3110).
+# Decision D2: note links accept both ``[[id:UUID]]`` and ``[[Title]]``.
+# ---------------------------------------------------------------------------
+
+
+def test_id_wikilink_projects_outgoing_edge_when_note_is_added(
+    graph_db: CharactersRAGDB,
+) -> None:
+    graph_db.add_note("Target Note", "plain", note_id=TARGET_ID)
+    graph_db.add_note("Source", f"See [[id:{TARGET_ID}]] for details.", note_id=SOURCE_ID)
+
+    assert graph_db.note_graph_projection_store.list_outgoing(SOURCE_ID) == (TARGET_ID,)
+
+
+# NE-02 (#3110): fixed. The projection resolves [[Title]] to the owner's note by title.
+def test_title_wikilink_projects_outgoing_edge_when_note_is_added(
+    graph_db: CharactersRAGDB,
+) -> None:
+    graph_db.add_note("Target Note", "plain", note_id=TARGET_ID)
+    graph_db.add_note("Source", "See [[Target Note]] for details.", note_id=SOURCE_ID)
+
+    assert graph_db.note_graph_projection_store.list_outgoing(SOURCE_ID) == (TARGET_ID,)

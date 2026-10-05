@@ -21,6 +21,7 @@ import TaskChecklistPreview from '@/components/Notes/TaskChecklistPreview'
 import type { TaskChecklistTogglePayload } from '@/components/Notes/TaskChecklistPreview'
 import TaskActivityNotice from '@/components/Notes/TaskActivityNotice'
 import type { ActiveWikilinkQuery, WikilinkCandidate } from '@/components/Notes/wikilinks'
+import { MISSING_WIKILINK_PREVIEW_CLASSES } from '@/components/Notes/wikilinks'
 import type {
   NoteTask,
   NoteTaskActivityEvent,
@@ -482,7 +483,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
     testId: string,
   ) => (
     <div
-      className="w-full flex-1 text-sm p-4 rounded-lg border border-border bg-surface2 overflow-auto"
+      className={`w-full flex-1 text-sm p-4 rounded-lg border border-border bg-surface2 overflow-auto ${MISSING_WIKILINK_PREVIEW_CLASSES}`}
       onClick={handlePreviewLinkClick}
       data-testid={testId}
     >

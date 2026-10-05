@@ -42,10 +42,28 @@ def test_duplicate_note_id_is_a_conflict_and_preserves_original(note_owners):
     assert note_owners.bob.get_note_by_id(note_owners.private) is None
 
 
-@pytest.mark.parametrize("operation", ["list", "count", "detail", "deleted", "batch", "search"])
+@pytest.mark.parametrize(
+    "operation",
+    ["list", "count", "detail", "deleted", "batch", "search", "title-search", "wikilink-title", "wikilink-id"],
+)
 def test_note_reads_exclude_foreign_owner(note_owners, operation):
     db = note_owners.bob
-    if operation == "list":
+    if operation == "title-search":
+        # [[wikilink]] autocomplete (NE-02) must only list the owner's titles.
+        assert db.search_note_titles("Citrine") == []
+        assert db.count_note_titles_matching("Citrine") == 0
+        assert [row["id"] for row in db.search_note_titles("Indigo")] == [note_owners.own]
+    elif operation == "wikilink-title":
+        resolved = db.note_graph_projection_store.resolve_wikilink_titles(
+            ["Alice private Citrine", "Bob private Indigo"]
+        )
+        assert resolved["Alice private Citrine"].note_id is None
+        assert resolved["Bob private Indigo"].note_id == note_owners.own
+    elif operation == "wikilink-id":
+        assert db.note_graph_projection_store.get_live_note_titles(
+            [note_owners.private, note_owners.own]
+        ) == {note_owners.own: "Bob private Indigo"}
+    elif operation == "list":
         assert [row["id"] for row in db.list_notes()] == [note_owners.own]
     elif operation == "count":
         assert db.count_notes() == 1
@@ -672,3 +690,74 @@ def test_note_message_parent_authority_follows_its_conversation(note_owners, cas
     else:
         with pytest.raises((ConflictError, CharactersRAGDBError)):
             f.bob.add_note("Foreign message note", "body", message_id=message)
+
+
+@pytest.mark.parametrize("operation", ["referrers", "titled", "plan", "rewrite", "undo"])
+def test_wikilink_rename_never_reads_or_rewrites_a_foreign_owners_notes(note_owners, operation):
+    """Updating ``[[Old title]]`` links after a rename (#3110) stays inside the owner's notes."""
+
+    from tldw_Server_API.app.core.Notes.wikilink_rename import (
+        WikilinkRestoreTarget,
+        WikilinkRewriteTarget,
+        plan_renamed_note_link,
+        restore_title_links,
+        rewrite_title_links,
+    )
+
+    f = note_owners
+    alice_target = f.alice.add_note("Shared rename", "Alice's note with the linked title")
+    alice_linker = f.alice.add_note("Alice linker", "Alice links [[Shared rename]].")
+    bob_linker = f.bob.add_note("Bob linker", "Bob links [[Shared rename]].")
+    store = f.bob.note_graph_projection_store
+    foreign_before = f.alice.get_note_by_id(alice_linker)
+
+    if operation == "referrers":
+        page = store.list_title_referrers("Shared rename")
+        assert (page.total, [note.note_id for note in page.notes]) == (1, [bob_linker])
+        # Alice's note with that title does not answer Bob's link, so it is still unresolved.
+        unresolved = store.list_title_referrers("Shared rename", unresolved_only=True)
+        assert (unresolved.total, [note.note_id for note in unresolved.notes]) == (1, [bob_linker])
+    elif operation == "titled":
+        assert store.list_live_note_ids_titled("Shared rename") == ()
+        assert f.alice.note_graph_projection_store.list_live_note_ids_titled("Shared rename") == (alice_target,)
+    elif operation == "plan":
+        assert plan_renamed_note_link(f.bob, alice_target) is None
+        # Alice's duplicate title never makes Bob's title "shared".
+        own_target = f.bob.add_note("Shared rename", "Bob's own note with that title")
+        plan = plan_renamed_note_link(f.bob, own_target)
+        assert plan is not None
+        assert (plan.link_form, plan.new_title_shared) == ("title", False)
+    elif operation == "rewrite":
+        results = rewrite_title_links(
+            f.bob,
+            old_title="Shared rename",
+            replacement="[[Renamed]]",
+            targets=[WikilinkRewriteTarget(alice_linker, 1), WikilinkRewriteTarget(bob_linker, 1)],
+        )
+        assert {result.note_id: result.status for result in results} == {
+            alice_linker: "skipped_not_found",
+            bob_linker: "updated",
+        }
+        assert f.bob.get_note_by_id(bob_linker)["content"] == "Bob links [[Renamed]]."
+    else:
+        # Alice renames her note and updates her own link; Bob then replays her undo data.
+        f.alice.update_note(alice_target, {"title": "Renamed by Alice"}, expected_version=1)
+        rewritten = rewrite_title_links(
+            f.alice,
+            old_title="Shared rename",
+            replacement="[[Renamed by Alice]]",
+            targets=[WikilinkRewriteTarget(alice_linker, 1)],
+        )
+        assert rewritten[0].status == "updated"
+        foreign_before = f.alice.get_note_by_id(alice_linker)
+        results = restore_title_links(
+            f.bob,
+            old_title="Shared rename",
+            replacement="[[Renamed by Alice]]",
+            targets=[
+                WikilinkRestoreTarget(alice_linker, int(rewritten[0].version), rewritten[0].replacements)
+            ],
+        )
+        assert [result.status for result in results] == ["skipped_not_found"]
+
+    assert f.alice.get_note_by_id(alice_linker) == foreign_before

@@ -45856,6 +45856,8 @@ for _note_store_method in (
     "delete_note",
     "restore_note",
     "search_notes",
+    "search_note_titles",
+    "count_note_titles_matching",
     "search_notes_with_keywords",
     "count_notes_matching_keywords",
     "link_note_to_keyword",
