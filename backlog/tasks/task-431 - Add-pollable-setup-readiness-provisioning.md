@@ -39,9 +39,9 @@ Task 4 implementation from Docs/superpowers/plans/2026-05-18-first-time-readines
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added SetupReadinessStore with atomic JSON writes and known lane/status/overlay validation. Preview persists sanitized state with preview_id. Provision applies confirmed config updates, queues installer work through BackgroundTasks, and merges persisted operation state into readiness status.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -44,7 +44,7 @@ Source: synthesis F9
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 SCOPE CORRECTION during Stage 0: there is a THIRD site the finding missed - core/Ingestion_Media_Processing/OCR/backends/dolphin_ocr.py:327, identical defect (NamedTemporaryFile(delete=True), file unlinked at the with-exit on :331, POST references f.name at :348). Fixed alongside dots_ocr and hunyuan_ocr.
 
 tesseract_cli.py:27 also uses delete=True and is CORRECT - its subprocess call runs INSIDE the with block. Verified, deliberately left unchanged.
@@ -54,7 +54,7 @@ All three fixed with the nemotron_parse.py:350-387 pattern: delete=False, captur
 2026-09-23 reconciliation: AC1 met - commit 7c348a05ae; dots_ocr.py:201, hunyuan_ocr.py:197 and dolphin_ocr.py:332 use NamedTemporaryFile(delete=False) with unlink in a finally after fetch_json. Behaviourally verified with an uncommitted scratch script (fetch_json stubbed, *_USE_DATA_URL=0): for all three backends the path named in the request exists at POST time, the stubbed text 'HELLO' is returned, and the file is removed afterwards. AC2 NOT met - no image_payload helper exists in OCR/runtime_support.py (grep: zero hits); the temp-file shape is still copy-pasted in dots/hunyuan/dolphin/nemotron_parse/llamacpp_ocr (x2). AC3 NOT met - no repo test exercises a non-data-URL run; tests/MediaIngestion_NEW/test_ocr_backend_dots.py only checks import/registry (1 passed, 1 skipped: dots_ocr not installed). Remaining: extract image_payload context manager, route the vLLM backends through it, add a test that stubs fetch_json with *_USE_DATA_URL=0 and asserts the path exists during the request and non-empty text is returned. Bandit on the three backends: only pre-existing B404/B603 (dots_ocr.py:8, :86 subprocess), unrelated to this fix.
 
 2026-09-23: AC2+AC3 done. runtime_support.image_payload(image_bytes, use_data_url=) yields the image_url part and unlinks the temp file on exit; dots/hunyuan/dolphin/nemotron_parse and both llamacpp paths use it (six copies removed). tests/Media_Ingestion_Modification/test_ocr_image_payload.py parametrizes the four vLLM backends with *_USE_DATA_URL=0: asserts the file is readable at POST time, text 'HELLO' is returned, file removed after. Red on pre-fix backends (3 failed: dots/hunyuan/dolphin), green now. llamacpp temp-file test repointed to runtime_support.tempfile. All 17 OCR-related test files: 241 passed, 3 skipped. Bandit -ll: no findings. Docs: none needed. No known skips.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

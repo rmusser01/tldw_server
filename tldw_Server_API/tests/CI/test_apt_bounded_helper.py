@@ -5,6 +5,10 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 HELPER = Path(".github/actions/apt-bounded.sh").resolve()
 
 _TIMEOUT_SHIM = """#!/usr/bin/env python3

@@ -29,13 +29,13 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation commits: 5c7a62cf9 added the storage substrate; a94a14ca1 moved SQL into DB_Management and fixed layering/user_id; c1d53c6b4 hardened store invariants; b5d10e987 made idempotent envelope/key-record inserts atomic with ON CONFLICT DO NOTHING plus stored-row fingerprint checks.
 
 Review notes: local spec review passed after the subagent review hit a usage limit. Local quality review found and fixed the read-then-insert idempotency race risk before closeout.
 
 Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -v -> 26 passed, 5 warnings. git diff --check -> passed. Bandit touched production scope -> 0 findings, output /tmp/bandit_sync_v2_storage.json.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -32,6 +32,9 @@ from tldw_Server_API.app.core.Character_Chat.character_conversation_factory impo
     validate_resumable_behavior_boole,
 )
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import validate_chat_settings_storage
+from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
+    supports_saved_character_extensions,
+)
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     CHAR_SENDER_ALIASES,
     SYSTEM_ALIASES,
@@ -571,13 +574,10 @@ def project_native_fork_context(
             for participant in participants + (values.get("participants") or []):
                 extensions = participant["prompt"]["prompt_relevant_extensions"]
                 card_extensions = extensions.get("character_extensions") or {}
-                if (
-                    set(extensions) - {"prompt_preset", "character_extensions"}
-                    or not isinstance(card_extensions, dict)
-                    or set(card_extensions) - {"prompt_preset", "promptPreset", "tldw"}
-                    or not isinstance(card_extensions.get("tldw", {}), dict)
-                    or set(card_extensions.get("tldw", {})) - {"prompt_preset", "promptPreset"}
-                ):
+                if set(extensions) - {
+                    "prompt_preset",
+                    "character_extensions",
+                } or not supports_saved_character_extensions(card_extensions):
                     _unsupported("prompt_extensions")
                 participant["default_memory"] = _project_memory(participant["default_memory"])
                 for field in ("world_books", "exemplars", "default_memory"):

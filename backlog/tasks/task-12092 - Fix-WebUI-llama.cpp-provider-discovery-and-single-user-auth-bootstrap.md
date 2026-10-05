@@ -37,7 +37,7 @@ IMPLEMENTATION_PLAN_llamacpp_webui_catalog_auth.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root causes investigated:
 - Backend provider catalog readiness was not using the same env-resolved custom OpenAI endpoint/model path as chat completions, so latest dev could chat directly while WebUI discovery still saw stale/default custom OpenAI settings.
 - WebUI advanced-mode single-user auth bootstrapped NEXT_PUBLIC_X_API_KEY into runtime request auth, but shared connection/model/stream paths did not consistently treat that runtime key as configured auth.
@@ -60,7 +60,7 @@ Verification:
 - Bandit on llm_providers.py: no findings.
 - git diff --check: clean.
 - Live probes after draining dev-server output: API 200, llama.cpp 200, WebUI 200.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

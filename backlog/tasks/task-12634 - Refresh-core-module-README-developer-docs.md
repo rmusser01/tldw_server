@@ -36,7 +36,7 @@ Implementation plan: Docs/superpowers/plans/2026-06-01-core-module-readme-refres
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-06-01: Design approved by user: source-informed orientation pass for all 88 top-level core modules first, followed by a deeper architecture-guide pass.
 
 2026-06-01: Pre-plan review found and corrected spec risks: Phase 2 now aligns with the user's 'approach 3 after approach 2' direction by treating all 88 modules as deep-guide candidates; scope now explicitly covers all immediate non-cache app/core directories; implementation inventory and local verification fallback are documented.
@@ -58,7 +58,7 @@ Verification: Task 5 refreshed existing core READMEs and updated the inventory. 
 2026-06-01: Final branch review follow-up fixed the Text2SQL RAG retriever path, replaced the Evaluations benchmark test command with an existing test file, and synchronized implementation-plan stage statuses with the completed task. Verification rerun follows in the worktree before commit.
 
 2026-06-01: Final branch review verification passed: corrected Text2SQL and Evaluations references point to existing files, no stale reviewed references remain, all 88 top-level app/core modules have README.md files, placeholder scan returned no matches, Markdown heading/local-link sanity passed, and git diff --check passed. Bandit remains skipped because this follow-up changed Markdown documentation only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

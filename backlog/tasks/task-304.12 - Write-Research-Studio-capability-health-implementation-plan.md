@@ -37,9 +37,9 @@ Write a staged implementation plan for adding the backend-owned Research Studio 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan saved at Docs/superpowers/plans/2026-05-13-research-studio-capability-health-contract-implementation-plan.md. Self-review corrected endpoint permission gating, user-context collector flow, and OpenAPI-stable capability map typing before closeout. Verification: git diff --check passed for the planning slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

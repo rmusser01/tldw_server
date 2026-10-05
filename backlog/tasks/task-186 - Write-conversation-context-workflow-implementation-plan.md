@@ -43,13 +43,13 @@ Create the implementation plan for the approved Conversation Context workflow de
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: reviewed the generated plan, confirmed ASCII-only content, confirmed plan references the approved spec and May 9 UX audit, and checked the worktree status.
 
 Bandit: not run because this task only adds documentation/planning artifacts and a Backlog task; no Python application code was touched.
 
 Subagent plan review: skipped because current tool policy only permits spawning subagents when the user explicitly asks for delegation; local self-review was performed instead.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

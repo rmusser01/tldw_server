@@ -25,9 +25,11 @@ Rebase PR 2254 onto latest dev and address still-valid review findings: secure n
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified all PR 2254 review findings against the rebased code and found them still valid. Rebased codex/mcp-filesystem-helper-plan onto origin/dev without conflicts. Added regression coverage for no-follow parent symlink escapes, excessive **/ patterns, symlink directory entries in fs.glob without traversal, grep directory-only walk caps, and the preset version bump.
-<!-- SECTION:NOTES:END -->
+
+Second PR review pass: verified Qodo's three new findings against current code and found all still valid. Fixed fs.glob to return size=null and size_unavailable=true when best-effort file size metadata cannot be read. Added grep_allow_regex gating so regex mode is disabled by default, and added grep_max_total_bytes / grep_max_files aggregate scan budgets with truncation_reasons and remaining_count_known metadata. Updated packaged docs and design/plan artifacts for the new settings.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -44,9 +46,3 @@ Rebased PR 2254 onto origin/dev after PR 2251 merged, addressed all still-valid 
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Second PR review pass: verified Qodo's three new findings against current code and found all still valid. Fixed fs.glob to return size=null and size_unavailable=true when best-effort file size metadata cannot be read. Added grep_allow_regex gating so regex mode is disabled by default, and added grep_max_total_bytes / grep_max_files aggregate scan budgets with truncation_reasons and remaining_count_known metadata. Updated packaged docs and design/plan artifacts for the new settings.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

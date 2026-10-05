@@ -29,7 +29,7 @@ priority: high
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 backend source-health contract implemented. Focused tests passed: pytest -q test_source_health.py test_rag_source_health_endpoint.py test_source_contract.py test_unified_pipeline.py -k 'source_status or source_health or source_contract' (8 passed, 23 deselected). git diff --check passed. Bandit touched backend scope passed with 0 findings at /tmp/bandit_knowledge_source_health_task1.json.
 
 Quality review fix: source-health no longer instantiates MultiDatabaseRetriever or source-specific databases during health polling. Endpoint derives configured source IDs from resolved request handles and existing Kanban DB files only; integration regression now fails if retriever construction is attempted. Re-ran focused backend tests (8 passed, 23 deselected), git diff --check, and Bandit touched backend scope (0 findings at /tmp/bandit_knowledge_source_health_task1_fix.json).
@@ -51,7 +51,7 @@ Task 6 final verification completed after rebasing onto origin/dev. Backend focu
 PR review sweep for #1745 started. Actionable unresolved threads verified: Gemini core_settings.get, async filesystem threadpool, internal /sources Link; Qodo async filesystem, PostgreSQL/non-file health detection, TEST_MODE base-dir parity. Implementing fixes on the same PR branch.
 
 PR review sweep for #1745 completed. Addressed Gemini/Qodo source-health review by moving filesystem checks into a threadpool, reusing DatabasePaths read-only base-dir resolution, adding single-user ID fallback, and avoiding file-only false negatives for PostgreSQL/lazy sources. Addressed CodeRabbit UI review by using router Link for /sources, disabling refresh while source health is loading, guarding source-health refresh races, treating missing health entries as caveats, avoiding indexing-as-unavailable copy, restoring no-results nearest-match access from search metadata, and making the SourceCard visible action label "Copy citation". Verification: backend focused pytest passed 15 selected tests; KnowledgeQA focused Vitest passed 7 files / 63 tests; git diff --check passed; Bandit touched backend files passed with 0 findings at /tmp/bandit_knowledge_source_health_review.json.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

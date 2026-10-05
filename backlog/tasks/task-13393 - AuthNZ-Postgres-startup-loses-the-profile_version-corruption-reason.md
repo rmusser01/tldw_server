@@ -26,11 +26,11 @@ ensure_authnz_core_tables_pg (pg_migrations_extra.py) runs ensure_postgres_profi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: the PostgreSQL transaction boundary (AuthNZ/database.py) re-raises every failure as TransactionError('PostgreSQL transaction') and logs only the exception type chain, because database messages can carry row data. The profile_version readiness RuntimeError lost its fixed-text reason there. Fix: readiness checks in postgres_profile_version_schema.py and profile_candidate_schema.py raise SchemaReadinessError (RuntimeError subclass, AuthNZ/exceptions.py); the boundary passes only that type's message as TransactionError detail; ensure_authnz_core_tables_pg logs the sanitized TransactionError message, and pool-init schema readiness logs the reason. Other failures stay type-only. Test: test_postgres_current_schema_corruption_fails_closed_at_startup now captures the WARNING and asserts it names 'AuthNZ profile_version readiness validation failed'. Verified: test_profile_version_migration_pg.py 8 passed (Docker Postgres); 14 AuthNZ/DB test files touching these modules 271 passed. Bandit (-ll) on the 5 touched modules: 0 issues. Docs: none needed (operator log text only). No known skips.
 
 Qodo on #3063: SchemaReadinessError moved to app/core/exceptions.py (the repo rule). test_profile_version_migration_pg.py 8 passed; the AuthNZ/DB files touching these modules 151 passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

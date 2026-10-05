@@ -38,7 +38,7 @@ Implement the first slice defined by the main /chat cockpit controls plan. The w
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the first slice of main WebUI /chat cockpit direct controls in .worktrees/chat-degraded-health. Added a shared cockpit action bridge, wired context rail controls to existing PlaygroundForm handlers, added direct web-search and temporary/saved session rail controls, separated provider/model runtime display, added model and character settings callbacks, and expanded the status strip with provider/model/context/persistence/degraded/error state. Scope stayed on main /chat only; no browser-extension sidepanel/sidebar code was touched.
 
 Verification:
@@ -49,7 +49,7 @@ Verification:
 - TypeScript check attempted: bunx tsc --noEmit --pretty false --project tsconfig.json in apps/packages/ui. It failed on existing repo-wide baseline errors across audio/composer/common/flashcards/onboarding/workspace/services/etc. No reported errors were in the new first-slice cockpit files.
 
 Bandit skipped because this slice touched frontend TypeScript/TSX/Playwright and Markdown task files only; no Python code was touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

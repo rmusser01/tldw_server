@@ -58,7 +58,7 @@ Implement the inventory/start-by-model backend slice from the implementation pla
 <!-- DOD:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 This is a stale tracker closeout after PR #2117 merged. The llama.cpp model inventory resolver implementation is already present on current `origin/dev`; this task record now reflects the shipped state rather than introducing new backend code.
 
 Implementation provenance:
@@ -78,7 +78,7 @@ Verification command:
 Known skips and noise:
 - After pytest reported pass, Loguru emitted cleanup-time `ValueError: I/O operation on closed file` messages from `handler_utils.py`. This appears to be post-test logging cleanup noise and was not introduced by this Backlog-only closeout.
 - Bandit was not rerun for this closeout branch because it changes only Backlog metadata. The implementation code shipped in the referenced PRs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:SUMMARY:BEGIN -->

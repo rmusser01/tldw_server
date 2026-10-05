@@ -29,14 +29,14 @@ Fix PR #2133 Windows full-suite failure where Admin bundle export returns export
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Windows full-suite Admin artifact for PR #2133 showed `test_create_bundle_authnz_only` returning `export_error`. The failing path shape was a Windows sqlite URL with a backslash drive path that parsed as `/C:\...`; the existing normalizer only stripped `/C:/...`. Updated `_resolve_dataset_db_path()` to strip the leading slash for both slash and backslash drive separators, and added a focused regression test for `sqlite:///C:\...` AuthNZ DATABASE_URL resolution.
 
 Local verification:
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/Admin/test_bundle_ops.py::test_authnz_backup_path_normalizes_windows_sqlite_url tldw_Server_API/tests/Admin/test_bundle_ops.py::test_create_bundle_authnz_only` passed: 2 tests.
 - `git diff --check` passed.
 - Bandit ran on touched Admin/Audio files; remaining findings are low-severity test assert usage only, with no B106 or medium/high findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

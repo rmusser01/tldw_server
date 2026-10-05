@@ -88,9 +88,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.legacy_content_queries impo
     get_all_content_from_database as sqlite_get_all_content_from_database,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_maintenance import (
-    check_media_and_whisper_model as sqlite_check_media_and_whisper_model,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.legacy_maintenance import (
     empty_trash as sqlite_empty_trash,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_backup import (
@@ -627,15 +624,6 @@ def add_media_with_keywords(*args, **kwargs):
         return media_writer.add_media_with_keywords(**kwargs)
     elif db_type == 'elasticsearch':
         _raise_elasticsearch_not_supported("add_media_with_keywords")
-    else:
-        raise ValueError(f"Unsupported database type: {db_type}")
-
-
-def check_media_and_whisper_model(*args, **kwargs):
-    if db_type in SQL_CONTENT_BACKENDS:
-        return sqlite_check_media_and_whisper_model(*args, **kwargs)
-    elif db_type == 'elasticsearch':
-        _raise_elasticsearch_not_supported("check_media_and_whisper_model")
     else:
         raise ValueError(f"Unsupported database type: {db_type}")
 
@@ -1369,35 +1357,6 @@ def get_document_version(*args, **kwargs):
 # End of Document Versioning Functions
 ############################################################################################################
 
-
-############################################################################################################
-#
-# Workflow Functions
-#
-# def get_workflow_chat(*args, **kwargs):
-#     if db_type == 'sqlite':
-#         return sqlite_get_workflow_chat(*args, **kwargs)
-#     elif db_type == 'elasticsearch':
-#         # Implement Elasticsearch version
-#         raise NotImplementedError("Elasticsearch version of get_workflow_chat not yet implemented")
-#
-#
-# def save_workflow_chat_to_db(*args, **kwargs):
-#     if db_type == 'sqlite':
-#         # FIXME
-#         return sqlite_save_workflow_chat_to_db(*args, **kwargs)
-#     elif db_type == 'elasticsearch':
-#         # Implement Elasticsearch version
-#         raise NotImplementedError("Elasticsearch version of save_workflow_chat_to_db not yet implemented")
-#
-# #
-# End of Workflow Functions
-############################################################################################################
-
-# Dead code FIXME
-# def close_connection():
-#     if db_type == 'sqlite':
-#         db.get_connection().close()
 
 #
 # End of file

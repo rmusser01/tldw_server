@@ -42,7 +42,7 @@ Verify and address validated current-code findings from the Embeddings module re
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Validated findings and implemented focused fixes:
 - Confined embeddings job artifact identifiers and payload-provided artifact paths to the per-user artifact directory.
 - Made Redis idempotency infrastructure failures raise so the adapter fails the root job instead of orphaning it.
@@ -57,7 +57,7 @@ Verification:
 - source .venv/bin/activate && python -m pytest --confcutdir=tldw_Server_API/tests/ChromaDB -q tldw_Server_API/tests/ChromaDB/unit/test_chromadb_dimensions_and_list.py => 17 passed, 4 warnings.
 - source .venv/bin/activate && python -m compileall -q <touched files> => passed.
 - source .venv/bin/activate && python -m bandit -r <touched production files> -f json -o /tmp/bandit_embeddings_review_findings_9927.json => 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

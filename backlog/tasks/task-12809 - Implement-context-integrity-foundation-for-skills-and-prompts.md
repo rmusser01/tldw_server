@@ -40,11 +40,9 @@ Docs/superpowers/plans/2026-06-25-context-integrity-foundation-implementation-pl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR #2523 review follow-up: renumbered from TASK-2366 to TASK-12017 after the dev rebase exposed a duplicate TASK-2366 record, and added explicit acceptance criteria matching the completed implementation slices and recorded verification.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

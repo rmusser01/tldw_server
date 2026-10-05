@@ -51,7 +51,13 @@ async def test_limits_are_unlimited_when_quotas_off(quotas_off: None, monkeypatc
 
     monkeypatch.setattr(audio_quota, "get_user_tier", _no_tier_lookup)
     limits = await audio_quota.get_limits_for_user(1)
-    assert limits == {"daily_minutes": None, "concurrent_streams": None, "concurrent_jobs": None, "max_file_size_mb": None}
+    assert limits == {
+        "daily_minutes": None,
+        "monthly_minutes": None,
+        "concurrent_streams": None,
+        "concurrent_jobs": None,
+        "max_file_size_mb": None,
+    }
 
 
 async def test_daily_minutes_allowed_past_the_old_free_tier(quotas_off: None) -> None:
@@ -97,22 +103,17 @@ async def test_finish_without_lease_is_a_noop(quotas_off: None, monkeypatch: pyt
     assert governor.released == []
 
 
-async def test_quotas_on_keeps_the_tier_limits(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With quotas on, get_limits_for_user still returns the free tier's configured daily minutes."""
+async def test_quotas_on_reads_daily_minutes_from_the_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With quotas on, get_limits_for_user's daily_minutes is the user's limits.audio_daily_minutes value (spec 2)."""
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
 
-    async def _free(_user_id: int) -> str:
-        """A tier-lookup stand-in reporting the free tier."""
-        return "free"
+    async def _user_quota(_user_id: int, key: str) -> object:
+        """Serve a daily-minutes override; every other key is unset (unlimited)."""
+        return 45 if key == "limits.audio_daily_minutes" else None
 
-    async def _no_overrides(_user_id: int) -> dict:
-        """An override-limits stand-in reporting no per-user overrides."""
-        return {}
-
-    monkeypatch.setattr(audio_quota, "get_user_tier", _free)
-    monkeypatch.setattr(audio_quota, "_get_user_override_limits", _no_overrides)
+    monkeypatch.setattr(audio_quota, "user_quota", _user_quota)
     limits = await audio_quota.get_limits_for_user(1)
-    assert limits["daily_minutes"] == audio_quota.TIER_LIMITS["free"]["daily_minutes"]
+    assert limits["daily_minutes"] == 45
 
 
 def test_upload_cap_falls_back_to_the_media_processing_cap() -> None:

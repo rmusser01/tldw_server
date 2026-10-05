@@ -55,7 +55,7 @@ OPERATIONAL WORKAROUND, documented in Docs/Development/CI_REQUIRED_GATES.md and 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 DECISION TAKEN 2026-09-23: resolution A. LICENSE_FIRST_CI_ENABLED=true set on the repository at 05:14:57Z (gh variable set). Resolution B -- loosening the four pinned contracts -- is not pursued.
 
 Effect NOT yet confirmed. Setting the variable makes admission run on workflow_run events instead of skipping, but no pull-request event has occurred since, so no evidence either way. The next PR through is the test. Two ways it can still fail:
@@ -121,7 +121,7 @@ It also settles the one inference in the mechanism. Adding ${{ github.event_name
 REMAINING DECISION, now cost-only rather than correctness. LICENSE_FIRST_CI_ENABLED is still true. With it on, each PR runs the gates twice: the pull_request lane reports, and the admitted lane repeats the work and posts to the default branch where nothing reads it. With it off, the workflow_run runs skip instantly as they did before. Either way PRs merge. Recommend unsetting it -- 'gh variable delete LICENSE_FIRST_CI_ENABLED' -- unless license-first is wanted for its own sake, in which case the duplicate work is the price and the admitted lane arguably wants statuses: write so it reports too.
 
 Docs/Development/CI_REQUIRED_GATES.md records all of the above; the manual landing procedure is now marked historical, kept as the fallback that Helper_Scripts/ci/land_required_gates.sh implements.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

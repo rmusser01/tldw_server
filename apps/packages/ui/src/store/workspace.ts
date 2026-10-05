@@ -2201,6 +2201,7 @@ export interface WorkspaceSourceTransferExecutionResult
 
 interface WorkspaceIdentityActions {
   initializeWorkspace: (name?: string) => string
+  restoreServerWorkspace: (snapshot: WorkspaceSnapshot) => void
   setWorkspaceName: (name: string) => void
   loadWorkspace: (config: WorkspaceConfig) => void
 }

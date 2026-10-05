@@ -25,7 +25,7 @@ Execute Task 2 from the approved plan: add UploadedFile document-processing meta
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Task 2 frontend processing service slice.
 
 Touched files:
@@ -44,7 +44,7 @@ Verification:
 - KNOWN BASELINE: bunx tsc --noEmit --pretty false --project tsconfig.json still fails in unrelated existing files (AudioStudio TimelineEditor, ScheduledTasks editor/control-plane, Skills Manager, mcp-hub readiness path, voice-cloning ArrayBuffer, e2e fixtures/flashcards); no touched document upload files appear in the error list.
 - Formatting note: default Prettier was not retained because it rewrote existing shared-package style across unrelated lines; final formatting verification for this slice is git diff --check.
 - Bandit: not applicable; frontend TypeScript only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

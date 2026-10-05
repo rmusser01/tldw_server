@@ -27,11 +27,11 @@ Continue #1116 Phase 2.2 by deferring workspace and character-family content rou
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR #1263 review follow-up: split the overlong access_count dict-comprehension in the workspace/character router laziness test. Verification rerun: focused workspace_character_router_attr_lookup 1 passed; full router_groups_contract 55 passed; git diff --check clean.
 
 PR #1265 review follow-up: Qodo flagged that the workspace/character laziness test asserts import calls in exact router-definition order. Verified this is incidental to the lazy-import contract; change the assertion to be order-insensitive while preserving duplicate detection.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

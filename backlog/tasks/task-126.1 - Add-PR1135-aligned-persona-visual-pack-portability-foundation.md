@@ -40,7 +40,7 @@ Add the first reviewable implementation slice for persona visual pack portabilit
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added persona visual pack portability foundation in tldw_Server_API/app/core/Persona/visual_portability/: archive member validation, constants, checksum/fingerprint helpers, export options/result models, PersonaVisualPackExporter, and PersonaVisualPackImportPreviewer. The archive contract mirrors PR #1135's VN portability shape with schema versioning, manifest.json, metadata section files, checksums/sha256.json, reserved signatures, canonical payload fingerprints, strict missing-byte mode, trust hints, and review-before-commit preview plans.
 
 Added tests in tldw_Server_API/tests/Persona/test_persona_visual_portability.py covering safe archive member rejection, export archive contents and checksums, strict missing-byte failure, import preview without DB mutation, and missing-byte warnings. Existing upload/activation regression coverage in test_persona_visual_service.py still passes.
@@ -48,7 +48,7 @@ Added tests in tldw_Server_API/tests/Persona/test_persona_visual_portability.py 
 Updated Docs/superpowers/plans/2026-05-08-persona-visual-packs-implementation-plan.md with Task 12 for the PR #1135-aligned portability foundation. Next slice is Jobs-backed API endpoints and frontend review UX mirroring PR #1135 export job, import preview, import commit, status polling, cleanup, and portability panel flows.
 
 Verification passed: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py tldw_Server_API/tests/Persona/test_persona_visual_portability.py -q (11 passed). Bandit passed with 0 findings: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visual_portability tldw_Server_API/tests/Persona/test_persona_visual_portability.py -f json -o /tmp/bandit_persona_visual_portability.json. git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

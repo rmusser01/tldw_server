@@ -77,6 +77,15 @@ def _sqlite_file_path_from_uri(db_uri: str) -> Optional[Path]:
     except (OSError, RuntimeError, ValueError):
         return candidate
 
+
+def _sqlite_allows_creation(db_path: str) -> bool:
+    """Return whether the SQLite URI permits creating its file and directories."""
+    if not db_path.startswith("file:"):
+        return True
+    mode = _url.parse_qs(_url.urlparse(db_path).query).get("mode", [""])[0]
+    return mode not in {"rw", "ro"}
+
+
 class SQLiteConnectionPool(ConnectionPool):
     """SQLite-specific connection pool using thread-local storage."""
 
@@ -143,7 +152,7 @@ class SQLiteConnectionPool(ConnectionPool):
     def _create_connection(self) -> sqlite3.Connection:
         """Create a new SQLite connection with optimal settings."""
         # Ensure database directory exists for file-backed DBs
-        if not self._is_memory:
+        if not self._is_memory and _sqlite_allows_creation(self.db_path):
             try:
                 dbp = _sqlite_file_path_from_uri(self.db_path) if self._use_uri else Path(self.db_path)
                 if dbp and dbp.parent and not dbp.parent.exists():
@@ -158,25 +167,29 @@ class SQLiteConnectionPool(ConnectionPool):
             uri=self._use_uri,
         )
 
-        # Set row factory for dict-like access
-        conn.row_factory = sqlite3.Row
+        try:
+            # Set row factory for dict-like access
+            conn.row_factory = sqlite3.Row
 
-        configure_sqlite_connection(
-            conn,
-            use_wal=bool(self.config.sqlite_wal_mode),
-            synchronous="NORMAL" if self.config.sqlite_wal_mode else None,
-            foreign_keys=bool(self.config.sqlite_foreign_keys),
-            busy_timeout_ms=10000,
-            cache_size=-2000,
-        )
+            configure_sqlite_connection(
+                conn,
+                use_wal=bool(self.config.sqlite_wal_mode),
+                synchronous="NORMAL" if self.config.sqlite_wal_mode else None,
+                foreign_keys=bool(self.config.sqlite_foreign_keys),
+                busy_timeout_ms=10000,
+                cache_size=-2000,
+            )
 
-        def history_sha256(value: Any) -> str | None:
-            if value is None:
-                return None
-            return hashlib.sha256(value.encode("utf-8") if isinstance(value, str) else bytes(value)).hexdigest()
+            def history_sha256(value: Any) -> str | None:
+                if value is None:
+                    return None
+                return hashlib.sha256(value.encode("utf-8") if isinstance(value, str) else bytes(value)).hexdigest()
 
-        # Register once on the real handle before any statement can use it.
-        conn.create_function("h1_sha256", 1, history_sha256, deterministic=True)
+            # Register once on the real handle before any statement can use it.
+            conn.create_function("h1_sha256", 1, history_sha256, deterministic=True)
+        except BaseException:
+            conn.close()
+            raise
         return conn
 
     def return_connection(self, connection: sqlite3.Connection) -> None:
@@ -334,7 +347,7 @@ class SQLiteBackend(DatabaseBackend):
         is_memory, use_uri = _classify_sqlite_path(raw_path)
 
         # Ensure database directory exists for file-backed DBs
-        if not is_memory:
+        if not is_memory and _sqlite_allows_creation(raw_path):
             if use_uri:
                 db_path = _sqlite_file_path_from_uri(raw_path)
                 if db_path is not None:
@@ -350,15 +363,19 @@ class SQLiteBackend(DatabaseBackend):
             uri=use_uri,
         )
 
-        conn.row_factory = sqlite3.Row
+        try:
+            conn.row_factory = sqlite3.Row
 
-        configure_sqlite_connection(
-            conn,
-            use_wal=bool(self.config.sqlite_wal_mode),
-            synchronous="NORMAL" if self.config.sqlite_wal_mode else None,
-            foreign_keys=bool(self.config.sqlite_foreign_keys),
-            busy_timeout_ms=10000,
-        )
+            configure_sqlite_connection(
+                conn,
+                use_wal=bool(self.config.sqlite_wal_mode),
+                synchronous="NORMAL" if self.config.sqlite_wal_mode else None,
+                foreign_keys=bool(self.config.sqlite_foreign_keys),
+                busy_timeout_ms=10000,
+            )
+        except BaseException:
+            conn.close()
+            raise
 
         return conn
 

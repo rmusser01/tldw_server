@@ -39,7 +39,7 @@ Narrow minimal utility router optional skip behavior after PR #1352 merged. The 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline focused selector before edits passed: minimal utility tests 2 passed, confirming current broad skip behavior was covered.
 
 TDD RED after test update failed as intended: utility specs still reported Exception and runtime import failures were skipped. GREEN focused selector passed after removing utility broad skip overrides: 6 passed.
@@ -49,7 +49,7 @@ Broader validation passed: router groups 127 passed, lifecycle 54 passed, OpenAP
 Scope note: remaining skip_exceptions=(Exception,) occurrences are the guardian/safety minimal group and should be handled in a later narrow slice.
 
 Opened PR https://github.com/rmusser01/tldw_server/pull/1355 against dev for this slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

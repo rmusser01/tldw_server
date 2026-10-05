@@ -35,9 +35,9 @@ Create a detailed implementation plan for Phase 7 of the first-class Character C
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-05-20-character-chat-phase7-model-usability-send-gating-plan.md. The plan decomposes Phase 7 into pure model-usability classification, readiness mapping, status-surface alignment, SEND gating, model-selector copy, provider/model failure recovery, real-backend E2E verification, and final verification/documentation. Self-review adjustments: descriptor-specific provider/model blockers take precedence over generic no_models, send blocker memo placement accounts for existing callback order in Playground.tsx, and the plan avoids simulated frontend success as proof of backend completion.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

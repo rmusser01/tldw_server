@@ -4981,6 +4981,11 @@
           "id": "billing_deps._check_limit",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
           "type": "dependency"
+        },
+        {
+          "id": "usage_quota_deps._check",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps",
+          "type": "dependency"
         }
       ],
       "description": "The unified RAG search endpoint with ALL features accessible via parameters.\n\n    **Key Features:**\n    - No configuration files needed\n    - Every feature is a direct parameter\n    - Mix and match any features\n    - Transparent execution\n\n    **Available Features:**\n    - Query expansion (acronym, synonym, domain, entity)\n    - Semantic caching with adaptive thresholds\n    - Multi-database search (media, notes, characters, chats)\n    - Security filtering and PII detection\n    - Citation generation (APA, MLA, Chicago, Harvard)\n    - Answer generation from context\n    - Document reranking (FlashRank, Cross-Encoder, Hybrid)\n    - Table processing and extraction\n    - Enhanced chunking with parent context\n    - User feedback collection\n    - Performance monitoring and observability\n    - Batch processing support\n    - Resilience features (retries, circuit breakers)\n\n    Simply set any feature parameter to enable it. All parameters are optional\n    except the query itself.",
@@ -5068,6 +5073,11 @@
         {
           "id": "billing_deps._check_limit",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "usage_quota_deps._check",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps",
           "type": "dependency"
         }
       ],
@@ -7741,6 +7751,11 @@
           "id": "billing_deps._check_limit",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
           "type": "dependency"
+        },
+        {
+          "id": "usage_quota_deps._check",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps",
+          "type": "dependency"
         }
       ],
       "description": "The unified RAG search endpoint with ALL features accessible via parameters.\n\n    **Key Features:**\n    - No configuration files needed\n    - Every feature is a direct parameter\n    - Mix and match any features\n    - Transparent execution\n\n    **Available Features:**\n    - Query expansion (acronym, synonym, domain, entity)\n    - Semantic caching with adaptive thresholds\n    - Multi-database search (media, notes, characters, chats)\n    - Security filtering and PII detection\n    - Citation generation (APA, MLA, Chicago, Harvard)\n    - Answer generation from context\n    - Document reranking (FlashRank, Cross-Encoder, Hybrid)\n    - Table processing and extraction\n    - Enhanced chunking with parent context\n    - User feedback collection\n    - Performance monitoring and observability\n    - Batch processing support\n    - Resilience features (retries, circuit breakers)\n\n    Simply set any feature parameter to enable it. All parameters are optional\n    except the query itself.",
@@ -8978,6 +8993,11 @@
         {
           "id": "billing_deps._check_limit",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "usage_quota_deps._check",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps",
           "type": "dependency"
         }
       ],

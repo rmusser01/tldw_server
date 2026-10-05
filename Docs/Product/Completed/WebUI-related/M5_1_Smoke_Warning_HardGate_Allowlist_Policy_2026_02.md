@@ -1,8 +1,9 @@
 # M5.1 UX Smoke Warning Hard-Gate Allowlist Policy
 
-Status: Active  
-Owner: WebUI + QA + Platform  
-Date: February 13, 2026  
+- Status: Active
+- Owner: WebUI + QA + Platform
+- Date: February 13, 2026
+
 Related Files:
 - `apps/tldw-frontend/e2e/smoke/smoke.setup.ts`
 - `apps/tldw-frontend/e2e/smoke/all-pages.spec.ts`

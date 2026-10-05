@@ -51,7 +51,7 @@ Design review adjustments before implementation:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan after design review. Worktree-local tracker supersedes an accidentally-created base-checkout duplicate that was removed before behavior edits.
 
 Implementation completed in the chat-workspace-live-flow worktree.
@@ -76,7 +76,7 @@ Verification:
 - Browser: TLDW_WEB_URL=http://localhost:18080 TLDW_WEB_CMD="bun run dev -- -p 18080" npx playwright test e2e/smoke/chat-workspace-live-backend.spec.ts --project=chromium passed: 4 tests. Escalation was required because sandbox blocked binding the fresh local dev server; fresh port was needed because 8080 had a stale reused server.
 - Whitespace: git diff --check passed.
 - Bandit: not applicable; #2032 touched TypeScript/TSX/docs/test files only, no Python.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

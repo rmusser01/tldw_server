@@ -44,9 +44,9 @@ Update the full VN platform API design spec after review. Scope is documentation
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Updated Docs/superpowers/specs/2026-05-10-vn-platform-api-design.md to address all seven review findings. Verification: git diff --check exited 0; the spec file exists; rg confirmed the expected profile snapshot, runtime action request, cleanup blocker, multipart idempotency, spoiler-safe state, character safety metadata, metadata boundary, and Bandit skip sections. Bandit is not applicable because this touches markdown/task metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

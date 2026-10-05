@@ -34,7 +34,7 @@ Plan and implement the next reviewable MCP Unified standalone Stage 2E slice: ga
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a package-local SQLiteMCPStore in mcp_unified.storage using stdlib sqlite3 and JSON payload columns plus indexed filter columns. Added validation/copy boundaries through existing Pydantic models and allowlisted SQL identifier handling for filter queries while keeping SQL values parameterized. Exported the store from mcp_unified.storage and added contract tests for schema creation, future-schema rejection, CRUD/filter behavior, audit query semantics, copy isolation, and package-boundary isolation.
 
 Verification:
@@ -67,7 +67,7 @@ Verification for this pass:
 - source .venv/bin/activate && python -m mypy mcp_unified tldw_Server_API/app/core/MCP_unified/tests/test_sqlite_storage_contracts.py -> Success, no issues in 15 source files
 - source .venv/bin/activate && python -m bandit -r mcp_unified -> No issues identified
 - git diff --check -> clean
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -47,13 +47,13 @@ Continue GitHub issue #1346 after the axios replacement by investigating a narro
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Removed unused direct package declarations for react-syntax-highlighter, @types/react-syntax-highlighter, react-toastify, rehype-mathjax, unist-util-visit, and zod from the WebUI, extension, and shared UI manifests where they had no exact source/config/script references. Regenerated apps/bun.lock with bun install. Retained @dnd-kit/abstract, @dnd-kit/dom, and @tiptap/pm because the lockfile shows active DnD package graph ownership and Tiptap peer/runtime ownership.
 
 Verification completed: bun install --frozen-lockfile from apps; bun run compile from apps/extension; NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile from apps/tldw-frontend; bun run lint from apps/tldw-frontend; bunx vitest run --changed=origin/dev from apps/tldw-frontend; git diff --check. Vitest changed-file probe exited 0 with no matching tests for manifest-only changes. Bandit skipped because no Python files changed.
 
 PR #1385 review follow-up: Qodo reported two actionable issues. Fix needed: record measurable dependency/lockfile deltas, and update stale dependency-audit table rows so packages removed by TASK-134 are no longer listed as active declarations or pending investigate-lockfile candidates.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

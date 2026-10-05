@@ -49,9 +49,9 @@ Resolve the additional CodeRabbit review threads on PR #1237 by verifying each O
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented validated CodeRabbit follow-ups: generic PCM OpenAPI media type for audio speech and reading TTS, explicit chat document JSON/SSE response content, explicit quickstart HTML fallback response, HAL Atom/RSS media types, VN asset image media types, hardened operation tag extraction for malformed scalar tags, and restored health tags on public control-plane routes. Red test run before production edits failed 7 expected assertions; final focused run passed 12 tests with 19 warnings. git diff --check passed. Bandit on touched backend/test files passed with B101 skipped for pytest asserts and zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

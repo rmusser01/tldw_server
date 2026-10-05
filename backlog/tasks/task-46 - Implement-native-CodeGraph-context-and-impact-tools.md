@@ -48,7 +48,7 @@ Scope: implement Stage 4 read-only CodeGraph impact traversal and bounded contex
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented repository impact traversal with deterministic bounded traversal; removed dynamic SQL construction after Bandit flagged the first implementation.
 
 Added CodeGraphContextBuilder for workspace-bounded snippets, file-size handling, path traversal protection, missing-file metadata, include_code=false metadata-only output, and truncation metadata.
@@ -64,7 +64,7 @@ PR #1270 review follow-up started: address Gemini comments about duplicated Code
 PR #1270 review fixes completed: centralized CodeGraphNode serialization in codegraph_node_to_dict and replaced per-node context relationship traversal with repository.traverse_impact_many batch traversal.
 
 Review-fix verification on 2026-05-05: focused CodeGraph/MCP pytest suite -> 95 passed, 5 warnings; Ruff touched scopes -> All checks passed; Bandit /tmp/bandit_codegraph_context_impact.json -> zero findings; git diff --check -> clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

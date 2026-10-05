@@ -39,7 +39,7 @@ Defects filed from this review: TASK-13287, TASK-13288, TASK-13289, TASK-13290, 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 COMPLETE FILED SET (44 tasks). The description above was written mid-filing and says "remaining findings are proposals"; that is superseded - all 40 ranked synthesis findings are now filed.
 
 Pre-existing / filed during the review: 13287 13288 13289 13290 13291 13292 13294 13295 13296 13297
@@ -48,7 +48,7 @@ Filed from the ranked table afterwards: 13300 13301 13302 13306 13307 13308 1330
 TASK-13287 gained an addendum: the regex fix alone does not fix the Chat path, because NetworkError is absent from _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS.
 
 Stage 0 of the migration plan (zero-risk items) is being executed under the individual task IDs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

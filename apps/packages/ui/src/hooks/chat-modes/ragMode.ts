@@ -15,10 +15,6 @@ import { coerceBooleanOrNull } from "@/services/settings/registry"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { ActorSettings } from "@/types/actor"
 import { maybeInjectActorMessage } from "@/utils/actor"
-import {
-  parseProviderQualifiedModelSelection,
-  resolveApiProviderForModel
-} from "@/utils/resolve-api-provider"
 import type { ChatModelSettings } from "@/store/model"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
@@ -294,19 +290,7 @@ const getMetadataString = (
   return typeof value === "string" && value.trim() ? value.trim() : ""
 }
 
-const getGeneratedRagAnswer = (ragRes: RagResponse | null | undefined) =>
-  typeof ragRes?.generated_answer === "string"
-    ? ragRes.generated_answer.trim()
-    : ""
-
-const buildSelectedSourceNoEvidenceText = (
-  ragRes: RagResponse | null | undefined
-) => {
-  const generatedAnswer = getGeneratedRagAnswer(ragRes)
-  if (generatedAnswer) {
-    return `${generatedAnswer}\n\nI did not send this as general chat because selected-source answers must be grounded in retrieved source evidence.`
-  }
-
+const buildSelectedSourceNoEvidenceText = () => {
   return "I couldn't find supporting evidence in the selected sources for that question. I did not send this as general chat because selected-source answers must be grounded in retrieved source evidence. Try rephrasing the question, selecting more ready sources, or checking ingestion and indexing status."
 }
 
@@ -427,36 +411,19 @@ const buildRagOptions = async (
   )
   // Precedence for top_k: (1) ctx.ragTopK if valid > 0, (2) ragOptions.top_k if valid > 0,
   // (3) defaultTopK fallback. ctx.ragSearchMode always overrides ragOptions.search_mode.
-  // ctx.ragEnableGeneration/citations control presence of their flags, even if set.
+  // Chat generates its answer through the streaming completion below. RAG is
+  // retrieval only here; requesting another answer delays evidence and the
+  // backend answer is never consumed by this path.
   if (typeof ctx.ragTopK === "number" && ctx.ragTopK > 0) {
     ragOptions.top_k = ctx.ragTopK
   } else if (ragOptions.top_k == null) {
     ragOptions.top_k = top_k
   }
   ragOptions.search_mode = ctx.ragSearchMode
-  // Delete false flags so the backend can apply its default behavior.
-  if (ctx.ragEnableGeneration) {
-    ragOptions.enable_generation = true
-    const rawSelectedGenerationModel = ctx.selectedModel?.trim()
-    const selectedModelSelection = parseProviderQualifiedModelSelection(
-      rawSelectedGenerationModel
-    )
-    const selectedGenerationModel = (
-      selectedModelSelection.modelId || rawSelectedGenerationModel
-    )?.trim()
-    if (selectedGenerationModel) {
-      ragOptions.generation_model = selectedGenerationModel
-    }
-    const selectedGenerationProvider = await resolveApiProviderForModel({
-      modelId: rawSelectedGenerationModel,
-      explicitProvider: ctx.currentChatModelSettings?.apiProvider
-    })
-    if (selectedGenerationProvider) {
-      ragOptions.generation_provider = selectedGenerationProvider
-    }
-  } else {
-    delete ragOptions.enable_generation
-  }
+  ragOptions.enable_generation = false
+  delete ragOptions.generation_model
+  delete ragOptions.generation_provider
+  delete ragOptions.generation_prompt
   if (ctx.ragEnableCitations) {
     ragOptions.enable_citations = true
   } else {
@@ -561,7 +528,7 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       }
 
       return buildSelectedSourceGroundingResponse(
-        buildSelectedSourceNoEvidenceText(retrieval.rawResponse),
+        buildSelectedSourceNoEvidenceText(),
         "selected_source_evidence_not_found",
         retrieval.rawResponse
       )
@@ -596,7 +563,7 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       context = retrieval.context
       source = retrieval.source
       if (hasSelectedMediaSources(ctx) && source.length === 0) {
-        throw new Error(buildSelectedSourceNoEvidenceText(retrieval.rawResponse))
+        throw new Error(buildSelectedSourceNoEvidenceText())
       }
     } catch (e) {
       if (ctx.signal.aborted || isRequestConfigScopeChangedError(e)) throw e

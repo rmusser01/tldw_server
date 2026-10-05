@@ -31,9 +31,9 @@ Resolve the post-PR #1982 MkDocs Pages deploy verification failure by making the
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Completed as part of PR #2557. The workflow now uses the real Docs/mkdocs.yml config path, and strict mode remains disabled because mkdocs build --strict -f Docs/mkdocs.yml currently aborts on 106 existing docs warnings unrelated to this deploy-verification fix. The evaluations-source fallback is now guarded in TASK-12075 follow-up work so missing source dirs fail fast.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

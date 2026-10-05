@@ -35,7 +35,7 @@ Write the Scheduled Tasks Phase 4B backend/API foundation design spec for API-ow
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Drafted the Phase 4B backend/API foundation spec from the approved brainstorming sections.
 Created isolated worktree branch codex/scheduled-tasks-phase4b-api-foundation-spec from origin/dev to avoid the dirty main checkout.
 Ran three spec-review subagent passes. Passes 1 and 2 found blocking/important issues and the spec was revised. Pass 3 found two remaining important issues; both were patched locally and recorded in the Spec Review section.
@@ -44,7 +44,7 @@ User-requested self-review found additional implementation-risk gaps: owner scop
 Implementation-plan review added `disabled_lock_kind` and `disabled_reason` to make the disabled duplicate guardrail implementable.
 Verification: git diff --check HEAD^ HEAD passed after the amended self-review commit; git status --short --branch showed the worktree clean and ahead of origin/dev by one commit.
 Bandit: not run because this task touched only documentation and Backlog metadata, no Python/code paths.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

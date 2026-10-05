@@ -47,7 +47,7 @@ Implement in four stages: add minimal character API/types; replace raw IDs with 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan Docs/superpowers/plans/2026-05-09-vn-play-session-setup-implementation-plan.md for issue #1407. The Backlog ID was moved to TASK-157 to avoid colliding with an existing TASK-155 in the main checkout.
 
 Implemented a selector-driven VN Play session setup dialog, a minimal WebUI characters API wrapper/types, readiness and compatibility warning states, manual ID fallback on selector load failure, empty-state guidance, and selector-aware VN Play smoke mocks.
@@ -65,7 +65,7 @@ Verification recorded:
 PR #1409 review follow-up: verified unresolved review threads, then added regressions and fixes for paginated character loading via /characters/query, bounded VN asset readiness request fan-out, rendering selectors before readiness completes, and duplicate readiness-warning React keys. Verification: red run failed 5 expected tests before fixes; final focused vitest passed 5 files / 26 tests; touched-file ESLint exited 0; git diff --check exited 0; VN Play smoke passed 1 test outside the sandbox after port binding was denied inside the sandbox. Bandit remains not applicable because touched production code is frontend TypeScript/React only.
 
 Closeout review 2026-05-23: confirmed PR #1409 merged into `dev` at merge commit `ad27e6af6fa4511e7d2e27bc96595912fa4db049`. Current `origin/dev` still contains the selector-driven VN Play setup ownership in `NewSessionDialog.tsx`, `lib/api/characters.ts`, `types/characters.ts`, focused `VNPlayWorkspace` coverage, and the selector-based VN Play smoke test. Backlog MCP resolves `TASK-157` to a different duplicate task, so this closeout used the exact VN Play task path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

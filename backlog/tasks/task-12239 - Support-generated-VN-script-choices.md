@@ -43,14 +43,14 @@ Implement Task 6 from Docs/superpowers/plans/2026-05-10-vn-scripted-generation-b
 <!-- AC:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added generated `choice_set` projection from active generation revisions into scripted public state.
 - Generated choices retain internal authored `on_generated_choice` targets only in private script position; public state omits targets and exposes source, generation_id, and revision_id.
 - Selection validates generated choices against the active revision for the current generation point before branching, including revision-owned id/text/metadata and the private authored target from the persisted opcode snapshot.
 - Selection records generated-choice metadata on `choice_selected` events and writes `last_generated_choice.id`, `.text`, and `.metadata` variables.
 - Generated-choice branch events and later scripted continuation events inherit the active branch id so branch event filtering does not depend on replaying untagged events.
 - Parser coverage now explicitly rejects model-provided `target` and `next_label` fields on generated choices.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Verification
 <!-- SECTION:VERIFICATION:BEGIN -->

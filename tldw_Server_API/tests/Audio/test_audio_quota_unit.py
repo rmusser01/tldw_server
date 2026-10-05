@@ -45,13 +45,6 @@ class _AlwaysFailingAudioQuotaPool:
         raise RuntimeError("audio table ensure failed at /private/audio-quota.db")
 
 
-class _SimpleRGRequest:
-    def __init__(self, *, entity: str, categories: dict, tags: dict) -> None:
-        self.entity = entity
-        self.categories = categories
-        self.tags = tags
-
-
 @pytest.mark.asyncio
 async def test_daily_ledger_init_failure_log_is_sanitized(monkeypatch):
     from tldw_Server_API.app.core.Usage import audio_quota
@@ -171,38 +164,6 @@ async def test_get_daily_minutes_used_failure_log_is_sanitized(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_user_override_limits_failure_log_is_sanitized(monkeypatch):
-    from tldw_Server_API.app.core.Usage import audio_quota
-    from tldw_Server_API.app.core.UserProfiles import overrides_repo
-
-    class _FailingOverridesRepo:
-        def __init__(self, pool) -> None:  # noqa: ARG002
-            pass
-
-        async def ensure_tables(self) -> None:
-            raise RuntimeError("audio override lookup failed at /private/overrides.db")
-
-        async def list_overrides_for_user(self, user_id: int):  # noqa: ARG002
-            return []
-
-    async def _fake_get_db_pool():
-        return object()
-
-    logger_stub = _LoggerStub()
-    monkeypatch.setattr(audio_quota, "get_db_pool", _fake_get_db_pool)
-    monkeypatch.setattr(overrides_repo, "UserProfileOverridesRepo", _FailingOverridesRepo)
-    monkeypatch.setattr(audio_quota, "logger", logger_stub)
-
-    overrides = await audio_quota._get_user_override_limits(123)
-
-    assert overrides == {}
-    assert logger_stub.debugs == ["Audio quota overrides unavailable"]
-    assert "123" not in str(logger_stub.debugs)
-    assert "audio override lookup failed" not in str(logger_stub.debugs)
-    assert "/private/overrides.db" not in str(logger_stub.debugs)
-
-
-@pytest.mark.asyncio
 async def test_ledger_remaining_minutes_failure_log_is_sanitized(monkeypatch):
     from tldw_Server_API.app.core.Usage import audio_quota
 
@@ -241,82 +202,6 @@ async def test_increment_jobs_started_failure_log_is_sanitized(monkeypatch):
     assert logger_stub.debugs == ["increment_jobs_started failed"]
     assert "audio quota write failed" not in str(logger_stub.debugs)
     assert "/private/audio-quota.db" not in str(logger_stub.debugs)
-
-
-@pytest.mark.asyncio
-async def test_can_start_job_rg_reserve_failure_log_is_sanitized(monkeypatch):
-    from tldw_Server_API.app.core.Usage import audio_quota
-
-    class _FailingGovernor:
-        async def reserve(self, req, op_id=None):  # noqa: ARG002
-            raise RuntimeError("rg jobs reserve failed at /private/rg.sock")
-
-    async def _fake_get_audio_rg_governor():
-        return _FailingGovernor()
-
-    async def _noop_fallback(reason: str) -> None:  # noqa: ARG001
-        return None
-
-    logger_stub = _LoggerStub()
-    monkeypatch.setattr(audio_quota, "_get_audio_rg_governor", _fake_get_audio_rg_governor)
-    monkeypatch.setattr(audio_quota, "_log_rg_audio_fallback", _noop_fallback)
-    monkeypatch.setattr(audio_quota, "RGRequest", _SimpleRGRequest)
-    monkeypatch.setattr(audio_quota, "logger", logger_stub)
-
-    allowed, message = await audio_quota.can_start_job(123)
-
-    assert allowed is True
-    assert message == "OK"
-    assert logger_stub.debugs == ["RG reserve failed for jobs, failing open"]
-    assert "rg jobs reserve failed" not in str(logger_stub.debugs)
-    assert "/private/rg.sock" not in str(logger_stub.debugs)
-
-
-@pytest.mark.asyncio
-async def test_can_start_stream_rg_reserve_failure_log_is_sanitized(monkeypatch):
-    from tldw_Server_API.app.core.Usage import audio_quota
-
-    class _FailingGovernor:
-        async def reserve(self, req, op_id=None):  # noqa: ARG002
-            raise RuntimeError("rg streams reserve failed at /private/rg.sock")
-
-    async def _fake_get_audio_rg_governor():
-        return _FailingGovernor()
-
-    async def _noop_fallback(reason: str) -> None:  # noqa: ARG001
-        return None
-
-    logger_stub = _LoggerStub()
-    monkeypatch.setattr(audio_quota, "_get_audio_rg_governor", _fake_get_audio_rg_governor)
-    monkeypatch.setattr(audio_quota, "_log_rg_audio_fallback", _noop_fallback)
-    monkeypatch.setattr(audio_quota, "RGRequest", _SimpleRGRequest)
-    monkeypatch.setattr(audio_quota, "logger", logger_stub)
-
-    allowed, message = await audio_quota.can_start_stream(123)
-
-    assert allowed is True
-    assert message == "OK"
-    assert logger_stub.debugs == ["RG reserve failed for streams, failing open"]
-    assert "rg streams reserve failed" not in str(logger_stub.debugs)
-    assert "/private/rg.sock" not in str(logger_stub.debugs)
-
-
-@pytest.mark.asyncio
-async def test_can_start_stream_propagates_cancellation(monkeypatch):
-    from tldw_Server_API.app.core.Usage import audio_quota
-
-    class _CancellingGovernor:
-        async def reserve(self, req, op_id=None):  # noqa: ARG002
-            raise asyncio.CancelledError()
-
-    async def _fake_get_audio_rg_governor():
-        return _CancellingGovernor()
-
-    monkeypatch.setattr(audio_quota, "_get_audio_rg_governor", _fake_get_audio_rg_governor)
-    monkeypatch.setattr(audio_quota, "RGRequest", _SimpleRGRequest)
-
-    with pytest.raises(asyncio.CancelledError):
-        await audio_quota.can_start_stream(123)
 
 
 @pytest.mark.asyncio

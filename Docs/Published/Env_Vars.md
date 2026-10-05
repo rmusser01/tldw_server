@@ -315,12 +315,15 @@ Pytest markers
 
 ## Usage Quotas
 
-Usage quotas are per-user budgets: audio minutes, storage, chatbook exports and imports, media ingest bytes and concurrency, workflow runs, and billing-plan limits. They are **off by default**: a stock install, single-user or multi-user, applies none of them. Request rate limits are separate (Resource Governor, below). Design: `Docs/Design/2026-10-02-usage-quota-posture-design.md`.
+Usage quotas are per-user budgets, **off by default**: a stock install, single-user or multi-user, applies none. Request rate limits are separate (Resource Governor, below). Design: `Docs/Design/2026-10-02-usage-quota-posture-design.md`.
 
-- `USAGE_QUOTAS_ENABLED`: master switch for every usage quota (`true|1|false|0`). Resolution: this env var > `LIMIT_ENFORCEMENT_ENABLED` (legacy, when set) > `config.txt` `[Usage-Quotas] enabled` > default `false`. With it off, quota checks never block, and usage is still recorded, so turning it on mid-day counts correctly — except media ingest bytes, which are not counted while quotas are off until a later PR.
-- `LIMIT_ENFORCEMENT_ENABLED`: **deprecated** spelling of `USAGE_QUOTAS_ENABLED`. It is honored only when `USAGE_QUOTAS_ENABLED` is unset, and logs a one-time warning. Its old default was `true`. A deploy that relied on that default must now set `USAGE_QUOTAS_ENABLED=true`.
-- Billing-plan limits additionally need a billing repository, which only the hosted product wires in. Without one, billing checks never run, even with quotas on, and accounts without an organization are never refused. If a billing repository is wired while quotas are off, the server logs a warning once, at startup.
-- This switch does not gate evaluations. In this PR the stock Resource Governor policy simply no longer has evaluation daily caps; evaluations return to gated status in a later PR.
+- `USAGE_QUOTAS_ENABLED`: master switch (`true|1|false|0`). Resolution: this env var > `LIMIT_ENFORCEMENT_ENABLED` (legacy, when set; warns once) > `config.txt` `[Usage-Quotas] enabled` > default `false`. Usage is recorded whether or not it is on.
+- With the switch on, a quota applies only where a platform admin set a value. Values are UserProfiles `limits.*` keys, set per user (`PATCH /api/v1/admin/users/{id}/profile`) or per team/org (`PUT`/`DELETE /api/v1/admin/{orgs|teams}/{id}/profile/overrides/{key}`, body `{"value": n}`; `null` removes). A team or org value is each member's own allowance. The user's own value wins; otherwise the most generous value among their teams that set the key; otherwise the most generous among their orgs. `0` blocks; no value anywhere means unlimited. Changes reach every worker within 60 s.
+- Keys: `limits.audio_daily_minutes`, `limits.transcription_minutes_per_month`, `limits.audio_concurrent_jobs` (queued jobs), `limits.llm_tokens_per_month` (enforced on `/chat/completions`), `limits.rag_queries_per_day` (RAG, Text2SQL, MCP), `limits.media_ingest_mb_per_day`, `limits.workflows_runs_per_day` (API-started and scheduled), `limits.evaluations_per_day`, `limits.evaluation_tokens_per_day`, `limits.chatbooks_exports_per_day`, `limits.chatbooks_imports_per_day`, `limits.chatbooks_concurrent_jobs`, `limits.storage_quota_mb` (per user only for now). Days and months are UTC.
+- Not quotas (unchanged): per-file upload size caps, character-chat count caps, per-minute rates. Synchronous concurrency (media ingest requests, audio streams, direct transcription) is not limited per user.
+- Billing-plan limits additionally need a billing repository (hosted product only); without one, billing checks never run. A wired repository with the switch off logs a warning once, at startup.
+- Operators on `RG_POLICY_STORE=db` whose stored `evals.*` policies carry a `daily_cap` keep that cap until they remove it from the stored policy; evaluation daily caps now come from `limits.evaluations_per_day` / `limits.evaluation_tokens_per_day`.
+- `WORKFLOWS_DISABLE_QUOTAS` and `CHATBOOKS_DISABLE_QUOTAS` (`true|1`): per-module escape hatches that turn off the workflows and chatbooks quota checks respectively, even with the master switch (`USAGE_QUOTAS_ENABLED`) on. `WORKFLOWS_DISABLE_QUOTAS` is read inside `quota_checks.workflows_runs_decision`, so it covers both the `/workflows` endpoint's daily-cap check and the scheduler's direct call for scheduled runs. `CHATBOOKS_DISABLE_QUOTAS` is read by `Chatbooks.quota_manager.QuotaManager`, covering exports/day, imports/day, and concurrent-jobs admission.
 
 ## Resource Governor (Unified Rate Limiting)
 
@@ -819,9 +822,12 @@ Notes:
   - `CLAIMS_REBUILD_MAX_QUEUE_ALERT`: Queue size threshold for rebuild alerts.
   - `CLAIMS_REBUILD_HEARTBEAT_WARN_SEC`: Heartbeat staleness threshold.
   - `CLAIMS_PROVIDER_COST_MULTIPLIERS`: Cost map for provider metrics.
-  - `CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED`: Enable nightly review metrics aggregation.
-  - `CLAIMS_REVIEW_METRICS_INTERVAL_SEC`: Review metrics scheduler interval (seconds).
-  - `CLAIMS_REVIEW_METRICS_LOOKBACK_DAYS`: Days of review log to aggregate per run.
+  - `CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED`: Enable recurring review metrics production (default `false`).
+  - `CLAIMS_REVIEW_METRICS_INTERVAL_SEC`: Interval in seconds (default `86400`, minimum `60`). Invalid/nonpositive values use the default; numeric values outside supported datetime bounds disable this scheduler.
+  - `CLAIMS_REVIEW_METRICS_LOOKBACK_DAYS`: Inclusive UTC days per run (default `2`, capped at `366`). Invalid/nonpositive values use the default.
+  - `CLAIMS_REVIEW_METRICS_JOBS_ENABLED`: Route aggregation through shared Jobs when `CLAIMS_JOBS_ENABLED` is also true (default `false`). Otherwise the one-release compatibility-local route remains active. Routing is captured at startup; restart after changes.
+  - `CLAIMS_JOBS_MAX_RETRIES_REVIEW_METRICS`: Shared Jobs execution retry budget (default `3`, valid range `0..100`). Independent of the producer's three transient-only admission attempts.
+  - The producer uses `CLAIMS_JOBS_QUEUE` (default `default`) and does not require a local worker: `CLAIMS_JOBS_WORKER_ENABLED` only controls local worker startup. Deploy a Claims worker on the same Jobs database and queue before cutover. See [Claims monitoring rollout](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Product/Claims_Module/Claims_Monitoring_Implementation.md#review-metrics-aggregation).
   - Email delivery uses `EMAIL_PROVIDER` (default `mock`) and SMTP settings when enabled.
 
 ## Watchlists Module

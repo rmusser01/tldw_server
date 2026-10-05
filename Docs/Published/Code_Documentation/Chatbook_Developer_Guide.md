@@ -236,6 +236,12 @@ then adds `features_used`, `producer`, `source_instance`, `compatibility`, and
 incrementally for content types that have stable structured restore payloads;
 until then, content payloads keep the v1-compatible `file_path` layout.
 
+Character JSON payloads preserve image bytes as a base64 `image` string with
+`image_encoding: "base64"`. Import validates this encoding and restores the
+bytes before database insertion. Character serialization errors fail the export
+job; character JSON is serialized before its file is opened so unsupported
+values cannot leave a truncated payload in a completed archive.
+
 Preview keeps `preview_chatbook()` as the legacy two-tuple. The API endpoint
 prefers `preview_chatbook_with_report()`, which reuses the safe extraction flow
 and adds the v1.1 preview report from `build_preview_report()`. This keeps

@@ -36,11 +36,11 @@ Resolve remaining review feedback on PR #1240 for ChaCha exemplar delegation. Sc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_chacha_character_store.py -k 'does_not_proxy or format_map or shared_by_stores' -v failed as expected. Failures covered unbounded CharacterStore proxy, remaining exemplar .format_map usage, and missing shared exemplar_normalization module.
 
 Green verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_chacha_character_store.py tldw_Server_API/tests/ChaChaNotesDB/test_chacha_persona_state_store.py -v passed 31 tests. git diff --check passed. Bandit on touched app code wrote /tmp/bandit_pr1240_review.json with zero findings; warnings were existing nosec notices only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

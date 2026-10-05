@@ -30,7 +30,7 @@ Implement the first MCP/profile policy decision-model slice from the approved pl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented MCP policy decision core per the plan. Added package-owned PolicyDecision/PolicyDecisionRule/PolicyExplanation models, safe command-rule compilation, tool-only decision evaluation, EffectivePolicyResult.decision metadata, redacted explanation helpers, and public profile package exports.
 
 Review/quality notes:
@@ -43,7 +43,7 @@ Touched files:
 - mcp_unified/profiles/__init__.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_profile_policy_decisions.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_profile_structured_resolution.py
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

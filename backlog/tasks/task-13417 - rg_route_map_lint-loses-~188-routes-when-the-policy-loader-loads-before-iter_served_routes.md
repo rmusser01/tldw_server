@@ -39,13 +39,13 @@ vs. calling iter_served_routes(app.routes) once before importing/using default_p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause was import order, not the FastAPI route cache: rg_route_map_lint.main() imported policy_loader before load_app(), which imports core/config.py. Outside pytest that module caches the real config.txt at import, so load_app()'s TLDW_CONFIG_FILE copy was ignored and all 188 routes of default-off routers (benchmarks, connectors, personalization, audiobooks, slack, sandbox, ...) never mounted. Under pytest the config import is lazy, so CI never saw it; the 'iter_served_routes first' observation was a red herring.
 Fix: route_auth_ratchet.load_app() calls config.clear_config_cache() when config is already imported, so the built app does not depend on what the caller imported first.
 Lint setup moved into load_inputs(). New test test_lint_sees_the_routes_a_fresh_app_serves compares it with a fresh load_app() in subprocesses with the pytest markers dropped; the shipped-map test runs the same way.
 Removed the by_path allowlist entries for /api/v1/benchmarks*, /api/v1/connectors* and /api/v1/personalization*. The lint is clean at 2878 routes with no new findings. Lint tests: 20 passed. Bandit: CI helper and test only; scoped run not needed. No docs affected.
 Side fix in the same PR: test_rg_metrics_redis_backend used a fixed namespace against the local real Redis and flaked on back-to-back runs; it now uses a uuid namespace.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

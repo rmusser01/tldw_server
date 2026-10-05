@@ -33,13 +33,13 @@ Improve post-v1 native CodeGraph context assembly so codegraph.context selects a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan added at Docs/superpowers/plans/2026-05-05-native-codegraph-context-ranking-implementation-plan.md. While mapping the MCP flow, noted that context currently searches the full task string, so the implementation will also collect token-level candidates before ranking while preserving public response shape.
 
 Implemented context ranking and token-level candidate collection. Verification: context+MCP focused subset passed with 35 passed and 5 warnings; full CodeGraph plus MCP module suite passed with 163 passed and 5 warnings; Ruff touched scope passed; Bandit /tmp/bandit_codegraph_context_ranking.json reported 0 results; git diff --check passed.
 
 Self-review added a regression for early common-token candidate starvation and changed context candidate collection to distribute the bounded candidate budget across whole-task and token searches before ranking.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

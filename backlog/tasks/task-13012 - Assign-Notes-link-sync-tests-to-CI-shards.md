@@ -31,11 +31,11 @@ PR #2773 rebased onto dev after PR #2782, which added two Notes test files witho
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Discovered while rebasing PR #2773 onto dev 414e81a12a; local reproduction reports exactly the two tests introduced by PR #2782.
 
 Verification: each new test path appears in all five duplicated shard matrices. Helper_Scripts/ci/check_shard_coverage.py passes with shards=773, test_files=4251, ignored=4, baseline=130, new_uncovered=0. The two affected test files pass: 29 passed. Bandit is not applicable because only CI YAML and task metadata changed. A broader CI policy run had five unrelated current-dev failures; the branch diff confirms this task changes only shard path entries.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

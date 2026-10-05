@@ -30,9 +30,9 @@ Executed three stages: synthetic benchmark baseline; real main-app lifespan and 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Synthetic SQLite benchmark: 10,000 messages, 150 warm default-mix queries p50 15.39 ms/p95 30.85 ms; 90 warm NFR-operator queries p50 9.91 ms/p95 21.19 ms. Main app lifespan + search/detail/media integration passed; full affected module 11 passed. Ruff check/format pass; Bandit zero findings. Reviewer found the initial /tmp-only benchmark evidence gap; both synthetic JSON reports are now committed under Docs/Operations with two-step fixture provenance. No other actionable review finding. Remaining release gates: chosen deployment and backend, real socket readiness, PostgreSQL/RLS if chosen, 1M-message scale, archive ingestion throughput, and owner sign-off. Optional Gmail/OAuth remains deferred.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
