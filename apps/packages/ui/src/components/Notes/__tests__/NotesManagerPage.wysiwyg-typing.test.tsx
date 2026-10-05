@@ -392,7 +392,10 @@ describe("NotesManagerPage WYSIWYG typing (NE-01)", { timeout: 60_000 }, () => {
     conflictOnPut = true
     serverNotes["note-a"].content = "Server version body"
     await user.keyboard("{Control>}s{/Control}")
-    fireEvent.click(await screen.findByTestId("notes-save-conflict-reload"))
+    // The single conflict panel (NS-03) replaced the "Reload" notice; "Use
+    // their version" is the reload. jsdom has no clipboard, so the discard
+    // confirm (mocked to accept) stands in for the copy.
+    fireEvent.click(await screen.findByTestId("notes-conflict-take-theirs"))
 
     await waitFor(() => {
       expect(screen.getByTestId("notes-wysiwyg-editor").textContent).toBe("Server version body")

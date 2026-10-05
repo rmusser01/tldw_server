@@ -195,7 +195,8 @@ describe('Notes saved-state hydration and optional monitoring', () => {
       await view.result.current.loadDetail('one')
     })
     expect(view.result.current.saveIndicator).toBe('saved')
-    expect(view.result.current.saveIndicatorText).toBe('All changes saved')
+    // The pill is the only status now (NS-06); no second "All changes saved" line.
+    expect(view.result.current.saveIssue).toBeNull()
     expect(view.result.current.selectedLastSavedAt).toBe(
       '2026-09-15T12:00:00.000Z'
     )
@@ -322,7 +323,8 @@ describe('Notes saved-state hydration and optional monitoring', () => {
     const view = renderEditor()
     await act(async () => {})
     expect(await editAndSave(view)).toBe(false)
-    expect(view.result.current.saveIndicator).toBe('error')
+    // No HTTP status: a transient failure that will retry, never "saved" (#3102).
+    expect(view.result.current.saveIndicator).toBe('retrying')
     expect(view.result.current.content).toBe('New note content')
     expect(
       mocks.request.mock.calls.some(([r]) =>
