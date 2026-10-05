@@ -107,6 +107,8 @@ import { useChatLoopState } from "@/services/chat-loop/hooks";
 import { subscribeChatLoopEvents } from "@/services/chat-loop/bridge";
 import { extractChatLoopEvent } from "@/services/chat-loop/stream";
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing";
+import { useConnectionStore } from "@/store/connection";
+import { ConnectionPhase } from "@/types/connection";
 import { syncChatSettingsForServerChat } from "@/services/chat-settings";
 import {
   loadServicePromptSnapshot,
@@ -2955,6 +2957,7 @@ export const useMessage = () => {
                     }
                   : undefined,
                 serverChatId,
+                setServerChatId,
                 selectionSource,
                 toolChoice: resolvedToolChoice,
                 selectedModel: model,
@@ -3005,10 +3008,19 @@ export const useMessage = () => {
                   ? {
                       controller: normalHistorySelection,
                       originIsCurrent: historyOriginIsCurrent!,
-                      temporary: temporaryChat
+                      temporary: temporaryChat,
+                      createServerChat:
+                        !image &&
+                        !(chatHistory || messages).length && !(memory || history).length &&
+                        !resolvedWebSearch &&
+                        useConnectionStore.getState().state.isConnected &&
+                        useConnectionStore.getState().state.phase === ConnectionPhase.CONNECTED &&
+                        useConnectionStore.getState().state.mode === "normal" &&
+                        !useConnectionStore.getState().state.offlineBypass
                     }
                   : undefined,
                 serverChatId,
+                setServerChatId,
                 selectionSource,
                 toolChoice: resolvedToolChoice,
                 selectedModel: model,

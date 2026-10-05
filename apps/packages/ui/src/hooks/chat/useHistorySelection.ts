@@ -287,7 +287,8 @@ export function useHistorySelection(
       owner: HistoryOwnerV1,
       reference?: HistorySelectionReference | null,
       onOpened?: (receipt: HistoryLoadReceipt) => void,
-      isCurrentLoad: () => boolean = () => true
+      isCurrentLoad: () => boolean = () => true,
+      resetOnCancel = false
     ) => {
       const operation = invalidate()
       if (owner.kind === "unavailable" || (owner.kind === "local" && !owner.validate_lease)) {
@@ -457,6 +458,13 @@ export function useHistorySelection(
           error: errorCode(error)
         })
         return true
+      } finally {
+        if (resetOnCancel && operation.epoch === epoch.current && !isCurrentLoad() && live.current.owner === owner) {
+          invalidate()
+          releaseOwnerLease.current?.()
+          releaseOwnerLease.current = null
+          publish(initialState())
+        }
       }
     },
     [install, invalidate, publish]
@@ -683,6 +691,7 @@ export function useHistorySelection(
         scope?: import("@/types/chat-scope").ChatScope
         bindUnbound?: boolean
         isCurrent?: () => boolean
+        resetOnCancel?: boolean
       },
       reference?: HistorySelectionReference | null,
       onLoaded?: (receipt: HistoryLoadReceipt) => void
@@ -807,7 +816,7 @@ export function useHistorySelection(
           validate_lease: () => valid && isCurrent()
         }
         capturedOwner = owner
-        const result = await open(owner, reference, opened, isCurrent)
+        const result = await open(owner, reference, opened, isCurrent, target.resetOnCancel)
         // Only an explicit action plus an authorized owner capture can bind an old mirror.
         if (
           target.bindUnbound &&
