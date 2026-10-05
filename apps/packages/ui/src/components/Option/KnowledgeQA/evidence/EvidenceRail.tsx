@@ -29,9 +29,9 @@ function EvidenceRailContent({
   onTabChange,
   resultsCount,
   citationsCount,
-  closeButtonRef,
+  showHeader = true,
 }: Omit<EvidenceRailProps, "open" | "className"> & {
-  closeButtonRef?: React.Ref<HTMLButtonElement>
+  showHeader?: boolean
 }) {
   const [sourceAnnouncement, setSourceAnnouncement] = useState("")
 
@@ -46,21 +46,22 @@ function EvidenceRailContent({
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {sourceAnnouncement}
       </div>
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <h2 className="text-sm font-semibold">Evidence</h2>
-        <span className="text-xs text-text-muted">
-          {resultsCount} sources • {citationsCount} citations
-        </span>
-        <button
-          type="button"
-          onClick={() => onOpenChange(false)}
-          className="ml-auto flex items-center justify-center min-w-8 min-h-8 h-8 w-8 rounded-md text-text-muted hover:bg-hover hover:text-text transition-colors"
-          ref={closeButtonRef}
-          aria-label="Close evidence panel"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
+      {showHeader ? (
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <h2 className="text-sm font-semibold">Evidence</h2>
+          <span className="text-xs text-text-muted">
+            {resultsCount} sources • {citationsCount} citations
+          </span>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="ml-auto flex items-center justify-center min-w-8 min-h-8 h-8 w-8 rounded-md text-text-muted hover:bg-hover hover:text-text transition-colors"
+            aria-label="Close evidence panel"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
       <div className="border-b border-border px-3 py-2">
         <div className="inline-flex rounded-md border border-border bg-bg-subtle p-0.5">
           <button
@@ -129,7 +130,7 @@ export function EvidenceRail({
 }: EvidenceRailProps) {
   const isDesktop = useDesktop()
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)")
-  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const drawerRef = useRef<HTMLDivElement>(null)
 
   if (isDesktop) {
     if (!open) {
@@ -213,12 +214,25 @@ export function EvidenceRail({
           : {})}
         open={open}
         drawerRender={(content) => (
-          <div onKeyDown={containDialogTab}>{content}</div>
+          <div ref={drawerRef} onKeyDown={containDialogTab}>
+            {content}
+          </div>
         )}
         afterOpenChange={(visible) => {
-          if (visible) closeButtonRef.current?.focus()
+          if (visible)
+            drawerRef.current
+              ?.querySelector<HTMLButtonElement>(
+                '[aria-label="Close evidence panel"]',
+              )
+              ?.focus()
         }}
-        title="Evidence"
+        title={<h2 className="text-sm font-semibold">Evidence</h2>}
+        closable={{ "aria-label": "Close evidence panel" }}
+        extra={
+          <span className="text-xs text-text-muted">
+            {resultsCount} sources • {citationsCount} citations
+          </span>
+        }
         onClose={() => onOpenChange(false)}
         size="min(88vw, 28rem)"
         styles={{ body: { padding: 0 }, wrapper: { maxWidth: "100vw" } }}
@@ -228,7 +242,7 @@ export function EvidenceRail({
           className="h-full pb-[env(safe-area-inset-bottom)]"
         >
           <EvidenceRailContent
-            closeButtonRef={closeButtonRef}
+            showHeader={false}
             tab={tab}
             onOpenChange={onOpenChange}
             onTabChange={onTabChange}
