@@ -39,6 +39,17 @@ def test_skip_values_include_the_configured_default(monkeypatch: pytest.MonkeyPa
     assert storage_quota_backfill.skip_values() == [5120, 10240]
 
 
+def test_skip_values_fall_back_to_legacy_default_when_settings_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A settings failure still yields the legacy 5120 skip value (and logs a warning)."""
+
+    def _boom():
+        """Fail like an unreadable settings source."""
+        raise RuntimeError("settings unavailable")
+
+    monkeypatch.setattr(authnz_settings, "get_settings", _boom)
+    assert storage_quota_backfill.skip_values() == [5120]
+
+
 def test_copies_only_non_default_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """2048 is copied; 5120 and the configured default (10240) are dropped; an existing override is kept."""
     monkeypatch.setattr(storage_quota_backfill, "skip_values", lambda: [5120, 10240])
@@ -68,3 +79,18 @@ def test_skips_when_users_table_absent(tmp_path: Path) -> None:
     apply_authnz_migrations(db_path)
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 100
+
+
+def test_skips_when_users_table_has_no_quota_column(tmp_path: Path) -> None:
+    """A version-99 DB whose users table lacks storage_quota_mb migrates to 100 and writes no override."""
+    db_path = tmp_path / "nocolumn.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TIMESTAMP NOT NULL)")
+        conn.execute("INSERT INTO schema_migrations VALUES (99, 'synthetic', CURRENT_TIMESTAMP)")
+        conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT)")
+        conn.execute("INSERT INTO users (username) VALUES ('nocol')")
+    apply_authnz_migrations(db_path)
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 100
+        # The skip returns before the overrides table is even created, so nothing was written.
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'user_config_overrides'").fetchone() is None
