@@ -7,6 +7,10 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import add_org_member, add_team_member, create_organization, create_team
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Usage import quota_resolver
@@ -16,6 +20,10 @@ from tldw_Server_API.app.services import admin_profiles_service
 pytestmark = pytest.mark.unit
 
 KEY = "limits.rag_queries_per_day"
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -33,8 +41,8 @@ def _setup_org_and_team(user_id: int) -> tuple[int, int]:
         """Create and join."""
         org = await create_organization(name=f"Quota Org {suffix}", owner_user_id=None)
         team = await create_team(org_id=int(org["id"]), name=f"Quota Team {suffix}")
-        await add_org_member(org_id=int(org["id"]), user_id=user_id)
-        await add_team_member(team_id=int(team["id"]), user_id=user_id)
+        await add_org_member(org_id=int(org["id"]), user_id=user_id, context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+        await add_team_member(team_id=int(team["id"]), user_id=user_id, context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
         return int(org["id"]), int(team["id"])
 
     return asyncio.run(_go())

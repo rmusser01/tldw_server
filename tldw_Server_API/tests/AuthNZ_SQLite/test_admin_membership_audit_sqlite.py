@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.tests.helpers.audit_helpers import await_audit_action, flush_audit_events
 from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
+from tldw_Server_API.tests.helpers.audit_helpers import await_audit_action, flush_audit_events
 
 
 @pytest.mark.real_audit
@@ -21,9 +21,9 @@ async def test_admin_org_membership_audit_events_sqlite(tmp_path, real_audit_ser
     os.environ['DATABASE_URL'] = f'sqlite:///{db_path}'
 
     # Reset singletons and init schema
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     reset_settings()
     await reset_db_pool()
 
@@ -39,8 +39,8 @@ async def test_admin_org_membership_audit_events_sqlite(tmp_path, real_audit_ser
     )
 
     # Prepare app
-    from tldw_Server_API.app.main import app
     from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.main import app
     app_settings['CSRF_ENABLED'] = False
 
     with TestClient(app) as client:
@@ -57,6 +57,40 @@ async def test_admin_org_membership_audit_events_sqlite(tmp_path, real_audit_ser
         )
         assert r.status_code == 200, r.text
 
+        for role in ("admin", "admin"):
+            r = client.patch(
+                f"/api/v1/admin/orgs/{org['id']}/members/{target_id}",
+                json={"role": role},
+                headers={"X-API-KEY": os.environ['SINGLE_USER_API_KEY']},
+            )
+            assert r.status_code == 200, r.text
+
+        r = client.delete(
+            f"/api/v1/admin/orgs/{org['id']}/members/{target_id}",
+            headers={"X-API-KEY": os.environ['SINGLE_USER_API_KEY']},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["removed"] is True
+
+        r = client.delete(
+            f"/api/v1/admin/orgs/{org['id']}/members/{target_id}",
+            headers={"X-API-KEY": os.environ['SINGLE_USER_API_KEY']},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["removed"] is False
+
+        r = client.post(
+            f"/api/v1/admin/orgs/{org['id']}/members",
+            json={"user_id": target_id, "role": "owner"},
+            headers={"X-API-KEY": os.environ['SINGLE_USER_API_KEY']},
+        )
+        assert r.status_code == 200, r.text
+        r = client.delete(
+            f"/api/v1/admin/orgs/{org['id']}/members/{target_id}",
+            headers={"X-API-KEY": os.environ['SINGLE_USER_API_KEY']},
+        )
+        assert r.status_code == 400, r.text
+
         flush_audit_events(client, int(admin_id))
 
     # Ensure audit services flush events before inspection.
@@ -68,5 +102,6 @@ async def test_admin_org_membership_audit_events_sqlite(tmp_path, real_audit_ser
     audit_db = DatabasePaths.get_audit_db_path(int(admin_id))
     assert audit_db.exists(), f"Audit DB not found: {audit_db}"
 
-    cnt = await await_audit_action(audit_db, "org_member.add")
-    assert cnt >= 1
+    assert await await_audit_action(audit_db, "org_member.add") == 2
+    assert await await_audit_action(audit_db, "org_member.update") == 2
+    assert await await_audit_action(audit_db, "org_member.remove") == 1

@@ -32,12 +32,25 @@ from tldw_Server_API.app.core.AuthNZ.byok_testing import (
     test_provider_credentials,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipAuthority,
+    MembershipAuthorizationError,
+    MembershipScopeNotFound,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
     AuthnzOrgProviderSecretsRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
     AuthnzUserProviderSecretsRepo,
+)
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
 )
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
@@ -91,6 +104,8 @@ async def get_shared_byok_repo() -> AuthnzOrgProviderSecretsRepo:
         return repo
     except HTTPException:
         raise
+    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as exc:
+        raise _shared_key_control_http_exception(exc) from exc
     except Exception as exc:
         logger.error("Failed to initialize shared BYOK repository")
         raise HTTPException(
@@ -105,6 +120,59 @@ def require_byok_enabled() -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="BYOK is disabled in this deployment",
         )
+
+
+def _platform_admin_membership_context(
+    principal: AuthPrincipal,
+) -> ActorMembershipWriteContext:
+    if type(principal.user_id) is not int or principal.user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage shared BYOK keys",
+        )
+    return ActorMembershipWriteContext(
+        actor_user_id=principal.user_id,
+        required_authority=MembershipAuthority.PLATFORM_ADMIN,
+    )
+
+
+_SHARED_KEY_CONTROL_ERRORS = (
+    MembershipAuthorizationError,
+    MembershipScopeNotFound,
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+    TimeoutError,
+)
+
+
+def _shared_key_control_http_exception(
+    exc: (
+        MembershipAuthorizationError
+        | MembershipScopeNotFound
+        | ConnectionPoolExhaustedError
+        | DatabaseLockError
+        | TimeoutError
+    ),
+) -> HTTPException:
+    if isinstance(exc, MembershipAuthorizationError):
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage shared BYOK keys",
+        )
+    if isinstance(exc, MembershipScopeNotFound):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shared BYOK scope not found",
+        )
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Authentication database is busy. Please retry shortly.",
+        headers={
+            "Retry-After": str(
+                get_authnz_transaction_policy().busy_retry_after_seconds
+            ),
+        },
+    )
 
 
 def normalize_credential_fields(
@@ -229,6 +297,7 @@ async def upsert_shared_key(
     payload: SharedProviderKeyUpsertRequest,
 ) -> SharedProviderKeyResponse:
     require_byok_enabled()
+    authorization_context = _platform_admin_membership_context(principal)
     provider_norm = canonical_provider_name(payload.provider)
     if not is_provider_allowlisted(provider_norm):
         raise HTTPException(status_code=403, detail="Provider not allowed for BYOK")
@@ -244,6 +313,22 @@ async def upsert_shared_key(
         raise_detached_error(
             HTTPException(status_code=400, detail="Invalid provider credential fields")
         )
+
+    repo = await get_shared_byok_repo()
+    try:
+        await repo.authorize_scope_write(
+            scope_type=payload.scope_type,
+            scope_id=payload.scope_id,
+            authorization_context=authorization_context,
+        )
+    except _SHARED_KEY_CONTROL_ERRORS as exc:
+        raise _shared_key_control_http_exception(exc) from exc
+    except Exception as exc:
+        logger.error("Failed to authorize shared BYOK key mutation")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to authorize shared BYOK key mutation",
+        ) from exc
 
     try:
         await test_provider_credentials(
@@ -274,7 +359,6 @@ async def upsert_shared_key(
             HTTPException(status_code=500, detail="BYOK encryption is not configured")
         )
 
-    repo = await get_shared_byok_repo()
     now = datetime.now(timezone.utc)
     try:
         row = await repo.upsert_secret(
@@ -287,7 +371,15 @@ async def upsert_shared_key(
             updated_at=now,
             created_by=principal.user_id,
             updated_by=principal.user_id,
+            authorization_context=authorization_context,
         )
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Conflicting provider credential aliases",
+        ) from exc
+    except _SHARED_KEY_CONTROL_ERRORS as exc:
+        raise _shared_key_control_http_exception(exc) from exc
     except Exception as exc:
         logger.error("Failed to store shared BYOK key")
         raise HTTPException(status_code=500, detail="Failed to store shared BYOK key") from exc
@@ -421,6 +513,7 @@ async def delete_shared_key(
     provider: str,
 ) -> None:
     require_byok_enabled()
+    authorization_context = _platform_admin_membership_context(principal)
     repo = await get_shared_byok_repo()
     provider_norm = canonical_provider_name(provider)
     try:
@@ -429,9 +522,12 @@ async def delete_shared_key(
             scope_id,
             provider_norm,
             revoked_by=principal.user_id,
+            authorization_context=authorization_context,
         )
     except ProviderCredentialAliasConflictError as exc:
         raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
+    except _SHARED_KEY_CONTROL_ERRORS as exc:
+        raise _shared_key_control_http_exception(exc) from exc
     except Exception as exc:
         logger.error("Failed to delete shared BYOK key")
         raise HTTPException(status_code=500, detail="Failed to delete shared BYOK key") from exc

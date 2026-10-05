@@ -10,6 +10,8 @@
 
 **Source design:** `Docs/superpowers/specs/2026-07-20-userprofiles-single-update-pipeline-stage2-design.md`
 
+**ADR check (Work Package 2):** ADR required: yes. ADR path: `Docs/ADR/060-authnz-membership-writer-transaction-and-version-ownership.md`. The approved shared membership writer creates a durable AuthNZ transaction, authorization, lock-order, and profile-version ownership boundary; the ADR backfills that decision without changing the approved Stage 2 scope.
+
 **Planning baseline:** Reconciled against `origin/dev` at `2e0d3f1a2cfcad9798008f5bd249d91bbac43f07`. Before implementation, start a fresh `codex/` worktree from the then-current `origin/dev` and bring this spec and plan onto it. Re-run the inventory tests before editing because the runtime writer set may have grown.
 
 ---
@@ -665,6 +667,219 @@ Request code review with special attention to lock order and owner invariants. R
 git add tldw_Server_API/app/core/AuthNZ tldw_Server_API/app/services tldw_Server_API/tests/AuthNZ tldw_Server_API/tests/AuthNZ_Postgres tldw_Server_API/tests/UserProfile/test_profile_write_boundaries.py backlog/tasks
 git commit -m "refactor(authnz): complete membership writer migration"
 ```
+
+### October 3 PR Integration Gates
+
+## Stage 1: Current Dev Rebase and Required Gate Corrections
+**Goal**: Preserve current dev behavior and repair WP2's CI baseline/publication drift.
+**Success Criteria**: Current dev is an ancestor; Jobs ADR058 and backlog-py ADR059 are preserved; WP2 ADR060 is published; existing tenant predicate baseline matches without new exemptions.
+**Tests**: Required ratchets, backend unit smoke, profile/writer/tenant/email regression, live PostgreSQL gate, strict docs build after publication commit.
+**Status**: Complete
+
+## Stage 2: Full-Suite Fixture Compatibility
+**Goal**: Align fixtures and fakes with the approved managed membership and persisted authorization contracts.
+**Success Criteria**: Related CI failures are reproduced and pass after focused corrections; production guards and authorizations are unchanged; independent review and touched-scope Bandit have no new actionable finding.
+**Tests**: Failed AuthNZ, Privileges, Admin, Billing, Sharing, Chunking and MCP cases, plus structural inventory.
+**Status**: Complete
+
+## Stage 3: Exact-Head Review and Merge
+**Goal**: Merge PR2821 only after the authorized gates pass.
+**Success Criteria**: Exact-head required CI and Qodo review are successful, current dev is an ancestor, human Change summary remains verbatim, merge commit is read back, TASK-13001.2 is finalized, and the heartbeat is paused.
+**Tests**: Authoritative GitHub PR/ref/check/review readbacks and expected-head merge precondition.
+**Status**: In Progress
+
+### October 4 Latest-Dev Reconciliation
+
+## Stage 1: Rebase and Contract Reconciliation
+**Goal**: Preserve latest dev's quota work and the reviewed WP2 membership writer.
+**Success Criteria**: Authoritative dev75ab224081 is an ancestor; Jobs058 and backlog-py059 remain unchanged; WP2 ADR060 is published; the generated API retains new quota routes and only the approved tenant-role schema difference.
+**Tests**: Range-diff, canonical dev/current OpenAPI exports, Published parity, profile/Usage quota regressions.
+**Status**: Complete
+
+## Stage 2: Fresh Integration Verification
+**Goal**: Validate conflict resolutions and new-dev fixture compatibility.
+**Success Criteria**: Focused profiles, writer, tenant, quota and official PostgreSQL tests pass; CI contracts and Docs pass; touched-scope lint/Bandit and independent review have no new actionable finding.
+**Tests**: UserProfile/Usage tests, writer/context/lock-plan/guard/candidate/tenant tests, official live PostgreSQL WP2 gate, required CI contracts, strict Docs, Ruff/compileall and Bandit baseline comparison.
+**Status**: Complete
+
+October 4 evidence: 545 UserProfile/Usage tests passed (two Usage PostgreSQL
+cases skipped for their missing/unreachable configured database), 448 focused
+writer/profile/tenant tests passed, and all 48 official live PostgreSQL WP2
+tests passed without skips. CI contracts and ratchets passed 469 tests; four
+license-fetch cases require Bash >=4 and skip on this host's Bash 3. Publication
+and task-format parity passed 37 tests. Runtime Bandit matches latest dev's 20
+existing findings exactly, with no new findings or scan errors. Independent
+range-diff/runtime/docs/OpenAPI and fixture reviews reported no actionable
+findings. Strict Docs passed all 212 tests after commit570fb262ac supplied
+Git history for renamed ADR060. The three fixture corrections retain
+authorization guards and assertions; final Ruff/compileall and diff checks
+pass. No runtime guard, required check, or license policy was weakened.
+
+## Stage 3: Publish and Exact-Head Merge
+**Goal**: Publish the verified rebase and merge only after fresh required gates and review pass.
+**Success Criteria**: Latest authoritative dev is an ancestor; new head is pushed with an explicit lease; Qodo references that exact head with no unresolved feedback; every required gate succeeds; human Change summary remains verbatim; expected-head merge is read back and task tracking finalized.
+**Tests**: Remote ref/PR/review/check readbacks, merge commit verification.
+**Status**: In Progress
+
+### October 5 Claims-Dev Rebase
+
+## Stage 1: Preserve Upstream Integration
+**Goal**: Replay reviewed WP2 onto authoritative dev `ba553fdc51`.
+**Success Criteria**: All 27 reviewed commits retain identical patches; upstream Claims/MediaDB changes and both scope-predicate entries are preserved; WP2 runtime, tests, ADR and API fingerprint remain unchanged.
+**Tests**: Clean rebase at `b4f0d013c4`, range-diff and touched-tree comparisons.
+**Status**: Complete
+
+## Stage 2: Focused Requalification
+**Goal**: Verify shared SQLite/startup integration without changing WP2 behavior.
+**Success Criteria**: Profile/Usage, writer/tenant, existing-only SQLite, official live PostgreSQL, CI contracts and strict Docs pass; API fingerprint and Bandit remain unchanged; independent rebase review has no actionable finding.
+**Tests**: Existing profile/writer gates plus MediaDB existing-only tests, Python3.12 export, touched-scope Bandit and independent review.
+**Status**: Complete
+
+Fresh verification: Profile/Usage 546 passed, with one existing Usage aggregator PostgreSQL skip because `DATABASE_URL` is unset; writer/context/lock-plan/guard/candidate/tenant plus existing-only SQLite 485 passed; official live PostgreSQL WP2 48 passed with no skips; CI contracts/ratchets 469 passed with four local Bash 3 license-fetch skips; strict Docs 212 passed. Ruff, compileall and diff checks passed. Python 3.12 OpenAPI fingerprint remains `5cb6cf6736d7` (2107 paths, 3247 schemas). Runtime Bandit matches the prior reviewed head and unchanged dev touched scope exactly: 20 existing findings, no new findings or scan errors. Independent bounded rebase review found no actionable regression and confirmed upstream-only integration, both predicate entries and all 27 equal patches. No implementation or fixture changes; WP3 remains untouched.
+
+## Stage 3: Publish and Gated Merge
+**Goal**: Publish with an explicit lease and merge only after fresh exact-head gates pass.
+**Success Criteria**: Latest authoritative dev remains an ancestor; human Change summary stays verbatim; current-head Qodo is clear and all required checks succeed; expected-head merge is verified and task tracking finalized.
+**Tests**: Authoritative remote/PR/review/check readbacks and merge verification.
+**Status**: In Progress
+
+Before publication, authoritative dev remains `ba553fdc51a16ba04330754671f0c2ee3398e17f` and remote PR head remains `8658dc4b8098bcd1771835ae9a1b51e4b8f0c7dd`. All previous Qodo conversations, reviews and four resolved inline threads are unchanged, pagination is complete, and no review requests changes. Old-head backend, security, coverage, e2e and container gates succeeded; frontend remained queued with no actionable failures. Those statuses do not qualify the new head. Publish with an explicit old-head lease, then require fresh exact-head Qodo and all seven required gates before merging. Human Change summary remains verbatim.
+
+### October 5 Privilege-Snapshot Dev Rebase
+
+## Stage 1: Preserve Reviewed Patches
+**Goal**: Replay WP2 onto authoritative dev `61589721bc` without changing runtime behavior.
+**Success Criteria**: All 28 reviewed patches remain equal; only the upstream privilege-route snapshot differs from the reviewed tree; runtime, executable tests, ADR and API fingerprint remain byte-identical.
+**Tests**: Clean rebase at `da90f7cf01`, range-diff and tree comparison.
+**Status**: Complete
+
+## Stage 2: Snapshot Integration Verification
+**Goal**: Requalify the only changed fixture and its live privilege registry contract.
+**Success Criteria**: Privileges, CI contracts and backend ratchets pass; Python 3.12 fingerprint and runtime Bandit remain unchanged; independent bounded rebase review finds no actionable issue.
+**Tests**: Privileges/CI/ratchets, API export, runtime Ruff/compile/Bandit, snapshot parity and independent review.
+**Status**: Complete
+
+The earlier October 5 Profile/Usage, writer/SQLite and live PostgreSQL evidence is carried forward because that implementation and its executable tests are byte-identical; these broader suites are not claimed as freshly rerun. No runtime edits or WP3 work are included.
+
+Fresh combined Privileges/CI/ratchet verification initially produced 511 passed, four host Bash 3 skips and one warm-schema guard failure: earlier app clients had already warmed the process memo before the guard installed its spy. The guard passed all four cases alone, but the reduced endpoint-before-guard ordering reproduced the positive-control failure (19 passed, one failed). Clearing the existing schema-verification test cache before warmup retains both assertions and fixes test isolation without changing runtime caching. The exact combined GREEN rerun passed 512 tests with the same four skips; fresh strict Docs passed 212 tests. Runtime/fixture Ruff and compileall, canonical task normalization and diff checks passed. Python 3.12 fingerprint remains `5cb6cf6736d7` (2107 paths, 3247 schemas). Runtime Bandit retains 20 baseline findings with no new findings or errors; guard-file Bandit retains its 10 baseline B101 assertions. Independent rebase and three-line fixture reviews found no actionable issues. Upstream snapshot remains exact; all 28 replayed patches are equal.
+
+## Stage 3: Publish and Exact-Head Merge
+**Goal**: Publish with an explicit lease, then require fresh exact-head Qodo and all seven merge gates.
+**Success Criteria**: Authoritative dev remains an ancestor; human Change summary is verbatim; review feedback is resolved and every required gate succeeds; expected-head merge and task finalization are verified.
+**Tests**: Remote refs, PR/review/check readbacks and merge verification.
+**Status**: In Progress
+
+Authoritative dev is still `61589721bc9e05c2be619a076cf5d575adea3d56`; remote PR head is still `5812eab045186b19d220d9d67ae52c6cde5c8448` before the explicit-lease push. Old-head Qodo is clear, all four threads resolved, and no review requests changes. Old-head security, coverage, e2e and license gates passed, with no actionable CI failures; old-head results do not qualify the new head. Human Change summary remains verbatim.
+
+### October 5 Notes/Chat Documentation Dev Rebase
+
+## Stage 1: Preserve Reviewed Patches
+**Goal**: Replay WP2 onto authoritative dev `49cec71190` without changing reviewed behavior.
+**Success Criteria**: All 29 reviewed patches remain equal; the only tree delta is the exact three upstream Notes/Chat UX documents; WP2 runtime, executable tests, ADR and API fingerprint stay byte-identical.
+**Tests**: Clean rebase at `5e71bf9c27`, full range-diff and tree/object comparison.
+**Status**: Complete
+
+## Stage 2: Documentation Integration Verification
+**Goal**: Requalify documentation, privilege contracts and CI ratchets after the docs-only upstream merge.
+**Success Criteria**: Focused gates pass, runtime static/security and API evidence remains unchanged, and independent bounded rebase review reports no actionable issues.
+**Tests**: Combined Docs/Privileges/CI/backend ratchets, runtime Ruff/compile/Bandit, Python 3.12 OpenAPI export and independent review.
+**Status**: Complete
+
+Fresh combined verification passed 724 tests (212 Docs plus 512 Privileges/CI/ratchets), with four existing host Bash 3 license-fetch skips. Runtime Ruff and compileall passed across all 27 PR-touched runtime files. Bandit exactly matches the prior 20 baseline findings with zero new findings or scan errors. The fresh Python 3.12 fingerprint remains `5cb6cf6736d7` (2107 paths, 3247 schemas). Independent review confirms all 29 patches are equal, all three upstream documents are byte-identical to dev, and no WP3, instruction or CI-policy changes were introduced.
+
+Earlier October 5 Profile/Usage (546 passed, one environment skip), writer/SQLite (485 passed) and official live PostgreSQL WP2 (48 passed, no skips) evidence is carried forward because those runtime and executable test files are byte-identical; those suites were not freshly rerun for this docs-only upstream change. The prior test-only schema memo reset and both assertions remain unchanged. ADR060 remains governing; no new architecture decision is introduced.
+
+## Stage 3: Publish and Exact-Head Merge
+**Goal**: Publish with a lease against `6fa4502f63`, then require new exact-head Qodo and all seven successful merge gates.
+**Success Criteria**: Latest authoritative dev remains an ancestor; the human Change summary remains verbatim; no feedback is unresolved; expected-head merge and task finalization are read back.
+**Tests**: Remote refs, paginated PR/review/check readbacks and merge verification.
+**Status**: In Progress
+
+Old-head Qodo is clear with all four threads resolved and no changes-requested review. Old-head security, coverage, e2e, container and trusted-license gates passed, backend was running and frontend remained incomplete; no actionable CI failures were present. Those checks do not qualify the new head. TASK-13001.2 remains In Progress until verified merge; WP3 remains untouched.
+
+### October 5 D7 Conversation-Model Documentation Dev Rebase
+
+## Stage 1: Preserve Reviewed Patches
+**Goal**: Replay WP2 onto authoritative dev `c2260945ee` without changing reviewed behavior.
+**Success Criteria**: All 30 reviewed patches remain equal; the only tree delta is the exact upstream D7 conversation-model document; executable files, ADR060 and API fingerprint stay byte-identical.
+**Tests**: Clean rebase at `157218e5fc`, full range-diff and whole-tree/object comparison.
+**Status**: Complete
+
+The sole upstream addition is `Docs/Design/2026-10-04-d7-conversation-model.md` (724 lines). Its blob and mode match dev exactly. Excluding that document, the previous and rebased committed trees are identical; no runtime, test, instruction, CI-policy or WP3 change is introduced.
+
+## Stage 2: Documentation and Tracking Verification
+**Goal**: Verify the documentation integration and unchanged touched-scope static/security baseline.
+**Success Criteria**: Docs/task-format tests pass, runtime lint/compile/security baseline is unchanged, and independent bounded review finds no actionable issues.
+**Tests**: Docs/task-format ratchet, runtime Ruff/compileall/Bandit and independent range/tree review.
+**Status**: Complete
+
+Fresh verification passed 216 tests (212 Docs plus four task-format checks), with no skips. Ruff and compileall passed across the 27 PR-touched runtime files. Fresh runtime Bandit exactly matches the previous 20 findings (19 low, one medium), with zero new findings or scan errors. Independent review confirms all 30 patches remain equal and the sole tree delta is the byte-identical upstream document.
+
+Previous combined Docs/Privileges/CI/ratchet verification (724 passed, four host Bash 3 license-fetch skips), Profile/Usage (546 passed, one environment skip), writer/SQLite (485 passed), official live PostgreSQL WP2 (48 passed, no skips), guard-file Bandit and Python 3.12 OpenAPI export evidence are carried forward, not freshly rerun. Whole-tree identity outside the upstream document establishes that their executable inputs, prior schema memo reset/assertions and fingerprint `5cb6cf6736d7` (2107 paths, 3247 schemas) are unchanged. ADR060 remains governing.
+
+## Stage 3: Publish and Exact-Head Merge
+**Goal**: Publish with a lease against `47a262cae6`, then require new exact-head Qodo and all seven successful merge gates.
+**Success Criteria**: Latest authoritative dev remains an ancestor; the human Change summary stays verbatim; feedback is resolved; expected-head merge and official task finalization are read back.
+**Tests**: Remote refs, fully paginated PR/review/check readbacks and merge verification.
+**Status**: In Progress
+
+Before publication, old-head Qodo remains clear with all four threads resolved and no changes-requested review. Trusted license passed; remaining required CI is pending or absent, with no actionable failure. Old-head checks never qualify the new head. TASK-13001.2 stays In Progress until verified merge; WP3 remains untouched.
+
+### October 5 Cached Chat-Settings Dev Rebase
+
+## Stage 1: Preserve Reviewed Patches and Upstream Fix
+**Goal**: Replay WP2 onto authoritative dev `025627214c` without changing reviewed WP2 behavior or the upstream cached-settings fix.
+**Success Criteria**: All 31 reviewed patches remain equal; only the three exact upstream files differ from the previous head; WP2 executable inputs, ADR060 and API fingerprint stay byte-identical.
+**Tests**: Clean rebase at `0301768119`, complete range-diff, whole-tree comparison and upstream blob/mode parity.
+**Status**: Complete
+
+The upstream delta changes `CurrentChatModelSettings.tsx` to reuse `buildBaseValues()`, adds its cached Save/remount and explicit-clear regression cases, and adds TASK-13452 (122 insertions, two deletions total). All three files match dev byte-for-byte and retain mode `100644`. Excluding those files, the old and rebased committed trees are identical. No backend, instruction, CI-policy or WP3 changes were introduced; the unrelated upstream task is preserved without edits.
+
+## Stage 2: Scoped Verification and Independent Review
+**Goal**: Verify integration tracking and unchanged touched-scope backend static/security evidence.
+**Success Criteria**: Docs/task-format tests pass, runtime lint/compile/security baseline is unchanged, and independent bounded review finds no actionable issues.
+**Tests**: Docs/task-format ratchet, 27-file runtime Ruff/compileall/Bandit, canonical task normalization and independent range/tree review.
+**Status**: Complete
+
+Fresh verification passed 216 tests (212 Docs plus four task-format checks), with no skips. Runtime Ruff and compileall passed across 27 PR-touched files. Fresh runtime Bandit exactly matches the prior 20 findings (19 low, one medium), with zero new findings or scan errors. Independent bounded review confirms all 31 patches are equal, the complete tree outside the three upstream files is unchanged, and their blobs/modes match dev. Local frontend tests were not rerun because this checkout has no frontend dependencies; successful required frontend CI on the new published head remains mandatory.
+
+Previous combined Docs/Privileges/CI/ratchets (724 passed, four host Bash 3 license-fetch skips), Profile/Usage (546 passed, one environment skip), writer/SQLite (485 passed), official live PostgreSQL WP2 (48 passed, no skips), guard-file Bandit and Python 3.12 OpenAPI export evidence are carried forward, not freshly rerun. Their executable inputs are byte-identical; the fingerprint remains `5cb6cf6736d7` (2107 paths, 3247 schemas), and the prior schema memo reset plus both assertions are unchanged. ADR check: no new ADR is required for this mechanical integration; [ADR060](../../ADR/060-authnz-membership-writer-transaction-and-version-ownership.md) remains governing because transaction/version ownership is unchanged.
+
+## Stage 3: Publish and Exact-Head Merge
+**Goal**: Publish with an explicit lease against `3c9b42e795`, then require fresh exact-head Qodo and all seven successful merge gates.
+**Success Criteria**: Latest authoritative dev is an ancestor; the human Change summary stays verbatim; feedback is resolved; expected-head merge and official task finalization are read back.
+**Tests**: Remote refs, fully paginated PR/review/check readbacks and merge verification.
+**Status**: In Progress
+
+All seven required gates succeeded for the old pushed head `3c9b42e795`, but none qualify the new head. All four inline threads remain resolved and no review requests changes. Qodo's last completed report still references `47a262cae6`; the single manual review request at 11:29 UTC received `qodo:billing-blocked` because the workspace is out of credits. The user has been notified; do not repeat manual triggers, change billing/settings, purchase credits or waive review while this condition persists. Merge remains prohibited until a fresh exact-head report is inspected and all required gates succeed. The known optional media-ingestion Redis/offline-harness failure and its aggregate remain failed historical checks, with baseline reproduction evidence preserved; neither was relabeled successful or re-diagnosed during this rebase. TASK-13001.2 stays In Progress until verified merge; WP3 remains untouched.
+
+### October 5 Native Chat-Ownership Dev Rebase
+
+## Stage 1: Preserve Reviewed Patches and Upstream Repair
+**Goal**: Replay WP2 onto authoritative dev `27ce976387` without changing reviewed WP2 behavior or the upstream native chat-ownership repair.
+**Success Criteria**: All 32 reviewed patches remain equal; only the 14 exact upstream files differ from the previous head; WP2 executable inputs, ADR060 and API fingerprint stay byte-identical.
+**Tests**: Clean rebase at `3375447652`, complete range-diff, whole-tree comparison and upstream blob/mode parity.
+**Status**: Complete
+
+The upstream delta restores native ownership for fresh connected saved normal chats, fences cancelled or stale creation/load, resets selection after accepted New chat navigation, preserves reasoning text, and updates focused frontend regressions and two native-persistence journey oracles. Its plan and TASK-13461 are preserved without edits. All 14 files match dev byte-for-byte and retain their modes (615 insertions, 121 deletions total). Outside those files, the old and rebased committed trees are identical; backend, instructions, CI policy and WP3 are unchanged.
+
+## Stage 2: Scoped Verification and Independent Review
+**Goal**: Verify integration tracking and unchanged touched-scope backend static/security evidence.
+**Success Criteria**: Docs/task-format tests pass, runtime lint/compile/security baseline is unchanged, and independent bounded review finds no actionable issues.
+**Tests**: Docs/task-format ratchet, 27-file runtime Ruff/compileall/Bandit, canonical task normalization and independent range/tree review.
+**Status**: Complete
+
+Fresh verification passed 216 tests (212 Docs plus four task-format checks), with no skips. Runtime Ruff and compileall passed across 27 PR-touched files. Fresh runtime Bandit exactly matches the prior 20 findings (19 low, one medium), with zero new findings or scan errors. Independent bounded review found no actionable integration issues and confirmed all 32 patches are equal, the complete tree outside the 14 upstream files is unchanged, and their blobs/modes match dev. Native chat creation uses the existing scoped authenticated client; authorization/quota enforcement remains unchanged. Local frontend tests were not run because frontend dependencies are absent; successful new exact-head required frontend and e2e CI remain mandatory.
+
+Previous combined Docs/Privileges/CI/ratchets (724 passed, four host Bash 3 license-fetch skips), Profile/Usage (546 passed, one environment skip), writer/SQLite (485 passed), official live PostgreSQL WP2 (48 passed, no skips), guard-file Bandit and Python 3.12 API export evidence are carried forward, not freshly rerun. Their executable inputs are byte-identical; the fingerprint remains `5cb6cf6736d7` (2107 paths, 3247 schemas), with the prior schema memo reset and both assertions unchanged. ADR check: no new ADR for this mechanical integration; [ADR060](../../ADR/060-authnz-membership-writer-transaction-and-version-ownership.md) remains governing.
+
+## Stage 3: Publish and Exact-Head Merge
+**Goal**: Publish with an explicit lease against `3fc99cd1a1`, then require fresh exact-head Qodo and all seven successful merge gates.
+**Success Criteria**: Latest authoritative dev is an ancestor; the human Change summary stays verbatim; feedback is resolved; expected-head merge and official task finalization are read back.
+**Tests**: Remote refs, fully paginated PR/review/check readbacks and merge verification.
+**Status**: In Progress
+
+All seven required gates succeeded for old head `3fc99cd1a1`, but none qualify the new head. Fully paginated feedback is unchanged: all four threads resolved, no changes-requested review. Qodo remains explicitly billing-blocked after the single manual trigger; do not repeat triggers, change billing/settings, purchase credits or waive review. Its last completed report is for `47a262cae6`, not this head. The historical optional Redis/offline-harness shard failure and its aggregate retain their failed status and existing evidence without repeated diagnosis. TASK-13001.2 stays In Progress until verified merge; WP3 remains untouched.
 
 ## Work Package 3: Typed Pipeline and Effects
 

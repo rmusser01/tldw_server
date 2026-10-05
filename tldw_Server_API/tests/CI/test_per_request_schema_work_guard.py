@@ -37,6 +37,9 @@ def test_warm_media_listing_does_not_reverify_schema(
         sqlite_helpers,
     )
 
+    # Earlier app clients may have already verified this database in the process.
+    sqlite_helpers.reset_schema_verification_cache()
+
     calls: list[str] = []
     original = sqlite_helpers.ensure_sqlite_post_core_structures
 

@@ -9,12 +9,18 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.federation import oidc_service as oidc_module
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
-from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
-
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
 pytestmark = pytest.mark.integration
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 @pytest.fixture
@@ -346,10 +352,10 @@ def test_identity_provider_dry_run_previews_safe_revoke_effects_for_existing_pro
         manual_org = await create_organization(name="Manual Dry Run Org", owner_user_id=None)
         manual_team = await create_team(org_id=int(manual_org["id"]), name="Manual Dry Run Team")
 
-        await add_org_member(org_id=int(managed_org["id"]), user_id=user_id, role="member")
-        await add_team_member(team_id=int(managed_team["id"]), user_id=user_id, role="member")
-        await add_org_member(org_id=int(manual_org["id"]), user_id=user_id, role="member")
-        await add_team_member(team_id=int(manual_team["id"]), user_id=user_id, role="member")
+        await add_org_member(org_id=int(managed_org["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+        await add_team_member(team_id=int(managed_team["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+        await add_org_member(org_id=int(manual_org["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+        await add_team_member(team_id=int(manual_team["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
         await users_repo.assign_role_if_missing(user_id=user_id, role_name="admin")
 
         await identity_repo.upsert_identity(

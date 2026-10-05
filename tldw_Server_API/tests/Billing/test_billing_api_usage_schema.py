@@ -9,7 +9,13 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.database import (
+    DatabasePool,
+    _convert_question_mark_to_dollar,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+    _execute_membership_scope_sql,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
 from tldw_Server_API.app.core.Billing.enforcement import BillingEnforcer
@@ -83,9 +89,26 @@ async def _org(pool: DatabasePool) -> int:
 async def _membership(pool: DatabasePool, user: int, org: int, days_ago: int) -> None:
     added = datetime(2026, 1, 10, tzinfo=timezone.utc) - timedelta(days=days_ago)
     value = added if pool.pool is not None else added.isoformat()
-    await pool.execute(
+    await _membership_fixture_sql(
+        pool,
         "INSERT INTO org_members (user_id, org_id, added_at) VALUES (?, ?, ?)", user, org, value,
     )
+
+
+async def _membership_fixture_sql(pool: DatabasePool, query: str, *parameters) -> None:
+    """Fabricate historical membership state with a one-shot test capability."""
+    async with pool.transaction() as conn:
+        if pool.pool is not None:
+            await _execute_membership_scope_sql(
+                conn,
+                _convert_question_mark_to_dollar(query, parameters),
+                *parameters,
+                backend="postgres",
+            )
+        else:
+            await _execute_membership_scope_sql(
+                conn, query, parameters, backend="sqlite",
+            )
 
 
 async def _daily(pool: DatabasePool, user: int, requests: int, days_offset: int = 0) -> None:
@@ -144,8 +167,8 @@ async def test_api_usage_only_counts_active_primary_memberships(usage_pool, inac
     await _membership(pool, member, primary, 2)
     await _membership(pool, member, secondary, 1)
     await _membership(pool, inactive_only, former, 3)
-    await pool.execute("UPDATE org_members SET status = ? WHERE org_id = ?", inactive_status, former)
-    await pool.execute("UPDATE org_members SET status = ? WHERE org_id = ?", active_status, primary)
+    await _membership_fixture_sql(pool, "UPDATE org_members SET status = ? WHERE org_id = ?", inactive_status, former)
+    await _membership_fixture_sql(pool, "UPDATE org_members SET status = ? WHERE org_id = ?", active_status, primary)
     await _daily(pool, member, 13)
     await _daily(pool, inactive_only, 17)
 
@@ -204,9 +227,9 @@ async def test_legacy_undated_memberships_match_existing_billing_attribution(usa
     await _membership(pool, user, lower, 2)
     await _membership(pool, user, higher, 1)
     await _daily(pool, user, 13)
-    await pool.execute("UPDATE org_members SET added_at = NULL WHERE org_id = ?", lower)
+    await _membership_fixture_sql(pool, "UPDATE org_members SET added_at = NULL WHERE org_id = ?", lower)
     if all_undated:
-        await pool.execute("UPDATE org_members SET added_at = NULL WHERE org_id = ?", higher)
+        await _membership_fixture_sql(pool, "UPDATE org_members SET added_at = NULL WHERE org_id = ?", higher)
     enforcer = BillingEnforcer()
     expected = [0, 0] if all_undated else [0, 13]
     assert [await enforcer._get_api_calls_today(org) for org in (lower, higher)] == expected

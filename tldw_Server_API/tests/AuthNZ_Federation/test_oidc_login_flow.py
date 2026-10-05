@@ -16,11 +16,17 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
 )
 from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
 
-
 pytestmark = pytest.mark.integration
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 def test_build_federation_redirect_uri_uses_public_base_without_request_host(
@@ -199,13 +205,13 @@ def test_federation_callback_supports_org_scoped_provider_resolution(
     federation_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.federation.oidc_service import OIDCFederationService
     from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import create_organization
     from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
     async def _seed_org_scoped_user() -> tuple[int, int]:
         pool = await get_db_pool()
@@ -892,8 +898,8 @@ def test_federation_callback_revokes_only_provider_managed_grants_in_safe_revoke
         managed_team = await create_team(org_id=int(managed_org["id"]), name="Federated Managed Team")
         manual_org = await create_organization(name="Federated Manual Org", owner_user_id=None)
         manual_team = await create_team(org_id=int(manual_org["id"]), name="Federated Manual Team")
-        await add_org_member(org_id=int(manual_org["id"]), user_id=int(user["id"]), role="member")
-        await add_team_member(team_id=int(manual_team["id"]), user_id=int(user["id"]), role="member")
+        await add_org_member(org_id=int(manual_org["id"]), user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+        await add_team_member(team_id=int(manual_team["id"]), user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
         return (
             int(user["id"]),
             int(managed_org["id"]),
