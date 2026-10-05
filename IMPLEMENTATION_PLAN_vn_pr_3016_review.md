@@ -471,3 +471,40 @@ and independently verified MERGED.
 **Status**: In Progress
 Known Qodo billing block is not waived; child3067 remains read-only. Old-head CI
 and current-dev fixture-only path inventories do not establish integration.
+
+## Task78: Finite Scheduler Property Budget
+
+Original TASK13369; all engineering approvals granted. Design amendment:
+Docs/Design/2026-10-04-vn-pr-3016-post-publication-repairs.md.
+
+### Stage 1: Diagnose And Stop Repeated Reproduction
+**Goal**: Identify the current-dev property failure before modifying behavior.
+**Success Criteria**: Preserve full failure, exact-seed replay and cost profile;
+separate cold input generation from scheduler assertion correctness.
+**Tests**: Three bounded attempts only; source/test bytes equal currentdev.
+**Status**: Complete
+Hypothesis cold constants scan599 modules costs4.320s; original health limit1s.
+Profiler process exit0 is not a pytest pass. Initial1251case run has1229passed/
+1failed/21official Jobs-gated skips; no further unchanged rerun.
+
+### Stage 2: Bounded Test-Only Correction And Review
+**Goal**: Keep a finite budget without suppressing health or correctness checks.
+**Success Criteria**: Only this property's deadline becomes2s; default examples,
+phases, ranges and all assertions unchanged; production/runtime config untouched.
+**Tests**: Exact-seed GREEN, in-memory wrong-slot assertion RED, static/Bandit,
+fresh independent SPEC/QUALITY; three originals archived before edits.
+**Status**: Complete
+Bohr independent SPEC/QUALITY PASS/no actionable findings; exact-seed100examples
+and original-assertion fault sensitivity independently confirmed. Controller
+final31file integration1230passed/21official Jobs-gated skips/44warnings250.12s,
+JUnit1251tests0failure0error21skip. All source/evidence hashes verified. Existing
+54B101 retained with0newnonassert findings; below-floor/nonPG/nonCI qualifications
+remain. Report: .superpowers/sdd/IMPLEMENTATION_PLAN_vn_pr_3016_review/task-78-property-review.md.
+
+### Stage 3: Publish Reviewed Union And Complete Gates
+**Goal**: Publish Task77/78 against fresh currentdev and normally merge3016.
+**Success Criteria**: Preserved union/hashes, configured hooks/normal commit,
+exact new-head external gates and independently verified MERGED.
+**Tests**: Fresh actualdev/rules and complete paginated arrays/all replies.
+**Status**: In Progress
+Billing block is not waived; old-head results do not transfer; child read-only.

@@ -128,3 +128,31 @@ accounting controls pass locally. Independent4GREEN and in-memory RED confirm
 sensitivity; no new nonassert Bandit findings. Both agents are closed. Local
 runtime remains below declared floors; fresh actual-dev integration and new-head
 external review/CI remain mandatory before normal merge.
+
+## Task78 Finite Property Generation Budget
+
+Current-dev integration exposed a local Hypothesis input-generation health check,
+not a scheduler assertion counterexample. The complete31file run reports1229pass/
+1fail/21Jobs-gated skips; unchanged exact-seed replay repeats the health failure.
+The third and final profiled attempt attributes4.320s to cold local-constant
+discovery and4.107s to scanning599 imported modules. The profiler wrapper exits0
+but the nested pytest result is FAILED; it is not green. No further unchanged
+reproduction loop is permitted. The test and scheduler match actualdev bytes.
+
+Under all engineering approvals, give only test_real_window_derivation a finite
+two-second Hypothesis deadline. Its derived generation health budget is ten
+seconds, above the observed cold scan; no health check is suppressed. Keep the
+default example count, phases, datetime/interval/lookback ranges and all three
+slot/window assertions exactly. Retain pytest's outer timeout. This property
+checks correctness, not a200ms performance contract; no production code changes.
+Verify exact-seed GREEN plus an in-memory future-slot fault that still fails the
+original assertion, scoped static/Bandit, and fresh independent SPEC/QUALITY.
+Retain all three original failures and below-floor qualifications; no whole-run,
+supported-runtime, PG or future-CI certificate is inferred from narrow GREEN.
+
+Task78 independent SPEC/QUALITY PASS/no actionable findings: unchanged source
+hashes,100examples and in-memory future-slot original-assertion RED confirmed.
+Final controller current-dev31file matrix1230passed/21official Jobs-gated skips/
+44warnings250.12s, JUnit1251tests0failure0error21skip. Finite timing tradeoff is
+explicit; installed-version draw-budget coupling is not a future-version promise.
+All original failures, warnings and below-floor/nonPG/nonCI qualifications remain.
