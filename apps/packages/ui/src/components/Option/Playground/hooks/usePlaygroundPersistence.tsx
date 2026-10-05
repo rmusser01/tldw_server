@@ -146,9 +146,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
 
   const { persistenceTooltip, focusConnectionCard, getPersistenceModeLabel } =
     usePersistenceMode({
-      temporaryChat,
-      serverChatId,
-      isConnectionReady
+      temporaryChat
     })
 
   const privateChatLocked = temporaryChat && history.length > 0
@@ -200,12 +198,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
           onOk: () => {
             if (clearChat() === false) return
             setTemporaryChat(next)
-            const modeLabel = getPersistenceModeLabel(
-              t,
-              next,
-              isConnectionReady,
-              serverChatId
-            )
+            const modeLabel = getPersistenceModeLabel(t, next)
             notificationApi.info({
               message: modeLabel,
               placement: "bottomRight",
@@ -219,12 +212,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       if (hasExistingHistory && clearChat() === false) return
       setTemporaryChat(next)
 
-      const modeLabel = getPersistenceModeLabel(
-        t,
-        next,
-        isConnectionReady,
-        serverChatId
-      )
+      const modeLabel = getPersistenceModeLabel(t, next)
 
       notificationApi.info({
         message: modeLabel,

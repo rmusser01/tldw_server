@@ -1,3 +1,4 @@
+import { usePersistenceMode } from "@/hooks/playground/usePersistenceMode"
 import { ChatDraftRecovery, type RestoreChatDraft } from "@/components/Chat/composer/ChatDraftRecovery"
 import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection"
 import { useMutation, useQuery } from "@tanstack/react-query"
@@ -874,9 +875,7 @@ export const SidepanelForm = ({
       // no-op
     }
   }, [overlayResumeMarkerKey])
-  const previousServerChatIdRef = React.useRef<string | null | undefined>(
-    serverChatId
-  )
+
 
   React.useEffect(() => {
     if (!overlayResumeMarkerKey) return
@@ -899,27 +898,6 @@ export const SidepanelForm = ({
     void syncOverlayResumeMarker()
   }, [effectiveAssistantState.mode, overlayResumeMarkerKey])
 
-  React.useEffect(() => {
-    const previous = previousServerChatIdRef.current
-    const current = serverChatId
-
-    if (previous && previous !== "" && !current && !temporaryChat) {
-      notification.warning({
-        message: t(
-          "sidepanel:saveStatus.saveFailed",
-          "Failed to save chat to server"
-        ),
-        description: t(
-          "sidepanel:saveStatus.saveFailedDescription",
-          "Chat is now saving locally only. Check your connection and try again."
-        ),
-        placement: "bottomRight",
-        duration: 4
-      })
-    }
-
-    previousServerChatIdRef.current = current
-  }, [notification, serverChatId, t, temporaryChat])
   const hasImage = form.values.image.length > 0
   const replyLabel = replyTarget
     ? [
@@ -1193,45 +1171,11 @@ export const SidepanelForm = ({
     clearChat
   })
   const temporaryChatLocked = temporaryChat && messages.length > 0
-  const temporaryChatToggleLabel = temporaryChat
-    ? t("playground:actions.temporaryOn", "Temporary chat (not saved)")
-    : t("playground:actions.temporaryOff", "Save chat to history")
-  const persistenceModeLabel = React.useMemo(() => {
-    if (temporaryChat) {
-      return t(
-        "playground:composer.persistence.ephemeral",
-        "Not saved: cleared when you close this window."
-      )
-    }
-    if (serverChatId || isConnectionReady) {
-      return t(
-        "playground:composer.persistence.server",
-        "Saved to your tldw server (and locally)."
-      )
-    }
-    return t(
-      "playground:composer.persistence.local",
-      "Saved locally until your tldw server is connected."
-    )
-  }, [isConnectionReady, serverChatId, t, temporaryChat])
-  const persistencePillLabel = React.useMemo(() => {
-    if (temporaryChat) {
-      return t("playground:composer.persistence.ephemeralPill", "Not saved")
-    }
-    if (serverChatId || isConnectionReady) {
-      return t("playground:composer.persistence.serverPill", "Server")
-    }
-    return t("playground:composer.persistence.localPill", "Local")
-  }, [isConnectionReady, serverChatId, t, temporaryChat])
-  const persistenceTooltip = React.useMemo(
-    () => (
-      <div className="flex flex-col gap-0.5 text-xs">
-        <span className="font-medium">{persistencePillLabel}</span>
-        <span className="text-text-subtle">{persistenceModeLabel}</span>
-      </div>
-    ),
-    [persistenceModeLabel, persistencePillLabel]
-  )
+  const {
+    persistenceTooltip,
+    persistenceControlLabel,
+    persistencePillLabel: temporaryChatToggleLabel
+  } = usePersistenceMode({ temporaryChat })
 
   // Character selection state
   const storedCharacterId = React.useMemo(
@@ -3446,7 +3390,7 @@ export const SidepanelForm = ({
                             onChange={(checked) =>
                               handleToggleTemporaryChat(!checked)
                             }
-                            aria-label={temporaryChatToggleLabel as string}
+                            aria-label={persistenceControlLabel}
                           />
                           <span className="text-xs text-text whitespace-nowrap">
                             {temporaryChatToggleLabel}

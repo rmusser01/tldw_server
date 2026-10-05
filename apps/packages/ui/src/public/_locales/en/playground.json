@@ -3766,5 +3766,20 @@
   },
   "draftRecovery_saved": {
     "message": "New chat draft"
+  },
+  "composer_persistence_historyModeTitle": {
+    "message": "History on"
+  },
+  "composer_persistence_historyModeHelp": {
+    "message": "New messages can be stored in chat history."
+  },
+  "composer_persistence_temporaryModeTitle": {
+    "message": "Temporary"
+  },
+  "composer_persistence_temporaryModeHelp": {
+    "message": "New messages are not added to saved chat history. Draft text may remain on this device."
+  },
+  "composer_persistence_historyControl": {
+    "message": "Chat history"
   }
 }

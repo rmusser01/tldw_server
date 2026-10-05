@@ -4,6 +4,7 @@ import { Modal } from "antd"
 
 import { usePlaygroundPersistence } from "../usePlaygroundPersistence"
 import { useTemporaryChatToggle } from "@/hooks/useTemporaryChatToggle"
+import { getPersistenceModeLabel } from "@/hooks/playground/usePersistenceMode"
 
 const selectedHistory = vi.hoisted(() => ({ value: null as any }))
 vi.mock('@/hooks/chat/useHistorySelection', () => ({ useHistorySelectionContext: () => selectedHistory.value }))
@@ -149,7 +150,7 @@ describe("usePlaygroundPersistence", () => {
     mocks.usePersistenceMode.mockReturnValue({
       persistenceTooltip: "save to server",
       focusConnectionCard: vi.fn(),
-      getPersistenceModeLabel: vi.fn(() => "Saved to server")
+      getPersistenceModeLabel
     })
   })
 
@@ -179,6 +180,46 @@ describe("usePlaygroundPersistence", () => {
       expect(notificationApi.info).toHaveBeenCalledTimes(accepted ? 1 : 0)
     } finally { confirm.mockRestore() }
   })
+
+  it.each([
+    ["playground", false],
+    ["playground", true],
+    ["sidepanel", false],
+    ["sidepanel", true]
+  ] as const)(
+    "%s mode-change notice describes eligibility, temporary=%s",
+    (surface, next) => {
+      const setTemporaryChat = vi.fn()
+      const deps = buildDeps({
+        temporaryChat: !next,
+        history: [],
+        serverChatId: "previous-server",
+        setTemporaryChat
+      })
+      const notificationApi =
+        surface === "sidepanel" ? modeNotification : deps.notificationApi
+      const { result } = renderHook(() => {
+        const playground = usePlaygroundPersistence(deps)
+        const sidepanel = useTemporaryChatToggle({
+          temporaryChat: !next,
+          setTemporaryChat,
+          messagesLength: 0,
+          clearChat: deps.clearChat
+        })
+        return surface === "playground" ? playground : sidepanel
+      })
+      act(() => result.current.handleToggleTemporaryChat(next))
+      expect(notificationApi.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: next
+            ? "New messages are not added to saved chat history. Draft text may remain on this device."
+            : "New messages can be stored in chat history."
+        })
+      )
+      expect(setTemporaryChat).toHaveBeenCalledWith(next)
+      expect(deps.clearChat).not.toHaveBeenCalled()
+    }
+  )
 
   it("does not autosave tracked character greetings before the send path owns persistence", async () => {
     renderHook(

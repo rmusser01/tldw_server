@@ -1,3 +1,7 @@
+import {
+  getPersistenceModeControlLabel,
+  getPersistenceModePillLabel
+} from "@/hooks/playground/usePersistenceMode"
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { Button as TldwButton } from "@/components/Common/Button"
@@ -235,6 +239,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   )
 
   // --- Shared sub-elements ---
+  const persistenceChipLabel = getPersistenceModePillLabel(t, temporaryChat)
+  const persistenceControlLabel = getPersistenceModeControlLabel(t, temporaryChat)
   const ephemeralToggle = React.useMemo(
     () => (
       <Tooltip title={persistenceTooltip}>
@@ -243,23 +249,14 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             type="button"
             onClick={() => onToggleTemporaryChat(!temporaryChat)}
             disabled={ephemeralDisabled}
-            aria-pressed={temporaryChat}
-            aria-label={
-              temporaryChat
-                ? (t(
-                    "playground:composer.ephemeralLabel",
-                    "Temporary"
-                  ) as string)
-                : (t("playground:composer.savedLabel", "Saved") as string)
-            }
+            aria-pressed={!temporaryChat}
+            aria-label={persistenceControlLabel}
             className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition hover:bg-surface2 hover:text-text ${
               temporaryChat
                 ? "bg-primary/10 text-primaryStrong"
                 : "text-text-muted"
             } ${ephemeralDisabled ? "cursor-not-allowed opacity-50" : ""}`}>
-            {temporaryChat
-              ? t("playground:composer.ephemeralLabel", "Temporary")
-              : t("playground:composer.savedLabel", "Saved")}
+            {persistenceChipLabel}
           </button>
         </span>
       </Tooltip>
@@ -268,7 +265,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       ephemeralDisabled,
       onToggleTemporaryChat,
       persistenceTooltip,
-      t,
+      persistenceChipLabel,
+      persistenceControlLabel,
       temporaryChat
     ]
   )
@@ -687,9 +685,6 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   const persistenceChipClass = temporaryChat
     ? "border-warn/40 bg-warn/10 text-warn"
     : "border-border bg-surface2 text-text-muted"
-  const persistenceChipLabel = temporaryChat
-    ? (t("playground:composer.ephemeralLabel", "Temporary") as string)
-    : (t("playground:composer.savedLabel", "Saved") as string)
   const advancedChipClass = casualAdvancedControlsOpen
     ? "border-primary/40 bg-primary/10 text-primaryStrong"
     : "border-border bg-surface2 text-text-muted"
@@ -807,15 +802,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             onClick={() => onToggleTemporaryChat(!temporaryChat)}
             disabled={ephemeralDisabled}
             data-testid="composer-casual-persistence-chip"
-            aria-pressed={temporaryChat}
-            aria-label={
-              temporaryChat
-                ? (t(
-                    "playground:composer.ephemeralLabel",
-                    "Temporary"
-                  ) as string)
-                : (t("playground:composer.savedLabel", "Saved") as string)
-            }
+            aria-pressed={!temporaryChat}
+            aria-label={persistenceControlLabel}
             className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition hover:bg-surface2 ${persistenceChipClass} ${ephemeralDisabled ? "cursor-not-allowed opacity-50" : ""}`}>
             <span>{persistenceChipLabel}</span>
           </button>

@@ -3,6 +3,10 @@ import { Modal } from "antd"
 import { useTranslation } from "react-i18next"
 import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
+import {
+  getPersistenceModeLabel as describePersistenceMode,
+  getPersistenceModePillLabel
+} from "@/hooks/playground/usePersistenceMode"
 
 export interface UseTemporaryChatToggleOptions {
   temporaryChat: boolean
@@ -31,27 +35,11 @@ export const useTemporaryChatToggle = (
   const notification = useAntdNotification()
 
   const getPersistenceModeLabel = React.useCallback(
-    (isTemporary: boolean) =>
-      isTemporary
-        ? t(
-            "playground:composer.persistence.ephemeral",
-            "Temporary chat: not saved in history and cleared when you close this window."
-          )
-        : t(
-            "playground:composer.persistence.local",
-            "Saved in this browser only."
-          ),
+    (isTemporary: boolean) => describePersistenceMode(t, isTemporary),
     [t]
   )
-
   const getPersistenceModeChipLabel = React.useCallback(
-    (isTemporary: boolean) =>
-      isTemporary
-        ? t(
-            "playground:composer.persistence.ephemeralShort",
-            "Temporary (not saved)"
-          )
-        : t("playground:composer.persistence.localShort", "Saved locally"),
+    (isTemporary: boolean) => getPersistenceModePillLabel(t, isTemporary),
     [t]
   )
 

@@ -549,6 +549,11 @@
     "ephemeralLabel": "Ephemeral",
     "savedLabel": "Saved",
     "persistence": {
+      "historyControl": "Chat history",
+      "historyModeTitle": "History on",
+      "historyModeHelp": "New messages can be stored in chat history.",
+      "temporaryModeTitle": "Temporary",
+      "temporaryModeHelp": "New messages are not added to saved chat history. Draft text may remain on this device.",
       "ephemeral": "Temporary chat: not saved in history and cleared when you close this window.",
       "local": "Saved locally in this browser only (not synced to your tldw server).",
       "server": "Saved Locally+Server",

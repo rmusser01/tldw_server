@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import React from "react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
 import { ComposerToolbar } from "../ComposerToolbar"
@@ -293,7 +294,7 @@ describe("ComposerToolbar web search", () => {
     expect(screen.queryByTestId("composer-session-status-chip")).toBeNull()
     expect(
       screen.getByTestId("composer-casual-persistence-chip")
-    ).toHaveTextContent("Saved")
+    ).toHaveTextContent("History on")
     expect(
       screen
         .getByTestId("composer-casual-advanced-chip")
@@ -478,7 +479,7 @@ describe("ComposerToolbar web search", () => {
     )
   })
 
-  it("places Advanced controls immediately to the right of Saved in the casual context strip", () => {
+  it("places Advanced controls immediately to the right of History on in the casual context strip", () => {
     render(<ComposerToolbar {...createProps()} />)
 
     const contextStrip = screen.getByTestId("composer-context-strip")
@@ -703,7 +704,7 @@ describe("ComposerToolbar web search", () => {
     )
     expect(primaryGroup).toContainElement(screen.getByText("Model selector"))
     expect(contextGroup).toContainElement(
-      screen.getByRole("button", { name: "Saved" })
+      screen.getByRole("button", { name: "Chat history: History on" })
     )
     expect(contextGroup).toContainElement(
       screen.getByRole("button", { name: "Search & Context" })
@@ -873,7 +874,7 @@ describe("ComposerToolbar web search", () => {
     ).toHaveTextContent("Offline")
   })
 
-  it("uses a bottom persistence chip to toggle saved vs temporary", () => {
+  it("uses a bottom persistence chip to toggle history mode vs temporary", () => {
     const onToggleTemporaryChat = vi.fn()
     render(
       <ComposerToolbar
@@ -887,4 +888,39 @@ describe("ComposerToolbar web search", () => {
 
     expect(onToggleTemporaryChat).toHaveBeenCalledWith(true)
   })
+})
+
+
+describe("history mode labels", () => {
+  it.each(
+    [
+      { name: "Casual desktop", isMobile: false, isProMode: false },
+      { name: "Pro desktop", isMobile: false, isProMode: true },
+      { name: "mobile", isMobile: true, isProMode: false }
+    ].flatMap((layout) =>
+      [false, true].map((temporaryChat) => ({ ...layout, temporaryChat }))
+    )
+  )(
+    "$name history toggle agrees with Temporary=$temporaryChat and responds to keyboard",
+    async (layout) => {
+      const onToggleTemporaryChat = vi.fn()
+      render(
+        <ComposerToolbar
+          {...createProps({ ...layout, onToggleTemporaryChat })}
+        />
+      )
+      const stateLabel = layout.temporaryChat ? "Temporary" : "History on"
+      const toggle = screen.getByRole("button", {
+        name: `Chat history: ${stateLabel}`
+      })
+      expect(toggle).toHaveTextContent(stateLabel)
+      expect(toggle).toHaveAttribute(
+        "aria-pressed",
+        String(!layout.temporaryChat)
+      )
+      toggle.focus()
+      await userEvent.setup().keyboard("{Enter}")
+      expect(onToggleTemporaryChat).toHaveBeenCalledWith(!layout.temporaryChat)
+    }
+  )
 })
