@@ -43,7 +43,8 @@ def quota_view(used_mb: float, quota_mb: Optional[int]) -> dict[str, Any]:
     return {
         "quota_mb": quota_mb,
         "available_mb": round(max(0.0, quota_mb - used_mb), 2),
-        "usage_percentage": round((used_mb / quota_mb * 100) if quota_mb > 0 else 0, 1),
+        # A zero quota is fully used by definition.
+        "usage_percentage": round(used_mb / quota_mb * 100, 1) if quota_mb > 0 else 100.0,
     }
 
 
@@ -188,7 +189,8 @@ class StorageQuotaService:
             self.quota_cache.pop(f"quota:{user_id}", None)
             quota_mb = await resolved_storage_quota_mb(user_id)
             logger.info(
-                f"Recalculated storage for user {user_id}: {total_mb:.2f}MB / {quota_mb}MB"
+                f"Recalculated storage for user {user_id}: {total_mb:.2f}MB / "
+                f"{'unlimited' if quota_mb is None else f'{quota_mb}MB'}"
             )
 
         result = {
@@ -368,7 +370,8 @@ class StorageQuotaService:
                 logger.info(
                     f"Updated storage for user {user_id}: "
                     f"{operation} {abs(mb_delta):.2f}MB "
-                    f"(new total: {new_usage:.2f}MB / {quota}MB)"
+                    f"(new total: {new_usage:.2f}MB / "
+                    f"{'unlimited' if quota is None else f'{quota}MB'})"
                 )
 
             # Update gauges
@@ -533,7 +536,7 @@ class StorageQuotaService:
                 # PostgreSQL
                 users = await conn.fetch(
                     """
-                    SELECT id, username, storage_used_mb, storage_quota_mb
+                    SELECT id, username, storage_used_mb
                     FROM users
                     WHERE is_active = TRUE
                     ORDER BY storage_used_mb DESC
@@ -543,7 +546,7 @@ class StorageQuotaService:
                 # SQLite
                 cursor = await conn.execute(
                     """
-                    SELECT id, username, storage_used_mb, storage_quota_mb
+                    SELECT id, username, storage_used_mb
                     FROM users
                     WHERE is_active = 1
                     ORDER BY storage_used_mb DESC
@@ -616,7 +619,7 @@ class StorageQuotaService:
     async def _get_user_storage_info(self, user_id: int) -> Optional[dict[str, Any]]:
         """Get user storage info from the database."""
         return await self.db_pool.fetchone(
-            "SELECT storage_used_mb, storage_quota_mb FROM users WHERE id = ?",
+            "SELECT storage_used_mb FROM users WHERE id = ?",
             user_id
         )
 
@@ -779,10 +782,15 @@ class StorageQuotaService:
                 combined_info["blocking_level"] = "org"
 
             if raise_on_exceed:
-                raise QuotaExceededError(
-                    new_bytes / (1024 * 1024),
-                    user_info.get("quota_mb") or 0,
-                )
+                level = combined_info["blocking_level"]
+                if level == "user":
+                    used_mb = user_info.get("projected_usage_mb") or 0
+                    quota_mb = user_info.get("quota_mb") or 0
+                else:
+                    pool = team_info if level == "team" else org_info
+                    used_mb = (pool.get("used_mb") or 0) + new_bytes / (1024 * 1024)
+                    quota_mb = pool.get("quota_mb") or 0
+                raise QuotaExceededError(used_mb, quota_mb)
 
         return has_quota, combined_info
 
@@ -1230,17 +1238,6 @@ async def get_storage_service() -> StorageQuotaService:
         _storage_service = StorageQuotaService()
         await _storage_service.initialize()
     return _storage_service
-
-
-def invalidate_storage_cache_for_user(user_id: int) -> None:
-    """Best-effort invalidation for module-level storage service singletons."""
-    candidates: list[StorageQuotaService] = []
-    if _storage_service is not None:
-        candidates.append(_storage_service)
-    if _quota_service is not None and _quota_service is not _storage_service:
-        candidates.append(_quota_service)
-    for service in candidates:
-        service.invalidate_user_cache(int(user_id))
 
 
 async def reset_storage_service() -> None:

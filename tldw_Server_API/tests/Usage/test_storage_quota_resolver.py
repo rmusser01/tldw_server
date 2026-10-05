@@ -72,6 +72,8 @@ def test_quota_view_unlimited_and_limited() -> None:
     """quota_view yields None fields when unlimited and arithmetic when limited."""
     assert sqs.quota_view(10.0, None) == {"quota_mb": None, "available_mb": None, "usage_percentage": None}
     assert sqs.quota_view(25.0, 100) == {"quota_mb": 100, "available_mb": 75.0, "usage_percentage": 25.0}
+    for used in (0.0, 5.0):
+        assert sqs.quota_view(used, 0) == {"quota_mb": 0, "available_mb": 0.0, "usage_percentage": 100.0}
 
 
 async def test_switch_off_admits_past_stale_column(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,8 +106,17 @@ async def test_combined_pool_denial_raises_quota_exceeded(service, monkeypatch: 
         return _PoolRepo()
 
     monkeypatch.setattr(service, "get_storage_quotas_repo", _repo)
-    with pytest.raises(QuotaExceededError):
+    with pytest.raises(QuotaExceededError) as exc:
         await service.check_combined_quota(7, MB, team_id=3, raise_on_exceed=True)
+    assert exc.value.quota_mb == 1 and exc.value.used_mb == 2.0
+
+
+async def test_combined_user_denial_reports_user_projection(service) -> None:
+    """When the user level blocks, the error carries the user's projected usage and quota."""
+    service.limits[7] = 150
+    with pytest.raises(QuotaExceededError) as exc:
+        await service.check_combined_quota(7, 51 * MB, raise_on_exceed=True)
+    assert exc.value.quota_mb == 150 and exc.value.used_mb == 151.0
 
 
 async def test_user_quota_status_is_read_only_and_has_quota_means_set(service) -> None:
