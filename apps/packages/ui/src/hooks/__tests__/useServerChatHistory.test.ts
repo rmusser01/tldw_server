@@ -219,6 +219,50 @@ describe("useServerChatHistory", () => {
     queryClient.clear()
   })
 
+  it("searches message content as well as titles and keeps content matches with their snippet (CS-02)", async () => {
+    searchConversationsWithMetaMock.mockResolvedValueOnce({
+      chats: [
+        createChat(9, {
+          title: "Weekly sync",
+          matched_in: ["content"],
+          match_snippet: "…the launch codeword is zebrafinch.",
+          match_message_id: "msg-1"
+        })
+      ],
+      total: 1
+    })
+
+    const { queryClient, wrapper } = createWrapper()
+    const { result } = renderHook(
+      () =>
+        useServerChatHistory("zebrafinch", {
+          enabled: true,
+          mode: "search"
+        }),
+      { wrapper }
+    )
+
+    // The title does not contain the query: only the server knows this chat matches.
+    await waitFor(() =>
+      expect(result.current.data.map((chat) => chat.id)).toEqual(["chat-9"])
+    )
+
+    expect(searchConversationsWithMetaMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: "zebrafinch",
+        search_in: "title,content"
+      }),
+      expect.anything()
+    )
+    expect(result.current.data[0].match_snippet).toBe(
+      "…the launch codeword is zebrafinch."
+    )
+    expect(result.current.data[0].matched_in).toEqual(["content"])
+    expect(result.current.total).toBe(1)
+
+    queryClient.clear()
+  })
+
   it("fetches only the requested overview page when server pagination is supported", async () => {
     listChatsWithMetaMock.mockResolvedValueOnce({
       chats: [createChat(26), createChat(27)],
@@ -553,6 +597,23 @@ describe("filterServerChatHistoryItems", () => {
     expect(filterServerChatHistoryItems(mapped, "in-progress").map((item) => item.id)).toEqual(
       ["chat-2"]
     )
+  })
+
+  it("keeps chats the server matched by message content even though the title does not match (CS-02)", () => {
+    const mapped = mapServerChatHistoryItems([
+      createChat(1, {
+        title: "Weekly sync",
+        matched_in: ["content"],
+        match_snippet: "…the launch codeword is zebrafinch."
+      }),
+      createChat(2, { title: "Zebrafinch notes", matched_in: ["title"] }),
+      createChat(3, { title: "Lunch plans" })
+    ])
+
+    expect(filterServerChatHistoryItems(mapped, "zebrafinch").map((item) => item.id)).toEqual([
+      "chat-1",
+      "chat-2"
+    ])
   })
 })
 

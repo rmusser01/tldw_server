@@ -775,13 +775,16 @@ export const SidepanelChatSidebar = ({
       label,
       metaLabel,
       onOpen,
-      topic
+      topic,
+      snippet
     }: {
       key: string
       label: string
       metaLabel: string
       onOpen: () => void
       topic?: string | null
+      /** What was said in the chat, when the search matched its messages. */
+      snippet?: string | null
     }) => (
       <div
         key={key}
@@ -800,6 +803,14 @@ export const SidepanelChatSidebar = ({
           <div className="flex items-center gap-1.5">
             <span className="truncate">{label}</span>
           </div>
+          {snippet && (
+            <div
+              className="mt-0.5 truncate text-[11px] text-text-subtle"
+              title={snippet}
+            >
+              {snippet}
+            </div>
+          )}
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-text-subtle">
             <span>{metaLabel}</span>
             {topic && (
@@ -1271,6 +1282,7 @@ export const SidepanelChatSidebar = ({
                         t("common:untitled", { defaultValue: "Untitled" }),
                       metaLabel: t("common:chatSidebar.serverLabel", "Server"),
                       topic: chat.topic_label ?? null,
+                      snippet: chat.match_snippet ?? null,
                       onOpen: () => onOpenServerChat?.(chat)
                     })
                   )}
