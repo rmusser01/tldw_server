@@ -73,6 +73,7 @@ import type { NoteStudioDocumentSummary } from '../notes-studio-types'
 import { notesAuthoritySetting } from '../notes-authority-storage'
 import { useNotesAuthorityState } from './useNotesAuthorityState'
 import { createNotesGraphAuthorityScope } from './useNotesGraphAuthorityScope'
+import type { NoteRenamedEvent } from './useNotesWikilinkRename'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 type NotesOwnedRequestOptions = {
@@ -109,10 +110,17 @@ export interface UseNotesEditorStateDeps {
   setKeywordSuggestionSelection: React.Dispatch<React.SetStateAction<string[]>>
   /** Capability */
   editorDisabled: boolean
+  /** Called after a save changed an existing note's title on the server. */
+  onNoteRenamed?: (event: NoteRenamedEvent) => void
 }
 
 const noteResourcePath = (id: string | number) =>
   `/api/v1/notes/${encodeURIComponent(String(id))}`
+
+const toNoteTitle = (note: unknown): string | null => {
+  const value = note && typeof note === 'object' ? (note as { title?: unknown }).title : null
+  return typeof value === 'string' ? value : null
+}
 
 export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const {
@@ -143,6 +151,23 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const callerCapabilities = useCallerCapabilities()
   const callerCapabilitiesRef = React.useRef(callerCapabilities)
   callerCapabilitiesRef.current = callerCapabilities
+  const onNoteRenamedRef = React.useRef(deps.onNoteRenamed)
+  onNoteRenamedRef.current = deps.onNoteRenamed
+  // The open note's title as the server last returned it, so a save can tell a rename from an edit.
+  const savedTitleRef = React.useRef<{ noteId: string; title: string } | null>(null)
+  /** A save landed: announce the rename when the note's saved title changed. */
+  const announceSavedTitle = React.useCallback(
+    (noteId: string | number, previousTitle: string | null, savedTitle: string | null) => {
+      const id = String(noteId)
+      if (savedTitle != null && savedTitleRef.current?.noteId === id) {
+        savedTitleRef.current = { noteId: id, title: savedTitle }
+      }
+      if (previousTitle && savedTitle && previousTitle !== savedTitle) {
+        onNoteRenamedRef.current?.({ noteId: id, oldTitle: previousTitle, newTitle: savedTitle })
+      }
+    },
+    []
+  )
   const authorityScopeRef = React.useRef(authorityScope)
   const connectionConfigRef = React.useRef(connectionConfig)
   const connectionEpochRef = React.useRef(0)
@@ -600,6 +625,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const d = await bgRequest<any>({ ...ownedRequest, path: noteResourcePath(id) as any, method: 'GET' as any })
       if (!isCurrent() || editRevisionRef.current.revision !== editRevision) return false
       const loadedTitle = String(d?.title || `Note ${id}`)
+      savedTitleRef.current = { noteId: String(id), title: String(d?.title || '') }
       setSelectedId(id)
       setTitle(String(d?.title || ''))
       setContent(String(d?.content || ''))
@@ -668,6 +694,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     savingInFlightRef.current = false
     setSaving(false)
     clearAssistUndoState()
+    savedTitleRef.current = null
     setSelectedId(null)
     setTitle('')
     setContent('')
@@ -1249,6 +1276,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           setSaveRecoveryNotice(null)
           setRemoteVersionInfo(null)
           if (created?.id != null) {
+            savedTitleRef.current = { noteId: String(created.id), title: toNoteTitle(created) ?? title }
             setSelectedId(created.id)
             acknowledgeOfflineDraft(created.id, createdVersion)
           }
@@ -1309,6 +1337,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             }
             return false
           }
+          const previousSavedTitle =
+            savedTitleRef.current?.noteId === String(selectedId) ? savedTitleRef.current.title : null
           const updated = await request({
             path: noteResourcePath(selectedId) as any,
             method: 'PUT' as any,
@@ -1318,6 +1348,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             },
             body: payload
           })
+          // A blank title is not sent, so the server keeps the previous one.
+          announceSavedTitle(
+            selectedId,
+            previousSavedTitle,
+            toNoteTitle(updated) ?? (title.trim() || previousSavedTitle)
+          )
           const updatedKeywordWarning = toKeywordSyncWarning(updated)
           const updatedVersion = toNoteVersion(updated)
           const updatedLastSaved = toNoteLastModified(updated)
@@ -1401,6 +1437,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       }
     },
     [
+      announceSavedTitle,
       authorityScope,
       connectionConfig,
       backlinkConversationId,
@@ -1549,6 +1586,15 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           },
           body: payload
         })
+        // A queued draft can carry a rename too.
+        if (!authorityChanged()) {
+          const remoteTitle = toNoteTitle(remote)
+          announceSavedTitle(
+            draft.noteId,
+            remoteTitle,
+            toNoteTitle(updated) ?? (String(draft.title || '').trim() || remoteTitle)
+          )
+        }
 
         return {
           status: 'synced',
@@ -1575,7 +1621,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         authorityRequestsRef.current.delete(controller)
       }
     },
-    [authorityScope, connectionConfig, isVersionConflictError]
+    [announceSavedTitle, authorityScope, connectionConfig, isVersionConflictError]
   )
 
   const syncOfflineDraftQueue = React.useCallback(async () => {
