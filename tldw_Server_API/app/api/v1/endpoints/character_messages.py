@@ -80,6 +80,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
     SyncServerOriginMutationNotSupportedError,
     capture_applied_server_origin_write,
     capture_server_origin_mutation,
+    delete_unenrolled_server_origin_objects,
     get_active_server_origin_sync_service_for_user,
     server_origin_object_id,
     server_origin_stable_key,
@@ -1294,28 +1295,7 @@ async def delete_message(
                 detail=f"Version mismatch. Expected {expected_version}, found {message.get('version', 1)}"
             )
 
-        sync_service = _active_message_sync_service(current_user, scope)
-        if sync_service is not None:
-            try:
-                capture_server_origin_mutation(
-                    sync_service,
-                    user_id=str(current_user.id),
-                    domain="chat.message",
-                    operation="tombstone",
-                    object_id=message_id,
-                    parent_id=str(message.get("conversation_id") or ""),
-                    payload={
-                        "id": message_id,
-                        "deleted": True,
-                        "conversation_id": str(message.get("conversation_id") or ""),
-                        "client_id": str(current_user.id),
-                        "owner_user_id": str(current_user.id),
-                    },
-                    source="server_api",
-                )
-            except Exception as sync_exc:
-                raise _message_sync_http_error(sync_exc) from sync_exc
-        else:
+        def delete_directly() -> None:
             # Soft delete the message
             success = remove_message_from_conversation(db, message_id, expected_version)
 
@@ -1324,6 +1304,43 @@ async def delete_message(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to delete message"
                 )
+
+        sync_service = _active_message_sync_service(current_user, scope)
+        if sync_service is not None:
+            try:
+                # A message Sync never saw (it predates the profile, or was saved by a path
+                # that publishes nothing) is deleted directly, as without a profile. A
+                # tombstone for it would be rejected and block the dataset (#3181).
+                published = await run_in_threadpool(
+                    delete_unenrolled_server_origin_objects,
+                    sync_service,
+                    user_id=str(current_user.id),
+                    objects=[("chat.message", message_id)],
+                    delete=lambda _unpublished: delete_directly(),
+                )
+                if published:
+                    capture_server_origin_mutation(
+                        sync_service,
+                        user_id=str(current_user.id),
+                        domain="chat.message",
+                        operation="tombstone",
+                        object_id=message_id,
+                        parent_id=str(message.get("conversation_id") or ""),
+                        payload={
+                            "id": message_id,
+                            "deleted": True,
+                            "conversation_id": str(message.get("conversation_id") or ""),
+                            "client_id": str(current_user.id),
+                            "owner_user_id": str(current_user.id),
+                        },
+                        source="server_api",
+                    )
+            except HTTPException:
+                raise
+            except Exception as sync_exc:
+                raise _message_sync_http_error(sync_exc) from sync_exc
+        else:
+            delete_directly()
 
         # Update conversation metadata (last_modified/version) via DB abstraction
         conv = db.get_conversation_by_id(message['conversation_id'])
