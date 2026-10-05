@@ -264,32 +264,39 @@ describe("NotesManagerPage stage 49 wikilink rename offer", { timeout: 60_000 },
         return { title: request.body?.title, count: notes.length, notes, next_after_note_id: null }
       }
       if (path === REWRITE && method === "POST") {
+        // Linker A is rewritten. Linker B was edited after the count (it is at
+        // version 3 now), so it is skipped and still links to the old title.
+        const sent = (request.body?.notes ?? []) as Array<{ id: string; expected_version: number }>
+        linkersByTitle = { "old title": [{ id: "linker-b", title: "Linker B", version: 3 }] }
+        const results = sent.map((note) =>
+          note.id === "linker-a"
+            ? {
+                id: "linker-a",
+                title: "Linker A",
+                status: "updated",
+                version: 5,
+                replaced_count: 1,
+                replacements: [{ token_index: 0, original: "[[Old title]]" }]
+              }
+            : {
+                id: note.id,
+                title: "Linker B",
+                status: note.expected_version === 3 ? "updated" : "skipped_conflict",
+                version: note.expected_version === 3 ? 4 : 3,
+                replaced_count: note.expected_version === 3 ? 1 : 0,
+                replacements:
+                  note.expected_version === 3 ? [{ token_index: 0, original: "[[Old title]]" }] : []
+              }
+        )
         return {
           old_title: request.body?.old_title,
           new_title: serverNote?.title,
           link_form: "title",
           replacement: `[[${serverNote?.title}]]`,
           new_title_shared: false,
-          updated_count: 1,
-          skipped_count: 1,
-          results: [
-            {
-              id: "linker-a",
-              title: "Linker A",
-              status: "updated",
-              version: 5,
-              replaced_count: 1,
-              replacements: [{ token_index: 0, original: "[[Old title]]" }]
-            },
-            {
-              id: "linker-b",
-              title: "Linker B",
-              status: "skipped_conflict",
-              version: 3,
-              replaced_count: 0,
-              replacements: []
-            }
-          ]
+          updated_count: results.filter((result) => result.status === "updated").length,
+          skipped_count: results.filter((result) => result.status !== "updated").length,
+          results
         }
       }
       if (path === UNDO && method === "POST") {
@@ -391,9 +398,11 @@ describe("NotesManagerPage stage 49 wikilink rename offer", { timeout: 60_000 },
         { id: "linker-b", expected_version: 2 }
       ]
     })
-    await waitFor(() => {
-      expectNoPrompt()
-    })
+    // The skipped note was not overwritten. It is offered again at its current version.
+    expect(await screen.findByText('1 note links to "Old title"')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId(CONFIRM))
+    await waitFor(() => expect(requestsTo(REWRITE)).toHaveLength(2))
+    expect(requestsTo(REWRITE)[1].body?.notes).toEqual([{ id: "linker-b", expected_version: 3 }])
   })
 
   it("restores the previous text when Undo is clicked", async () => {

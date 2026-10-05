@@ -155,15 +155,25 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   onNoteRenamedRef.current = deps.onNoteRenamed
   // The open note's title as the server last returned it, so a save can tell a rename from an edit.
   const savedTitleRef = React.useRef<{ noteId: string; title: string } | null>(null)
-  /** A save landed: announce the rename when the note's saved title changed. */
+  /** A save landed for this owner: announce the rename when the note's saved title changed. */
   const announceSavedTitle = React.useCallback(
-    (noteId: string | number, previousTitle: string | null, savedTitle: string | null) => {
+    (
+      noteId: string | number,
+      previousTitle: string | null,
+      savedTitle: string | null,
+      savedForScope: string | null | undefined
+    ) => {
       const id = String(noteId)
       if (savedTitle != null && savedTitleRef.current?.noteId === id) {
         savedTitleRef.current = { noteId: id, title: savedTitle }
       }
-      if (previousTitle && savedTitle && previousTitle !== savedTitle) {
-        onNoteRenamedRef.current?.({ noteId: id, oldTitle: previousTitle, newTitle: savedTitle })
+      if (savedForScope && previousTitle && savedTitle && previousTitle !== savedTitle) {
+        onNoteRenamedRef.current?.({
+          noteId: id,
+          oldTitle: previousTitle,
+          newTitle: savedTitle,
+          authorityScope: savedForScope
+        })
       }
     },
     []
@@ -1213,9 +1223,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           abortSignal: controller.signal,
           headers: { 'X-TLDW-Expected-User-ID': String(user.id) }
         }
-        const request = async (init: BgRequestInit<`/${string}`, 'GET' | 'POST' | 'PUT'>) => {
+        const request = async (
+          init: BgRequestInit<`/${string}`, 'GET' | 'POST' | 'PUT'>,
+          onResponse?: (response: { id?: string | number }) => void
+        ) => {
           if (!isCurrent()) throw new DOMException('Note selection changed', 'AbortError')
           const response = await bgRequest<{ id?: string | number }>({ ...init, ...ownedRequest, headers: { ...init.headers, ...ownedRequest.headers } })
+          // The server has answered, even if the editor has since moved on.
+          onResponse?.(response)
           if (!isCurrent() || controller.signal.aborted) throw new DOMException('Note selection changed', 'AbortError')
           return response
         }
@@ -1339,20 +1354,25 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           }
           const previousSavedTitle =
             savedTitleRef.current?.noteId === String(selectedId) ? savedTitleRef.current.title : null
-          const updated = await request({
-            path: noteResourcePath(selectedId) as any,
-            method: 'PUT' as any,
-            headers: {
-              'Content-Type': 'application/json',
-              'expected-version': String(expectedVersion)
+          const updated = await request(
+            {
+              path: noteResourcePath(selectedId) as any,
+              method: 'PUT' as any,
+              headers: {
+                'Content-Type': 'application/json',
+                'expected-version': String(expectedVersion)
+              },
+              body: payload
             },
-            body: payload
-          })
-          // A blank title is not sent, so the server keeps the previous one.
-          announceSavedTitle(
-            selectedId,
-            previousSavedTitle,
-            toNoteTitle(updated) ?? (title.trim() || previousSavedTitle)
+            // A rename is saved once the server answers, whatever the editor shows by then.
+            // A blank title is not sent, so the server keeps the previous one.
+            (saved) =>
+              announceSavedTitle(
+                selectedId,
+                previousSavedTitle,
+                toNoteTitle(saved) ?? (title.trim() || previousSavedTitle),
+                requestAuthorityScope
+              )
           )
           const updatedKeywordWarning = toKeywordSyncWarning(updated)
           const updatedVersion = toNoteVersion(updated)
@@ -1587,14 +1607,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           body: payload
         })
         // A queued draft can carry a rename too.
-        if (!authorityChanged()) {
-          const remoteTitle = toNoteTitle(remote)
-          announceSavedTitle(
-            draft.noteId,
-            remoteTitle,
-            toNoteTitle(updated) ?? (String(draft.title || '').trim() || remoteTitle)
-          )
-        }
+        const remoteTitle = toNoteTitle(remote)
+        announceSavedTitle(
+          draft.noteId,
+          remoteTitle,
+          toNoteTitle(updated) ?? (String(draft.title || '').trim() || remoteTitle),
+          requestScope
+        )
 
         return {
           status: 'synced',

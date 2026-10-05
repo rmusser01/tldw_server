@@ -18,18 +18,21 @@ import { createNotesGraphAuthorityScope } from './useNotesGraphAuthorityScope'
  * the server how many other notes link to the old title and, if any do, shows
  * a non-blocking prompt. Confirming rewrites the links and shows a result
  * toast with Undo. Dismissing leaves the links as they are, and the same
- * rename is not offered again.
+ * rename is not offered again during this visit.
  */
 
 export type NoteRenamedEvent = {
   noteId: string
   oldTitle: string
   newTitle: string
+  /** The verified notes owner the rename was saved for. */
+  authorityScope: string
 }
 
 export interface UseNotesWikilinkRenameDeps {
   /** Server calls run only while online and for a verified notes owner. */
   isOnline: boolean
+  /** Null while the session is being re-checked; that is not a change of owner. */
   authorityScope: string | null | undefined
   connectionConfig: TldwConfig | null | undefined
   message: MessageInstance
@@ -37,6 +40,8 @@ export interface UseNotesWikilinkRenameDeps {
   /** The note open in the editor. Its unsaved edits are never rewritten under it. */
   selectedId: string | number | null
   isDirty: boolean
+  /** Whether a note has edits queued offline. Such a note is held back too. */
+  hasQueuedDraft?: (noteId: string) => boolean
   /** Reload the open note after its saved text changed on the server. */
   reloadSelectedNote: () => unknown
   /** Refresh the list and link panels after notes were rewritten. */
@@ -46,7 +51,8 @@ export interface UseNotesWikilinkRenameDeps {
 type LinkingNote = { id: string; title: string; version: number }
 type ReferrersPage = { count: number; notes: LinkingNote[]; nextAfterNoteId: string | null }
 type TokenReplacement = { token_index: number; original: string }
-type RewrittenNote = LinkingNote & { replacements: TokenReplacement[] }
+/** An updated note, with what Undo needs: its new version, the link written, and what it replaced. */
+type RewrittenNote = LinkingNote & { replacement: string; replacements: TokenReplacement[] }
 type SkipReason =
   | 'skipped_conflict'
   | 'skipped_no_match'
@@ -58,11 +64,12 @@ type SkippedNote = { id: string; title: string; reason: SkipReason }
 type RewriteBatch = {
   updated: RewrittenNote[]
   skipped: SkippedNote[]
-  replacement: string
   linkForm: string
   newTitle: string
   newTitleShared: boolean
 }
+/** An open offer. `closedByCode` tells a programmatic close from the user dismissing it. */
+type OpenPrompt = { closedByCode: boolean }
 
 const REFERRERS_PATH = '/api/v1/notes/wikilinks/referrers'
 const REWRITE_PATH = '/api/v1/notes/wikilinks/rewrite'
@@ -80,6 +87,8 @@ const SKIP_REASONS: readonly string[] = [
   'skipped_resolved',
   'failed'
 ]
+/** Statuses with which the server refused the rewrite itself; asking again would not help. */
+const REFUSAL_STATUSES: readonly number[] = [400, 404, 422]
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' ? (value as Record<string, unknown>) : null
@@ -120,6 +129,7 @@ const parseRewrite = (payload: unknown, sent: LinkingNote[]): RewriteBatch => {
   if (!body || typeof body.replacement !== 'string' || !Array.isArray(body.results)) {
     throw new Error('The server returned an unexpected response.')
   }
+  const replacement = body.replacement
   const sentById = new Map(sent.map((note) => [note.id, note]))
   const updated: RewrittenNote[] = []
   const skipped: SkippedNote[] = []
@@ -132,7 +142,7 @@ const parseRewrite = (payload: unknown, sent: LinkingNote[]): RewriteBatch => {
     const replacements = parseReplacements(result?.replacements)
     // Without a version and its replacements a note could not be undone, so it is not counted as updated.
     if (result?.status === 'updated' && Number.isInteger(version) && replacements.length > 0) {
-      updated.push({ id, title, version, replacements })
+      updated.push({ id, title, version, replacement, replacements })
     } else {
       skipped.push({ id, title, reason: toSkipReason(result?.status) })
     }
@@ -140,7 +150,6 @@ const parseRewrite = (payload: unknown, sent: LinkingNote[]): RewriteBatch => {
   return {
     updated,
     skipped,
-    replacement: body.replacement,
     linkForm: typeof body.link_form === 'string' ? body.link_form : 'title',
     newTitle: typeof body.new_title === 'string' ? body.new_title : '',
     newTitleShared: body.new_title_shared === true
@@ -175,6 +184,20 @@ const parseUndo = (
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error || '')
 
+const isRefusal = (error: unknown): boolean =>
+  REFUSAL_STATUSES.includes(Number(asRecord(error)?.status))
+
+/** Each rewrite request decides the link text again, so Undo sends notes back grouped by it. */
+const groupByReplacement = (notes: RewrittenNote[]): Array<[string, RewrittenNote[]]> => {
+  const groups = new Map<string, RewrittenNote[]>()
+  for (const note of notes) {
+    const group = groups.get(note.replacement)
+    if (group) group.push(note)
+    else groups.set(note.replacement, [note])
+  }
+  return Array.from(groups.entries())
+}
+
 export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
   const notification = useAntdNotification()
   const { showUndoNotification } = useUndoNotification()
@@ -186,9 +209,27 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
   notificationRef.current = notification
   const showUndoNotificationRef = React.useRef(showUndoNotification)
   showUndoNotificationRef.current = showUndoNotification
-  /** Renames already confirmed or dismissed: never offered again. */
-  const settledRenamesRef = React.useRef(new Set<string>())
-  const openPromptKeysRef = React.useRef(new Set<string>())
+  /** Renames the user dismissed: not offered again during this visit. */
+  const dismissedRenamesRef = React.useRef(new Set<string>())
+  const openPromptsRef = React.useRef(new Map<string, OpenPrompt>())
+  // The scope goes null while a session is re-checked (for example when the
+  // window regains focus) and then comes back unchanged. Only a different
+  // owner, a logout, or leaving the page ends an offer.
+  const lastVerifiedScopeRef = React.useRef<string | null>(deps.authorityScope ?? null)
+
+  const scopeIsCurrent = React.useCallback(
+    (scope: string): boolean =>
+      (depsRef.current.authorityScope ?? lastVerifiedScopeRef.current) === scope,
+    []
+  )
+
+  const closePrompts = React.useCallback(() => {
+    for (const [key, prompt] of openPromptsRef.current) {
+      prompt.closedByCode = true
+      notificationRef.current.destroy(key)
+    }
+    openPromptsRef.current.clear()
+  }, [])
 
   /** POST as the verified notes owner, like saving a note does. */
   const ownedRequest = React.useCallback(
@@ -200,12 +241,12 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
           })
         )
       const config = depsRef.current.connectionConfig ? { ...depsRef.current.connectionConfig } : null
-      if (!config || depsRef.current.authorityScope !== scope) throw ownerChanged()
+      if (!config || !scopeIsCurrent(scope)) throw ownerChanged()
       const user = await tldwAuth.getCurrentUser()
       if (
         !user?.is_active ||
         user.id == null ||
-        depsRef.current.authorityScope !== scope ||
+        !scopeIsCurrent(scope) ||
         createNotesGraphAuthorityScope(config.serverUrl, user.id) !== scope
       ) {
         throw ownerChanged()
@@ -232,7 +273,7 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
         servicePromptConfig
       })
     },
-    []
+    [scopeIsCurrent]
   )
 
   const describeSkipped = React.useCallback((skipped: SkippedNote[]): string => {
@@ -243,7 +284,7 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
           return t('option:notesSearch.wikilinkRenameSkipEdited', { defaultValue: 'edited since' })
         case 'unsaved':
           return t('option:notesSearch.wikilinkRenameSkipUnsaved', {
-            defaultValue: 'open with unsaved changes'
+            defaultValue: 'has unsaved changes'
           })
         case 'skipped_not_found':
           return t('option:notesSearch.wikilinkRenameSkipMissing', {
@@ -259,7 +300,7 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
           })
         default:
           return t('option:notesSearch.wikilinkRenameSkipFailed', {
-            defaultValue: 'could not be saved'
+            defaultValue: 'could not be updated'
           })
       }
     }
@@ -278,14 +319,19 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
     return named.join(', ')
   }, [])
 
-  /** Hold back the open note while it has unsaved edits: rewriting it would force a save conflict. */
-  const splitUnsavedOpenNote = React.useCallback(
+  /**
+   * Hold back notes with local edits the server has not seen: the open note
+   * while it is dirty, and notes with a draft queued offline. Rewriting them
+   * on the server would turn the user's next save into a conflict.
+   */
+  const splitNotesWithLocalEdits = React.useCallback(
     <T extends LinkingNote>(notes: T[]): { held: T[]; rest: T[] } => {
-      const { selectedId, isDirty } = depsRef.current
+      const { selectedId, isDirty, hasQueuedDraft } = depsRef.current
       const openId = isDirty && selectedId != null ? String(selectedId) : null
+      const hasLocalEdits = (note: T) => note.id === openId || hasQueuedDraft?.(note.id) === true
       return {
-        held: notes.filter((note) => note.id === openId),
-        rest: notes.filter((note) => note.id !== openId)
+        held: notes.filter(hasLocalEdits),
+        rest: notes.filter((note) => !hasLocalEdits(note))
       }
     },
     []
@@ -300,32 +346,34 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
   }, [])
 
   const undoRewrite = React.useCallback(
-    async (event: NoteRenamedEvent, scope: string, replacement: string, rewritten: RewrittenNote[]) => {
+    async (event: NoteRenamedEvent, rewritten: RewrittenNote[]) => {
       const { t, message } = depsRef.current
       const restoredIds: string[] = []
-      const { held, rest } = splitUnsavedOpenNote(rewritten)
+      const { held, rest } = splitNotesWithLocalEdits(rewritten)
       const skipped: SkippedNote[] = held.map((note) => ({
         id: note.id,
         title: note.title,
         reason: 'unsaved'
       }))
       try {
-        for (let offset = 0; offset < rest.length; offset += MAX_NOTES_PER_REQUEST) {
-          const chunk = rest.slice(offset, offset + MAX_NOTES_PER_REQUEST)
-          const result = parseUndo(
-            await ownedRequest(scope, UNDO_PATH, {
-              old_title: event.oldTitle,
-              replacement,
-              notes: chunk.map((note) => ({
-                id: note.id,
-                expected_version: note.version,
-                replacements: note.replacements
-              }))
-            }),
-            chunk
-          )
-          restoredIds.push(...result.restoredIds)
-          skipped.push(...result.skipped)
+        for (const [replacement, notes] of groupByReplacement(rest)) {
+          for (let offset = 0; offset < notes.length; offset += MAX_NOTES_PER_REQUEST) {
+            const chunk = notes.slice(offset, offset + MAX_NOTES_PER_REQUEST)
+            const result = parseUndo(
+              await ownedRequest(event.authorityScope, UNDO_PATH, {
+                old_title: event.oldTitle,
+                replacement,
+                notes: chunk.map((note) => ({
+                  id: note.id,
+                  expected_version: note.version,
+                  replacements: note.replacements
+                }))
+              }),
+              chunk
+            )
+            restoredIds.push(...result.restoredIds)
+            skipped.push(...result.skipped)
+          }
         }
       } finally {
         if (restoredIds.length > 0) afterLinksChanged(restoredIds)
@@ -339,20 +387,28 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
       if (restoredIds.length === 0) throw new Error(notRestored)
       message.warning(notRestored)
     },
-    [afterLinksChanged, describeSkipped, ownedRequest, splitUnsavedOpenNote]
+    [afterLinksChanged, describeSkipped, ownedRequest, splitNotesWithLocalEdits]
+  )
+
+  // `offer` opens a prompt, whose confirm runs the rewrite, which may offer
+  // again. The ref breaks that cycle.
+  const offerRef = React.useRef<(event: NoteRenamedEvent, renameKey: string) => Promise<void>>(
+    async () => {}
   )
 
   const runRewrite = React.useCallback(
-    async (event: NoteRenamedEvent, scope: string, firstPage: ReferrersPage) => {
+    async (event: NoteRenamedEvent, renameKey: string, firstPage: ReferrersPage) => {
       const { t, message } = depsRef.current
+      const scope = event.authorityScope
       const updated: RewrittenNote[] = []
       const skipped: SkippedNote[] = []
       let last: RewriteBatch | null = null
       let failure: string | null = null
+      let refused = false
       try {
         let page = firstPage
         for (let pageIndex = 0; pageIndex < MAX_REFERRER_PAGES; pageIndex += 1) {
-          const { held, rest } = splitUnsavedOpenNote(page.notes)
+          const { held, rest } = splitNotesWithLocalEdits(page.notes)
           skipped.push(...held.map((note) => ({ id: note.id, title: note.title, reason: 'unsaved' as const })))
           if (rest.length > 0) {
             last = parseRewrite(
@@ -379,6 +435,7 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
         }
       } catch (error) {
         failure = errorText(error)
+        refused = isRefusal(error)
       }
 
       const skippedText =
@@ -408,71 +465,71 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
               .join(' ')
           )
         }
-        return
-      }
-
-      const { replacement, linkForm, newTitleShared } = last
-      const newTitle = last.newTitle || event.newTitle
-      let linkFormText = ''
-      if (linkForm === 'id') {
-        linkFormText = newTitleShared
-          ? t('option:notesSearch.wikilinkRenameLinkedById', {
-              defaultValue: 'Another note is also titled "{{title}}", so the links use this note\'s id.',
-              title: newTitle
+      } else {
+        const newTitle = last.newTitle || event.newTitle
+        let linkFormText = ''
+        if (last.linkForm === 'id') {
+          linkFormText = last.newTitleShared
+            ? t('option:notesSearch.wikilinkRenameLinkedById', {
+                defaultValue: 'Another note is also titled "{{title}}", so the links use this note\'s id.',
+                title: newTitle
+              })
+            : t('option:notesSearch.wikilinkRenameLinkedByIdUnlinkable', {
+                defaultValue: '"{{title}}" can\'t be written as a [[link]], so the links use this note\'s id.',
+                title: newTitle
+              })
+        }
+        const incompleteText = failure
+          ? t('option:notesSearch.wikilinkRenameIncomplete', {
+              defaultValue: 'The update stopped early: {{error}}',
+              error: failure
             })
-          : t('option:notesSearch.wikilinkRenameLinkedByIdUnlinkable', {
-              defaultValue: '"{{title}}" can\'t be written as a [[link]], so the links use this note\'s id.',
-              title: newTitle
-            })
-      } else if (newTitleShared) {
-        linkFormText = t('option:notesSearch.wikilinkRenameSharedTitle', {
-          defaultValue: 'Another note is also titled "{{title}}", so these links may open that note.',
-          title: newTitle
+          : ''
+        afterLinksChanged(updated.map((note) => note.id))
+        showUndoNotificationRef.current({
+          title:
+            updated.length === 1
+              ? t('option:notesSearch.wikilinkRenameUpdatedOne', {
+                  defaultValue: 'Updated links in 1 note'
+                })
+              : t('option:notesSearch.wikilinkRenameUpdatedMany', {
+                  defaultValue: 'Updated links in {{count}} notes',
+                  count: updated.length
+                }),
+          description: [linkFormText, skippedText, incompleteText].filter(Boolean).join(' ') || undefined,
+          duration: RESULT_TOAST_SECONDS,
+          onUndo: () => undoRewrite(event, updated)
         })
       }
-      const incompleteText = failure
-        ? t('option:notesSearch.wikilinkRenameIncomplete', {
-            defaultValue: 'The update stopped early: {{error}}',
-            error: failure
-          })
-        : ''
-      afterLinksChanged(updated.map((note) => note.id))
-      showUndoNotificationRef.current({
-        title:
-          updated.length === 1
-            ? t('option:notesSearch.wikilinkRenameUpdatedOne', {
-                defaultValue: 'Updated links in 1 note'
-              })
-            : t('option:notesSearch.wikilinkRenameUpdatedMany', {
-                defaultValue: 'Updated links in {{count}} notes',
-                count: updated.length
-              }),
-        description: [linkFormText, skippedText, incompleteText].filter(Boolean).join(' ') || undefined,
-        duration: RESULT_TOAST_SECONDS,
-        onUndo: () => undoRewrite(event, scope, replacement, updated)
-      })
+
+      // Notes left behind for a reason that can pass (a failed request, an
+      // edit since the count, unsaved changes) get a fresh offer, so the user
+      // can try them again with current versions.
+      const retryable =
+        (failure !== null && !refused) ||
+        skipped.some((note) => note.reason === 'skipped_conflict' || note.reason === 'unsaved')
+      if (retryable) void offerRef.current(event, renameKey)
     },
-    [afterLinksChanged, describeSkipped, ownedRequest, splitUnsavedOpenNote, undoRewrite]
+    [afterLinksChanged, describeSkipped, ownedRequest, splitNotesWithLocalEdits, undoRewrite]
   )
 
   const openPrompt = React.useCallback(
-    (event: NoteRenamedEvent, scope: string, renameKey: string, firstPage: ReferrersPage) => {
+    (event: NoteRenamedEvent, renameKey: string, firstPage: ReferrersPage) => {
       const { t } = depsRef.current
       const key = `notes-wikilink-rename:${renameKey}`
       const one = firstPage.count === 1
-      let confirmed = false
-      const settle = () => {
-        settledRenamesRef.current.add(renameKey)
-        openPromptKeysRef.current.delete(key)
-      }
+      const prompt: OpenPrompt = { closedByCode: false }
       const confirm = () => {
-        if (confirmed) return
-        confirmed = true
-        settle()
+        if (prompt.closedByCode) return
+        prompt.closedByCode = true
+        if (openPromptsRef.current.get(key) === prompt) openPromptsRef.current.delete(key)
         notificationRef.current.destroy(key)
-        void runRewrite(event, scope, firstPage)
+        void runRewrite(event, renameKey, firstPage)
       }
-      openPromptKeysRef.current.add(key)
+      // Opening with the same key replaces the notice: the old one was not dismissed.
+      const replaced = openPromptsRef.current.get(key)
+      if (replaced) replaced.closedByCode = true
+      openPromptsRef.current.set(key, prompt)
       notificationRef.current.open({
         key,
         message: (
@@ -519,27 +576,23 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
           </Button>
         ),
         onClose: () => {
-          // Dismissed: the links stay unresolved, and this rename is not offered again.
-          if (!confirmed) settle()
+          if (prompt.closedByCode) return
+          // Dismissed by the user: the links stay unresolved, and this rename is not offered again.
+          prompt.closedByCode = true
+          if (openPromptsRef.current.get(key) === prompt) openPromptsRef.current.delete(key)
+          dismissedRenamesRef.current.add(renameKey)
         }
       })
     },
     [runRewrite]
   )
 
-  const handleNoteRenamed = React.useCallback(
-    async (event: NoteRenamedEvent) => {
-      const { isOnline, authorityScope } = depsRef.current
-      const oldKey = normalizeWikilinkTitle(event.oldTitle)
-      const newKey = normalizeWikilinkTitle(event.newTitle)
-      // Links match titles ignoring case and spacing, so such a rename breaks nothing.
-      if (!isOnline || !authorityScope || !event.noteId || !oldKey || !newKey || oldKey === newKey) return
-      const renameKey = JSON.stringify([authorityScope, event.noteId, oldKey, newKey])
-      if (settledRenamesRef.current.has(renameKey)) return
+  const offer = React.useCallback(
+    async (event: NoteRenamedEvent, renameKey: string) => {
       let page: ReferrersPage
       try {
         page = parseReferrers(
-          await ownedRequest(authorityScope, REFERRERS_PATH, {
+          await ownedRequest(event.authorityScope, REFERRERS_PATH, {
             title: event.oldTitle,
             exclude_note_id: event.noteId,
             unresolved_only: true
@@ -550,22 +603,51 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
         console.debug('[NotesManagerPage] Wikilink referrer count failed:', error)
         return
       }
-      if (depsRef.current.authorityScope !== authorityScope) return
+      if (!scopeIsCurrent(event.authorityScope) || dismissedRenamesRef.current.has(renameKey)) return
       if (page.count <= 0 || page.notes.length === 0) return
-      if (settledRenamesRef.current.has(renameKey)) return
-      openPrompt(event, authorityScope, renameKey, page)
+      openPrompt(event, renameKey, page)
     },
-    [openPrompt, ownedRequest]
+    [openPrompt, ownedRequest, scopeIsCurrent]
+  )
+  offerRef.current = offer
+
+  const handleNoteRenamed = React.useCallback(
+    async (event: NoteRenamedEvent) => {
+      const oldKey = normalizeWikilinkTitle(event.oldTitle)
+      const newKey = normalizeWikilinkTitle(event.newTitle)
+      // Links match titles ignoring case and spacing, so such a rename breaks nothing.
+      if (!event.noteId || !oldKey || !newKey || oldKey === newKey) return
+      if (!depsRef.current.isOnline || !event.authorityScope || !scopeIsCurrent(event.authorityScope)) return
+      const renameKey = JSON.stringify([event.authorityScope, event.noteId, oldKey, newKey])
+      if (dismissedRenamesRef.current.has(renameKey)) return
+      await offer(event, renameKey)
+    },
+    [offer, scopeIsCurrent]
   )
 
-  // Offers belong to one notes owner and one visit to the page.
+  // A different verified owner ends the open offers. A scope that goes null
+  // and comes back unchanged is only a session re-check.
   React.useEffect(() => {
-    const openPromptKeys = openPromptKeysRef.current
-    return () => {
-      for (const key of Array.from(openPromptKeys)) notificationRef.current.destroy(key)
-      openPromptKeys.clear()
+    const scope = deps.authorityScope
+    if (!scope) return
+    const previous = lastVerifiedScopeRef.current
+    lastVerifiedScopeRef.current = scope
+    if (previous && previous !== scope) closePrompts()
+  }, [closePrompts, deps.authorityScope])
+
+  // So do a logout and leaving the page.
+  React.useEffect(() => {
+    const onPrincipalChanged = (event: Event) => {
+      if ((event as CustomEvent<{ kind?: string }>).detail?.kind !== 'logout') return
+      lastVerifiedScopeRef.current = null
+      closePrompts()
     }
-  }, [deps.authorityScope])
+    window.addEventListener('tldw:auth-principal-changed', onPrincipalChanged)
+    return () => {
+      window.removeEventListener('tldw:auth-principal-changed', onPrincipalChanged)
+      closePrompts()
+    }
+  }, [closePrompts])
 
   return { handleNoteRenamed }
 }

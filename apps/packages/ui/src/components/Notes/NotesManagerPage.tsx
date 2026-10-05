@@ -770,6 +770,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     t,
     selectedId: ed.selectedId,
     isDirty: ed.isDirty,
+    hasQueuedDraft: (noteId) => Boolean(ed.offlineDraftQueue[`note:${noteId}`]),
     reloadSelectedNote: () => (ed.selectedId == null ? undefined : ed.loadDetail(ed.selectedId)),
     onLinksChanged: () => {
       void list.refetch()
