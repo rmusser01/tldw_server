@@ -110,14 +110,16 @@ def create_media_database(
     db_path: str | None = None,
     backend: Any = None,
     config: Any = None,
+    existing_only: bool = False,
 ) -> MediaDbLike:
-    """Create a MediaDatabase using the shared content runtime defaults."""
+    """Create a MediaDatabase, optionally opening only existing, unmodified schema."""
     return runtime_create_media_database(
         client_id,
         db_path=db_path,
         backend=backend,
         config=config,
         runtime=build_media_runtime_config(),
+        **({"existing_only": True} if existing_only else {}),
     )
 
 
@@ -129,18 +131,20 @@ def managed_media_database(
     backend=None,
     config=None,
     initialize: bool = True,
+    existing_only: bool = False,
     suppress_init_exceptions: tuple[type[BaseException], ...] = (),
     suppress_close_exceptions: tuple[type[BaseException], ...] = (),
 ) -> Iterator[MediaDbLike]:
-    """Create a MediaDatabase, optionally initialize it, and always close it on exit."""
+    """Manage a MediaDatabase; existing-only sessions never bootstrap its schema."""
     db = create_media_database(
         client_id,
         db_path=db_path,
         backend=backend,
         config=config,
+        **({"existing_only": True} if existing_only else {}),
     )
     try:
-        if initialize:
+        if initialize and not existing_only:
             if suppress_init_exceptions:
                 with contextlib.suppress(*suppress_init_exceptions):
                     db.initialize_db()
