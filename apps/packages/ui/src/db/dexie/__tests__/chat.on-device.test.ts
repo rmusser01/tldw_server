@@ -320,3 +320,58 @@ it("observes only relevant DB changes, including unchanged-count edits, and unsu
   fire("idb://PageAssistDatabase/chatHistories/");
   expect(changed).toHaveBeenCalledTimes(3);
 });
+
+
+describe("qualified cached server discovery", () => {
+  const cached = (id: string, chatId = id, extra = {}) => row(id, {
+    message_source: "server", server_chat_id: chatId, server_scope_key: "A",
+    server_scope_type: "global", ...extra
+  })
+  const policy = () => ({ includeCachedServerChats: true })
+  it("includes only owned account cached copies under an explicit read policy", async () => {
+    state.rows = [row("local"), cached("copy"), cached("foreign-account", "f", {server_scope_key: "B"}),
+      cached("foreign-profile", "p", {local_owner_key:"local-history-v1:Q"}),
+      cached("unbound", "u", {server_scope_key:undefined}), row("temp", {server_chat_id:"t", server_scope_key:"A"})]
+    const result = await database.getChatHistoriesPaginated(1, undefined, scope(), policy())
+    expect(result.histories.map(item => item.id).sort()).toEqual(["copy", "local"])
+    expect(result.totalCount).toBe(2)
+    expect(state.writes).not.toHaveBeenCalled()
+  })
+  it("deduplicates only visible current global server identity before counts and pages", async () => {
+    state.rows = [cached("matched", "S"), cached("other-id", "T"), cached("unknown-scope", "S", {server_scope_type: undefined}),
+      cached("workspace", "S", {server_scope_type: "workspace", server_workspace_id:"W"}),
+      row("same-title", {title:"matched"})]
+    const visibleServerChats = {serverScopeKey:"A", query:"", ids:new Set(["S"]), isCurrent:()=>true}
+    const result = await database.getChatHistoriesPaginated(1, undefined, scope(), { ...policy(), visibleServerChats })
+    expect(result.histories.map(item => item.id).sort()).toEqual(["other-id", "same-title", "unknown-scope", "workspace"])
+    expect(result.totalCount).toBe(4)
+  })
+  it.each(["stale", "other account", "other query", "other page"])("keeps copies reachable for %s server results", async reason => {
+    state.rows = [cached("copy", "S", {title:"needle"})]
+    const visibleServerChats = {serverScopeKey:reason === "other account" ? "B" : "A", query:reason === "other query" ? "else" : "needle",
+      ids:new Set(reason === "other page" ? ["T"] : ["S"]), isCurrent:()=>reason !== "stale"}
+    const result = await database.getChatHistoriesPaginated(1, "needle", scope(), {...policy(), visibleServerChats})
+    expect(result.histories.map(item => item.id)).toEqual(["copy"])
+  })
+  it("previews cached stored rows without adopting a local path or writing bookmarks", async () => {
+    state.rows = [cached("copy", "S")]; state.messages = [message("q", "copy", "Stored cached question")]
+    const result = await database.getOnDeviceChatPreview("copy", scope(), policy())
+    expect(result?.messages.map(item => item.content)).toEqual(["Stored cached question"])
+    expect(await database.getOnDeviceChatPreview("copy", scope())).toBeNull()
+    expect(state.writes).not.toHaveBeenCalled()
+  })
+  it("qualifies and pages 2000 local/cached histories and searches their content", async () => {
+    state.rows = Array.from({length:2000}, (_, i) => i < 1100 ? row(`local-${i}`) : cached(`copy-${i}`, `S-${i}`))
+    state.rows.push(cached("foreign", "F", {server_scope_key:"B"}))
+    state.messages = [message("needle", "copy-1999", "Distinctive cached body")]
+    const ids = new Set<string>()
+    for (let page = 1; page <= 67; page++) {
+      const result = await database.getChatHistoriesPaginated(page, undefined, scope(), policy())
+      result.histories.forEach(item => ids.add(item.id))
+      expect(result.hasMore).toBe(page < 67)
+      expect(result.totalCount).toBe(2000)
+    }
+    expect(ids.size).toBe(2000)
+    expect((await database.getChatHistoriesPaginated(1, "distinctive", scope(), policy())).histories.map(item => item.id)).toEqual(["copy-1999"])
+  })
+})

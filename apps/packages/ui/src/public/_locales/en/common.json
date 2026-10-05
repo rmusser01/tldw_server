@@ -1815,7 +1815,7 @@
     "message": "Search {{source}} history."
   },
   "chatSidebar_searchFromFolders": {
-    "message": "Typing searches Server history."
+    "message": "Typing searches Server and On this device history."
   },
   "commandPalette_searchCommands": {
     "message": "Search commands"
@@ -1828,5 +1828,65 @@
   },
   "commandPalette_searchHistoryDesc": {
     "message": "Focus conversation history search"
+  },
+  "chatSidebar_discovery_allScope": {
+    "message": "Search Server and On this device history."
+  },
+  "chatSidebar_discovery_serverGroup": {
+    "message": "Server results"
+  },
+  "chatSidebar_discovery_deviceGroup": {
+    "message": "On this device results"
+  },
+  "chatSidebar_discovery_verifyError": {
+    "message": "Could not verify the account for Server history."
+  },
+  "chatSidebar_discovery_verifying": {
+    "message": "Verifying the account for Server history…"
+  },
+  "chatSidebar_discovery_offline": {
+    "message": "Server history is offline. Owned cached copies remain available in On this device."
+  },
+  "chatSidebar_discovery_refreshError": {
+    "message": "Could not refresh Server history. Try again; cached copies remain in On this device."
+  },
+  "chatSidebar_discovery_noServerMatches": {
+    "message": "No matching chats on this Server page."
+  },
+  "chatSidebar_discovery_foreignScope": {
+    "message": "Some Server results were excluded because they belong to a different chat scope."
+  },
+  "chatSidebar_discovery_page": {
+    "message": "Page {{page}}"
+  },
+  "chatSidebar_local_cachedPreviewAction": {
+    "message": "Preview cached server chat: {{title}} · {{id}}"
+  },
+  "chatSidebar_local_cachedOrigin": {
+    "message": "Cached server copy · Read-only"
+  },
+  "chatSidebar_local_cachedWorkspace": {
+    "message": "Workspace {{id}}"
+  },
+  "chatSidebar_local_cachedUnknownScope": {
+    "message": "Chat scope unknown"
+  },
+  "chatSidebar_local_chatReference": {
+    "message": "Chat {{id}}"
+  },
+  "chatSidebar_local_cachedPreviewHelp": {
+    "message": "These are messages stored on this device. The copy may be incomplete or contain local edits. Your open chat stays unchanged; reconnect and open Server history to continue."
+  },
+  "chatSidebar_tabs_all": {
+    "message": "All"
+  },
+  "chatSidebar_local_cachedVerifyError": {
+    "message": "Could not verify the account for cached Server copies. Profile-owned chats are still available."
+  },
+  "chatSidebar_local_cachedVerifying": {
+    "message": "Verifying the account for cached Server copies. Profile-owned chats are still available."
+  },
+  "chatSidebar_local_retryAccount": {
+    "message": "Retry account verification"
   }
 }

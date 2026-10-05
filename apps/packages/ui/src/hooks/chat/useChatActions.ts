@@ -4749,6 +4749,7 @@ export const useChatActions = ({
         chatId,
         title: String(created?.title ?? title),
         ownerKey,
+        scope: requestOptions.scope,
         signal: owner.scopeInvalidatedSignal,
         validate_lease: isCurrent
       })

@@ -367,17 +367,17 @@ export const UI_MODE_SETTING = defineSetting(
   }
 )
 
-const SIDEBAR_TAB_VALUES = ["server", "local", "folders"] as const
+const SIDEBAR_TAB_VALUES = ["all", "server", "local", "folders"] as const
 type SidebarTabValue = (typeof SIDEBAR_TAB_VALUES)[number]
 
 export const SIDEBAR_ACTIVE_TAB_SETTING = defineSetting(
   "tldw:sidebar:activeTab",
-  "server" as SidebarTabValue,
+  "all" as SidebarTabValue,
   (value) => {
     const normalized = String(value || "").toLowerCase()
     return SIDEBAR_TAB_VALUES.includes(normalized as SidebarTabValue)
       ? (normalized as SidebarTabValue)
-      : "server"
+      : "all"
   },
   {
     area: "local",

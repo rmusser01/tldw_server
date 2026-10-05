@@ -43,6 +43,37 @@ export function isOnDeviceHistory(history: HistoryInfo, scope: OnDeviceHistorySc
   return !!profileKey && history.local_owner_key === profileKey;
 }
 
+/** A view receipt, valid only while the same successful Server page is visible. */
+export type VisibleServerChats = {
+  serverScopeKey: string;
+  query: string;
+  ids: ReadonlySet<string>;
+  isCurrent: () => boolean;
+};
+export type OnDeviceHistoryReadOptions = {
+  includeCachedServerChats?: boolean;
+  visibleServerChats?: VisibleServerChats | null;
+};
+
+export function isOwnedCachedServerHistory(history: HistoryInfo, scope: OnDeviceHistoryScope): boolean {
+  if (history.id === "temp" || !history.server_chat_id?.trim() || !scope.serverScopeKey ||
+      history.server_scope_key !== scope.serverScopeKey) return false;
+  return !history.local_owner_key ||
+    (!!scope.profileId && history.local_owner_key === `local-history-v1:${scope.profileId}`);
+}
+
+/** Qualification and exact visible-page deduplication precede counts and paging. */
+export function isReadableOnDeviceHistory(history: HistoryInfo, scope: OnDeviceHistoryScope,
+  options?: OnDeviceHistoryReadOptions, query = ""): boolean {
+  if (isOnDeviceHistory(history, scope)) return true;
+  if (!options?.includeCachedServerChats || !isOwnedCachedServerHistory(history, scope)) return false;
+  const visible = options.visibleServerChats;
+  return !(history.server_scope_type === "global" && !history.server_workspace_id &&
+    visible?.serverScopeKey === scope.serverScopeKey &&
+    visible.query.trim().toLowerCase() === query.trim().toLowerCase() &&
+    visible.isCurrent() && visible.ids.has(history.server_chat_id!));
+}
+
 export type LocalHistoryOwnerV1 = {
   readonly kind: "local"
   readonly profile_id: string

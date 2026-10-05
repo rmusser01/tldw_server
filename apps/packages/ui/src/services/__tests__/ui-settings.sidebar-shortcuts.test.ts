@@ -103,11 +103,11 @@ describe("sidebar shortcut defaults", () => {
   })
 })
 
-it.each(["server", "folders", "local"])("persists the %s conversation view", value => {
+it.each(["all", "server", "folders", "local"])("persists the %s conversation view", value => {
   expect(normalizeSettingValue(SIDEBAR_ACTIVE_TAB_SETTING, value)).toBe(value)
 })
-it("keeps the server fallback for unknown conversation views", () => {
-  expect(normalizeSettingValue(SIDEBAR_ACTIVE_TAB_SETTING, "other")).toBe("server")
+it("uses All for unknown conversation views", () => {
+  expect(normalizeSettingValue(SIDEBAR_ACTIVE_TAB_SETTING, "other")).toBe("all")
 })
 
 it("calls the new view On this device in the deployed English catalog", async () => {

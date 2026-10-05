@@ -1634,7 +1634,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
       const ownerKey = serverChatMirrorOwnerKey({ requestScope: current.owner.request_scope })
       const signal = openingHistorySelection.getSignal()
       const isCurrent = openingHistorySelection.fence()
-      const localHistoryId = await linkServerChatMirror({ chatId, title: chat.title || newChatLabel, ownerKey, signal })
+      const localHistoryId = await linkServerChatMirror({ chatId, title: chat.title || newChatLabel, ownerKey, signal, scope: current.owner.scope, validate_lease: isCurrent })
       if (!isCurrent()) return null
       const incoming = mapServerChatMessages(list, userDisplayName).mappedMessages.map(message => ({ ...message, serverMessageId: message.serverMessageId || message.id }))
       await reconcileServerChatMirror({ historyId: localHistoryId, chatId, ownerKey, messages: incoming, signal })

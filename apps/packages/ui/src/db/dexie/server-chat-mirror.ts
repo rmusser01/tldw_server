@@ -5,6 +5,7 @@ import { db } from "./schema"
 import { generateID } from "./helpers"
 import { runChatPersistenceTransaction } from "./chat-persistence-transaction"
 import type { Message } from "./types"
+import type { ChatScope } from "@/types/chat-scope"
 import type { HistoryOperationOptions } from "./history-selection"
 
 /** Full verified target/owner identity; never stores bearer tokens or API keys. */
@@ -19,25 +20,30 @@ export const serverChatMirrorOwnerKey = (snapshot: Pick<ServicePromptSnapshot, "
 }
 
 export const linkServerChatMirror = async ({
-  chatId, title, ownerKey, currentHistoryId, legacyHistoryId, signal, validate_lease
+  chatId, title, ownerKey, currentHistoryId, legacyHistoryId, scope, signal, validate_lease
 }: {
   chatId: string; title: string; ownerKey: string
-  currentHistoryId?: string | null; legacyHistoryId?: string | null
+  currentHistoryId?: string | null; legacyHistoryId?: string | null; scope?: ChatScope
 } & HistoryOperationOptions): Promise<string> => runChatPersistenceTransaction(signal, async () => {
+  const namespace = { server_scope_type: scope?.type ?? "global" as const,
+    server_workspace_id: scope?.type === "workspace" ? scope.workspaceId : undefined }
   const candidates = await db.chatHistories.where("server_chat_id").equals(chatId).toArray()
-  const owned = candidates.find(history => history.server_scope_key === ownerKey)
+  const sameNamespace = (history: import("./types").HistoryInfo) =>
+    !history.server_scope_type || (history.server_scope_type === namespace.server_scope_type &&
+      (history.server_workspace_id ?? undefined) === namespace.server_workspace_id)
+  const owned = candidates.find(history => history.server_scope_key === ownerKey && sameNamespace(history))
   const current = currentHistoryId ? await db.chatHistories.get(currentHistoryId) : undefined
-  const canLinkCurrent = current && (!current.server_chat_id || current.server_chat_id === chatId) &&
+  const canLinkCurrent = current && sameNamespace(current) && (!current.server_chat_id || current.server_chat_id === chatId) &&
     (current.server_scope_key === ownerKey ||
       (!current.server_scope_key && current.id === legacyHistoryId))
   const history = owned || (canLinkCurrent ? current : undefined)
   if (history) {
-    await db.chatHistories.update(history.id, { title, server_chat_id: chatId, server_scope_key: ownerKey })
+    await db.chatHistories.update(history.id, { title, server_chat_id: chatId, server_scope_key: ownerKey, ...namespace })
     return history.id
   }
   const id = generateID()
   await db.chatHistories.add({ id, title, createdAt: Date.now(), is_rag: false,
-    message_source: "server", server_chat_id: chatId, server_scope_key: ownerKey })
+    message_source: "server", server_chat_id: chatId, server_scope_key: ownerKey, ...namespace })
   return id
 }, undefined, validate_lease)
 

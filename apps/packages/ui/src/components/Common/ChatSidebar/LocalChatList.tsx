@@ -12,7 +12,8 @@ import { MessageSquare, PinIcon } from "lucide-react";
 import { db } from "@/db/dexie/schema";
 import {
   pageAssistDatabase,
-  isOnDeviceHistory,
+  isReadableOnDeviceHistory,
+  type VisibleServerChats,
   watchOnDeviceHistoryChanges,
   type OnDeviceHistoryScope,
 } from "@/db/dexie/chat";
@@ -37,6 +38,8 @@ export interface LocalChatListProps {
   selectedChatId?: string | null;
   onSelectChat?: (chatId: string) => void;
   readOnly?: boolean;
+  includeCachedServerChats?: boolean;
+  visibleServerChats?: VisibleServerChats | null;
   className?: string;
 }
 type PreviewData = NonNullable<
@@ -49,6 +52,7 @@ type Preview = {
   isCurrent: () => boolean;
   status: "loading" | "ready" | "error" | "unavailable";
   data?: PreviewData;
+  cached: boolean;
 };
 type PreparedOpen = {
   row: HistoryInfo;
@@ -64,12 +68,59 @@ type PreparedOpen = {
 const focusRing =
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg";
 
+const returnPreviewFocus = (
+  initiator: HTMLElement | null,
+  sidebar: Element | null,
+  isCurrent: () => boolean = () => true,
+) => {
+  queueMicrotask(() => {
+    if (!isCurrent()) return;
+    const active = document.activeElement;
+    if (
+      active !== document.body &&
+      active?.isConnected &&
+      !active.closest(".on-device-history-preview")
+    )
+      return;
+    const visible = (element: Element | null): element is HTMLElement => {
+      if (!(element instanceof HTMLElement) || !element.isConnected)
+        return false;
+      for (
+        let ancestor: HTMLElement | null = element;
+        ancestor;
+        ancestor = ancestor.parentElement
+      ) {
+        const style = getComputedStyle(ancestor);
+        if (
+          ancestor.hidden ||
+          ancestor.hasAttribute("inert") ||
+          style.display === "none" ||
+          style.visibility === "hidden"
+        )
+          return false;
+      }
+      return true;
+    };
+    const currentSidebar = sidebar?.isConnected
+      ? sidebar
+      : document.querySelector("[data-chat-sidebar]");
+    const fallback =
+      currentSidebar?.querySelector(
+        "input, [data-testid='chat-sidebar-toggle']",
+      ) ?? null;
+    if (visible(initiator)) initiator.focus({ preventScroll: true });
+    else if (visible(fallback)) fallback.focus({ preventScroll: true });
+  });
+};
+
 /** Discovery only: management/migration needs a separately qualified write path. */
 export function LocalChatList({
   searchQuery,
   selectedChatId,
   onSelectChat,
   readOnly = false,
+  includeCachedServerChats = false,
+  visibleServerChats,
   className,
 }: LocalChatListProps) {
   const { t } = useTranslation(["common", "sidepanel", "option"]);
@@ -109,6 +160,7 @@ export function LocalChatList({
   const listRoot = React.useRef<HTMLDivElement>(null);
   const previewInitiator = React.useRef<HTMLElement | null>(null);
   const previewWasOpen = React.useRef(false);
+  const pendingPreviewFocus = React.useRef<(() => void) | null>(null);
   const mounted = React.useRef(false);
   const request = React.useRef(0);
   const currentScope = React.useRef<OnDeviceHistoryScope | null>(null);
@@ -116,6 +168,8 @@ export function LocalChatList({
     ownerKey,
     serverScopeKey,
     isCurrent: ownerCurrent,
+    verificationState,
+    retryVerification,
   } = useChatDraftOwner(() => {
     request.current++;
     pendingOpen.current = null;
@@ -202,8 +256,32 @@ export function LocalChatList({
     setSelectionFailed(false);
   }, [draftAddress, draftRevision, previewOnly, routeEpoch]);
   const query = searchQuery.trim();
+  const visibleServerReceipt =
+    visibleServerChats?.isCurrent() &&
+    visibleServerChats.serverScopeKey === serverScopeKey &&
+    visibleServerChats.query.trim().toLowerCase() === query.toLowerCase()
+      ? visibleServerChats
+      : null;
+  const visibleServerIds = visibleServerReceipt
+    ? [...visibleServerReceipt.ids].sort()
+    : [];
+  const readOptions = React.useMemo(
+    () => ({
+      includeCachedServerChats,
+      visibleServerChats: visibleServerReceipt,
+    }),
+    [includeCachedServerChats, visibleServerReceipt],
+  );
   const history = useInfiniteQuery({
-    queryKey: ["fetchChatHistory", "on-device", query, profileId, ownerKey],
+    queryKey: [
+      "fetchChatHistory",
+      "on-device",
+      query,
+      profileId,
+      ownerKey,
+      includeCachedServerChats,
+      visibleServerIds,
+    ],
     enabled: !!scope,
     queryFn: async ({ pageParam }) => {
       if (!scope?.isCurrent())
@@ -212,6 +290,7 @@ export function LocalChatList({
         pageParam,
         query || undefined,
         scope,
+        readOptions,
       );
       if (!scope.isCurrent())
         throw new Error("on_device_history_scope_changed");
@@ -227,11 +306,15 @@ export function LocalChatList({
     const unique = new Map<string, HistoryInfo>();
     for (const page of history.data?.pages ?? [])
       for (const row of page.histories) {
-        if (scope && isOnDeviceHistory(row, scope) && !unique.has(row.id))
+        if (
+          scope &&
+          isReadableOnDeviceHistory(row, scope, readOptions, query) &&
+          !unique.has(row.id)
+        )
           unique.set(row.id, row);
       }
     return [...unique.values()];
-  }, [history.data, scope]);
+  }, [history.data, scope, readOptions, query]);
   const ids = rows.map((row) => row.id);
   const metadata = useQuery({
     queryKey: ["historyMetadata", "on-device", profileId, ownerKey, ids],
@@ -242,6 +325,7 @@ export function LocalChatList({
       const value = await pageAssistDatabase.getHistoriesWithMetadata(
         ids,
         scope,
+        { includeCachedServerChats },
       );
       if (!scope.isCurrent())
         throw new Error("on_device_history_scope_changed");
@@ -260,11 +344,29 @@ export function LocalChatList({
   );
 
   const closePreview = () => {
-    request.current++;
+    const token = ++request.current;
+    const key = previewLifetime.current.key;
+    const sourceScope = scope;
+    const initiator = previewInitiator.current;
+    const sidebar = listRoot.current?.closest("[data-chat-sidebar]") ?? null;
+    pendingPreviewFocus.current = () =>
+      returnPreviewFocus(
+        initiator,
+        sidebar,
+        () =>
+          mounted.current &&
+          request.current === token &&
+          previewLifetime.current.key === key &&
+          currentScope.current === sourceScope,
+      );
     setPreview(null);
   };
-  const showPreview = async (row: HistoryInfo) => {
+  const showPreview = async (
+    row: HistoryInfo,
+    cached = !!row.server_chat_id,
+  ) => {
     if (!scope?.isCurrent()) return;
+    pendingPreviewFocus.current = null;
     const token = ++request.current;
     const source = captureChatDraftLoad("switch", scope.isCurrent);
     const current = () => token === request.current && source.isCurrent();
@@ -274,13 +376,18 @@ export function LocalChatList({
       scope,
       isCurrent: current,
       status: "loading",
+      cached,
     };
     setPreview(initial);
     try {
-      const data = await pageAssistDatabase.getOnDeviceChatPreview(row.id, {
-        ...scope,
-        isCurrent: current,
-      });
+      const data = await pageAssistDatabase.getOnDeviceChatPreview(
+        row.id,
+        {
+          ...scope,
+          isCurrent: current,
+        },
+        { includeCachedServerChats },
+      );
       if (!current()) return;
       setPreview({
         ...initial,
@@ -377,7 +484,7 @@ export function LocalChatList({
   }, [preparedOpen, ready, profileId, profileRetry, scope, openSelection]);
 
   const select = async (row: HistoryInfo) => {
-    if (previewOnly) {
+    if (previewOnly || row.server_chat_id) {
       await showPreview(row);
       return;
     }
@@ -477,7 +584,11 @@ export function LocalChatList({
       </Button>
     </div>
   );
-  const visiblePreview = previewOnly && preview?.isCurrent() ? preview : null;
+  const visiblePreview =
+    (previewOnly || (includeCachedServerChats && preview?.cached)) &&
+    preview?.isCurrent()
+      ? preview
+      : null;
   const alternatives = React.useMemo(() => {
     const replies = new Map<string, PreviewData["messages"]>();
     for (const row of visiblePreview?.data?.messages ?? []) {
@@ -529,43 +640,7 @@ export function LocalChatList({
         return;
       const initiator = previewInitiator.current;
       const sidebar = listRoot.current?.closest("[data-chat-sidebar]");
-      queueMicrotask(() => {
-        const activeNow = document.activeElement;
-        if (
-          activeNow !== document.body &&
-          activeNow?.isConnected &&
-          !activeNow.closest(".on-device-history-preview")
-        )
-          return;
-        const visible = (element: Element | null): element is HTMLElement => {
-          if (!(element instanceof HTMLElement) || !element.isConnected)
-            return false;
-          for (
-            let ancestor: HTMLElement | null = element;
-            ancestor;
-            ancestor = ancestor.parentElement
-          ) {
-            const style = getComputedStyle(ancestor);
-            if (
-              ancestor.hidden ||
-              ancestor.hasAttribute("inert") ||
-              style.display === "none" ||
-              style.visibility === "hidden"
-            )
-              return false;
-          }
-          return true;
-        };
-        const currentSidebar = sidebar?.isConnected
-          ? sidebar
-          : document.querySelector("[data-chat-sidebar]");
-        const fallback =
-          currentSidebar?.querySelector(
-            "input, [data-testid='chat-sidebar-toggle']",
-          ) ?? null;
-        if (visible(initiator)) initiator.focus({ preventScroll: true });
-        else if (visible(fallback)) fallback.focus({ preventScroll: true });
-      });
+      returnPreviewFocus(initiator, sidebar ?? null);
     },
     [previewKey],
   );
@@ -585,6 +660,31 @@ export function LocalChatList({
             "Chats stored on this device. Account-bound chats appear for the current account.",
         })}
       </p>
+      {includeCachedServerChats && verificationState !== "ready" && (
+        <div
+          role={verificationState === "error" ? "alert" : "status"}
+          className="px-3 pb-2 text-sm"
+        >
+          <p>
+            {verificationState === "error"
+              ? t("common:chatSidebar.local.cachedVerifyError", {
+                  defaultValue:
+                    "Could not verify the account for cached Server copies. Profile-owned chats are still available.",
+                })
+              : t("common:chatSidebar.local.cachedVerifying", {
+                  defaultValue:
+                    "Verifying the account for cached Server copies. Profile-owned chats are still available.",
+                })}
+          </p>
+          {verificationState === "error" && (
+            <Button onClick={retryVerification}>
+              {t("common:chatSidebar.local.retryAccount", {
+                defaultValue: "Retry account verification",
+              })}
+            </Button>
+          )}
+        </div>
+      )}
       {previewOnly && (
         <p role="status" className="px-3 pb-2 text-xs text-text-muted">
           {t("common:chatSidebar.local.temporaryHelp", {
@@ -658,15 +758,28 @@ export function LocalChatList({
                   key={row.id}
                   type="button"
                   aria-label={
-                    previewOnly
-                      ? t("common:chatSidebar.local.previewAction", {
-                          defaultValue: "Preview chat: {{title}}",
+                    row.server_chat_id
+                      ? t("common:chatSidebar.local.cachedPreviewAction", {
+                          defaultValue:
+                            "Preview cached server chat: {{title}} · {{id}}",
                           title,
+                          id: row.id,
                         })
-                      : title
+                      : previewOnly
+                        ? t("common:chatSidebar.local.previewAction", {
+                            defaultValue: "Preview chat: {{title}}",
+                            title,
+                          })
+                        : rows.some(
+                              (item) =>
+                                item.id !== row.id && item.title === row.title,
+                            )
+                          ? `${title} · ${t("common:chatSidebar.local.chatReference", { defaultValue: "Chat {{id}}", id: row.id })}`
+                          : title
                   }
                   aria-current={
                     !previewOnly &&
+                    !row.server_chat_id &&
                     (selectedChatId ?? options.historyId) === row.id
                       ? "true"
                       : undefined
@@ -692,6 +805,35 @@ export function LocalChatList({
                     )}
                     {loadingId === row.id && <Spin size="small" />}
                   </span>
+                  {row.server_chat_id && (
+                    <span className="block text-xs text-text-muted">
+                      {t("common:chatSidebar.local.cachedOrigin", {
+                        defaultValue: "Cached server copy · Read-only",
+                      })}
+                      {row.server_scope_type === "workspace" &&
+                      row.server_workspace_id
+                        ? " · " +
+                          t("common:chatSidebar.local.cachedWorkspace", {
+                            defaultValue: "Workspace {{id}}",
+                            id: row.server_workspace_id,
+                          })
+                        : row.server_scope_type !== "global"
+                          ? " · " +
+                            t("common:chatSidebar.local.cachedUnknownScope", {
+                              defaultValue: "Chat scope unknown",
+                            })
+                          : ""}
+                    </span>
+                  )}
+                  {rows.filter((item) => item.title === row.title).length >
+                    1 && (
+                    <span className="block text-xs text-text-muted">
+                      {t("common:chatSidebar.local.chatReference", {
+                        defaultValue: "Chat {{id}}",
+                        id: row.id,
+                      })}
+                    </span>
+                  )}
                   {excerpt && (
                     <span className="block truncate text-xs text-text-muted">
                       {excerpt}
@@ -766,6 +908,11 @@ export function LocalChatList({
             : ""
         }
         onCancel={closePreview}
+        afterClose={() => {
+          const restore = pendingPreviewFocus.current;
+          pendingPreviewFocus.current = null;
+          restore?.();
+        }}
         footer={
           <Button onClick={closePreview}>
             {t("common:chatSidebar.local.closePreview", {
@@ -775,10 +922,15 @@ export function LocalChatList({
         }
       >
         <p className="mb-3 text-sm text-text-muted">
-          {t("common:chatSidebar.local.previewHelp", {
-            defaultValue:
-              "Your Temporary chat stays open. These are stored messages in time order; alternatives and comparison results may be included.",
-          })}
+          {visiblePreview?.cached
+            ? t("common:chatSidebar.local.cachedPreviewHelp", {
+                defaultValue:
+                  "These are messages stored on this device. The copy may be incomplete or contain local edits. Your open chat stays unchanged; reconnect and open Server history to continue.",
+              })
+            : t("common:chatSidebar.local.previewHelp", {
+                defaultValue:
+                  "Your Temporary chat stays open. These are stored messages in time order; alternatives and comparison results may be included.",
+              })}
         </p>
         {visiblePreview?.status === "loading" && (
           <p role="status">
@@ -792,10 +944,13 @@ export function LocalChatList({
               defaultValue: "Could not read this chat.",
             }),
             () => {
-              void showPreview({
-                id: visiblePreview.id,
-                title: visiblePreview.title,
-              } as HistoryInfo);
+              void showPreview(
+                {
+                  id: visiblePreview.id,
+                  title: visiblePreview.title,
+                } as HistoryInfo,
+                visiblePreview.cached,
+              );
             },
           )}
         {visiblePreview?.status === "unavailable" && (

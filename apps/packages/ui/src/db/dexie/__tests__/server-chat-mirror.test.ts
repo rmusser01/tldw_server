@@ -149,6 +149,15 @@ describe("owned server Chat mirror", () => {
     await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: remote })
     expect(state.messages.get("local-q")).toMatchObject({ serverMessageId: undefined, content: kind === "edited-user" ? "Edited" : "Repeat" })
   })
+  it("does not repurpose an exact chat ID from a different recorded namespace", async () => {
+    state.histories.set("global", {...history("global", "A"), server_scope_type:"global"})
+    const workspace = await link("A", {currentHistoryId:"global", legacyHistoryId:"global", scope:{type:"workspace",workspaceId:"W"}})
+    expect(workspace).not.toBe("global")
+    expect(state.histories.get("global")?.server_scope_type).toBe("global")
+    expect(state.histories.get(workspace)).toMatchObject({server_scope_type:"workspace",server_workspace_id:"W"})
+    expect(await link("A",{scope:{type:"global"}})).toBe("global")
+  })
+
   it("keeps identical conversation IDs in different owners' histories", async () => {
     state.histories.set("alice", history("alice", "A"))
     const bob = await link("B", { currentHistoryId: "alice" })

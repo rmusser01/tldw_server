@@ -1,6 +1,7 @@
 import {
   assertNoPendingLocalSettingsWrite,
-  isOnDeviceHistory,
+  isReadableOnDeviceHistory,
+  type OnDeviceHistoryReadOptions,
   type OnDeviceHistoryScope,
   withLocalMessageMutation,
   type LocalHistoryOwnerV1,
@@ -28,7 +29,7 @@ import { db } from './schema';
 import { getAllModelNicknames } from "./nickname";
 const PAGE_SIZE = 30;
 
-export { isOnDeviceHistory, type OnDeviceHistoryScope } from "./history-selection";
+export { isOnDeviceHistory, isReadableOnDeviceHistory, isOwnedCachedServerHistory, type OnDeviceHistoryScope, type OnDeviceHistoryReadOptions, type VisibleServerChats } from "./history-selection";
 
 async function assertOnDeviceReader(scope: OnDeviceHistoryScope): Promise<void> {
   if (!scope.isCurrent()) throw new Error("on_device_history_scope_changed");
@@ -258,14 +259,14 @@ export class PageAssistDatabase {
     };
   }
 
-  async getHistoriesWithMetadata(historyIds: string[], scope?: OnDeviceHistoryScope): Promise<Map<string, {
+  async getHistoriesWithMetadata(historyIds: string[], scope?: OnDeviceHistoryScope, options?: OnDeviceHistoryReadOptions): Promise<Map<string, {
     messageCount: number;
     lastMessage?: { content: string; role: string; createdAt: number };
   }>> {
     if (scope) return db.transaction("r", [db.userSettings, db.chatHistories, db.messages], async () => {
       await assertOnDeviceReader(scope);
       const rows = await Promise.all(historyIds.map(id => db.chatHistories.get(id)));
-      const eligible = rows.filter((row): row is HistoryInfo => !!row && isOnDeviceHistory(row, scope));
+      const eligible = rows.filter((row): row is HistoryInfo => !!row && isReadableOnDeviceHistory(row, scope, options));
       const metadata = await this.getHistoriesWithMetadata(eligible.map(row => row.id));
       await assertOnDeviceReader(scope);
       return metadata;
@@ -436,7 +437,7 @@ export class PageAssistDatabase {
   async deleteMessage(history_id: string) {
     await db.messages.where('history_id').equals(history_id).delete();
   }
-  async getChatHistoriesPaginated(page: number = 1, searchQuery?: string, scope?: OnDeviceHistoryScope): Promise<{
+  async getChatHistoriesPaginated(page: number = 1, searchQuery?: string, scope?: OnDeviceHistoryScope, options?: OnDeviceHistoryReadOptions): Promise<{
     histories: ChatHistory;
     hasMore: boolean;
     totalCount: number;
@@ -446,7 +447,7 @@ export class PageAssistDatabase {
     if (scope) return db.transaction("r", [db.userSettings, db.chatHistories, db.messages], async () => {
       await assertOnDeviceReader(scope);
       const candidates = query ? await this.fullTextSearchChatHistories(query) : await this.getChatHistories();
-      const eligible = candidates.filter(history => isOnDeviceHistory(history, scope));
+      const eligible = candidates.filter(history => isReadableOnDeviceHistory(history, scope, options, query));
       await assertOnDeviceReader(scope);
       return {
         histories: eligible.slice(offset, offset + PAGE_SIZE),
@@ -498,11 +499,11 @@ export class PageAssistDatabase {
     }
   }
   /** Stored rows for a labelled read-only preview; no H1 path or bookmark is adopted. */
-  async getOnDeviceChatPreview(id: string, scope: OnDeviceHistoryScope): Promise<{ historyInfo: HistoryInfo; messages: Message[] } | null> {
+  async getOnDeviceChatPreview(id: string, scope: OnDeviceHistoryScope, options?: OnDeviceHistoryReadOptions): Promise<{ historyInfo: HistoryInfo; messages: Message[] } | null> {
     return db.transaction("r", [db.userSettings, db.chatHistories, db.messages], async () => {
       await assertOnDeviceReader(scope);
       const historyInfo = await db.chatHistories.get(id);
-      if (!historyInfo || !isOnDeviceHistory(historyInfo, scope)) return null;
+      if (!historyInfo || !isReadableOnDeviceHistory(historyInfo, scope, options)) return null;
       const messages = await db.messages.where("history_id").equals(id).toArray();
       await assertOnDeviceReader(scope);
       return { historyInfo, messages: messages.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)) };

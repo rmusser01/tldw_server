@@ -263,3 +263,16 @@ it.each([
 ])("scoped chat path %s %s has exact access %s", (path, method, expected) => {
   expect(isServicePromptRequestPath(path, method)).toBe(expected)
 })
+
+
+it.each([
+  ["/api/v1/chats/owned/restore","POST",true],
+  ["/api/v1/chats/owned/restore?scope_type=global&expected_version=4","POST",true],
+  ["/api/v1/chats/owned/restore","GET",false],
+  ["/api/v1/chats/owned/restore","PUT",false],
+  ["/api/v1/chats/owned/restore/extra","POST",false],
+  ["/api/v1/chats/a%2fb/restore","POST",false],
+  ["/api/v1/chats/%2e%2e/restore","POST",false],
+])("bounds captured Restore transport %s %s",(path,method,expected)=>{
+  expect(isServicePromptRequestPath(path,method)).toBe(expected)
+})

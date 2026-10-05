@@ -1004,8 +1004,9 @@ export const chatRagMethods = {
   async restoreChat(
     this: TldwApiClientCore,
     chat_id: string | number,
-    options?: { expectedVersion?: number; scope?: ChatScope }
+    options?: { expectedVersion?: number; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     let expectedVersion = options?.expectedVersion
     if (expectedVersion == null) {
@@ -1026,6 +1027,8 @@ export const chatRagMethods = {
       )
       try {
         const res = await bgRequest<any>({
+          ...scopeFields,
+          ...(options?.signal ? {abortSignal:options.signal} : {}),
           path: `/api/v1/chats/${cid}/restore${query}`,
           method: "POST"
         })

@@ -24,6 +24,8 @@ import {
   SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE,
   useServerChatHistory
 } from "@/hooks/useServerChatHistory"
+import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
+import type { VisibleServerChats } from "@/db/dexie/chat"
 import { useClearChat } from "@/hooks/chat/useClearChat"
 import { useFolderStore } from "@/store/folder"
 import { useStoreMessageOption } from "@/store/option"
@@ -59,7 +61,7 @@ interface ChatSidebarProps {
   onConversationSelected?: () => void
 }
 
-type SidebarTab = "server" | "local" | "folders"
+type SidebarTab = "all" | "server" | "local" | "folders"
 
 export function ChatSidebar({
   collapsed = false,
@@ -72,14 +74,23 @@ export function ChatSidebar({
   const navigate = useNavigate()
   const location = useLocation()
   const [searchQuery, setSearchQuery] = useState("")
+  const hasSearchQuery = searchQuery.trim().length > 0
   const debouncedSearchQuery = useDebounce(searchQuery, 300)
   const [selectionMode, setSelectionMode] = useState(false)
   const [recentCollapsed, setRecentCollapsed, recentPreference] = useSetting(
     SIDEBAR_RECENT_COLLAPSED_SETTING
   )
   // Read the saved source before starting any source-specific list.
-  const [currentTab, setCurrentTab, tabPreference] = useSetting(SIDEBAR_ACTIVE_TAB_SETTING)
+  const [savedTab, setCurrentTab, tabPreference] = useSetting(SIDEBAR_ACTIVE_TAB_SETTING)
   const tabReady = tabPreference?.isLoading !== true
+  const currentTab: SidebarTab = savedTab === "folders" && hasSearchQuery ? "all" : savedTab
+  const [visibleServerChats, setVisibleServerChats] = useState<VisibleServerChats | null>(null)
+  const readOwner = useChatDraftOwner(() => setVisibleServerChats(null))
+  const ownerReady = readOwner.verificationState === "ready" && !!readOwner.ownerKey && !!readOwner.requestScope && readOwner.isCurrent()
+  const historyOwner = React.useMemo(() => ownerReady ? {
+    key: readOwner.ownerKey!, requestScope: readOwner.requestScope!, isCurrent: readOwner.isCurrent
+  } : undefined, [ownerReady, readOwner.ownerKey, readOwner.requestScope, readOwner.isCurrent])
+
   const searchInput = React.useRef<InputRef>(null)
   const focusSearchOnOpen = React.useRef<{
     location: typeof location
@@ -100,7 +111,6 @@ export function ChatSidebar({
         active !== requested.initiator && active !== searchInput.current?.input) return
     searchInput.current?.focus()
   }, [collapsed, location, tabReady])
-  const hasSearchQuery = searchQuery.trim().length > 0
   const recentHistoryVisible = tabReady && (hasSearchQuery ||
     (recentPreference?.isLoading !== true && !recentCollapsed))
 
@@ -119,7 +129,7 @@ export function ChatSidebar({
     (state) => shouldEnableOptionalResource(state, "server-history")
   )
   const serverHistoryPanelVisible =
-    !collapsed && recentHistoryVisible && currentTab === "server"
+    !collapsed && recentHistoryVisible && (currentTab === "server" || currentTab === "all")
 
   const clearChat = useClearChat()
   const temporaryChat = useStoreMessageOption((state) => state.temporaryChat)
@@ -134,7 +144,9 @@ export function ChatSidebar({
 
   // Server chat count for tab badge
   const { total: serverChatCount = 0 } = useServerChatHistory("", {
-    enabled: serverHistoryPanelVisible && serverHistoryOverviewEnabled,
+    enabled: ownerReady && serverHistoryPanelVisible && serverHistoryOverviewEnabled,
+    owner: historyOwner,
+    scope: {type:"global"},
     mode: "overview",
     page: 1,
     limit: SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE,
@@ -214,9 +226,6 @@ export function ChatSidebar({
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const nextValue = e.target.value
-    if (currentTab === "folders" && nextValue.trim().length > 0) {
-      void setCurrentTab("server")
-    }
     if (currentTab !== "local" && nextValue.trim().length > 0) {
       markPanelEngaged("server-history")
     }
@@ -248,7 +257,7 @@ export function ChatSidebar({
   }, [collapsed, openResetKey])
 
   React.useEffect(() => {
-    if ((currentTab !== "server" || temporaryChat) && selectionMode) {
+    if ((currentTab !== "server" && currentTab !== "all" || temporaryChat) && selectionMode) {
       setSelectionMode(false)
     }
   }, [currentTab, selectionMode, temporaryChat])
@@ -269,9 +278,10 @@ export function ChatSidebar({
 
   // Build tab options with counts
   const tabOptions: Array<{ value: SidebarTab; label: string }> = [
+    { value: "all", label: t("common:chatSidebar.tabs.all", "All") },
     {
       value: "server",
-      label: `${t("common:chatSidebar.tabs.server", "Server")}${serverChatCount > 0 ? ` (${serverChatCount})` : ""}`
+      label: `${t("common:chatSidebar.tabs.server", "Server")}${ownerReady && serverChatCount > 0 ? ` (${serverChatCount})` : ""}`
     },
     {
       value: "local",
@@ -445,7 +455,7 @@ export function ChatSidebar({
               <Plus className="size-4" />
             </button>
           </Tooltip>
-          {recentHistoryVisible && currentTab === "server" && !temporaryChat && (
+          {recentHistoryVisible && (currentTab === "server" || currentTab === "all") && !temporaryChat && (
             <Tooltip
               title={
                 selectionMode
@@ -517,7 +527,9 @@ export function ChatSidebar({
             {!tabReady
               ? t("common:loading.title", "Loading…")
               : currentTab === "folders"
-              ? t("common:chatSidebar.searchFromFolders", "Typing searches Server history.")
+              ? t("common:chatSidebar.searchFromFolders", "Typing searches Server and On this device history.")
+              : currentTab === "all"
+              ? t("common:chatSidebar.discovery.allScope", "Search Server and On this device history.")
               : t("common:chatSidebar.searchScope", "Search {{source}} history.", {
                   source: currentTab === "local"
                     ? t("common:chatSidebar.tabs.local", "On this device")
@@ -583,18 +595,27 @@ export function ChatSidebar({
                   : ""
               }
             >
-              {currentTab === "server" && (
+              {(currentTab === "server" || currentTab === "all") && (
+                <section aria-label={t("common:chatSidebar.tabs.server", "Server")}>
+                {currentTab === "all" && <h3 className="px-3 pt-3 text-sm font-semibold">{t("common:chatSidebar.discovery.serverGroup", "Server results")}</h3>}
                 <ServerChatList
                   searchQuery={debouncedSearchQuery}
                   selectionMode={selectionMode}
                   readOnly={temporaryChat}
                   onConversationSelected={onConversationSelected}
+                  onVisibleChatsChange={setVisibleServerChats}
                 />
+                </section>
               )}
 
-              {currentTab === "local" && (
+              {(currentTab === "local" || currentTab === "all") && (
+                <section aria-label={t("common:chatSidebar.tabs.local", "On this device")}>
+                {currentTab === "all" && <h3 className="px-3 pt-3 text-sm font-semibold">{t("common:chatSidebar.discovery.deviceGroup", "On this device results")}</h3>}
                 <LocalChatList searchQuery={debouncedSearchQuery} readOnly={temporaryChat}
+                  includeCachedServerChats
+                  visibleServerChats={currentTab === "all" ? visibleServerChats : null}
                   onSelectChat={() => onConversationSelected?.()} />
+                </section>
               )}
 
               {currentTab === "folders" && (

@@ -16,6 +16,9 @@ export type HistoryInfo = {
   model_id?: string;
   server_chat_id?: string;
   server_scope_key?: string;
+  /** Captured chat namespace of a verified mirror; absent on older copies. */
+  server_scope_type?: "global" | "workspace";
+  server_workspace_id?: string;
   local_owner_key?: string;
   // External settings writers register before writing; abandoned tokens block fork certification.
   local_settings_guard?: {

@@ -1,5 +1,6 @@
 import { useHistorySelectionContext } from "./useHistorySelection"
 import React from "react"
+import type { ChatScope } from "@/types/chat-scope"
 import type { TFunction } from "i18next"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
@@ -9,6 +10,7 @@ import { usePlaygroundSessionStore } from "@/store/playground-session"
 export type VerifiedHistoryMirrorOwner = {
   ownerKey: string
   validateLease: () => boolean
+  scope?: ChatScope
 }
 
 type UseServerChatHistoryIdOptions = {
@@ -77,7 +79,8 @@ export const useServerChatHistoryId = ({
               ownerKey: serverChatMirrorOwnerKey({
                 requestScope: selectedOwner.request_scope
               }),
-              validateLease: selectedOwner.validate_lease
+              validateLease: selectedOwner.validate_lease,
+              scope: selectedOwner.scope
             }
           : null)
       if (selection && !owner) throw new Error("unbound_server_mirror")
@@ -90,7 +93,7 @@ export const useServerChatHistoryId = ({
         assertCurrent()
         if (snapshot && serverChatMirrorOwnerKey(snapshot) !== owner.ownerKey)
           throw createServicePromptScopeChangedError()
-        const key = JSON.stringify([owner.ownerKey, chatId])
+        const key = JSON.stringify([owner.ownerKey, chatId, owner.scope?.type ?? "global", owner.scope?.type === "workspace" ? owner.scope.workspaceId : null])
         const localId =
           scopedCache.current.get(key) ||
           (await linkServerChatMirror({
@@ -99,6 +102,7 @@ export const useServerChatHistoryId = ({
               title?.trim() ||
               t("common:untitled", { defaultValue: "Untitled" }),
             ownerKey: owner.ownerKey,
+            scope: owner.scope,
             currentHistoryId,
             signal: scopeInvalidatedSignal
           }))

@@ -136,6 +136,7 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/service-prompts\/[^/]+$/.test(pathname)) {
     return ["GET", "PUT", "DELETE"].includes(requestMethod)
   }
+  if (/^\/api\/v1\/chats\/[^/]+\/restore$/.test(pathname)) return requestMethod === "POST"
   if (/^\/api\/v1\/chats\/[^/]+\/settings$/.test(pathname)) return ["GET", "PUT"].includes(requestMethod)
   if (requestMethod === "GET" && /^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return true
   if (/^\/api\/v1\/flashcards\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)

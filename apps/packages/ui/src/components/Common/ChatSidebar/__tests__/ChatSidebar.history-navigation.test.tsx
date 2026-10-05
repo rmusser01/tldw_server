@@ -46,12 +46,28 @@ vi.mock("@/utils/safe-storage", () => ({
         callbacks.add(listener);
         io.listeners.set(key, callbacks);
       }
-      return true;
+      return () => {
+        for (const [key, listener] of Object.entries(listeners))
+          io.listeners.get(key)?.delete(listener);
+      };
     },
     unwatch: (listeners: Record<string, (change: Change) => void>) => {
       for (const [key, listener] of Object.entries(listeners))
         io.listeners.get(key)?.delete(listener);
     },
+  }),
+}));
+vi.mock("@/hooks/useChatDraftOwner", () => ({
+  useChatDraftOwner: () => ({
+    ownerKey: "A",
+    serverScopeKey: "A",
+    requestScope: {
+      config: { serverUrl: "http://chat.test", authMode: "multi-user" },
+      userId: "A",
+    },
+    isCurrent: () => true,
+    verificationState: "ready",
+    retryVerification: vi.fn(),
   }),
 }));
 vi.mock("@/hooks/useDebounce", () => ({
@@ -82,20 +98,36 @@ vi.mock("@/store/route-transition", () => ({
 }));
 vi.mock("../ServerChatList", () => ({
   ServerChatList: ({
+    searchQuery,
     readOnly,
     onConversationSelected,
   }: {
+    searchQuery: string;
     readOnly?: boolean;
     onConversationSelected?: () => void;
   }) => (
-    <div data-testid="server-chat-list" data-readonly={String(readOnly)}>
+    <div
+      data-testid="server-chat-list"
+      data-query={searchQuery}
+      data-readonly={String(readOnly)}
+    >
       <button onClick={onConversationSelected}>Accept server selection</button>
     </div>
   ),
 }));
 vi.mock("../LocalChatList", () => ({
-  LocalChatList: ({ readOnly }: { readOnly?: boolean }) => (
-    <div data-testid="local-chat-list" data-readonly={String(readOnly)} />
+  LocalChatList: ({
+    searchQuery,
+    readOnly,
+  }: {
+    searchQuery: string;
+    readOnly?: boolean;
+  }) => (
+    <div
+      data-testid="local-chat-list"
+      data-query={searchQuery}
+      data-readonly={String(readOnly)}
+    />
   ),
 }));
 vi.mock("../FolderChatList", () => ({
@@ -167,6 +199,27 @@ describe("history-first sidebar navigation", () => {
         "model-catalog": false,
       },
     });
+  });
+
+  it("uses All on first use so one query reaches Server and On this device without replacing an explicit preference", async () => {
+    renderSidebar();
+    await screen.findByTestId("server-chat-list");
+    expect(screen.getByTestId("local-chat-list")).toBeInTheDocument();
+    expect(
+      screen.getByText("Search Server and On this device history."),
+    ).toBeVisible();
+    fireEvent.change(findInput(), { target: { value: "needle" } });
+    expect(screen.getByTestId("server-chat-list")).toHaveAttribute(
+      "data-query",
+      "needle",
+    );
+    expect(screen.getByTestId("local-chat-list")).toHaveAttribute(
+      "data-query",
+      "needle",
+    );
+    expect(
+      io.writes.mock.calls.filter(([key]) => key === "tldw:sidebar:activeTab"),
+    ).toEqual([]);
   });
 
   it("shows Find conversations and expanded recent history before platform shortcuts on first use", async () => {
@@ -454,11 +507,25 @@ describe("history-first sidebar navigation", () => {
     io.values.set("tldw:sidebar:activeTab", "folders");
     renderSidebar();
     await screen.findByTestId("folder-chat-list");
-    expect(screen.getByText("Typing searches Server history.")).toBeVisible();
+    expect(
+      screen.getByText("Typing searches Server and On this device history."),
+    ).toBeVisible();
     fireEvent.change(findInput(), { target: { value: "alpha" } });
     expect(await screen.findByTestId("server-chat-list")).toBeInTheDocument();
     expect(screen.queryByTestId("folder-chat-list")).toBeNull();
-    expect(findInput()).toHaveValue("alpha");
+    expect(screen.getByTestId("local-chat-list")).toHaveAttribute(
+      "data-query",
+      "alpha",
+    );
+    fireEvent.change(findInput(), { target: { value: "" } });
+    await waitFor(() =>
+      expect(screen.getByTestId("folder-chat-list")).toBeInTheDocument(),
+    );
+    expect(io.values.get("tldw:sidebar:activeTab")).toBe("folders");
+    expect(
+      io.writes.mock.calls.filter(([key]) => key === "tldw:sidebar:activeTab"),
+    ).toEqual([]);
+    expect(findInput()).toHaveValue("");
   });
 
   it("keeps all custom shortcuts in their saved order below history in one scroller", async () => {

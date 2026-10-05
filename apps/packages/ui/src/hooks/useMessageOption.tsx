@@ -460,6 +460,7 @@ export const useMessageOption = (
     void ensureServerChatHistoryId(serverChatId, serverChatTitle || undefined, controller.signal, {
       ownerKey: serverChatMirrorOwnerKey({ requestScope: current.owner.request_scope }),
       validateLease: current.owner.validate_lease,
+      scope: current.owner.scope,
     }).catch(error => {
       if (!controller.signal.aborted) console.error("Failed to bind selected server chat mirror", error);
     });

@@ -5859,7 +5859,7 @@ export class TldwApiClientBase {
   async updateChat(
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: { expectedVersion?: number } & ScopedRequestOptions
+    options?: { expectedVersion?: number; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
     const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
@@ -5874,10 +5874,10 @@ export class TldwApiClientBase {
         // ignore and fall back to unversioned update
       }
     }
-    const qp =
-      typeof expectedVersion === "number"
-        ? `?expected_version=${encodeURIComponent(String(expectedVersion))}`
-        : ""
+    const qp = this.buildQuery({
+      ...toChatScopeParams(options?.scope),
+      ...(typeof expectedVersion === "number" ? {expected_version:expectedVersion} : {})
+    })
     const res = await bgRequest<any>({
       ...scopeFields,
       ...(options?.signal ? { abortSignal: options.signal } : {}),
@@ -5896,11 +5896,13 @@ export class TldwApiClientBase {
       requestScope?: ServicePromptRequestScope
       expectedVersion?: number
       hardDelete?: boolean
+      scope?: ChatScope
     }
   ): Promise<void> {
     const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery({
+      ...toChatScopeParams(options?.scope),
       ...(typeof options?.expectedVersion === "number"
         ? { expected_version: options.expectedVersion }
         : {}),
@@ -5916,15 +5918,17 @@ export class TldwApiClientBase {
 
   async restoreChat(
     chat_id: string | number,
-    options?: { expectedVersion?: number }
+    options?: { expectedVersion?: number; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
-    const query = this.buildQuery(
-      typeof options?.expectedVersion === "number"
-        ? { expected_version: options.expectedVersion }
-        : {}
-    )
+    const query = this.buildQuery({
+      ...toChatScopeParams(options?.scope),
+      ...(typeof options?.expectedVersion === "number" ? {expected_version:options.expectedVersion} : {})
+    })
     const res = await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? {abortSignal:options.signal} : {}),
       path: `/api/v1/chats/${cid}/restore${query}`,
       method: "POST"
     })

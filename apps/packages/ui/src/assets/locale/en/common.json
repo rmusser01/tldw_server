@@ -523,7 +523,8 @@
     "tabs": {
       "local": "On this device",
       "server": "Server",
-      "folders": "Folders"
+      "folders": "Folders",
+      "all": "All"
     },
     "noServerChats": "No server chats yet",
     "foldersRequireConnection": "Folders require a server connection",
@@ -554,11 +555,32 @@
         "assistant": "Assistant",
         "system": "System",
         "tool": "Tool"
-      }
+      },
+      "cachedPreviewAction": "Preview cached server chat: {{title}} · {{id}}",
+      "cachedOrigin": "Cached server copy · Read-only",
+      "cachedWorkspace": "Workspace {{id}}",
+      "cachedUnknownScope": "Chat scope unknown",
+      "chatReference": "Chat {{id}}",
+      "cachedPreviewHelp": "These are messages stored on this device. The copy may be incomplete or contain local edits. Your open chat stays unchanged; reconnect and open Server history to continue.",
+      "cachedVerifyError": "Could not verify the account for cached Server copies. Profile-owned chats are still available.",
+      "cachedVerifying": "Verifying the account for cached Server copies. Profile-owned chats are still available.",
+      "retryAccount": "Retry account verification"
     },
     "findConversations": "Find conversations",
     "searchScope": "Search {{source}} history.",
-    "searchFromFolders": "Typing searches Server history."
+    "searchFromFolders": "Typing searches Server and On this device history.",
+    "discovery": {
+      "allScope": "Search Server and On this device history.",
+      "serverGroup": "Server results",
+      "deviceGroup": "On this device results",
+      "verifyError": "Could not verify the account for Server history.",
+      "verifying": "Verifying the account for Server history…",
+      "offline": "Server history is offline. Owned cached copies remain available in On this device.",
+      "refreshError": "Could not refresh Server history. Try again; cached copies remain in On this device.",
+      "noServerMatches": "No matching chats on this Server page.",
+      "foreignScope": "Some Server results were excluded because they belong to a different chat scope.",
+      "page": "Page {{page}}"
+    }
   },
   "knowledgeSidebar": {
     "title": "Knowledge history"

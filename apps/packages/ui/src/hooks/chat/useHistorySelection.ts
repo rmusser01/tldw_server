@@ -867,6 +867,7 @@ export function useHistorySelection(
               chatId: String(chatId),
               title: details.title,
               ownerKey: mirrorKey,
+              scope: target.scope,
               currentHistoryId: details.id,
               legacyHistoryId: details.id,
               signal: request.current?.signal,

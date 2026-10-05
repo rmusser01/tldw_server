@@ -126,6 +126,7 @@ vi.mock("@/db/dexie/helpers", () => ({
   restoreChat: vi.fn(),
 }));
 vi.mock("@/services/service-prompts", () => ({
+  isServicePromptScopeUnresolvedError: () => false,
   resolveServicePromptScope: () => io.resolve(),
   subscribeToServicePromptConfigChanges: () => () => {},
   loadServicePromptSnapshot: async () => ({
@@ -177,25 +178,43 @@ function Probe() {
 function mount(
   path = "/chat",
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  props: Partial<React.ComponentProps<typeof LocalChatList>> = {},
+  sidebarShell = false,
 ) {
   const selected = vi.fn();
-  const ui = (
+  const tree = (
+    next: Partial<React.ComponentProps<typeof LocalChatList>> = {},
+  ) => (
     <ConfigProvider theme={{ token: { motion: false } }}>
       <MemoryRouter initialEntries={[path]}>
         <QueryClientProvider client={client}>
           <HistorySelectionProvider>
             <Probe />
-            <LocalChatList
-              searchQuery=""
-              selectedChatId={null}
-              onSelectChat={selected}
-            />
+            <div data-chat-sidebar={sidebarShell ? "" : undefined}>
+              {sidebarShell && <input aria-label="Find conversations" />}
+              <LocalChatList
+                searchQuery=""
+                selectedChatId={null}
+                onSelectChat={selected}
+                {...props}
+                {...next}
+              />
+            </div>
           </HistorySelectionProvider>
         </QueryClientProvider>
       </MemoryRouter>
     </ConfigProvider>
   );
-  return { ...render(ui), client, selected, ui };
+  const ui = tree();
+  const view = render(ui);
+  return {
+    ...view,
+    client,
+    selected,
+    ui,
+    rerenderList: (next: Partial<React.ComponentProps<typeof LocalChatList>>) =>
+      view.rerender(tree(next)),
+  };
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -363,7 +382,12 @@ it("deduplicates IDs across pages before grouping", async () => {
   mount();
   fireEvent.click(await screen.findByRole("button", { name: /load more/i }));
   await waitFor(() =>
-    expect(io.page).toHaveBeenCalledWith(2, undefined, expect.anything()),
+    expect(io.page).toHaveBeenCalledWith(
+      2,
+      undefined,
+      expect.anything(),
+      expect.objectContaining({ includeCachedServerChats: false }),
+    ),
   );
   expect(
     screen.getAllByRole("button", { name: "Owned local chat" }),
@@ -1218,4 +1242,197 @@ it("does not initialize a replacement profile if it disappears before H1 open", 
   );
   expect(io.controller!.getCurrent().owner).toBe(settled.owner);
   expect(io.controller!.getCurrent().view).toBe(settled.view);
+});
+
+it("previews an owned cached Server copy in normal mode without changing the source draft or adopting H1", async () => {
+  const ownerKey = serverChatMirrorOwnerKey({
+    requestScope: await io.resolve(),
+  });
+  const cached = {
+    ...owned,
+    id: "copy",
+    title: "Cached Cedar",
+    server_chat_id: "S",
+    server_scope_key: ownerKey,
+    server_scope_type: "global",
+  };
+  io.page.mockResolvedValue({
+    histories: [cached],
+    totalCount: 1,
+    hasMore: false,
+  });
+  io.preview.mockResolvedValue({
+    historyInfo: cached,
+    messages: [
+      {
+        id: "stored",
+        role: "assistant",
+        name: "Cedar",
+        content: "Cached opening",
+        createdAt: 1,
+      },
+    ],
+  });
+  const before = useStoreMessageOption.getState();
+  const view = mount("/chat", undefined, { includeCachedServerChats: true });
+  const trigger = await screen.findByRole("button", {
+    name: "Preview cached server chat: Cached Cedar · copy",
+  });
+  fireEvent.click(trigger);
+  expect(await screen.findByText("Cached opening")).toBeInTheDocument();
+  await waitFor(() =>
+    expect(
+      screen.getByText(/The copy may be incomplete or contain local edits/),
+    ).toBeVisible(),
+  );
+  expect(view.selected).not.toHaveBeenCalled();
+  expect(io.capture).not.toHaveBeenCalled();
+  expect(io.bookmark).not.toHaveBeenCalled();
+  expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(
+    before.chatDraftAddress,
+  );
+  expect(useStoreMessageOption.getState().messages).toEqual(before.messages);
+  fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
+  await waitFor(() => expect(trigger).toHaveFocus());
+});
+
+it("restores the stored copy when the exact visible Server receipt is retired", async () => {
+  const ownerKey = serverChatMirrorOwnerKey({
+    requestScope: await io.resolve(),
+  });
+  const cached = {
+    ...owned,
+    id: "copy",
+    title: "Cached Cedar",
+    server_chat_id: "S",
+    server_scope_key: ownerKey,
+    server_scope_type: "global",
+  };
+  const { isReadableOnDeviceHistory } =
+    await import("@/db/dexie/history-selection");
+  io.page.mockImplementation(async (_page, _query, scope, options) => {
+    const histories = [owned, cached].filter((row) =>
+      isReadableOnDeviceHistory(row, scope, options),
+    );
+    return { histories, totalCount: histories.length, hasMore: false };
+  });
+  let current = true;
+  const receipt = {
+    serverScopeKey: ownerKey,
+    query: "",
+    ids: new Set(["S"]),
+    isCurrent: () => current,
+  };
+  const view = mount("/chat", undefined, {
+    includeCachedServerChats: true,
+    visibleServerChats: receipt,
+  });
+  await screen.findByRole("button", { name: "Owned local chat" });
+  expect(
+    screen.queryByRole("button", {
+      name: "Preview cached server chat: Cached Cedar · copy",
+    }),
+  ).toBeNull();
+  expect(io.page.mock.results.some((result) => result.type === "return")).toBe(
+    true,
+  );
+  const successfulPage = await io.page.mock.results.at(-1)!.value;
+  expect(successfulPage.histories.map((row: typeof owned) => row.id)).toEqual([
+    "owned",
+  ]);
+  const readsBefore = io.page.mock.calls.length;
+  current = false;
+  view.rerenderList({});
+  expect(
+    await screen.findByRole("button", {
+      name: "Preview cached server chat: Cached Cedar · copy",
+    }),
+  ).toBeInTheDocument();
+  expect(io.page.mock.calls.length).toBeGreaterThan(readsBefore);
+});
+
+it("explains failed cached-copy account verification while leaving profile-owned chats readable and retryable", async () => {
+  io.resolve.mockRejectedValue(new Error("account verification unavailable"));
+  mount("/chat", undefined, { includeCachedServerChats: true });
+  expect(
+    await screen.findByRole("button", { name: "Owned local chat" }),
+  ).toBeInTheDocument();
+  expect(
+    await screen.findByText(
+      "Could not verify the account for cached Server copies. Profile-owned chats are still available.",
+    ),
+  ).toBeVisible();
+  const attempts = io.resolve.mock.calls.length;
+  fireEvent.click(
+    screen.getByRole("button", { name: "Retry account verification" }),
+  );
+  await waitFor(() =>
+    expect(io.resolve.mock.calls.length).toBeGreaterThan(attempts),
+  );
+});
+
+it("distinguishes equal local titles with visible and accessible stored IDs", async () => {
+  io.page.mockResolvedValue({
+    histories: [
+      { ...owned, id: "A", title: "Same title" },
+      { ...owned, id: "B", title: "Same title" },
+    ],
+    totalCount: 2,
+    hasMore: false,
+  });
+  mount();
+  expect(
+    await screen.findByRole("button", { name: "Same title · Chat A" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Same title · Chat B" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Chat A")).toBeVisible();
+});
+
+it("returns to Find after matching Server results remove the cached preview trigger", async () => {
+  const user = userEvent.setup();
+  const ownerKey = serverChatMirrorOwnerKey({
+    requestScope: await io.resolve(),
+  });
+  const cached = {
+    ...owned,
+    id: "copy",
+    title: "Cached Cedar",
+    server_chat_id: "S",
+    server_scope_key: ownerKey,
+    server_scope_type: "global",
+  };
+  io.page.mockResolvedValue({
+    histories: [cached],
+    totalCount: 1,
+    hasMore: false,
+  });
+  io.preview.mockResolvedValue({ historyInfo: cached, messages: [] });
+  const view = mount(
+    "/chat",
+    undefined,
+    { includeCachedServerChats: true },
+    true,
+  );
+  const trigger = await screen.findByRole("button", {
+    name: "Preview cached server chat: Cached Cedar · copy",
+  });
+  await user.click(trigger);
+  await screen.findByRole("dialog");
+  view.rerenderList({
+    visibleServerChats: {
+      serverScopeKey: ownerKey,
+      query: "",
+      ids: new Set(["S"]),
+      isCurrent: () => true,
+    },
+  });
+  expect(trigger).not.toBeInTheDocument();
+  await user.keyboard("{Escape}");
+  await waitFor(() =>
+    expect(
+      screen.getByRole("textbox", { name: "Find conversations" }),
+    ).toHaveFocus(),
+  );
 });
