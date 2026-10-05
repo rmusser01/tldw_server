@@ -577,6 +577,10 @@ class NoteBulkCreateResponse(BaseModel):
 
 
 # --- List/Export Response Schemas ---
+NoteListSortBy = Literal["last_modified", "created_at", "title"]
+NoteListSortOrder = Literal["asc", "desc"]
+
+
 class NotesListResponse(BaseModel):
     notes: list[NoteResponse]
     items: list[NoteResponse]

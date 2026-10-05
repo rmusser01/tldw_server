@@ -12,7 +12,7 @@ import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, TypeVar
+from typing import Annotated, Any, Callable, Literal, Optional, TypeVar
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -104,6 +104,8 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NoteFolderResponse,
     NoteFoldersListResponse,
     NoteKeywordLinkResponse,
+    NoteListSortBy,
+    NoteListSortOrder,
     NoteResponse,
     NotesExportRequest,
     NotesExportResponse,
@@ -2340,6 +2342,13 @@ async def list_notes(
         limit: int = Query(100, ge=1, le=1000, description="Number of notes to return"),
         offset: int = Query(0, ge=0, description="Offset for pagination"),
         include_keywords: bool = Query(False, description="If true, include linked keywords inline per note"),
+        # Annotated keeps real Python defaults, so direct calls (tests, internal
+        # callers) that omit the sort get "last_modified"/"desc", not a Query object.
+        sort_by: Annotated[
+            NoteListSortBy,
+            Query(description="Order the whole list by this field before paging (title is case-insensitive)"),
+        ] = "last_modified",
+        sort_order: Annotated[NoteListSortOrder, Query(description="Sort direction")] = "desc",
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
         _: None = Depends(rbac_rate_limit("notes.list")),
@@ -2355,8 +2364,10 @@ async def list_notes(
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                                 detail="Rate limit exceeded for notes.list",
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
-        logger.debug(f"User (DB client_id: {db.client_id}) listing notes: limit={limit}, offset={offset}")
-        notes_data = db.list_notes(limit=limit, offset=offset)
+        logger.debug(
+            f"User (DB client_id: {db.client_id}) listing notes: limit={limit}, offset={offset}, "
+            f"sort_by={sort_by}, sort_order={sort_order}")
+        notes_data = db.list_notes(limit=limit, offset=offset, sort_by=sort_by, sort_order=sort_order)
         _attach_folders_bulk(db, notes_data)
         # Attach keywords inline for each note (optional for performance)
         if include_keywords:
@@ -2401,6 +2412,13 @@ async def list_deleted_notes(
         limit: int = Query(100, ge=1, le=1000, description="Number of trashed notes to return"),
         offset: int = Query(0, ge=0, description="Offset for pagination"),
         include_keywords: bool = Query(False, description="If true, include linked keywords inline per note"),
+        # Annotated keeps real Python defaults, so direct calls (tests, internal
+        # callers) that omit the sort get "last_modified"/"desc", not a Query object.
+        sort_by: Annotated[
+            NoteListSortBy,
+            Query(description="Order the whole trash by this field before paging (title is case-insensitive)"),
+        ] = "last_modified",
+        sort_order: Annotated[NoteListSortOrder, Query(description="Sort direction")] = "desc",
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
         _: None = Depends(rbac_rate_limit("notes.list")),
@@ -2417,8 +2435,11 @@ async def list_deleted_notes(
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
 
         logger.debug(
-            f"User (DB client_id: {db.client_id}) listing deleted notes: limit={limit}, offset={offset}")
-        notes_data = db.list_deleted_notes(limit=limit, offset=offset)
+            f"User (DB client_id: {db.client_id}) listing deleted notes: limit={limit}, offset={offset}, "
+            f"sort_by={sort_by}, sort_order={sort_order}")
+        notes_data = db.list_deleted_notes(
+            limit=limit, offset=offset, sort_by=sort_by, sort_order=sort_order
+        )
         _attach_folders_bulk(db, notes_data)
         if include_keywords:
             try:

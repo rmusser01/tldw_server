@@ -41,6 +41,10 @@ from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
+# Whitelists for note list ordering; values are interpolated into ORDER BY.
+_NOTE_LIST_SORT_COLUMNS = frozenset({"last_modified", "created_at", "title"})
+_NOTE_LIST_SORT_DIRECTIONS = {"asc": "ASC", "desc": "DESC"}
+
 
 class NoteStore:
     """Focused persistence seam for note CRUD operations."""
@@ -1761,19 +1765,47 @@ class NoteStore:
         except BackendDatabaseError as e:
             raise CharactersRAGDBError(f"Backend error updating note studio diagram manifest: {e}") from e  # noqa: TRY003
 
+    def _note_list_order_clause(self, sort_by: str, sort_order: str) -> str:
+        """Build a whitelisted ORDER BY clause for note listings.
+
+        ``id`` breaks ties so that LIMIT/OFFSET pages never overlap or skip
+        notes that share a timestamp or title.
+        """
+        column = str(sort_by or "").strip().lower()
+        direction = _NOTE_LIST_SORT_DIRECTIONS.get(str(sort_order or "").strip().lower())
+        if column not in _NOTE_LIST_SORT_COLUMNS or direction is None:
+            raise InputError(  # noqa: TRY003
+                f"Unsupported note sort: sort_by={sort_by!r}, sort_order={sort_order!r}"
+            )
+        if column == "title":
+            primary = self._db._case_insensitive_order_expression("title", direction)
+        else:
+            primary = f"{column} {direction}"
+        return f"ORDER BY {primary}, id ASC"
+
     def list_notes(
         self,
         limit: int = 100,
         offset: int = 0,
         include_deleted: bool = False,
         only_deleted: bool = False,
+        sort_by: str = "last_modified",
+        sort_order: str = "desc",
     ) -> list[dict[str, Any]]:
-        """List notes ordered by most recently modified.
+        """List notes, most recently modified first by default.
 
         By default this returns only active notes (``deleted = 0``).
         Set ``only_deleted=True`` to list trash items, or ``include_deleted=True``
         to list both active and deleted notes.
+
+        ``sort_by`` is one of ``last_modified``, ``created_at`` or ``title``
+        (case-insensitive) and ``sort_order`` is ``asc`` or ``desc``. The whole
+        result set is ordered before ``limit``/``offset`` apply.
+
+        Raises:
+            InputError: If ``sort_by`` or ``sort_order`` is not supported.
         """
+        order_clause = self._note_list_order_clause(sort_by, sort_order)
         where_clause = " WHERE 1 = 1"
         params: list[Any] = []
         if only_deleted:
@@ -1788,7 +1820,7 @@ class NoteStore:
         params.extend(owner_params)
         query = (
             f"SELECT * FROM notes{where_clause} "  # nosec B608
-            "ORDER BY last_modified DESC "
+            f"{order_clause} "
             "LIMIT ? OFFSET ?"
         )
         params.extend([limit, offset])
@@ -1825,9 +1857,21 @@ class NoteStore:
             params.append(self._db.client_id)
         return self._db.execute_query(query, tuple(params)).fetchone() is not None
 
-    def list_deleted_notes(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
-        """List only soft-deleted notes (trash)."""
-        return self.list_notes(limit=limit, offset=offset, only_deleted=True)
+    def list_deleted_notes(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        sort_by: str = "last_modified",
+        sort_order: str = "desc",
+    ) -> list[dict[str, Any]]:
+        """List only soft-deleted notes (trash), ordered like ``list_notes``."""
+        return self.list_notes(
+            limit=limit,
+            offset=offset,
+            only_deleted=True,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
 
     def get_notes_batch(self, note_ids: list[str], include_deleted: bool = True) -> list[dict[str, Any]]:
         """Return note rows for the given IDs. Batches in groups of 900."""
