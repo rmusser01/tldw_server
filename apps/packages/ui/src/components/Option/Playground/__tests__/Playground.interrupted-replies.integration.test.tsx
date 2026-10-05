@@ -6,14 +6,15 @@
  * reloads, or the user leaves /chat while it streams. In every case the
  * question must stay in the transcript, the part of the reply that arrived must
  * be kept and marked ("Interrupted", or "Stopped" for a deliberate stop) with a
- * Retry, and no server chat may be created as a side effect. These run against
- * the real Playground through the integration harness.
+ * Retry, and no server chat may be created as a side effect. Since #3195 a fresh
+ * chat on a connected server is owned by a server chat created by its first
+ * send; that chat is the only one. These run against the real Playground
+ * through the integration harness.
  */
 import {
   completionMessages,
   createFakeTldwServer,
   deferred,
-  getHarnessDb,
   HARNESS_WAIT,
   openSavedServerChat,
   renderPlayground,
@@ -66,13 +67,6 @@ const interruptionNotice = async (label: "Interrupted" | "Stopped") => {
   return marker.closest("[role='status']") as HTMLElement
 }
 
-const localRows = async () =>
-  (await getHarnessDb().messages.toArray()).map((row) => ({
-    role: row.role,
-    content: row.content,
-    interrupted: Boolean((row.generationInfo as Record<string, unknown> | undefined)?.interrupted)
-  }))
-
 describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
   beforeEach(async () => {
     await resetPlaygroundHarness()
@@ -104,13 +98,21 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     const notice = await interruptionNotice("Interrupted")
     expect(within(notice).getByRole("button", { name: /retry/i })).toBeInTheDocument()
     expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()
-    // The question and the partial answer are in the local chat, not only on screen.
-    expect(await localRows()).toEqual(
-      expect.arrayContaining([
-        { role: "user", content: "Explain reloads", interrupted: false },
-        { role: "assistant", content: "Partial answer", interrupted: true }
-      ])
-    )
+    // Not only on screen: a fresh chat is owned by a server chat from its first
+    // send (#3195), which holds the question; the cut-off reply is kept from this
+    // device, as for any server chat.
+    const state = useStoreMessageOption.getState()
+    expect(state.serverChatId).toBeTruthy()
+    expect(
+      server.chats.get(state.serverChatId as string)?.messages.map((message) => `${message.role}: ${message.content}`)
+    ).toEqual(["user: Explain reloads"])
+    expect(
+      resolveChatPersistenceKind({
+        temporaryChat: state.temporaryChat,
+        serverChatId: state.serverChatId,
+        serverSaveStatus: getServerChatSaveStatus(state.serverChatId)
+      })
+    ).toBe("serverFailed")
   })
 
   it("CS-04: a reply cut off by a dropped connection keeps the partial answer marked Interrupted, and Retry resends the question", async () => {
@@ -182,7 +184,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()
   })
 
-  it("CS-04 / CS-N3: leaving /chat while a reply streams keeps the reply on return and creates no server chat", async () => {
+  it("CS-04 / CS-N3: leaving /chat while a reply streams keeps the reply on return and creates no extra server chat", async () => {
     const server = createFakeTldwServer()
     const resume = deferred()
     server.planCompletion({
@@ -211,9 +213,13 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     )
     expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()
     // Returning must not promote the chat into an empty or partial server chat.
+    // Since #3195 the first send creates the chat's server owner; returning adds
+    // no other chat, and the one chat holds the whole turn.
     await new Promise((resolve) => setTimeout(resolve, 1_000))
-    expect(server.find("POST", /^\/api\/v1\/chats\/?$/)).toEqual([])
-    expect([...server.chats.values()]).toEqual([])
+    expect(server.find("POST", /^\/api\/v1\/chats\/?$/)).toHaveLength(1)
+    expect(
+      [...server.chats.values()].map((chat) => chat.messages.map((message) => `${message.role}: ${message.content}`))
+    ).toEqual([["user: Explain navigation", "assistant: Partial answer finished while away"]])
   })
 
   it("CS-04: an interrupted reply in a server chat keeps the question and is not labelled Saved on server", async () => {

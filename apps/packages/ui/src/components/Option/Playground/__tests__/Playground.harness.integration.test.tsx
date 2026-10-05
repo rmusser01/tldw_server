@@ -9,7 +9,6 @@
 import {
   completionMessages,
   createFakeTldwServer,
-  getHarnessDb,
   HARNESS_WAIT,
   openSavedServerChat,
   renderPlayground,
@@ -47,23 +46,21 @@ describe("Playground integration harness", { timeout: 60_000 }, () => {
     expect(server.unhandled).toEqual([])
   })
 
-  it("keeps the local turn in the in-memory chat database", async () => {
+  // A fresh chat on a connected server is owned by a server chat from its first
+  // send (#3195, ADR-049), so the turn is kept there, not in the local database.
+  it("keeps a fresh chat's turn with its owner, the server chat", async () => {
     const server = createFakeTldwServer()
     const view = await renderPlayground({ server })
 
     await sendFromComposer(view, "Remember me")
 
-    const historyId = useStoreMessageOption.getState().historyId
-    expect(historyId).toBeTruthy()
-    const rows = await getHarnessDb()
-      .messages.where("history_id")
-      .equals(historyId as string)
-      .toArray()
+    const serverChatId = useStoreMessageOption.getState().serverChatId
+    expect(serverChatId).toBeTruthy()
+    expect([...server.chats.keys()]).toEqual([serverChatId])
     // Both rows of a turn can share a timestamp, so compare without order.
-    expect(rows.map((row) => `${row.role}: ${row.content}`).sort()).toEqual([
-      "assistant: Harness reply",
-      "user: Remember me"
-    ])
+    expect(
+      server.chats.get(serverChatId as string)?.messages.map((message) => `${message.role}: ${message.content}`).sort()
+    ).toEqual(["assistant: Harness reply", "user: Remember me"])
   })
 
   it("continues a saved server chat through native history admission", async () => {
