@@ -1,3 +1,4 @@
+import { ChatDraftRecovery, type RestoreChatDraft } from "@/components/Chat/composer/ChatDraftRecovery"
 import { buildQueuedRequest } from "@/utils/chat-request-queue"
 import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { useStoreChatModelSettings } from "@/store/model"
@@ -35,6 +36,8 @@ const io = vi.hoisted(() => ({
   serverId: "server-chat",
   captureNative: false,
   useComposer: false,
+  useRecovery: false,
+  write: vi.fn(),
   physicalTabId: 7 as number | null,
   controller: null as HistorySelectionController | null,
   keyboardNew: null as (() => void) | null,
@@ -47,9 +50,8 @@ const io = vi.hoisted(() => ({
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
     get: (key: string) => io.read(key),
-    set: async (key: string, value: unknown) => {
-      io.data.set(key, value)
-    },
+    set: (key: string, value: unknown) => io.write(key, value),
+    getAll: async () => Object.fromEntries(io.data),
     remove: async (key: string) => {
       io.data.delete(key)
     }
@@ -210,12 +212,21 @@ vi.mock("@/components/Sidepanel/Chat/body", () => ({
 const formAst = ts.createSourceFile("form.tsx", readFileSync(path.resolve(__dirname,
   "../../components/Sidepanel/Chat/form.tsx"), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 let sidepanelTabScopedDraft = false
+let sidepanelRecoverySurface: string | undefined
+let sidepanelHasDraftAddress = false
+let sidepanelRecoverySurfaceTabs = false
 const findComposerOptions = (node: ts.Node) => {
   if (ts.isCallExpression(node) && node.expression.getText(formAst) === "useComposerText") {
     const options = node.arguments[0]
-    if (options && ts.isObjectLiteralExpression(options)) sidepanelTabScopedDraft = options.properties.some(property =>
-      ts.isPropertyAssignment(property) && property.name.getText(formAst) === "tabScopedDraft" &&
-      property.initializer.kind === ts.SyntaxKind.TrueKeyword)
+    if (options && ts.isObjectLiteralExpression(options)) {
+      sidepanelHasDraftAddress = options.properties.some(property => ts.isPropertyAssignment(property) && property.name.getText(formAst) === "draftAddress" && property.initializer.getText(formAst) === "draftAddress ?? undefined")
+      sidepanelRecoverySurfaceTabs = options.properties.some(property => ts.isPropertyAssignment(property) && property.name.getText(formAst) === "recoverySurfaceTabs" && property.initializer.kind === ts.SyntaxKind.TrueKeyword)
+      sidepanelTabScopedDraft = options.properties.some(property => ts.isPropertyAssignment(property) &&
+        property.name.getText(formAst) === "tabScopedDraft" && property.initializer.kind === ts.SyntaxKind.TrueKeyword)
+      const property = options.properties.find((property): property is ts.PropertyAssignment =>
+        ts.isPropertyAssignment(property) && property.name.getText(formAst) === "recoverySurface")
+      if (property && ts.isStringLiteral(property.initializer)) sidepanelRecoverySurface = property.initializer.text
+    }
   }
   ts.forEachChild(node, findComposerOptions)
 }
@@ -226,7 +237,7 @@ const tabStorage = (): Storage => {
     getItem: key => entries.get(key) ?? null, setItem: (key, value) => { entries.set(key, value) },
     removeItem: key => { entries.delete(key) }, clear: () => entries.clear() }
 }
-const ComposerProbe = ({ draftKey, inputRef }: { draftKey: string; inputRef?: React.RefObject<HTMLTextAreaElement> }) => {
+const ComposerProbe = ({ draftKey, inputRef, onRecoverDraft }: { draftKey: string; inputRef?: React.RefObject<HTMLTextAreaElement>; onRecoverDraft?: RestoreChatDraft }) => {
   const address = useStoreMessageOption(state => state.chatDraftAddress)
   React.useLayoutEffect(() => {
     if (!useStoreMessageOption.getState().chatDraftAddress) useStoreMessageOption.getState().startNewChatDraft()
@@ -234,6 +245,9 @@ const ComposerProbe = ({ draftKey, inputRef }: { draftKey: string; inputRef?: Re
   const transition = useStoreMessageOption(state => state.chatDraftTransition)
   const composer = useComposerText({
     draftKey: address ? conversationDraftKey(draftKey, address) : draftKey,
+    draftAddress: sidepanelHasDraftAddress ? address ?? undefined : undefined,
+    recoverySurface: sidepanelRecoverySurface,
+    recoverySurfaceTabs: sidepanelRecoverySurfaceTabs,
     draftEnabled: address !== null,
     tabScopedDraft: sidepanelTabScopedDraft,
     bindFromDraftKey: address && transition?.kind === "bind" && transition.sourceAddress &&
@@ -241,9 +255,9 @@ const ComposerProbe = ({ draftKey, inputRef }: { draftKey: string; inputRef?: Re
       ? conversationDraftKey(draftKey, transition.sourceAddress) : undefined,
     textareaRef: inputRef ?? React.createRef<HTMLTextAreaElement>()
   })
-  return <textarea ref={inputRef} aria-label="Composer draft" disabled={!composer.draftReady}
+  return <>{io.useRecovery && <ChatDraftRecovery listDrafts={composer.listRetainedDrafts} copyDraft={composer.copyRetainedDraft} onRestore={onRecoverDraft} disabled={!composer.draftReady} />}<textarea ref={inputRef} aria-label="Composer draft" disabled={!composer.draftReady}
     value={composer.form.values.message}
-    onChange={event => composer.setMessageValue(event.target.value)} />
+    onChange={event => composer.setMessageValue(event.target.value)} /></>
 }
 vi.mock("@/components/Sidepanel/Chat/form", () => ({
   SidepanelForm: (props: { draftKey: string }) => io.useComposer ? <ComposerProbe {...props} /> : null
@@ -414,6 +428,8 @@ describe.each([
     io.serverId = "server-chat"
     io.captureNative = false
     io.useComposer = false
+    io.useRecovery = false
+    io.write.mockReset().mockImplementation(async (key, value) => { io.data.set(key, value) })
     io.physicalTabId = 7
     sessionStorage.clear()
     io.controller = null
@@ -485,6 +501,113 @@ describe.each([
     })
     expect(useSidepanelChatTabsStore.getState().getSnapshot(id)?.messages[0]?.message).toBe("TEMPORARY PRIVATE TURN")
     expect(useStoreMessageOption.getState().messages[0]?.message).toBe("TEMPORARY PRIVATE TURN")
+  })
+
+  it.each([false, true])("recovers a departed unsent draft into a new compact tab (Temporary %s)", async temporary => {
+    io.useComposer = true; io.useRecovery = true
+    const view = render(<Route />)
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    act(() => useStoreMessageOption.getState().setTemporaryChat(temporary))
+    const source = useStoreMessageOption.getState().chatDraftAddress
+    const sourceTab = useSidepanelChatTabsStore.getState().activeTabId!
+    fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "RETAINED BEFORE DEBOUNCE" } })
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }))
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toHaveValue(""))
+    fireEvent.click(screen.getByRole("button", { name: "Recover drafts" }))
+    fireEvent.click(await screen.findByRole("button", { name: /RETAINED BEFORE DEBOUNCE/ }))
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toHaveValue("RETAINED BEFORE DEBOUNCE"))
+    expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "fresh", scope: source!.kind === "fresh" ? source.scope : undefined, temporary })
+    expect(useStoreMessageOption.getState().chatDraftAddress?.id).not.toBe(source?.id)
+    expect(useStoreMessageOption.getState().temporaryChat).toBe(temporary)
+    expect(useStoreMessageOption.getState().historyId).toBeNull()
+    expect(useSidepanelChatTabsStore.getState().activeTabId).not.toBe(sourceTab)
+    expect(useSidepanelChatTabsStore.getState().tabs.some(tab => tab.id === sourceTab)).toBe(true)
+    const recovered = useStoreMessageOption.getState().chatDraftAddress
+    const recoveredTab = useSidepanelChatTabsStore.getState().activeTabId
+    act(() => window.dispatchEvent(new Event("pagehide")))
+    view.unmount(); await act(async () => {})
+    sessionStorage.clear()
+    useSidepanelChatTabsStore.getState().clear()
+    useStoreMessageOption.getState().startNewChatDraft()
+    render(<Route />)
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toHaveValue("RETAINED BEFORE DEBOUNCE"))
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe(recoveredTab)
+    expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(recovered)
+    expect(useStoreMessageOption.getState().temporaryChat).toBe(temporary)
+  })
+
+
+  it("allows a later local destination preparation to supersede a held recovery copy", async () => {
+    io.useComposer = true; io.useRecovery = true
+    render(<Route />)
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "OLDER RECOVERY TEXT" } })
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }))
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toHaveValue(""))
+    const sourceTab = useSidepanelChatTabsStore.getState().activeTabId
+    const source = useStoreMessageOption.getState().chatDraftAddress
+    let finishCopy!: () => void
+    io.write.mockImplementation(async (key, value) => {
+      if (key.startsWith("registry:draft:") && value.value?.content === "OLDER RECOVERY TEXT")
+        await new Promise<void>(resolve => { finishCopy = resolve })
+      io.data.set(key, value)
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Recover drafts" }))
+    fireEvent.click(await screen.findByRole("button", { name: /OLDER RECOVERY TEXT/ }))
+    await waitFor(() => expect(finishCopy).toBeTypeOf("function"))
+    io.localId = "B"
+    let finishLoad!: (value: unknown) => void
+    const load = new Promise(resolve => { finishLoad = resolve })
+    io.local.mockReturnValue(load)
+    fireEvent.click(screen.getByRole("button", { name: "Open cached history" }))
+    await waitFor(() => expect(finishLoad).toBeTypeOf("function"))
+    await act(async () => { finishCopy() })
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe(sourceTab)
+    expect(useStoreMessageOption.getState().chatDraftAddress).toBe(source)
+    await act(async () => { finishLoad({ historyInfo: { id: "B", title: "B", server_scope_key: ownerKey("alice") },
+      messages: [{ id: "B-message", role: "user", content: "LATER B TRANSCRIPT" }] }) })
+    await screen.findByText("LATER B TRANSCRIPT")
+    expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "local", id: "B" })
+  })
+  it.each(["copy failure", "declined navigation", "New during copy"])("retains the active compact draft after %s recovery", async boundary => {
+    io.useComposer = true; io.useRecovery = true
+    render(<Route />)
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "OLD RETAINED TEXT" } })
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }))
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toHaveValue(""))
+    fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "CURRENT PRIVATE TEXT" } })
+    fireEvent.click(screen.getByRole("button", { name: "Recover drafts" }))
+    const choice = await screen.findByRole("button", { name: /OLD RETAINED TEXT/ })
+    const sourceTab = useSidepanelChatTabsStore.getState().activeTabId
+    const source = useStoreMessageOption.getState().chatDraftAddress
+    let finish!: () => void
+    if (boundary === "copy failure") io.write.mockImplementation(async (key, value) => {
+      if (key.startsWith("registry:draft:")) throw new Error("quota")
+      io.data.set(key, value)
+    })
+    if (boundary === "declined navigation") window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, event => event.preventDefault(), { once: true })
+    if (boundary === "New during copy") io.write.mockImplementation(async (key, value) => {
+      if (key.startsWith("registry:draft:") && value.value?.content === "OLD RETAINED TEXT")
+        await new Promise<void>(resolve => { finish = resolve })
+      io.data.set(key, value)
+    })
+    fireEvent.click(choice)
+    if (boundary === "New during copy") {
+      await waitFor(() => expect(finish).toBeTypeOf("function"))
+      fireEvent.click(screen.getByRole("button", { name: "New conversation" }))
+      await waitFor(() => expect(screen.getByLabelText("Composer draft")).toHaveValue(""))
+      fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "NEW ACCEPTED TEXT" } })
+      const accepted = useStoreMessageOption.getState().chatDraftAddress
+      await act(async () => { finish() })
+      expect(useStoreMessageOption.getState().chatDraftAddress).toBe(accepted)
+      expect(screen.getByLabelText("Composer draft")).toHaveValue("NEW ACCEPTED TEXT")
+    } else {
+      await screen.findByText("Could not open this draft. Your current text and saved draft are kept.")
+      expect(useSidepanelChatTabsStore.getState().activeTabId).toBe(sourceTab)
+      expect(useStoreMessageOption.getState().chatDraftAddress).toBe(source)
+      expect(screen.getByLabelText("Composer draft")).toHaveValue("CURRENT PRIVATE TEXT")
+    }
   })
 
   it.each([false, true])("cold restores a fresh handle before stale H1, transcript and recent fallback (Temporary %s)", async temporary => {

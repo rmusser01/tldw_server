@@ -114,10 +114,10 @@ describe("PromptAssistComposerAction real shell wiring", () => {
 
   it("completes only the exact current submit attempt", () => {
     expect(playgroundSubmitSource).toMatch(
-      /const promptAssistAttemptId = beginPromptAssistReset\(\)[\s\S]*isChatSubmitSuccess[\s\S]*markPromptAssistAttemptSaved\(promptAssistAttemptId\)/
+      /const promptAssistAttemptId = beginPromptAssistReset\(\)[\s\S]*isChatSubmitSuccess[\s\S]*markPromptAssistAttemptSaved\(promptAssistAttemptId, result !== undefined\)/
     )
     expect(sidepanelFormSource).toMatch(
-      /promptAssistAttemptId = beginPromptAssistReset\(\)[\s\S]*afterSend: \(result\)[\s\S]*isChatSubmitSuccess[\s\S]*markPromptAssistAttemptSaved\(promptAssistAttemptId\)/
+      /promptAssistAttemptId = beginPromptAssistReset\(\)[\s\S]*afterSend: \(result\)[\s\S]*isChatSubmitSuccess[\s\S]*markPromptAssistAttemptSaved\(promptAssistAttemptId, result !== undefined\)/
     )
     expect(playgroundFormSource).not.toContain("markPromptAssistSaved")
     expect(sidepanelFormSource).not.toContain("markPromptAssistSaved")

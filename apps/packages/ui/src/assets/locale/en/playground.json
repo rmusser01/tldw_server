@@ -1382,5 +1382,18 @@
     "draftChanged": "Your draft changed while the server version was loading. Your newer draft is preserved.",
     "serverLoadFailed": "The server version could not be loaded. Your draft is preserved.",
     "downloadFailed": "Download could not be prepared. Your draft is preserved."
+  },
+  "draftRecovery": {
+    "unavailable": "This draft is no longer available. Your current text is unchanged.",
+    "notOpened": "Could not open this draft. Your current text and saved draft are kept.",
+    "open": "Recover drafts",
+    "title": "Retained drafts",
+    "help": "Opening a draft starts a fresh conversation in its original mode, using your current chat setup. Your current unsent text stays available. Review retained text before sending it again. Attachments and conversation messages are not included.",
+    "loading": "Loading drafts…",
+    "partial": "Some saved drafts could not be read. Retry to check again.",
+    "retry": "Retry",
+    "empty": "No other retained drafts on this browser.",
+    "temporary": "Temporary draft",
+    "saved": "New chat draft"
   }
 }

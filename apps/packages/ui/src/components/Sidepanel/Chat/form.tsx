@@ -1,3 +1,4 @@
+import { ChatDraftRecovery, type RestoreChatDraft } from "@/components/Chat/composer/ChatDraftRecovery"
 import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import React from "react"
@@ -182,6 +183,7 @@ type Props = {
   inputRef?: React.RefObject<HTMLTextAreaElement>
   onHeightChange?: (height: number) => void
   draftKey?: string
+  onRecoverDraft?: RestoreChatDraft
   onOpenChatInWebUi?: (
     overrides?: SidepanelChatWebUiHandoffOverrides
   ) => Promise<void> | void
@@ -202,6 +204,7 @@ export const SidepanelForm = ({
   inputRef,
   onHeightChange,
   draftKey,
+  onRecoverDraft,
   onOpenChatInWebUi
 }: Props) => {
   const formContainerRef = React.useRef<HTMLDivElement>(null)
@@ -368,9 +371,14 @@ export const SidepanelForm = ({
     textAreaFocus: promptAssistReturnFocus,
     draftSaved,
     draftReady,
-    clearDraft
+    clearDraft,
+    listRetainedDrafts,
+    copyRetainedDraft
   } = useComposerText({
     draftKey: draftAddress ? conversationDraftKey(storageKey, draftAddress) : storageKey,
+    draftAddress: draftAddress ?? undefined,
+    recoverySurface: "tldw:sidepanelChatDraft",
+    recoverySurfaceTabs: true,
     draftEnabled: draftAddress !== null,
     tabScopedDraft: true,
     bindFromDraftKey: draftAddress && draftTransition?.kind === "bind" && draftTransition.sourceAddress &&
@@ -2010,8 +2018,9 @@ export const SidepanelForm = ({
             promptAssistAttemptId !== null &&
             isChatSubmitSuccess(normalizeChatSubmitResult(result))
           ) {
-            markPromptAssistAttemptSaved(promptAssistAttemptId)
-            clearDraft(promptAssistAttemptId)
+            markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
+            // Legacy void outcomes can include a swallowed failure.
+            if (result !== undefined) clearDraft(promptAssistAttemptId)
           }
           clearSelectedDocuments()
           setContextFiles([])
@@ -3095,6 +3104,7 @@ export const SidepanelForm = ({
       <div
         ref={formContainerRef}
         className={`flex w-full min-w-0 flex-col items-center ${composerPadding}`}>
+      <div className="flex w-full justify-end"><ChatDraftRecovery listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={onRecoverDraft} disabled={!draftReady} /></div>
       <div
         className={`relative z-10 flex w-full min-w-0 flex-col items-center justify-center ${composerGap} text-body`}>
         <div className="relative flex w-full min-w-0 flex-row justify-center gap-2">

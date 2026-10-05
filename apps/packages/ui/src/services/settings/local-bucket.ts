@@ -1,4 +1,4 @@
-import { createSafeStorage } from "@/utils/safe-storage"
+import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage"
 
 export type LocalRegistryRecord<T> = {
   value: T
@@ -12,15 +12,24 @@ type LocalRegistryBucketOptions = {
   tabScoped?: boolean
 }
 
+export type LocalRegistryListing<T> = { records: Record<string, LocalRegistryRecord<T>>; unavailable: boolean }
+
 export type LocalRegistryBucket<T> = {
+  /** Read candidates without pinning unseen records or deleting stale ones. */
+  list: () => Promise<LocalRegistryListing<T>>
   get: (key: string) => Promise<LocalRegistryRecord<T> | null>
-  set: (key: string, value: T, updatedAt?: number) => Promise<void>
+  set: (key: string, value: T, updatedAt?: number, expected?: LocalRegistryRecord<T>) => Promise<boolean>
   remove: (key: string) => Promise<void>
   cleanup: () => Promise<number>
   buildKey: (key: string) => string
 }
 
 const storage = createSafeStorage({ area: "local" })
+const hasDurableBackend = () => {
+  const backend = storage as typeof storage & { hasPersistentBackend?: boolean; hasExtensionApi?: boolean }
+  return backend.hasPersistentBackend !== false && backend.hasExtensionApi !== false
+}
+
 
 const withRecordLock = async <T>(key: string, operation: () => Promise<T>): Promise<T> => {
   if (typeof navigator === "undefined" || !navigator.locks?.request) return operation()
@@ -123,15 +132,55 @@ export const createLocalRegistryBucket = <T>({
     }
   }
 
-  const set = async (key: string, value: T, updatedAt = Date.now()): Promise<void> => {
+  const set = async (key: string, value: T, updatedAt = Date.now(), expected?: LocalRegistryRecord<T>): Promise<boolean> => {
     const storageKey = buildKey(key)
     try {
+      const previous = expected && JSON.stringify(expected)
+      if (expected && tabScoped && readTab(storageKey) !== previous) return false
       const record = { value, updatedAt }
       pinTab(storageKey, JSON.stringify(record))
-      await withRecordLock(storageKey, () => storage.set(storageKey, record))
+      // A conditional read/write must be serialized across physical contexts.
+      // Without Web Locks, retire only this exact pin; keep the durable source.
+      if (expected && (typeof navigator === "undefined" || !navigator.locks?.request)) return false
+      return await withRecordLock(storageKey, async () => {
+        if (expected && JSON.stringify(await storage.get(storageKey) ?? null) !== previous) return false
+        await storage.set(storageKey, record)
+        return hasDurableBackend()
+      })
     } catch {
-      // ignore storage errors
+      return false
     }
+  }
+
+  const list = async (): Promise<LocalRegistryListing<T>> => {
+    let entries: Record<string, unknown> = {}
+    let unavailable = !hasDurableBackend()
+    try { entries = { ...await storage.getAll() } } catch { unavailable = true }
+    if (tabScoped) {
+      const pinned = new Map(tabRecords)
+      try {
+        for (let i = 0; tabStorage && i < tabStorage.length; i++) {
+          const key = tabStorage.key(i)
+          if (key?.startsWith(prefix)) {
+            const value = tabStorage.getItem(key)
+            if (value !== null) pinned.set(key, value)
+          }
+        }
+      } catch { unavailable = true }
+      // Overlay after the asynchronous read, including empty tombstones and
+      // quota-fallback pins from this exact mounted bucket.
+      for (const [key, value] of pinned) {
+        try { entries[key] = JSON.parse(value) } catch { entries[key] = null }
+      }
+    }
+    const records: LocalRegistryListing<T>["records"] = {}
+    const now = Date.now()
+    for (const [key, value] of Object.entries(entries)) {
+      if (!key.startsWith(prefix)) continue
+      const record = parseRecord<T>(safeStorageSerde.deserializer(value))
+      if (record && Number.isFinite(new Date(record.updatedAt).getTime()) && !isStale(record.updatedAt, now, ttlMs)) records[key.slice(prefix.length)] = record
+    }
+    return { records, unavailable }
   }
 
   const cleanup = async (): Promise<number> => {
@@ -141,7 +190,7 @@ export const createLocalRegistryBucket = <T>({
       const keysToRemove = Object.entries(entries)
         .filter(([key]) => key.startsWith(prefix))
         .filter(([, value]) => {
-          const record = parseRecord<T>(value)
+          const record = parseRecord<T>(safeStorageSerde.deserializer(value))
           return !record || isStale(record.updatedAt, now, ttlMs)
         })
         .map(([key]) => key)
@@ -166,6 +215,7 @@ export const createLocalRegistryBucket = <T>({
   }
 
   return {
+    list,
     get,
     set,
     remove,

@@ -2,11 +2,11 @@
 
 Date: 2026-10-04
 
-Status: Approved by the user on 2026-10-04, with the pre-implementation review corrections below. No application changes have begun.
+Status: Approved by the user on 2026-10-04, with the pre-implementation review corrections below. Stage 1 implementation is in progress. The accepted D7 owner decisions integrated on 2026-10-05 govern the remaining persistence work.
 
 Program: TASK-13453; delivery stages TASK-13454–TASK-13458.
 
-Baseline: latest `origin/dev` verified at `75ab224081bf140ef52017c1a9b0a04f6878d488`.
+Initial baseline: `origin/dev` at `75ab224081bf140ef52017c1a9b0a04f6878d488`. Current baseline: latest `origin/dev` at `c2260945ee021353b55baa6b1a83c887d7a6297d`, integrated in `10d6abff30`; that incoming range adds the accepted D7 design only.
 
 ## Outcome and evidence
 
@@ -28,9 +28,15 @@ Two alternatives were considered:
 |---|---|---|
 | Shared flow repair and progressive disclosure | Addresses the audited tasks directly; preserves existing contracts and expert controls | Selected. Requires careful integration with concurrent lifecycle fixes. |
 | Replace `/chat` with a new setup wizard and workbench | Allows a fresh information architecture | Adds another setup/settings system and migration effort before saving and ownership are dependable. Do not introduce it for this scope. |
-| Make every chat server-only immediately | Could simplify cross-origin identity eventually | Changes persistence, offline behavior, and migration policy. The separate D7 proposal is awaiting owner decision; this client design does not decide that architecture. |
+| Server identity for new saved chats, with explicit legacy import | Simplifies cross-surface identity and acknowledged persistence | Adopted in the separate accepted D7 design. Implement after its backend prerequisites; legacy local chats remain usable and are never migrated automatically. |
 
-The existing [D7 proposal, PR #3165](https://github.com/rmusser01/tldw_server/pull/3165), and [honest saving labels, PR #3147](https://github.com/rmusser01/tldw_server/pull/3147), [sidepanel integrity, PR #3152](https://github.com/rmusser01/tldw_server/pull/3152), and [content search, PR #3178](https://github.com/rmusser01/tldw_server/pull/3178) overlap parts of the scope. These were open when this design was prepared. Refresh dev before each stage and verify merged behavior; reuse those changes rather than create competing implementations. An open PR or its claimed checks do not close an audit finding. Do not merge or cherry-pick unrelated work as part of design preparation.
+The accepted [D7 design](2026-10-04-d7-conversation-model.md), merged by [PR #3165](https://github.com/rmusser01/tldw_server/pull/3165), and [honest saving labels, PR #3147](https://github.com/rmusser01/tldw_server/pull/3147), [sidepanel integrity, PR #3152](https://github.com/rmusser01/tldw_server/pull/3152), and [content search, PR #3178](https://github.com/rmusser01/tldw_server/pull/3178) overlap parts of the scope. These were open when this design was prepared; D7 is now accepted and merged as a design, not as shipped backend capability. Refresh dev before each stage and verify merged behavior; reuse those changes rather than create competing implementations. An open PR or its claimed checks do not close an audit finding. Do not merge or cherry-pick unrelated work as part of design preparation.
+
+## Accepted D7 reconciliation (2026-10-05)
+
+D7 §8 records the owner decisions: new non-Temporary chats use native server identity; cached chats are readable offline while Send waits for connection; existing local chats stay usable and import only on an explicit per-chat or bulk action to the signed-in account; Temporary chats survive reload on this device until closed or cleared and never reach the server; Sync v2 users remain in scope. Its P1–P10 contracts and migration gates control the corresponding work below. Do not extend auto-promotion as the long-term first-send design or add an offline outbox. Use durable records and server acknowledgements for saving status, with no competing status store.
+
+The draft-transition checkpoints preserve recoverable unsent text and qualified owner identity. Their earlier Temporary transcript exclusion is superseded by Q3 and needs a follow-up across all surfaces; it is not evidence that the new reload policy is delivered. Backend idempotent creation, settlement metadata/partials, lossless import, freshness and Sync v2 support remain unimplemented until their contracts and tests exist. D7 acceptance does not enable TASK-13160 custom context or close any unsupported-capability gate.
 
 ## Pre-implementation review checkpoint
 
@@ -175,7 +181,7 @@ Each stage delivers a reviewable behavior change. This is a design sequence, not
 
 ### Stage 1 — Saving and safe conversation transitions
 
-**Task:** TASK-13454. **Status:** Not Started.
+**Task:** TASK-13454. **Status:** In Progress.
 
 **Goal:** dependable start, saving, new-chat mode, and character ownership. Findings 1, 2, 8, plus the persistence prerequisite for finding 4.
 
@@ -274,4 +280,4 @@ The usability-study script uses uncoached standard and roleplay tasks for novice
 
 Preserve owner/account/workspace fences and explicit legacy-history review. Do not infer ancestry from displayed rows/timestamps, silently promote local owners, expose unfinished native forks, weaken CSP, or alter temporary retention accidentally. Keep scope-specific settings and privacy decisions intact. Use existing dependencies, locale source files and mirror tooling, shared components, and current test harnesses. Avoid a new settings framework, onboarding wizard, analytics collection, search index, or generic history aggregation service.
 
-This branch is isolated from the dirty primary checkout and from the completed audit branch. This review changes design/tracking only. Written design approval is recorded; the detailed plans follow the corrected contracts above, and application work has not begun. Completion is evidence-based by stage; unmet backend capabilities, native-shell checks, and human-study checks remain explicitly identified rather than disappearing from scope.
+This branch is isolated from the dirty primary checkout and from the completed audit branch. Written design approval is recorded, and Stage 1 application work is underway in reviewed incremental deliveries. Detailed plans follow the corrected contracts and accepted D7 reconciliation above. Completion is evidence-based by stage; unmet backend capabilities, native-shell checks, and human-study checks remain explicitly identified rather than disappearing from scope.

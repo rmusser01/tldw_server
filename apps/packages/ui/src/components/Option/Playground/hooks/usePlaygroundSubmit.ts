@@ -45,7 +45,7 @@ type DocumentProcessingTurnReservation = {
 export type UsePlaygroundSubmitDeps = {
   form: any
   beginPromptAssistReset: () => number
-  markPromptAssistAttemptSaved: (attemptId: number) => void
+  markPromptAssistAttemptSaved: (attemptId: number, acknowledgedDelivery?: boolean) => void
   isSending: boolean
   isConnectionReady: boolean
   draftReady: boolean
@@ -584,7 +584,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       await dispatch(payload, {
         afterSend: (result) => {
           if (isChatSubmitSuccess(normalizeChatSubmitResult(result as any))) {
-            markPromptAssistAttemptSaved(promptAssistAttemptId)
+            markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
             if (messageForModel) {
               clearImportedSidepanelContext?.()
             }

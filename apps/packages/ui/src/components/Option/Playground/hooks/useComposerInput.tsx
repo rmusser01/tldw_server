@@ -111,6 +111,8 @@ export function useComposerInput(deps: UseComposerInputDeps) {
   const draftKey = draftAddress ? conversationDraftKey("tldw:playgroundChatDraft", draftAddress) : "tldw:playgroundChatDraft";
   const composerText = useComposerText({
     draftKey,
+    draftAddress: draftAddress ?? undefined,
+    recoverySurface: "tldw:playgroundChatDraft",
     draftEnabled: draftAddress !== null,
     bindFromDraftKey: draftAddress && draftTransition?.kind === "bind" && draftTransition.sourceAddress &&
       draftTransition.destinationKey === chatDraftAddressKey(draftAddress)
@@ -617,6 +619,8 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     onComposerRenderProfile,
     wrapComposerProfile,
     // Draft persistence
+    listRetainedDrafts: composerText.listRetainedDrafts,
+    copyRetainedDraft: composerText.copyRetainedDraft,
     draftSaved,
     draftReady,
   };

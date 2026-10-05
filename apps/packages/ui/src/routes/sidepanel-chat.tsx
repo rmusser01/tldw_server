@@ -1,6 +1,7 @@
+import type { RestoreChatDraft } from "@/components/Chat/composer/ChatDraftRecovery"
 import { restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation"
 import { browser } from "wxt/browser"
-import { isChatDraftAddress, isChatDraftHandle, chatDraftAddressKey } from "@/utils/chat-draft-address"
+import { freshChatDraftAddress, isChatDraftAddress, isChatDraftHandle, chatDraftAddressKey, type ChatDraftAddress } from "@/utils/chat-draft-address"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import { captureChatDraftLoad, chatDraftAddressForReceipt } from "@/hooks/chat/chat-draft-transition"
 import { requestSettingsNavigation } from "@/utils/settings-return"
@@ -1336,15 +1337,15 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
     tabs.length
   ])
 
-  const handleNewTab = React.useCallback(() => {
+  const createFreshTab = React.useCallback((newTabId = generateID(), recovered?: Extract<ChatDraftAddress, { kind: "fresh" }>) => {
     if (!owner.isCurrent() || (isRestoringChat && restoreFailure !== "target")) return false
     saveActiveTabSnapshot()
-    const newTabId = generateID()
     if (clearChat(() => {
       isSwitchingTabRef.current = true
       historySelection.activate(newTabId)
     }) === false) return false
     loadGenerationRef.current++
+    if (recovered) useStoreMessageOption.getState().setChatDraftAddress(recovered)
     setDropedFile(undefined)
     useSidepanelChatTabsStore.getState().upsertTab({
       id: newTabId,
@@ -1376,6 +1377,23 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
     newChatLabel
   ])
 
+  const handleNewTab = React.useCallback(() => createFreshTab(), [createFreshTab])
+  const handleRecoverDraft: RestoreChatDraft = async (draft, copy) => {
+    if (!owner.isCurrent() || !isChatDraftHandle(draft.handle) || draft.handle.address.kind !== "fresh" ||
+      draft.handle.ownerHash !== chatDraftOwnerKey(owner.snapshot.requestScope)) return false
+    const source = useStoreMessageOption.getState()
+    const sourceTabId = useSidepanelChatTabsStore.getState().activeTabId
+    const generation = loadGenerationRef.current
+    const current = () => owner.isCurrent() && generation === loadGenerationRef.current && !isRestoringChatRef.current &&
+      useSidepanelChatTabsStore.getState().activeTabId === sourceTabId &&
+      useStoreMessageOption.getState().chatDraftAddress === source.chatDraftAddress &&
+      useStoreMessageOption.getState().chatDraftRevision === source.chatDraftRevision
+    const newTabId = generateID()
+    const recovered = { ...draft.handle.address, id: freshChatDraftAddress(draft.handle.address.temporary).id }
+    if (!current() || !requestSettingsNavigation("/") || !(await copy(`tldw:sidepanelChatDraft:${newTabId}`, recovered)) || !current() ||
+      useSidepanelChatTabsStore.getState().tabs.some(tab => tab.id === newTabId)) return false
+    return createFreshTab(newTabId, recovered)
+  }
   useChatShortcuts(handleNewTab, true)
 
   const handleSelectTab = React.useCallback(
@@ -2741,6 +2759,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
                   inputRef={textareaRef}
                   onHeightChange={setComposerHeight}
                   draftKey={draftKey}
+                  onRecoverDraft={handleRecoverDraft}
                   onOpenChatInWebUi={browser.runtime.id ? undefined : openChatInWebUi}
                 />
               </div>
@@ -2773,6 +2792,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
                 inputRef={textareaRef}
                 onHeightChange={setComposerHeight}
                 draftKey={draftKey}
+                onRecoverDraft={handleRecoverDraft}
                 onOpenChatInWebUi={browser.runtime.id ? undefined : openChatInWebUi}
               />
             </div>

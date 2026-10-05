@@ -3733,5 +3733,38 @@
   },
   "mediaHandoff_cancel": {
     "message": "Cancel import"
+  },
+  "draftRecovery_unavailable": {
+    "message": "This draft is no longer available. Your current text is unchanged."
+  },
+  "draftRecovery_notOpened": {
+    "message": "Could not open this draft. Your current text and saved draft are kept."
+  },
+  "draftRecovery_open": {
+    "message": "Recover drafts"
+  },
+  "draftRecovery_title": {
+    "message": "Retained drafts"
+  },
+  "draftRecovery_help": {
+    "message": "Opening a draft starts a fresh conversation in its original mode, using your current chat setup. Your current unsent text stays available. Review retained text before sending it again. Attachments and conversation messages are not included."
+  },
+  "draftRecovery_loading": {
+    "message": "Loading drafts…"
+  },
+  "draftRecovery_partial": {
+    "message": "Some saved drafts could not be read. Retry to check again."
+  },
+  "draftRecovery_retry": {
+    "message": "Retry"
+  },
+  "draftRecovery_empty": {
+    "message": "No other retained drafts on this browser."
+  },
+  "draftRecovery_temporary": {
+    "message": "Temporary draft"
+  },
+  "draftRecovery_saved": {
+    "message": "New chat draft"
   }
 }

@@ -5,6 +5,8 @@ import {
 import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import React from "react"
+import { useStoreMessageOption } from "@/store/option"
+import { chatDraftAddressKey, conversationDraftKey, isChatDraftHandle, type ChatDraftAddress, type ChatDraftHandle } from "@/utils/chat-draft-address"
 
 /**
  * Shared composer text primitive consumed by both Playground and Sidepanel.
@@ -25,7 +27,20 @@ import React from "react"
  * adopts it directly, replacing its inline equivalents in `form.tsx`.
  */
 
+export type RecoveredChatDraft = {
+  key: string
+  surfaceKey: string
+  handle: ChatDraftHandle & { address: Extract<ChatDraftAddress, { kind: "fresh" }> }
+  content: string
+  metadata?: DraftMetadataObject
+  updatedAt: number
+}
+export type ChatDraftRecoveryListing = { drafts: RecoveredChatDraft[]; unavailable: boolean }
+
 export interface UseComposerTextOptions {
+  draftAddress?: ChatDraftAddress
+  recoverySurface?: string
+  recoverySurfaceTabs?: boolean
   /** Persistence key for draft messages. Each surface uses its own key. */
   draftKey: string
   /** Explicit first-ID binding; ignored unless this source is already mounted. */
@@ -61,6 +76,8 @@ export type ComposerPromptAssistMutation =
     }
 
 export interface UseComposerTextResult {
+  listRetainedDrafts: () => Promise<ChatDraftRecoveryListing>
+  copyRetainedDraft: (draft: RecoveredChatDraft, surfaceKey: string, destination?: Extract<ChatDraftAddress, { kind: "fresh" }>) => Promise<boolean>
   /** The underlying `useSimpleForm` instance. Callers can use `getInputProps("message")`. */
   form: ReturnType<typeof useSimpleForm<{ message: string; image: string }>>
   /** Monotonic signal that advances once for each committed message change. */
@@ -70,7 +87,7 @@ export interface UseComposerTextResult {
   /** Resets the owner and returns the exact optimistic attempt token. */
   beginPromptAssistReset: () => number
   /** Marks a specific owner attempt as definitively sent or enqueued. */
-  markPromptAssistAttemptSaved: (attemptId: number) => void
+  markPromptAssistAttemptSaved: (attemptId: number, acknowledgedDelivery?: boolean) => void
   /** Most recently completed owner attempt, or null before the first completion. */
   promptAssistSavedAttemptId: number | null
   /** Convenience setter for the message field. */
@@ -95,6 +112,9 @@ export function useComposerText(
 ): UseComposerTextResult {
   const {
     draftKey,
+    draftAddress,
+    recoverySurface,
+    recoverySurfaceTabs = false,
     bindFromDraftKey,
     tabScopedDraft = false,
     textareaRef,
@@ -113,8 +133,10 @@ export function useComposerText(
       revision: 0,
       source: "owner"
     })
-  const [promptAssistSavedAttemptId, setPromptAssistSavedAttemptId] =
-    React.useState<number | null>(null)
+  const [savedAttempt, setSavedAttempt] =
+    React.useState<{ id: number; acknowledgedDelivery: boolean } | null>(null)
+  const promptAssistSavedAttemptId = savedAttempt?.id ?? null
+  const attemptSourceRef = React.useRef<{ id: number; storageKey: string; address: ChatDraftAddress } | null>(null)
   const previousMessageRef = React.useRef(form.values.message)
   const nextPromptAssistAttemptIdRef = React.useRef(0)
   const pendingPromptAssistResetRef = React.useRef<{
@@ -141,21 +163,6 @@ export function useComposerText(
     )
   }, [form.values.message])
 
-  const beginPromptAssistReset = React.useCallback(() => {
-    const attemptId = ++nextPromptAssistAttemptIdRef.current
-    pendingPromptAssistResetRef.current = {
-      attemptId,
-      fromValue: form.values.message
-    }
-    form.reset()
-    return attemptId
-  }, [form])
-
-  const markPromptAssistAttemptSaved = React.useCallback(
-    (attemptId: number) => setPromptAssistSavedAttemptId(attemptId),
-    []
-  )
-
   const setMessageValue = React.useCallback(
     (value: string) => {
       form.setFieldValue("message", value)
@@ -173,27 +180,107 @@ export function useComposerText(
 
   const { ownerKey, isCurrent } = useChatDraftOwner(() => {
     pendingPromptAssistResetRef.current = null
-    setPromptAssistSavedAttemptId(null)
+    setSavedAttempt(null)
+    attemptSourceRef.current = null
     form.reset()
     restoreWithMetadata?.("", undefined)
   })
 
-  const { draftSaved, draftReady, clearDraft: clearPersistedDraft } = useDraftPersistence({
+  const markPromptAssistAttemptSaved = React.useCallback(
+    (attemptId: number, acknowledgedDelivery = false) => setSavedAttempt({ id: attemptId, acknowledgedDelivery }), []
+  )
+
+  const metadata = React.useCallback(() => ({
+    ...getDraftMetadata?.(),
+    ...(draftAddress?.kind === "fresh" && ownerKey ? { chatDraftHandle: { address: draftAddress, ownerHash: ownerKey } as unknown as DraftMetadataObject } : {})
+  }), [getDraftMetadata, draftAddress, ownerKey])
+  const attemptSource = attemptSourceRef.current
+  const transition = useStoreMessageOption.getState().chatDraftTransition
+  const currentAttemptSource = attemptSource && attemptSource.id === nextPromptAssistAttemptIdRef.current && draftAddress &&
+    (draftAddress === attemptSource.address || (transition?.kind === "bind" &&
+      transition.sourceAddress === attemptSource.address && transition.destinationKey === chatDraftAddressKey(draftAddress)))
+  const preserveEmptyDraft = Boolean(currentAttemptSource &&
+    (pendingPromptAssistResetRef.current || promptAssistMutation.source === "optimistic_reset") &&
+    !(savedAttempt?.id === attemptSource.id && savedAttempt.acknowledgedDelivery))
+  const { draftSaved, draftReady, clearDraft: clearPersistedDraft, listDrafts, retainDraft, acknowledgeBoundDraft, flushDraft } = useDraftPersistence({
     storageKey: `${draftKey}:owner:${ownerKey ?? "unresolved"}`,
     bindFromStorageKey: bindFromDraftKey && ownerKey ? `${bindFromDraftKey}:owner:${ownerKey}` : undefined,
     tabScoped: tabScopedDraft,
+    preserveEmptyDraft,
     legacyStorageKey: draftKey,
     isCurrent,
     getValue: () => form.values.message,
-    getMetadata: getDraftMetadata,
+    getMetadata: draftAddress ? metadata : getDraftMetadata,
     setValue: (value) => setMessageValue(value),
     setValueWithMetadata: restoreMessage,
     enabled: draftEnabled && ownerKey !== null
   })
+  const beginPromptAssistReset = React.useCallback(() => {
+    flushDraft()
+    const attemptId = ++nextPromptAssistAttemptIdRef.current
+    attemptSourceRef.current = ownerKey && draftAddress?.kind === "fresh"
+      ? { id: attemptId, storageKey: `${draftKey}:owner:${ownerKey}`, address: draftAddress } : null
+    pendingPromptAssistResetRef.current = { attemptId, fromValue: form.values.message }
+    form.reset()
+    return attemptId
+  }, [form, ownerKey, draftAddress, draftKey, flushDraft])
+  React.useEffect(() => {
+    const source = attemptSourceRef.current
+    if (!savedAttempt?.acknowledgedDelivery || !source || savedAttempt.id !== source.id ||
+      savedAttempt.id !== nextPromptAssistAttemptIdRef.current || previousMessageRef.current !== "" || !isCurrent()) return
+    const transition = useStoreMessageOption.getState().chatDraftTransition
+    if (transition?.kind !== "bind" || !transition.sourceAddress || !draftAddress ||
+      transition.destinationKey !== chatDraftAddressKey(draftAddress) ||
+      chatDraftAddressKey(transition.sourceAddress) !== chatDraftAddressKey(source.address)) return
+    void acknowledgeBoundDraft(source.storageKey)
+  }, [savedAttempt, draftAddress, form.values.message, isCurrent, acknowledgeBoundDraft])
+
   const clearDraft = React.useCallback((attemptId?: number) => {
     if (attemptId !== undefined && (attemptId !== nextPromptAssistAttemptIdRef.current || previousMessageRef.current !== "")) return
     clearPersistedDraft()
   }, [clearPersistedDraft])
+
+  const validRecoverySurface = React.useCallback((surface: string) => Boolean(recoverySurface &&
+    (surface === recoverySurface || (recoverySurfaceTabs && surface.startsWith(`${recoverySurface}:`) &&
+      surface.slice(recoverySurface.length + 1).length > 0 && !surface.slice(recoverySurface.length + 1).includes(":")))), [recoverySurface, recoverySurfaceTabs])
+  const listRetainedDrafts = React.useCallback(async (): Promise<ChatDraftRecoveryListing> => {
+    const source = useStoreMessageOption.getState()
+    const current = () => draftReady && isCurrent() && source.chatDraftAddress === draftAddress &&
+      useStoreMessageOption.getState().chatDraftAddress === source.chatDraftAddress &&
+      useStoreMessageOption.getState().chatDraftRevision === source.chatDraftRevision
+    if (!ownerKey || !draftAddress || !recoverySurface || !current()) return { drafts: [], unavailable: false }
+    const result = await listDrafts()
+    if (!current()) return { drafts: [], unavailable: false }
+    const currentScope = draftAddress.kind === "local" ? { type: "global" as const } : draftAddress.scope
+    const suffix = `:owner:${ownerKey}`
+    const drafts: RecoveredChatDraft[] = []
+    for (const record of result.drafts) {
+      const handle = record.metadata?.chatDraftHandle
+      if (!isChatDraftHandle(handle) || handle.ownerHash !== ownerKey || handle.address.kind !== "fresh" ||
+        (handle.address.scope.type !== currentScope.type || (handle.address.scope.type === "workspace" && currentScope.type === "workspace" && handle.address.scope.workspaceId !== currentScope.workspaceId)) || !record.storageKey.endsWith(suffix)) continue
+      const marker = record.storageKey.lastIndexOf(":conversation:")
+      if (marker < 0) continue
+      const surfaceKey = record.storageKey.slice(0, marker)
+      if (!validRecoverySurface(surfaceKey) || record.storageKey !== `${conversationDraftKey(surfaceKey, handle.address)}${suffix}` ||
+        (surfaceKey === draftKey.slice(0, draftKey.lastIndexOf(":conversation:")) &&
+          chatDraftAddressKey(handle.address) === chatDraftAddressKey(draftAddress))) continue
+      drafts.push({ key: record.storageKey, surfaceKey, handle: { ...handle, address: handle.address },
+        content: record.content, metadata: record.metadata, updatedAt: record.updatedAt })
+    }
+    return { drafts: drafts.sort((a, b) => b.updatedAt - a.updatedAt), unavailable: result.unavailable }
+  }, [draftReady, isCurrent, ownerKey, draftAddress, recoverySurface, draftKey, validRecoverySurface, listDrafts])
+  const copyRetainedDraft = React.useCallback(async (draft: RecoveredChatDraft, surfaceKey: string, destination?: Extract<ChatDraftAddress, { kind: "fresh" }>) => {
+    if (!ownerKey || !validRecoverySurface(surfaceKey)) return false
+    const current = (await listRetainedDrafts()).drafts.find(candidate => candidate.key === draft.key &&
+      candidate.handle.address.temporary === draft.handle.address.temporary)
+    if (!current) return false
+    const address = destination ?? current.handle.address
+    if (!isChatDraftHandle({ address, ownerHash: ownerKey }) || address.kind !== "fresh" ||
+      address.temporary !== current.handle.address.temporary || address.scope.type !== current.handle.address.scope.type ||
+      (address.scope.type === "workspace" && current.handle.address.scope.type === "workspace" && address.scope.workspaceId !== current.handle.address.scope.workspaceId)) return false
+    return retainDraft(`${conversationDraftKey(surfaceKey, address)}:owner:${ownerKey}`,
+      { content: current.content, metadata: { ...current.metadata, chatDraftHandle: { address, ownerHash: ownerKey } as unknown as DraftMetadataObject } })
+  }, [listRetainedDrafts, ownerKey, retainDraft, validRecoverySurface])
 
   const textareaMaxHeight =
     explicitMaxHeight ??
@@ -217,6 +304,8 @@ export function useComposerText(
   }, [textareaRef])
 
   return {
+    listRetainedDrafts,
+    copyRetainedDraft,
     form,
     messageRevision: promptAssistMutation.revision,
     promptAssistMutation,

@@ -1,3 +1,4 @@
+import { ChatDraftRecovery, type RestoreChatDraft } from "@/components/Chat/composer/ChatDraftRecovery";
 import { watchChatAccountChanges } from "@/services/chat-account-boundary";
 import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection";
 import {
@@ -2122,8 +2123,19 @@ export const PlaygroundForm = ({
     wrapComposerProfile,
     draftSaved,
     draftReady,
+    listRetainedDrafts,
+    copyRetainedDraft,
   } = composerInput;
   React.useLayoutEffect(() => { composerImageRef.current = form.values.image; }, [form.values.image]);
+
+  const restoreRetainedDraft: RestoreChatDraft = async (draft, copy) => {
+    const source = useStoreMessageOption.getState();
+    const current = () => useStoreMessageOption.getState().chatDraftAddress === source.chatDraftAddress &&
+      useStoreMessageOption.getState().chatDraftRevision === source.chatDraftRevision;
+    if (!requestSettingsNavigation("/") || !(await copy(draft.surfaceKey)) || !current()) return false;
+    if (clearChat() === false) return false;
+    return useStoreMessageOption.getState().setChatDraftAddress(draft.handle.address);
+  };
 
   const hasDraft = (form.values.message || "").trim().length > 0;
   const {
@@ -5294,6 +5306,7 @@ export const PlaygroundForm = ({
       onRender={onComposerRenderProfile}
     >
       <div className="flex w-full flex-col items-center px-2 pb-0 sm:px-4 sm:pb-0">
+        <div className="flex w-full justify-end"><ChatDraftRecovery listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={restoreRetainedDraft} disabled={!draftReady} /></div>
         <div
           data-checkwidemode={effectiveWideMode}
           data-ui-mode={uiMode}
