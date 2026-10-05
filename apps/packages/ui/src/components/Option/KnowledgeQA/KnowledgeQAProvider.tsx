@@ -751,19 +751,20 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
     ragContext?.trust_evidence_origin === "unknown_origin"
       ? ragContext.trust_evidence_origin
       : null
-  const normalizedTrust =
-    storedTrustState != null
-      ? {
-          state: storedTrustState,
-          reasonCodes: storedReasonCodes,
-          evidenceOrigin: storedEvidenceOrigin ?? "unknown_origin",
-        }
-      : normalizeKnowledgeAnswerTrust({
-          answer,
-          results,
-          citations,
-          hasRequiredMetadata: false,
-        })
+  const normalizedTrust = normalizeKnowledgeAnswerTrust({
+    answer,
+    results,
+    citations,
+    backendTrust:
+      storedTrustState != null
+        ? {
+            state: storedTrustState,
+            reasonCodes: storedReasonCodes,
+            evidenceOrigin: storedEvidenceOrigin ?? "unknown_origin",
+          }
+        : null,
+    hasRequiredMetadata: false,
+  })
   const queryFromContext =
     typeof ragContext?.search_query === "string" &&
     ragContext.search_query.trim().length > 0
