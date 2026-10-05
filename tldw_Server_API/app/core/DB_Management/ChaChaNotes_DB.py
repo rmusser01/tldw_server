@@ -315,6 +315,12 @@ _ORDER_BY_EXPR_RE = re.compile(
 _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _CHAT_GRAMMAR_VALIDATION_STATUSES = frozenset({"unchecked", "valid", "invalid"})
 
+# The persona older Sync v2 projections stored for a chat that named no assistant
+# (#3182). It never existed. This one definition serves the migration that clears it
+# from stored chats and the Sync materializer, which reads it in a payload as no assistant.
+RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND = "persona"
+RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID = "sync-v2"
+
 # --- Custom Exceptions ---
 class CharactersRAGDBError(Exception):
     """Base exception for CharactersRAGDB related errors."""
@@ -788,8 +794,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 75  # Client-id create fingerprints after Workspace startup receipts
-    _POSTGRES_SCHEMA_VERSION = 79
+    _CURRENT_SCHEMA_VERSION = 76  # Retired Sync placeholder persona cleared after client-id create fingerprints
+    _POSTGRES_SCHEMA_VERSION = 80
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -7621,6 +7627,32 @@ ALTER TABLE conversations ADD COLUMN create_request_fingerprint TEXT
 UPDATE db_schema_version SET version = 79 WHERE schema_name = 'rag_char_chat_schema' AND version = 78;
 """
 
+    # #3182: until the Sync v2 conversation materializer stopped doing it, a chat whose
+    # payload named no assistant was stored as persona 'sync-v2'. That persona never
+    # existed, so persona admission answered 404 for the chat. The repair makes such a
+    # row a plain chat: no kind, no id, no memory mode, and no startup provenance, which
+    # belongs to a binding the chat never really had.
+    #
+    # Only the exact placeholder is matched, compared byte for byte. A chat whose owner
+    # has, or had, a persona profile with that id is that owner's own binding and is
+    # left alone, as is any chat bound to a character. `version` and `last_modified` do
+    # not move: nothing was edited, and under Sync the row version is the object revision.
+    _RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL = f"""
+UPDATE conversations
+   SET assistant_kind = NULL,
+       assistant_id = NULL,
+       persona_memory_mode = NULL,
+       assistant_startup_json = NULL
+ WHERE assistant_kind = '{RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND}'
+   AND assistant_id = '{RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID}'
+   AND character_id IS NULL
+   AND NOT EXISTS (
+       SELECT 1 FROM persona_profiles AS profile
+        WHERE profile.id = '{RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID}'
+          AND profile.user_id = conversations.client_id
+   )
+"""  # nosec B608 - the interpolated values are the two module constants above.
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -8773,6 +8805,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (72, "_migrate_from_v72_to_v73_persona_companion"),
             (73, "_migrate_from_v73_to_v74"),
             (74, "_migrate_from_v74_to_v75"),
+            (75, "_migrate_from_v75_to_v76"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17983,6 +18016,69 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "Conversation create fingerprint PostgreSQL migration V78->V79 failed version verification."
             )
 
+    def _migrate_from_v75_to_v76(self, conn: sqlite3.Connection) -> None:
+        """Clear the retired Sync placeholder persona from this owner's chats."""
+        conn.execute(self._RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL)
+        conn.execute(
+            "UPDATE db_schema_version SET version = 76 WHERE schema_name = ? AND version = 75", (self._SCHEMA_NAME,)
+        )
+        if self._get_db_version(conn) != 76:
+            raise SchemaError("Sync placeholder repair migration V75->V76 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v79_to_v80_postgres(self, conn: Any) -> None:
+        """Clear the retired Sync placeholder persona from every owner's chats.
+
+        One PostgreSQL database holds every owner's chats, and `conversations`
+        has a forced tenant policy. A role that bypasses row-level security (the
+        documented superuser setup) sees all rows. A table owner that does not
+        bypass it would repair only the rows its session happens to see and then
+        record the version, leaving the other owners' chats broken for good. So
+        the policy is lifted for the owner inside this transaction, behind an
+        ACCESS EXCLUSIVE lock that keeps every other session out of the table,
+        and put back before the version bump.
+        """
+        backend = self.backend
+        backend.execute("LOCK TABLE conversations IN ACCESS EXCLUSIVE MODE", connection=conn)
+        states = backend.execute(
+            """
+            SELECT table_row.relrowsecurity,
+                   table_row.relforcerowsecurity,
+                   pg_has_role(current_user, table_row.relowner, 'USAGE') AS is_table_owner,
+                   (SELECT role_row.rolsuper OR role_row.rolbypassrls
+                      FROM pg_roles AS role_row
+                     WHERE role_row.rolname = current_user) AS bypasses_rls
+              FROM pg_class AS table_row
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid = table_row.relnamespace
+             WHERE namespace_row.nspname = current_schema()
+               AND table_row.relkind IN ('r', 'p')
+               AND table_row.relname = 'conversations'
+            """,
+            connection=conn,
+        ).rows
+        if len(states) != 1:
+            raise SchemaError("Sync placeholder repair v80 cannot verify the conversations relation.")  # noqa: TRY003
+        state = states[0]
+        policy_applies = bool(state.get("relrowsecurity")) and not bool(state.get("bypasses_rls"))
+        is_table_owner = bool(state.get("is_table_owner"))
+        if policy_applies and not is_table_owner:
+            raise SchemaError(  # noqa: TRY003
+                "Sync placeholder repair v80 requires the PostgreSQL schema-owner migration path."
+            )
+        lift_forced_policy = policy_applies and bool(state.get("relforcerowsecurity"))
+        if lift_forced_policy:
+            backend.execute("ALTER TABLE conversations NO FORCE ROW LEVEL SECURITY", connection=conn)
+        backend.execute(self._RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL, connection=conn)
+        if lift_forced_policy:
+            backend.execute("ALTER TABLE conversations FORCE ROW LEVEL SECURITY", connection=conn)
+        backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 79",
+            (80, self._SCHEMA_NAME), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 80:
+            raise SchemaError(  # noqa: TRY003
+                "Sync placeholder repair PostgreSQL migration V79->V80 failed version verification."
+            )
+
     def _migrate_from_v77_to_v78_postgres(self, conn: Any) -> None:
         """Install PostgreSQL receipts with forced owner RLS before the version bump."""
         from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_workspace_chat_startup_rls_sql
@@ -21190,6 +21286,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 75 and current_db_version == 74:
                         self._migrate_from_v74_to_v75(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 76 and current_db_version == 75:
+                        self._migrate_from_v75_to_v76(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21663,6 +21762,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 75 and current_db_version == 74:
                     self._migrate_from_v74_to_v75(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 76 and current_db_version == 75:
+                    self._migrate_from_v75_to_v76(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25524,7 +25626,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77, 78) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25552,6 +25654,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 79 and current_version < 79:
                     self._migrate_from_v78_to_v79_postgres(conn)
                     current_version = 79
+                if target_version >= 80 and current_version < 80:
+                    self._migrate_from_v79_to_v80_postgres(conn)
+                    current_version = 80
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -26003,6 +26108,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v78_to_v79_postgres(conn)
                 self._runtime_schema_version = 79
                 current_version = 79
+
+            if target_version >= 80 and current_version < 80:
+                self._migrate_from_v79_to_v80_postgres(conn)
+                self._runtime_schema_version = 80
+                current_version = 80
 
             if current_version < target_version:
                 logger.warning(
@@ -45849,6 +45959,7 @@ for _message_store_method in (
     "settle_history_admission",
     "append_message_from_sync",
     "tombstone_message_from_sync",
+    "tombstone_unsynced_message_from_sync",
     "get_messages_by_sync_stable_id",
     "_insert_message_images",
     "append_message_image",

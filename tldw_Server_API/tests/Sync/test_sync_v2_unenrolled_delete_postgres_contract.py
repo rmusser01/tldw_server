@@ -1,10 +1,12 @@
-"""The delete rule for chat rows Sync v2 never saw, with PostgreSQL on either side (#3181).
+"""Deletes of chat rows Sync v2 never saw, with PostgreSQL on either side (#3181).
 
-``test_sync_v2_unenrolled_delete.py`` covers the rule on SQLite. Here the same
-routes run once with the owner's chat database on PostgreSQL and once with the
-Sync store on PostgreSQL, because the rule takes the dataset projection fence,
-resolves a conflict inside a savepoint, and deletes owner rows inside that
-fence. The tests skip when no PostgreSQL server is reachable.
+``test_sync_v2_unenrolled_delete.py`` covers the server's delete routes on
+SQLite, and ``test_sync_v2_satisfied_tombstone.py`` a device's tombstone of a
+message the server does not have. Here both run once with the owner's chat
+database on PostgreSQL and once with the Sync store on PostgreSQL, because they
+take the dataset projection fence, settle a conflict inside a savepoint, and
+delete owner rows inside that fence. The tests skip when no PostgreSQL server is
+reachable.
 """
 
 from __future__ import annotations
@@ -26,6 +28,15 @@ from tldw_Server_API.tests.Sync.test_sync_v2_native_history_capture import (
     _client,
     _dataset_id,
     _log,
+)
+from tldw_Server_API.tests.Sync.test_sync_v2_satisfied_tombstone import (
+    GONE,
+    THIRD,
+    _envelope,
+    _push,
+    _push_tombstone,
+    _state,
+    _strand_device_tombstone,
 )
 from tldw_Server_API.tests.Sync.test_sync_v2_unenrolled_delete import (
     LEGACY_ANSWER,
@@ -177,3 +188,100 @@ def test_postgres_stranded_delete_recovers_when_it_is_retried(
     assert retried.status_code == 204, retried.text
     assert _is_deleted(chacha_db, LEGACY_QUESTION)
     assert _blocker(sync_service) is None
+
+
+# ---------------------------------------------------------------------------
+# A device's tombstone of a message the server does not have
+# ---------------------------------------------------------------------------
+
+
+def _third_device(sync_service: SyncV2Service) -> str:
+    sync_service.register_device(user_id=USER, display_name="Phone", client_type="chatbook", device_id=THIRD)
+    return THIRD
+
+
+def test_postgres_device_tombstone_of_an_unknown_message_is_applied_and_delivered(
+    stack: tuple[TestClient, CharactersRAGDB, SyncV2Service],
+) -> None:
+    client, chacha_db, sync_service = stack
+    third = _third_device(sync_service)
+
+    pushed = _push_tombstone(sync_service)
+
+    assert pushed.conflicts == [] and pushed.rejected == []
+    assert [item.apply_status for item in pushed.accepted] == ["applied"]
+    assert _state(sync_service).deleted is True
+    assert chacha_db.get_message_by_id(GONE, include_deleted=True) is None
+    assert _blocker(sync_service) is None
+    pulled = sync_service.pull(
+        user_id=USER,
+        dataset_id=_dataset_id(sync_service),
+        device_id=third,
+        cursor="0",
+        domains=["chat.conversation", "chat.message"],
+    ).envelopes
+    assert [(item.operation, item.object_id) for item in pulled] == [("tombstone", GONE)]
+    assert client.post("/api/v1/chats/", json={"title": "After the tombstone"}).status_code == 201
+
+
+def test_postgres_device_tombstone_deletes_the_copy_the_server_holds_outside_sync(
+    stack: tuple[TestClient, CharactersRAGDB, SyncV2Service],
+) -> None:
+    _client, chacha_db, sync_service = stack
+    _legacy_chat(chacha_db, messages=(LEGACY_QUESTION, LEGACY_ANSWER))
+
+    pushed = _push_tombstone(sync_service, LEGACY_QUESTION)
+
+    assert pushed.conflicts == []
+    assert [item.apply_status for item in pushed.accepted] == ["applied"]
+    assert _is_deleted(chacha_db, LEGACY_QUESTION) and not _is_deleted(chacha_db, LEGACY_ANSWER)
+    assert _state(sync_service, LEGACY_QUESTION).deleted is True
+
+
+def test_postgres_dataset_blocked_by_a_device_tombstone_recovers_on_the_next_push(
+    stack: tuple[TestClient, CharactersRAGDB, SyncV2Service],
+) -> None:
+    _client, chacha_db, sync_service = stack
+    third = _third_device(sync_service)
+    _legacy_chat(chacha_db)
+    stranded = _strand_device_tombstone(sync_service)
+
+    pushed = _push(sync_service, _envelope(sync_service, "append", "from-the-phone", device=third))
+
+    assert pushed.conflicts == []
+    assert [item.apply_status for item in pushed.accepted] == ["applied"]
+    assert _blocker(sync_service) is None
+    assert sync_service.store.get_envelope_by_server_cursor(stranded.server_cursor).apply_status == "applied"
+    assert sync_service.store.get_conflict("conflict-device-tombstone").status == "resolved"
+    assert _state(sync_service).deleted is True
+
+
+def test_postgres_device_tombstone_never_reaches_another_owners_message(
+    tmp_path: Path,
+    pg_database_config: DatabaseConfig,
+) -> None:
+    """One database holds both owners' chats, and the documented role bypasses row-level security.
+
+    The tombstone names a message by id only. It must find nothing for an owner
+    who does not hold the chat, even though the connection can read the row.
+    """
+    backends = [DatabaseBackendFactory.create_backend(pg_database_config) for _ in range(3)]
+    first = CharactersRAGDB(db_path=":memory:", client_id=USER, backend=backends[0])
+    first_projection = CharactersRAGDB(db_path=":memory:", client_id=USER, backend=backends[1])
+    second = CharactersRAGDB(db_path=":memory:", client_id="user-2", backend=backends[2])
+    try:
+        second.add_conversation({"id": "their-chat", "character_id": None, "title": "Theirs", "client_id": "user-2"})
+        second.add_message({"id": "their-message", "conversation_id": "their-chat", "sender": "user", "content": "x"})
+        sync_service = _active_profile(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db"), first_projection)
+
+        pushed = _push_tombstone(sync_service, "their-message")
+
+        assert pushed.conflicts == []
+        assert [item.apply_status for item in pushed.accepted] == ["applied"]
+        assert not _is_deleted(second, "their-message")
+        assert _state(sync_service, "their-message").deleted is True
+    finally:
+        for database in (first_projection, first, second):
+            database.close_connection()
+        for backend in backends:
+            backend.get_pool().close_all()
