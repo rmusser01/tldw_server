@@ -1,6 +1,7 @@
 # Provider-authoritative model inventory
 
-Task: TASK-13460. Baseline: dev `75ab224081`.
+Task: TASK-13460. Initial baseline: dev `75ab224081`.
+Rebased without conflicts onto dev `ba553fdc51` before final publication.
 
 The commercial catalog currently combines config and historical pricing IDs;
 OpenRouter adds live IDs without removing stale ones. Chat validation also accepts
