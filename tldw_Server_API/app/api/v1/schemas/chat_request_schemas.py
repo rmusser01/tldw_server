@@ -10,10 +10,22 @@ from typing import Any, Literal, Optional, Union
 
 #
 # 3rd-party imports
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    StrictBool,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
-from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistorySelectionV1
+from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
+    HISTORY_BRANCH_FIELD_DESCRIPTION,
+    HistorySelectionV1,
+)
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     is_safe_extra_header_value,
     is_server_managed_extra_header,
@@ -1140,6 +1152,7 @@ class ChatCompletionRequest(BaseModel):
     )
     conversation_id: Optional[str] = Field(None, description="Optional ID of the conversation to use for context.")
     tldw_history_selection_v1: HistorySelectionV1 | None = None
+    tldw_history_branch: StrictBool | None = Field(None, description=HISTORY_BRANCH_FIELD_DESCRIPTION)
     tldw_continuation: Optional[TLDWContinuationSpec] = Field(
         None,
         description=(
@@ -1220,6 +1233,8 @@ class ChatCompletionRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_history_selection_request(self) -> "ChatCompletionRequest":
+        if self.tldw_history_branch is not None and self.tldw_history_selection_v1 is None:
+            raise ValueError("tldw_history_branch requires tldw_history_selection_v1")
         if self.tldw_history_selection_v1 is not None:
             if self.tldw_continuation is not None:
                 raise ValueError("Versioned selection cannot be combined with legacy continuation controls")

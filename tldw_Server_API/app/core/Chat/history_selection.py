@@ -14,14 +14,82 @@ from typing import Any
 
 
 class HistorySelectionError(ValueError):
-    """A stable code for malformed or unavailable ancestry."""
+    """A stable code for malformed or unavailable ancestry.
 
-    def __init__(self, code: str) -> None:
+    `details` holds extra JSON-safe fields an endpoint adds to its 409 body.
+    """
+
+    def __init__(self, code: str, *, details: Mapping[str, Any] | None = None) -> None:
         super().__init__(code)
         self.code = code
+        self.details: dict[str, Any] = dict(details or {})
 
     def __str__(self) -> str:
         return self.code
+
+
+class HistoryBranchChangedError(HistorySelectionError):
+    """A "must extend the latest message" admission found the selected tip already continued.
+
+    Nothing was written. `leaf_ids` are the current live leaves below the tip, so a
+    client can refresh its view and offer "send after latest" or an explicit branch.
+    """
+
+    def __init__(
+        self,
+        *,
+        conversation_id: str,
+        parent_message_id: str | None,
+        leaf_ids: Sequence[str],
+        history_version: str | int,
+    ) -> None:
+        super().__init__(
+            "history_branch_changed",
+            details={
+                "conversation_id": conversation_id,
+                "parent_message_id": parent_message_id,
+                "leaf_ids": list(leaf_ids),
+                "history_version": int(history_version),
+            },
+        )
+
+
+def history_branch_leaves(
+    nodes: Sequence[Mapping[str, Any]],
+    interpretation_status: Mapping[str, Any],
+    parent_id: str | None,
+) -> tuple[str, ...]:
+    """Return the live leaves below a selected tip, or () when the tip has no live child.
+
+    `nodes` is an owner snapshot manifest: live (non-deleted) rows only, in manifest
+    order. A child is a row whose parent under the selection's interpretation is the
+    tip: its `parent_id` for `parent_graph_v1`, and the reviewed path order for rows of
+    an accepted `legacy_linear_v1` projection. A `None` tip (an empty or before-first
+    selection) treats root rows as its children. Siblings of the tip, such as other
+    assistant variants of the same reply, are never children. Leaves are the tip's
+    descendants without children of their own, returned in manifest order.
+    """
+    parents = {row["id"]: row.get("parent_id") for row in nodes}
+    if interpretation_status.get("kind") == "legacy_linear_v1":
+        path = tuple(interpretation_status.get("ordered_path_ids") or ())
+        parents.update(zip(path, (None, *path[:-1]), strict=True))
+    children: dict[str | None, list[str]] = {}
+    for row in nodes:
+        children.setdefault(parents[row["id"]], []).append(row["id"])
+    leaves: set[str] = set()
+    seen: set[str] = set()
+    pending = list(children.get(parent_id, ()))
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        below = children.get(current)
+        if below:
+            pending.extend(below)
+        else:
+            leaves.add(current)
+    return tuple(row["id"] for row in nodes if row["id"] in leaves)
 
 
 @dataclass(frozen=True)
