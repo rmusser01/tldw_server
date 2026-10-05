@@ -38,11 +38,11 @@ Evaluate first-time and experienced power-user journeys for single and batch ing
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Both independent assessments completed on dev 75ab224081bf140ef52017c1a9b0a04f6878d488. Exact-dev WebUI ran with safe fixture API; Chrome extension built and loaded in an isolated profile. Five major priorities: empty URL handoff, comma URL parsing, failed-import retry, preview/selection consistency, and small-screen reading/bulk action visibility. Additional batch-count, duplicate, pagination, accessibility and workflow improvements recorded. No product-code edits. Temporary frontend, fixture API, detector server and review browsers stopped; dependency symlink removed.
 
 Verification: all 29 local report/evidence links resolve and referenced source lines exist; five P1 priorities and 22/40 quality score verified. Archived ten original screenshots. Narrowed detector: 30 TSX files, zero findings/advisories, exit 0; workflow defects still observed independently. Chrome development extension build completed and loaded; WebUI pointer/keyboard and 390–400 px interactions reviewed against fixtures. Real backend ingestion/reliability remains outside this audit. No product-code changes; Python tests and Bandit not applicable to Markdown/PNG audit artifacts. Temporary report body removed, first-run trend read, and all review-only servers/browsers stopped.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
