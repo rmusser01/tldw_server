@@ -16,7 +16,7 @@ tldw_Server_API/app/core/DB_Management/Workflows_DB.py:1810 if owner_id
 tldw_Server_API/app/core/DB_Management/Workflows_DB.py:1959 if user_id
 tldw_Server_API/app/core/DB_Management/Workflows_Scheduler_DB.py:409 if user_id
 tldw_Server_API/app/core/DB_Management/Workflows_Scheduler_DB.py:442 if user_id
-tldw_Server_API/app/core/DB_Management/media_db/api.py:1080 if user_id
+tldw_Server_API/app/core/DB_Management/media_db/api.py:1084 if user_id
 tldw_Server_API/app/core/DB_Management/prompt_studio_db/repositories/projects.py:139 if user_id
 tldw_Server_API/app/core/Jobs/manager.py:5416 if owner_user_id
 tldw_Server_API/app/core/Jobs/manager.py:5464 if owner_user_id

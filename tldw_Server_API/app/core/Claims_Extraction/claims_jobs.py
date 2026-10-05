@@ -5,13 +5,16 @@ from __future__ import annotations
 import hashlib
 import os
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.operations.contracts import AdmissionResult
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 
 from .claims_job_contracts import (
+    CLAIMS_AGGREGATE_REVIEW_METRICS_JOB_TYPE,
     CLAIMS_DELIVER_ALERT_JOB_TYPE,
     CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE,
     CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE,
@@ -19,9 +22,11 @@ from .claims_job_contracts import (
     CLAIMS_JOBS_DEFAULT_QUEUE,
     CLAIMS_JOBS_DOMAIN,
     CLAIMS_REBUILD_MEDIA_JOB_TYPE,
+    ClaimsJobError,
     validate_alert_delivery_payload,
     validate_analytics_export_payload,
     validate_rebuild_media_payload,
+    validate_review_metrics_payload,
     validate_review_notification_payload,
 )
 
@@ -61,6 +66,15 @@ def claims_analytics_export_jobs_enabled(
     """Return whether Claims analytics exports should enqueue through Jobs."""
     return claims_jobs_enabled(settings_obj) and _truthy(
         _setting_value("CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED", False, settings_obj)
+    )
+
+
+def claims_review_metrics_jobs_enabled(
+    settings_obj: Mapping[str, Any] | None = None,
+) -> bool:
+    """Return whether both global and review-metrics Jobs routing are enabled."""
+    return claims_jobs_enabled(settings_obj) and _truthy(
+        _setting_value("CLAIMS_REVIEW_METRICS_JOBS_ENABLED", False, settings_obj)
     )
 
 
@@ -179,6 +193,53 @@ def enqueue_claims_analytics_export(
         idempotency_key=(
             f"claims:analytics_export:{payload['owner_user_id']}:"
             f"{payload['export_id']}"
+        ),
+    )
+
+
+def enqueue_claims_review_metrics(
+    *,
+    owner_user_id: str,
+    scheduled_for: str,
+    start_date: str,
+    end_date: str,
+    interval_seconds: int,
+    job_manager: JobManager | None = None,
+    settings_obj: Mapping[str, Any] | None = None,
+) -> AdmissionResult:
+    """Admit one explicit owner-window Job and preserve the typed Jobs outcome.
+
+    The caller supplies a captured canonical UTC slot timestamp and inclusive
+    dates. Claims derives all admission metadata; retries belong to the producer.
+    """
+    payload = validate_review_metrics_payload(
+        {
+            "version": CLAIMS_JOB_PAYLOAD_VERSION,
+            "owner_user_id": owner_user_id,
+            "scheduled_for": scheduled_for,
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+    )
+    if type(interval_seconds) is not int or interval_seconds <= 0:
+        raise ClaimsJobError(
+            "claims review metrics interval must be a positive integer",
+            failure_code="claims_invalid_payload",
+        )
+    scheduled = datetime.fromisoformat(payload["scheduled_for"])
+    slot_epoch = int((scheduled - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds())
+    return _manager(job_manager).admit_job(
+        domain=CLAIMS_JOBS_DOMAIN,
+        queue=claims_jobs_queue(settings_obj),
+        job_type=CLAIMS_AGGREGATE_REVIEW_METRICS_JOB_TYPE,
+        payload=payload,
+        owner_user_id=payload["owner_user_id"],
+        priority=5,
+        max_retries=_max_retries("CLAIMS_JOBS_MAX_RETRIES_REVIEW_METRICS", 3, settings_obj),
+        batch_group=f"claims-review-metrics:{payload['start_date']}:{payload['end_date']}",
+        idempotency_key=(
+            f"claims:review_metrics:v1:{payload['owner_user_id']}:{interval_seconds}:"
+            f"{slot_epoch}:{payload['start_date']}:{payload['end_date']}"
         ),
     )
 
