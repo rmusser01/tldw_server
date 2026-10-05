@@ -2248,6 +2248,7 @@ export class TldwApiClientBase {
     serverUrl: string
     apiKey: string
     persistence: ApiKeyPersistence
+    assertCurrent?: (current: TldwConfig | null) => void
   }): Promise<"device" | "session" | "memory"> {
     const serverUrl = String(input.serverUrl || "").trim()
     const apiKey = String(input.apiKey || "").trim()
@@ -2256,7 +2257,16 @@ export class TldwApiClientBase {
     if (!apiKey) throw new Error("API key is required")
 
     const previousConfig = await this.getConfig()
+    input.assertCurrent?.(previousConfig)
     const saved = await withManualSessionCredentialLock(async () => {
+      if (input.assertCurrent) {
+        // Initialization can acquire this same credential lock for session cleanup.
+        const current = await resolveEffectiveTldwConfig({ persistent: this.storage, session: this.sessionStorage },
+          this.config?.authSource === "cookie-session"
+            ? { cookieSession: this.config, expectedCookieOrigin: getQuickstartWebUiServerUrl() }
+            : undefined)
+        input.assertCurrent(current)
+      }
       await this.clearManualSingleUserCredentialsUnlocked()
       if (input.persistence !== "device") {
         return await this.writeSessionOrMemoryUnlocked(
@@ -2403,8 +2413,10 @@ export class TldwApiClientBase {
       await this.saveManualSingleUserCredential({
         serverUrl: config.serverUrl || currentConfig.serverUrl,
         apiKey: submittedApiKey,
-        persistence: config.apiKeyPersistence || "device"
+        persistence: config.apiKeyPersistence || "device",
+        ...(assertCurrent ? { assertCurrent: (current: TldwConfig | null) => assertCurrent(current || {}) } : {})
       })
+      assertCommitted?.((await this.getConfig()) || {})
       return
     }
 

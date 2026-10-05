@@ -347,7 +347,7 @@ it("UAT378 saves a multi-user target before credentials are entered and still va
   const serverUrl = "https://new.example.test/base"
   fireEvent.change(await screen.findByLabelText("Server URL"), { target: { value: serverUrl } })
   fireEvent.click(screen.getByRole("button", { name: "common:save" }))
-  await waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({serverUrl, authMode: "multi-user"})))
+  await waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({serverUrl, authMode: "multi-user"}), expect.any(Function), expect.any(Function)))
   await waitFor(() => expect(login()).toBeEnabled())
   expect(screen.queryByText("Please enter your username")).toBeNull()
   expect(screen.queryByText("Please enter your password")).toBeNull()
@@ -372,7 +372,7 @@ it("UAT378 submits the connection form with empty login credentials", async () =
   const input = await screen.findByLabelText("Server URL")
   fireEvent.change(input, { target: { value: serverUrl } })
   fireEvent.submit(input.closest("form")!)
-  await waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({serverUrl})))
+  await waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({serverUrl}), expect.any(Function), expect.any(Function)))
   await waitFor(() => expect(login()).toBeEnabled())
   expect(mocks.login).not.toHaveBeenCalled()
 })

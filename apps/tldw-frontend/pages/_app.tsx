@@ -15,6 +15,7 @@ import { FirstRunGate } from "@/components/PersonaGarden/FirstRunGate"
 import { AppProviders } from "@web/components/AppProviders"
 import ErrorBoundary from "@web/components/ErrorBoundary"
 import { ConfigurationGuard } from "@web/components/networking/ConfigurationGuard"
+import { resolveSettingsNavigationUrl, SETTINGS_NAVIGATION_REQUEST_EVENT, type SettingsNavigationRequestDetail } from "@/utils/settings-return"
 import { ServerReadinessGate } from "@web/components/networking/ServerReadinessGate"
 import {
   getRuntimeApiBearer,
@@ -42,6 +43,11 @@ import {
 
 const OptionLayout = dynamic(
   () => import("@web/components/layout/WebLayout"),
+  { ssr: false }
+)
+
+const ChatServerSetupDialog = dynamic(
+  () => import("@/components/Chat/composer/ChatServerSetupDialog").then(module => module.ChatServerSetupDialog),
   { ssr: false }
 )
 
@@ -257,6 +263,29 @@ export default function App({ Component, pageProps }: AppProps) {
     React.useState<string | null>(null)
   const [authResolved, setAuthResolved] = React.useState(false)
   const [requiresLogin, setRequiresLogin] = React.useState(false)
+  const [chatServerSetupOpen, setChatServerSetupOpen] = React.useState(false)
+  React.useEffect(() => {
+    if (routePath !== "/chat" || requiresLogin) setChatServerSetupOpen(false)
+  }, [routePath, requiresLogin])
+  React.useEffect(() => {
+    if (routePath !== "/chat" || !authResolved || requiresLogin) return
+    const openSetup = (event: Event) => {
+      if (event.defaultPrevented) return
+      const destination = (event as CustomEvent<SettingsNavigationRequestDetail>).detail?.destination
+      if (destination === "/settings/tldw") {
+        event.preventDefault()
+        setChatServerSetupOpen(true)
+      } else if (destination === "/settings/health") {
+        const url = resolveSettingsNavigationUrl(destination, window.location.href)
+        if (url) {
+          event.preventDefault()
+          window.open(url, "_blank", "noopener")
+        }
+      }
+    }
+    window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, openSetup)
+    return () => window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, openSetup)
+  }, [routePath, authResolved, requiresLogin])
   const didWarmRoutePrefetch = React.useRef(false)
 
   React.useEffect(() => {
@@ -526,6 +555,9 @@ export default function App({ Component, pageProps }: AppProps) {
               configuredServerUrl={configuredServerUrl}>
               {gatedContent}
             </ServerReadinessGate>
+            {routePath === "/chat" && (
+              <ChatServerSetupDialog open={chatServerSetupOpen} onClose={() => setChatServerSetupOpen(false)} />
+            )}
           </ErrorBoundary>
         </BackendRecoveryUiProvider>
       </ConfigurationGuard>

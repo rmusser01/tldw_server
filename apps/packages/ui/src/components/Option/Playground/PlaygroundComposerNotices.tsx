@@ -1,3 +1,4 @@
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import React from "react"
 import {
   Input,
@@ -745,6 +746,10 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
             </span>
             <Link
               to="/settings/tldw"
+              onClick={event => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                if (!requestSettingsNavigation("/settings/tldw")) event.preventDefault()
+              }}
               className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text"
             >
               {t(

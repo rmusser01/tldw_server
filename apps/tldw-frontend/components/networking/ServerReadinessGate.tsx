@@ -1,3 +1,4 @@
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import React from "react"
 
 import { resolvePublicApiOrigin, type DeploymentEnv } from "@web/lib/api-base"
@@ -259,7 +260,7 @@ function emitServerReadinessState(detail: ServerReadinessPublishedState) {
 }
 
 function navigateTo(path: string): void {
-  if (typeof window === "undefined") return
+  if (typeof window === "undefined" || !requestSettingsNavigation(path)) return
   window.location.assign(path)
 }
 

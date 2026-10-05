@@ -6,6 +6,7 @@ import {
   invalidateRefreshSessionIfCurrent,
   storeRefreshRotationIfCurrent
 } from "@/services/tldw/single-user-credential"
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import { COOKIE_SESSION_CONFIG_KEY } from "@/services/tldw/browser-networking"
 
 vi.mock("@web/lib/i18n-web", () => ({}))
@@ -83,6 +84,10 @@ const buddyLifetime = vi.hoisted(() => ({
 }))
 vi.mock("next/dynamic", () => ({
   default: (loader: () => unknown) => {
+    if (loader.toString().includes("ChatServerSetupDialog"))
+      return ({ open, onClose }: { open: boolean; onClose: () => void }) => open ? (
+        <div role="dialog" aria-label="Server settings"><button onClick={onClose}>Return to chat</button></div>
+      ) : null
     if (loader.toString().includes("IndependentBuddyHost"))
       return function BuddyHostProbe() {
         const [draft, setDraft] = React.useState("")
@@ -311,6 +316,38 @@ describe("App layout routing", () => {
         expect(screen.getByRole("textbox", { name: "Chat draft probe" })).toBe(editor)
         expect(screen.getByText("Server partially degraded")).toBeInTheDocument()
       } finally { vi.useRealTimers(); health.mockRestore() }
+    })
+    it("opens setup without route navigation or remounting the original Chat editor", async () => {
+      const health = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}))
+      try {
+        mountDraftPage()
+        const editor = await screen.findByRole("textbox", { name: "Chat draft probe" })
+        fireEvent.change(editor, { target: { value: "SETUP ORIGINAL\nKEEP SECOND LINE" } })
+        let permitted = true
+        act(() => { permitted = requestSettingsNavigation("/settings/tldw") })
+        expect(permitted).toBe(false)
+        expect(screen.getByRole("dialog", { name: "Server settings" })).toBeInTheDocument()
+        expect(screen.getByRole("textbox", { name: "Chat draft probe" })).toBe(editor)
+        fireEvent.click(screen.getByRole("button", { name: "Return to chat" }))
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+        expect(editor).toHaveValue("SETUP ORIGINAL\nKEEP SECOND LINE")
+        expect(mockRouter.push).not.toHaveBeenCalledWith("/settings/tldw")
+      } finally { health.mockRestore() }
+    })
+    it("opens recovery diagnostics separately while keeping the original Chat editor", async () => {
+      const health = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}))
+      const diagnostics = vi.spyOn(window, "open").mockReturnValue(null)
+      try {
+        mountDraftPage()
+        const editor = await screen.findByRole("textbox", { name: "Chat draft probe" })
+        fireEvent.change(editor, { target: { value: "DIAGNOSTICS DRAFT" } })
+        let permitted = true
+        act(() => { permitted = requestSettingsNavigation("/settings/health") })
+        expect(permitted).toBe(false)
+        expect(diagnostics).toHaveBeenCalledWith(expect.stringContaining("/settings/health"), "_blank", "noopener")
+        expect(screen.getByRole("textbox", { name: "Chat draft probe" })).toBe(editor)
+        expect(editor).toHaveValue("DIAGNOSTICS DRAFT")
+      } finally { health.mockRestore(); diagnostics.mockRestore() }
     })
     it("keeps signed-out multi-user private chat hidden without relying on health", async () => {
       currentConfig = { serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "" }
