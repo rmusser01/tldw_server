@@ -788,8 +788,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 74  # Permanent Workspace startup receipts after Companion storage
-    _POSTGRES_SCHEMA_VERSION = 78
+    _CURRENT_SCHEMA_VERSION = 75  # Client-id create fingerprints after Workspace startup receipts
+    _POSTGRES_SCHEMA_VERSION = 79
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -7600,6 +7600,27 @@ ALTER TABLE conversations ADD COLUMN assistant_startup_json TEXT
 UPDATE db_schema_version SET version = 74 WHERE schema_name = 'rag_char_chat_schema' AND version = 73;
 """
 
+    # D7 P3: fingerprint of a client-id create request, written by the same INSERT.
+    # Existing chats stay NULL, so they are never mistaken for client-id creates.
+    _MIGRATION_SQL_V74_TO_V75 = """
+ALTER TABLE conversations ADD COLUMN create_request_fingerprint TEXT
+    CHECK (create_request_fingerprint IS NULL OR (
+        typeof(create_request_fingerprint) = 'text'
+        AND length(create_request_fingerprint) = 64
+        AND length(CAST(create_request_fingerprint AS BLOB)) = 64
+        AND create_request_fingerprint NOT GLOB '*[^0-9a-f]*'
+    ));
+UPDATE db_schema_version SET version = 75 WHERE schema_name = 'rag_char_chat_schema' AND version = 74;
+"""
+
+    _MIGRATION_SQL_V78_TO_V79_POSTGRES = """
+ALTER TABLE conversations ADD COLUMN create_request_fingerprint TEXT
+    CHECK (create_request_fingerprint IS NULL OR (
+        length(create_request_fingerprint) = 64 AND create_request_fingerprint !~ '[^0-9a-f]'
+    ));
+UPDATE db_schema_version SET version = 79 WHERE schema_name = 'rag_char_chat_schema' AND version = 78;
+"""
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -8751,6 +8772,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (71, "_migrate_from_v71_to_v72"),
             (72, "_migrate_from_v72_to_v73_persona_companion"),
             (73, "_migrate_from_v73_to_v74"),
+            (74, "_migrate_from_v74_to_v75"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17945,6 +17967,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_db_version(conn) != 74:
             raise SchemaError("Workspace startup migration V73->V74 failed version verification.")
 
+    def _migrate_from_v74_to_v75(self, conn: sqlite3.Connection) -> None:
+        """Add client-id create fingerprints without inferring them for existing chats."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V74_TO_V75):
+            conn.execute(statement)
+        if self._get_db_version(conn) != 75:
+            raise SchemaError("Conversation create fingerprint migration V74->V75 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v78_to_v79_postgres(self, conn: Any) -> None:
+        """Add PostgreSQL client-id create fingerprints in the caller's upgrade transaction."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V78_TO_V79_POSTGRES):
+            self.backend.execute(statement, connection=conn)
+        if self._get_schema_version_postgres(conn) != 79:
+            raise SchemaError(  # noqa: TRY003
+                "Conversation create fingerprint PostgreSQL migration V78->V79 failed version verification."
+            )
+
     def _migrate_from_v77_to_v78_postgres(self, conn: Any) -> None:
         """Install PostgreSQL receipts with forced owner RLS before the version bump."""
         from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_workspace_chat_startup_rls_sql
@@ -21149,6 +21187,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 74 and current_db_version == 73:
                         self._migrate_from_v73_to_v74(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 75 and current_db_version == 74:
+                        self._migrate_from_v74_to_v75(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21619,6 +21660,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 74 and current_db_version == 73:
                     self._migrate_from_v73_to_v74(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 75 and current_db_version == 74:
+                    self._migrate_from_v74_to_v75(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25480,7 +25524,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25505,6 +25549,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 78 and current_version < 78:
                     self._migrate_from_v77_to_v78_postgres(conn)
                     current_version = 78
+                if target_version >= 79 and current_version < 79:
+                    self._migrate_from_v78_to_v79_postgres(conn)
+                    current_version = 79
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -25951,6 +25998,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v77_to_v78_postgres(conn)
                 self._runtime_schema_version = 78
                 current_version = 78
+
+            if target_version >= 79 and current_version < 79:
+                self._migrate_from_v78_to_v79_postgres(conn)
+                self._runtime_schema_version = 79
+                current_version = 79
 
             if current_version < target_version:
                 logger.warning(

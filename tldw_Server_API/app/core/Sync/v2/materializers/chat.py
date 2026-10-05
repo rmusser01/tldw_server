@@ -64,7 +64,10 @@ class ChatConversationMaterializer:
         object_hash = envelope.payload_hash or ""
         try:
             if envelope.operation == "upsert":
-                payload = _conversation_payload(envelope.payload)
+                # The payload is the whole chat. One that names no assistant is a plain
+                # chat and is stored as one: an invented persona would not exist, and
+                # every persona check on the chat would then answer ``persona_not_found``.
+                payload = envelope.payload
                 self.note_db.upsert_conversation_from_sync(
                     conversation_id=envelope.object_id,
                     title=payload.get("title"),
@@ -461,16 +464,6 @@ def _conflict_result(
         message=message,
         metadata=metadata,
     )
-
-
-def _conversation_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    assistant_kind = payload.get("assistant_kind")
-    assistant_id = payload.get("assistant_id")
-    character_id = payload.get("character_id")
-    if assistant_kind is None and assistant_id is None and character_id is None:
-        assistant_kind = "persona"
-        assistant_id = "sync-v2"
-    return {**payload, "assistant_kind": assistant_kind, "assistant_id": assistant_id}
 
 
 def _message_payload(payload: dict[str, Any]) -> dict[str, Any]:

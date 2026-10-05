@@ -5,9 +5,9 @@ Provides CRUD operations for messages in conversations.
 """
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response, status
 from loguru import logger
@@ -72,11 +72,15 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.models import normalize_sync_timestamp
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
+    AppliedServerOriginObject,
     SyncServerOriginIdempotencyConflictError,
     SyncServerOriginMaterializationError,
     SyncServerOriginMutationNotSupportedError,
+    capture_applied_server_origin_write,
     capture_server_origin_mutation,
+    delete_unenrolled_server_origin_objects,
     get_active_server_origin_sync_service_for_user,
     server_origin_object_id,
     server_origin_stable_key,
@@ -103,6 +107,8 @@ _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS = (
 
 
 router = APIRouter()
+
+_HistoryWrite = TypeVar("_HistoryWrite")
 
 # ========================================================================
 # Helper Functions
@@ -182,6 +188,60 @@ def _active_message_sync_service(
     if scope.scope_type == "workspace":
         return None
     return get_active_server_origin_sync_service_for_user(str(current_user.id))
+
+
+def _applied_message_object(db: CharactersRAGDB, message_id: str, owner_id: str) -> AppliedServerOriginObject:
+    """Describe a stored message as the ``chat.message`` append other devices receive.
+
+    The payload has the same fields as a Sync-routed append and is read back from
+    the row, so the parent and timestamp are the ones the owner transaction
+    stored. Owner-only history provenance is not part of it.
+    """
+    row = db.get_message_by_id(message_id)
+    if row is None:
+        raise CharactersRAGDBError(f"Message {message_id} is unavailable for Sync capture.")
+    timestamp = row.get("timestamp")
+    return AppliedServerOriginObject(
+        domain="chat.message",
+        operation="append",
+        object_id=message_id,
+        parent_id=str(row["conversation_id"]),
+        payload={
+            "conversation_id": str(row["conversation_id"]),
+            "parent_message_id": row.get("parent_message_id"),
+            "sender": row["sender"],
+            "content": row.get("content") or "",
+            "timestamp": timestamp if isinstance(timestamp, str) else normalize_sync_timestamp(timestamp),
+            "client_id": owner_id,
+        },
+    )
+
+
+def _publish_history_messages(
+    sync_service: SyncV2Service,
+    db: CharactersRAGDB,
+    *,
+    owner_id: str,
+    message_ids: list[str],
+    write: Callable[[], _HistoryWrite],
+) -> _HistoryWrite:
+    """Run a versioned history write inside the Sync projection fence and publish its messages.
+
+    Admission and settlement validate and append under the conversation owner's
+    transaction, which a Sync materializer cannot replay. So the owner write
+    commits first, inside the fence, and each message in ``message_ids`` that
+    Sync has not seen is then recorded as an applied ``chat.message`` append, in
+    that order. Both writes are idempotent by message id, so a request repeated
+    after a lost capture publishes the message it already stored.
+    """
+    return capture_applied_server_origin_write(
+        sync_service,
+        user_id=owner_id,
+        source="server_api",
+        claims=[("chat.message", message_id) for message_id in message_ids],
+        write=write,
+        describe=lambda _result: [_applied_message_object(db, message_id, owner_id) for message_id in message_ids],
+    )
 
 
 def _verify_conversation_access(
@@ -427,8 +487,6 @@ async def send_message(
         history_admission = None
         versioned = message_data.tldw_history_selection_v1 is not None or message_data.tldw_history_admission_v1 is not None
         sync_service = _active_message_sync_service(current_user, scope)
-        if versioned and sync_service is not None:
-            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
 
         if sync_service is not None and image_data is not None:
             raise HTTPException(
@@ -445,22 +503,38 @@ async def send_message(
                     "image_data": image_data, "image_mime_type": image_mime_type}
             if "parent_message_id" in message_data.model_fields_set:
                 data["parent_message_id"] = message_data.parent_message_id
-            try:
-                owner = native_history_owner_key(request, current_user.id)
-                if message_data.tldw_history_selection_v1 is not None:
-                    history_admission = await run_in_threadpool(
-                        db.append_selected_history_input, chat_id,
-                        message_data.tldw_history_selection_v1.model_dump(mode="json"), data,
-                        owner_client_id=str(current_user.id), owner_key=owner,
+            owner = native_history_owner_key(request, current_user.id)
+            owner_id = str(current_user.id)
+            if message_data.tldw_history_selection_v1 is not None:
+                selection = message_data.tldw_history_selection_v1.model_dump(mode="json")
+                # The admitted message is the only row this write creates.
+                published_ids = [message_data.id]
+
+                def history_write() -> tuple[str, dict[str, Any] | None]:
+                    admission = db.append_selected_history_input(
+                        chat_id, selection, data, owner_client_id=owner_id, owner_key=owner,
                         history_branch=message_data.tldw_history_branch)
-                    created_id = history_admission["input_message_id"]
+                    return admission["input_message_id"], admission
+            else:
+                reference = message_data.tldw_history_admission_v1.model_dump(mode="json")
+                # The accepted input goes first, so a reply is never published ahead of
+                # an input whose own capture was lost.
+                published_ids = [reference["input_message_id"], message_data.id]
+
+                def history_write() -> tuple[str, dict[str, Any] | None]:
+                    return db.settle_history_admission(
+                        chat_id, reference, data, owner_client_id=owner_id, owner_key=owner), None
+            try:
+                if sync_service is None:
+                    created_id, history_admission = await run_in_threadpool(history_write)
                 else:
-                    created_id = await run_in_threadpool(
-                        db.settle_history_admission, chat_id,
-                        message_data.tldw_history_admission_v1.model_dump(mode="json"), data,
-                        owner_client_id=str(current_user.id), owner_key=owner)
+                    created_id, history_admission = await run_in_threadpool(
+                        _publish_history_messages, sync_service, db,
+                        owner_id=owner_id, message_ids=published_ids, write=history_write)
             except HistorySelectionError as exc:
                 raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code, **exc.details}) from exc
+            except SyncStoreError as sync_exc:
+                raise _message_sync_http_error(sync_exc) from sync_exc
         elif sync_service is not None:
             created_id = server_origin_object_id("chat.message", idempotency_key) or str(uuid.uuid4())
             stable_key = server_origin_stable_key(
@@ -1226,28 +1300,7 @@ async def delete_message(
                 detail=f"Version mismatch. Expected {expected_version}, found {message.get('version', 1)}"
             )
 
-        sync_service = _active_message_sync_service(current_user, scope)
-        if sync_service is not None:
-            try:
-                capture_server_origin_mutation(
-                    sync_service,
-                    user_id=str(current_user.id),
-                    domain="chat.message",
-                    operation="tombstone",
-                    object_id=message_id,
-                    parent_id=str(message.get("conversation_id") or ""),
-                    payload={
-                        "id": message_id,
-                        "deleted": True,
-                        "conversation_id": str(message.get("conversation_id") or ""),
-                        "client_id": str(current_user.id),
-                        "owner_user_id": str(current_user.id),
-                    },
-                    source="server_api",
-                )
-            except Exception as sync_exc:
-                raise _message_sync_http_error(sync_exc) from sync_exc
-        else:
+        def delete_directly() -> None:
             # Soft delete the message
             success = remove_message_from_conversation(db, message_id, expected_version)
 
@@ -1256,6 +1309,43 @@ async def delete_message(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to delete message"
                 )
+
+        sync_service = _active_message_sync_service(current_user, scope)
+        if sync_service is not None:
+            try:
+                # A message Sync never saw (it predates the profile, or was saved by a path
+                # that publishes nothing) is deleted directly, as without a profile. A
+                # tombstone for it would be rejected and block the dataset (#3181).
+                published = await run_in_threadpool(
+                    delete_unenrolled_server_origin_objects,
+                    sync_service,
+                    user_id=str(current_user.id),
+                    objects=[("chat.message", message_id)],
+                    delete=lambda _unpublished: delete_directly(),
+                )
+                if published:
+                    capture_server_origin_mutation(
+                        sync_service,
+                        user_id=str(current_user.id),
+                        domain="chat.message",
+                        operation="tombstone",
+                        object_id=message_id,
+                        parent_id=str(message.get("conversation_id") or ""),
+                        payload={
+                            "id": message_id,
+                            "deleted": True,
+                            "conversation_id": str(message.get("conversation_id") or ""),
+                            "client_id": str(current_user.id),
+                            "owner_user_id": str(current_user.id),
+                        },
+                        source="server_api",
+                    )
+            except HTTPException:
+                raise
+            except Exception as sync_exc:
+                raise _message_sync_http_error(sync_exc) from sync_exc
+        else:
+            delete_directly()
 
         # Update conversation metadata (last_modified/version) via DB abstraction
         conv = db.get_conversation_by_id(message['conversation_id'])
