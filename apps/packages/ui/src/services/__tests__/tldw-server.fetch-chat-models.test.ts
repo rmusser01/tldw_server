@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
+  getModels: vi.fn(),
   getChatModels: vi.fn(),
   getCachedChatModels: vi.fn(),
   clearModelsCache: vi.fn(),
@@ -35,7 +36,9 @@ vi.mock("@/services/app", () => ({
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: (...args: unknown[]) =>
-    (mocks.bgRequest as (...args: unknown[]) => unknown)(...args)
+    (mocks.bgRequest as (...args: unknown[]) => unknown)(...args),
+  bgStream: vi.fn(),
+  bgUpload: vi.fn()
 }))
 
 vi.mock("@/utils/safe-storage", async (importOriginal) => ({
@@ -62,6 +65,7 @@ describe("fetchChatModels", () => {
     vi.unstubAllEnvs()
     vi.resetModules()
     mocks.getConfig.mockReset()
+    mocks.getModels.mockReset()
     mocks.getChatModels.mockReset()
     mocks.getCachedChatModels.mockReset()
     mocks.clearModelsCache.mockReset()
@@ -344,11 +348,27 @@ describe("fetchChatModels", () => {
     expect(mocks.clearModelsCache).not.toHaveBeenCalled()
   })
 
-  it("does not let a pre-update fetch overwrite or release the post-update fetch", async () => {
-    const stale = deferred<Array<Record<string, unknown>>>()
+  it("does not fall back to a warmed wrapper catalog when discovery throws", async () => {
+    mocks.getChatModels
+      .mockResolvedValueOnce([{ id: "retired-model", provider: "openai", type: "chat" }])
+      .mockRejectedValueOnce(new Error("Discovery unavailable"))
+    const { fetchChatModels } = await importService()
+    expect(await fetchChatModels()).toHaveLength(1)
+
+    await expect(fetchChatModels({ forceRefresh: true, returnEmpty: true })).resolves.toEqual([])
+    await expect(fetchChatModels({ allowNetwork: false })).resolves.toEqual([])
+    expect(mocks.getChatModels).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(["success", "empty", "failure"])("joins the post-update fetch after a pre-update %s without overwriting or releasing it", async (outcome) => {
+    const stale = deferred<Array<Record<string, unknown>> | Error>()
     const fresh = deferred<Array<Record<string, unknown>>>()
     mocks.getChatModels
-      .mockImplementationOnce(() => stale.promise)
+      .mockImplementationOnce(async () => {
+        const result = await stale.promise
+        if (result instanceof Error) throw result
+        return result
+      })
       .mockImplementationOnce(() => fresh.promise)
 
     const { fetchChatModels } = await importService()
@@ -360,7 +380,7 @@ describe("fetchChatModels", () => {
     const postUpdate = fetchChatModels({ returnEmpty: true })
     await vi.waitFor(() => expect(mocks.getChatModels).toHaveBeenCalledTimes(2))
 
-    stale.resolve([
+    stale.resolve(outcome === "failure" ? new Error("Older discovery failed") : outcome === "empty" ? [] : [
       { id: "llama/stale", name: "Stale", provider: "llama", type: "chat" }
     ])
 
@@ -380,5 +400,77 @@ describe("fetchChatModels", () => {
       expect.objectContaining({ model: "tldw:llama/fresh" })
     ])
     expect(mocks.getChatModels).toHaveBeenCalledTimes(2)
+  })
+
+  describe("with the real model cache", () => {
+    beforeEach(async () => {
+      const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+      vi.spyOn(tldwClient, "getConfig").mockImplementation(mocks.getConfig)
+      vi.spyOn(tldwClient, "initialize").mockResolvedValue(undefined)
+      vi.spyOn(tldwClient, "getModels").mockImplementation(mocks.getModels)
+      const { TldwModelsService } = await import("@/services/tldw/TldwModels")
+      const models = new TldwModelsService()
+      mocks.getChatModels.mockImplementation(models.getChatModels)
+      mocks.getCachedChatModels.mockImplementation(models.getCachedChatModels)
+      mocks.clearModelsCache.mockImplementation(() => models.clearCache())
+      mocks.subscribeInvalidation.mockImplementation((listener) => models.subscribeInvalidation(listener))
+    })
+
+    it.each([
+      ["Error", false], ["AbortError", false], ["TypeError", false],
+      ["Error", true], ["AbortError", true], ["TypeError", true]
+    ] as const)(
+      "settles a %s failure tombstone without recursive discovery (warmed: %s)",
+      async (name, warmed) => {
+        if (warmed) mocks.getModels.mockResolvedValueOnce([
+          { id: "retired-model", name: "Retired Model", provider: "openai", type: "chat" }
+        ])
+        const error = Object.assign(new Error("Discovery unavailable"), { name })
+        mocks.getModels
+          .mockRejectedValueOnce(error)
+          .mockRejectedValueOnce(error)
+          .mockRejectedValueOnce(error)
+          .mockResolvedValue([
+            { id: "unexpected-retry", name: "Unexpected Retry", provider: "openai", type: "chat" }
+          ])
+        const { fetchChatModels } = await importService()
+        if (warmed) expect(await fetchChatModels()).toHaveLength(1)
+
+        await expect(fetchChatModels({ forceRefresh: true })).resolves.toEqual([])
+        await expect(fetchChatModels({ allowNetwork: false })).resolves.toEqual([])
+        expect(mocks.getModels).toHaveBeenCalledTimes(warmed ? 2 : 1)
+      }
+    )
+
+    it("replaces a warmed wrapper catalog after a successful empty discovery", async () => {
+      mocks.getModels
+        .mockResolvedValueOnce([
+          { id: "retired-model", name: "Retired Model", provider: "openai", type: "chat" }
+        ])
+        .mockResolvedValue([])
+      const { fetchChatModels } = await importService()
+      await expect(fetchChatModels()).resolves.toEqual([
+        expect.objectContaining({ model: "tldw:retired-model" })
+      ])
+
+      await expect(fetchChatModels({ forceRefresh: true })).resolves.toEqual([])
+      await expect(fetchChatModels()).resolves.toEqual([])
+      await expect(fetchChatModels({ allowNetwork: false })).resolves.toEqual([])
+      expect(mocks.getModels).toHaveBeenCalledTimes(2)
+    })
+
+    it("withholds an expired wrapper and inner catalog when network access is disabled", async () => {
+      const now = Date.now()
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now)
+      mocks.getModels.mockResolvedValue([
+        { id: "retired-model", name: "Retired Model", provider: "openai", type: "chat" }
+      ])
+      const { fetchChatModels } = await importService()
+      expect(await fetchChatModels()).toHaveLength(1)
+      clock.mockReturnValue(now + 5 * 60 * 1000)
+
+      await expect(fetchChatModels({ allowNetwork: false })).resolves.toEqual([])
+      expect(mocks.getModels).toHaveBeenCalledTimes(1)
+    })
   })
 })

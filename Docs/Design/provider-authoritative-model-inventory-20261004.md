@@ -41,6 +41,8 @@ these IDs and fuzzy date-stripped aliases. This can display and call retired mod
 - Override model lists restrict current IDs; they cannot restore absent IDs.
 - Browser catalogs use a five-minute TTL and a new persisted-cache version;
   expired cached getters and failed fetches cannot return old availability.
+  Empty refreshes also clear the outer cache. Invalidation does not recursively
+  retry an outage; callers join only an actual newer refresh.
 
 Discovery currently covers OpenAI, Anthropic, Cohere, DeepSeek, Google, Groq,
 Mistral, Moonshot, OpenRouter, Qwen, Novita, Poe, Together and Hugging Face's
