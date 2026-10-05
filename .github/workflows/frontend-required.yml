@@ -568,6 +568,9 @@ jobs:
     name: ${{ github.event_name == 'workflow_dispatch' && github.actor != 'github-actions[bot]' && 'frontend-required-diagnostic' || 'frontend-required' }}
     runs-on: ubuntu-latest
     needs: [changes, admission, frontend-unit-tests, await_license]
+    # Same condition as the changes job, and deliberately no test of its result: GitHub counts
+    # a skipped required job as satisfied, so a change detection that did not succeed has to
+    # reach the first step and fail there (TASK-13452, spec 4.9).
     if: >-
       always() && !cancelled() &&
       (
@@ -583,9 +586,6 @@ jobs:
             needs.await_license.outputs.license_passed == 'true'
           )
         )
-      ) &&
-      (
-        needs.changes.result == 'success'
       )
     timeout-minutes: 120
     env:
@@ -597,6 +597,17 @@ jobs:
       PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
       SKIP_WXT_PREPARE: '1'
     steps:
+      - name: Require change detection success
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "::error::Change detection did not succeed (changes job result: ${CHANGES_RESULT}), so frontend-required cannot know what to test. Failing instead of reporting a skipped check that would count as passed."
+            exit 1
+          fi
+
       - name: Require frontend unit shard success
         shell: bash
         env:
