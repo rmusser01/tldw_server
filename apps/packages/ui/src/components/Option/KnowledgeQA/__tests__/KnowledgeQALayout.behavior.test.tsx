@@ -229,10 +229,16 @@ vi.mock("../panels/AnswerWorkspace", () => ({
 vi.mock("../panels/NoResultsRecovery", () => ({
   NoResultsRecovery: ({
     onShowNearestMatches,
+    onChangeIncludedSources,
+    onSearchMoreResults
   }: {
+    onChangeIncludedSources: () => void
+    onSearchMoreResults: () => void
     onShowNearestMatches: () => void
   }) => (
     <div data-testid="knowledge-no-results-recovery">
+      <button onClick={onChangeIncludedSources}>Change included sources</button>
+      <button onClick={onSearchMoreResults}>Search more results</button>
       <button type="button" onClick={onShowNearestMatches}>
         Show nearest matches
       </button>
@@ -260,6 +266,27 @@ vi.mock("../evidence/EvidenceRail", () => ({
 }))
 
 describe("KnowledgeQALayout evidence-rail transitions", () => {
+  it("opens source selection separately from retrieval depth", async () => {
+    state.hasSearched = true
+    state.results = []
+    renderLayout()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Change included sources" })
+    )
+    expect(
+      screen.getByRole("dialog", { name: "Source scope and profiles" })
+    ).toBeVisible()
+    expect(state.updateSetting).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Search more results" }))
+    expect(state.updateSetting).toHaveBeenCalledWith(
+      "top_k",
+      expect.any(Number)
+    )
+    expect(
+      state.updateSetting.mock.calls.every(([key]) => key === "top_k")
+    ).toBe(true)
+  })
+
   it("keeps focus inside scope and returns to its trigger after Escape", async () => {
     const user = userEvent.setup()
     render(<KnowledgeQALayout onExportClick={vi.fn()} />)

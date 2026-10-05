@@ -25,3 +25,36 @@ export function parseKnowledgeMediaScope(
   }
   return { mediaIds: [...new Set(mediaIds)], invalid: false }
 }
+
+const CANONICAL_NOTE_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function buildKnowledgeNoteScopePath(noteIds: string[]): string {
+  const valid =
+    noteIds.length > 0 && noteIds.every((id) => CANONICAL_NOTE_ID.test(id))
+  return `/knowledge?${new URLSearchParams({ note_ids: valid ? [...new Set(noteIds)].join(",") : "" })}`
+}
+
+/** Every explicitly supplied category must be valid before any search can run. */
+export function parseKnowledgeScope(search: string): {
+  mediaIds: number[]
+  noteIds: string[]
+  invalid: boolean
+} | null {
+  const media = parseKnowledgeMediaScope(search)
+  const values = new URLSearchParams(search).getAll("note_ids")
+  if (!media && values.length === 0) return null
+  const noteIds = values.length ? values[0].split(",") : []
+  if (
+    media?.invalid ||
+    values.length > 1 ||
+    noteIds.some((id) => !CANONICAL_NOTE_ID.test(id))
+  ) {
+    return { mediaIds: [], noteIds: [], invalid: true }
+  }
+  return {
+    mediaIds: media?.mediaIds ?? [],
+    noteIds: [...new Set(noteIds)],
+    invalid: false
+  }
+}

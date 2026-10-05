@@ -29,6 +29,8 @@ vi.mock("@/utils/knowledge-qa-search-metrics", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn().mockResolvedValue(undefined),
+    listMedia: vi.fn().mockResolvedValue({ pagination: { total: 0 } }),
+    listNotes: vi.fn().mockResolvedValue({ total: 0 }),
     fetchWithAuth: vi.fn().mockResolvedValue({
       ok: false,
       json: async () => [],

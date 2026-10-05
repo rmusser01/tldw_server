@@ -46,8 +46,8 @@ import {
   resolveConferenceDuplicatePolicy,
   type ApiMediaCollection,
   type ApiMediaCollectionItem,
-  type MediaCollectionItemStatus,
   type ConferenceRetryRequestItem,
+  type MediaCollectionItemStatus,
 } from "@/services/tldw/conference-collections";
 
 type TypeDefaults = {
@@ -729,7 +729,15 @@ const patchConferenceCollectionItem = async (
     )}/items/${encodeURIComponent(String(planned.itemId))}`,
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: payload,
+    body: {
+      ...payload,
+      ...(planned.retryAttempt
+        ? {
+            retry_count: planned.retryAttempt,
+            idempotency_key: planned.idempotencyKey
+          }
+        : {})
+    },
     timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
     ...DIRECT_QUICK_INGEST_TRANSPORT,
   }).catch(() => {

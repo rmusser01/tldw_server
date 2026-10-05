@@ -64,7 +64,7 @@ import {
   type PresetMap,
 } from "./QuickIngest/presets"
 import { getEligibleQueueItems, validateQueueItem } from "./QuickIngest/queue-items"
-import { getSavedMediaIds } from "./QuickIngest/result-actions"
+import { canRetryWizardResult, getSavedMediaIds } from "./QuickIngest/result-actions"
 import type {
   CommonOptions,
   ConferenceBatchMetadata,
@@ -935,12 +935,16 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
   const cancelRequestedRef = useRef(false)
-  const [retryIds, setRetryIds] = useState<string[] | null>(null)
-  const retryRequestsRef = useRef<ConferenceRetryRequestItem[]>(session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(results) : [])
+  const [retryIds, setRetryIds] = useState<string[] | null>(() =>
+    currentStep === 4 && processingState.perItemProgress.length
+      ? processingState.perItemProgress.map(item => item.id)
+      : null
+  )
+  const retryRequestsRef = useRef<ConferenceRetryRequestItem[]>(session.tracking?.retryItems ?? (session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(results) : []))
   const retryCollectionIdRef = useRef<string | undefined>(session.tracking?.collectionId)
   const validQueueItems = useMemo(
     () =>
-      getEligibleQueueItems(queueItems).filter(item => retryIds ? retryIds.includes(item.id) : !results.some(result => result.id === item.id && result.status === "ok")),
+      getEligibleQueueItems(queueItems).filter(item => (!retryIds || retryIds.includes(item.id)) && !results.some(result => result.id === item.id && result.status === "ok")),
     [queueItems, retryIds, results]
   )
   const trackedQueueItems = useMemo(
@@ -1485,6 +1489,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         ...(requestPayload.conferenceRetry
           ? {
               collectionId: requestPayload.conferenceRetry.collectionId,
+              retryItems: requestPayload.conferenceRetry.items,
               plannedItemIds: requestPayload.conferenceRetry.items.map(
                 (item) => item.collectionItemId
               ),
@@ -1713,10 +1718,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     (itemIds: string[], requests?: ConferenceRetryRequestItem[]) => {
       if (!operation.isCurrent() || !isOnlineForIngest || isCheckingConnection) return
       const requested = new Set(requests?.map(item => item.resultId) ?? itemIds)
-      const eligible = new Set(getEligibleQueueItems(queueItems).filter(item => item.url || item.file).map(item => item.id))
-      const failed = resultsRef.current.filter(item => requested.has(item.id) && eligible.has(item.id) &&
-      item.outcome !== "cancelled" && (item.status === "error" || item.outcome === "failed" || item.outcome === "submit_failed") &&
-      classifyError(item.error, item.data).retryable)
+      const failed = resultsRef.current.filter(item => requested.has(item.id) && canRetryWizardResult(item, queueItems))
       if (!failed.length) return
       const ids = failed.map((item) => item.id)
       setRetryIds(ids)
@@ -1729,6 +1731,19 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       cancelRequestedRef.current = false
       hasStartedRunRef.current = false
       activeSessionIdRef.current = null
+      runStartedAtRef.current = null
+      // Persist this attempt before upload/acknowledgment; old jobs must not be reattached.
+      markProcessingTracking({
+        mode: "webui-direct",
+        sessionId: `qi-direct-retry-${crypto.randomUUID()}`,
+        ...(retryCollectionIdRef.current && retryRequestsRef.current.length
+          ? {
+              collectionId: retryCollectionIdRef.current,
+              retryItems: retryRequestsRef.current,
+              durableMode: "durable_collection" as const
+            }
+          : {})
+      })
       updateProcessingState({
         status: "running",
         perItemProgress: ids.map((id) => ({
@@ -1742,7 +1757,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       })
       goToStep(4)
     },
-    [goToStep, isCheckingConnection, isOnlineForIngest, operation, queueItems, session.tracking, setResults, updateProcessingState]
+    [goToStep, isCheckingConnection, isOnlineForIngest, operation, queueItems, session.tracking, setResults, markProcessingTracking, updateProcessingState]
   )
 
   const handleReattach = useCallback((id: string, file: File) => {

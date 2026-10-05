@@ -238,12 +238,14 @@ export function KnowledgeQALayout({
     () =>
       classifyKnowledgeReadyRecoveryState({
         knowledgeStatus,
+        sourceHealth,
         selectedSourceCount: settings.sources.length,
         webFallbackAvailable,
         webFallbackEnabled: settings.enable_web_fallback,
       }),
     [
       knowledgeStatus,
+      sourceHealth,
       settings.enable_web_fallback,
       settings.sources.length,
       webFallbackAvailable,
@@ -413,7 +415,7 @@ export function KnowledgeQALayout({
     })
   }
 
-  const handleBroadenScope = () => {
+  const handleSearchMoreResults = () => {
     updateSetting("top_k", Math.min(50, Math.max(settings.top_k + 5, 10)))
     setSettingsPanelOpen(true)
   }
@@ -660,7 +662,8 @@ export function KnowledgeQALayout({
                 {showNoResultsState ? (
                   <React.Suspense fallback={null}>
                     <LazyNoResultsRecovery
-                      onBroadenScope={handleBroadenScope}
+                      onSearchMoreResults={handleSearchMoreResults}
+                      onChangeIncludedSources={handleOpenSourceSelector}
                       onOpenQuickIngest={handleAddSources}
                       onEnableWeb={handleEnableWeb}
                       onShowNearestMatches={handleShowNearestMatches}

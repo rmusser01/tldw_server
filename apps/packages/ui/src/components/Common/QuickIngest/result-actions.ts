@@ -1,4 +1,6 @@
-import type { WizardResultItem } from "./types"
+import { getEligibleQueueItems } from "./queue-items"
+import { classifyError } from "./ErrorClassification"
+import type { WizardQueueItem, WizardResultItem } from "./types"
 
 export const LOCAL_QUEUE_DUPLICATE_SKIP_MESSAGE =
   "Already queued. Use Process again to include this duplicate, or remove it from the queue."
@@ -60,4 +62,21 @@ export const getSavedMediaIds = (results: WizardResultItem[]): Array<string | nu
     if (!ids.has(key)) ids.set(key, typeof id === "string" ? key : id)
   }
   return [...ids.values()]
+}
+
+export const canRetryWizardResult = (
+  item: WizardResultItem,
+  queueItems: WizardQueueItem[]
+): boolean => {
+  const queued = getEligibleQueueItems(queueItems).find((entry) => entry.id === item.id)
+  return (
+    (item.status === "error" || item.outcome === "failed" || item.outcome === "submit_failed") &&
+    item.outcome !== "cancelled" &&
+    classifyError(item.error, item.data).retryable &&
+    Boolean(
+      queued?.validation.valid &&
+      queued.conferenceOverride?.selected !== false &&
+      (queued.url || queued.file)
+    )
+  )
 }

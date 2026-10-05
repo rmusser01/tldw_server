@@ -393,3 +393,32 @@ describe("evidence-aware recipes", () => {
     },
   )
 })
+
+it("offers first-add for connected services with an empty personal library", () => {
+  const onAdd = vi.fn()
+  render(
+    <MemoryRouter>
+      <KnowledgeReadyState
+        suggestedPrompts={[]}
+        onPromptClick={vi.fn()}
+        onContinueRecent={vi.fn()}
+        onSelectSources={vi.fn()}
+        onAddSources={onAdd}
+        hasSources
+        hasRecentSession={false}
+        selectedSources={["media_db", "notes"]}
+        sourceHealth={
+          {
+            loading: false,
+            error: null,
+            loadedAt: null,
+            bySource: { media_db: { itemCount: 0 }, notes: { itemCount: 0 } },
+            sources: []
+          } as any
+        }
+      />
+    </MemoryRouter>
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Add your first source" }))
+  expect(onAdd).toHaveBeenCalledOnce()
+})

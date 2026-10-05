@@ -359,7 +359,7 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
       )
     }
   }
-})
+)
 
 vi.mock("@/components/Common/QuickIngest/ReviewStep", () => ({
   ReviewStep: () => <div data-testid="wizard-review" />,
@@ -950,6 +950,382 @@ describe("QuickIngestWizardModal session runtime", () => {
     fireEvent.click(staleButton)
     expect(mocks.navigate).not.toHaveBeenCalled()
     view.unmount()
+  })
+
+  it.each([false, true])(
+    "passes durable retry identity with previous jobs, including pre-ack remount %s",
+    async (remount) => {
+      mocks.useActualResultsStep = true
+      useQuickIngestSessionStore.getState().createDraftSession({
+        ...createEmptyQuickIngestSession(),
+        currentStep: 5,
+        lifecycle: "partial_failure",
+        queueItems: [
+          {
+            id: "failed-item",
+            kind: "url",
+            url: "https://example.com/source.pdf",
+            detectedType: "pdf",
+            icon: "File",
+            fileSize: 0,
+            validation: { valid: true }
+          }
+        ],
+        results: [
+          { id: "saved-item", type: "pdf", status: "ok", mediaId: 1 },
+          {
+            id: "failed-item",
+            type: "pdf",
+            status: "error",
+            outcome: "failed",
+            error: "Network timeout",
+            collectionItemId: "11",
+            retryAttempt: 1
+          }
+        ],
+        tracking: {
+          mode: "webui-direct",
+          sessionId: "qi-direct-old",
+          jobIds: [66],
+          itemIds: ["failed-item"],
+          jobIdToItemId: { "66": "failed-item" },
+          collectionId: "7",
+          durableMode: "durable_collection"
+        },
+        processingState: {
+          status: "complete",
+          perItemProgress: [],
+          elapsed: 1,
+          estimatedRemaining: 0
+        }
+      })
+      mocks.startQuickIngestSession.mockResolvedValue({
+        ok: true,
+        sessionId: "qi-direct-durable-retry"
+      })
+      mocks.submitQuickIngestBatch.mockResolvedValue({
+        ok: true,
+        results: [
+          {
+            id: "failed-item",
+            type: "pdf",
+            status: "ok",
+            mediaId: 3,
+            collectionItemId: 11,
+            retryAttempt: 2
+          }
+        ]
+      })
+      if (remount)
+        mocks.startQuickIngestSession.mockImplementationOnce(
+          () => new Promise(() => {})
+        )
+      const firstRender = render(
+        <QuickIngestWizardModal open onClose={vi.fn()} />
+      )
+      fireEvent.click(await screen.findByRole("button", { name: /Retry all/ }))
+      if (remount) {
+        await waitFor(() =>
+          expect(mocks.startQuickIngestSession).toHaveBeenCalledOnce()
+        )
+        expect(
+          useQuickIngestSessionStore.getState().session?.tracking?.jobIds
+        ).toBeUndefined()
+        firstRender.unmount()
+        render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      }
+      await waitFor(() =>
+        expect(mocks.submitQuickIngestBatch).toHaveBeenCalledOnce()
+      )
+      expect(
+        mocks.submitQuickIngestBatch.mock.calls[0][0].conferenceRetry
+      ).toEqual({
+        collectionId: "7",
+        items: [
+          {
+            resultId: "failed-item",
+            collectionItemId: "11",
+            retryAttempt: 2,
+            idempotencyKey: "conference-retry-11-2"
+          }
+        ]
+      })
+      expect(
+        useQuickIngestSessionStore.getState().session?.tracking
+      ).toMatchObject({ collectionId: "7", durableMode: "durable_collection" })
+      expect(
+        useQuickIngestSessionStore
+          .getState()
+          .session?.results.filter((item) => item.status === "ok")
+          .map((item) => item.mediaId)
+      ).toEqual([1, 3])
+    }
+  )
+  it("keeps earlier successes when a retried direct job reattaches after remount", async () => {
+    mocks.useActualResultsStep = true
+    useQuickIngestSessionStore
+      .getState()
+      .createDraftSession({
+        ...createEmptyQuickIngestSession(),
+        currentStep: 4,
+        lifecycle: "processing",
+        queueItems: [
+          {
+            id: "failed-item",
+            kind: "url",
+            url: "https://example.com/source.pdf",
+            detectedType: "pdf",
+            icon: "File",
+            fileSize: 0,
+            validation: { valid: true }
+          }
+        ],
+        results: [{ id: "saved-item", type: "pdf", status: "ok", mediaId: 1 }],
+        tracking: {
+          mode: "webui-direct",
+          sessionId: "qi-direct-retry",
+          jobIds: [77],
+          itemIds: ["failed-item"],
+          jobIdToItemId: { "77": "failed-item" }
+        },
+        processingState: {
+          status: "running",
+          perItemProgress: [],
+          elapsed: 1,
+          estimatedRemaining: 0
+        }
+      })
+    mocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "completed",
+      jobs: [{ id: 77, status: "completed", result: { media_id: 3 } }]
+    })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await screen.findByRole("button", { name: "Ask added items" })
+    expect(
+      useQuickIngestSessionStore
+        .getState()
+        .session?.results.map((item) => item.mediaId)
+    ).toEqual([1, 3])
+  })
+
+  it.each(["all", "item"])(
+    "retries only eligible actual results via %s and keeps the accumulated exact scope",
+    async (mode) => {
+      mocks.useActualResultsStep = true
+      const ids = [
+        "saved-item",
+        "failed-item",
+        "permanent-item",
+        "cancelled-item"
+      ]
+      useQuickIngestSessionStore.getState().createDraftSession({
+        queueItems: ids.map((id) => ({
+          id,
+          kind: "url",
+          url: `https://example.com/${id}`,
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true }
+        })),
+        presetConfig: {
+          ...resolvePresetMap().quick,
+          common: {
+            ...resolvePresetMap().quick.common,
+            perform_chunking: true
+          },
+          advancedValues: { chunk_size: 456 }
+        }
+      })
+      mocks.startQuickIngestSession
+        .mockResolvedValueOnce({ ok: true, sessionId: "qi-mixed-first" })
+        .mockResolvedValueOnce({ ok: true, sessionId: "qi-mixed-retry" })
+      render(
+        <QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />
+      )
+      await waitFor(() =>
+        expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+      )
+      act(() =>
+        emitRuntimeMessage({
+          type: "tldw:quick-ingest/completed",
+          payload: {
+            sessionId: "qi-mixed-first",
+            results: [
+              {
+                id: "saved-item",
+                type: "web",
+                status: "ok",
+                mediaId: 1,
+                title: "Saved source"
+              },
+              {
+                id: "failed-item",
+                type: "web",
+                status: "error",
+                outcome: "failed",
+                error: "Network timeout",
+                title: "Retry source"
+              },
+              {
+                id: "permanent-item",
+                type: "web",
+                status: "error",
+                outcome: "failed",
+                error: "Unsupported format",
+                title: "Permanent source"
+              },
+              {
+                id: "cancelled-item",
+                type: "web",
+                status: "error",
+                outcome: "cancelled",
+                error: "Network timeout",
+                title: "Cancelled source"
+              }
+            ]
+          }
+        })
+      )
+      await screen.findByTestId("wizard-results-step")
+      expect(
+        screen.queryByRole("button", { name: "Retry Cancelled source" })
+      ).toBeNull()
+      expect(
+        screen.queryByRole("button", { name: "Retry Permanent source" })
+      ).toBeNull()
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: mode === "all" ? /Retry all/ : "Retry Retry source"
+        })
+      )
+      await waitFor(() =>
+        expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(2)
+      )
+      const retriedItemIds =
+        mocks.startQuickIngestSession.mock.calls[1][0].entries.map(
+          (item: { id: string }) => item.id
+        )
+      expect(retriedItemIds).toEqual(["failed-item"])
+      expect(mocks.startQuickIngestSession.mock.calls[1][0].common).toEqual(
+        mocks.startQuickIngestSession.mock.calls[0][0].common
+      )
+      expect(
+        mocks.startQuickIngestSession.mock.calls[1][0].advancedValues
+      ).toEqual({ chunk_size: 456 })
+      act(() =>
+        emitRuntimeMessage({
+          type: "tldw:quick-ingest/completed",
+          payload: {
+            sessionId: "qi-mixed-retry",
+            results: [
+              {
+                id: "failed-item",
+                type: "web",
+                status: "ok",
+                mediaId: 3,
+                title: "Retried source"
+              }
+            ]
+          }
+        })
+      )
+      await screen.findByTestId("wizard-results-step")
+      const successfulMediaIdsAfterRetry = useQuickIngestSessionStore
+        .getState()
+        .session!.results.filter((item) => item.status === "ok")
+        .map((item) => item.mediaId)
+      expect(successfulMediaIdsAfterRetry).toEqual([1, 3])
+      expect(
+        useQuickIngestSessionStore
+          .getState()
+          .session!.results.filter((item) => item.status === "error")
+          .map((item) => item.id)
+      ).toEqual(["permanent-item", "cancelled-item"])
+      fireEvent.click(screen.getByRole("button", { name: "Ask added items" }))
+      const { parseKnowledgeMediaScope } =
+        await import("@/utils/knowledge-scope-handoff")
+      const reopenedScope = {
+        include_media_ids: parseKnowledgeMediaScope(
+          new URL(mocks.navigate.mock.calls.at(-1)![0], "https://local.test")
+            .search
+        )!.mediaIds
+      }
+      expect(reopenedScope.include_media_ids).toEqual([1, 3])
+    }
+  )
+
+  it("requires a missing queued file to be reattached and keeps its settings and result ID", async () => {
+    mocks.useActualResultsStep = true
+    useQuickIngestSessionStore
+      .getState()
+      .createDraftSession({
+        ...createEmptyQuickIngestSession(),
+        currentStep: 5,
+        lifecycle: "partial_failure",
+        queueItems: [
+          {
+            id: "failed-file",
+            kind: "file",
+            fileName: "source.txt",
+            detectedType: "document",
+            icon: "File",
+            fileSize: 4,
+            validation: {
+              valid: false,
+              warnings: ["Reattach this file after refresh to process it."]
+            }
+          }
+        ],
+        presetConfig: {
+          ...resolvePresetMap().quick,
+          advancedValues: { chunk_size: 123 }
+        },
+        results: [
+          {
+            id: "failed-file",
+            fileName: "source.txt",
+            type: "document",
+            status: "error",
+            outcome: "failed",
+            error: "Network timeout"
+          }
+        ],
+        processingState: {
+          status: "complete",
+          perItemProgress: [],
+          elapsed: 0,
+          estimatedRemaining: 0
+        }
+      })
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-file-retry"
+    })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    expect(
+      screen.queryByRole("button", { name: "Retry source.txt" })
+    ).toBeNull()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Reattach source.txt" })
+    )
+    const file = new NodeFile(["text"], "source.txt", {
+      type: "text/plain"
+    }) as unknown as File
+    fireEvent.change(screen.getByLabelText("Reattach queued file"), {
+      target: { files: [file] }
+    })
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Retry source.txt" })
+    )
+    await waitFor(() =>
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledOnce()
+    )
+    const request = mocks.startQuickIngestSession.mock.calls[0][0]
+    expect(request.files).toMatchObject([
+      { id: "failed-file", name: "source.txt", data: [116, 101, 120, 116] }
+    ])
+    expect(request.advancedValues).toEqual({ chunk_size: 123 })
   })
 
   it.each([false, true])(

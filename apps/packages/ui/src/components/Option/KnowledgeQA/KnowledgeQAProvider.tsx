@@ -14,7 +14,7 @@ import React, {
   type ReactNode,
 } from "react"
 import { useInRouterContext, useLocation } from "react-router-dom"
-import { parseKnowledgeMediaScope } from "@/utils/knowledge-scope-handoff"
+import { parseKnowledgeScope } from "@/utils/knowledge-scope-handoff"
 import { useStorage } from "@plasmohq/storage/hook"
 import type {
   KnowledgeQAState,
@@ -1724,11 +1724,7 @@ function RoutedKnowledgeQAProvider({
     scopeKey &&
     handoffOwner.current.scopeKey !== scopeKey
   useEffect(() => {
-    if (
-      scopeKey &&
-      parseKnowledgeMediaScope(location.search) &&
-      !ownerChanged
-    ) {
+    if (scopeKey && parseKnowledgeScope(location.search) && !ownerChanged) {
       handoffOwner.current = { routeKey: location.key, scopeKey }
     }
   }, [location.key, location.search, ownerChanged, scopeKey, handoffOwner])
@@ -1785,7 +1781,7 @@ function OwnedKnowledgeQAProvider({
   const [defaultsHydrated, setDefaultsHydrated] = useState(false)
   const [scopeHandoffApplied, setScopeHandoffApplied] = useState<string | null>(null)
   const scopeHandoffPending =
-    parseKnowledgeMediaScope(scopeSearch) !== null &&
+    parseKnowledgeScope(scopeSearch) !== null &&
     scopeHandoffApplied !== `${scopeArrivalKey}:${scopeSearch}`
   const invalidScopeHandoffRef = useRef(false)
   const activeSearchAbortRef = useRef<AbortController | null>(null)
@@ -1859,7 +1855,7 @@ function OwnedKnowledgeQAProvider({
   ])
 
   useEffect(() => {
-    const scope = parseKnowledgeMediaScope(scopeSearch)
+    const scope = parseKnowledgeScope(scopeSearch)
     if (
       !scope ||
       !defaultsHydrated ||
@@ -1885,9 +1881,14 @@ function OwnedKnowledgeQAProvider({
       type: "SET_SETTINGS",
       payload: {
         ...state.settings,
-        sources: scope.invalid ? [] : ["media_db"],
+        sources: scope.invalid
+          ? []
+          : [
+              ...(scope.mediaIds.length ? ["media_db" as const] : []),
+              ...(scope.noteIds.length ? ["notes" as const] : [])
+            ],
         include_media_ids: scope.mediaIds,
-        include_note_ids: [],
+        include_note_ids: scope.noteIds,
         collection_id: null,
         keyword_filter: "",
         corpus: "",
@@ -3789,11 +3790,32 @@ function OwnedKnowledgeQAProvider({
     sourceHealthRequestIdRef.current = requestId
     dispatch({ type: "SET_SOURCE_HEALTH_LOADING" })
     try {
-      const payload = await tldwClient.ragSourceHealth()
+      const [payload, counts] = await Promise.all([
+        tldwClient.ragSourceHealth(),
+        Promise.allSettled([
+          tldwClient.listMedia({
+            page: 1,
+            results_per_page: 1,
+            include_keywords: false
+          }),
+          tldwClient.listNotes({ limit: 1, offset: 0 })
+        ])
+      ])
+      const [media, notes] = counts
       if (sourceHealthRequestIdRef.current !== requestId) return
       dispatch({
         type: "SET_SOURCE_HEALTH",
-        payload: normalizeKnowledgeSourceHealth(payload),
+        payload: {
+          ...normalizeKnowledgeSourceHealth(payload, {
+            media_db: media.status === "fulfilled" ? media.value : undefined,
+            notes: notes.status === "fulfilled" ? notes.value : undefined
+          }),
+          personalContentError: counts.some(
+            (count) => count.status === "rejected"
+          )
+            ? "Personal item counts could not be loaded. Check Media or Notes and refresh readiness."
+            : null
+        }
       })
     } catch {
       if (sourceHealthRequestIdRef.current !== requestId) return
@@ -3804,6 +3826,23 @@ function OwnedKnowledgeQAProvider({
       })
     }
   }, [dispatch, tldwClient])
+
+  useEffect(() => {
+    if (!authority.snapshot) return
+    const complete = (event: Event) => {
+      const detail = (event as CustomEvent<{ isCurrent?: () => boolean }>)
+        .detail
+      if (
+        !isCurrent() ||
+        (typeof detail?.isCurrent === "function" && !detail.isCurrent())
+      )
+        return
+      void refreshSourceHealth()
+    }
+    window.addEventListener("tldw:quick-ingest-complete", complete)
+    return () =>
+      window.removeEventListener("tldw:quick-ingest-complete", complete)
+  }, [authority.snapshot, isCurrent, refreshSourceHealth])
 
   // Initialize client and load safe pre-query source health once when ready.
   useEffect(() => {

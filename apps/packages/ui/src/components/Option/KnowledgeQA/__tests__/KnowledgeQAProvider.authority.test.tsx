@@ -132,24 +132,35 @@ describe("Knowledge QA verified account boundary", () => {
     })
   })
 
-  it("does not replay a transferred media set after the verified owner changes", async () => {
-    const routedView = () => (
-      <MemoryRouter initialEntries={["/knowledge?media_ids=3%2C7"]}>
-        {view()}
-      </MemoryRouter>
-    )
-    const rendered = render(routedView())
-    await waitFor(() =>
-      expect(current.settings.include_media_ids).toEqual([3, 7]),
-    )
-    account("bob")
-    rendered.rerender(routedView())
-    await waitFor(() => expect(current.historyHydrated).toBe(true))
-    await waitFor(() => expect(current.error).toMatch(/source selection/i))
-    expect(current.settings.include_media_ids).toEqual([])
-    expect(current.settings.sources).toEqual([])
-    expect(current.answer).toBeNull()
-  })
+  it.each(["media_ids=3%2C7", "note_ids=12345678-1234-4234-8234-123456789abc"])(
+    "does not replay transferred %s after the verified owner changes",
+    async (scope) => {
+      const routedView = () => (
+        <MemoryRouter initialEntries={[`/knowledge?${scope}`]}>
+          {view()}
+        </MemoryRouter>
+      )
+      const rendered = render(routedView())
+      await waitFor(() =>
+        expect(
+          scope.startsWith("media")
+            ? current.settings.include_media_ids
+            : current.settings.include_note_ids
+        ).toEqual(
+          scope.startsWith("media")
+            ? [3, 7]
+            : ["12345678-1234-4234-8234-123456789abc"]
+        )
+      )
+      account("bob")
+      rendered.rerender(routedView())
+      await waitFor(() => expect(current.historyHydrated).toBe(true))
+      await waitFor(() => expect(current.error).toMatch(/source selection/i))
+      expect(current.settings.include_media_ids).toEqual([])
+      expect(current.settings.sources).toEqual([])
+      expect(current.answer).toBeNull()
+    }
+  )
 
   it("does not start private QA from the SearchBar before authority is verified and can recover", async () => {
     harness.loading = true

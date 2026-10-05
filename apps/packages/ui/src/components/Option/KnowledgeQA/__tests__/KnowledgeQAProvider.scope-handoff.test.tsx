@@ -20,10 +20,26 @@ vi.mock("@plasmohq/storage/hook", () => ({
 vi.mock("@/hooks/useAntdMessage", () => ({
   useAntdMessage: () => ({ open: vi.fn() }),
 }))
-const search = vi.hoisted(() => ({ run: vi.fn() }))
+const search = vi.hoisted(() => ({
+  run: vi.fn(),
+  media: vi.fn(),
+  notes: vi.fn()
+}))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: async () => undefined,
+    ragSourceHealth: async () => ({
+      sources: ["media_db", "notes"].map((source_id) => ({
+        source_id,
+        available: true,
+        searchable: true,
+        index_status: "ready",
+        item_count: null,
+        indexed_count: null
+      }))
+    }),
+    listMedia: (...args: unknown[]) => search.media(...args),
+    listNotes: (...args: unknown[]) => search.notes(...args),
     fetchWithAuth: async () => new Response("[]", { status: 200 }),
     ragSearch: (...args: unknown[]) => search.run(...args),
     createChat: async () => ({ id: "thread-1" }),
@@ -52,6 +68,8 @@ function mount(path = "/knowledge") {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  search.media.mockResolvedValue({ pagination: { total: 0 } })
+  search.notes.mockResolvedValue({ total: 0 })
   localStorage.clear()
   stored.loading = false
   stored.settings = DEFAULT_RAG_SETTINGS
@@ -250,4 +268,74 @@ describe("Knowledge QA source intent", () => {
       expect(qa.settings.sources).toEqual([])
     },
   )
+})
+
+it("applies captured notes after hydration and replaces them on same-route arrival", async () => {
+  const noteId = "12345678-1234-4234-8234-123456789abc"
+  stored.loading = true
+  const view = mount(`/knowledge?note_ids=${noteId}`)
+  act(() => qa.setQuery("Too early"))
+  await act(async () => qa.search())
+  expect(qa.answer).toBeNull()
+  stored.loading = false
+  view.rerender(
+    <MemoryRouter>
+      <KnowledgeQAProvider>
+        <Probe />
+      </KnowledgeQAProvider>
+    </MemoryRouter>
+  )
+  await waitFor(() =>
+    expect(qa.settings).toMatchObject({
+      sources: ["notes"],
+      include_media_ids: [],
+      include_note_ids: [noteId]
+    })
+  )
+  act(() => navigate(`/knowledge?note_ids=${noteId}&media_ids=`))
+  await waitFor(() => expect(qa.error).toMatch(/source selection/i))
+  act(() => qa.setQuery("Invalid mixed scope"))
+  await act(async () => qa.search())
+  expect(qa.answer).toBeNull()
+})
+
+it("refreshes empty personal counts after current-owner ingest only", async () => {
+  mount()
+  await waitFor(() =>
+    expect(qa.sourceHealth.bySource.media_db?.itemCount).toBe(0)
+  )
+  search.media.mockResolvedValue({ pagination: { total: 1 } })
+  act(() =>
+    window.dispatchEvent(
+      new CustomEvent("tldw:quick-ingest-complete", {
+        detail: { isCurrent: () => false }
+      })
+    )
+  )
+  expect(qa.sourceHealth.bySource.media_db?.itemCount).toBe(0)
+  act(() =>
+    window.dispatchEvent(
+      new CustomEvent("tldw:quick-ingest-complete", {
+        detail: { isCurrent: () => true }
+      })
+    )
+  )
+  await waitFor(() =>
+    expect(qa.sourceHealth.bySource.media_db?.itemCount).toBe(1)
+  )
+  expect(qa.sourceHealth.bySource.media_db?.embeddingStatus).toBe("unknown")
+})
+
+it("keeps service availability separate when personal counts fail", async () => {
+  search.media.mockRejectedValue(new Error("Media count unavailable"))
+  mount()
+  await waitFor(() => expect(qa.sourceHealth.loading).toBe(false))
+  await waitFor(() =>
+    expect(qa.sourceHealth.bySource.media_db?.available).toBe(true)
+  )
+  expect(qa.sourceHealth.bySource.media_db?.itemCount).toBeNull()
+  expect(qa.sourceHealth.personalContentError).toMatch(
+    /counts could not be loaded/i
+  )
+  expect(qa.sourceHealth.error).toBeNull()
 })

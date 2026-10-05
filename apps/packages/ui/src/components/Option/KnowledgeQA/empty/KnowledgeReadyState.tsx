@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react"
 import { Link } from "react-router-dom"
 import { BookOpen, ChevronDown, ChevronUp, Clock3, FolderPlus, Globe, HelpCircle, MessageSquare, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/libs/utils"
+import { getPersonalItemCount } from "../sourceHealth"
 import type { RagSource } from "@/services/rag/unified-rag"
 import type { KnowledgeSourceHealthState } from "../types"
 import type { KnowledgeReadyRecoveryState } from "./recoveryState"
@@ -66,9 +67,9 @@ function buildSourceHealthNotice(
   sourceHealth: KnowledgeSourceHealthState | undefined
 ): SourceHealthNotice | null {
   if (!hasSources) return null
-  if (sourceHealth?.error) {
+  if (sourceHealth?.error || sourceHealth?.personalContentError) {
     return {
-      message: sourceHealth.error,
+      message: sourceHealth.error || sourceHealth.personalContentError!,
       tone: "info",
       actionLabel: "Select sources",
       action: "select",
@@ -150,7 +151,7 @@ export function KnowledgeReadyState({
         return "Library search is offline"
       case "no_indexed_sources":
       case "no_indexed_sources_web_only":
-        return "No indexed library sources yet"
+        return "No personal sources ready yet"
       case "no_selected_sources":
         return "No source categories selected"
       case "web_only":
@@ -164,13 +165,13 @@ export function KnowledgeReadyState({
       case "backend_unavailable":
         return "The Knowledge QA backend is not reachable, so cited library answers cannot run yet."
       case "no_indexed_sources":
-        return "Your server is online, but Knowledge QA has no indexed documents, media, or notes to search."
+        return "Your server is online. Add your first source or check readiness in Media or Notes."
       case "no_indexed_sources_web_only":
-        return "Your personal library has no indexed sources yet. Because web fallback is enabled, searches will use web results only until you add or index sources."
+        return "Your personal sources are not ready yet. Web fallback is enabled, so searches can use web results while you add or prepare sources."
       case "no_selected_sources":
         return effectiveRecoveryState.webFallbackAvailable
-          ? "Your library has indexed sources, but none are selected for this search."
-          : "Your library has indexed sources, but none are selected and web fallback is not available on this server."
+          ? "No personal source categories are selected for this search."
+          : "No personal source categories are selected and web fallback is not available on this server."
       case "web_only":
         return "No source categories are selected. Because web fallback is enabled, this search will use web results only and will not cite your personal library until sources are selected."
       default:
@@ -204,7 +205,9 @@ export function KnowledgeReadyState({
           className="inline-flex min-h-9 items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-3 text-sm text-primaryStrong"
         >
           <FolderPlus className="h-4 w-4" />
-          Add sources
+          {getPersonalItemCount(sourceHealth) === 0
+            ? "Add your first source"
+            : "Add sources"}
         </button>
         <p className="basis-full text-xs text-text-muted">
           {hasRecentSession
@@ -280,7 +283,9 @@ export function KnowledgeReadyState({
                     onClick={handleAddSources}
                     className="font-medium text-primary hover:underline"
                   >
-                    Add sources
+                    {getPersonalItemCount(sourceHealth) === 0
+                      ? "Add your first source"
+                      : "Add sources"}
                   </button>
                 </span>
               </li>

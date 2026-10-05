@@ -123,7 +123,9 @@ describe("KnowledgeContextBar source health", () => {
       />
     )
 
-    expect(screen.getByText("Sources ready: 1 of 2")).toBeInTheDocument()
+    expect(
+      screen.getByText("Available services: 1 of 2 · Personal items: unknown")
+    ).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /Sources:/i }))
     expect(screen.getByText("Ready")).toBeInTheDocument()
     expect(screen.getByText("Unavailable")).toBeInTheDocument()

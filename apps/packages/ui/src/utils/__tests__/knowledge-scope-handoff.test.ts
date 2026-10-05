@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
   buildKnowledgeMediaScopePath,
   parseKnowledgeMediaScope,
+  buildKnowledgeNoteScopePath,
+  parseKnowledgeScope
 } from "../knowledge-scope-handoff"
 describe("Knowledge media scope handoff", () => {
   it("round-trips the exact added media set", () => {
@@ -38,5 +40,39 @@ describe("Knowledge media scope handoff", () => {
     })),
   )("emits explicit invalid scope for unusable IDs $ids", ({ ids }) => {
     expect(buildKnowledgeMediaScopePath(ids)).toBe("/knowledge?media_ids=")
+  })
+})
+
+const noteId = "12345678-1234-4234-8234-123456789abc"
+describe("Knowledge captured-note scope", () => {
+  it("round-trips a canonical note without a media scope", () => {
+    const path = buildKnowledgeNoteScopePath([noteId])
+    expect(
+      parseKnowledgeScope(new URL(path, "https://local.test").search)
+    ).toEqual({
+      mediaIds: [],
+      noteIds: [noteId],
+      invalid: false
+    })
+  })
+  it.each([
+    "",
+    "note-1",
+    `${noteId}&note_ids=${noteId}`,
+    `${noteId}&media_ids=`,
+    `invalid&media_ids=3`
+  ])("never widens malformed or mixed scope %s", (value) => {
+    expect(parseKnowledgeScope(`?note_ids=${value}`)).toEqual({
+      mediaIds: [],
+      noteIds: [],
+      invalid: true
+    })
+  })
+  it("keeps both valid explicit scopes", () => {
+    expect(parseKnowledgeScope(`?note_ids=${noteId}&media_ids=3`)).toEqual({
+      mediaIds: [3],
+      noteIds: [noteId],
+      invalid: false
+    })
   })
 })

@@ -27,6 +27,7 @@ import { classifyError, extractionFailureSources } from "./ErrorClassification"
 import type { ErrorCategory } from "./ErrorClassification"
 import {
   canOpenMedia,
+  canRetryWizardResult,
   getSavedMediaIds,
   GENERIC_SKIPPED_MESSAGE,
   LIBRARY_DUPLICATE_SKIP_MESSAGE,
@@ -117,9 +118,6 @@ function groupResultItems(results: WizardResultItem[]): ResultGroups {
   return groups
 }
 
-function hasReadyMedia(item: WizardResultItem): boolean {
-  return item.mediaId != null
-}
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -150,7 +148,9 @@ const SuccessRow: React.FC<SuccessRowProps> = React.memo(
           <div className="truncate" title={label}>{label}</div>
           <p className="text-xs text-text-muted">{getSavedMediaIds([item]).length
             ? qi("wizard.results.savedState", "Saved")
-            : qi("wizard.results.extractedState", "Extracted content; not saved")}</p>
+            : qi("wizard.results.extractedState", "Extracted content; not saved")}
+            {item.data && typeof item.data === "object" && "analysis" in item.data && typeof item.data.analysis === "string" && item.data.analysis.trim()
+              ? ` · ${qi("wizard.results.analysisAvailable", "Analysis available")}` : ""}</p>
           {getSavedMediaIds([item]).length > 0 && <p className="text-xs text-text-muted">{qi("wizard.results.knowledgeUnconfirmed", "Knowledge readiness unconfirmed")}</p>}
           {item.warning && <p className="whitespace-pre-line break-words text-xs text-warn">{item.warning}</p>}
         </div>
@@ -411,21 +411,13 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const collectionId = tracking?.collectionId
   const hasDurableCollection =
     Boolean(collectionId) && tracking?.durableMode === "durable_collection"
-  const readyCollectionItemCount = useMemo(
-    () => [...savedItems, ...skippedExisting].filter(hasReadyMedia).length,
-    [savedItems, skippedExisting]
-  )
-  const canAskCollection =
-    hasDurableCollection &&
-    readyCollectionItemCount > 0 &&
-    Boolean(onSearchKnowledge) &&
-    Boolean(capabilities?.hasKnowledgeQaMediaScope)
-  const savedMediaIds = savedItems
-    .map((item) => Number(item.mediaId))
+  const savedMediaIds = savedIds
+    .map((id) => Number(id))
     .filter((id) => Number.isSafeInteger(id) && id > 0)
-  const collectionMediaIds = [...savedItems, ...skippedExisting]
-    .map((item) => Number(item.mediaId))
+  const collectionMediaIds = [...savedIds, ...skippedExisting.filter(item => canOpenMedia(item) && item.persisted !== false && (!queueItems.length || eligibleIds.has(item.id))).map(item => item.mediaId)]
+    .map((id) => Number(id))
     .filter((id) => Number.isSafeInteger(id) && id > 0)
+  const canAskCollection = hasDurableCollection && collectionMediaIds.length > 0 && Boolean(onSearchKnowledge) && Boolean(capabilities?.hasKnowledgeQaMediaScope)
   const showGenericSearch =
     savedMediaIds.length > 0 && Boolean(onSearchKnowledge)
   const hasWorkspaceOpenTarget =
@@ -441,15 +433,22 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const errorCategories = useMemo(() => {
     const map = new Map<string, ErrorCategory>()
     for (const item of failures) {
-      map.set(item.id, classifyError(item.error, item.data))
+      const category = classifyError(item.error, item.data)
+      map.set(item.id, item.outcome === "cancelled" ? {
+        ...category,
+        retryable: false,
+        badgeLabel: qi("wizard.results.cancelledBadge", "Cancelled"),
+        userMessage: qi("wizard.results.cancelledMessage", "This item was cancelled."),
+        suggestion: qi("wizard.results.cancelledSuggestion", "Review the input before starting another run.")
+      } : category)
     }
     return map
-  }, [failures])
+  }, [failures, qi])
 
   // -- Retryable error IDs --------------------------------------------------
 
   const conferenceRetryRequests = useMemo(
-    () => (hasDurableCollection ? buildConferenceRetryRequestItems(failures.filter(item => item.outcome !== "cancelled" && classifyError(item.error, item.data).retryable && !missingFileIds.has(item.id) && (!queueItems.length || eligibleIds.has(item.id)))) : []),
+    () => (hasDurableCollection ? buildConferenceRetryRequestItems(failures.filter(item => canRetryWizardResult(item, queueItems))) : []),
     [failures, hasDurableCollection, queueItems]
   )
 
@@ -466,7 +465,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
       hasDurableCollection
         ? conferenceRetryRequests.map((request) => request.collectionItemId)
         : failures
-            .filter((e) => e.outcome !== "cancelled" && errorCategories.get(e.id)?.retryable && !missingFileIds.has(e.id) && (!queueItems.length || eligibleIds.has(e.id)))
+            .filter((e) => canRetryWizardResult(e, queueItems))
             .map((e) => e.id),
     [conferenceRetryRequests, errorCategories, failures, hasDurableCollection, queueItems]
   )
@@ -532,7 +531,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
 
   const getRetryHandlerForItem = useCallback(
     (item: WizardResultItem) => {
-      if (!onRetryItems || item.outcome === "cancelled" || !classifyError(item.error, item.data).retryable || missingFileIds.has(item.id) || (queueItems.length && !eligibleIds.has(item.id))) return undefined
+      if (!onRetryItems || !canRetryWizardResult(item, queueItems)) return undefined
       if (!hasDurableCollection) return handleRetrySingle
       return conferenceRetryRequestsByResultId.has(item.id)
         ? handleRetrySingle
@@ -683,10 +682,10 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                     if (docItem) onOpenWorkspace(docItem)
                   }}
                   className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 transition-colors"
-                  aria-label={qi("wizard.results.openWorkspaceAria", "Open document in Document Workspace")}
+                  aria-label={qi("wizard.results.openDocumentWorkspaceAria", "Open in Document Workspace")}
                 >
                   <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
-                  {qi("wizard.results.openWorkspace", "Open in Workspace")}
+                  {qi("wizard.results.openDocumentWorkspace", "Open in Document Workspace")}
                 </button>
               )}
             </div>
@@ -746,7 +745,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                 <Download className="h-3 w-3" aria-hidden="true" />
                 {qi("wizard.results.exportFailedList", "Export failed list")}
               </button>
-              {retryableIds.length > 1 && onRetryItems && (
+              {retryableIds.length > 0 && onRetryItems && (
                 <button
                   type="button"
                   onClick={handleRetryAll}

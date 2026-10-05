@@ -22,6 +22,7 @@ import {
   persist
 } from "zustand/middleware"
 import { createWithEqualityFn } from "zustand/traditional"
+import type { ConferenceRetryRequestItem } from "@/services/tldw/conference-collections"
 
 const STORAGE_KEY = "tldw-quick-ingest-session"
 
@@ -40,6 +41,7 @@ export type PersistedQuickIngestTracking = {
   batchIds?: string[]
   collectionId?: string
   plannedItemIds?: string[]
+  retryItems?: ConferenceRetryRequestItem[]
   jobIds?: number[]
   submittedItemIds?: string[]
   /** @deprecated use submittedItemIds */
@@ -304,6 +306,14 @@ const sanitizeTracking = (
     batchIds: batchIds.length > 0 ? batchIds : undefined,
     collectionId: tracking.collectionId?.trim() || undefined,
     plannedItemIds: plannedItemIds.length > 0 ? plannedItemIds : undefined,
+    retryItems: Array.isArray(tracking.retryItems)
+      ? tracking.retryItems.map((item) => ({
+          resultId: item.resultId,
+          collectionItemId: item.collectionItemId,
+          retryAttempt: item.retryAttempt,
+          idempotencyKey: item.idempotencyKey,
+        }))
+      : undefined,
     jobIds: jobIds && jobIds.length > 0 ? Array.from(new Set(jobIds)) : undefined,
     submittedItemIds:
       submittedItemIds.length > 0 ? submittedItemIds : undefined,
@@ -349,6 +359,7 @@ const mergeTracking = (
     batchId: next.batchId || base.batchId,
     batchIds: [...(base.batchIds || []), ...(next.batchIds || [])],
     collectionId: next.collectionId || base.collectionId,
+    retryItems: next.retryItems || base.retryItems,
     plannedItemIds: [
       ...(base.plannedItemIds || []),
       ...(next.plannedItemIds || []),
