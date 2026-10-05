@@ -233,15 +233,58 @@ def test_upsert_without_an_assistant_clears_a_placeholder_an_older_server_stored
 def test_upsert_that_names_an_assistant_is_stored_as_named(
     sync_service: SyncV2Service, chacha_db: CharactersRAGDB,
 ) -> None:
-    """Only a payload with no identity is plain: a named persona, even an unknown one, is kept as sent."""
+    """A named persona is kept as sent, even one this server does not know."""
     result = _push_one(
         sync_service,
-        _conversation_envelope(payload={"title": "Named", "assistant_kind": "persona", "assistant_id": "sync-v2"}),
+        _conversation_envelope(payload={"title": "Named", "assistant_kind": "persona", "assistant_id": "sync-v2-custom"}),
     )
 
     assert [item.apply_status for item in result.accepted] == ["applied"]
     row = chacha_db.get_conversation_by_id("conv-1")
-    assert (row["assistant_kind"], row["assistant_id"]) == ("persona", "sync-v2")
+    assert (row["assistant_kind"], row["assistant_id"]) == ("persona", "sync-v2-custom")
+
+
+@pytest.mark.parametrize("existing", [False, True], ids=["new-chat", "repaired-chat"])
+def test_upsert_naming_the_retired_placeholder_is_stored_as_a_plain_chat(
+    sync_service: SyncV2Service, chacha_db: CharactersRAGDB, existing: bool,
+) -> None:
+    """The placeholder reached the log, so a payload can still carry it; it must not come back (#3182).
+
+    A rename through the server API was built from the stored row, placeholder
+    included. A device that received such an envelope echoes it, and a replay
+    of the log meets it again. Read as a real persona it would undo the
+    migration that cleared the stored rows.
+    """
+    if existing:
+        chacha_db.add_conversation({"id": "conv-1", "character_id": None, "title": "Repaired"})
+    payload = {"title": "Echoed", "assistant_kind": "persona", "assistant_id": "sync-v2", "persona_memory_mode": "read_only"}
+
+    result = _push_one(sync_service, _conversation_envelope(payload=payload))
+
+    assert [item.apply_status for item in result.accepted] == ["applied"]
+    row = chacha_db.get_conversation_by_id("conv-1")
+    assert row["title"] == "Echoed"
+    assert (row["assistant_kind"], row["assistant_id"], row["character_id"], row["persona_memory_mode"]) == (
+        None, None, None, None,
+    )
+    assert require_current_persona(chacha_db, owner_id=chacha_db.owner_user_id, conversation=row) is None
+
+
+@pytest.mark.parametrize("profile_deleted", [False, True], ids=["live-persona", "deleted-persona"])
+def test_upsert_naming_a_real_persona_with_the_placeholder_id_keeps_it(
+    sync_service: SyncV2Service, chacha_db: CharactersRAGDB, profile_deleted: bool,
+) -> None:
+    """An owner who has, or had, a persona with exactly that id is naming their own persona."""
+    chacha_db.create_persona_profile(
+        {"id": "sync-v2", "user_id": chacha_db.owner_user_id, "name": "Really mine", "deleted": profile_deleted}
+    )
+    payload = {"title": "Mine", "assistant_kind": "persona", "assistant_id": "sync-v2", "persona_memory_mode": "read_only"}
+
+    result = _push_one(sync_service, _conversation_envelope(payload=payload))
+
+    assert [item.apply_status for item in result.accepted] == ["applied"]
+    row = chacha_db.get_conversation_by_id("conv-1")
+    assert (row["assistant_kind"], row["assistant_id"], row["persona_memory_mode"]) == ("persona", "sync-v2", "read_only")
 
 
 def _push_one_through_materializer_conflict(

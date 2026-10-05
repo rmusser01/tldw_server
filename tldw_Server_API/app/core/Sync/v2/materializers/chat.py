@@ -67,7 +67,7 @@ class ChatConversationMaterializer:
                 # The payload is the whole chat. One that names no assistant is a plain
                 # chat and is stored as one: an invented persona would not exist, and
                 # every persona check on the chat would then answer ``persona_not_found``.
-                payload = envelope.payload
+                payload = _conversation_payload(envelope.payload, self.note_db)
                 self.note_db.upsert_conversation_from_sync(
                     conversation_id=envelope.object_id,
                     title=payload.get("title"),
@@ -464,6 +464,24 @@ def _conflict_result(
         message=message,
         metadata=metadata,
     )
+
+
+def _conversation_payload(payload: dict[str, Any], note_db: CharactersRAGDB) -> dict[str, Any]:
+    """Read the retired Sync placeholder persona in a payload as no assistant.
+
+    Older projections stored a chat with no assistant as persona ``sync-v2``, and
+    an upsert built from such a row put that identity in the log. A device can
+    echo it and a replay meets it again. Stored as sent it would bring back the
+    placeholder the ChaChaNotes migration cleared, so it is projected as a plain
+    chat, unless the owner really has a persona with that id.
+    """
+    if not note_db.conversation_store.is_retired_sync_placeholder_assistant(
+        assistant_kind=payload.get("assistant_kind"),
+        assistant_id=payload.get("assistant_id"),
+        character_id=payload.get("character_id"),
+    ):
+        return payload
+    return {**payload, "assistant_kind": None, "assistant_id": None, "persona_memory_mode": None}
 
 
 def _message_payload(payload: dict[str, Any]) -> dict[str, Any]:
