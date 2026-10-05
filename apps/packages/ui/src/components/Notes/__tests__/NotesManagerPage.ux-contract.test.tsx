@@ -8,9 +8,9 @@
  * only inlines keywords when `include_keywords=true`; `PATCH /api/v1/notes/{id}`
  * replaces the note's keyword set.
  *
- * Each `it.fails` asserts the CORRECT behaviour and passes only while the
- * defect exists. When a fix lands the test starts failing: convert it to a
- * plain `it(...)` in the same change.
+ * These began as red-first `it.fails` reproductions. NL-01, NL-02 and NL-03
+ * are fixed (#3148), so each is now a plain `it(...)` with its assertions
+ * unchanged; the comment above each test records the defect it reproduced.
  */
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -55,6 +55,11 @@ vi.mock("@/components/Notes/notes-manager-utils", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/Notes/notes-manager-utils")>()
   return { ...actual, promptModal: mockPromptModal }
 })
+
+// Bulk "Add tags" asks through its own themed prompt since NL-03 was fixed.
+vi.mock("@/components/Notes/NotesBulkAddTagsPrompt", () => ({
+  promptBulkAddTags: vi.fn(async () => ["c"])
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -380,7 +385,7 @@ describe("NotesManagerPage UX contract reproductions (#3103)", { timeout: 60_000
   })
 
   // NL-01 (#3103): useNotesListManagement.tsx:394-397 sends page/results_per_page, but list_notes (endpoints/notes.py:2309-2316) only reads limit/offset.
-  it.fails("NL-01 (#3103): browse request pages with the server's limit/offset params", async () => {
+  it("NL-01 (#3103): browse request pages with the server's limit/offset params", async () => {
     installContractServer(makeServerNotes(250))
     renderPage()
     await waitForFirstPage()
@@ -393,7 +398,7 @@ describe("NotesManagerPage UX contract reproductions (#3103)", { timeout: 60_000
   })
 
   // NL-01 (#3103): useNotesListManagement.tsx:405 reads pagination.total_items, but list_notes (endpoints/notes.py:2353-2358) returns pagination.total.
-  it.fails("NL-01 (#3103): displayed total comes from pagination.total", async () => {
+  it("NL-01 (#3103): displayed total comes from pagination.total", async () => {
     installContractServer(makeServerNotes(250))
     renderPage()
     await waitForFirstPage()
@@ -402,7 +407,7 @@ describe("NotesManagerPage UX contract reproductions (#3103)", { timeout: 60_000
   })
 
   // NL-01 (#3103): page/results_per_page from useNotesListManagement.tsx:394-397 are ignored by endpoints/notes.py:2309-2316, so every page is the first 100 notes.
-  it.fails("NL-01 (#3103): page 2 shows the next slice of notes, not page 1 again", async () => {
+  it("NL-01 (#3103): page 2 shows the next slice of notes, not page 1 again", async () => {
     installContractServer(makeServerNotes(250))
     renderPage()
     await waitForFirstPage()
@@ -416,7 +421,7 @@ describe("NotesManagerPage UX contract reproductions (#3103)", { timeout: 60_000
   })
 
   // NL-02 (#3103): useNotesExport.tsx:135-170 pages with page/results_per_page and stops on pagination.total_pages (never sent), so it re-reads the first 100 notes.
-  it.fails("NL-02 (#3103): export pages with limit/offset and stops at the true total", async () => {
+  it("NL-02 (#3103): export pages with limit/offset and stops at the true total", async () => {
     const totalNotes = 250
     installContractServer(makeServerNotes(totalNotes), { maxListRequests: 25 })
     renderPage()
@@ -445,7 +450,7 @@ describe("NotesManagerPage UX contract reproductions (#3103)", { timeout: 60_000
   })
 
   // NL-03 (#3103): NotesManagerPage.tsx:1421-1431 PATCHes only the new tags and the server replaces the set (_sync_note_keywords, endpoints/notes.py:1710-1720).
-  it.fails("NL-03 (#3103): bulk Assign tags keeps each note's existing tags", async () => {
+  it("NL-03 (#3103): bulk Assign tags keeps each note's existing tags", async () => {
     const notes = makeServerNotes(3)
     notes[0].keywords = ["a", "b"]
     installContractServer(notes)
