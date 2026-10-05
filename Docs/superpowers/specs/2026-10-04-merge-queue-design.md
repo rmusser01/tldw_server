@@ -98,8 +98,11 @@ an event guard. The dispatch job:
 - runs only from `refs/heads/dev` (`if:` on `github.ref`), so the policy code is always `dev`'s;
 - resolves the PR through the API (number must be numeric, PR open, base `dev` or `main`), taking the head SHA and
   author from the PR and the base SHA from the base branch's current tip;
-- then runs the same evaluate and publish steps. A contract test fails if the two jobs' evaluate or publish scripts
-  drift apart.
+- then runs the audit job's own steps, copied verbatim. A contract test fails if the two jobs' steps drift apart.
+
+The workflow's concurrency group becomes `frontend-license-gate-<PR number or dispatch input>`, with the input read
+through `github.event.inputs`, which exists on every event. A `pull_request_target` run keeps the group it had, and a
+dispatch for PR N shares N's group.
 
 A PR branch could add this trigger to its own copy and dispatch it there with `statuses: write`. That is no new
 exposure: any same-repo workflow run can already declare that permission, which GitHub documents for write access.
@@ -120,8 +123,19 @@ its gate job failed** and the queue mode is `dry` or `on`, for a dispatch or a s
 required and not in any gate's `needs`, so it can never turn a required check red. Its job-level permissions are the
 queue's: `contents`, `pull-requests` and `actions` write, `checks` and `statuses` read.
 
-Known gaps, accepted: a failed license status has no tick (the trusted workflow stays minimal), and "green but
-auto-merge did not fire" is noticed only at the next wake. Both wait for the next arm, disarm, close, push or tick.
+A tick runs inside its gate's own run. When the queue then dispatches that same workflow on the same branch (a retry
+of that gate, or a rebase), the new run joins the same concurrency group (workflow, event, ref, cancel-in-progress) and
+cancels the run the tick is executing in. The script therefore sends the host workflow's dispatch last, after every
+other dispatch, the cancellation of superseded runs and the comment, so a cancelled tick loses nothing.
+
+Known gaps, accepted:
+- A failed license status has no tick (the trusted workflow stays minimal), and "green but auto-merge did not fire" is
+  noticed only at the next wake. Both wait for the next arm, disarm, close, push or tick.
+- A tick fires on a gate result of `failure` only. If a gate job that hits its timeout reports `cancelled`, no tick
+  fires and the script reads a cancelled run as no run; the next wake dispatches it again.
+- With the queue on, a failed gate on a Dependabot PR starts a tick whose token is read-only. If the front PR needs an
+  action at that moment the tick fails, as a red non-required check on the Dependabot PR; nothing is evicted.
+- Every PR shows six skipped `Merge queue tick` rows and one skipped `frontend-license-gate-dispatch` row.
 
 ### 4.7 Repository settings the owner must change before `on`
 
@@ -145,8 +159,10 @@ access and an edited workflow, the same trust level as editing `frontend-require
 In the five gates with a `changes` job, the gate job required `needs.changes.result == 'success'`. When `changes`
 failed, the gate job was skipped, and GitHub counts a skipped required job as satisfied. This predates the queue (a
 runner flake in `changes` is enough) and a dispatch adds one more way to reach it (a `base_sha` that is not a commit in
-the clone). The gate job now also runs when `changes` did not succeed, and fails in its first step. The existing arm
-that turns a negative license verdict red is unchanged.
+the clone). The gate job now also runs when `changes` did not succeed, and fails in a guard step before anything
+else runs. In `backend-required.yml` the existing arm and step that turn a negative license verdict red are unchanged
+and stay first. The other four gates never had that arm: on a negative verdict they are still skipped, and
+`backend-required` and the license status are what block the merge.
 
 ## 5. Architecture
 
@@ -210,7 +226,9 @@ summary with no side effects; `on` acts.
      under its real name (4.8);
    - the license dispatch on `dev` posts the status on the PR head (4.4);
    - dependency review accepts explicit refs on a dispatch (4.3);
-   - the job-level write permissions of `queue-tick` are granted.
+   - the job-level write permissions of `queue-tick` are granted;
+   - a tick that dispatches its own workflow completes everything else first (4.6);
+   - what result a gate job reports when it hits its timeout (4.6).
 5. `on` for all traffic.
 
 Rollback: `gh variable set MERGE_QUEUE --body off`, effective immediately.
@@ -236,4 +254,8 @@ Checked with `gh variable get MERGE_QUEUE`.
   `base_sha` and fail when `changes` did not succeed; all six have a failure-only `queue-tick` outside every `needs`;
   the `frontend-required` name guard exempts only `github-actions[bot]`; the license dispatch job is `dev`-only and its
   evaluate and publish scripts equal the `pull_request_target` job's.
-- Existing contract tests under `tldw_Server_API/tests/CI` and `tests/Infrastructure` stay green.
+- Existing contract tests under `tldw_Server_API/tests/CI` and `tests/Infrastructure` stay green. The license-first
+  contract excludes `merge-queue.yml` by name and exempts `queue-tick` from its no-write-credentials rule, each behind a
+  test that pins the whole exempted shape.
+- `backend-required` runs the six `test_merge_queue_*` files in its contract step, so they are enforced by a required
+  check.
