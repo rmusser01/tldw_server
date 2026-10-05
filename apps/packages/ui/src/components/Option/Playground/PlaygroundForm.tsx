@@ -3452,7 +3452,6 @@ export const PlaygroundForm = ({
   const {
     persistenceTooltip,
     focusConnectionCard,
-    getPersistenceModeLabel,
     privateChatLocked,
     showServerPersistenceHint,
     handleToggleTemporaryChat,

@@ -86,7 +86,10 @@ import type { UploadedFile } from "@/db/dexie/types";
 import { applyMcpModuleDisclosureFromToolCalls } from "@/utils/mcp-disclosure";
 import { normalizeChatModelId } from "@/utils/chat-model-availability";
 import { validateSelectedChatModelAvailability } from "@/utils/chat-model-validation";
-import { discardAbortedTurnIfRequested } from "@/hooks/chat/abort-turn-cleanup";
+import {
+  discardAbortedTurnIfRequested,
+  markChatTurnStoppedByUser
+} from "@/hooks/chat/abort-turn-cleanup";
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome";
 import { hydrateTrackedCharacterForSend } from "@/hooks/chat/tracked-character-hydration";
 import {
@@ -3094,6 +3097,7 @@ export const useMessage = () => {
       }
     }
     if (abortController) {
+      markChatTurnStoppedByUser(abortController.signal);
       abortController.abort();
       setAbortController(null);
     }

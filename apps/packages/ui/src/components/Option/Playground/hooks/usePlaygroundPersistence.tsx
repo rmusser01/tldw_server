@@ -4,9 +4,19 @@ import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import type { Message } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { acknowledgePromotedChatMessage, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { getChatPromotionBlocker } from "@/db/dexie/chat-promotion"
 import { Modal } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { usePersistenceMode } from "@/hooks/playground"
+import {
+  beginServerChatWrite,
+  getServerChatSaveStatus,
+  type ServerChatWriteOutcome
+} from "@/store/server-chat-save-status"
+import {
+  getChatPersistenceCopy,
+  resolveChatPersistenceKind
+} from "@/utils/chat-persistence-status"
 import type { Character } from "@/types/character"
 import { type AssistantSelectionMode } from "@/types/assistant-selection"
 import { WEBUI_CHAT_SOURCE } from "@/utils/character-chat-session"
@@ -144,12 +154,26 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     serverPersistenceHintSeenRef.current = serverPersistenceHintSeen
   }, [serverPersistenceHintSeen])
 
-  const { persistenceTooltip, focusConnectionCard, getPersistenceModeLabel } =
+  const { persistenceKind, persistenceTooltip, focusConnectionCard } =
     usePersistenceMode({
       temporaryChat,
-      serverChatId,
-      isConnectionReady
+      serverChatId
     })
+
+  // Toasts describe the mode being switched to from acknowledged state, never
+  // from connectivity (CS-03, #3104).
+  const describePersistenceMode = React.useCallback(
+    (nextTemporaryChat: boolean) =>
+      getChatPersistenceCopy(
+        t,
+        resolveChatPersistenceKind({
+          temporaryChat: nextTemporaryChat,
+          serverChatId,
+          serverSaveStatus: getServerChatSaveStatus(serverChatId)
+        })
+      ).description,
+    [serverChatId, t]
+  )
 
   const privateChatLocked = temporaryChat && history.length > 0
 
@@ -200,12 +224,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
           onOk: () => {
             setTemporaryChat(next)
             clearChat()
-            const modeLabel = getPersistenceModeLabel(
-              t,
-              next,
-              isConnectionReady,
-              serverChatId
-            )
+            const modeLabel = describePersistenceMode(next)
             notificationApi.info({
               message: modeLabel,
               placement: "bottomRight",
@@ -221,12 +240,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         clearChat()
       }
 
-      const modeLabel = getPersistenceModeLabel(
-        t,
-        next,
-        isConnectionReady,
-        serverChatId
-      )
+      const modeLabel = describePersistenceMode(next)
 
       notificationApi.info({
         message: modeLabel,
@@ -236,14 +250,12 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     },
     [
       clearChat,
+      describePersistenceMode,
       history.length,
-      isConnectionReady,
       notificationApi,
-      serverChatId,
       setTemporaryChat,
       t,
-      temporaryChat,
-      getPersistenceModeLabel
+      temporaryChat
     ]
   )
 
@@ -336,6 +348,14 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
           requestSnapshot = scopeSnapshot
           if (!isCurrentSave()) return
           requireConnectionReady()
+          // Never copy a chat the history selection owns (it writes its own
+          // turns) or one already on the server: on return to /chat the
+          // transcript here can be stale, which left empty server chats
+          // (CS-N3, #3104).
+          if (!createdChatId) {
+            const blocker = await getChatPromotionBlocker(capturedHistoryId)
+            if (blocker || !isCurrentSave()) return
+          }
           const firstUser = snapshot.find((m) => m.role === "user")
           const explicitSource =
             serverChatSourceRef.current &&
@@ -374,106 +394,135 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
           // Every resumed conversation needs a fresh prefix check, including
           // readiness pauses after an acknowledged create or message write.
           const reconcileExistingChat = createdChatId !== null
-          if (!createdChatId) {
-            const created = await tldwClient.createChat(
-              createPayload,
-              requestOptions
-            )
-            if (!isCurrentSave()) return
-            const rawId =
-              (created as any)?.id ?? (created as any)?.chat_id ?? created
-            const cid = rawId != null ? String(rawId) : ""
-            if (!cid) {
-              throw new Error("Failed to create server chat")
+          // The server chat id is published before its messages are written, so
+          // the whole promotion is one tracked write: labels say "saving" until
+          // every message is acknowledged, and "failed" if promotion stops early
+          // (CS-03, #3104).
+          let endPromotionWrite = createdChatId
+            ? beginServerChatWrite(createdChatId)
+            : null
+          let promotionOutcome: ServerChatWriteOutcome = "failed"
+          try {
+            if (!createdChatId) {
+              const created = await tldwClient.createChat(
+                createPayload,
+                requestOptions
+              )
+              const rawId =
+                (created as any)?.id ?? (created as any)?.chat_id ?? created
+              const cid = rawId != null ? String(rawId) : ""
+              if (!isCurrentSave()) {
+                // The save was abandoned while the chat was being created.
+                // Nothing refers to the new chat yet, so delete it rather
+                // than leave an empty server chat behind (CS-N3, #3104).
+                if (cid) {
+                  try {
+                    await tldwClient.deleteChat(cid, {
+                      hardDelete: true,
+                      requestScope: scopeSnapshot.requestScope
+                    })
+                  } catch {
+                    // Best effort: the chat is unreferenced either way.
+                  }
+                }
+                return
+              }
+              if (!cid) {
+                throw new Error("Failed to create server chat")
+              }
+              createdChatId = cid
+              endPromotionWrite = beginServerChatWrite(cid)
+              setServerChatId(cid)
+              setServerChatState(
+                (created as any)?.state ??
+                  (created as any)?.conversation_state ??
+                  serverChatStateRef.current ??
+                  "in-progress"
+              )
+              setServerChatSource(
+                (created as any)?.source ?? serverChatSourceRef.current ?? null
+              )
+              setServerChatVersion((created as any)?.version ?? null)
+              invalidateServerChatHistory()
             }
-            createdChatId = cid
-            setServerChatId(cid)
-            setServerChatState(
-              (created as any)?.state ??
-                (created as any)?.conversation_state ??
-                serverChatStateRef.current ??
-                "in-progress"
-            )
-            setServerChatSource(
-              (created as any)?.source ?? serverChatSourceRef.current ?? null
-            )
-            setServerChatVersion((created as any)?.version ?? null)
-            invalidateServerChatHistory()
-          }
 
-          const cid = createdChatId
-          const acknowledge = async (index: number, saved: { id: string; version?: number }) => {
-            const source = sources[index]
-            if (!source?.id || !isCurrentSave()) return
-            await acknowledgePromotedChatMessage({
-              historyId: capturedHistoryId, chatId: cid,
-              ownerKey: serverChatMirrorOwnerKey(scopeSnapshot), source,
-              serverMessageId: String(saved.id), version: saved.version,
-              signal: scopeSnapshot.scopeSignal, isCurrent: isCurrentSave
-            })
-            if (!isCurrentSave()) return
-            latestDepsRef.current.setMessages?.(current => current.map(message => {
-              if (message.id !== source.id) return message
-              if (message.serverMessageId && message.serverMessageId !== String(saved.id))
-                throw new Error("The local saved message identity changed. Keep this chat and resolve its history before retrying.")
-              return { ...message, serverMessageId: String(saved.id),
-                serverMessageVersion: message.serverMessageVersion ?? (message.message === source.message ? saved.version : undefined) }
-            }))
-          }
-          if (reconcileExistingChat) {
-            const stored = []
-            for (let offset = 0; ; offset += 200) {
+            const cid = createdChatId
+            const acknowledge = async (index: number, saved: { id: string; version?: number }) => {
+              const source = sources[index]
+              if (!source?.id || !isCurrentSave()) return
+              await acknowledgePromotedChatMessage({
+                historyId: capturedHistoryId, chatId: cid,
+                ownerKey: serverChatMirrorOwnerKey(scopeSnapshot), source,
+                serverMessageId: String(saved.id), version: saved.version,
+                signal: scopeSnapshot.scopeSignal, isCurrent: isCurrentSave
+              })
+              if (!isCurrentSave()) return
+              latestDepsRef.current.setMessages?.(current => current.map(message => {
+                if (message.id !== source.id) return message
+                if (message.serverMessageId && message.serverMessageId !== String(saved.id))
+                  throw new Error("The local saved message identity changed. Keep this chat and resolve its history before retrying.")
+                return { ...message, serverMessageId: String(saved.id),
+                  serverMessageVersion: message.serverMessageVersion ?? (message.message === source.message ? saved.version : undefined) }
+              }))
+            }
+            if (reconcileExistingChat) {
+              const stored = []
+              for (let offset = 0; ; offset += 200) {
+                requireConnectionReady()
+                const batch = await tldwClient.listChatMessages(
+                  cid,
+                  { limit: 200, offset, render_placeholders: false },
+                  { ...requestOptions, fresh: true }
+                )
+                if (!isCurrentSave()) return
+                stored.push(...batch)
+                if (stored.length > snapshot.length || batch.length < 200) break
+              }
+              const prefixMatches =
+                stored.length >= acknowledgedIds.length &&
+                stored.length <= snapshot.length &&
+                stored.every(
+                  (row, index) =>
+                    Boolean(row.id) &&
+                    (row.role || row.sender) === snapshot[index]?.role &&
+                    row.content === snapshot[index]?.content &&
+                    (!acknowledgedIds[index] ||
+                      String(row.id) === acknowledgedIds[index])
+                )
+              if (!prefixMatches)
+                throw new Error(
+                  "Saved messages changed during recovery. Keep this local chat and resolve the server history before retrying."
+                )
+              for (let index = 0; index < stored.length; index++) {
+                await acknowledge(index, stored[index])
+                if (!isCurrentSave()) return
+              }
+              acknowledgedIds.splice(
+                0,
+                acknowledgedIds.length,
+                ...stored.map((row) => String(row.id))
+              )
+            }
+            for (const msg of snapshot.slice(acknowledgedIds.length)) {
+              if (!isCurrentSave()) return
               requireConnectionReady()
-              const batch = await tldwClient.listChatMessages(
+              const saved = await tldwClient.addChatMessage(
                 cid,
-                { limit: 200, offset, render_placeholders: false },
-                { ...requestOptions, fresh: true }
+                msg,
+                requestOptions
               )
               if (!isCurrentSave()) return
-              stored.push(...batch)
-              if (stored.length > snapshot.length || batch.length < 200) break
+              if (!saved?.id)
+                throw new Error(
+                  "The server did not confirm the saved message identity."
+                )
+              const index = acknowledgedIds.length
+              acknowledgedIds.push(String(saved.id))
+              await acknowledge(index, saved)
             }
-            const prefixMatches =
-              stored.length >= acknowledgedIds.length &&
-              stored.length <= snapshot.length &&
-              stored.every(
-                (row, index) =>
-                  Boolean(row.id) &&
-                  (row.role || row.sender) === snapshot[index]?.role &&
-                  row.content === snapshot[index]?.content &&
-                  (!acknowledgedIds[index] ||
-                    String(row.id) === acknowledgedIds[index])
-              )
-            if (!prefixMatches)
-              throw new Error(
-                "Saved messages changed during recovery. Keep this local chat and resolve the server history before retrying."
-              )
-            for (let index = 0; index < stored.length; index++) {
-              await acknowledge(index, stored[index])
-              if (!isCurrentSave()) return
-            }
-            acknowledgedIds.splice(
-              0,
-              acknowledgedIds.length,
-              ...stored.map((row) => String(row.id))
-            )
-          }
-          for (const msg of snapshot.slice(acknowledgedIds.length)) {
-            if (!isCurrentSave()) return
-            requireConnectionReady()
-            const saved = await tldwClient.addChatMessage(
-              cid,
-              msg,
-              requestOptions
-            )
-            if (!isCurrentSave()) return
-            if (!saved?.id)
-              throw new Error(
-                "The server did not confirm the saved message identity."
-              )
-            const index = acknowledgedIds.length
-            acknowledgedIds.push(String(saved.id))
-            await acknowledge(index, saved)
+            promotionOutcome = "saved"
+          } finally {
+            endPromotionWrite?.(promotionOutcome)
           }
 
           if (!isCurrentSave()) return
@@ -610,11 +659,14 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
   }, [setShowServerPersistenceHint])
 
   return {
+    persistenceKind,
     persistenceTooltip,
     focusConnectionCard,
-    getPersistenceModeLabel,
     privateChatLocked,
-    showServerPersistenceHint,
+    // The "saved on your server" hint is only true while the server copy is
+    // acknowledged (CS-03, #3104).
+    showServerPersistenceHint:
+      showServerPersistenceHint && persistenceKind === "server",
     handleToggleTemporaryChat,
     handleSaveChatToServer,
     persistChatMetadata,

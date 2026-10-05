@@ -1,6 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import {
+  beginServerChatWrite,
+  getServerChatSaveStatus,
+  resetServerChatSaveStatus
+} from "@/store/server-chat-save-status"
 import { usePlaygroundPersistence } from "../usePlaygroundPersistence"
 
 const selectedHistory = vi.hoisted(() => ({ value: null as any }))
@@ -13,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   createCharacter: vi.fn(),
   createChat: vi.fn(),
   addChatMessage: vi.fn(),
+  deleteChat: vi.fn(),
+  getChatPromotionBlocker: vi.fn(),
   getConfig: vi.fn(),
   savePlaygroundSession: vi.fn(),
   buildChatSurfaceScopeKeyFromConfig: vi.fn(),
@@ -49,8 +56,14 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     createCharacter: mocks.createCharacter,
     createChat: mocks.createChat,
     addChatMessage: mocks.addChatMessage,
+    deleteChat: mocks.deleteChat,
     getConfig: mocks.getConfig
   }
+}))
+
+vi.mock("@/db/dexie/chat-promotion", () => ({
+  getChatPromotionBlocker: (...args: unknown[]) =>
+    (mocks.getChatPromotionBlocker as (...args: unknown[]) => unknown)(...args)
 }))
 
 vi.mock("@/services/chat-surface-scope", () => ({
@@ -115,10 +128,13 @@ describe("usePlaygroundPersistence", () => {
     mocks.createCharacter.mockReset()
     mocks.createChat.mockReset()
     mocks.addChatMessage.mockReset()
+    mocks.deleteChat.mockReset()
+    mocks.getChatPromotionBlocker.mockReset()
     mocks.getConfig.mockReset()
     mocks.savePlaygroundSession.mockReset()
     mocks.buildChatSurfaceScopeKeyFromConfig.mockReset()
     mocks.usePersistenceMode.mockReset()
+    resetServerChatSaveStatus()
 
     mocks.initialize.mockResolvedValue(undefined)
     mocks.searchCharacters.mockRejectedValue(new Error("search failed"))
@@ -126,6 +142,8 @@ describe("usePlaygroundPersistence", () => {
     mocks.createCharacter.mockRejectedValue(new Error("create failed"))
     mocks.createChat.mockResolvedValue({ id: "chat-1" })
     mocks.addChatMessage.mockResolvedValue({ id: "saved-message", version: 1 })
+    mocks.deleteChat.mockResolvedValue(undefined)
+    mocks.getChatPromotionBlocker.mockResolvedValue(null)
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
       authMode: "single-user",
@@ -133,9 +151,9 @@ describe("usePlaygroundPersistence", () => {
     })
     mocks.buildChatSurfaceScopeKeyFromConfig.mockReturnValue("scope:chat")
     mocks.usePersistenceMode.mockReturnValue({
+      persistenceKind: "server",
       persistenceTooltip: "save to server",
-      focusConnectionCard: vi.fn(),
-      getPersistenceModeLabel: vi.fn(() => "Saved to server")
+      focusConnectionCard: vi.fn()
     })
   })
 
@@ -500,6 +518,151 @@ describe("usePlaygroundPersistence", () => {
     expect(deps.setServerChatId).not.toHaveBeenCalled()
     expect(mocks.addChatMessage).not.toHaveBeenCalled()
     if (held === 'initialize') expect(mocks.createChat).not.toHaveBeenCalled()
+    // CS-N3 (#3104): a chat created for a save that was abandoned is deleted,
+    // not left on the server empty.
+    if (held === 'createChat')
+      await waitFor(() =>
+        expect(mocks.deleteChat).toHaveBeenCalledWith(
+          'late-draft',
+          expect.objectContaining({ hardDelete: true })
+        )
+      )
   })
 
+  // CS-03 (#3104): promotion records whether the server acknowledged the chat,
+  // so persistence labels never claim the server for an incomplete copy.
+  it("marks a promoted chat as saving until every message is acknowledged, then saved", async () => {
+    let releaseMessage!: (value: { id: string; version: number }) => void
+    mocks.addChatMessage.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseMessage = resolve
+        })
+    )
+    const deps = buildDeps({
+      history: [{ role: "user", content: "Keep this on the server" }]
+    })
+
+    renderHook(() => usePlaygroundPersistence(deps))
+
+    await waitFor(() => expect(releaseMessage).toBeTypeOf("function"))
+    expect(deps.setServerChatId).toHaveBeenCalledWith("chat-1")
+    expect(getServerChatSaveStatus("chat-1")).toBe("saving")
+
+    await act(async () => {
+      releaseMessage({ id: "saved-message", version: 1 })
+    })
+
+    await waitFor(() => expect(getServerChatSaveStatus("chat-1")).toBe("saved"))
+  })
+
+  it("marks a promoted chat as failed when the server rejects a message write", async () => {
+    mocks.addChatMessage.mockRejectedValueOnce(new Error("server unavailable"))
+    const notificationApi = {
+      error: vi.fn(),
+      warning: vi.fn(),
+      info: vi.fn(),
+      success: vi.fn()
+    }
+    const deps = buildDeps({
+      notificationApi,
+      history: [{ role: "user", content: "Keep this on the server" }]
+    })
+
+    const { result } = renderHook(() => usePlaygroundPersistence(deps))
+
+    await waitFor(() => expect(notificationApi.error).toHaveBeenCalled())
+    expect(deps.setServerChatId).toHaveBeenCalledWith("chat-1")
+    expect(getServerChatSaveStatus("chat-1")).toBe("failed")
+    expect(result.current.showServerPersistenceHint).toBe(false)
+  })
+
+  it.each([
+    ["the history selection owns the chat", "history_selection_owned"],
+    ["it already mirrors a server chat", "server_linked"]
+  ] as const)(
+    "does not create a server chat when %s (CS-N3)",
+    async (_label, blocker) => {
+      mocks.getChatPromotionBlocker.mockResolvedValue(blocker)
+      const deps = buildDeps({
+        historyId: "local-chat",
+        history: [{ role: "user", content: "Keep this on the server" }]
+      })
+
+      const { result } = renderHook(() => usePlaygroundPersistence(deps))
+      await act(async () => {
+        await result.current.handleSaveChatToServer()
+      })
+
+      expect(mocks.getChatPromotionBlocker).toHaveBeenCalledWith("local-chat")
+      expect(mocks.createChat).not.toHaveBeenCalled()
+      expect(deps.setServerChatId).not.toHaveBeenCalled()
+    }
+  )
+
+  it("hides the saved-on-server hint when the server copy is not acknowledged", async () => {
+    mocks.usePersistenceMode.mockReturnValue({
+      persistenceKind: "serverFailed",
+      persistenceTooltip: "not saved to server",
+      focusConnectionCard: vi.fn()
+    })
+
+    const { result } = renderHook(() =>
+      usePlaygroundPersistence(
+        buildDeps({ history: [{ role: "user", content: "Persist this chat" }] })
+      )
+    )
+
+    await waitFor(() => expect(mocks.addChatMessage).toHaveBeenCalled())
+    await waitFor(() => expect(getServerChatSaveStatus("chat-1")).toBe("saved"))
+    expect(result.current.showServerPersistenceHint).toBe(false)
+  })
+
+  it.each([
+    [
+      "a local chat while connected",
+      null,
+      null,
+      "Saved on this device only. This chat is not on your tldw server."
+    ],
+    [
+      "a server chat whose last write failed",
+      "chat-9",
+      "failed",
+      "Saved on this device. Your tldw server didn't confirm the latest changes."
+    ],
+    [
+      "a server chat whose last write was acknowledged",
+      "chat-9",
+      "saved",
+      "Saved on your tldw server and on this device."
+    ]
+  ] as const)(
+    "announces truthful persistence copy when leaving temporary mode for %s",
+    (_label, serverChatId, outcome, expected) => {
+      if (serverChatId && outcome) beginServerChatWrite(serverChatId)(outcome)
+      const notificationApi = {
+        error: vi.fn(),
+        warning: vi.fn(),
+        info: vi.fn(),
+        success: vi.fn()
+      }
+      const { result } = renderHook(() =>
+        usePlaygroundPersistence(
+          buildDeps({
+            notificationApi,
+            temporaryChat: true,
+            serverChatId,
+            history: []
+          })
+        )
+      )
+
+      act(() => result.current.handleToggleTemporaryChat(false))
+
+      expect(notificationApi.info).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expected })
+      )
+    }
+  )
 })

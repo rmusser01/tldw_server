@@ -120,7 +120,8 @@ import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import { createCharacterEmoteStream } from "@/hooks/chat/character-emote-stream"
 import {
   discardAbortedTurnIfRequested,
-  isAbortLikeError
+  isAbortLikeError,
+  markChatTurnStoppedByUser
 } from "@/hooks/chat/abort-turn-cleanup"
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
@@ -4800,7 +4801,7 @@ export const useChatActions = ({
     (temporaryChat && !actionSelectionState?.owner)
       ? null
       : historySelection
-  const regenerateLastMessage = createRegenerateLastMessage({
+  const regenerateLastMessageBase = createRegenerateLastMessage({
     notification,
     allowOrdinaryRetry: true,
     validateBeforeSubmitFn,
@@ -4825,6 +4826,54 @@ export const useChatActions = ({
     }
   })
 
+  // CS-04 (#3104): Retry on a kept interrupted reply in a selected-history
+  // chat asks the same question again from the point before it. The cut-off
+  // reply stays in the chat's history as an alternative branch. Regenerate in
+  // general is not supported on selected history yet (CM-01, #3106).
+  const retryInterruptedHistoryTurn =
+    async (): Promise<ChatSubmitResult | null> => {
+      const selection = selectedHistoryForActions
+      if (!selection) return null
+      const replyIndex = messages.length - 1
+      const reply = messages[replyIndex]
+      const replyInfo = reply?.generationInfo as
+        | Record<string, unknown>
+        | undefined
+      if (!reply?.isBot || !replyInfo?.interrupted) return null
+      const question = messages[replyIndex - 1]
+      if (!question || question.isBot || !question.id) return null
+      if (!validateBeforeSubmitFn())
+        return chatSubmitSkipped("Retry was not submitted")
+      const retained = (selection.recoveries ?? []).filter(
+        (entry) =>
+          entry.turn.input_id === question.id ||
+          entry.turn.admission?.input_message_id === question.id
+      )
+      const moved = await selection.choose({
+        kind: "before_message",
+        message_id: question.id
+      })
+      if (!moved) {
+        notification.error({
+          message: t("error", { defaultValue: "Error" }),
+          description: t(
+            "playground:errorRecovery.retryUnavailable",
+            "This chat changed before the reply could be retried. Send the question again."
+          )
+        })
+        return chatSubmitFailed("history_selection_changed")
+      }
+      for (const entry of retained) await selection.dismissRecovery(entry)
+      return toChatSubmitResult(
+        await onSubmit({
+          message: question.message,
+          image: question.images?.[0] ?? ""
+        })
+      )
+    }
+  const regenerateLastMessage = async () =>
+    (await retryInterruptedHistoryTurn()) ?? regenerateLastMessageBase()
+
   const stopStreamingRequest = React.useCallback(
     (options?: unknown) => {
       if (!abortController) {
@@ -4841,6 +4890,7 @@ export const useChatActions = ({
         discardCurrentTurnOnAbortSignalRef.current = abortController.signal
       }
 
+      markChatTurnStoppedByUser(abortController.signal)
       abortController.abort()
       setAbortController(null)
     },

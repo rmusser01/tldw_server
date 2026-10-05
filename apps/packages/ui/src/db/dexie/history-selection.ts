@@ -918,6 +918,8 @@ export const settleLocalAcceptedAssistant = (
 }
 
 
+const HISTORY_TURN_OUTCOMES = new Set<string>(["complete", "interrupted", "stopped"])
+
 /** Store a credential-free operation intent before dispatch, separate from all ancestry. */
 export const saveHistoryTurnRecovery = async (
   scope: HistoryBookmarkScope, view: HistoryViewSelectionV1, turn: HistoryTurnRecovery
@@ -930,6 +932,11 @@ export const saveHistoryTurnRecovery = async (
     persistence: turn.persistence ?? "client",
     input_id: turn.input_id, assistant_id: turn.assistant_id, created_at: turn.created_at,
     input_text: turn.input_text, input_images: turn.input_images, result_text: turn.result_text, state: turn.state,
+    ...(turn.outcome && HISTORY_TURN_OUTCOMES.has(turn.outcome) ? {outcome: turn.outcome} : {}),
+    ...(turn.interruption_reason ? {interruption_reason: turn.interruption_reason} : {}),
+    ...(turn.settled_message_id ? {settled_message_id: turn.settled_message_id} : {}),
+    ...(turn.model_name ? {model_name: turn.model_name} : {}),
+    ...(turn.model_id ? {model_id: turn.model_id} : {}),
     ...(turn.admission ? {admission: {
       version: turn.admission.version, owner_key: turn.admission.owner_key,
       conversation_id: turn.admission.conversation_id, input_message_id: turn.admission.input_message_id,
