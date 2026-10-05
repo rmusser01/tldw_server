@@ -5714,20 +5714,12 @@ export class TldwApiClientBase {
       scope?: ChatScope
       signal?: AbortSignal
       requestScope?: ServicePromptRequestScope
+      seedFirstMessage?: boolean
+      greetingStrategy?: "default" | "alternate_random" | "alternate_index"
+      alternateIndex?: number
     }
   ): Promise<ServerChatSummary> {
-    const scopeFields = requestScopeFields(options?.requestScope)
-    const res = await bgRequest<any>({
-      path: "/api/v1/chats/",
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...scopeFields.headers },
-      body: { ...payload, ...toChatScopeParams(options?.scope) },
-      abortSignal: options?.signal,
-      ...(scopeFields.servicePromptConfig
-        ? { servicePromptConfig: scopeFields.servicePromptConfig }
-        : {})
-    })
-    return this.normalizeChatSummary(res)
+    return chatRagMethods.createChat.call(this as unknown as TldwApiClientCore, payload, options)
   }
 
   async completeCharacterChatTurn(

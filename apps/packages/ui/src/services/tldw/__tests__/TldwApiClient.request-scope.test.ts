@@ -364,6 +364,22 @@ describe("TldwApiClient captured request scope", () => {
     })
   })
 
+  it.each(["public", "base", "domain"])("keeps %s greeting seed options out of JSON while retaining captured account, workspace and cancellation", async (implementation) => {
+    mocks.bgRequest.mockResolvedValueOnce({id: "greeting-chat", title: "Opening"})
+    const signal = new AbortController().signal
+    const body = {character_id: 42, provider: "openai", model: "configured-model", temperature: 0, top_p: 0}
+    const client = implementation === "public" ? new TldwApiClient() : new TldwApiClientBase()
+    const options = {requestScope, signal, scope: {type: "workspace" as const, workspaceId: "owned-workspace"},
+      seedFirstMessage: true, greetingStrategy: "alternate_index" as const, alternateIndex: 0}
+    if (implementation === "domain") await chatRagMethods.createChat.call(client, body, options)
+    else await client.createChat(body, options)
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/chats/?seed_first_message=true&greeting_strategy=alternate_index&alternate_index=0",
+      method: "POST", body: {...body, scope_type: "workspace", workspace_id: "owned-workspace"},
+      abortSignal: signal, ...expectedScopeFields
+    })
+  })
+
   it("reads fresh promotion messages with captured scope without joining cached or pending reads", async () => {
     const client = new TldwApiClient()
     mocks.bgRequest.mockResolvedValueOnce([{ id: "cached", sender: "user", content: "old" }])

@@ -51,6 +51,28 @@ describe("TldwApiClient chat mutations", () => {
     )
   })
 
+  it.each([
+    { options: {seedFirstMessage: true, greetingStrategy: "default" as const}, query: "?seed_first_message=true&greeting_strategy=default" },
+    { options: {seedFirstMessage: true, greetingStrategy: "alternate_index" as const, alternateIndex: 0}, query: "?seed_first_message=true&greeting_strategy=alternate_index&alternate_index=0" },
+    { options: {seedFirstMessage: false}, query: "?seed_first_message=false" }
+  ])("uses the existing greeting seed query contract: $query", async ({options, query}) => {
+    mocks.bgRequest.mockResolvedValue({id: "greeting-chat", character_id: 42})
+    const result = await new TldwApiClient().createChat({character_id: 42}, options)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/chats/" + query, method: "POST", body: {character_id: 42, scope_type: "global"}
+    }))
+    expect(result.id).toBe("greeting-chat")
+  })
+
+  it.each([-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid alternate index %s before transport", async (alternateIndex) => {
+      await expect(new TldwApiClient().createChat({character_id: 42}, {
+        seedFirstMessage: true, greetingStrategy: "alternate_index", alternateIndex
+      })).rejects.toThrow("alternateIndex")
+      expect(mocks.bgRequest).not.toHaveBeenCalled()
+    }
+  )
+
   it("retries updateChat once with the latest version after conflict", async () => {
     mocks.bgRequest.mockImplementation(
       async (request: { path?: string; method?: string; body?: unknown }) => {

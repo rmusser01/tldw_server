@@ -737,11 +737,23 @@ export const chatRagMethods = {
       scope?: ChatScope
       signal?: AbortSignal
       requestScope?: ServicePromptRequestScope
+      seedFirstMessage?: boolean
+      greetingStrategy?: "default" | "alternate_random" | "alternate_index"
+      alternateIndex?: number
     }
   ): Promise<ServerChatSummary> {
+    if (options?.alternateIndex != null &&
+      (!Number.isSafeInteger(options.alternateIndex) || options.alternateIndex < 0)) {
+      throw new RangeError("alternateIndex must be a nonnegative safe integer")
+    }
     const scopeFields = requestScopeFields(options?.requestScope)
+    const query = buildQuery({
+      seed_first_message: options?.seedFirstMessage,
+      greeting_strategy: options?.greetingStrategy,
+      alternate_index: options?.alternateIndex
+    })
     const res = await bgRequest<any>({
-      path: "/api/v1/chats/",
+      path: appendPathQuery("/api/v1/chats/", query),
       method: "POST",
       headers: { "Content-Type": "application/json", ...scopeFields.headers },
       body: { ...payload, ...toChatScopeParams(options?.scope) },
