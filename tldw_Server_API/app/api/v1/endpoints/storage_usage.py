@@ -113,9 +113,10 @@ async def get_usage_breakdown(
     if quota_used_mb is None:
         quota_used_mb = total_mb
 
-    # A None quota means unlimited (spec 2 section 5): leave the derived fields null too.
-    available_mb = max(0, quota_mb - quota_used_mb) if quota_mb is not None else None
-    usage_pct = round((quota_used_mb / quota_mb * 100) if quota_mb else 0, 1) if quota_mb is not None else None
+    # A None quota means unlimited (spec 2 section 5), and a quota of 0 is fully used.
+    view = quota_view(quota_used_mb, quota_mb)
+    available_mb = view["available_mb"]
+    usage_pct = view["usage_percentage"]
 
     return UsageBreakdownResponse(
         user_id=user.id,

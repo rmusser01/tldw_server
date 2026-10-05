@@ -379,6 +379,39 @@ class TestUsageEndpoint:
         assert payload["available_mb"] == 650.0
         assert payload["usage_percentage"] == 35.0
 
+    def test_usage_breakdown_route_zero_quota_is_fully_used(
+        self,
+        mock_storage_service,
+        mock_user,
+        monkeypatch,
+    ):
+        """A quota of 0 reads as 100% used with nothing available, like the usage route."""
+        mock_storage_service.get_user_generated_files_usage = AsyncMock(
+            return_value={
+                "total_bytes": 0,
+                "total_mb": 0.0,
+                "by_category": {},
+                "quota_mb": 0,
+                "quota_used_mb": 0.0,
+            }
+        )
+        mock_storage_service.get_user_folders = AsyncMock(return_value=[])
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            response = client.get("/api/v1/storage/usage/breakdown")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["quota_mb"] == 0
+        assert payload["available_mb"] == 0.0
+        assert payload["usage_percentage"] == 100.0
+
 
 class TestTrashEndpoint:
     """Tests for GET /storage/trash endpoint."""
