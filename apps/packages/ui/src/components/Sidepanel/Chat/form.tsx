@@ -4151,7 +4151,7 @@ export const SidepanelForm = ({
                                 <Tooltip
                                   title={t(
                                     "common:commandPalette.open",
-                                    "Open commands"
+                                    "Search commands"
                                   )}
                                 >
                                   <button
@@ -4160,7 +4160,7 @@ export const SidepanelForm = ({
                                     className={`${v5ActionButtonClass} font-mono text-sm text-primary`}
                                     aria-label={t(
                                       "common:commandPalette.open",
-                                      "Open commands"
+                                      "Search commands"
                                     )}
                                   >
                                     /

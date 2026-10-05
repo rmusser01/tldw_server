@@ -25,7 +25,14 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/hooks/useSetting", () => ({
-  useSetting: (...args: unknown[]) => useSettingMock(...args)
+  useSetting: (...args: unknown[]) => {
+    const result = useSettingMock(...args)
+    const [value, setValue] = React.useState(result[0])
+    const setting = args[0] as { key?: string }
+    return setting?.key === "tldw:sidebar:recentCollapsed"
+      ? [value, setValue]
+      : result
+  }
 }))
 
 vi.mock("@/hooks/useDebounce", () => ({
@@ -96,6 +103,7 @@ describe("ChatSidebar lazy history loading", () => {
     const setShortcutSelection = vi.fn()
     useSettingMock.mockImplementation((setting: { key?: string } | string) => {
       const key = typeof setting === "string" ? setting : setting?.key
+      if (key === "tldw:sidebar:recentCollapsed") return [true, vi.fn()]
       if (key === "tldw:sidebar:activeTab") {
         return [activeTab.value, setCurrentTab]
       }

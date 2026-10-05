@@ -466,16 +466,20 @@
     "switchModel": "Switch Model",
     "toggleSidebar": "Toggle Sidebar",
     "toggleSidebarDesc": "Show or hide the chat sidebar",
-    "placeholder": "Type a command or search...",
+    "placeholder": "Search commands, settings, and prompts…",
     "noResults": "No results found",
-    "title": "Command Palette",
+    "title": "Search commands",
     "navigate": "navigate",
     "select": "select",
     "toOpen": "to open",
     "categoryActions": "Actions",
     "categoryNavigation": "Navigation",
     "categorySettings": "Settings",
-    "categoryRecent": "Recent"
+    "categoryRecent": "Recent",
+    "searchCommands": "Search commands",
+    "open": "Search commands",
+    "searchHistory": "Find conversations",
+    "searchHistoryDesc": "Focus conversation history search"
   },
   "featureHints": {
     "knowledge": {
@@ -551,7 +555,10 @@
         "system": "System",
         "tool": "Tool"
       }
-    }
+    },
+    "findConversations": "Find conversations",
+    "searchScope": "Search {{source}} history.",
+    "searchFromFolders": "Typing searches Server history."
   },
   "knowledgeSidebar": {
     "title": "Knowledge history"

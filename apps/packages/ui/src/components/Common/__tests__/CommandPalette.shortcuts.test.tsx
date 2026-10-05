@@ -276,7 +276,7 @@ describe("CommandPalette shortcut hints", () => {
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
 
-    const searchInput = screen.getByPlaceholderText(/Type a command or search/i)
+    const searchInput = screen.getByPlaceholderText(/Search commands, settings, and prompts/i)
     expect(searchInput.className).toContain("focus-visible:ring-2")
     expect(searchInput.className).toContain("focus-visible:ring-focus")
     expect(searchInput.className).toContain("focus-visible:ring-offset-2")

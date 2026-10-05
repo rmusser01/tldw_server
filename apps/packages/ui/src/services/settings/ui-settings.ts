@@ -412,6 +412,13 @@ export const SIDEBAR_SERVER_CHAT_FILTER_SETTING = defineSetting(
   }
 )
 
+export const SIDEBAR_RECENT_COLLAPSED_SETTING = defineSetting(
+  "tldw:sidebar:recentCollapsed",
+  false,
+  (value) => coerceBoolean(value, false),
+  { area: "local" }
+)
+
 export const SIDEBAR_SHORTCUTS_COLLAPSED_SETTING = defineSetting(
   "tldw:sidebar:shortcutsCollapsed",
   false,

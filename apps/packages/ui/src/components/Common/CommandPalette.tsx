@@ -494,11 +494,11 @@ export function CommandPalette({
               id: "action-search-history",
               label: t(
                 "common:commandPalette.searchHistory",
-                "Search chat history"
+                "Find conversations"
               ),
               description: t(
                 "common:commandPalette.searchHistoryDesc",
-                "Focus the chat search input"
+                "Focus conversation history search"
               ),
               icon: <Search className="size-4" />,
               action: () => {
@@ -799,7 +799,7 @@ export function CommandPalette({
         className="fixed left-1/2 top-[15%] sm:top-[20%] z-50 w-[calc(100%-2rem)] sm:w-full max-w-lg -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-surface shadow-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={t("common:commandPalette.title", "Command Palette")}
+        aria-label={t("common:commandPalette.title", "Search commands")}
         onKeyDown={handleKeyDown}
       >
         {/* Search input */}
@@ -811,7 +811,7 @@ export function CommandPalette({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label={t("common:commandPalette.searchCommands", "Search commands")}
-            placeholder={t("common:commandPalette.placeholder", "Type a command or search...")}
+            placeholder={t("common:commandPalette.placeholder", "Search commands, settings, and prompts…")}
             className={cn(
               "flex-1 rounded-md bg-transparent text-base text-text placeholder:text-text-subtle",
               focusRingClasses

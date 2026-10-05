@@ -134,7 +134,7 @@ describe("ChatHeader shortcut toggle", () => {
       screen.getByRole("button", { name: "Collapse sidebar" }),
       screen.getByRole("button", { name: "Companion Home" }),
       screen.getByRole("button", { name: "Show shortcuts" }),
-      screen.getByRole("button", { name: "Search - Open command palette" }),
+      screen.getByRole("button", { name: "Search commands - Open command palette" }),
       screen.getByRole("button", { name: "New saved chat" }),
       screen.getByRole("button", { name: "Temporary chat (not saved)" }),
       screen.getByRole("button", { name: "Character chat" }),
@@ -156,11 +156,11 @@ describe("ChatHeader shortcut toggle", () => {
     render(<ChatHeader {...props} />)
 
     const trigger = screen.getByRole("button", {
-      name: "Search - Open command palette"
+      name: "Search commands - Open command palette"
     })
 
-    expect(trigger).toHaveAttribute("title", "Search")
-    expect(trigger).toHaveTextContent("Search")
+    expect(trigger).toHaveAttribute("title", "Search commands")
+    expect(trigger).toHaveTextContent("Search commands")
     expect(trigger).toHaveTextContent("Ctrl+K")
 
     fireEvent.click(trigger)

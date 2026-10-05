@@ -123,7 +123,7 @@ export function ChatHeader({
   const commandPaletteLabel = toText(
     t("common:shortcuts.openCommandPalette", "Open command palette")
   )
-  const commandPaletteTitle = toText(t("common:search", "Search"))
+  const commandPaletteTitle = toText(t("common:commandPalette.searchCommands", "Search commands"))
   const commandPaletteAccessibleLabel =
     `${commandPaletteTitle} - ${commandPaletteLabel}`
   const showSavedChatAction = Boolean(onStartSavedChat)

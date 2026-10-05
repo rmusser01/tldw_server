@@ -849,13 +849,13 @@
     "message": "Show or hide the chat sidebar"
   },
   "commandPalette_placeholder": {
-    "message": "Type a command or search..."
+    "message": "Search commands, settings, and prompts…"
   },
   "commandPalette_noResults": {
     "message": "No results found"
   },
   "commandPalette_title": {
-    "message": "Command Palette"
+    "message": "Search commands"
   },
   "commandPalette_navigate": {
     "message": "navigate"
@@ -1807,5 +1807,26 @@
   },
   "chatSidebar_local_roles_tool": {
     "message": "Tool"
+  },
+  "chatSidebar_findConversations": {
+    "message": "Find conversations"
+  },
+  "chatSidebar_searchScope": {
+    "message": "Search {{source}} history."
+  },
+  "chatSidebar_searchFromFolders": {
+    "message": "Typing searches Server history."
+  },
+  "commandPalette_searchCommands": {
+    "message": "Search commands"
+  },
+  "commandPalette_open": {
+    "message": "Search commands"
+  },
+  "commandPalette_searchHistory": {
+    "message": "Find conversations"
+  },
+  "commandPalette_searchHistoryDesc": {
+    "message": "Focus conversation history search"
   }
 }
