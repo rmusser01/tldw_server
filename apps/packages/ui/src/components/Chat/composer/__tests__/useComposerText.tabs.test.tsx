@@ -30,13 +30,13 @@ const makeTabStorage = (copy?: Storage): Storage => {
     clear: () => data.clear()
   }
 }
-const mount = (tab: Storage, strictMode = false) => {
+const mount = (tab: Storage, strictMode = false, draftKey = "tldw:playgroundChatDraft") => {
   vi.stubGlobal("sessionStorage", tab)
-  return renderHook(() => useComposerText({
-    draftKey: "tldw:playgroundChatDraft",
+  return renderHook(({ draftKey }) => useComposerText({
+    draftKey,
     tabScopedDraft: true,
     textareaRef: React.createRef<HTMLTextAreaElement>()
-  }), { wrapper: strictMode ? React.StrictMode : undefined })
+  }), { initialProps: { draftKey }, wrapper: strictMode ? React.StrictMode : undefined })
 }
 const settle = async () => {
   await act(async () => { await vi.dynamicImportSettled() })
@@ -50,6 +50,36 @@ const enter = async (view: ReturnType<typeof mount>, text: string) => {
 describe("Playground drafts in distinct native tab storage areas", () => {
   beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); authority.user = "alice" })
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers() })
+
+  it("retains the next draft when an older submitted attempt finishes", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab)
+    await settle(); await enter(view, "SUBMITTED")
+    const clearAfterSend = view.result.current.clearDraft
+    let attempt!: number
+    act(() => { attempt = view.result.current.beginPromptAssistReset() })
+    await settle()
+    act(() => view.result.current.setMessageValue("NEXT DRAFT"))
+    act(() => { view.result.current.markPromptAssistAttemptSaved(attempt); clearAfterSend(attempt) })
+    view.unmount()
+    const restored = mount(tab)
+    await settle()
+    expect(restored.result.current.form.values.message).toBe("NEXT DRAFT")
+  })
+
+  it("does not let an old clear callback remove its retained source after a key change", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab, false, "source-draft")
+    await settle(); await enter(view, "RETAINED SOURCE")
+    const clearSource = view.result.current.clearDraft
+    view.rerender({ draftKey: "destination-draft" })
+    await settle()
+    act(() => clearSource())
+    view.unmount()
+    const source = mount(tab, false, "source-draft")
+    await settle()
+    expect(source.result.current.form.values.message).toBe("RETAINED SOURCE")
+  })
 
   it.each(["", "PREVIOUSLY SAVED"])("preserves an immediate route departure after editing %j", async previous => {
     const tab = makeTabStorage()

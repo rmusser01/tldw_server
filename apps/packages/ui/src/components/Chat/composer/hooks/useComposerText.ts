@@ -79,8 +79,8 @@ export interface UseComposerTextResult {
   draftSaved: boolean
   /** Whether this owner's saved draft has finished restoring. */
   draftReady: boolean
-  /** Imperative draft clear (call after a successful send). */
-  clearDraft: () => void
+  /** Clear current persistence; pass the acknowledged attempt for delayed sends. */
+  clearDraft: (attemptId?: number) => void
   /** Computed max height actually applied to the textarea. Surfaced for tests. */
   textareaMaxHeight: number
 }
@@ -175,7 +175,7 @@ export function useComposerText(
     restoreWithMetadata?.("", undefined)
   })
 
-  const { draftSaved, draftReady, clearDraft } = useDraftPersistence({
+  const { draftSaved, draftReady, clearDraft: clearPersistedDraft } = useDraftPersistence({
     storageKey: `${draftKey}:owner:${ownerKey ?? "unresolved"}`,
     tabScoped: tabScopedDraft,
     legacyStorageKey: draftKey,
@@ -186,6 +186,10 @@ export function useComposerText(
     setValueWithMetadata: restoreMessage,
     enabled: draftEnabled && ownerKey !== null
   })
+  const clearDraft = React.useCallback((attemptId?: number) => {
+    if (attemptId !== undefined && (attemptId !== nextPromptAssistAttemptIdRef.current || previousMessageRef.current !== "")) return
+    clearPersistedDraft()
+  }, [clearPersistedDraft])
 
   const textareaMaxHeight =
     explicitMaxHeight ??

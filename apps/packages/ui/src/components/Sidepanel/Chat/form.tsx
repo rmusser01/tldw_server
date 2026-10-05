@@ -1987,8 +1987,8 @@ export const SidepanelForm = ({
             isChatSubmitSuccess(normalizeChatSubmitResult(result))
           ) {
             markPromptAssistAttemptSaved(promptAssistAttemptId)
+            clearDraft(promptAssistAttemptId)
           }
-          clearDraft()
           clearSelectedDocuments()
           setContextFiles([])
           setKnowledgeMentionActive(false)

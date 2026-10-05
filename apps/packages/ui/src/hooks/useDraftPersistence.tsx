@@ -152,6 +152,8 @@ export const useDraftPersistence = ({
     : durableDraftBucket, [tabScoped])
   const [draftSaved, setDraftSaved] = React.useState(false)
   const identity = React.useMemo(() => ({ storageKey, enabled, isCurrent }), [storageKey, enabled, isCurrent])
+  const currentIdentityRef = React.useRef(identity)
+  React.useLayoutEffect(() => { currentIdentityRef.current = identity }, [identity])
   const [hydrated, setHydrated] = React.useState<object | null>(null)
   const draftSavedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -359,7 +361,7 @@ export const useDraftPersistence = ({
   }, [])
 
   const clearDraft = React.useCallback(() => {
-    if (isCurrent && !isCurrent()) return
+    if (currentIdentityRef.current !== identity || (isCurrent && !isCurrent())) return
     pendingPersistRef.current = null
     if (persistTimeoutRef.current) {
       clearTimeout(persistTimeoutRef.current)
@@ -369,7 +371,7 @@ export const useDraftPersistence = ({
     clearLegacyDraft(storageKey)
     lastPersistedSignatureRef.current = null
     setDraftSaved(false)
-  }, [storageKey, isCurrent, draftBucket])
+  }, [storageKey, isCurrent, draftBucket, identity])
 
   return {
     draftSaved,
