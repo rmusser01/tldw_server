@@ -1,3 +1,4 @@
+import { getEligibleQueueItems } from "./queue-items"
 import React from "react"
 import {
   AutoComplete,
@@ -87,7 +88,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
 
   const detectedTypes = React.useMemo(() => {
     const types = new Set<DetectedMediaType>()
-    for (const item of queueItems) {
+    for (const item of getEligibleQueueItems(queueItems)) {
       types.add(item.detectedType)
     }
     return types
@@ -628,11 +629,12 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
 
   return (
     <div className="space-y-5 py-3">
+      <p className="text-sm text-text-muted">{qi("configureEligibleCount", "{{count}} eligible items in this run", { count: getEligibleQueueItems(queueItems).length })}</p>
       <PresetSelector
         qi={qi}
         value={selectedPreset}
         onChange={setPreset}
-        queueItems={queueItems}
+        queueItems={getEligibleQueueItems(queueItems)}
       />
 
       <div className="rounded-md border border-border bg-surface p-4">
@@ -644,7 +646,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
             <Typography.Text type="secondary" className="text-xs text-text-subtle">
               {qi(
                 "defaultsForNewItems",
-                "Defaults apply to items added after this point."
+                "Settings apply to all eligible items in this run. Saved preset defaults are managed in Quick Ingest settings for future runs."
               )}
             </Typography.Text>
           </div>

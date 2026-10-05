@@ -918,6 +918,19 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
   // -------------------------------------------------------------------------
   // Step 1 -> Step 2: Advance to Configure
   // -------------------------------------------------------------------------
+  it("keeps eligible counts aligned and explains every excluded source in Review", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} initialState={{ selectedPreset: "quick", customBasePreset: "quick", presetConfig: resolvePresetMap().quick }} />)
+    await user.type(screen.getByPlaceholderText(/https:\/\/example\.com/i), "https://example.com/a\nhttps://example.com/a\ninvalid")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
+    expect(screen.getByText("1 eligible items in this run")).toBeInTheDocument()
+    expect(screen.getByText(/Settings apply to all eligible items in this run/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Next" }))
+    expect(screen.getByText(/Already queued — excluded/)).toBeInTheDocument()
+    expect(screen.getByText(/Invalid — excluded/)).toBeInTheDocument()
+  })
+
   it("Step 1 -> Step 2 — clicking configure advances to preset selector", async () => {
     const user = userEvent.setup()
     render(<WizardTestHarness onClose={onClose} />)

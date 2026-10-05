@@ -166,3 +166,14 @@ describe("quick ingest session store", () => {
     expect(store.getState().session?.tracking).toBeUndefined()
   })
 })
+
+
+it("keeps explicit duplicate repetition after owner-fenced persistence", () => {
+  sessionStorage.clear()
+  const store = createQuickIngestSessionStore()
+  store.getState().setAuthority("verified-test-owner")
+  store.getState().createDraftSession({ queueItems: [{ id: "repeat", kind: "url", url: "https://example.com", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true }, processAgain: true }] })
+  const restored = createQuickIngestSessionStore()
+  restored.getState().setAuthority("verified-test-owner")
+  expect(restored.getState().session?.queueItems[0].processAgain).toBe(true)
+})

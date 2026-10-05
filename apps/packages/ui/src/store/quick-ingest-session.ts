@@ -63,6 +63,7 @@ export type PersistedWizardQueueItem = {
   mimeType?: string
   validation: QueueItemValidation
   playlist?: PlaylistQueueMetadata
+  processAgain?: boolean
   conferenceOverride?: ConferenceItemMetadataOverride
   fileStub?: {
     key?: string
@@ -382,6 +383,7 @@ const sanitizeQueueItems = (
             ? item.type
             : undefined,
       validation: item?.validation || { valid: true },
+      processAgain: item?.processAgain === true,
       playlist: item?.playlist,
       conferenceOverride: item?.conferenceOverride,
     }

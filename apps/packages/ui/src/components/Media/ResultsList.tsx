@@ -123,7 +123,7 @@ export function ResultsList({
   const handleIngestClick = useCallback(() => {
     const trimmed = ingestUrl.trim()
     if (trimmed && onOpenQuickIngest) {
-      onOpenQuickIngest({ source: trimmed })
+      onOpenQuickIngest({ source: "manual", url: trimmed })
     } else if (onOpenQuickIngest) {
       onOpenQuickIngest()
     }

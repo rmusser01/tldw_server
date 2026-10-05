@@ -17,7 +17,6 @@ import type {
   ConferenceDuplicatePolicy,
   DetectedMediaType,
   WizardQueueItem,
-  QueueItemValidation,
 } from "./types"
 import { useIngestWizard } from "./IngestWizardContext"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
@@ -31,8 +30,11 @@ import {
   QUICK_INGEST_MAX_FILE_SIZE_LABEL,
   QUICK_INGEST_MAX_FILE_SIZE,
 } from "./constants"
-import { normalizeUrlForDedupe } from "@/entries/shared/ingest-payloads"
-import { isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
+import { detectTypeFromUrl, createUrlQueueItems, getEligibleQueueItems, getQueueItemExclusionReason, isValidQueueUrl, validateQueueItem } from "./queue-items"
+export { detectTypeFromUrl } from "./queue-items"
+import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
+import { buildQuickIngestOpenDetailFromUrl, isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -101,30 +103,6 @@ const detectTypeFromFile = (file: File): DetectedMediaType => {
     : detectTypeFromMime(file.type)
 }
 
-export const detectTypeFromUrl = (url: string): DetectedMediaType => {
-  try {
-    const parsed = new URL(url)
-    const pathname = parsed.pathname.toLowerCase()
-    const hostname = parsed.hostname.toLowerCase()
-    // Check common file extensions in URL path
-    const ext = pathname.split(".").pop() || ""
-    if (["mp3", "wav", "ogg", "flac", "m4a"].includes(ext)) return "audio"
-    if (["mp4", "mkv", "avi", "mov", "webm"].includes(ext)) return "video"
-    if (ext === "pdf") return "pdf"
-    if (["epub", "mobi"].includes(ext)) return "ebook"
-    if (["docx", "txt", "rtf", "md", "markdown", "xml", "json"].includes(ext)) return "document"
-    // YouTube and common video platforms
-    if (hostnameMatches(hostname, "youtube.com") || hostnameMatches(hostname, "youtu.be")) return "video"
-    if (hostnameMatches(hostname, "vimeo.com")) return "video"
-    if (hostnameMatches(hostname, "soundcloud.com")) return "audio"
-    if (hostnameMatches(hostname, "spotify.com")) return "audio"
-    // Default for URLs is web
-    return "web"
-  } catch {
-    return "web"
-  }
-}
-
 export const detectPlaylistPreflightCandidate = (url: string): boolean => {
   try {
     const parsed = new URL(url)
@@ -142,76 +120,12 @@ export const detectPlaylistPreflightCandidate = (url: string): boolean => {
 const isDuplicatePreflightStatus = (status: string | undefined): boolean =>
   status === "duplicate_existing" || status === "duplicate_in_batch"
 
-const isValidUrl = (raw: string): boolean => {
-  const trimmed = raw.trim()
-  if (!trimmed) return false
-  try {
-    const parsed = new URL(trimmed)
-    return parsed.protocol === "http:" || parsed.protocol === "https:"
-  } catch {
-    return false
-  }
-}
-
 const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return "0 B"
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
-}
-
-const validateQueueItem = (
-  item: WizardQueueItem,
-  existingItems: WizardQueueItem[]
-): QueueItemValidation => {
-  const errors: string[] = []
-  const warnings: string[] = []
-
-  if (item.url) {
-    if (!isValidUrl(item.url)) {
-      errors.push("Invalid URL format")
-    }
-    // Check for duplicates
-    const dedupeKey = normalizeUrlForDedupe(item.url)
-    const isDuplicate = existingItems.some(
-      (other) =>
-        other.id !== item.id &&
-        other.url &&
-        normalizeUrlForDedupe(other.url) === dedupeKey
-    )
-    if (isDuplicate) {
-      warnings.push("Already queued")
-    }
-  }
-
-  if (item.file) {
-    if (item.fileSize > QUICK_INGEST_MAX_FILE_SIZE) {
-      errors.push(`File exceeds ${QUICK_INGEST_MAX_FILE_SIZE_LABEL} quick-ingest limit`)
-    }
-    // Check for duplicate files
-    const isDuplicate = existingItems.some(
-      (other) =>
-        other.id !== item.id &&
-        other.fileName === item.fileName &&
-        other.fileSize === item.fileSize
-    )
-    if (isDuplicate) {
-      warnings.push("Already queued")
-    }
-  }
-
-  if (item.detectedType === "unknown") {
-    errors.push(
-      "Unsupported file type. Quick Ingest supports PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, and video."
-    )
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors: errors.length > 0 ? errors : undefined,
-    warnings: warnings.length > 0 ? warnings : undefined,
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +207,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           mimeType: file.type || undefined,
           validation: { valid: true },
         }
-        item.validation = validateQueueItem(item, [...queueItems, ...newItems])
+        item.validation = validateQueueItem(item)
         newItems.push(item)
       }
       setQueueItems([...queueItems, ...newItems])
@@ -303,27 +217,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
 
   // Add URLs from the multi-line input
   const handleAddUrls = useCallback(() => {
-    const lines = urlInput
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-
-    if (lines.length === 0) return
-
-    const newItems: WizardQueueItem[] = []
-    for (const url of lines) {
-      const detectedType = detectTypeFromUrl(url)
-      const item: WizardQueueItem = {
-        id: crypto.randomUUID(),
-        url,
-        detectedType,
-        icon: ICON_NAME_MAP[detectedType],
-        fileSize: 0,
-        validation: { valid: true },
-      }
-      item.validation = validateQueueItem(item, [...queueItems, ...newItems])
-      newItems.push(item)
-    }
+    const newItems = createUrlQueueItems(urlInput)
+    if (!newItems.length) return
 
     setQueueItems([...queueItems, ...newItems])
     setUrlInput("")
@@ -350,7 +245,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       mimeType: file.type || undefined,
       validation: { valid: true },
     }
-    item.validation = validateQueueItem(item, queueItems)
+    item.validation = validateQueueItem(item)
     setQueueItems([...queueItems, item])
     setPastedTextInput("")
   }, [pastedTextInput, queueItems, setQueueItems])
@@ -449,7 +344,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             : {})
         }
       }
-      item.validation = validateQueueItem(item, [...queueItems, ...newItems])
+      item.validation = validateQueueItem(item)
       newItems.push(item)
     }
     if (newItems.length === 0) return
@@ -548,16 +443,58 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     setQueueItems([])
   }, [setQueueItems])
 
+  const captureMounted = React.useRef(true)
+  const queueRef = React.useRef(queueItems)
+  queueRef.current = queueItems
+  React.useEffect(() => {
+    captureMounted.current = true
+    return () => {
+      captureMounted.current = false
+    }
+  }, [])
+  const [captureError, setCaptureError] = useState<string | null>(null)
+  const [capturing, setCapturing] = useState(false)
+  const handleCaptureTab = async () => {
+    if (!isExtensionRuntime() || capturing) return
+    const captureOwner = useQuickIngestSessionStore.getState().authorityKey
+    const captureSession = useQuickIngestSessionStore.getState().session?.id
+    const isCurrentCapture = () =>
+      captureMounted.current &&
+      captureOwner === useQuickIngestSessionStore.getState().authorityKey &&
+      captureSession === useQuickIngestSessionStore.getState().session?.id
+    setCapturing(true)
+    setCaptureError(null)
+    try {
+      const tabsApi =
+        (globalThis as typeof globalThis & { browser?: typeof chrome }).browser
+          ?.tabs || globalThis.chrome?.tabs
+      const tabs = await tabsApi?.query({ active: true, currentWindow: true })
+      if (!isCurrentCapture()) return
+      const url = tabs?.[0]?.url?.trim() || ""
+      if (!isValidQueueUrl(url)) throw new Error("restricted")
+      const playlist = buildQuickIngestOpenDetailFromUrl(url)
+      setUrlInput(url)
+      if (playlist) setPlaylistPreflightSeed(playlist)
+      else setQueueItems([...queueRef.current, ...createUrlQueueItems(url)])
+    } catch {
+      if (isCurrentCapture())
+        setCaptureError(
+          qi(
+            "captureRestricted",
+            "This tab cannot be captured. Open an HTTP or HTTPS page, or paste its URL here."
+          )
+        )
+    } finally {
+      if (isCurrentCapture()) setCapturing(false)
+    }
+  }
   const hasItems = queueItems.length > 0
   const selectedItems = useMemo(
-    () => queueItems.filter((item) => item.conferenceOverride?.selected !== false),
+    () => getEligibleQueueItems(queueItems),
     [queueItems]
   )
-  const validItemCount = useMemo(
-    () => selectedItems.filter((item) => item.validation.valid).length,
-    [selectedItems]
-  )
-  const invalidItemCount = selectedItems.length - validItemCount
+  const validItemCount = selectedItems.length
+  const invalidItemCount = queueItems.filter(item => !item.validation.valid).length
   const canProceed = validItemCount > 0
   const canStartProcessing = canProceed && isOnlineForIngest && !isCheckingConnection
 
@@ -641,6 +578,15 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
               { maxSize: QUICK_INGEST_MAX_FILE_SIZE_LABEL }
             )}
           />
+        )}
+
+        {isExtensionRuntime() && (
+          <Button onClick={handleCaptureTab} loading={capturing} disabled={capturing}>
+            {qi("captureCurrentTab", "Capture current tab")}
+          </Button>
+        )}
+        {captureError && (
+          <div role="alert" className="text-sm text-danger">{captureError}</div>
         )}
 
         {/* Multi-line URL paste area */}
@@ -775,7 +721,9 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           </div>
 
           <div className="mt-2 space-y-1.5">
-            {queueItems.map((item) => (
+            {queueItems.map((item) => {
+              const exclusion = getQueueItemExclusionReason(item, queueItems)
+              return (
               <div
                 key={item.id}
                 className={`flex items-center gap-3 rounded-md border px-3 py-2 ${
@@ -841,7 +789,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
                   {/* Validation errors/warnings */}
                   {item.validation.errors?.map((err, i) => (
                     <div key={`e-${i}`} className="text-[11px] text-danger mt-0.5">
-                      {err}
+                      {err === "Invalid URL format" ? qi("invalidUrl", "Invalid URL format. Enter one HTTP(S) URL per line. Separate pasted URLs with a comma and a space.") : err}
                     </div>
                   ))}
                   {item.validation.warnings?.map((warn, i) => (
@@ -851,6 +799,22 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
                   ))}
                 </div>
 
+                {exclusion && (
+                  <span className="text-xs text-text-muted">
+                    {exclusion === "duplicate"
+                      ? qi("queueDuplicateExcluded", "Already queued — excluded")
+                      : exclusion === "unselected"
+                        ? qi("queueUnselected", "Not selected — excluded")
+                        : qi("queueInvalidExcluded", "Invalid — excluded")}
+                  </span>
+                )}
+                {exclusion === "duplicate" && (
+                  <Button size="small" onClick={() => setQueueItems(
+                    queueItems.map(current => current.id === item.id ? { ...current, processAgain: true } : current)
+                  )}>
+                    {qi("processAgain", "Process again")}
+                  </Button>
+                )}
                 {/* Remove button */}
                 <button
                   type="button"
@@ -861,7 +825,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
                   <X className="h-4 w-4" />
                 </button>
               </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

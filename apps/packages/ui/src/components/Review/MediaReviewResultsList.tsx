@@ -34,9 +34,11 @@ export const MediaReviewResultsList: React.FC<MediaReviewResultsListProps> = ({ 
     persistFirstIngestDismissed()
   }, [])
 
+  const [ingestUrl, setIngestUrl] = React.useState("")
+
   const handleRequestQuickIngestOpen = React.useCallback(() => {
-    requestQuickIngestOpen()
-  }, [])
+    requestQuickIngestOpen(ingestUrl.trim() ? { source: "manual", url: ingestUrl.trim() } : undefined)
+  }, [ingestUrl])
 
   const handleShowTutorialAgain = React.useCallback(() => {
     setTutorialDismissed(false)
@@ -208,6 +210,8 @@ export const MediaReviewResultsList: React.FC<MediaReviewResultsListProps> = ({ 
           </p>
           <div className="mx-auto mt-4 max-w-md">
             <Input
+              value={ingestUrl}
+              onChange={event => setIngestUrl(event.target.value)}
               placeholder="https://www.youtube.com/watch?v=..."
               className="text-center"
               onPressEnter={handleRequestQuickIngestOpen}

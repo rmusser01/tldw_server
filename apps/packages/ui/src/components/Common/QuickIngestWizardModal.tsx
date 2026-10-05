@@ -1,3 +1,4 @@
+import { getEligibleQueueItems } from "./QuickIngest/queue-items"
 import { createReviewDraftsFromResults } from "./hooks/useIngestResults"
 import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -336,6 +337,7 @@ const buildPersistedQueueItems = (
     validation: item.validation,
     playlist: item.playlist,
     conferenceOverride: item.conferenceOverride,
+    processAgain: item.processAgain,
     fileStub:
       item.file || item.fileStub
         ? {
@@ -464,6 +466,7 @@ const hydrateQueueItems = (
         validation: item.validation,
         playlist: item.playlist,
         conferenceOverride: item.conferenceOverride,
+        processAgain: item.processAgain,
       }
     }
 
@@ -486,6 +489,7 @@ const hydrateQueueItems = (
       },
       playlist: item.playlist,
       conferenceOverride: item.conferenceOverride,
+      processAgain: item.processAgain,
       fileStub: item.fileStub || {
         key: item.key,
         lastModified: item.lastModified,
@@ -639,7 +643,7 @@ const buildSessionPatchFromWizardState = (
     badge: {
       queueCount:
         lifecycle === "draft"
-          ? queueItems.filter((item) => item.validation.valid).length
+          ? getEligibleQueueItems(state.queueItems).length
           : 0,
       hasRecentFailure:
         lifecycle === "partial_failure" || lifecycle === "interrupted",
@@ -824,9 +828,7 @@ const buildQuickIngestPayload = async (
     typeDefaults: TypeDefaults
   }
 ): Promise<QuickIngestRequestPayload> => {
-  const validItems = items.filter(
-    (item) => item.validation.valid && item.conferenceOverride?.selected !== false
-  )
+  const validItems = getEligibleQueueItems(items)
   const entries = validItems
     .filter((item): item is WizardQueueItem & { url: string } => Boolean(item.url))
     .map((item) => ({
@@ -924,9 +926,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const cancelRequestedRef = useRef(false)
   const validQueueItems = useMemo(
     () =>
-      queueItems.filter(
-        (item) => item.validation.valid && item.conferenceOverride?.selected !== false
-      ),
+      getEligibleQueueItems(queueItems),
     [queueItems]
   )
   const trackedQueueItems = useMemo(
@@ -1243,9 +1243,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   const finalizeFailure = useCallback(
     (message: string, outcome: "failed" | "cancelled") => {
-      const trackedEligibleItems = trackedQueueItems.filter(
-        (item) => item.validation.valid && item.conferenceOverride?.selected !== false
-      )
+      const trackedEligibleItems = getEligibleQueueItems(trackedQueueItems)
       const fallbackItems =
         trackedEligibleItems.length > 0 ? trackedEligibleItems : validQueueItems
       const existingResultIds = new Set(

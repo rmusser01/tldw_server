@@ -54,6 +54,7 @@ function TestHarness() {
     <div>
       <span data-testid="currentStep">{state.currentStep}</span>
       <span data-testid="highestStep">{state.highestStep}</span>
+      <span data-testid="overwrite">{String(state.presetConfig.common.overwrite_existing)}</span>
       <span data-testid="preset">{state.selectedPreset}</span>
       <span data-testid="queueLen">{state.queueItems.length}</span>
       <span data-testid="status">{state.processingState.status}</span>
@@ -758,5 +759,17 @@ describe("IngestWizardContext", () => {
 
       spy.mockRestore()
     })
+  })
+})
+
+
+describe("replacement permission", () => {
+  it.each([false, true])("preserves explicit overwrite %s across presets", async (overwrite) => {
+    renderWithInitialState({ presetConfig: { ...resolvePresetMap().standard, common: { ...resolvePresetMap().standard.common, overwrite_existing: overwrite } } })
+    await userEvent.click(screen.getByText("setDeep"))
+    expect(screen.getByTestId("overwrite").textContent).toBe(String(overwrite))
+  })
+  it("Deep does not grant replacement permission", () => {
+    expect(resolvePresetMap().deep.common.overwrite_existing).toBe(false)
   })
 })

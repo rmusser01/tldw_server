@@ -1,4 +1,28 @@
 {
+  "quickIngest_invalidUrl": {
+    "message": "Invalid URL format. Enter one HTTP(S) URL per line. Separate pasted URLs with a comma and a space."
+  },
+  "quickIngest_configureEligibleCount": {
+    "message": "{{count}} eligible items in this run"
+  },
+  "quickIngest_queueInvalidExcluded": {
+    "message": "Invalid — excluded"
+  },
+  "quickIngest_queueUnselected": {
+    "message": "Not selected — excluded"
+  },
+  "quickIngest_queueDuplicateExcluded": {
+    "message": "Already queued — excluded"
+  },
+  "quickIngest_processAgain": {
+    "message": "Process again"
+  },
+  "quickIngest_captureRestricted": {
+    "message": "This tab cannot be captured. Open an HTTP or HTTPS page, or paste its URL here."
+  },
+  "quickIngest_captureCurrentTab": {
+    "message": "Capture current tab"
+  },
   "newChat": {
     "message": "New Chat"
   },
@@ -678,7 +702,7 @@
     "message": "Language (e.g., en)"
   },
   "quickIngest_audioDiarizationHelp": {
-    "message": "Turn on to separate speakers in transcripts; applies to new audio items."
+    "message": "Separate speakers in audio transcripts for this run."
   },
   "quickIngest_documentOptions": {
     "message": "Document options"
@@ -687,7 +711,7 @@
     "message": "Video options"
   },
   "quickIngest_captionsHelp": {
-    "message": "Include timestamps/captions for new video items; helpful for search and summaries."
+    "message": "Include available timestamps/captions for video items in this run."
   },
   "quickIngest_cancel": {
     "message": "Cancel"
@@ -876,7 +900,7 @@
     "message": "URLs to ingest"
   },
   "quickIngest_urlsPlaceholder": {
-    "message": "https://example.com, https://..."
+    "message": "https://example.com/article\nhttps://youtube.com/watch?v=..."
   },
   "quickIngest_urlsInputAria": {
     "message": "Paste URLs input"
@@ -2802,10 +2826,10 @@
     "message": "Characters"
   },
   "quickIngest_defaultsForNewItems": {
-    "message": "Defaults apply only to items added after you change them."
+    "message": "Settings apply to all eligible items in this run. Saved preset defaults are managed in Quick Ingest settings for future runs."
   },
   "quickIngest_ocrHelp": {
-    "message": "OCR helps extract text from scanned PDFs or images; applies to new document/PDF items."
+    "message": "Extract text from scanned PDFs or images for this run."
   },
   "quickIngest_localFilesWarning": {
     "message": "Local files are kept only while this dialog is open. Complete your ingest run before closing, or reattach files when you return."

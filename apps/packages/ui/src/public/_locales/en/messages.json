@@ -1,4 +1,31 @@
 {
+  "quickIngest_invalidUrl": {
+    "message": "Invalid URL format. Enter one HTTP(S) URL per line. Separate pasted URLs with a comma and a space."
+  },
+  "quickIngest_configureEligibleCount": {
+    "message": "{{count}} eligible items in this run"
+  },
+  "quickIngest_queueInvalidExcluded": {
+    "message": "Invalid — excluded"
+  },
+  "quickIngest_queueUnselected": {
+    "message": "Not selected — excluded"
+  },
+  "quickIngest_queueDuplicateExcluded": {
+    "message": "Already queued — excluded"
+  },
+  "quickIngest_processAgain": {
+    "message": "Process again"
+  },
+  "quickIngest_captureRestricted": {
+    "message": "This tab cannot be captured. Open an HTTP or HTTPS page, or paste its URL here."
+  },
+  "quickIngest_captureCurrentTab": {
+    "message": "Capture current tab"
+  },
+  "quickIngest_defaultsForNewItems": {
+    "message": "Settings apply to all eligible items in this run. Saved preset defaults are managed in Quick Ingest settings for future runs."
+  },
   "extName": {
     "message": "tldw Assistant"
   },
@@ -417,7 +444,7 @@
     "message": "Move to folder"
   },
   "quickIngest_ocrHelp": {
-    "message": "OCR helps extract text from scanned PDFs or images."
+    "message": "Extract text from scanned PDFs or images for this run."
   },
   "specReloadedToast": {
     "message": "Advanced spec reloaded from server"
@@ -1440,7 +1467,7 @@
     "message": "Language (e.g., en)"
   },
   "quickIngest_audioDiarizationHelp": {
-    "message": "Turn on to separate speakers in transcripts."
+    "message": "Separate speakers in audio transcripts for this run."
   },
   "quickIngest_documentOptions": {
     "message": "Document options"
@@ -1449,7 +1476,7 @@
     "message": "Video options"
   },
   "quickIngest_captionsHelp": {
-    "message": "Include timestamps/captions when available."
+    "message": "Include available timestamps/captions for video items in this run."
   },
   "quickIngest_cancel": {
     "message": "Cancel"
@@ -1632,7 +1659,7 @@
     "message": "URLs to ingest"
   },
   "quickIngest_urlsPlaceholder": {
-    "message": "https://example.com, https://..."
+    "message": "https://example.com/article\nhttps://youtube.com/watch?v=..."
   },
   "quickIngest_urlsInputAria": {
     "message": "Paste URLs input"
