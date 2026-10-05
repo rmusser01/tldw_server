@@ -979,3 +979,44 @@ jobs:
         if: needs.changes.outputs.admin_ui_changed == 'true'
         working-directory: admin-ui
         run: bun run build
+
+  # Wakes the merge queue after a failed gate (TASK-13452, spec 4.6). A red required check
+  # produces no event that merge-queue.yml listens to, so without this the front PR would sit
+  # in the line until an unrelated push to dev.
+  #
+  # It runs only when the gate job failed and the queue is enabled: a green run spends no
+  # runner on it, and with MERGE_QUEUE unset it is skipped on every run. Nothing needs it, so
+  # it can never delay the required check or turn it red. It never runs on workflow_run or for
+  # a fork, and it checks out dev, never the PR, so the code that runs with these write
+  # permissions is always dev's.
+  queue-tick:
+    name: Merge queue tick
+    needs: [frontend-required]
+    if: >-
+      always() && !cancelled() &&
+      needs.frontend-required.result == 'failure' &&
+      (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # write: rebase the front PR's branch, comment and disarm, dispatch/cancel/delete runs.
+      contents: write
+      pull-requests: write
+      actions: write
+      # read: the six required check runs and the license commit status on the front PR's head.
+      checks: read
+      statuses: read
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: dev
+          persist-credentials: false
+      - name: Advance the queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_QUEUE: ${{ vars.MERGE_QUEUE }}
+        run: python3 -m Helper_Scripts.ci.merge_queue

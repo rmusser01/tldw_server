@@ -1,4 +1,4 @@
-"""Merge-queue contract of frontend-required.yml (spec sections 4.8 and 4.9).
+"""Merge-queue contract of frontend-required.yml (spec sections 4.6, 4.8 and 4.9).
 
 Spec: Docs/superpowers/specs/2026-10-04-merge-queue-design.md
 """
@@ -21,7 +21,9 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 WORKFLOW = WORKFLOWS / "frontend-required.yml"
+CHECKOUT_ACTION = "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd"
 GATE = "frontend-required"
+TICK = "queue-tick"
 CHANGES_GUARD = "Require change detection success"
 SHARD_GUARD = "Require frontend unit shard success"
 
@@ -138,3 +140,62 @@ def test_gate_ends_red_when_failed_change_detection_skipped_the_unit_shards():
         condition = str(step.get("if", ""))
         if "always()" in condition or "failure()" in condition:
             assert "needs.changes.outputs." in condition, step.get("name")
+
+
+# --- 4.6: the failure-only queue-tick ---------------------------------------------------------
+
+
+def test_queue_tick_runs_only_after_a_failed_gate_with_the_queue_enabled():
+    """With MERGE_QUEUE unset every conjunct after it is moot: the job is skipped on every run."""
+    tick = _jobs()[TICK]
+    assert tick["needs"] == [GATE]
+    assert _normalized(tick["if"]) == _normalized(
+        """
+        always() && !cancelled() &&
+        needs.frontend-required.result == 'failure' &&
+        (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
+        (github.event_name == 'workflow_dispatch' ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository))
+        """
+    )
+
+
+def test_queue_tick_is_the_queue_job_with_a_shorter_budget():
+    """Same permissions and steps as merge-queue.yml's `queue` job: dev's script, never the PR's."""
+    tick = _jobs()[TICK]
+    queue = yaml.safe_load((WORKFLOWS / "merge-queue.yml").read_text(encoding="utf-8"))["jobs"]["queue"]
+    assert set(tick) == {"name", "needs", "if", "runs-on", "timeout-minutes", "permissions", "steps"}
+    assert tick["name"] == "Merge queue tick"
+    assert tick["runs-on"] == "ubuntu-latest"
+    assert tick["timeout-minutes"] == 10
+    assert tick["permissions"] == queue["permissions"] == {
+        "contents": "write", "pull-requests": "write", "actions": "write",
+        "checks": "read", "statuses": "read",
+    }
+    assert tick["steps"] == queue["steps"]
+    checkout, advance = tick["steps"]
+    assert checkout["uses"] == CHECKOUT_ACTION
+    assert checkout["with"] == {"ref": "dev", "persist-credentials": False}
+    assert advance["run"] == "python3 -m Helper_Scripts.ci.merge_queue"
+    assert advance["env"] == {"GH_TOKEN": "${{ github.token }}", "MERGE_QUEUE": "${{ vars.MERGE_QUEUE }}"}
+
+
+def test_queue_tick_checkout_is_pinned_like_every_other_checkout_in_the_workflow():
+    pins = {
+        step["uses"]
+        for job in _jobs().values()
+        for step in job.get("steps", [])
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    }
+    assert pins == {CHECKOUT_ACTION}
+
+
+def test_queue_tick_is_outside_every_needs_and_holds_the_only_write_scopes():
+    """Outside every `needs` the tick can never delay the required check or turn it red."""
+    wf = _wf()
+    assert wf["permissions"] == {"contents": "read"}
+    for name, job in wf["jobs"].items():
+        assert TICK not in _needs(job), name
+        if name != TICK:
+            assert "write" not in job.get("permissions", {}).values(), name
