@@ -268,6 +268,7 @@ const createHookOptions = () => ({
 })
 
 const h1 = vi.hoisted(() => ({
+  connected: false,
   create: vi.fn(),
   live: vi.fn(() => {
     throw new Error("live card deleted")
@@ -283,6 +284,9 @@ const h1 = vi.hoisted(() => ({
   localAppend: vi.fn(),
   localSettle: vi.fn(),
   beforeModel: vi.fn()
+}))
+vi.mock("@/store/connection", () => ({
+  useConnectionStore: { getState: () => ({ state: { isConnected: h1.connected, phase: "connected", mode: "normal" } }) }
 }))
 vi.mock("@/hooks/chat/useHistorySelection", async (original) => ({
   ...(await original<any>()),
@@ -441,6 +445,7 @@ const makeController = () => {
 }
 
 beforeEach(async () => {
+  h1.connected = false
   vi.clearAllMocks()
   h1.beforeModel.mockReset()
   messageStoreState.value.selectedModel = "deepseek-chat"
@@ -744,6 +749,42 @@ it("unknown admission after navigation retains immutable original intent and dis
     request_context_digest: expect.any(String)
   })
   expect(addChatMessageMock).toHaveBeenCalledTimes(1)
+})
+
+it("connected fresh saved normal send adopts a verified native owner before admission", async () => {
+  h1.connected = true
+  const options = { ...ordinaryOptions(), historyId: null, serverChatId: null, messages: [], history: [] }
+  let current: any = { owner: null, view: null, status: "idle" }
+  h1.controller = {
+    getCurrent: () => current,
+    fence: () => { const origin = current; return () => current === origin },
+    loadConversation: vi.fn(async (target, _reference, onLoaded) => {
+      expect(target).toMatchObject({ serverChatId: "tracked-chat-1" })
+      expect(options.setServerChatId).not.toHaveBeenCalled()
+      current = makeController().getCurrent()
+      current.view = { ...current.view, cursor: { kind: "empty" } }
+      current.capture = captureFor(current.view)
+      onLoaded({ owner: current.owner, view: current.view })
+      return true
+    }),
+    followResult: vi.fn(async () => true)
+  }
+  createChatMock.mockResolvedValue({ id: "tracked-chat-1" })
+  options.setServerChatId.mockImplementation(() => {
+    expect(current.owner.kind).toBe("native")
+  })
+  h1.wire.mockImplementation(async function* (request) {
+    expect(addChatMessageMock).toHaveBeenCalledOnce()
+    expect(request.save_to_db).toBe(false)
+    yield { choices: [{ delta: { content: "new answer" } }] }
+  })
+  const hook = renderHook(() => useChatActions(options as any))
+  await act(async () => { expect(await hook.result.current.onSubmit({ message: "first", image: "" })).toEqual({ status: "submitted" }) })
+  expect(createChatMock).toHaveBeenCalledOnce()
+  expect(options.setServerChatId).toHaveBeenCalledWith("tracked-chat-1")
+  expect(h1.saveHistory).not.toHaveBeenCalled()
+  expect(addChatMessageMock).toHaveBeenCalledTimes(2)
+  expect(h1.wire).toHaveBeenCalledOnce()
 })
 
 it("first durable ordinary send creates its local owner and admits before inference without a server conversation", async () => {

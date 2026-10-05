@@ -127,6 +127,8 @@ import { hydrateTrackedCharacterForSend } from "@/hooks/chat/tracked-character-h
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat"
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing"
 import { WEBUI_CHAT_SOURCE } from "@/utils/character-chat-session"
+import { useConnectionStore } from "@/store/connection"
+import { ConnectionPhase } from "@/types/connection"
 import { resolveVisualIdentityBindingWithCache } from "@/hooks/useVisualIdentityResolver"
 import {
   aggregateChatSubmitResults,
@@ -4008,13 +4010,24 @@ export const useChatActions = ({
             signal,
             {
               ...scopedNormalModeParams,
+              setServerChatId,
+              scope,
               ownsAbortController: (turnSignal: AbortSignal) =>
                 activeAbortControllerRef.current?.signal === turnSignal,
               historySelection: normalHistorySelection
                 ? {
                     controller: normalHistorySelection,
                     originIsCurrent: historyOriginIsCurrent!,
-                    temporary: temporaryChat
+                    temporary: temporaryChat,
+                    createServerChat:
+                      resolvedSendMode === "plain" &&
+                      !image &&
+                      !baseMessages.length && !baseHistory.length &&
+                      !normalModeParams.webSearch && !normalModeParams.dynamicUIRequest &&
+                      useConnectionStore.getState().state.isConnected &&
+                      useConnectionStore.getState().state.phase === ConnectionPhase.CONNECTED &&
+                      useConnectionStore.getState().state.mode === "normal" &&
+                      !useConnectionStore.getState().state.offlineBypass
                   }
                 : undefined
             }
