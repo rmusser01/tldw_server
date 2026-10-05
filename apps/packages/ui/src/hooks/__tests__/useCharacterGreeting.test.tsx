@@ -11,6 +11,7 @@ import {
 import { useCharacterGreeting } from "../useCharacterGreeting"
 
 const mocks = vi.hoisted(() => ({
+  userDisplayName: "",
   settings: null as Record<string, unknown> | null,
   updateSettings: vi.fn(),
   initialize: vi.fn(),
@@ -18,7 +19,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: () => [""]
+  useStorage: () => [mocks.userDisplayName]
 }))
 
 vi.mock("@/db/dexie/helpers", () => ({
@@ -62,6 +63,7 @@ const createDeferred = <T,>() => {
 
 describe("useCharacterGreeting", () => {
   beforeEach(() => {
+    mocks.userDisplayName = ""
     mocks.settings = {
       greetingEnabled: true,
       greetingSelectionId: null,
@@ -578,4 +580,16 @@ describe("useCharacterGreeting", () => {
     })
     expect(historyState[0]?.content).toBe("Hello there")
   })
+})
+
+
+it.each(["Guide", ""])("renders the actual injected greeting with distinct user and card identities (name=%s)", async name => {
+  mocks.userDisplayName = "Viewer"
+  mocks.settings = { greetingEnabled: true, useCharacterDefault: true }
+  mocks.getCharacter.mockResolvedValue(null)
+  let messages: Message[] = []
+  renderHook(() => useCharacterGreeting({ playgroundReady: true, selectedCharacter: { id: "identity", name, greeting: "{{user}} meets {{char}}" },
+    selectedCharacterMode: "tracked", serverChatId: null, historyId: null, messagesLength: 0,
+    setMessages: next => { messages = applyMessageUpdate(messages, next) }, setHistory: vi.fn() }))
+  await waitFor(() => expect(messages[0]?.message).toBe(`Viewer meets ${name || "{{char}}"}`))
 })

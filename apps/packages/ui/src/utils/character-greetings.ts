@@ -7,12 +7,18 @@ export type CharacterGreetingFields = {
   alternateGreetings?: unknown
 }
 
+/** Exact server creation input; display filtering must never change its raw index or text. */
+export type GreetingSeed =
+  | { greetingStrategy: "default"; rawText: string }
+  | { greetingStrategy: "alternate_index"; alternateIndex: number; rawText: string }
+
 export type GreetingOption = {
   id: string
   text: string
   index: number
   sourceKey?: string
   sourceLabel?: string
+  seed?: GreetingSeed
 }
 
 export type GreetingSelectionFallback = "none" | "first" | "random"
@@ -35,6 +41,7 @@ export type GreetingEntry = {
   text: string
   sourceKey: string
   sourceLabel: string
+  seed?: GreetingSeed
 }
 
 const normalizeStringEntries = (value: unknown[]): string[] =>
@@ -103,6 +110,19 @@ export const collectGreetingEntries = (
   character: CharacterGreetingFields | null | undefined
 ): GreetingEntry[] => {
   if (!character) return []
+  // The backend selects first_message verbatim or one raw alternate_greetings
+  // list position. Compatibility aliases and nested JSON are display-only.
+  const seeds = new Map<string, GreetingSeed>()
+  if (typeof character.first_message === "string" && character.first_message.trim())
+    seeds.set(character.first_message.trim(), { greetingStrategy: "default", rawText: character.first_message })
+  let alternates = character.alternate_greetings
+  if (typeof alternates === "string") {
+    try { alternates = JSON.parse(alternates) } catch { alternates = null }
+  }
+  if (Array.isArray(alternates)) alternates.forEach((rawText, alternateIndex) => {
+    if (typeof rawText === "string" && rawText.trim() && !seeds.has(rawText.trim()))
+      seeds.set(rawText.trim(), { greetingStrategy: "alternate_index", alternateIndex, rawText })
+  })
   const entries: GreetingEntry[] = []
   GREETING_SOURCES.forEach(({ key, label }) => {
     const values = normalizeGreetingValue(
@@ -112,7 +132,8 @@ export const collectGreetingEntries = (
       entries.push({
         text,
         sourceKey: String(key),
-        sourceLabel: label
+        sourceLabel: label,
+        ...(seeds.has(text) ? { seed: seeds.get(text) } : {})
       })
     })
   })
@@ -160,7 +181,8 @@ export const buildGreetingOptionsFromEntries = (
     text: entry.text,
     index,
     sourceKey: entry.sourceKey,
-    sourceLabel: entry.sourceLabel
+    sourceLabel: entry.sourceLabel,
+    ...(entry.seed ? { seed: entry.seed } : {})
   }))
 
 export const buildGreetingsChecksumFromOptions = (

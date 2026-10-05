@@ -184,7 +184,8 @@ export const useCharacterGreeting = ({
       if (!isCurrentSelection()) return
       const rendered = replaceUserDisplayNamePlaceholders(
         greetingValue,
-        userDisplayName
+        userDisplayName,
+        selectedCharacter.name
       )
       const trimmed = rendered.trim()
       if (!trimmed) return

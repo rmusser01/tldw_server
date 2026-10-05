@@ -13,6 +13,8 @@ import {
   collectGreetingEntries
 } from "@/utils/character-greetings"
 
+const displayName = vi.hoisted(() => ({ value: "" }))
+
 const notificationErrorMock = vi.hoisted(() => vi.fn())
 
 vi.mock("react-i18next", () => ({
@@ -23,7 +25,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: () => [""]
+  useStorage: () => [displayName.value]
 }))
 
 vi.mock("antd", () => ({
@@ -103,6 +105,7 @@ const renderPicker = (
 
 describe("ChatGreetingPicker", () => {
   afterEach(() => {
+    displayName.value = ""
     cleanup()
     vi.clearAllMocks()
   })
@@ -381,4 +384,11 @@ describe("ChatGreetingPicker", () => {
       warnSpy.mockRestore()
     }
   })
+})
+
+
+it.each(["Guide", ""])("renders the actual picker preview with distinct user and character names (name=%s)", name => {
+  displayName.value = "Viewer"
+  renderPicker({}, vi.fn().mockResolvedValue(null), { selectedCharacter: { id: "identity", name, greeting: "{{user}} meets {{char}}" } })
+  expect(screen.getByText(`Viewer meets ${name || "{{char}}"}`)).toBeInTheDocument()
 })

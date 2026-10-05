@@ -122,3 +122,30 @@ describe("character greetings utils", () => {
     expect(result.isStale).toBe(true)
   })
 })
+
+
+describe("native creation seed provenance is independent of display positions", () => {
+  it.each([false, true])("preserves exact raw alternate indices through filtering/deduplication (JSON=%s)", json => {
+    const alternates = ["", 7, "  Alternate {{char}}  ", "Alternate {{char}}", "Last"]
+    const options = buildGreetingOptionsFromEntries(collectGreetingEntries({ greeting: "Compatibility alias", first_message: "  Default {{user}}  ", alternate_greetings: json ? JSON.stringify(alternates) : alternates }))
+    expect(options.map(option => option.text)).toEqual(["Compatibility alias", "Default {{user}}", "Alternate {{char}}", "Last"])
+    expect(options[1]).toMatchObject({ index: 1, seed: { greetingStrategy: "default", rawText: "  Default {{user}}  " } })
+    expect(options[2]).toMatchObject({ index: 2, seed: { greetingStrategy: "alternate_index", alternateIndex: 2, rawText: "  Alternate {{char}}  " } })
+    expect(options[3]).toMatchObject({ index: 3, seed: { greetingStrategy: "alternate_index", alternateIndex: 4, rawText: "Last" } })
+    expect(options[0]).not.toHaveProperty("seed")
+  })
+  it("deduplicated compatibility text retains a matching canonical default before alternates", () => {
+    const [option] = buildGreetingOptionsFromEntries(collectGreetingEntries({ greeting: "Same", first_message: "  Same  ", alternate_greetings: ["Same"] }))
+    expect(option).toMatchObject({ sourceKey: "greeting", index: 0, seed: { greetingStrategy: "default", rawText: "  Same  " } })
+    expect(option.seed).not.toHaveProperty("alternateIndex")
+  })
+  it.each([
+    { firstMessage: "Legacy alias", alternateGreetings: ["Legacy alternate"] },
+    { first_message: ["List default"], alternate_greetings: JSON.stringify(JSON.stringify(["Nested alternate"])) },
+    { first_message: '["Split default"]', alternate_greetings: "Plain text alternate" }
+  ])("does not manufacture a server seed for unsupported fields or encodings: %j", character => {
+    const options = buildGreetingOptionsFromEntries(collectGreetingEntries(character))
+    expect(options.length).toBeGreaterThan(0)
+    expect(options.every(option => !Object.hasOwn(option, "seed"))).toBe(true)
+  })
+})

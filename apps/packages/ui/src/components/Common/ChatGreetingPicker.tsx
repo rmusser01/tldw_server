@@ -118,7 +118,8 @@ export const ChatGreetingPicker: React.FC<Props> = ({
   const previewText = selectedOption?.text
     ? replaceUserDisplayNamePlaceholders(
         selectedOption.text,
-        userDisplayName
+        userDisplayName,
+        selectedCharacter.name
       )
     : ""
 
@@ -172,7 +173,8 @@ export const ChatGreetingPicker: React.FC<Props> = ({
     if (greetingPersistInFlightRef.current) return
     const rendered = replaceUserDisplayNamePlaceholders(
       selectedOption.text,
-      userDisplayName
+      userDisplayName,
+      selectedCharacter.name
     )
     const trimmed = rendered.trim()
     if (!trimmed) return
