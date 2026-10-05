@@ -179,6 +179,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useStorage } from "@plasmohq/storage/hook";
 
 import { useFocusShortcuts } from "~/hooks/keyboard";
+import { isFreshChatSelectionPending } from "~/hooks/chat/fresh-chat-selection";
+import { useHistorySelectionContext } from "~/hooks/chat/useHistorySelection";
 import { useMessageOption } from "~/hooks/useMessageOption";
 import { useTabMentions } from "~/hooks/useTabMentions";
 import { useWebUI } from "~/store/webui";
@@ -579,7 +581,6 @@ export const PlaygroundForm = ({
     useOCR,
     setUseOCR,
     defaultInternetSearchOn,
-    setHistory,
     historyId,
     history,
     uploadedFiles,
@@ -3357,6 +3358,14 @@ export const PlaygroundForm = ({
     notificationApi,
     t,
   });
+  // CS-01 (#3106): a chat that addresses no conversation (after New chat or
+  // Clear, or while a restored one is still loading) sends only once its
+  // history-selection controller is idle; until then Send stays disabled and
+  // the draft stays in the composer.
+  const historySelection = useHistorySelectionContext();
+  const historySelectionPending =
+    !isSending &&
+    isFreshChatSelectionPending(historySelection, { historyId, serverChatId });
   const runCharacterChatSendBlocker = React.useCallback(() => {
     if (characterChatSendBlocker?.active) {
       stopListening();
@@ -3364,12 +3373,18 @@ export const PlaygroundForm = ({
     }
   }, [characterChatSendBlocker, stopListening]);
   const handleComposerSend = React.useCallback(() => {
+    if (historySelectionPending) return;
     if (characterChatSendBlocker?.active) {
       runCharacterChatSendBlocker();
       return;
     }
     submitForm();
-  }, [characterChatSendBlocker, runCharacterChatSendBlocker, submitForm]);
+  }, [
+    characterChatSendBlocker,
+    historySelectionPending,
+    runCharacterChatSendBlocker,
+    submitForm,
+  ]);
   React.useEffect(() => {
     voiceChatSubmitFormRef.current = () => {
       handleComposerSend();
@@ -3381,6 +3396,8 @@ export const PlaygroundForm = ({
       const trimmed = text.trim();
       if (!trimmed) return;
       setMessageValue(trimmed, { collapseLarge: true });
+      // The question stays in the composer until the selection is idle.
+      if (historySelectionPending) return;
       queueMicrotask(() => {
         if (characterChatSendBlocker?.active) {
           runCharacterChatSendBlocker();
@@ -3393,6 +3410,7 @@ export const PlaygroundForm = ({
     },
     [
       characterChatSendBlocker,
+      historySelectionPending,
       runCharacterChatSendBlocker,
       setMessageValue,
       submitFormRef,
@@ -3484,7 +3502,10 @@ export const PlaygroundForm = ({
       okButtonProps: { danger: true },
       cancelText: t("common:cancel", "Cancel"),
       onOk: () => {
-        setHistory([]);
+        // CS-05 (#3106): clearing only `history` left the transcript and the
+        // history selection in place, so the next request still carried the
+        // old turns. Use the New chat reset, which clears both.
+        if (clearChat() === false) return;
         notificationApi.success({
           message: t(
             "playground:composer.clearContextSuccess",
@@ -3494,7 +3515,7 @@ export const PlaygroundForm = ({
         });
       },
     });
-  }, [history.length, notificationApi, setHistory, t]);
+  }, [clearChat, history.length, notificationApi, t]);
 
   const requestKnowledgePanelTab = React.useCallback((tab: KnowledgeTab) => {
     setKnowledgePanelTab(tab);
@@ -4988,6 +5009,7 @@ export const PlaygroundForm = ({
       isMobileViewport={isMobileViewport}
       isSending={isSending}
       isPreparingDocuments={isPreparingDocuments}
+      isHistorySelectionPending={historySelectionPending}
       isConnectionReady={isConnectionReady}
       sendWhenEnter={sendWhenEnter}
       onSendWhenEnterChange={setSendWhenEnter}

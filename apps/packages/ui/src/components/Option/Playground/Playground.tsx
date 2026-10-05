@@ -984,6 +984,10 @@ const PlaygroundContent = () => {
         detail.historyId !== current.historyId ||
         detail.restoreRevision !== session.restoreRevision) return;
       if (detail.characterId === undefined) {
+        // New chat and Clear (useClearChat, from the header, sidebar "+",
+        // Ctrl+Shift+U or the composer) start a clean conversation: release the
+        // previous one's history selection and persisted session (CS-01, #3106).
+        clearPersistedSession();
         setCharacterModeIntentActive(false);
         void setChatWorkflowMode("standard");
       }
@@ -1020,7 +1024,7 @@ const PlaygroundContent = () => {
     };
     window.addEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, handleReplacement);
     return () => window.removeEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, handleReplacement);
-  }, [location.hash, location.pathname, location.search, navigate, rawRouteCharacterIntent, routeLocationKey, setChatWorkflowMode]);
+  }, [clearPersistedSession, location.hash, location.pathname, location.search, navigate, rawRouteCharacterIntent, routeLocationKey, setChatWorkflowMode]);
 
   React.useEffect(() => {
     if (!routeRequestsCharacterMode) return;
