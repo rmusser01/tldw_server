@@ -2428,5 +2428,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "ذخیره‌سازی آفلاین تا زمانی که حساب و ذخیره‌سازی محلی شما تأیید نشود در دسترس نیست. تغییرات شما ذخیره نشده باقی می‌مانند."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

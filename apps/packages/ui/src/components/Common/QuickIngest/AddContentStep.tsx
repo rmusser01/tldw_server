@@ -1,40 +1,51 @@
-import React, { useCallback, useMemo, useState } from "react"
+import { Badge, Alert as DesignSystemAlert } from "@/components/ui/primitives"
+import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
+import type { PlaylistPreflightResult } from "@/services/tldw/playlist-preflight"
+import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
+import { buildQuickIngestOpenDetailFromUrl, isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
+
 import { Button, Input, Tooltip, Typography } from "antd"
-import { useTranslation } from "react-i18next"
 import {
   AlertTriangle,
+  BookOpen,
+  File as FileIcon,
   FileText,
   Film,
   Globe,
-  Music,
   Image as ImageIcon,
-  BookOpen,
-  File as FileIcon,
-  X,
+  Music,
+  Loader2,
   Plus,
+  X
 } from "lucide-react"
+import React, { useCallback, useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
+
+import { BatchMetadataPanel } from "./BatchMetadataPanel"
+import { useIngestWizard } from "./IngestWizardContext"
+import { PlaylistPreflightPanel } from "./PlaylistPreflightPanel"
+import { FileDropZone } from "./QueueTab/FileDropZone"
+import {
+  QUICK_INGEST_MAX_FILE_SIZE,
+  QUICK_INGEST_MAX_FILE_SIZE_LABEL
+} from "./constants"
+import {
+  createUrlQueueItems,
+  detectTypeFromUrl,
+  getEligibleQueueItems,
+  getQueueItemExclusionReason,
+  isValidQueueUrl,
+  validateQueueItem
+} from "./queue-items"
 import type {
   ConferenceDuplicatePolicy,
   DetectedMediaType,
   WizardQueueItem,
 } from "./types"
-import { useIngestWizard } from "./IngestWizardContext"
-import { useServerCapabilities } from "@/hooks/useServerCapabilities"
-import { Alert as DesignSystemAlert, Badge } from "@/components/ui/primitives"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
-import type { PlaylistPreflightResult } from "@/services/tldw/playlist-preflight"
-import { FileDropZone } from "./QueueTab/FileDropZone"
-import { PlaylistPreflightPanel } from "./PlaylistPreflightPanel"
-import { BatchMetadataPanel } from "./BatchMetadataPanel"
-import {
-  QUICK_INGEST_MAX_FILE_SIZE_LABEL,
-  QUICK_INGEST_MAX_FILE_SIZE,
-} from "./constants"
-import { detectTypeFromUrl, createUrlQueueItems, getEligibleQueueItems, getQueueItemExclusionReason, isValidQueueUrl, validateQueueItem } from "./queue-items"
+
 export { detectTypeFromUrl } from "./queue-items"
-import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
-import { isExtensionRuntime } from "@/utils/browser-runtime"
-import { buildQuickIngestOpenDetailFromUrl, isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -531,7 +542,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         <Typography.Text className="block text-xs text-text-muted">
           {qi(
             "wizard.addPurpose",
-            "Add URLs or files. Stored items appear in Media; analyzed and chunked items become searchable in Knowledge."
+            "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
           )}
         </Typography.Text>
 
@@ -581,12 +592,18 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         )}
 
         {isExtensionRuntime() && (
-          <Button onClick={handleCaptureTab} loading={capturing} disabled={capturing}>
+          <Button
+            onClick={handleCaptureTab}
+            aria-busy={capturing}
+            icon={capturing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : undefined}
+            disabled={capturing}>
             {qi("captureCurrentTab", "Capture current tab")}
           </Button>
         )}
         {captureError && (
-          <div role="alert" className="text-sm text-danger">{captureError}</div>
+          <div role="alert" className="text-sm text-danger">
+            {captureError}
+          </div>
         )}
 
         {/* Multi-line URL paste area */}
@@ -724,7 +741,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             {queueItems.map((item) => {
               const exclusion = getQueueItemExclusionReason(item, queueItems)
               return (
-              <div
+                <div
                 key={item.id}
                 className={`flex items-center gap-3 rounded-md border px-3 py-2 ${
                   !item.validation.valid
@@ -734,97 +751,97 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
                       : "border-border"
                 }`}
               >
-                {/* Type icon */}
-                <span className="flex-shrink-0">
-                  {MEDIA_TYPE_ICONS[item.detectedType]}
-                </span>
+                  {/* Type icon */}
+                  <span className="flex-shrink-0">
+                    {MEDIA_TYPE_ICONS[item.detectedType]}
+                  </span>
 
-                {/* Name/URL and metadata */}
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">
-                    {item.fileName || item.url || qi("untitledItem", "Untitled")}
-                  </div>
-                  <div className="flex items-center gap-2 text-[11px] text-text-muted">
-                    {item.fileSize > 0 && (
+                  {/* Name/URL and metadata */}
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">
+                      {item.fileName || item.url || qi("untitledItem", "Untitled")}
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] text-text-muted">
+                      {item.fileSize > 0 && (
                       <span>{formatFileSize(item.fileSize)}</span>
                     )}
-                    {ffmpegMissing &&
+                      {ffmpegMissing &&
                     (item.detectedType === "audio" ||
                       item.detectedType === "video") ? (
-                      <Tooltip
+                        <Tooltip
                         title={qi(
                           "ffmpegRequiredTooltip",
                           "FFmpeg is not installed on the server -- this file may fail to process"
                         )}
                       >
-                        <Badge
+                          <Badge
                           variant="warning"
                           size="sm"
                           className="!m-0"
                         >
-                          <AlertTriangle
+                            <AlertTriangle
                             className="mr-0.5 h-3 w-3"
                             aria-hidden="true"
                           />
-                          {item.detectedType.charAt(0).toUpperCase() +
+                            {item.detectedType.charAt(0).toUpperCase() +
                             item.detectedType.slice(1)}
-                        </Badge>
-                      </Tooltip>
-                    ) : (
-                      <Badge
+                          </Badge>
+                        </Tooltip>
+                      ) : (
+                        <Badge
                         variant="info"
                         size="sm"
                         className="!m-0"
                       >
-                        {item.detectedType === "web"
+                          {item.detectedType === "web"
                           ? "Web page"
                           : item.detectedType.charAt(0).toUpperCase() +
                             item.detectedType.slice(1)}
-                      </Badge>
-                    )}
-                    {item.detectedType !== "unknown" && (
+                        </Badge>
+                      )}
+                      {item.detectedType !== "unknown" && (
                       <span className="text-text-subtle">(auto)</span>
                     )}
+                    </div>
+                    {/* Validation errors/warnings */}
+                    {item.validation.errors?.map((err, i) => (
+                      <div key={`e-${i}`} className="text-[11px] text-danger mt-0.5">
+                        {err === "Invalid URL format" ? qi("invalidUrl", "Invalid URL format. Enter one HTTP(S) URL per line. Separate pasted URLs with a comma and a space.") : err}
+                      </div>
+                    ))}
+                    {item.validation.warnings?.map((warn, i) => (
+                      <div key={`w-${i}`} className="text-[11px] text-warn mt-0.5">
+                        {warn}
+                      </div>
+                    ))}
                   </div>
-                  {/* Validation errors/warnings */}
-                  {item.validation.errors?.map((err, i) => (
-                    <div key={`e-${i}`} className="text-[11px] text-danger mt-0.5">
-                      {err === "Invalid URL format" ? qi("invalidUrl", "Invalid URL format. Enter one HTTP(S) URL per line. Separate pasted URLs with a comma and a space.") : err}
-                    </div>
-                  ))}
-                  {item.validation.warnings?.map((warn, i) => (
-                    <div key={`w-${i}`} className="text-[11px] text-warn mt-0.5">
-                      {warn}
-                    </div>
-                  ))}
-                </div>
 
-                {exclusion && (
-                  <span className="text-xs text-text-muted">
-                    {exclusion === "duplicate"
+                  {exclusion && (
+                    <span className="text-xs text-text-muted">
+                      {exclusion === "duplicate"
                       ? qi("queueDuplicateExcluded", "Already queued — excluded")
                       : exclusion === "unselected"
                         ? qi("queueUnselected", "Not selected — excluded")
                         : qi("queueInvalidExcluded", "Invalid — excluded")}
-                  </span>
-                )}
-                {exclusion === "duplicate" && (
-                  <Button size="small" onClick={() => setQueueItems(
+                    </span>
+                  )}
+                  {exclusion === "duplicate" && (
+                    <Button size="small" onClick={() => setQueueItems(
                     queueItems.map(current => current.id === item.id ? { ...current, processAgain: true } : current)
                   )}>
-                    {qi("processAgain", "Process again")}
-                  </Button>
-                )}
-                {/* Remove button */}
-                <button
+                      {qi("processAgain", "Process again")}
+                    </Button>
+                  )}
+                  {/* Remove button */}
+                  <button
                   type="button"
                   onClick={() => handleRemoveItem(item.id)}
                   className="flex-shrink-0 rounded p-1 text-text-muted hover:bg-surface2 hover:text-danger transition-colors"
                   aria-label={qi("removeItemAria", "Remove this item from queue")}
                 >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               )
             })}
           </div>

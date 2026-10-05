@@ -232,7 +232,15 @@ vi.mock("antd", async (importOriginal) => {
     )
   )
 
-  const Button = ({ children, onClick, disabled, icon, ...rest }: any) => (
+  const Button = ({
+    children,
+    onClick,
+    disabled,
+    icon,
+    iconPlacement,
+    danger,
+    ...rest
+  }: any) => (
     <button type="button" onClick={onClick} disabled={disabled} {...rest}>
       {icon}
       {children}
@@ -267,7 +275,11 @@ vi.mock("antd", async (importOriginal) => {
             label: child?.props?.children
           }))
     const isMultiple = mode === "multiple" || mode === "tags"
-    const selected = isMultiple ? (Array.isArray(value) ? value : []) : (value ?? "")
+    const selected = isMultiple
+      ? Array.isArray(value)
+        ? value
+        : []
+      : (value ?? "")
     return (
       <select
         multiple={isMultiple}
@@ -291,7 +303,9 @@ vi.mock("antd", async (importOriginal) => {
       </select>
     )
   }
-  ;(SelectComponent as any).Option = ({ value, children }: any) => <option value={value}>{children}</option>
+  ;(SelectComponent as any).Option = ({ value, children }: any) => (
+    <option value={value}>{children}</option>
+  )
 
   const RadioButton = ({ value, children, __groupValue, __groupOnChange }: any) => (
     <button
@@ -323,7 +337,12 @@ vi.mock("antd", async (importOriginal) => {
   }
 
   const Skeleton = () => <div>loading-skeleton</div>
-  const Alert = ({ title, action }: any) => <div>{title}{action}</div>
+  const Alert = ({ title, action }: any) => (
+    <div>
+      {title}
+      {action}
+    </div>
+  )
   const Dropdown = ({ menu, children }: any) => (
     <div>
       {children}
@@ -352,7 +371,11 @@ vi.mock("antd", async (importOriginal) => {
   const Modal = () => null
   ;(Modal as any).confirm = vi.fn()
   const Drawer = ({ open, title, children }: any) =>
-    open ? <div role="dialog" aria-label={typeof title === "string" ? title : "drawer"}>{children}</div> : null
+    open ? (
+      <div role="dialog" aria-label={typeof title === "string" ? title : "drawer"}>
+        {children}
+      </div>
+    ) : null
 
   return {
     ...actual,
@@ -378,7 +401,9 @@ vi.mock("antd", async (importOriginal) => {
 })
 
 vi.mock("@/components/Common/Markdown", () => ({
-  Markdown: ({ message }: { message: string }) => <div data-testid="mock-markdown">{message}</div>
+  Markdown: ({ message }: { message: string }) => (
+    <div data-testid="mock-markdown">{message}</div>
+  )
 }))
 
 vi.mock("@/components/Media/diff-worker-client", () => ({

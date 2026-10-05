@@ -2725,5 +2725,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "在確認您的帳戶和本機儲存空間之前，離線儲存無法使用。您的變更仍未儲存。"
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

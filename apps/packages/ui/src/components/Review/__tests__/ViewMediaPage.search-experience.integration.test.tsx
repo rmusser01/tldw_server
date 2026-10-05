@@ -340,17 +340,25 @@ vi.mock('@/components/Media/MediaLibraryStatsPanel', () => ({
 const renderMediaPage = (initialEntry: string) => {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/" element={<div data-testid="root-route" />} />
-        <Route path="/media" element={<ViewMediaPage />} />
-      </Routes>
-    </MemoryRouter>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/" element={<div data-testid="root-route" />} />
+          <Route path="/media" element={<ViewMediaPage />} />
+        </Routes>
+      </MemoryRouter>
     </QueryClientProvider>
   )
 }
 
 describe('ViewMediaPage metadata search integration', () => {
+  it("keeps recent imports in the primary Inspector without expanding Library tools", async () => {
+    renderMediaPage("/media")
+    expect(
+      await screen.findByTestId("media-ingest-jobs-panel")
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("media-library-tools-panel")).toBeNull()
+  })
+
   beforeEach(() => {
     mocks.bgRequest.mockReset()
     mocks.metadataPaths.length = 0

@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import MediaReviewPage from "../MediaReviewPage"
 
+import { isServicePromptRequestPath } from "@/services/tldw/service-prompt-scope-error"
+
 const sourceItems = [
   {
     id: 1,
@@ -34,6 +36,8 @@ const detailById: Record<number, { content: string }> = {
 }
 
 const mocks = vi.hoisted(() => ({
+  realQuery: false,
+  authorityKey: "verified-alice" as string | null,
   bgRequest: vi.fn(),
   messageInfo: vi.fn(),
   messageWarning: vi.fn(),
@@ -51,7 +55,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/services/tldw/quick-ingest-authority', () => ({
-  useQuickIngestAuthority: () => 'verified-alice',
+  useQuickIngestAuthority: () => mocks.authorityKey,
   quickIngestAuthority: { capture: () => ({isCurrent: () => true, signal: new AbortController().signal}) }
 }))
 
@@ -125,11 +129,19 @@ vi.mock("@/services/background-proxy", () => ({
   bgRequest: mocks.bgRequest
 }))
 
-vi.mock("@tanstack/react-query", () => {
+vi.mock("@tanstack/react-query", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tanstack/react-query")>()
   const React = require("react") as typeof import("react")
   return {
+    ...actual,
     keepPreviousData: {},
-    useQuery: ({ queryFn, queryKey }: { queryFn: () => Promise<unknown>; queryKey: unknown[] }) => {
+    useQuery: (options: {
+      queryFn: () => Promise<unknown>
+      queryKey: unknown[]
+      enabled?: boolean
+    }) => {
+      const { queryFn, queryKey } = options
+      if (mocks.realQuery) return actual.useQuery(options)
       const [data, setData] = React.useState<unknown>([])
       const [isFetching, setIsFetching] = React.useState(false)
       const queryFnRef = React.useRef(queryFn)
@@ -281,7 +293,11 @@ vi.mock("antd", async (importOriginal) => {
           label: child?.props?.children
         }))
     const isMultiple = mode === "multiple" || mode === "tags"
-    const selected = isMultiple ? (Array.isArray(value) ? value : []) : (value ?? "")
+    const selected = isMultiple
+      ? Array.isArray(value)
+        ? value
+        : []
+      : (value ?? "")
     return (
       <select
         multiple={isMultiple}
@@ -304,7 +320,9 @@ vi.mock("antd", async (importOriginal) => {
       </select>
     )
   }
-  ;(SelectComponent as any).Option = ({ value, children }: any) => <option value={value}>{children}</option>
+  ;(SelectComponent as any).Option = ({ value, children }: any) => (
+    <option value={value}>{children}</option>
+  )
 
   const RadioButton = ({ value, children, __groupValue, __groupOnChange }: any) => (
     <button
@@ -336,7 +354,12 @@ vi.mock("antd", async (importOriginal) => {
   }
 
   const Skeleton = () => <div>loading-skeleton</div>
-  const Alert = ({ title, action }: any) => <div>{title}{action}</div>
+  const Alert = ({ title, action }: any) => (
+    <div>
+      {title}
+      {action}
+    </div>
+  )
   const Dropdown = ({ menu, children }: any) => (
     <div>
       {children}
@@ -357,11 +380,12 @@ vi.mock("antd", async (importOriginal) => {
     </div>
   )
   const Modal = () => null
-  const Drawer = ({ open, title, children }: any) => (
+  const Drawer = ({ open, title, children }: any) =>
     open ? (
-      <div role="dialog" aria-label={typeof title === "string" ? title : "drawer"}>{children}</div>
+      <div role="dialog" aria-label={typeof title === "string" ? title : "drawer"}>
+        {children}
+      </div>
     ) : null
-  )
 
   return {
     ...actual,
@@ -387,7 +411,9 @@ vi.mock("antd", async (importOriginal) => {
 })
 
 vi.mock("@/components/Common/Markdown", () => ({
-  Markdown: ({ message }: { message: string }) => <div data-testid="mock-markdown">{message}</div>
+  Markdown: ({ message }: { message: string }) => (
+    <div data-testid="mock-markdown">{message}</div>
+  )
 }))
 
 vi.mock("@/components/Media/diff-worker-client", () => ({
@@ -404,6 +430,8 @@ vi.mock("@/components/Media/diff-worker-client", () => ({
 
 describe("MediaReviewPage stage3 search/filter/sort", () => {
   beforeEach(() => {
+    mocks.realQuery = false
+    mocks.authorityKey = "verified-alice"
     mocks.bgRequest.mockReset()
     mocks.messageInfo.mockReset()
     mocks.messageWarning.mockReset()
@@ -471,6 +499,55 @@ describe("MediaReviewPage stage3 search/filter/sort", () => {
         dispatchEvent: vi.fn()
       }))
     })
+  })
+
+  it.each([null, "verified-alice"])(
+    "lists media from initial authority %s through the real query lifecycle without another Search",
+    async (initialAuthority) => {
+      mocks.realQuery = true
+      mocks.authorityKey = initialAuthority
+      const { QueryClient, QueryClientProvider } = await vi.importActual<
+        typeof import("@tanstack/react-query")
+      >("@tanstack/react-query")
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } }
+      })
+      const view = render(
+        <React.StrictMode>
+          <QueryClientProvider client={client}>
+            <MediaReviewPage />
+          </QueryClientProvider>
+        </React.StrictMode>
+      )
+      mocks.authorityKey = "verified-alice"
+      view.rerender(
+        <React.StrictMode>
+          <QueryClientProvider client={client}>
+            <MediaReviewPage />
+          </QueryClientProvider>
+        </React.StrictMode>
+      )
+      await waitFor(() =>
+        expect(screen.getByText("Alpha paper")).toBeInTheDocument()
+      )
+    }
+  )
+
+  it("loads the initial list through the existing exact scoped request policy", async () => {
+    mocks.bgRequest.mockImplementation(
+      async (request: { path: string; method: string }) => {
+        if (!isServicePromptRequestPath(request.path, request.method))
+          throw new Error("Scoped request rejected")
+        return {
+          items: sourceItems,
+          pagination: {
+            total_items: sourceItems.length
+          }
+        }
+      }
+    )
+    render(<MediaReviewPage />)
+    expect(await screen.findByText("Alpha paper")).toBeInTheDocument()
   })
 
   it("renders sort control and date range group in filter controls", async () => {

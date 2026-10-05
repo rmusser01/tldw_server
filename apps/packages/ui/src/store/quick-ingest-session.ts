@@ -1,24 +1,27 @@
-import { createWithEqualityFn } from "zustand/traditional"
-import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
-
+import { DEFAULT_PRESET, DEFAULT_PRESETS } from "@/components/Common/QuickIngest/presets"
+import { getSavedMediaIds } from "@/components/Common/QuickIngest/result-actions"
 import type {
+  ConferenceBatchMetadata,
+  ConferenceItemMetadataOverride,
+  DetectedMediaType,
   IngestPreset,
+  PlaylistQueueMetadata,
   PresetConfig,
   QueueItemValidation,
   WizardProcessingState,
   WizardResultItem,
-  WizardStep,
-  DetectedMediaType,
-  ConferenceBatchMetadata,
-  ConferenceItemMetadataOverride,
-  PlaylistQueueMetadata,
-} from "@/components/Common/QuickIngest/types"
-import { DEFAULT_PRESET, DEFAULT_PRESETS } from "@/components/Common/QuickIngest/presets"
-import {
-  isFirstSourceQuickIngestKind,
-  type FirstSourceQuickIngestKind,
+  WizardStep} from "@/components/Common/QuickIngest/types"
+import { type FirstSourceQuickIngestKind,
   type QuickIngestOpenDetail,
+isFirstSourceQuickIngestKind
 } from "@/utils/quick-ingest-open"
+
+import {
+  type StateStorage,
+  createJSONStorage,
+  persist
+} from "zustand/middleware"
+import { createWithEqualityFn } from "zustand/traditional"
 
 const STORAGE_KEY = "tldw-quick-ingest-session"
 
@@ -122,7 +125,22 @@ export type QuickIngestSessionRecord = {
   completedAt?: number | null
 }
 
+export type RecentImport = {
+  id: string
+  authorityKey: string
+  sourceLabel: string
+  sourceCount: number
+  lifecycle: QuickIngestSessionLifecycle
+  createdAt: number
+  updatedAt: number
+  completedAt: number | null
+  batchIds: string[]
+  jobIds: number[]
+  savedMediaIds: number[]
+}
+
 type QuickIngestSessionPersistedState = {
+  recentImports: RecentImport[]
   session: QuickIngestSessionRecord | null
 }
 
@@ -132,6 +150,10 @@ const isCustomBasePreset = (
   typeof value === "string" && value in DEFAULT_PRESETS
 
 type QuickIngestSessionState = QuickIngestSessionPersistedState & {
+  updateRecentImport: (
+    id: string,
+    patch: Pick<RecentImport, "lifecycle" | "savedMediaIds">
+  ) => void
   authorityKey: string | null
   generation: number
   setAuthority: (key: string | null, retainSession?: boolean) => void
@@ -180,20 +202,25 @@ const createSessionStorage = (): StateStorage => {
   if (typeof window === "undefined") {
     return createMemoryStorage()
   }
+  let readable = false
   return {
     getItem: (name: string): string | null => {
       try {
-        return window.sessionStorage.getItem(name)
-      } catch {
-        return null
+        const value = window.sessionStorage.getItem(name)
+      readable = true
+        return value
+      } catch (error) {
+        readable = false
+        throw error
       }
     },
     setItem: (name: string, value: string): void => {
+      if (!readable) return
       try {
         const parsed = JSON.parse(value) as {
           state?: QuickIngestSessionPersistedState
         }
-        if (!parsed?.state?.session) {
+        if (!parsed?.state?.session&& !parsed?.state?.recentImports?.length) {
           window.sessionStorage.removeItem(name)
           return
         }
@@ -203,13 +230,13 @@ const createSessionStorage = (): StateStorage => {
       }
     },
     removeItem: (name: string): void => {
+      if (!readable) return
       try {
         window.sessionStorage.removeItem(name)
       } catch {
         // Ignore storage removal failures.
       }
-    },
-  }
+    }}
 }
 
 const generateSessionId = (): string => {
@@ -404,6 +431,100 @@ const sanitizeQueueItems = (
   })
 }
 
+/** History keeps a host or filename only; pasted text and signed URL data stay out. */
+export const recentImportSourceLabel = (
+  item?: Pick<PersistedWizardQueueItem, "kind" | "url" | "fileName" | "name">
+): string => {
+  if (item?.kind === "text") return "Text"
+  const sourceUrl =
+    item?.url ||
+    (/^https?:/i.test(item?.fileName || "") ? item?.fileName : undefined)
+  if (sourceUrl) {
+    try {
+      const url = new URL(sourceUrl)
+      return ["http:", "https:"].includes(url.protocol)
+        ? url.hostname
+        : "Source"
+    } catch {
+      return "Source"
+    }
+  }
+  return (item?.fileName || item?.name || "Import")
+    .split(/[\\/]/)
+    .pop()!
+    .slice(0, 120)
+}
+
+const positiveIds = (values: unknown[]): number[] =>
+  Array.from(
+    new Set(
+      values.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0)
+    )
+  )
+const sanitizeRecentImports = (records: RecentImport[] = []): RecentImport[] =>
+  records
+    .filter(
+      (item) =>
+        item &&
+        typeof item.authorityKey === "string" &&
+        item.authorityKey &&
+        typeof item.id === "string"
+    )
+    .map((item) => ({
+      id: item.id,
+      authorityKey: item.authorityKey,
+      sourceLabel: recentImportSourceLabel({
+        kind: "file",
+        fileName: item.sourceLabel
+      }),
+      sourceCount: normalizeCountLike(item.sourceCount) || 0,
+      lifecycle: item.lifecycle,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      completedAt: item.completedAt || null,
+      batchIds: normalizeStringIds(item.batchIds),
+      jobIds: positiveIds(item.jobIds || []),
+      savedMediaIds: positiveIds(item.savedMediaIds || [])
+    }))
+    .slice(0, 10)
+
+const withRecentImport = (
+  records: RecentImport[],
+  session: QuickIngestSessionRecord | null
+): RecentImport[] => {
+  if (!session?.authorityKey || session.lifecycle === "draft") return records
+  const previous = records.find(
+    (item) =>
+      item.id === session.id && item.authorityKey === session.authorityKey
+  )
+  const metadata: RecentImport = {
+    id: session.id,
+    authorityKey: session.authorityKey,
+    sourceLabel: recentImportSourceLabel(session.queueItems[0]),
+    sourceCount:
+      session.queueItems.length ||
+      session.resultSummary.totalCount ||
+      session.results.length,
+    lifecycle: session.lifecycle,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    completedAt: session.completedAt || null,
+    batchIds: normalizeStringIds([
+      ...(previous?.batchIds || []),
+      ...(session.tracking?.batchIds || [])
+    ]),
+    jobIds: positiveIds([
+      ...(previous?.jobIds || []),
+      ...(session.tracking?.jobIds || [])
+    ]),
+    savedMediaIds: positiveIds(getSavedMediaIds(session.results))
+  }
+  return [metadata, ...records.filter((item) => item.id !== session.id)].slice(
+    0,
+    10
+  )
+}
+
 const countTerminalFailures = (session: QuickIngestSessionRecord): number => {
   if (session.lifecycle === "partial_failure" || session.lifecycle === "interrupted") {
     return Math.max(
@@ -412,8 +533,10 @@ const countTerminalFailures = (session: QuickIngestSessionRecord): number => {
         session.results.filter((item) => item.status === "error").length
     )
   }
-  return session.resultSummary.failedCount ||
-    session.results.filter((item) => item.status === "error").length
+  return (
+    session.resultSummary.failedCount ||
+        session.results.filter((item) => item.status === "error").length
+  )
 }
 
 const buildTriggerSummary = (
@@ -551,9 +674,11 @@ const normalizeCountLike = (value: unknown): number | null => {
 }
 
 const buildPersistedState = (
-  session: QuickIngestSessionRecord | null
+  session: QuickIngestSessionRecord | null,
+  recentImports: RecentImport[]
 ): QuickIngestSessionPersistedState => ({
   session: sanitizeSession(session),
+  recentImports: sanitizeRecentImports(recentImports)
 })
 
 export const createEmptyQuickIngestSession = (): QuickIngestSessionRecord => {
@@ -590,7 +715,8 @@ const createInitialState = (): QuickIngestSessionPersistedState & {
   triggerSummary: QuickIngestTriggerSummary
 } => ({
   session: null,
-  triggerSummary: buildTriggerSummary(null),
+  recentImports: [],
+  triggerSummary: buildTriggerSummary(null)
 })
 
 const withSessionUpdate = (
@@ -606,14 +732,18 @@ const withSessionUpdate = (
     const session = sanitizeSession(resolver(state.session))
     return {
       session,
-      triggerSummary: buildTriggerSummary(session),
+      recentImports: withRecentImport(state.recentImports, session),
+      triggerSummary: buildTriggerSummary(session)
     }
   })
 }
 
-export const createQuickIngestSessionStore = (storage = createSessionStorage()) => {
+export const createQuickIngestSessionStore = (
+  storage = createSessionStorage()
+) => {
   let authorityRevision = 0
   let quarantined: QuickIngestSessionRecord | null = null
+  let quarantinedImports: RecentImport[] = []
   const guardedStorage: StateStorage = {
     ...storage,
     getItem: (name) => {
@@ -636,23 +766,27 @@ export const createQuickIngestSessionStore = (storage = createSessionStorage()) 
         const actions = (generation: number) => {
           const isCurrent = () => get().generation === generation && Boolean(get().authorityKey)
           return {
-        createDraftSession: (seed) => {
-          if (!isCurrent()) throw new Error("Verify the current account before starting Quick Ingest.")
-          authorityRevision += 1
-          quarantined = null
-          const next = sanitizeSession({
+            createDraftSession: (seed) => {
+              if (!isCurrent()) throw new Error("Verify the current account before starting Quick Ingest.")
+              authorityRevision += 1
+              quarantined = null
+              const next = sanitizeSession({
             ...createEmptyQuickIngestSession(),
             ...(seed || {}),
             authorityKey: get().authorityKey!,
             updatedAt: Date.now(),
           })
-          replace({
-            session: next,
-            triggerSummary: buildTriggerSummary(next),
-          })
-          return next as QuickIngestSessionRecord
-        },
-        upsertSession: (next) => {
+              replace({
+                session: next,
+                recentImports: withRecentImport(
+                  withRecentImport(get().recentImports, get().session),
+                  next
+                ),
+                triggerSummary: buildTriggerSummary(next)
+              })
+              return next as QuickIngestSessionRecord
+            },
+            upsertSession: (next) => {
           if (!isCurrent()) return
           withSessionUpdate(set, (current) => {
             if (!current || (next.id && next.id !== current.id)) return current
@@ -679,7 +813,7 @@ export const createQuickIngestSessionStore = (storage = createSessionStorage()) 
             }
           })
         },
-        showSession: () => {
+            showSession: () => {
           if (!isCurrent()) return
           if (!get().session) { get().createDraftSession(); return }
           withSessionUpdate(set, (current) => {
@@ -691,7 +825,7 @@ export const createQuickIngestSessionStore = (storage = createSessionStorage()) 
             }
           })
         },
-        hideSession: () => {
+            hideSession: () => {
           if (!isCurrent()) return
           withSessionUpdate(set, (current) => {
             if (!current) return current
@@ -702,7 +836,7 @@ export const createQuickIngestSessionStore = (storage = createSessionStorage()) 
             }
           })
         },
-        markProcessingTracking: (tracking) => {
+            markProcessingTracking: (tracking) => {
           if (!isCurrent()) return
           withSessionUpdate(set, (current) => {
             if (!current) return null
@@ -719,7 +853,7 @@ export const createQuickIngestSessionStore = (storage = createSessionStorage()) 
             }
           })
         },
-        markInterrupted: (reason) => {
+            markInterrupted: (reason) => {
           if (!isCurrent()) return
           withSessionUpdate(set, (current) => {
             if (!current) return current
@@ -740,36 +874,72 @@ export const createQuickIngestSessionStore = (storage = createSessionStorage()) 
             }
           })
         },
-        clearSession: () =>
-          {
-            if (get().generation !== generation) return
-            authorityRevision += 1
-            quarantined = null
-            replace({
+            updateRecentImport: (id, patch) => {
+              if (!isCurrent()) return
+              set((state) => ({
+                recentImports: state.recentImports.map((item) =>
+                  item.id === id && item.authorityKey === state.authorityKey
+                    ? {
+                        ...item,
+                        lifecycle: patch.lifecycle,
+                        savedMediaIds: positiveIds([
+                          ...item.savedMediaIds,
+                          ...patch.savedMediaIds
+                        ]),
+                        updatedAt: Date.now()
+                      }
+                    : item
+                )
+              }))
+            },
+            clearSession: () => {
+              if (get().generation !== generation) return
+              authorityRevision += 1
+              quarantined = null
+              replace({
               session: null,
               triggerSummary: buildTriggerSummary(null),
             })
-            void storage.removeItem(STORAGE_KEY)
-          },
-        replaceWithNewDraft: (seed) => {
+            },
+            replaceWithNewDraft: (seed) => {
           if (!isCurrent()) throw new Error("Verify the current account before starting Quick Ingest.")
           get().clearSession()
           return get().createDraftSession(seed)
-        },
+        }
           } satisfies Omit<QuickIngestSessionState, keyof QuickIngestSessionPersistedState | "triggerSummary" | "authorityKey" | "generation" | "setAuthority">
         }
         return {
-          ...createInitialState(), authorityKey: null, generation: 0,
+          ...createInitialState(),
+          authorityKey: null,
+          generation: 0,
           ...actions(0),
           setAuthority: (key, retainSession = false) => {
             if (key && get().authorityKey === key) return
             if (get().authorityKey || !key) authorityRevision += 1
-            if (retainSession) quarantined = get().session || quarantined
-            else if (get().authorityKey || !key) quarantined = null
+            if (retainSession) {
+              quarantined = get().session || quarantined
+              quarantinedImports = get().recentImports.length
+                ? get().recentImports
+                : quarantinedImports
+            } else if (get().authorityKey || !key) {
+              quarantined = null
+              quarantinedImports = []
+            }
             const session = key && quarantined?.authorityKey === key ? quarantined : null
-            if (key) quarantined = null
-            replace({ authorityKey: key, session, triggerSummary: buildTriggerSummary(session) })
-          },
+            const recentImports = key
+              ? quarantinedImports.filter((item) => item.authorityKey === key)
+              : []
+            if (key) {
+              quarantined = null
+              quarantinedImports = []
+            }
+            replace({
+              authorityKey: key,
+              session,
+              recentImports,
+              triggerSummary: buildTriggerSummary(session)
+            })
+          }
         }
       },
       {
@@ -779,20 +949,42 @@ export const createQuickIngestSessionStore = (storage = createSessionStorage()) 
         version: 2,
         migrate: (persisted) => persisted as any,
         storage: createJSONStorage(() => guardedStorage),
-        partialize: (state) => buildPersistedState(state.session || quarantined),
+        partialize: (state) =>
+          buildPersistedState(
+            state.session || quarantined,
+            state.authorityKey ? state.recentImports : quarantinedImports
+          ),
         merge: (persistedState, currentState) => {
           const nextSession = sanitizeSession(
             (persistedState as QuickIngestSessionPersistedState | undefined)?.session ||
               null
           )
+          const incoming = sanitizeRecentImports(
+            (persistedState as QuickIngestSessionPersistedState | undefined)
+              ?.recentImports
+          )
+          quarantinedImports = currentState.authorityKey ? [] : incoming
           quarantined = currentState.authorityKey ? null : nextSession
           const visible = currentState.session || (nextSession?.authorityKey === currentState.authorityKey ? nextSession : null)
           return {
             ...currentState,
             session: visible,
-            triggerSummary: buildTriggerSummary(visible),
+            recentImports: withRecentImport(
+              [
+                ...currentState.recentImports,
+                ...incoming.filter(
+                  (item) =>
+                    item.authorityKey === currentState.authorityKey &&
+                    !currentState.recentImports.some(
+                      (existing) => existing.id === item.id
+                    )
+                )
+              ].slice(0, 10),
+              visible
+            ),
+            triggerSummary: buildTriggerSummary(visible)
           }
-        },
+        }
       }
     )
   )

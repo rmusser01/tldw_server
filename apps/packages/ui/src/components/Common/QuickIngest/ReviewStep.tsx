@@ -1,22 +1,21 @@
-import { getEligibleQueueItems, getQueueItemExclusionReason } from "./queue-items"
-import React, { useCallback, useMemo } from "react"
-import { useTranslation } from "react-i18next"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import {
   AlertTriangle,
   ArrowLeft,
-  Play,
+  BookOpen,
+  File,
   FileText,
-  Music,
   Film,
   Globe,
   Image,
-  BookOpen,
-  File,
+  Music,
+  Play
 } from "lucide-react"
-import type { DetectedMediaType, IngestPreset, PresetConfig, WizardQueueItem } from "./types"
+import React, { useCallback, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import { useIngestWizard } from "./IngestWizardContext"
-
+import { getEligibleQueueItems, getQueueItemExclusionReason } from "./queue-items"
+import type { DetectedMediaType, IngestPreset, PresetConfig, WizardQueueItem } from "./types"
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -266,6 +265,17 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
           })}
         </ul>
 
+        <p className="mt-3 text-sm text-text-muted">
+          {presetConfig.common.overwrite_existing
+            ? qi(
+                "review.replacementAllowed",
+                "Replacement allowed: matching saved sources may be replaced. Affected saved items have not been confirmed."
+              )
+            : qi(
+                "review.replacementDisabled",
+                "Replacement disabled: existing saved sources are preserved."
+              )}
+        </p>
         {/* Storage mode */}
         <p className="mt-3 text-xs text-text-muted">
           {qi("review.storage", "Storage: {{mode}}", { mode: storageMode })}

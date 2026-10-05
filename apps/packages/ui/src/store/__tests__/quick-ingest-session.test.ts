@@ -69,7 +69,8 @@ describe("quick ingest session store", () => {
     store.getState().clearSession()
 
     expect(store.getState().session).toBeNull()
-    expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull()
+    expect(JSON.parse(sessionStorage.getItem(STORAGE_KEY)!).state.recentImports
+    ).toHaveLength(1)
   })
 
   it("stores queue file stubs without raw File instances", () => {

@@ -1,3 +1,7 @@
+import {
+  buildChatSurfaceScopeKeyFromConfig,
+  deriveSingleUserApiKeyCredentialScope,
+} from "@/services/chat-surface-scope"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -6,11 +10,6 @@ import {
   servicePromptSingleUserApiKeyScopeMatches,
   servicePromptTargetsMatch
 } from "../service-prompt-scope-error"
-import {
-  buildChatSurfaceScopeKeyFromConfig,
-  deriveSingleUserApiKeyCredentialScope,
-} from "@/services/chat-surface-scope"
-
 describe("Service Prompt scope policy", () => {
   it.each([
     ["/api/v1/media/389", "PUT", true],
@@ -301,4 +300,36 @@ it.each([
   ['/api/v1/media/7/permanent', 'DELETE', false],
 ] as const)('bounds Inspector recovery %s %s', (path, method, allowed) => {
   expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})
+it.each([
+  ["/api/v1/media/ingest/jobs?batch_id=known", "GET", true],
+  ["/api/v1/media/ingest/jobs", "DELETE", false],
+  ["/api/v1/media/ingest/jobs/", "GET", false],
+  ["/api/v1/media/ingest/jobs/extra", "GET", false],
+  ["/api/v1/media/ingest/jobs%2fextra", "GET", false]
+] as const)("bounds recent import reads %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+describe("exact registered Media listing route variants", () => {
+  it.each(["/api/v1/media?page=2", "/api/v1/media/?page=2"])(
+    "accepts GET %s",
+    (path) => {
+      expect(isServicePromptRequestPath(path, "GET")).toBe(true)
+    }
+  )
+  it.each([
+    "/api/v1/media//",
+    "/api/v1/media/%2e%2e",
+    "/api/v1/media/unrelated",
+    "/api/v1/media/%2F"
+  ])("rejects GET %s", (path) => {
+    expect(isServicePromptRequestPath(path, "GET")).toBe(false)
+  })
+  it.each(["POST", "DELETE", "PATCH", "PUT"])(
+    "rejects %s listing",
+    (method) => {
+      expect(isServicePromptRequestPath("/api/v1/media/", method)).toBe(false)
+    }
+  )
 })

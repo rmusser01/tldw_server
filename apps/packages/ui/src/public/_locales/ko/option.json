@@ -2758,5 +2758,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "계정과 로컬 저장소가 확인될 때까지 오프라인 저장을 사용할 수 없습니다. 변경 사항은 저장되지 않은 상태로 유지됩니다."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

@@ -1,50 +1,50 @@
-import React from "react"
-import { useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
-import { useTranslation } from "react-i18next"
-import { useNavigate, useLocation } from "react-router-dom"
-import { useQuery } from "@tanstack/react-query"
-import { useVirtualizer } from "@tanstack/react-virtual"
-import { useAntdMessage } from "@/hooks/useAntdMessage"
-import { useStorage } from "@plasmohq/storage/hook"
-import { useSetting } from "@/hooks/useSetting"
-import { useMessageOption } from "@/hooks/useMessageOption"
-import { useServerOnline } from "@/hooks/useServerOnline"
-import { getSetting, setSetting } from "@/services/settings/registry"
-import {
-  MEDIA_HIDE_TRANSCRIPT_TIMINGS_SETTING,
-  MEDIA_REVIEW_ORIENTATION_SETTING,
-  MEDIA_REVIEW_VIEW_MODE_SETTING,
-  MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING,
-  MEDIA_REVIEW_AUTO_VIEW_MODE_SETTING,
-  MEDIA_REVIEW_SELECTION_SETTING,
-  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING
-} from "@/services/settings/ui-settings"
-import {
-  hasLeadingTranscriptTimings
-} from "@/utils/media-transcript-display"
-import type { MediaDateRange, MediaSortBy } from "@/components/Review/mediaSearchRequest"
-import {
+import { type ContentFilterProgress,
   IDLE_CONTENT_FILTER_PROGRESS,
-  toProgressLabel,
-  type ContentFilterProgress
+  toProgressLabel
 } from "@/components/Review/content-filtering-progress"
+import type { MediaMultiBatchExportFormat } from "@/components/Review/media-multi-batch-actions"
+import { DEFAULT_SORT_BY,
+  MOBILE_REVIEW_MEDIA_QUERY,
+  type MediaDetail,
+  type MediaItem,
+  type MediaReviewState,
+  RESULTS_ROW_ESTIMATE_SIZE,
+  SELECTION_WARNING_THRESHOLD,
+  getContent,
+  getIsMobileReviewViewport
+} from "@/components/Review/media-review-types"
+import type { MediaDateRange, MediaSortBy } from "@/components/Review/mediaSearchRequest"
 import {
   STACK_VIRTUAL_ESTIMATE_SIZE,
   STACK_VIRTUAL_OVERSCAN,
   shouldVirtualizeStackMode
 } from "@/components/Review/stack-virtualization"
-import type { MediaMultiBatchExportFormat } from "@/components/Review/media-multi-batch-actions"
+import { useAntdMessage } from "@/hooks/useAntdMessage"
+import { useMessageOption } from "@/hooks/useMessageOption"
+import { useServerOnline } from "@/hooks/useServerOnline"
+import { useSetting } from "@/hooks/useSetting"
+import { getSetting, setSetting } from "@/services/settings/registry"
 import {
-  type MediaItem,
-  type MediaDetail,
-  getContent,
-  DEFAULT_SORT_BY,
-  SELECTION_WARNING_THRESHOLD,
-  RESULTS_ROW_ESTIMATE_SIZE,
-  MOBILE_REVIEW_MEDIA_QUERY,
-  getIsMobileReviewViewport,
-  type MediaReviewState
-} from "@/components/Review/media-review-types"
+  MEDIA_HIDE_TRANSCRIPT_TIMINGS_SETTING,
+  MEDIA_REVIEW_AUTO_VIEW_MODE_SETTING,
+  MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING,
+  MEDIA_REVIEW_ORIENTATION_SETTING,
+  MEDIA_REVIEW_SELECTION_SETTING,
+  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING
+,
+  MEDIA_REVIEW_VIEW_MODE_SETTING
+} from "@/services/settings/ui-settings"
+import { useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
+import {
+  hasLeadingTranscriptTimings
+} from "@/utils/media-transcript-display"
+import { useQuery } from "@tanstack/react-query"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import React from "react"
+import { useTranslation } from "react-i18next"
+import { useLocation, useNavigate } from "react-router-dom"
+
+import { useStorage } from "@plasmohq/storage/hook"
 
 export function useMediaReviewState(
   fetchListFn: React.MutableRefObject<(() => Promise<MediaItem[]>) | null>
@@ -53,6 +53,14 @@ export function useMediaReviewState(
   const navigate = useNavigate()
   const location = useLocation()
   const authorityKey = useQuickIngestAuthority()
+  const [queryAuthorityKey, setQueryAuthorityKey] = React.useState<
+    string | null
+  >(null)
+  // Start only after this owner's action lifetime has committed. Query startup
+  // can otherwise capture the previous lifetime during an authority transition.
+  React.useEffect(() => {
+    setQueryAuthorityKey(authorityKey)
+  }, [authorityKey])
   const selectionRevision = React.useRef(0)
   const [readingActive, setReadingActiveState] = React.useState(false)
   const setReadingActive: React.Dispatch<React.SetStateAction<boolean>> = React.useCallback(next => {
@@ -120,8 +128,7 @@ export function useMediaReviewState(
   const [viewModeState, setViewModeState] = React.useState<"spread" | "list" | "all">("spread")
   const shouldHideTranscriptTimings = hideTranscriptTimings ?? true
   const viewMode = isMobileViewport
-    ? (viewModeState === "all" && selectedIds.length > 1 ? "all" : "list")
-    : viewModeState
+    ? viewModeState === "all" && selectedIds.length > 1 ? "all" : "list": viewModeState
   const setViewMode = React.useCallback((mode: "spread" | "list" | "all") => {
     if (isMobileViewport) {
       setViewModeState(mode === "all" && selectedIds.length > 1 ? "all" : "list")
@@ -268,16 +275,15 @@ export function useMediaReviewState(
     },
     placeholderData: (previousData, previousQuery) => previousQuery?.queryKey[1] === authorityKey ? previousData : undefined,
     enabled: isOnline && Boolean(authorityKey)
+  && queryAuthorityKey === authorityKey
   })
-
-  React.useEffect(() => { refetch() }, [])
 
   // Derived values
   const cardCls = orientation === 'vertical'
     ? 'border border-border rounded p-3 bg-surface w-full'
     : 'border border-border rounded p-3 bg-surface w-full md:w-[48%]'
 
-  const allResults: MediaItem[] = React.useMemo(() => authorityKey && Array.isArray(data) ? data : [], [authorityKey, data])
+  const allResults: MediaItem[] = React.useMemo(() => (authorityKey && Array.isArray(data) ? data : []), [authorityKey, data])
   const hasResults = allResults.length > 0
   React.useEffect(() => {
     if (!authorityKey || !allResults.length) return
@@ -296,8 +302,7 @@ export function useMediaReviewState(
   const visibleIds = viewMode === "spread"
     ? readingIds
     : viewMode === "list"
-      ? (focusedId != null ? [focusedId] : [])
-      : readingIds
+      ? focusedId != null ? [focusedId] : []: readingIds
   const focusedDetail = readingActive && focusedId != null ? details[focusedId] : null
   const focusIndex = focusedId != null ? selectedIds.findIndex((id) => String(id) === String(focusedId)) : -1
   const previewedDetail = previewedId != null ? details[previewedId] : null
@@ -319,7 +324,7 @@ export function useMediaReviewState(
   })
 
   const viewerVirtualizer = useVirtualizer({
-    count: viewMode === "spread" ? viewerItems.length : viewMode === "list" ? (focusedDetail ? 1 : 0) : 0,
+    count: viewMode === "spread" ? viewerItems.length : viewMode === "list" ? focusedDetail ? 1 : 0: 0,
     getScrollElement: () => viewerParentRef.current,
     estimateSize: () => 520,
     overscan: 6,
@@ -344,10 +349,13 @@ export function useMediaReviewState(
   const hasDateRangeFilter = Boolean(dateRange.startDate || dateRange.endDate)
   const selectionStatusLevel =
     selectedIds.length >= openAllLimit
-      ? "limit" as const
+      ? ("limit" as const
+      )
       : readingIds.length >= SELECTION_WARNING_THRESHOLD
-        ? "warning" as const
-        : "safe" as const
+        ? ("warning" as const
+        )
+        : ("safe" as const
+  )
   const selectionStatusText =
     selectionStatusLevel === "limit"
       ? t("mediaPage.selectionStatusWindowed", "Windowed reading")

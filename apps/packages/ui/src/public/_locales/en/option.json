@@ -6391,5 +6391,14 @@
   },
   "quickIngest_wizard_results_savedReviewFailed": {
     "message": "Unable to open saved items. Try again."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
+  },
+  "quickIngest_review_replacementAllowed": {
+    "message": "Replacement allowed: matching saved sources may be replaced. Affected saved items have not been confirmed."
+  },
+  "quickIngest_review_replacementDisabled": {
+    "message": "Replacement disabled: existing saved sources are preserved."
   }
 }

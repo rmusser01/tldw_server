@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { bgRequest } from "../background-proxy"
+import { TldwApiClient, tldwClient } from "../tldw/TldwApiClient"
+import { mediaMethods } from "../tldw/domains/media"
+import { requestScopeFields } from "../tldw/domains/service-prompts"
+
 const boundary = vi.hoisted(() => ({ get: vi.fn(), fetch: vi.fn() }))
 vi.mock("wxt/browser", () => ({ browser: { runtime: { id: null } } }))
 vi.mock("@/utils/safe-storage", () => ({
@@ -7,16 +12,35 @@ vi.mock("@/utils/safe-storage", () => ({
   safeStorageSerde: { serialize: (value: unknown) => value, deserialize: (value: unknown) => value },
 }))
 vi.mock("@/services/tldw/runtime-auth-override", () => ({ getRuntimeSingleUserApiKeyOverride: () => null, isCookieSessionConfigInvalidated: () => false }))
-import { TldwApiClient, tldwClient } from "../tldw/TldwApiClient"
-import { bgRequest } from "../background-proxy"
-import { requestScopeFields } from "../tldw/domains/service-prompts"
-import { mediaMethods } from "../tldw/domains/media"
-
-
 const config = (user = 1, serverUrl = "https://ingest.test") => ({ serverUrl, authMode: "multi-user" as const, accessToken: `test.${btoa(JSON.stringify({ sub: String(user) }))}.signature` })
 const options = { requestScope: { config: { serverUrl: "https://ingest.test", authMode: "multi-user" as const }, userId: 1 } }
 let client: TldwApiClient
 const operations = [
+  [
+    "initial Review trailing-slash list",
+    () =>
+      bgRequest({
+        path: "/api/v1/media/?page=1&results_per_page=20",
+        method: "GET",
+        ...requestScopeFields(options.requestScope)
+      })
+  ],
+  [
+    "recent imports",
+    () =>
+      client.listMediaIngestJobs(
+        { batch_id: "known-batch", limit: 50 },
+        options
+      )
+  ],
+  [
+    "domain recent imports",
+    () =>
+      mediaMethods.listMediaIngestJobs(
+        { batch_id: "known-batch", limit: 50 },
+        options
+      )
+  ],
   ['Inspector quota', () => bgRequest({ path: '/api/v1/users/storage', method: 'GET', ...requestScopeFields(options.requestScope) })],
   ['Inspector note trash', () => bgRequest({ path: '/api/v1/notes/7', method: 'DELETE', headers: { 'expected-version': '7' }, ...requestScopeFields(options.requestScope) })],
   ['Inspector note restore', () => bgRequest({ path: '/api/v1/notes/7/restore?expected_version=8', method: 'POST', ...requestScopeFields(options.requestScope) })],
@@ -26,7 +50,7 @@ const operations = [
   ['reprocess', () => client.reprocessMedia(7, {perform_chunking:true}, options)],
   ['domain bulk tags', () => mediaMethods.bulkUpdateMediaKeywords({media_ids:[7], keywords:['owned']}, options)],
   ['domain trash', () => mediaMethods.deleteMedia(7, options)],
-  ['domain reprocess', () => mediaMethods.reprocessMedia(7, {perform_chunking:true}, options)],
+  ['domain reprocess', () => mediaMethods.reprocessMedia(7, {perform_chunking:true}, options)]
 ] as const
 
 beforeEach(() => {
@@ -46,7 +70,9 @@ describe("Review batch real outbound scope", () => {
     const scoped = requestScopeFields(options.requestScope)
     await bgRequest({ path: '/api/v1/notes/7', method: 'DELETE', ...scoped, headers: { ...scoped.headers, 'expected-version': '7' }, abortSignal: controller.signal })
     let entered!: () => void
-    const started = new Promise<void>(resolve => { entered = resolve })
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
     boundary.fetch.mockImplementationOnce((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
       init.signal!.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true })
       entered()
@@ -84,23 +110,30 @@ describe("Review batch real outbound scope", () => {
     await expect(run()).rejects.toMatchObject({ status: 412 })
     expect(boundary.fetch).not.toHaveBeenCalled()
   })
-  it.each(operations)('blocks %s when owner changes while request config is loading', async (_label, run) => {
-    let release!: () => void
-    let entered!: () => void
-    const started = new Promise<void>(resolve => {entered = resolve})
-    const wait = new Promise<void>(resolve => {release = resolve})
-    boundary.get.mockImplementation(async (key: string) => {
+  it.each(operations)(
+    'blocks %s when owner changes while request config is loading',
+    async (_label, run) => {
+      let release!: () => void
+      let entered!: () => void
+      const started = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const wait = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      boundary.get.mockImplementation(async (key: string) => {
       if (key !== 'tldwConfig') return null
       entered()
       await wait
       return config(2, 'https://foreign.test')
     })
-    const pending = run()
-    await started
-    release()
-    await expect(pending).rejects.toMatchObject({status:412})
-    expect(boundary.fetch).not.toHaveBeenCalled()
-  })
+      const pending = run()
+      await started
+      release()
+      await expect(pending).rejects.toMatchObject({status:412})
+      expect(boundary.fetch).not.toHaveBeenCalled()
+    }
+  )
   it.each(['client','domain'])('keeps the %s bulk fallback scoped after a server transition', async (kind) => {
     boundary.fetch.mockImplementation(async () => {
       boundary.get.mockImplementation(async (key: string) => key === 'tldwConfig' ? config(2, 'https://foreign.test') : null)

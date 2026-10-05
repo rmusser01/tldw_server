@@ -1981,5 +1981,53 @@
   },
   "mediaPage_restoreSelectedNotes_other": {
     "message": "Restore {{count}} notes"
+  },
+  "mediaPage_recentImportsTitle": {
+    "message": "Recent imports"
+  },
+  "mediaPage_recentImportsHint": {
+    "message": "Imports appear here when processing starts. Add media to begin."
+  },
+  "mediaPage_importSourceCount": {
+    "message": "{{count}} sources"
+  },
+  "mediaPage_importLiveProgress": {
+    "message": "{{done}} processing outcomes received"
+  },
+  "mediaPage_resumeImport": {
+    "message": "Resume import"
+  },
+  "mediaPage_refreshImport": {
+    "message": "Refresh import"
+  },
+  "mediaPage_reviewImportSaved": {
+    "message": "Review {{count}} saved items"
+  },
+  "mediaPage_importDiagnostics": {
+    "message": "Optional diagnostics"
+  },
+  "mediaPage_ingestJobsLoadError": {
+    "message": "Unable to refresh this import. Try again."
+  },
+  "mediaPage_ingestReviewError": {
+    "message": "Unable to open the saved review set. Try again."
+  },
+  "mediaPage_importState_draft": {
+    "message": "Draft"
+  },
+  "mediaPage_importState_processing": {
+    "message": "Processing"
+  },
+  "mediaPage_importState_completed": {
+    "message": "Completed"
+  },
+  "mediaPage_importState_partial_failure": {
+    "message": "Some items failed"
+  },
+  "mediaPage_importState_cancelled": {
+    "message": "Cancelled"
+  },
+  "mediaPage_importState_interrupted": {
+    "message": "Interrupted"
   }
 }

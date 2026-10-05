@@ -602,7 +602,7 @@
     "uploadFailed": "Upload failed",
     "uploadMissingMediaId": "Upload succeeded but no media ID was returned",
     "unsupportedType": "This media type isn’t supported in the document workspace.",
-    "missingFile": "This document's original file was not preserved during ingest. To view it in the workspace, re-upload it using the Upload tab above, or re-ingest it \u2014 newer ingests automatically preserve document files.",
+    "missingFile": "This document's original file was not preserved during ingest. To view it in the workspace, re-upload it using the Upload tab above, or re-ingest it — newer ingests automatically preserve document files.",
     "fileUnauthorized": "You don't have permission to access this document.",
     "openFailed": "Failed to open document",
     "healthWarningTitle": "Document workspace storage unavailable",
@@ -1305,7 +1305,9 @@
         "unselectedExcluded": "Not selected for this run.",
         "savedReviewFailed": "Unable to open saved items. Try again."
       }
-    }
+    },
+    "review.replacementAllowed": "Replacement allowed: matching saved sources may be replaced. Affected saved items have not been confirmed.",
+    "review.replacementDisabled": "Replacement disabled: existing saved sources are preserved."
   },
   "libraryView": "Library View",
   "notes": "Notes",
@@ -2258,7 +2260,7 @@
       "title": "Welcome to Content Rules",
       "description": "Set up content safety rules, blocklists, overrides, and test cases.",
       "guardrailsCta": "Set up Family Guardrails",
-      "dismiss": "Skip \u2014 I\u2019ll explore on my own",
+      "dismiss": "Skip — I’ll explore on my own",
       "tabHint": "Start here: Policy & Settings tab sets your base rules. Then test them in the Test Sandbox.",
       "startHereBadge": "Start here"
     }

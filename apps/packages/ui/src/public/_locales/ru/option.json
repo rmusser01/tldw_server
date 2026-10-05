@@ -2770,5 +2770,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "Автономное сохранение недоступно, пока не подтверждены ваша учётная запись и локальное хранилище. Ваши изменения остаются несохранёнными."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

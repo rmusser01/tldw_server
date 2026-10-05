@@ -3595,13 +3595,20 @@ export class TldwApiClientBase {
     params: {
       batch_id: string
       limit?: number
+      offset?: number
     },
-    options?: { timeoutMs?: number }
+    options?: {
+      timeoutMs?: number
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
   ): Promise<any> {
     const query = this.buildQuery(params as Record<string, any>)
     return await bgRequest<any>({
       path: `/api/v1/media/ingest/jobs${query}`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
       timeoutMs: options?.timeoutMs
     })
   }

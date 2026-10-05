@@ -438,7 +438,25 @@
     "restoreSelectedNotes": "Restore {{count}} notes",
     "noteRestorePartial": "{{count}} notes could not be restored. Try again.",
     "restoreSelectedNotes_one": "Restore {{count}} note",
-    "restoreSelectedNotes_other": "Restore {{count}} notes"
+    "restoreSelectedNotes_other": "Restore {{count}} notes",
+    "recentImportsTitle": "Recent imports",
+    "recentImportsHint": "Imports appear here when processing starts. Add media to begin.",
+    "importSourceCount": "{{count}} sources",
+    "importLiveProgress": "{{done}} processing outcomes received",
+    "resumeImport": "Resume import",
+    "refreshImport": "Refresh import",
+    "reviewImportSaved": "Review {{count}} saved items",
+    "importDiagnostics": "Optional diagnostics",
+    "ingestJobsLoadError": "Unable to refresh this import. Try again.",
+    "ingestReviewError": "Unable to open the saved review set. Try again.",
+    "importState": {
+      "draft": "Draft",
+      "processing": "Processing",
+      "completed": "Completed",
+      "partial_failure": "Some items failed",
+      "cancelled": "Cancelled",
+      "interrupted": "Interrupted"
+    }
   },
   "trashPage": {
     "title": "Trash",

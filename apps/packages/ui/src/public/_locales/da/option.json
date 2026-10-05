@@ -2755,5 +2755,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "Offline-gemning er ikke tilgængelig, før din konto og lokale lagring er bekræftet. Dine ændringer er fortsat ikke gemt."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

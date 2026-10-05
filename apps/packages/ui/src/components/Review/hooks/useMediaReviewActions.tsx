@@ -1,40 +1,42 @@
-import { watchChatAccountChanges } from "@/services/chat-account-boundary"
-import React from "react"
-import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
-import { quickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
-import { Button, Modal } from "antd"
+import { IDLE_CONTENT_FILTER_PROGRESS } from "@/components/Review/content-filtering-progress"
+import { rankKeywordSuggestions } from "@/components/Review/filter-chip-priority"
+import { type MediaMultiBatchExportItem,
+  buildBatchExportArtifact,
+  parseBatchKeywords
+} from "@/components/Review/media-multi-batch-actions"
+import { DEFAULT_SORT_BY, type MediaDetail,
+  type MediaItem,
+  type MediaReviewActions,
+  type MediaReviewState,
+  UNDO_DURATION_SECONDS,
+  getContent,
+  getErrorStatusCode,
+  idsEqual,
+  includesId
+} from "@/components/Review/media-review-types"
+import { buildMediaTrashHandoffSearch } from "@/components/Review/mediaPermalink"
+import { buildMediaSearchPayload } from "@/components/Review/mediaSearchRequest"
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
 import { bgRequest } from "@/services/background-proxy"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { getNoteKeywords, searchNoteKeywords } from "@/services/note-keywords"
 import { clearSetting } from "@/services/settings/registry"
 import {
   LAST_MEDIA_ID_SETTING
 } from "@/services/settings/ui-settings"
-import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
-import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from "@/services/tldw/media-chat-handoff"
-import { rankKeywordSuggestions } from "@/components/Review/filter-chip-priority"
-import { IDLE_CONTENT_FILTER_PROGRESS } from "@/components/Review/content-filtering-progress"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
 import {
-  buildBatchExportArtifact,
-  parseBatchKeywords,
-  type MediaMultiBatchExportItem
-} from "@/components/Review/media-multi-batch-actions"
-import { buildMediaTrashHandoffSearch } from "@/components/Review/mediaPermalink"
-import { buildMediaSearchPayload } from "@/components/Review/mediaSearchRequest"
+  buildMediaChatHandoffRoute,
+  createMediaChatHandoff, removeMediaChatHandoff } from "@/services/tldw/media-chat-handoff"
+import { quickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { downloadBlob } from "@/utils/download-blob"
 import { extractMediaDetailAnalysis } from "@/utils/media-detail-content"
 import {
-  type MediaItem,
-  type MediaDetail,
-  type MediaReviewState,
-  type MediaReviewActions,
-  getContent,
-  idsEqual,
-  includesId,
-  getErrorStatusCode,
-  DEFAULT_SORT_BY,
-  UNDO_DURATION_SECONDS
-} from "@/components/Review/media-review-types"
+  Button,
+  Modal } from "antd"
+import React from "react"
 
 export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions & { _fetchList: () => Promise<MediaItem[]> } {
   const actionLifetime = React.useRef<AbortController | null>(null)
@@ -95,24 +97,33 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   const fetchDetail = React.useCallback(async (id: string | number, operation = captureOperation()): Promise<MediaDetail> => {
     if (!operation?.isCurrent()) throw new Error('Review owner is unavailable')
     const key = `${authorityKey}:${id}`
-    while (detailRequests.current.size >= openAllLimit && !detailRequests.current.has(key)) {
-      await Promise.race([...detailRequests.current.values()].map(promise => promise.catch(() => null)))
-      if (!operation.isCurrent()) throw new Error('Review owner changed')
-    }
-    const existing = detailRequests.current.get(key)
-    if (existing) return existing
-    const pending = bgRequest<MediaDetail>({
+      while (
+        detailRequests.current.size >= openAllLimit && !detailRequests.current.has(key)
+      ) {
+        await Promise.race(
+          [...detailRequests.current.values()].map((promise) =>
+            promise.catch(() => null)
+          )
+        )
+        if (!operation.isCurrent()) throw new Error('Review owner changed')
+      }
+      const existing = detailRequests.current.get(key)
+      if (existing) return existing
+      const pending = bgRequest<MediaDetail>({
       path: `/api/v1/media/${id}?include_content=true&include_versions=false` as any,
       method: 'GET' as any,
       abortSignal: operation.signal,
       ...requestScopeFields(operation.requestScope)
-    }).then(detail => {
+    }).then((detail) => {
       if (!operation.isCurrent()) throw new Error('Review owner changed')
       return detail
-    }).finally(() => {detailRequests.current.delete(key)})
-    detailRequests.current.set(key, pending)
-    return pending
-  }, [authorityKey, openAllLimit, captureOperation])
+    })
+        .finally(() => {detailRequests.current.delete(key)})
+      detailRequests.current.set(key, pending)
+      return pending
+    },
+    [authorityKey, openAllLimit, captureOperation]
+  )
 
   const cancelContentFiltering = React.useCallback(() => {
     contentFilterRunRef.current += 1
@@ -192,29 +203,32 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     return filtered
   }, [captureOperation, fetchDetail, details, includeContent, keywordTokens, query, contentFilterRunRef, setContentLoading, setContentFilterProgress, setDetails])
 
-  const mapMediaItems = React.useCallback((items: any[]): MediaItem[] => (
-    items.map((m: any) => ({
+  const mapMediaItems = React.useCallback(
+    (items: any[]): MediaItem[] =>
+      items.map((m: any) => ({
       id: m?.id ?? m?.media_id ?? m?.pk ?? m?.uuid,
       title: m?.title || m?.filename || `Media ${m?.id}`,
       snippet: m?.snippet || m?.summary || "",
       type: String(m?.type || m?.media_type || "").toLowerCase(),
       created_at: m?.created_at
-    }))
-  ), [])
+    })),
+    []
+  )
 
-  const ensureDetail = React.useCallback(async (id: string | number, isRetry = false) => {
-    if (details[id] || detailLoading[id]) return
-    const operation = captureOperation()
-    if (!operation) return
-    setDetailLoading((prev) => ({ ...prev, [id]: true }))
-    if (isRetry) {
+  const ensureDetail = React.useCallback(
+    async (id: string | number, isRetry = false) => {
+      if (details[id] || detailLoading[id]) return
+      const operation = captureOperation()
+      if (!operation) return
+      setDetailLoading((prev) => ({ ...prev, [id]: true }))
+      if (isRetry) {
       setFailedIds((prev) => {
         const next = new Set(prev)
         next.delete(id)
         return next
       })
     }
-    try {
+      try {
       const d = await fetchDetail(id, operation)
       if (!operation.isCurrent()) return
       const base = Array.isArray(data) ? (data as MediaItem[]).find((x) => idsEqual(x.id, id)) : undefined
@@ -226,24 +240,28 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         return next
       })
     } catch (error) {
-      if (!operation.isCurrent()) return
-      setFailedIds((prev) => new Set(prev).add(id))
-      const statusCode = getErrorStatusCode(error)
-      if (statusCode === 404 || statusCode === 410) {
-        setSelectedIds((prev) => {
+        if (!operation.isCurrent()) return
+        setFailedIds((prev) => new Set(prev).add(id))
+        const statusCode = getErrorStatusCode(error)
+        if (statusCode === 404 || statusCode === 410) {
+          setSelectedIds((prev) => {
           const next = prev.filter((candidateId) => String(candidateId) !== String(id))
           return next.length === prev.length ? prev : next
         })
-        setFocusedId((prev) => (prev != null && String(prev) === String(id) ? null : prev))
-      }
-    } finally {
+          setFocusedId((prev) =>
+            prev != null && String(prev) === String(id) ? null : prev
+          )
+        }
+      } finally {
       if (operation.isCurrent()) setDetailLoading((prev) => {
         const next = { ...prev }
         delete next[id]
         return next
       })
     }
-  }, [captureOperation, fetchDetail, data, detailLoading, details, setDetailLoading, setDetails, setFailedIds, setSelectedIds, setFocusedId])
+    },
+    [captureOperation, fetchDetail, data, detailLoading, details, setDetailLoading, setDetails, setFailedIds, setSelectedIds, setFocusedId]
+  )
 
   // Keep ref in sync
   React.useEffect(() => {
@@ -279,8 +297,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
 
     message.info(
       <span>
-        {t('mediaPage.selectionClearedCount', 'Selection cleared ({{count}} items).', { count: selectionToRestore.length })}
-        {' '}
+        {t('mediaPage.selectionClearedCount', 'Selection cleared ({{count}} items).', { count: selectionToRestore.length })}{" "}
         <Button
           type="link"
           size="small"
@@ -360,22 +377,29 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     startSelectedReview(selectedIds[next])
   }, [selectedIds, openAllLimit, readingWindowStart, startSelectedReview])
 
-  const toggleSelect = React.useCallback(async (id: string | number, event?: React.MouseEvent) => {
-    if (!authorityKey) return
-    if (event?.shiftKey && lastClickedRef.current != null) {
-      const lastIdx = allResults.findIndex(r => idsEqual(r.id, lastClickedRef.current!))
-      const currIdx = allResults.findIndex(r => idsEqual(r.id, id))
-      if (lastIdx !== -1 && currIdx !== -1) {
-        const [start, end] = lastIdx < currIdx ? [lastIdx, currIdx] : [currIdx, lastIdx]
-        const rangeIds = allResults.slice(start, end + 1).map(r => r.id)
-        setSelectedIds(prev => [...prev, ...rangeIds.filter(rid => !includesId(prev, rid))])
-        lastClickedRef.current = id
-        return
+  const toggleSelect = React.useCallback(
+    async (id: string | number, event?: React.MouseEvent) => {
+      if (!authorityKey) return
+      if (event?.shiftKey && lastClickedRef.current != null) {
+        const lastIdx = allResults.findIndex((r) =>
+          idsEqual(r.id, lastClickedRef.current!)
+        )
+        const currIdx = allResults.findIndex((r) => idsEqual(r.id, id))
+        if (lastIdx !== -1 && currIdx !== -1) {
+          const [start, end] = lastIdx < currIdx ? [lastIdx, currIdx] : [currIdx, lastIdx]
+          const rangeIds = allResults.slice(start, end + 1).map((r) => r.id)
+          setSelectedIds((prev) => [...prev, ...rangeIds.filter(rid => !includesId(prev, rid))])
+          lastClickedRef.current = id
+          return
+        }
       }
-    }
-    lastClickedRef.current = id
-    setSelectedIds(prev => includesId(prev, id) ? prev.filter(x => !idsEqual(x, id)) : [...prev, id])
-  }, [authorityKey, allResults, setSelectedIds, lastClickedRef])
+      lastClickedRef.current = id
+      setSelectedIds((prev) =>
+        includesId(prev, id) ? prev.filter(x => !idsEqual(x, id)) : [...prev, id]
+      )
+    },
+    [authorityKey, allResults, setSelectedIds, lastClickedRef]
+  )
 
   // Checkbox selection is metadata only. Fetch just the active reading window.
   React.useEffect(() => {
@@ -406,25 +430,36 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     setSelectedIds(allResults.map(item => item.id))
     setReadingWindowStart(0)
     setFocusedId(allResults[0]?.id ?? null)
-    message.info(<span>{t('mediaPage.selectionReplaced', 'Selection replaced with current visible items.')} <Button type="link" size="small" className="!p-0" onClick={() => {
+    message.info(
+      <span>
+        {t('mediaPage.selectionReplaced', 'Selection replaced with current visible items.')}{" "}
+        <Button type="link" size="small" className="!p-0" onClick={() => {
       if (!operation?.isCurrent()) return
       setSelectedIds(previousSelection)
       message.success(t('mediaPage.selectionRestored', 'Selection restored'))
-    }}>{t('mediaPage.undo', 'Undo')}</Button></span>, UNDO_DURATION_SECONDS)
+    }}>
+          {t("mediaPage.undo", "Undo")}
+        </Button>
+      </span>,
+      UNDO_DURATION_SECONDS
+    )
   }, [captureOperation, authorityKey, setReadingWindowStart, allResults, selectedIds, message, t, setSelectedIds, setFocusedId])
 
-  const removeFromSelection = React.useCallback((id: string | number) => {
-    setSelectedIds((prev) => {
-      const next = prev.filter((candidate) => !idsEqual(candidate, id))
-      if (next.length !== prev.length) {
-        setFocusedId((current) => {
-          if (current == null) return next[0] ?? null
-          return idsEqual(current, id) ? next[0] ?? null : current
-        })
-      }
-      return next
-    })
-  }, [setSelectedIds, setFocusedId])
+  const removeFromSelection = React.useCallback(
+    (id: string | number) => {
+      setSelectedIds((prev) => {
+        const next = prev.filter((candidate) => !idsEqual(candidate, id))
+        if (next.length !== prev.length) {
+          setFocusedId((current) => {
+            if (current == null) return next[0] ?? null
+            return idsEqual(current, id) ? (next[0] ?? null) : current
+          })
+        }
+        return next
+      })
+    },
+    [setSelectedIds, setFocusedId]
+  )
 
   const scrollToCard = React.useCallback(
     (id: string | number) => {
@@ -746,7 +781,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
           if (current == null) return next[0] ?? null
           return next.some((candidate) => idsEqual(candidate, current))
             ? current
-            : next[0] ?? null
+            : (next[0] ?? null)
         })
         return next
       })
@@ -761,8 +796,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         <span>
           {failedCount > 0
             ? t("mediaPage.batchTrashPartial", "Moved {{deleted}} item(s) to trash; {{failed}} failed.", { deleted: deletedIds.length, failed: failedCount })
-            : t("mediaPage.batchTrashSuccess", "Moved {{count}} item(s) to trash.", { count: deletedIds.length })}
-          {" "}
+            : t("mediaPage.batchTrashSuccess", "Moved {{count}} item(s) to trash.", { count: deletedIds.length })}{" "}
           <Button
             type="link"
             size="small"
@@ -804,7 +838,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         if (!operation.isCurrent()) return
         const row = selectedMetadata[String(id)] ?? currentResults.find((candidate) => idsEqual(candidate.id, id))
         // Fetch missing export content one at a time; do not populate the reading window.
-        const detail = details[id] ?? await fetchDetail(id, operation)
+        const detail = details[id] ?? (await fetchDetail(id, operation))
         if (!operation.isCurrent()) return
         const analysisText = extractMediaDetailAnalysis(detail)
         exportItems.push({
@@ -886,7 +920,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   // fetchList function for the query
   const fetchList = React.useCallback(async (): Promise<MediaItem[]> => {
     const operation = captureOperation()
-    if (!operation) return []
+    if (!operation) throw createServicePromptScopeChangedError()
     const hasQuery = query.trim().length > 0
     const hasDateRange = Boolean(dateRange.startDate || dateRange.endDate)
     const shouldUseSearchEndpoint =
@@ -909,8 +943,10 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         abortSignal: operation.signal,
         ...requestScopeFields(operation.requestScope)
       })
-      if (!operation.isCurrent()) return []
-      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res?.results) ? res.results : [])
+      if (!operation.isCurrent()) throw createServicePromptScopeChangedError()
+      const items = Array.isArray(res?.items)
+        ? res.items
+        : Array.isArray(res?.results) ? res.results : []
       const pagination = res?.pagination
       setTotal(Number(pagination?.total_items || items.length || 0))
       const mapped = mapMediaItems(items)
@@ -933,7 +969,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       abortSignal: operation.signal,
       ...requestScopeFields(operation.requestScope)
     })
-    if (!operation.isCurrent()) return []
+    if (!operation.isCurrent()) throw createServicePromptScopeChangedError()
     const items = Array.isArray(res?.items) ? res.items : []
     const pagination = res?.pagination
     setTotal(Number(pagination?.total_items || items.length || 0))

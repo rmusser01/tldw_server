@@ -1,396 +1,464 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import { useStorage } from '@plasmohq/storage/hook'
-import { ChevronDown, Loader2, RefreshCw } from 'lucide-react'
+import { setSetting } from "@/services/settings/registry"
+import {
+  MEDIA_REVIEW_SELECTION_SETTING,
+  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING
+} from "@/services/settings/ui-settings"
 import { tldwClient } from '@/services/tldw/TldwApiClient'
+import {
+  quickIngestAuthority,
+  useQuickIngestAuthority
+} from "@/services/tldw/quick-ingest-authority"
+import {
+  type RecentImport,
+  recentImportSourceLabel,
+  useQuickIngestSessionStore
+} from "@/store/quick-ingest-session"
 import { formatRelativeTime } from '@/utils/dateFormatters'
-import { requestQuickIngestOpen } from '@/utils/quick-ingest-open'
+import { ChevronDown, Loader2, RefreshCw } from 'lucide-react'
+import React, { useCallback, useEffect, useRef, useState } from "react"
+import { useTranslation } from 'react-i18next'
+import { useNavigate } from "react-router-dom"
+
+import { useStorage } from '@plasmohq/storage/hook'
 
 type MediaIngestJobStatus = {
   id: number
   status: string
   source?: string | null
-  source_kind?: string | null
   progress_percent?: number | null
   progress_message?: string | null
   error_message?: string | null
-  created_at?: string | null
-  completed_at?: string | null
+  result?: { media_id?: number | string; persisted?: boolean }
 }
-
-const MEDIA_INGEST_PANEL_COLLAPSED_KEY = 'media:ingest:panelCollapsed'
-const MEDIA_INGEST_LAST_BATCH_ID_KEY = 'media:ingest:lastBatchId'
-const MEDIA_INGEST_AUTO_REFRESH_KEY = 'media:ingest:autoRefresh'
-const MEDIA_INGEST_POLL_INTERVAL_MS = 8000
-
-const statusToneClass = (status: string | null | undefined): string => {
-  const normalized = String(status || '')
-    .toLowerCase()
-    .trim()
-  if (normalized === 'completed' || normalized === 'succeeded') {
-    return 'bg-success/10 text-success'
-  }
-  if (
-    normalized === 'running' ||
-    normalized === 'processing' ||
-    normalized === 'started' ||
-    normalized === 'queued'
-  ) {
-    return 'bg-primary/10 text-primaryStrong'
-  }
-  if (normalized === 'failed' || normalized === 'error' || normalized === 'cancelled') {
-    return 'bg-danger/10 text-danger'
-  }
-  return 'bg-surface2 text-text-muted'
-}
+const activeJob = (status: string) =>
+  ["running", "processing", "started", "queued"].includes(status.toLowerCase())
 
 export function MediaIngestJobsPanel() {
-  const { t } = useTranslation(['review'])
-  const [collapsed, setCollapsed] = useStorage<boolean>(
-    MEDIA_INGEST_PANEL_COLLAPSED_KEY,
-    true
+  const { t } = useTranslation(["review"])
+  const navigate = useNavigate()
+  const authorityKey = useQuickIngestAuthority()
+  const recentImports = useQuickIngestSessionStore(
+    (state) => state.recentImports
   )
-  const [savedBatchId, setSavedBatchId] = useStorage<string>(
-    MEDIA_INGEST_LAST_BATCH_ID_KEY,
-    ''
+  const session = useQuickIngestSessionStore((state) => state.session)
+  const [collapsed, setCollapsed] = useStorage<boolean>(
+    "media:ingest:panelCollapsed",
+    true
   )
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useStorage<boolean>(
-    MEDIA_INGEST_AUTO_REFRESH_KEY,
+    "media:ingest:autoRefresh",
     true
   )
-  const [batchDraft, setBatchDraft] = useState(savedBatchId || '')
+  // Raw IDs are explicit, temporary diagnostics. Old unowned persisted IDs cannot start requests.
+  const [batchDraft, setBatchDraft] = useState("")
+  const [diagnosticBatch, setDiagnosticBatch] = useState("")
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [jobs, setJobs] = useState<MediaIngestJobStatus[]>([])
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
-  const requestSequenceRef = useRef(0)
+  const sequence = useRef(0)
+  const imports = authorityKey
+    ? recentImports.filter((item) => item.authorityKey === authorityKey)
+    : []
+  const selected = imports.find((item) => item.id === selectedId)
+  const batchIds = selected?.batchIds.join("\n") || diagnosticBatch
   const panelCollapsed = collapsed === true
-  const persistedBatchId = String(savedBatchId || '').trim()
+  const qi = useCallback(
+    (key: string, defaultValue: string, options?: Record<string, unknown>) =>
+      t(`review:mediaPage.${key}`, { defaultValue, ...options }),
+    [t]
+  )
 
   useEffect(() => {
-    setBatchDraft(String(savedBatchId || ''))
-  }, [savedBatchId])
+    sequence.current += 1
+    setSelectedId(null)
+    setDiagnosticBatch("")
+    setBatchDraft("")
+    setJobs([])
+    setError(null)
+    setLoading(false)
+    setLastUpdatedAt(null)
+  }, [authorityKey])
 
-  // Auto-link batch ID and expand panel when Quick Ingest completes
-  useEffect(() => {
-    const handleIngestComplete = (e: Event) => {
-      const detail = (e as CustomEvent)?.detail
-      const batchId = detail?.batchId
-      if (batchId) {
-        setBatchDraft(batchId)
-        void setSavedBatchId(batchId)
-        void setCollapsed(false)
-      }
-    }
-    window.addEventListener("tldw:quick-ingest-complete", handleIngestComplete)
-    return () => window.removeEventListener("tldw:quick-ingest-complete", handleIngestComplete)
-  }, [setSavedBatchId, setCollapsed])
-
-  const summary = useMemo(() => {
-    return jobs.reduce(
-      (acc, job) => {
-        const status = String(job.status || '')
-          .toLowerCase()
-          .trim()
-        if (status === 'completed' || status === 'succeeded') {
-          acc.completed += 1
-          return acc
-        }
-        if (
-          status === 'running' ||
-          status === 'started' ||
-          status === 'queued' ||
-          status === 'processing'
-        ) {
-          acc.active += 1
-          return acc
-        }
-        if (status === 'failed' || status === 'error' || status === 'cancelled') {
-          acc.failed += 1
-          return acc
-        }
-        acc.other += 1
-        return acc
-      },
-      { completed: 0, active: 0, failed: 0, other: 0 }
-    )
-  }, [jobs])
-
+  const loadError = qi(
+    "ingestJobsLoadError",
+    "Unable to refresh this import. Try again."
+  )
   const loadJobs = useCallback(async () => {
-    if (!persistedBatchId) {
-      setJobs([])
-      setError(null)
-      setLastUpdatedAt(null)
-      setLoading(false)
+    if (!authorityKey || !batchIds) return
+    const request = ++sequence.current
+    let operation: ReturnType<typeof quickIngestAuthority.capture>
+    try {
+      operation = quickIngestAuthority.capture({ sessionBound: false })
+    } catch {
       return
     }
-
-    const requestSequence = ++requestSequenceRef.current
+    const current = () => request === sequence.current && operation.isCurrent()
     setLoading(true)
     setError(null)
-
     try {
-      const response = await tldwClient.listMediaIngestJobs({
-        batch_id: persistedBatchId,
-        limit: 50
-      })
-      if (requestSequence !== requestSequenceRef.current) return
-      setJobs(Array.isArray(response?.jobs) ? response.jobs : [])
+      const responses = await Promise.all(
+        batchIds.split("\n").map(async (batch_id) => {
+          const collected: MediaIngestJobStatus[] = []
+          let offset: number | undefined
+          while (current()) {
+            const response = await tldwClient.listMediaIngestJobs(
+              { batch_id, limit: 50, ...(offset ? { offset } : {}) },
+              {
+                signal: operation.signal,
+                requestScope: operation.requestScope
+              }
+            )
+            if (!current()) return { jobs: [] }
+            collected.push(
+              ...(Array.isArray(response?.jobs) ? response.jobs : [])
+            )
+            const nextOffset =
+              response?.next_offset ?? response?.pagination?.next_offset
+            if (!(response?.has_more ?? response?.pagination?.has_more)) break
+            if (
+              !Number.isSafeInteger(nextOffset) ||
+              nextOffset <= (offset || 0)
+            )
+              throw new Error("Invalid import pagination")
+            offset = nextOffset
+          }
+          return { jobs: collected }
+        })
+      )
+      if (!current()) return
+      const next: MediaIngestJobStatus[] = Array.from(
+        new Map(
+          responses
+            .flatMap((response) =>
+              Array.isArray(response?.jobs) ? response.jobs : []
+            )
+            .map((job) => [job.id, job])
+        ).values()
+      )
+      setJobs(next)
       setLastUpdatedAt(new Date().toISOString())
-    } catch (err: any) {
-      if (requestSequence !== requestSequenceRef.current) return
-      setError('Unable to load ingest jobs. Check the batch ID and try again.')
-      setJobs([])
-    } finally {
-      if (requestSequence === requestSequenceRef.current) {
-        setLoading(false)
+      if (selectedId && next.length) {
+        const anyActive = next.some(
+          (job) =>
+            activeJob(job.status) ||
+            ![
+              "completed",
+              "succeeded",
+              "failed",
+              "error",
+              "cancelled"
+            ].includes(job.status.toLowerCase())
+        )
+        const failed = next.some((job) =>
+          ["failed", "error"].includes(job.status.toLowerCase())
+        )
+        const cancelled = next.every(
+          (job) => job.status.toLowerCase() === "cancelled"
+        )
+        useQuickIngestSessionStore.getState().updateRecentImport(selectedId, {
+          lifecycle: anyActive
+            ? "processing"
+            : failed
+              ? "partial_failure"
+              : cancelled
+                ? "cancelled"
+                : "completed",
+          savedMediaIds: next
+            .filter(
+              (job) =>
+                ["completed", "succeeded"].includes(job.status.toLowerCase()) &&
+                job.result?.persisted !== false
+            )
+            .map((job) => Number(job.result?.media_id))
+            .filter((id) => Number.isSafeInteger(id) && id > 0)
+        })
       }
+    } catch {
+      if (current()) {
+        setJobs([])
+        setError(loadError)
+      }
+    } finally {
+      if (current()) setLoading(false)
     }
-  }, [persistedBatchId])
+  }, [authorityKey, batchIds, selectedId, loadError])
 
   useEffect(() => {
-    if (panelCollapsed) return
-    void loadJobs()
+    if (!panelCollapsed) void loadJobs()
+    return () => {
+      sequence.current += 1
+    }
   }, [loadJobs, panelCollapsed])
-
   useEffect(() => {
-    if (panelCollapsed || !persistedBatchId || autoRefreshEnabled === false) return
-    const intervalId = window.setInterval(() => {
+    if (
+      panelCollapsed ||
+      !batchIds ||
+      autoRefreshEnabled === false ||
+      !(
+        jobs.some((job) => activeJob(job.status)) ||
+        (!jobs.length && selected?.lifecycle === "processing")
+      )
+    )
+      return
+    const timer = window.setInterval(() => {
       void loadJobs()
-    }, MEDIA_INGEST_POLL_INTERVAL_MS)
-    return () => window.clearInterval(intervalId)
-  }, [autoRefreshEnabled, loadJobs, panelCollapsed, persistedBatchId])
+    }, 8000)
+    return () => window.clearInterval(timer)
+  }, [
+    panelCollapsed,
+    batchIds,
+    autoRefreshEnabled,
+    jobs,
+    selected?.lifecycle,
+    loadJobs
+  ])
 
-  const applyBatchId = useCallback(() => {
-    const normalizedBatchId = batchDraft.trim()
-    void setSavedBatchId(normalizedBatchId)
-  }, [batchDraft, setSavedBatchId])
-
+  const reviewSaved = async (item: RecentImport) => {
+    if (item.authorityKey !== authorityKey || !item.savedMediaIds.length) return
+    let operation: ReturnType<typeof quickIngestAuthority.capture>
+    try {
+      operation = quickIngestAuthority.capture({ sessionBound: false })
+    } catch {
+      return
+    }
+    setError(null)
+    try {
+      await setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, {
+        version: 1,
+        authorityKey: operation.authorityKey,
+        selectedIds: item.savedMediaIds
+      })
+      if (!operation.isCurrent()) return
+      try {
+        await setSetting(MEDIA_REVIEW_SELECTION_SETTING, item.savedMediaIds)
+      } catch {
+        console.warn(
+          "[media-review] Compatibility selection mirror could not be written."
+        )
+      }
+      if (operation.isCurrent()) navigate("/media-multi")
+    } catch {
+      if (operation.isCurrent())
+        setError(
+          qi(
+            "ingestReviewError",
+            "Unable to open the saved review set. Try again."
+          )
+        )
+    }
+  }
+  const actionClass =
+    "min-h-10 rounded-md border border-border px-3 py-2 text-xs text-text hover:bg-surface2 disabled:opacity-50"
   return (
     <div className="border-b border-border px-4 py-3">
       <button
         type="button"
         onClick={() => setCollapsed(!panelCollapsed)}
-        className="flex w-full items-center justify-between text-sm text-text hover:text-text"
+        className="flex min-h-10 w-full items-center justify-between text-sm text-text"
         aria-expanded={!panelCollapsed}
         aria-controls="media-ingest-jobs-panel"
-        data-testid="media-ingest-jobs-toggle"
-      >
-        <span>{t('review:mediaPage.ingestJobsTitle', { defaultValue: 'Ingest jobs' })}</span>
+        data-testid="media-ingest-jobs-toggle">
+        <span>
+          {qi("recentImportsTitle", "Recent imports")}
+          {imports.length ? ` (${imports.length})` : ""}
+        </span>
         <ChevronDown
-          className={`h-4 w-4 transition-transform ${panelCollapsed ? '' : 'rotate-180'}`}
+          className={`h-4 w-4 ${panelCollapsed ? "" : "rotate-180"}`}
         />
       </button>
-
       {!panelCollapsed && (
         <div id="media-ingest-jobs-panel" className="mt-3 space-y-3" data-testid="media-ingest-jobs-panel">
-          <div className="space-y-2">
-            <label className="block text-xs text-text-muted">
-              {t('review:mediaPage.ingestBatchId', { defaultValue: 'Batch ID' })}
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                value={batchDraft}
-                onChange={(event) => setBatchDraft(event.target.value)}
-                placeholder={t('review:mediaPage.ingestBatchIdPlaceholder', {
-                  defaultValue: 'Paste batch ID from ingest response'
-                })}
-                className="h-8 flex-1 rounded-md border border-border bg-surface px-2 text-xs text-text"
-                data-testid="media-ingest-batch-input"
-              />
+          {!imports.length && (
+            <p className="text-xs text-text-muted" data-testid="media-ingest-jobs-empty-batch">
+              {qi(
+                "recentImportsHint",
+                "Imports appear here when processing starts. Add media to begin."
+              )}
+            </p>
+          )}
+          <ul className="space-y-2">
+            {imports.map((item) => (
+              <li
+                key={item.id}
+                className="rounded-md border border-border bg-surface px-3 py-2">
+                <p className="truncate text-sm font-medium text-text">
+                  {item.sourceLabel}
+                </p>
+                <p className="text-xs text-text-muted">
+                  {qi("importSourceCount", "{{count}} sources", {
+                    count: item.sourceCount
+                  })}{" "}
+                  ·{" "}
+                  {qi(
+                    `importState.${item.lifecycle}`,
+                    item.lifecycle.replace(/_/g, " ")
+                  )}{" "}
+                  ·{" "}
+                  {formatRelativeTime(
+                    new Date(item.updatedAt).toISOString(),
+                    t,
+                    { compact: true }
+                  )}
+                </p>
+                {item.id === session?.id &&
+                  session.authorityKey === authorityKey && (
+                    <p className="text-xs text-text-muted" role="status">
+                      {qi(
+                        "importLiveProgress",
+                        "{{done}} processing outcomes received",
+                        {
+                          done: session.results.length,
+                          count: item.sourceCount
+                        }
+                      )}
+                    </p>
+                  )}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {item.id === session?.id &&
+                    session.authorityKey === authorityKey && (
+                      <button
+                        className={actionClass}
+                        onClick={() =>
+                          useQuickIngestSessionStore.getState().showSession()
+                        }>
+                        {qi("resumeImport", "Resume import")}
+                      </button>
+                    )}
+                  {!!item.batchIds.length && (
+                    <button
+                      className={actionClass}
+                      onClick={() => {
+                        setDiagnosticBatch("")
+                        if (selectedId === item.id) void loadJobs()
+                        else setSelectedId(item.id)
+                      }}>
+                      <RefreshCw className="mr-1 inline h-3 w-3" />
+                      {qi("refreshImport", "Refresh import")}
+                    </button>
+                  )}
+                  {!!item.savedMediaIds.length && (
+                    <button
+                      className={actionClass}
+                      onClick={() => void reviewSaved(item)}>
+                      {qi("reviewImportSaved", "Review {{count}} saved items", {
+                        count: item.savedMediaIds.length
+                      })}
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <details>
+            <summary className="cursor-pointer text-xs text-text-muted">
+              {qi("importDiagnostics", "Optional diagnostics")}
+            </summary>
+            <div className="mt-2 flex gap-2">
+              <label className="min-w-0 flex-1 text-xs">
+                {qi("ingestBatchId", "Batch ID")}
+                <input
+                  value={batchDraft}
+                  onChange={(event) => setBatchDraft(event.target.value)}
+                  className="mt-1 h-10 w-full rounded border border-border bg-surface px-2"
+                  data-testid="media-ingest-batch-input"
+                />
+              </label>
               <button
-                type="button"
-                onClick={applyBatchId}
-                disabled={!batchDraft.trim()}
-                className="h-8 rounded-md border border-border px-2 text-xs text-text hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!authorityKey || !batchDraft.trim()}
+                className={actionClass}
                 data-testid="media-ingest-batch-apply"
-              >
-                {t('review:mediaPage.applyBatch', { defaultValue: 'Apply' })}
-              </button>
-              <button
-                type="button"
-                onClick={() => void loadJobs()}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-text hover:bg-surface2"
-                aria-label={t('review:mediaPage.refreshIngestJobs', { defaultValue: 'Refresh ingest jobs' })}
-                title={t('review:mediaPage.refreshIngestJobs', { defaultValue: 'Refresh ingest jobs' })}
-                data-testid="media-ingest-jobs-refresh"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
+                onClick={() => {
+                  setSelectedId(null)
+                  setDiagnosticBatch(batchDraft.trim())
+                }}>
+                {qi("applyBatch", "Apply")}
               </button>
             </div>
-            <label className="inline-flex items-center gap-2 text-xs text-text-muted">
-              <input
-                type="checkbox"
-                checked={autoRefreshEnabled !== false}
-                onChange={(event) => setAutoRefreshEnabled(event.target.checked)}
-                className="h-3.5 w-3.5 rounded border-border bg-surface"
-                data-testid="media-ingest-auto-refresh"
-              />
-              <span>
-                {t('review:mediaPage.autoRefreshJobs', {
-                  defaultValue: 'Auto refresh every 8s'
-                })}
-              </span>
-            </label>
-          </div>
-
-          {!persistedBatchId ? (
-            <p className="text-xs text-text-muted" data-testid="media-ingest-jobs-empty-batch">
-              {t('review:mediaPage.ingestJobsHint', {
-                defaultValue: 'Enter a batch ID to track ingestion progress.'
-              })}
-            </p>
-          ) : (
+          </details>
+          {!!batchIds && (
             <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
-                <span>{t('review:mediaPage.totalJobs', { defaultValue: 'Jobs: {{count}}', count: jobs.length })}</span>
-                <span>
-                  {t('review:mediaPage.activeJobs', {
-                    defaultValue: 'Active: {{count}}',
-                    count: summary.active
-                  })}
-                </span>
-                <span>
-                  {t('review:mediaPage.completedJobs', {
-                    defaultValue: 'Completed: {{count}}',
-                    count: summary.completed
-                  })}
-                </span>
-                <span>
-                  {t('review:mediaPage.failedJobs', {
-                    defaultValue: 'Failed: {{count}}',
-                    count: summary.failed
-                  })}
-                </span>
-                {summary.other > 0 && (
-                  <span>
-                    {t('review:mediaPage.otherJobs', {
-                      defaultValue: 'Other: {{count}}',
-                      count: summary.other
-                    })}
-                  </span>
-                )}
-                {lastUpdatedAt && (
-                  <span data-testid="media-ingest-jobs-updated">
-                    {t('review:mediaPage.lastUpdated', {
-                      defaultValue: 'Updated {{time}}',
-                      time: formatRelativeTime(lastUpdatedAt, t, { compact: true })
-                    })}
-                  </span>
-                )}
-              </div>
-
-              {loading && (
-                <div
-                  className="inline-flex items-center gap-2 text-xs text-text-muted"
-                  data-testid="media-ingest-jobs-loading"
-                >
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>
-                    {t('review:mediaPage.loadingIngestJobs', {
-                      defaultValue: 'Loading ingest jobs...'
-                    })}
-                  </span>
-                </div>
-              )}
-
-              {error && (
-                <div
-                  className="rounded-md border border-danger/30 bg-danger/5 px-2 py-2 text-xs text-danger"
-                  data-testid="media-ingest-jobs-error"
-                >
-                  <p>{error}</p>
-                  <button
-                    type="button"
-                    onClick={() => void loadJobs()}
-                    className="mt-2 rounded-md border border-danger/40 px-2 py-1 text-[11px] hover:bg-danger/10"
-                    data-testid="media-ingest-jobs-retry"
-                  >
-                    {t('review:mediaPage.retryIngestJobs', { defaultValue: 'Retry' })}
-                  </button>
-                </div>
-              )}
-
-              {!loading && !error && jobs.length === 0 && (
-                <p className="text-xs text-text-muted" data-testid="media-ingest-jobs-empty">
-                  {t('review:mediaPage.ingestJobsEmpty', {
-                    defaultValue: 'No jobs found for this batch.'
+              <label className="inline-flex min-h-10 items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={autoRefreshEnabled !== false}
+                  onChange={(event) => setAutoRefreshEnabled(event.target.checked)}
+                  data-testid="media-ingest-auto-refresh"
+                />
+                {qi("autoRefreshJobs", "Auto refresh every 8s")}
+              </label>
+              {lastUpdatedAt && (
+                <p
+                  className="text-xs text-text-muted"
+                  data-testid="media-ingest-jobs-updated">
+                  {qi("lastUpdated", "Updated {{time}}", {
+                    time: formatRelativeTime(lastUpdatedAt, t, { compact: true })
                   })}
                 </p>
               )}
-
-              {jobs.length > 0 && (
+              {loading && (
+                <p className="text-xs" data-testid="media-ingest-jobs-loading">
+                  <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                  {qi("loadingIngestJobs", "Loading ingest jobs...")}
+                </p>
+              )}
+              {!loading && !error && !jobs.length && (
+                <p className="text-xs text-text-muted" data-testid="media-ingest-jobs-empty">
+                  {qi("ingestJobsEmpty", "No jobs found for this batch.")}
+                </p>
+              )}
+              {!!jobs.length && (
                 <ul className="max-h-52 space-y-2 overflow-y-auto" data-testid="media-ingest-jobs-list">
                   {jobs.map((job) => (
                     <li
                       key={job.id}
-                      className="rounded-md border border-border bg-surface px-2 py-2"
-                      data-testid={`media-ingest-job-row-${job.id}`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-medium text-text">
-                            {job.source || t('review:mediaPage.unknownSource', { defaultValue: 'Unknown source' })}
-                          </p>
-                          <p className="text-[11px] text-text-muted">
-                            {t('review:mediaPage.jobIdLabel', {
-                              defaultValue: 'Job #{{id}}',
-                              id: job.id
-                            })}
-                            {job.source_kind
-                              ? ` • ${String(job.source_kind).toUpperCase()}`
-                              : ''}
-                          </p>
-                        </div>
-                        <span
-                          className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${statusToneClass(job.status)}`}
-                          data-testid={`media-ingest-job-status-${job.id}`}
-                        >
-                          {job.status || 'unknown'}
+                      className="rounded border border-border p-2 text-xs"
+                      data-testid={`media-ingest-job-row-${job.id}`}>
+                      <p>
+                        {recentImportSourceLabel({
+                          url: job.source?.startsWith("http")
+                            ? job.source
+                            : undefined,
+                          fileName: job.source || undefined
+                        })}{" "}
+                        ·{" "}
+                        <span data-testid={`media-ingest-job-status-${job.id}`}>
+                          {job.status}
                         </span>
-                      </div>
-
+                      </p>
                       {(typeof job.progress_percent === 'number' || job.progress_message) && (
-                        <p className="mt-1 text-[11px] text-text-muted">
-                          {typeof job.progress_percent === 'number'
+                        <p>
+                          {typeof job.progress_percent === "number"
                             ? `${Math.max(0, Math.min(100, Math.round(job.progress_percent)))}%`
-                            : null}
+                            : ""}
                           {job.progress_message
-                            ? `${typeof job.progress_percent === 'number' ? ' • ' : ''}${job.progress_message}`
-                            : null}
+                            ? ` • ${job.progress_message}`
+                            : ""}
                         </p>
                       )}
-
                       {job.error_message && (
-                        <p className="mt-1 text-[11px] text-danger">{job.error_message}</p>
+                        <p className="text-danger">{job.error_message}</p>
                       )}
-                      {/* Retry button for failed/error/cancelled jobs */}
-                      {(() => {
-                        const s = String(job.status || '').toLowerCase().trim()
-                        if (s !== 'failed' && s !== 'error' && s !== 'cancelled') return null
-                        return (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              if (job.source) {
-                                requestQuickIngestOpen({
-                                  source: job.source,
-                                  sourceKind: job.source_kind,
-                                })
-                              }
-                            }}
-                            className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-danger/40 px-2 py-0.5 text-[11px] text-danger hover:bg-danger/10 transition-colors"
-                            data-testid={`media-ingest-job-retry-${job.id}`}
-                          >
-                            <RefreshCw className="h-3 w-3" />
-                            {t('review:mediaPage.retryJob', { defaultValue: 'Retry' })}
-                          </button>
-                        )
-                      })()}
                     </li>
                   ))}
                 </ul>
+              )}
+            </div>
+          )}
+          {error && (
+            <div
+              role="alert"
+              className="rounded border border-danger/30 p-2 text-xs text-danger"
+              data-testid="media-ingest-jobs-error">
+              <p>{error}</p>
+              {!!batchIds && (
+                <button
+                  className={actionClass}
+                  onClick={() => void loadJobs()}
+                  data-testid="media-ingest-jobs-retry">
+                  {qi("retryIngestJobs", "Retry")}
+                </button>
               )}
             </div>
           )}

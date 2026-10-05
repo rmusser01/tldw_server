@@ -2725,5 +2725,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "Il salvataggio offline non è disponibile finché il tuo account e l’archiviazione locale non sono confermati. Le tue modifiche restano non salvate."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

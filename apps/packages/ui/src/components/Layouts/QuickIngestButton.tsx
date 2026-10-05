@@ -257,8 +257,8 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
     (options?: { focusTrigger?: boolean }) => {
       hideSession()
       setQuickIngestAutoProcessQueued(false)
-      preparedSessionIdRef.current = null
-      setPreparedSessionId(null)
+      // Hiding preserves this prepared session and its live executor. A resume
+      // must not unmount it while a readiness effect prepares the same ID again.
       if ((options?.focusTrigger ?? true) && focusTriggerRef?.current) {
         requestAnimationFrame(() => {
           focusTriggerRef.current?.focus()
