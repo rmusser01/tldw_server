@@ -64,9 +64,23 @@ Notes link each other with `[[Title]]` or `[[id:<UUID>]]` (UX review decision D2
 - **Title links** match the owner's live notes after trimming, collapsing whitespace, and lower-casing. Titles may contain single `[` or `]` characters, but not `[[` or a newline. The linking note never matches its own title.
 - **Ambiguous titles** (several live notes share the title) resolve deterministically: an exact, case-sensitive title match wins, then the oldest note (`created_at`), then the lowest note id. "Oldest wins" keeps existing links stable when a duplicate is created later. Use `[[id:<UUID>]]` to link a specific duplicate; the WebUI autocomplete inserts that form for duplicate titles.
 - **Unresolved titles** (no live note has the title) create no edge. The WebUI shows them as "create note" links; creating the note resolves the link.
-- **Renames and lifecycle changes** re-resolve links. Each `[[Title]]` link stores a title reference key beside its edge in `note_wikilink_edges`, so when a note is created, renamed, trashed, restored, or deleted, `NoteGraphProjectionStore.refresh_title_referrers` finds the notes that link to the old or new title and re-projects them in the same transaction. Up to 200 linking notes are re-projected inline; the rest are queued dirty for the maintenance worker. Links follow titles, not notes: after a rename, `[[Old title]]` is unresolved until a note has that title again. Note text is never rewritten.
+- **Renames and lifecycle changes** re-resolve links. Each `[[Title]]` link stores a title reference key beside its edge in `note_wikilink_edges`, so when a note is created, renamed, trashed, restored, or deleted, `NoteGraphProjectionStore.refresh_title_referrers` finds the notes that link to the old or new title and re-projects them in the same transaction. Up to 200 linking notes are re-projected inline; the rest are queued dirty for the maintenance worker. Links follow titles, not notes: after a rename, `[[Old title]]` is unresolved until a note has that title again. Note text is never rewritten on its own; see "Renaming a note" below.
 - **Existing notes**: `WIKILINK_PARSER_VERSION` is 2, so the maintenance worker rebuilds every owner's projection once and `[[Title]]` links written before this change gain edges. Derived-edge reads return a retryable 503 while that rebuild runs.
 - `POST /api/v1/notes/wikilinks/resolve` applies the same rules for the WebUI preview, and `GET /api/v1/notes/search?title_only=true` searches titles across the whole library for `[[` autocomplete.
+
+### Renaming a note
+
+A rename leaves `[[Old title]]` links in other notes unresolved. The owner decision (#3110) is to **offer** an update: nothing is rewritten silently, and there is no alias state. The logic is in `tldw_Server_API/app/core/Notes/wikilink_rename.py`.
+
+- **Count**: `POST /api/v1/notes/wikilinks/referrers` lists the owner's live notes that hold a `[[Title]]` link to a title, with each note's version. It reads the title reference keys, not note text. `unresolved_only` keeps only the links a rename broke: if another live note still has the old title, the links resolve to that note and are not offered. Pages hold up to 200 notes, with an `after_note_id` cursor.
+- **Rewrite**: `POST /api/v1/notes/wikilinks/rewrite` takes the renamed note's id, the old title, and up to 200 `{id, expected_version}` notes.
+  - It replaces exactly the tokens the parser reads as a link to the old title, ignoring case and extra whitespace (`iter_wikilink_tokens`). `[[id:<UUID>]]` links, similar titles, and all other text are untouched.
+  - There is no alias syntax: `[[Old title|label]]` is the title `Old title|label`, so it is not a link to `Old title`. Code spans are not special to the parser, so a link inside code is rewritten too.
+  - Each note is one version-checked transaction. A note edited since the count is `skipped_conflict`, never overwritten. A failed save leaves that note's text whole and the batch continues.
+  - Other results: `skipped_no_match`, `skipped_not_found` (missing, trashed, or another owner's), `skipped_resolved` (the old title still names a live note), and `failed`.
+- **Ambiguous new title**: the new link is `[[New title]]`. If another live note shares the new title, that link could resolve to the other note by the ambiguity rule, so the links are written as `[[id:<UUID>]]` and keep pointing at the renamed note (`link_form: "id"`). The same form is used when no title link can name the new title. A note whose id is not a UUID has no id form: it keeps the title link and the response sets `new_title_shared`.
+- **Undo**: `POST /api/v1/notes/wikilinks/rewrite/undo` restores the previous text. The server keeps no undo state: the rewrite returns, per updated note, its new version and each replaced token's ordinal and original text, and undo puts exactly those tokens back if the note's version is unchanged. A note edited since the rewrite is `skipped_conflict`. A note with more than 1,000 rewritten links, or a link longer than 4,096 characters, is reported as `failed` instead of rewritten, because undo could not carry it.
+- **WebUI**: after the renamed note saves, `useNotesWikilinkRename` asks for the count and, when it is above zero, shows a non-blocking prompt ("N notes link to "Old title"" / Update links). Confirming rewrites the links and shows a result toast with Undo that names skipped notes. Dismissing leaves the links unresolved, and the same rename is not offered again in that visit. A note open with unsaved edits is left out and named.
 
 ## Extension Points
 
@@ -79,13 +93,15 @@ Notes link each other with `[[Title]]` or `[[id:<UUID>]]` (UX review decision D2
 ## Testing
 
 - Unit tests for the parser, cache, and graph service live under `tldw_Server_API/tests/Notes_Graph/unit/`.
+- The rename offer is covered by `unit/test_wikilink_rewrite.py` (token rules, with a rewrite-then-undo property test), `unit/test_wikilink_rename.py` (count, locking, undo), `integration/test_wikilink_rename_endpoints.py`, and the owner contract in `tldw_Server_API/tests/DB_Management/test_note_shared_owner_contract.py`.
 - Endpoint integration coverage for `/graph` and `/neighbors` lives in `tldw_Server_API/tests/Notes_Graph/integration/test_graph_endpoint.py`.
 - Suggestion API, worker, persistence, privacy, and quality coverage lives under `tldw_Server_API/tests/Notes_Graph/` and `tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py`.
 
 ## Gotchas
 
 - `note_wikilink_edges.target_note_id` holds note ids and `title:<sha256>` reference keys. Reference keys never join a note row, so graph reads skip them; `list_outgoing` filters them out. Don't treat every row as a note id.
-- Renaming a note breaks `[[Title]]` links to its old title (they become unresolved). Rewriting linking notes on rename is not implemented.
+- Renaming a note breaks `[[Title]]` links to its old title (they become unresolved). Linking notes are rewritten only when the user accepts the WebUI's "Update links" offer; API clients that rename notes must call the referrers and rewrite endpoints themselves.
+- The referrer count comes from the projection's title reference keys. For a note still waiting to be projected (a parser-version rebuild, or a write that bypassed the note store) it can lag behind note text, so a rename during a rebuild may be offered for fewer notes. The rewrite itself always reads each note's current text.
 - Manual-only graph reads remain available while a derived projection rebuild is pending; derived-edge and orphan reads return retryable 503 until the projection is current.
 - Trashing a note hides its incident manual and derived edges without deleting canonical link history; restoring the note makes those edges visible again when both endpoints are live.
 - Graph cursors are revision-bound pagination hints, never authorization tokens. Authorization and current revision are resolved before cache or cursor use.
