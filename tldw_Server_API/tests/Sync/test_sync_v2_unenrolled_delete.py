@@ -948,4 +948,6 @@ def test_without_sync_v2_deletes_behave_as_before(
 
     assert deleted_chat.status_code == 204, deleted_chat.text
     assert chacha_db.get_conversation_by_id(LEGACY_CHAT) is None
-    assert _is_deleted(chacha_db, LEGACY_ANSWER)
+    # Without a profile, Trash flags only the conversation (CS-N2, #3154): its messages
+    # keep their own deleted flag, so Restore brings the transcript back as it was.
+    assert not _is_deleted(chacha_db, LEGACY_ANSWER)
