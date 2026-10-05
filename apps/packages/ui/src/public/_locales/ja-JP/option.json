@@ -1167,7 +1167,7 @@
     "message": "レビュー後に保存"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "保存前にレビュー"
+    "message": "保存前に抽出した内容を確認"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "今すぐ処理し、サーバーに保存する前にローカルで下書きを編集します。"

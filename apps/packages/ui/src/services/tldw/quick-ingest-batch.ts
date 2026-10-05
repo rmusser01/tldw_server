@@ -47,6 +47,7 @@ import {
   type ApiMediaCollection,
   type ApiMediaCollectionItem,
   type MediaCollectionItemStatus,
+  type ConferenceRetryRequestItem,
 } from "@/services/tldw/conference-collections";
 
 type TypeDefaults = {
@@ -94,6 +95,7 @@ type QuickIngestBatchInput = QuickIngestRequestContext & {
   advancedValues?: Record<string, any>;
   fileDefaults?: TypeDefaults;
   conferenceBatchMetadata?: ConferenceBatchMetadata | null;
+  conferenceRetry?: { collectionId: string; items: ConferenceRetryRequestItem[] };
   chunkingTemplateName?: string;
   autoApplyTemplate?: boolean;
   __quickIngestSessionId?: string;
@@ -612,6 +614,7 @@ const webScrapeResponseIndicatesPersisted = (
 type PlannedConferenceCollectionItem = {
   collectionId: number;
   itemId: number;
+  retryAttempt?: number;
   idempotencyKey?: string | null;
 };
 
@@ -646,6 +649,21 @@ const createPlannedConferenceCollection = async (
   input: QuickIngestBatchInput,
   entries: QuickIngestEntry[],
 ): Promise<PlannedConferenceCollection | null> => {
+  if (input.conferenceRetry) {
+    const collectionId = Number(input.conferenceRetry.collectionId);
+    if (!Number.isSafeInteger(collectionId) || collectionId <= 0) throw new Error("Invalid retry collection identity");
+    const requests = new Map(input.conferenceRetry.items.map(item => [item.resultId, item]));
+    const itemsByEntryId = new Map<string, PlannedConferenceCollectionItem>();
+    for (const entry of entries) {
+      const request = requests.get(entry.id);
+      const itemId = Number(request?.collectionItemId);
+      if (!request || !Number.isSafeInteger(itemId) || itemId <= 0 || !Number.isSafeInteger(request.retryAttempt) || request.retryAttempt <= 0 || !request.idempotencyKey) {
+        throw new Error("Invalid retry item identity");
+      }
+      itemsByEntryId.set(entry.id, { collectionId, itemId, retryAttempt: request.retryAttempt, idempotencyKey: request.idempotencyKey });
+    }
+    return { collectionId, itemsByEntryId };
+  }
   if (!hasUsableConferenceMetadata(input.conferenceBatchMetadata)) return null;
   const selectedEntries = entries.filter(
     (entry) =>
@@ -764,6 +782,7 @@ const runDirectQuickIngestBatch = async (
       conferencePlan = await createPlannedConferenceCollection(input, entries);
     } catch (error) {
       assertQuickIngestRequestCurrent(input, error);
+      if (input.conferenceRetry) throw error;
       console.warn("[tldw] Conference collection planning failed", error);
     }
   }
@@ -851,7 +870,7 @@ const runDirectQuickIngestBatch = async (
             url,
             type: resolvedType,
             collectionItemId: plannedConferenceItem.itemId,
-            retryAttempt: 0,
+            retryAttempt: plannedConferenceItem.retryAttempt ?? 0,
             idempotencyKey: plannedConferenceItem.idempotencyKey ?? null,
             message: DUPLICATE_SKIP_MESSAGE,
             persisted: false,
@@ -927,6 +946,7 @@ const runDirectQuickIngestBatch = async (
             latestJobId = firstJobId;
             await patchConferenceCollectionItem(input, plannedConferenceItem, {
               status: "processing",
+              retry_count: plannedConferenceItem?.retryAttempt ?? 0,
               latest_job_id: String(firstJobId),
             });
             const directTracker = ensureDirectSessionTracker(directSessionId);
@@ -1062,7 +1082,7 @@ const runDirectQuickIngestBatch = async (
           persisted: resultPersisted,
           mediaId: resultMediaId,
           collectionItemId: plannedConferenceItem?.itemId ?? null,
-          retryAttempt: plannedConferenceItem ? 0 : null,
+          retryAttempt: plannedConferenceItem ? plannedConferenceItem.retryAttempt ?? 0 : null,
           idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
         });
       } catch (error) {
@@ -1089,7 +1109,7 @@ const runDirectQuickIngestBatch = async (
               ? error.message
               : String(error || "Request failed"),
           collectionItemId: plannedConferenceItem?.itemId ?? null,
-          retryAttempt: plannedConferenceItem ? 0 : null,
+          retryAttempt: plannedConferenceItem ? plannedConferenceItem.retryAttempt ?? 0 : null,
           idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
         });
       }
@@ -1244,6 +1264,7 @@ export const submitQuickIngestBatch = async (
 ): Promise<QuickIngestBatchResponse> => {
   assertQuickIngestRequestCurrent(input);
   if (
+    !input.conferenceRetry &&
     !isDirectQuickIngestSessionId(input?.__quickIngestSessionId) &&
     (await canUseExtensionMessagingRuntime())
   ) {
@@ -1268,7 +1289,8 @@ export const startQuickIngestSession = async (
   input: QuickIngestBatchInput,
 ): Promise<QuickIngestStartAck> => {
   assertQuickIngestRequestCurrent(input);
-  if (!shouldPreferDirectQuickIngestSession() && (await canUseExtensionMessagingRuntime())) {
+  // The legacy background planner does not understand existing collection retry identities.
+  if (!input.conferenceRetry && !shouldPreferDirectQuickIngestSession() && (await canUseExtensionMessagingRuntime())) {
     try {
       assertQuickIngestRequestCurrent(input);
       return await sendExtensionMessageWithTimeout<QuickIngestStartAck>({

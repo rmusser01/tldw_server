@@ -346,7 +346,6 @@ const reducer = (
           elapsed: 0,
           estimatedRemaining: 0,
         },
-        results: [],
       }
     }
 

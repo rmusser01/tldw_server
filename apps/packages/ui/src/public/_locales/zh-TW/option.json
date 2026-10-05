@@ -1167,7 +1167,7 @@
     "message": "審核後儲存"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "儲存前審核"
+    "message": "儲存前檢閱擷取的內容"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "先處理，然後在提交到伺服器前於本機編輯草稿。"

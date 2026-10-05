@@ -1167,7 +1167,7 @@
     "message": "Salva dopo la revisione"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Rivedi prima di salvare"
+    "message": "Rivedi il contenuto estratto prima di salvare"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Elabora ora, poi modifica le bozze localmente prima di salvarle sul server."

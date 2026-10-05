@@ -1658,7 +1658,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(screen.getByText("Skipped existing (1)")).toBeTruthy()
     expect(screen.getByText("Existing Article")).toBeTruthy()
     expect(
-      screen.getByText(/1 succeeded.*1 skipped.*1 failed/i)
+      screen.getByText(/1 excluded\/skipped.*1 succeeded.*1 failed/i)
     ).toBeTruthy()
   })
 
@@ -1861,11 +1861,11 @@ describe("QuickIngestWizardModal — real configure step", () => {
 
     // Advanced controls are hidden by default
     expect(screen.queryByTitle("Captions toggle")).not.toBeInTheDocument()
-    expect(screen.queryByText("Review before saving")).not.toBeInTheDocument()
+    expect(screen.queryByText("Review extracted content before saving")).not.toBeInTheDocument()
 
     // Expand advanced options to reveal them
     await expandAdvancedOptions(user)
-    expect(screen.getByText("Review before saving")).toBeInTheDocument()
+    expect(screen.getByText("Review extracted content before saving")).toBeInTheDocument()
     expect(screen.getByTitle("Captions toggle")).toBeInTheDocument()
 
     await user.click(analysisToggle)
@@ -1986,7 +1986,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       screen.getByLabelText(/store ingest results on your tldw server/i)
     )
 
-    const reviewToggle = screen.getByLabelText(/review before saving/i)
+    const reviewToggle = screen.getByLabelText(/review.*before saving/i)
     await user.click(reviewToggle)
 
     expect(

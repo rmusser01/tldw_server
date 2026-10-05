@@ -1167,7 +1167,7 @@
     "message": "Guardar después de revisar"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Revisar antes de guardar"
+    "message": "Revisar el contenido extraído antes de guardar"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Procesa ahora y luego edita los borradores localmente antes de confirmarlos en tu servidor."

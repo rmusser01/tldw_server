@@ -842,6 +842,14 @@ export const MEDIA_REVIEW_SELECTION_SETTING = defineSetting(
   }
 )
 
+/** Verified Quick Ingest authority owning the saved review selection. */
+export const MEDIA_REVIEW_SELECTION_OWNER_SETTING = defineSetting(
+  "media-review-selection-owner",
+  null as string | null,
+  (value) => typeof value === "string" && value ? value : null,
+  { area: "local" }
+)
+
 export const MEDIA_REVIEW_FOCUSED_ID_SETTING = defineSetting(
   "media-review-focused-id",
   null as string | number | null,

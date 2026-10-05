@@ -1053,12 +1053,12 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
                         <Switch
                           aria-label={qi(
                             "reviewBeforeStorage",
-                            "Review before saving"
+                            "Review extracted content before saving"
                           )}
                           checked={presetConfig.reviewBeforeStorage}
                           onChange={handleReviewBeforeStorageChange}
                         />
-                        <span>{qi("reviewBeforeStorage", "Review before saving")}</span>
+                        <span>{qi("reviewBeforeStorage", "Review extracted content before saving")}</span>
                       </label>
                       {presetConfig.reviewBeforeStorage ? (
                         <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">

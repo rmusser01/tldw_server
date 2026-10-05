@@ -1179,7 +1179,7 @@
     "message": "الحفظ بعد المراجعة"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "المراجعة قبل الحفظ"
+    "message": "مراجعة المحتوى المستخرج قبل الحفظ"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "قم بالمعالجة الآن ثم حرّر المسودات محليًا قبل اعتمادها على الخادم."

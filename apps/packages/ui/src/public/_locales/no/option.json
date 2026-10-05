@@ -537,7 +537,7 @@
     "message": "Lagre etter gjennomgang"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Gjennomgå før lagring"
+    "message": "Se gjennom uthentet innhold før lagring"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Behandle nå, og rediger deretter kladder lokalt før du lagrer på serveren."

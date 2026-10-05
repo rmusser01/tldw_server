@@ -1188,7 +1188,7 @@
     "message": "审阅后保存"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "保存前审阅"
+    "message": "保存前审核提取的内容"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "先处理，然后在提交到服务器前在本地编辑草稿。"

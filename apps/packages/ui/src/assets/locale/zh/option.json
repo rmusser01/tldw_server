@@ -610,7 +610,7 @@
     "reviewStorageCapWarning_one": "{{count}} 个文件超过本地草稿上限（{{cap}}）。请在提交音频/视频前附加来源。",
     "reviewStorageCapWarning_other": "{{count}} 个文件超过本地草稿上限（{{cap}}）。请在提交音频/视频前附加来源。",
     "storeAfterReview": "审阅后保存",
-    "reviewBeforeStorage": "保存前审阅",
+    "reviewBeforeStorage": "保存前审核提取的内容",
     "reviewBeforeStorageHint": "先处理，然后在提交到服务器前在本地编辑草稿。",
     "reviewEnabled": "审阅模式",
     "reviewStorageCap": "本地草稿上限为 {{cap}}。",

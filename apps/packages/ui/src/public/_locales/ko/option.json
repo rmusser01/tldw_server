@@ -1167,7 +1167,7 @@
     "message": "검토 후 저장"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "저장 전에 검토"
+    "message": "저장하기 전에 추출된 콘텐츠 검토"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "지금 처리한 뒤 서버에 저장하기 전에 로컬에서 초안을 편집하세요."

@@ -42,6 +42,20 @@ const startQuickIngestSession = (input: Parameters<typeof startBatch>[0]) => sta
 const cancelQuickIngestSession = (input: Parameters<typeof cancelBatch>[0]) => cancelBatch({ requestScope, ...input })
 
 describe("submitQuickIngestBatch", () => {
+  it("keeps conference retry identities on the shared executor in a legacy messaging runtime", async () => {
+    mocks.runtimeId = "legacy-extension"
+    mocks.manifestVersion = 2
+    mocks.sendMessage.mockResolvedValue({ ok: true, sessionId: "legacy-session", results: [] })
+    mocks.bgUpload.mockResolvedValue({ batch_id: "retry", jobs: [{ id: 99 }] })
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result: { status: "Success", media_id: 99 } } })
+    const input = { entries: [{ id: "failed", url: "https://source.test/talk.mp4", type: "video" as const }], files: [], storeRemote: true, processOnly: false,
+      conferenceRetry: { collectionId: "7", items: [{ resultId: "failed", collectionItemId: "81", retryAttempt: 1, idempotencyKey: "conference-retry-81-1" }] } }
+    const ack = await startQuickIngestSession(input)
+    const result = await submitQuickIngestBatch({ ...input, __quickIngestSessionId: ack.sessionId })
+    expect(result.results).toEqual([expect.objectContaining({ id: "failed", mediaId: 99, collectionItemId: 81, retryAttempt: 1 })])
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+  })
+
   it("retains saved-source Warning data through the real direct upload and job poller", async () => {
     const terminal = { status: "Warning", media_id: 1, error: null, warnings: ["Analysis failed for chunk 1"] }
     mocks.bgUpload.mockResolvedValue({ batch_id: "saved-warning", jobs: [{ id: 101 }] })

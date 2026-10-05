@@ -1179,7 +1179,7 @@
     "message": "Enregistrer après révision"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Réviser avant d’enregistrer"
+    "message": "Vérifier le contenu extrait avant l’enregistrement"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Traitez maintenant, puis modifiez les brouillons localement avant de les valider sur votre serveur."

@@ -534,7 +534,7 @@
     "message": "Зберігати після перевірки"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Перевірити перед збереженням"
+    "message": "Переглянути витягнутий вміст перед збереженням"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Створювати чернетки та перевіряти їх перед збереженням"

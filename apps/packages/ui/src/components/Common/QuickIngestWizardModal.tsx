@@ -1,4 +1,9 @@
-import { getEligibleQueueItems } from "./QuickIngest/queue-items"
+import { getSavedMediaIds } from "./QuickIngest/result-actions"
+import { classifyError } from "./QuickIngest/ErrorClassification"
+import { buildConferenceRetryRequestItems, type ConferenceRetryRequestItem } from "@/services/tldw/conference-collections"
+import { setSetting } from "@/services/settings/registry"
+import { MEDIA_REVIEW_SELECTION_SETTING, MEDIA_REVIEW_SELECTION_OWNER_SETTING } from "@/services/settings/ui-settings"
+import { getEligibleQueueItems, validateQueueItem } from "./QuickIngest/queue-items"
 import { createReviewDraftsFromResults } from "./hooks/useIngestResults"
 import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -113,6 +118,7 @@ type QuickIngestRequestPayload = {
   advancedValues: Record<string, unknown>
   fileDefaults: TypeDefaults
   conferenceBatchMetadata?: ConferenceBatchMetadata | null
+  conferenceRetry?: { collectionId: string; items: ConferenceRetryRequestItem[] }
   __quickIngestSessionId?: string
 }
 
@@ -911,6 +917,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     updateItemProgress,
     updateProcessingState,
     setResults,
+    setQueueItems,
     goToStep,
     goNext,
   } = useIngestWizard()
@@ -926,10 +933,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
   const cancelRequestedRef = useRef(false)
+  const [retryIds, setRetryIds] = useState<string[] | null>(null)
+  const retryRequestsRef = useRef<ConferenceRetryRequestItem[]>(session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(results) : [])
+  const retryCollectionIdRef = useRef<string | undefined>(session.tracking?.collectionId)
   const validQueueItems = useMemo(
     () =>
-      getEligibleQueueItems(queueItems),
-    [queueItems]
+      getEligibleQueueItems(queueItems).filter(item => retryIds ? retryIds.includes(item.id) : !results.some(result => result.id === item.id && result.status === "ok")),
+    [queueItems, retryIds, results]
   )
   const trackedQueueItems = useMemo(
     () => resolveTrackedQueueItems(queueItems, session.tracking),
@@ -1160,8 +1170,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
               "failed"
             )
 
-      resultsRef.current = reattachedResults
-      setResults(reattachedResults)
+      const mergedResults = mergeWizardResults(resultsRef.current, reattachedResults)
+      resultsRef.current = mergedResults
+      setResults(mergedResults)
       updateProcessingState({
         status:
           snapshot.lifecycle === "completed"
@@ -1231,7 +1242,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       incomingResults: WizardResultItem[]
     ) => {
       syncElapsed()
-      applyResults(incomingResults)
+      const resolvedIds = new Set([...resultsRef.current, ...incomingResults].map(item => item.id))
+      applyResults([...incomingResults, ...buildFailureResults(validQueueItems.filter(item => !resolvedIds.has(item.id)), "The server returned no result for this input. Review the source and try again.", "failed")])
       updateProcessingState({
         status: nextStatus,
         estimatedRemaining: 0,
@@ -1240,12 +1252,12 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       activeSessionIdRef.current = null
       goNext()
     },
-    [applyResults, goNext, syncElapsed, updateProcessingState]
+    [applyResults, goNext, syncElapsed, updateProcessingState, validQueueItems]
   )
 
   const finalizeFailure = useCallback(
     (message: string, outcome: "failed" | "cancelled") => {
-      const trackedEligibleItems = getEligibleQueueItems(trackedQueueItems)
+      const trackedEligibleItems = getEligibleQueueItems(trackedQueueItems).filter(item => retryIds == null || retryIds.includes(item.id))
       const fallbackItems =
         trackedEligibleItems.length > 0 ? trackedEligibleItems : validQueueItems
       const existingResultIds = new Set(
@@ -1263,7 +1275,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       )
       finalizeRun(outcome === "cancelled" ? "cancelled" : "error", fallbackResults)
     },
-    [finalizeRun, trackedQueueItems, validQueueItems]
+    [finalizeRun, trackedQueueItems, validQueueItems, retryIds]
   )
 
   const handleCancelAll = useCallback(() => {
@@ -1294,16 +1306,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   const markRunActive = useCallback(() => {
     runStartedAtRef.current = Date.now()
-    for (const item of validQueueItems) {
-      updateItemProgress({
-        id: item.id,
-        status: "processing",
-        progressPercent: 0,
-        currentStage: "Waiting for server result",
-        estimatedRemaining: 0,
-      })
-    }
-  }, [updateItemProgress, validQueueItems])
+    updateProcessingState({ perItemProgress: validQueueItems.map(item => ({
+      id: item.id, status: "processing", progressPercent: 0,
+      currentStage: "Waiting for server result", estimatedRemaining: 0,
+    })) })
+  }, [updateProcessingState, validQueueItems])
 
   const handleRuntimeMessage = useCallback(
     (message: QuickIngestRuntimeMessage) => {
@@ -1380,6 +1387,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const startRun = useCallback(async () => {
     if (!operation.isCurrent() || hasStartedRunRef.current || validQueueItems.length === 0) return
     hasStartedRunRef.current = true
+    const attemptedIds = new Set(validQueueItems.map(item => item.id))
+    const retained = resultsRef.current.filter(item => !attemptedIds.has(item.id) || item.status === "ok")
+    resultsRef.current = retained
+    setResults(retained)
 
     try {
       try {
@@ -1401,6 +1412,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         }
       )
       if (!operation.isCurrent() || cancelRequestedRef.current) return
+      if (retryRequestsRef.current.length && retryCollectionIdRef.current) {
+        requestPayload.conferenceRetry = { collectionId: retryCollectionIdRef.current, items: retryRequestsRef.current }
+      }
 
       const providerWarning = getQuickIngestAnalysisProviderWarning({
         common: requestPayload.common,
@@ -1519,6 +1533,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [
     finalizeFailure,
     finalizeRun,
+    setResults,
     markRunActive,
     presetConfig.advancedValues,
     presetConfig.common,
@@ -1625,7 +1640,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       return
     }
     setAnalysisProviderWarning(null)
-    skipToProcessing()
+    if (retryIds) {
+      const retained = resultsRef.current.filter(item => !retryIds.includes(item.id))
+      resultsRef.current = retained
+      setResults(retained)
+      hasStartedRunRef.current = false
+      cancelRequestedRef.current = false
+      updateProcessingState({ status: "running", perItemProgress: [], estimatedRemaining: 0 })
+      goToStep(4)
+    } else {
+      skipToProcessing()
+    }
   }, [
     currentStep,
     goNext,
@@ -1636,6 +1661,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     presetConfig.common,
     qi,
     skipToProcessing,
+    retryIds,
+    setResults,
+    updateProcessingState,
     operation,
   ])
 
@@ -1663,6 +1691,47 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     isOnlineForIngest,
     validQueueItems.length,
   ])
+
+  const handleRetryItems = useCallback((itemIds: string[], requests?: ConferenceRetryRequestItem[]) => {
+    if (!operation.isCurrent() || !isOnlineForIngest || isCheckingConnection) return
+    const requested = new Set(requests?.map(item => item.resultId) ?? itemIds)
+    const eligible = new Set(getEligibleQueueItems(queueItems).filter(item => item.url || item.file).map(item => item.id))
+    const failed = resultsRef.current.filter(item => requested.has(item.id) && eligible.has(item.id) &&
+      item.outcome !== "cancelled" && (item.status === "error" || item.outcome === "failed" || item.outcome === "submit_failed") &&
+      classifyError(item.error, item.data).retryable)
+    if (!failed.length) return
+    const ids = failed.map(item => item.id)
+    setRetryIds(ids)
+    retryRequestsRef.current = session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(failed) : []
+    retryCollectionIdRef.current = session.tracking?.collectionId
+    // Remove only the failed attempt; successes remain available and survive reload.
+    const retained = resultsRef.current.filter(item => !ids.includes(item.id))
+    resultsRef.current = retained
+    setResults(retained)
+    cancelRequestedRef.current = false
+    hasStartedRunRef.current = false
+    activeSessionIdRef.current = null
+    updateProcessingState({ status: "running", perItemProgress: ids.map(id => ({ id, status: "pending", progressPercent: 0, currentStage: "", estimatedRemaining: 0 })), estimatedRemaining: 0 })
+    goToStep(4)
+  }, [goToStep, isCheckingConnection, isOnlineForIngest, operation, queueItems, session.tracking, setResults, updateProcessingState])
+
+  const handleReattach = useCallback((id: string, file: File) => {
+    if (!operation.isCurrent()) return
+    setQueueItems(queueItems.map(item => {
+      if (item.id !== id) return item
+      if (file.name !== item.fileName || file.size !== item.fileSize) return { ...item, validation: { valid: false, errors: [qi("wizard.results.reattachMismatch", "Choose the original file with the same name and size.")] } }
+      const attached = { ...item, file, mimeType: file.type, fileSize: file.size }
+      return { ...attached, validation: validateQueueItem(attached) }
+    }))
+  }, [operation, qi, queueItems, setQueueItems])
+
+  const handleCorrectItems = useCallback((ids: string[]) => {
+    if (!operation.isCurrent()) return
+    setRetryIds(ids)
+    retryRequestsRef.current = session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(resultsRef.current.filter(item => ids.includes(item.id))) : []
+    retryCollectionIdRef.current = session.tracking?.collectionId
+    goToStep(2)
+  }, [goToStep, operation, session.tracking, updateProcessingState])
 
   // Navigation callbacks for WizardResultsStep CTAs
   const navigate = useNavigate()
@@ -1737,6 +1806,21 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     [navigate, onClose, operation]
   )
 
+  const handleReviewSavedItems = useCallback(async (ids: Array<string | number>) => {
+    if (!operation.isCurrent()) return
+    const current = getSavedMediaIds(resultsRef.current)
+    const requested = new Set(ids.map(String))
+    const selected = current.filter(id => requested.has(String(id)))
+    if (!selected.length) return
+    // Publish the owner fence first. Task3 reads it with the same verified authority signal.
+    await setSetting(MEDIA_REVIEW_SELECTION_OWNER_SETTING, operation.authorityKey)
+    if (!operation.isCurrent()) return
+    await setSetting(MEDIA_REVIEW_SELECTION_SETTING, selected)
+    if (!operation.isCurrent()) return
+    navigate("/media-multi")
+    onClose()
+  }, [navigate, onClose, operation])
+
   const handleOpenCollection = useCallback(
     (collectionId: string) => {
       if (!operation.isCurrent()) return
@@ -1795,6 +1879,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             onSearchKnowledge={handleSearchKnowledge}
             onOpenWorkspace={handleOpenWorkspace}
             onOpenCollection={handleOpenCollection}
+            onRetryItems={handleRetryItems}
+            onCorrectItems={handleCorrectItems}
+            onReattach={handleReattach}
+            onReviewSavedItems={handleReviewSavedItems}
           />
           </>
         )
@@ -1809,6 +1897,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     handleCancelAll,
     handleOpenMedia,
     handleOpenCollection,
+    handleRetryItems,
+    handleCorrectItems,
+    handleReattach,
+    handleReviewSavedItems,
     handleOpenWorkspace,
     handleIngestMore,
     handleQuickProcess,

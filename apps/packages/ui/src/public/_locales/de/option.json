@@ -1167,7 +1167,7 @@
     "message": "Nach Überprüfung speichern"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Vor dem Speichern überprüfen"
+    "message": "Extrahierte Inhalte vor dem Speichern prüfen"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Jetzt verarbeiten und Entwürfe lokal bearbeiten, bevor du sie auf deinen Server überträgst."

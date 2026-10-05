@@ -555,7 +555,7 @@
     "message": "Spara efter granskning"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Granska före sparning"
+    "message": "Granska extraherat innehåll före sparande"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Bearbeta nu och redigera sedan utkast lokalt innan du sparar till servern."

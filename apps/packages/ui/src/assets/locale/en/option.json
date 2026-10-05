@@ -1028,7 +1028,7 @@
     "storageServerDescription": "Stored on your tldw server (recommended for RAG and shared workspaces).",
     "storageLocalDescription": "Kept in this browser only; no data written to your server.",
     "storeAfterReview": "Store after review",
-    "reviewBeforeStorage": "Review before saving",
+    "reviewBeforeStorage": "Review extracted content before saving",
     "reviewBeforeStorageHint": "Process now, then edit drafts locally before committing to your server.",
     "reviewEnabled": "Review mode",
     "reviewStorageCap": "Local drafts are capped at {{cap}}.",
@@ -1288,7 +1288,24 @@
     "resultStatusIngested": "Ingested",
     "resultStatusSkipped": "Skipped",
     "keywordsPlaceholder": "Keywords (comma-separated)",
-    "keywordsAria": "Keywords for this item"
+    "keywordsAria": "Keywords for this item",
+    "wizard": {
+      "results": {
+        "batchAccounting": "{{added}} added · {{excluded}} excluded/skipped · {{succeeded}} succeeded ({{saved}} saved) · {{failed}} failed · {{cancelled}} cancelled",
+        "reviewSaved": "Review these {{count}} saved items",
+        "savedState": "Saved",
+        "extractedState": "Extracted content; not saved",
+        "knowledgeUnconfirmed": "Knowledge readiness unconfirmed",
+        "reattach": "Reattach {{name}}",
+        "reattachMismatch": "Choose the original file with the same name and size.",
+        "correct": "Correct settings",
+        "correctItem": "Correct settings for {{name}}",
+        "excludedSection": "Excluded inputs",
+        "invalidExcluded": "Invalid input. Correct it before processing.",
+        "unselectedExcluded": "Not selected for this run.",
+        "savedReviewFailed": "Unable to open saved items. Try again."
+      }
+    }
   },
   "libraryView": "Library View",
   "notes": "Notes",

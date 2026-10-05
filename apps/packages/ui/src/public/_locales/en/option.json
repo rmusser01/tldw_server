@@ -615,7 +615,7 @@
     "message": "Store after review"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Review before saving"
+    "message": "Review extracted content before saving"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Process now, then edit drafts locally before committing to your server."
@@ -6352,5 +6352,44 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "Offline saving is unavailable until your account and local storage are confirmed. Your changes remain unsaved."
+  },
+  "quickIngest_wizard_results_batchAccounting": {
+    "message": "{{added}} added · {{excluded}} excluded/skipped · {{succeeded}} succeeded ({{saved}} saved) · {{failed}} failed · {{cancelled}} cancelled"
+  },
+  "quickIngest_wizard_results_reviewSaved": {
+    "message": "Review these {{count}} saved items"
+  },
+  "quickIngest_wizard_results_savedState": {
+    "message": "Saved"
+  },
+  "quickIngest_wizard_results_extractedState": {
+    "message": "Extracted content; not saved"
+  },
+  "quickIngest_wizard_results_knowledgeUnconfirmed": {
+    "message": "Knowledge readiness unconfirmed"
+  },
+  "quickIngest_wizard_results_reattach": {
+    "message": "Reattach {{name}}"
+  },
+  "quickIngest_wizard_results_reattachMismatch": {
+    "message": "Choose the original file with the same name and size."
+  },
+  "quickIngest_wizard_results_correct": {
+    "message": "Correct settings"
+  },
+  "quickIngest_wizard_results_correctItem": {
+    "message": "Correct settings for {{name}}"
+  },
+  "quickIngest_wizard_results_excludedSection": {
+    "message": "Excluded inputs"
+  },
+  "quickIngest_wizard_results_invalidExcluded": {
+    "message": "Invalid input. Correct it before processing."
+  },
+  "quickIngest_wizard_results_unselectedExcluded": {
+    "message": "Not selected for this run."
+  },
+  "quickIngest_wizard_results_savedReviewFailed": {
+    "message": "Unable to open saved items. Try again."
   }
 }
