@@ -984,3 +984,18 @@ Actual dev025627214c3aeda1b2e9af5c6a9f85c636a2ec02 adds PR3193's cached model
 settings fix after c226. Published d912 plus this base is conflict-free; runtime
 PR3093 remains pending integration. Preserve existing history using a normal
 latest-dev merge when conflict-free; a history rewrite is unnecessary.
+
+2026-10-05 normal merge d232e39d3d retains checkpoint commit6c3 and actual dev025
+as its parents. Full treea64d5883402faaef6e55673932afcb6a246edef1 exactly matches
+the independent integration. Fresh source-bound qualification passes incoming649,
+durable384, auth/admin plus all six durable PostgreSQL170, provider60 and canonical
+editor149 tests with zero failures/skips. Owning frontend1736/95 files, focused113,
+types8GB0, matched six-file lint0errors/2inheritedwarnings/0new,28-file Bandit0
+findings/errors and immutable7226-entry build/token/unchanged budgets pass.
+Initial incoming648/1 input-generation health failure, auth162/8 setup errors
+from a collector maintenance-DSN override and sandbox-blocked normal commit cache
+write remain failures; isolated incoming, fixture-owned named-DB auth and unchanged
+normal-hook commit retries pass. No test/fixture/health-check/timeout/budget changes
+were used. Publication and fresh exact-head hosted/Qodo qualification remain
+pending, as does native acceptance. The original running source and all protected
+data/resources remain retained; no additional native Send/inference occurred.
