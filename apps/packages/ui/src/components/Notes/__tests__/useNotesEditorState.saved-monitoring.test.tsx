@@ -780,4 +780,55 @@ describe('Notes saved-state hydration and optional monitoring', () => {
     expect(view.result.current.selectedVersion).toBe(3)
     expect(view.result.current.saveIndicator).toBe('dirty')
   })
+  it('retains Knowledge QA origin and qualifications after reopening and editing the exported title', async () => {
+    const metadata = {
+      origin: 'knowledge_qa',
+      thread_id: 'thread-export',
+      trust_state: 'uncited_degraded_answer',
+      evidence_origin: 'local_library',
+    }
+    let saved: ReturnType<typeof note> & { metadata: typeof metadata } = {
+      ...note('exported-uuid', {
+        content: 'Exact exported draft with source excerpt',
+        metadata,
+      }),
+      metadata,
+    }
+    mocks.request.mockImplementation(async (request) => {
+      if (request.method === 'PUT') saved = { ...saved, ...request.body }
+      return saved
+    })
+    const view = renderEditor()
+    await act(async () => {
+      await view.result.current.loadDetail('exported-uuid')
+    })
+    expect(view.result.current.content).toBe(
+      'Exact exported draft with source excerpt',
+    )
+    expect(view.result.current.provenanceSummaryText).toContain('Knowledge QA')
+    act(() => view.result.current.setTitle('Edited title'))
+    expect(view.result.current.provenanceSummaryText).toContain(
+      'uncited_degraded_answer',
+    )
+    expect(view.result.current.provenanceSummaryText).toContain('thread-export')
+    await act(async () => {
+      await view.result.current.saveNote()
+    })
+    expect(saved.metadata).toMatchObject(metadata)
+    expect(saved.title).toBe('Edited title')
+    view.unmount()
+    const reopened = renderEditor()
+    await act(async () => {
+      await reopened.result.current.loadDetail('exported-uuid')
+    })
+    expect(reopened.result.current.content).toBe(
+      'Exact exported draft with source excerpt',
+    )
+    expect(reopened.result.current.provenanceSummaryText).toContain(
+      'Knowledge QA',
+    )
+    expect(reopened.result.current.provenanceSummaryText).toContain(
+      'thread-export',
+    )
+  })
 })

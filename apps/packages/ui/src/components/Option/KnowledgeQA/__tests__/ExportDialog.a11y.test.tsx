@@ -1,7 +1,24 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
+import {
+  act,
+  fireEvent,
+  render as renderBare,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ExportDialog } from "../ExportDialog"
 import type { RagResult } from "../types"
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: { defaultValue?: string }) =>
+      options?.defaultValue ?? key,
+  }),
+}))
+
+const render = (element: React.ReactElement) =>
+  renderBare(element, { wrapper: MemoryRouter })
 
 const {
   messageOpenMock,
@@ -459,6 +476,9 @@ describe("ExportDialog accessibility", () => {
 
     await waitFor(() => expect(createNoteMock).toHaveBeenCalledTimes(1))
 
+    expect(
+      await screen.findByRole("link", { name: "Open saved note" }),
+    ).toHaveAttribute("href", "/notes?source_ref_id=1")
     const [noteContent, noteMetadata] = createNoteMock.mock.calls[0]
     expect(noteContent).toContain("# Knowledge QA Export")
     expect(noteContent).toContain("## Bibliography")

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next"
 import React, { useState, useEffect } from "react"
 import { Link } from "react-router-dom"
 import { BookOpen, ChevronDown, ChevronUp, CircleHelp, Clock3, FolderPlus, Globe, HelpCircle, MessageSquare, SlidersHorizontal } from "lucide-react"
@@ -177,6 +178,8 @@ export function KnowledgeReadyState({
     }
   })()
 
+  const { t } = useTranslation("knowledge")
+
   // Collapse guide when history finishes loading and reveals a returning user
   useEffect(() => {
     if (isReturningUser) {
@@ -296,6 +299,53 @@ export function KnowledgeReadyState({
             </ol>
           )
         )}
+      </div>
+
+      <div
+        className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-2"
+        aria-label={t("recipes.label", { defaultValue: "Research recipes" })}
+      >
+        {[
+          [
+            "compare",
+            "Compare these papers",
+            "Compare these papers within my selected sources. Cite evidence for agreements, disagreements, and gaps; distinguish findings from speculation.",
+          ],
+          [
+            "claims",
+            "Extract claims with evidence",
+            "Extract the main claims from my selected sources. Pair each claim with citations and supporting excerpts, and flag unsupported claims.",
+          ],
+          [
+            "interview",
+            "Summarize this interview",
+            "Summarize this interview using my selected sources. Support key themes and quotes with citations, distinguish speakers, and flag missing evidence.",
+          ],
+          [
+            "brief",
+            "Save a sourced brief",
+            "Draft a sourced brief from my selected sources that I can review and save. Include key findings with citations, supporting evidence, uncertainties, and open questions.",
+          ],
+        ].map(([key, label, question]) => (
+          <button
+            key={key}
+            type="button"
+            className="rounded-md border border-border px-3 py-2 text-sm hover:bg-surface2"
+            onClick={() =>
+              onPromptClick(
+                t(`recipes.${key}.question`, { defaultValue: question }),
+              )
+            }
+          >
+            {t(`recipes.${key}.label`, { defaultValue: label })}
+          </button>
+        ))}
+        <p className="basis-full text-xs text-text-muted">
+          {t("recipes.editBeforeAsk", {
+            defaultValue:
+              "Choose a recipe, edit the question, then Ask. Your selected sources stay the same.",
+          })}
+        </p>
       </div>
 
       <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-2">

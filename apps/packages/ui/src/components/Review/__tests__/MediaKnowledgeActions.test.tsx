@@ -21,6 +21,19 @@ vi.mock("@/utils/safe-storage", () => ({
   }),
   safeStorageSerde: { deserializer: (value: unknown) => value },
 }))
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    getConfig: async () => ({
+      serverUrl: "server:alice",
+      authMode: "single-user",
+      apiKey: "test",
+    }),
+  },
+}))
+vi.mock("@/services/chat-surface-scope", () => ({
+  buildChatSurfaceScopeKeyFromConfig: () => "server:alice",
+  connectionAuthoritiesMatch: () => true,
+}))
 vi.mock("@/hooks/useHomeMilestoneScope", () => ({
   useHomeMilestoneScope: () => "server:alice",
 }))

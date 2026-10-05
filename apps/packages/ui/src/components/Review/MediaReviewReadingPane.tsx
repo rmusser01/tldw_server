@@ -394,7 +394,18 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
               ) : hasAnalysis ? (
                 <ContentRenderer content={analysisShown} contentType="markdown" />
               ) : (
-                <span className="text-text-muted">{t("mediaPage.noAnalysis", "No analysis available")}</span>
+                <Button
+                  type="link"
+                  onClick={() =>
+                    state.navigate(
+                      `/media?id=${encodeURIComponent(String(d.id))}`,
+                    )
+                  }
+                >
+                  {t("mediaPage.generateAnalysisInMedia", {
+                    defaultValue: "Generate analysis in Media",
+                  })}
+                </Button>
               )}
             </div>
           </div>
@@ -410,10 +421,12 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
               size="small"
               type="link"
               onClick={() => {
-                setShowEmptyAnalysisIds((prev) => new Set(prev).add(key))
+                state.navigate(`/media?id=${encodeURIComponent(String(d.id))}`)
               }}
             >
-              {t("mediaPage.showEmptyAnalysisPanel", "Show panel")}
+              {t("mediaPage.generateAnalysisInMedia", {
+                defaultValue: "Generate analysis in Media",
+              })}
             </Button>
           </div>
         )}

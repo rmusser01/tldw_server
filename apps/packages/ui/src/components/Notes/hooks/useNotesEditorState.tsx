@@ -2371,6 +2371,20 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   }, [selectedLastSavedAt, selectedVersion, t])
 
   const provenanceSummaryText = React.useMemo(() => {
+    if (originalMetadata?.origin === 'knowledge_qa') {
+      return [
+        t('option:notesSearch.provenanceKnowledgeQa', {
+          defaultValue: 'Origin: Knowledge QA',
+        }),
+        originalMetadata.trust_state,
+        originalMetadata.evidence_origin,
+        originalMetadata.thread_id
+          ? `Session: ${originalMetadata.thread_id}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    }
     if (editProvenance.mode === 'manual') {
       if (backlinkConversationId) {
         return t('option:notesSearch.provenanceChat', { defaultValue: 'Origin: Saved from Chat' })
@@ -2390,7 +2404,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       defaultValue: 'Origin: AI-generated'
     })
     return `${generatedPrefix} (${actionLabel} at ${generatedAt})`
-  }, [backlinkConversationId, editProvenance, t])
+  }, [backlinkConversationId, editProvenance, originalMetadata, t])
 
   const monitoringNoticeClasses = React.useMemo(() => {
     if (!monitoringNotice) return ''

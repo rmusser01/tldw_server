@@ -78,7 +78,7 @@ export function MediaKnowledgeActions({
           },
         })),
       })
-      await queueResearchWorkspacePrefill(payload)
+      await queueResearchWorkspacePrefill(payload, ownerScope)
       if (
         !mounted.current ||
         invalidated.current ||

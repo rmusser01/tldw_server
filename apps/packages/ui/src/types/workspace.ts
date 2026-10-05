@@ -1,3 +1,7 @@
+import type {
+  KnowledgeQaScope,
+  WorkspaceKnowledgeQaPrefillSource,
+} from "@/utils/research-workspace-prefill"
 /**
  * Workspace Types
  * Types for the NotebookLM-style three-pane research interface
@@ -70,6 +74,16 @@ export interface WorkspaceSourceStatusDetails {
 export interface WorkspaceSource {
   id: string
   mediaId: number // Server-side media ID
+  knowledgeQaEvidence?: {
+    importId: string
+    threadId: string | null
+    sources: WorkspaceKnowledgeQaPrefillSource[]
+    trustState?: string | null
+    trustReasonCodes?: string[]
+    evidenceOrigin?: string | null
+    scope?: KnowledgeQaScope
+    snapshot: boolean
+  }
   title: string
   type: WorkspaceSourceType
   status?: WorkspaceSourceStatus

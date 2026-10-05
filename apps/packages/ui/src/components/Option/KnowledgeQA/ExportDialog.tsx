@@ -5,6 +5,8 @@
 import { getMeasuredRelevance } from "./sourceListUtils"
 
 import React, { useState, useCallback, useEffect, useRef } from "react"
+import { Link } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 import {
   Download,
   FileText,
@@ -83,6 +85,7 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
 }
 
 export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
+  const { t } = useTranslation("knowledge")
   const {
     client: tldwClient,
     isAuthorityCurrent,
@@ -102,6 +105,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
   const [options, setOptions] = useState<ExportOptions>(DEFAULT_OPTIONS)
   const [isExporting, setIsExporting] = useState(false)
   const [isSavingNote, setIsSavingNote] = useState(false)
+  const [savedNoteId, setSavedNoteId] = useState<string | null>(null)
   const [exportedContent, setExportedContent] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -172,6 +176,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     }
     setIsExporting(false)
     setIsSavingNote(false)
+    setSavedNoteId(null)
     setExportedContent(null)
     setExportError(null)
     setCopied(false)
@@ -408,13 +413,16 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         metadata.thread_id = currentThreadId
       }
 
-      await tldwClient.createNote(noteContent, {
+      const savedNote = await tldwClient.createNote(noteContent, {
         title,
         metadata,
       })
       if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
+      if (savedNote?.id == null)
+        throw new Error("The saved note response did not include its ID.")
+      setSavedNoteId(String(savedNote.id))
       message.open({
         type: "success",
         content: "Saved to Notes.",
@@ -838,6 +846,16 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
               >
                 {isSavingNote ? "Saving..." : "Save to Notes"}
               </button>
+              {savedNoteId && (
+                <Link
+                  className="text-xs font-medium text-primary underline"
+                  to={`/notes?source_ref_id=${encodeURIComponent(savedNoteId)}`}
+                >
+                  {t("export.openSavedNote", {
+                    defaultValue: "Open saved note",
+                  })}
+                </Link>
+              )}
               <button
                 type="button"
                 onClick={handleCopyThreadLink}
