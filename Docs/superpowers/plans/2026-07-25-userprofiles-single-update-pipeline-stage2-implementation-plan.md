@@ -797,6 +797,34 @@ Earlier October 5 Profile/Usage (546 passed, one environment skip), writer/SQLit
 
 Old-head Qodo is clear with all four threads resolved and no changes-requested review. Old-head security, coverage, e2e, container and trusted-license gates passed, backend was running and frontend remained incomplete; no actionable CI failures were present. Those checks do not qualify the new head. TASK-13001.2 remains In Progress until verified merge; WP3 remains untouched.
 
+### October 5 D7 Conversation-Model Documentation Dev Rebase
+
+## Stage 1: Preserve Reviewed Patches
+**Goal**: Replay WP2 onto authoritative dev `c2260945ee` without changing reviewed behavior.
+**Success Criteria**: All 30 reviewed patches remain equal; the only tree delta is the exact upstream D7 conversation-model document; executable files, ADR060 and API fingerprint stay byte-identical.
+**Tests**: Clean rebase at `157218e5fc`, full range-diff and whole-tree/object comparison.
+**Status**: Complete
+
+The sole upstream addition is `Docs/Design/2026-10-04-d7-conversation-model.md` (724 lines). Its blob and mode match dev exactly. Excluding that document, the previous and rebased committed trees are identical; no runtime, test, instruction, CI-policy or WP3 change is introduced.
+
+## Stage 2: Documentation and Tracking Verification
+**Goal**: Verify the documentation integration and unchanged touched-scope static/security baseline.
+**Success Criteria**: Docs/task-format tests pass, runtime lint/compile/security baseline is unchanged, and independent bounded review finds no actionable issues.
+**Tests**: Docs/task-format ratchet, runtime Ruff/compileall/Bandit and independent range/tree review.
+**Status**: Complete
+
+Fresh verification passed 216 tests (212 Docs plus four task-format checks), with no skips. Ruff and compileall passed across the 27 PR-touched runtime files. Fresh runtime Bandit exactly matches the previous 20 findings (19 low, one medium), with zero new findings or scan errors. Independent review confirms all 30 patches remain equal and the sole tree delta is the byte-identical upstream document.
+
+Previous combined Docs/Privileges/CI/ratchet verification (724 passed, four host Bash 3 license-fetch skips), Profile/Usage (546 passed, one environment skip), writer/SQLite (485 passed), official live PostgreSQL WP2 (48 passed, no skips), guard-file Bandit and Python 3.12 OpenAPI export evidence are carried forward, not freshly rerun. Whole-tree identity outside the upstream document establishes that their executable inputs, prior schema memo reset/assertions and fingerprint `5cb6cf6736d7` (2107 paths, 3247 schemas) are unchanged. ADR060 remains governing.
+
+## Stage 3: Publish and Exact-Head Merge
+**Goal**: Publish with a lease against `47a262cae6`, then require new exact-head Qodo and all seven successful merge gates.
+**Success Criteria**: Latest authoritative dev remains an ancestor; the human Change summary stays verbatim; feedback is resolved; expected-head merge and official task finalization are read back.
+**Tests**: Remote refs, fully paginated PR/review/check readbacks and merge verification.
+**Status**: In Progress
+
+Before publication, old-head Qodo remains clear with all four threads resolved and no changes-requested review. Trusted license passed; remaining required CI is pending or absent, with no actionable failure. Old-head checks never qualify the new head. TASK-13001.2 stays In Progress until verified merge; WP3 remains untouched.
+
 ## Work Package 3: Typed Pipeline and Effects
 
 ### Task 9: Replace open payload contracts with frozen discriminated types
