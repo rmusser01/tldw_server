@@ -24,7 +24,7 @@ const search = vi.hoisted(() => ({ run: vi.fn() }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: async () => undefined,
-    fetchWithAuth: async () => ({ ok: false, json: async () => [] }),
+    fetchWithAuth: async () => new Response("[]", { status: 200 }),
     ragSearch: (...args: unknown[]) => search.run(...args),
     createChat: async () => ({ id: "thread-1" }),
     deleteChat: async () => undefined,
@@ -114,6 +114,94 @@ describe("Knowledge QA source intent", () => {
       }),
     )
   })
+  it.each(["3,7", "invalid"])(
+    "blocks %s queries while an explicit arrival waits for defaults",
+    async (ids) => {
+      stored.loading = true
+      const view = mount(`/knowledge?media_ids=${ids}`)
+      search.run.mockImplementation(async (_query, options) => ({
+        results: [],
+        answer: options.include_media_ids?.length
+          ? `Scoped ${options.include_media_ids.join(",")}`
+          : "Whole-library answer",
+      }))
+      act(() => qa.setQuery("Ask before hydration"))
+      await act(async () => qa.search())
+      expect(qa.currentThreadId).toBeNull()
+      expect(qa.messages).toEqual([])
+      expect(qa.answer).toBeNull()
+      expect(qa.isSearching).toBe(false)
+      stored.loading = false
+      view.rerender(
+        <MemoryRouter>
+          <KnowledgeQAProvider>
+            <Probe />
+          </KnowledgeQAProvider>
+        </MemoryRouter>,
+      )
+      if (ids === "invalid") {
+        await waitFor(() => expect(qa.error).toMatch(/source selection/i))
+        act(() => qa.setQuery("Still invalid"))
+        await act(async () => qa.search())
+        expect(qa.answer).toBeNull()
+        expect(qa.currentThreadId).toBeNull()
+        act(() => {
+          qa.updateSetting("sources", ["media_db"])
+          qa.updateSetting("include_media_ids", [9])
+        })
+      } else {
+        await waitFor(() =>
+          expect(qa.settings.include_media_ids).toEqual([3, 7]),
+        )
+      }
+      act(() => qa.setQuery("Ask the applied sources"))
+      await act(async () => qa.search())
+      expect(qa.answer).toBe(ids === "invalid" ? "Scoped 9" : "Scoped 3,7")
+    },
+  )
+  it("does not create a new topic ahead of an explicit arrival", async () => {
+    stored.loading = true
+    const view = mount("/knowledge?media_ids=3,7")
+    await act(async () => expect(await qa.startNewTopic()).toBeNull())
+    expect(qa.currentThreadId).toBeNull()
+    stored.loading = false
+    view.rerender(
+      <MemoryRouter>
+        <KnowledgeQAProvider>
+          <Probe />
+        </KnowledgeQAProvider>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(qa.settings.include_media_ids).toEqual([3, 7]))
+  })
+  it.each(["7", "invalid"])(
+    "does not query the previous scope while a same-route %s arrival is pending",
+    async (ids) => {
+      const view = mount("/knowledge?media_ids=3")
+      await waitFor(() => expect(qa.settings.include_media_ids).toEqual([3]))
+      stored.loading = true
+      act(() => navigate(`/knowledge?media_ids=${ids}`))
+      act(() => qa.setQuery("Ask the arriving selection"))
+      await act(async () => qa.search())
+      expect(qa.answer).toBeNull()
+      expect(qa.currentThreadId).toBeNull()
+      expect(qa.messages).toEqual([])
+      stored.loading = false
+      view.rerender(
+        <MemoryRouter>
+          <KnowledgeQAProvider>
+            <Probe />
+          </KnowledgeQAProvider>
+        </MemoryRouter>,
+      )
+      await waitFor(() =>
+        expect(qa.settings.include_media_ids).toEqual(
+          ids === "invalid" ? [] : [7],
+        ),
+      )
+      if (ids === "invalid") expect(qa.error).toMatch(/source selection/i)
+    },
+  )
   it("replaces scope on same-route arrival and drops late work and old output", async () => {
     mount()
     await waitFor(() => expect(qa.settings.enable_web_fallback).toBe(false))

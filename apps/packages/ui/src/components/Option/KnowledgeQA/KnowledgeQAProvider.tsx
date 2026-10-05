@@ -1783,7 +1783,10 @@ function OwnedKnowledgeQAProvider({
   const [streamingFeatureFlag] = useStorage<boolean>("ff_knowledgeQaStreaming", true)
   const hydratedDefaultsRef = useRef<string | null>(null)
   const [defaultsHydrated, setDefaultsHydrated] = useState(false)
-  const scopeHandoffAppliedRef = useRef<string | null>(null)
+  const [scopeHandoffApplied, setScopeHandoffApplied] = useState<string | null>(null)
+  const scopeHandoffPending =
+    parseKnowledgeMediaScope(scopeSearch) !== null &&
+    scopeHandoffApplied !== `${scopeArrivalKey}:${scopeSearch}`
   const invalidScopeHandoffRef = useRef(false)
   const activeSearchAbortRef = useRef<AbortController | null>(null)
   const activeSearchRequestIdRef = useRef(0)
@@ -1806,7 +1809,7 @@ function OwnedKnowledgeQAProvider({
     if (
       presetStorage?.isLoading ||
       settingsStorage?.isLoading ||
-      scopeHandoffAppliedRef.current !== null
+      scopeHandoffApplied !== null
     )
       return
     if (state.currentThreadId || state.messages.length > 0) {
@@ -1848,6 +1851,7 @@ function OwnedKnowledgeQAProvider({
     dispatch,
     presetStorage?.isLoading,
     settingsStorage?.isLoading,
+    scopeHandoffApplied,
     state.currentThreadId,
     state.messages.length,
     storedPreset,
@@ -1865,8 +1869,8 @@ function OwnedKnowledgeQAProvider({
     )
       return
     const arrival = `${scopeArrivalKey}:${scopeSearch}`
-    if (scopeHandoffAppliedRef.current === arrival) return
-    scopeHandoffAppliedRef.current = arrival
+    if (scopeHandoffApplied === arrival) return
+    setScopeHandoffApplied(arrival)
     invalidScopeHandoffRef.current = scope.invalid
     activeSearchAbortRef.current?.abort("clear")
     activeSearchAbortRef.current = null
@@ -1902,6 +1906,7 @@ function OwnedKnowledgeQAProvider({
     dispatch,
     presetStorage?.isLoading,
     scopeArrivalKey,
+    scopeHandoffApplied,
     scopeSearch,
     settingsStorage?.isLoading,
     state.settings,
@@ -2018,7 +2023,7 @@ function OwnedKnowledgeQAProvider({
 
   const createNewThread = useCallback(
     async (title?: string, options?: CreateThreadOptions): Promise<string | null> => {
-      if (!canStartPrivateOperation()) return null
+      if (!canStartPrivateOperation() || scopeHandoffPending) return null
       const shouldActivate = options?.shouldActivate ?? (() => true)
       const cleanupRemoteIfSkipped = options?.cleanupRemoteIfSkipped ?? false
       try {
@@ -2117,7 +2122,7 @@ function OwnedKnowledgeQAProvider({
         return localId
       }
     },
-    [canStartPrivateOperation, dispatch, isCurrent, resolveDefaultCharacterId, tagConversationKeyword, tldwClient]
+    [canStartPrivateOperation, dispatch, isCurrent, resolveDefaultCharacterId, scopeHandoffPending, tagConversationKeyword, tldwClient]
   )
 
   const notifyPersistenceFailure = useCallback(() => {
@@ -2406,6 +2411,13 @@ function OwnedKnowledgeQAProvider({
       settingsOverrides?: Partial<RagSettings>
     ) => {
       if (!canStartPrivateOperation()) return
+      if (scopeHandoffPending) {
+        dispatch({
+          type: "SET_ERROR",
+          payload: "Preparing this source selection. Please ask again once it is ready.",
+        })
+        return
+      }
       if (invalidScopeHandoffRef.current) {
         dispatch({
           type: "SET_ERROR",
@@ -2990,6 +3002,7 @@ function OwnedKnowledgeQAProvider({
     },
     [
       canStartPrivateOperation,
+      scopeHandoffPending,
       dispatch,
       beginThreadHydrationRequest,
       state.settings,
