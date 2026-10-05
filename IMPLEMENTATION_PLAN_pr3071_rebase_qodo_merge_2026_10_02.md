@@ -999,3 +999,30 @@ normal-hook commit retries pass. No test/fixture/health-check/timeout/budget cha
 were used. Publication and fresh exact-head hosted/Qodo qualification remain
 pending, as does native acceptance. The original running source and all protected
 data/resources remain retained; no additional native Send/inference occurred.
+
+## Stage 21: VN Capture Responsiveness CI
+**Goal**: Correct the verified timing surrogate in exact-head gap-verified-6.
+**Success Criteria**: Prove event-loop progress while recipe capture is blocked;
+retain the existing two-second watchdogs and reject a blocking-route mutation.
+Nonblocking request scheduling latency must not be mistaken for a blocked loop.
+**Tests**: Original delayed-request RED, coordinated delayed-request GREEN,
+blocking-route mutation RED, focused and owning VN tests, Bandit and normal hooks.
+**Status**: Complete
+
+Hosted job111855059494 retains678 passes/1 failure/21 skips. Its one-second
+request-to-capture assertion fails at1.061249894s. The production route/service
+and test are identical to actual dev025; no production offload regression has
+been established. Preserve all healthy hosted work while verifying this narrowly
+scoped test correction. No native send or Character-root reproduction is involved.
+
+Original test fails with a nonblocking1.05s scheduling delay; the coordinated test
+passes that same probe and fails the blocking-route mutation. Owning VN Assets
+passes393 tests with zero failures/skips. Both existing two-second watchdogs and
+the202 response assertion remain; request cleanup now awaits completion in finally.
+Dalton's independent review finds no actionable issue. Raw touched-test Bandit
+retains292 B101 assertions (baseline291), no other findings/errors; this is not a
+zero-finding scan. All286 actual PR-range files pass normal preflight hooks.
+Protected rows, seven accepted bindings,70 stashes and separate model head remain
+exact; browser preservation remains unverified. No runtime/application code changed.
+Complete locally only; fresh published-head CI/Qodo gates and applicable native
+acceptance remain mandatory. The original hosted failure is not relabeled a pass.
