@@ -15,6 +15,8 @@ WORKFLOW_PATH = REPO_ROOT / ".github/workflows/frontend-license-gate.yml"
 ACTIONLINT_PATH = REPO_ROOT / ".github/workflows/actionlint.yml"
 CHECKOUT_ACTION = "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd"
 JOB_ID = "frontend-license-gate-audit"
+# The merge queue's dispatch path; its contract is test_merge_queue_license_dispatch.py.
+DISPATCH_JOB_ID = "frontend-license-gate-dispatch"
 SUPPORTED_BASE_REFS = ("main", "dev")
 STATUS_CONTEXT_PREFIX = "frontend-license-policy/trusted"
 STATUS_CONTEXT_EXPRESSION = "frontend-license-policy/trusted/${{ github.event.pull_request.base.ref }}"
@@ -99,10 +101,11 @@ def assert_exact_privileged_job_surface(data: dict[str, Any]) -> None:
     assert set(data) == {"name", trigger_key, "permissions", "concurrency", "jobs"}
     assert data["name"] == "Frontend License Gate Audit"
     assert data["concurrency"] == {
-        "group": "frontend-license-gate-${{ github.event.pull_request.number }}",
+        "group": "frontend-license-gate-${{ github.event.pull_request.number || inputs.pr }}",
         "cancel-in-progress": True,
     }
-    assert set(job) == {"runs-on", "timeout-minutes", "env", "steps"}
+    assert set(job) == {"if", "runs-on", "timeout-minutes", "env", "steps"}
+    assert job["if"] == "github.event_name == 'pull_request_target'"
     assert job["runs-on"] == "ubuntu-latest"
     assert job["timeout-minutes"] == 5
     assert job["env"] == EXPECTED_JOB_ENV
@@ -165,7 +168,7 @@ def test_workflow_uses_the_base_controlled_trigger_and_minimum_permissions() -> 
     data = load_yaml(WORKFLOW_PATH)
     triggers = data.get("on", data.get(True))
 
-    assert set(triggers) == {"pull_request_target"}
+    assert set(triggers) == {"pull_request_target", "workflow_dispatch"}
     assert triggers["pull_request_target"]["branches"] == ["main", "dev"]
     assert triggers["pull_request_target"]["types"] == [
         "opened",
@@ -175,7 +178,7 @@ def test_workflow_uses_the_base_controlled_trigger_and_minimum_permissions() -> 
         "edited",
     ]
     assert data["permissions"] == {"contents": "read", "statuses": "write"}
-    assert set(data["jobs"]) == {JOB_ID}
+    assert set(data["jobs"]) == {JOB_ID, DISPATCH_JOB_ID}
 
 
 def test_workflow_locks_the_complete_privileged_job_surface() -> None:
