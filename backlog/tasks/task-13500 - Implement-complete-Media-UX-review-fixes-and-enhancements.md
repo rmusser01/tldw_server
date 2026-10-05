@@ -1,7 +1,7 @@
 ---
 id: TASK-13500
 title: Implement complete Media UX review fixes and enhancements
-status: In Progress
+status: Done
 labels:
 - media
 - ux
@@ -16,12 +16,12 @@ Implement all five major findings, all nine additional issues and all potential 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Reliable URL and file queue handoff, deduplication, eligible counts and overwrite semantics across WebUI and extension.
-- [ ] #2 Failed-item retry preserves successful results, saved batches open directly in multi-review, and saved/search readiness is truthful.
-- [ ] #3 Preview, selection, keyboard activation and selected-set navigation agree across pages with an explicit 30-item simultaneous reading cap.
-- [ ] #4 Inspector selection persists across pages, deletion is recoverable, and reading/bulk actions remain accessible on mobile.
-- [ ] #5 Recent imports, active-tab capture, compact batch summaries and contextual batch guidance are implemented using existing state.
-- [ ] #6 Meaningful unit/integration and browser checks, build/type/security validation, source review, documentation and tracked incremental commits cover the full accepted scope.
+- [x] #1 Reliable URL and file queue handoff, deduplication, eligible counts and overwrite semantics across WebUI and extension.
+- [x] #2 Failed-item retry preserves successful results, saved batches open directly in multi-review, and saved/search readiness is truthful.
+- [x] #3 Preview, selection, keyboard activation and selected-set navigation agree across pages with an explicit 30-item simultaneous reading cap.
+- [x] #4 Inspector selection persists across pages, deletion is recoverable, and reading/bulk actions remain accessible on mobile.
+- [x] #5 Recent imports, active-tab capture, compact batch summaries and contextual batch guidance are implemented using existing state.
+- [x] #6 Meaningful unit/integration and browser checks, build/type/security validation, source review, documentation and tracked incremental commits cover the full accepted scope.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -41,19 +41,22 @@ Integration remains In Progress on latest dev ba553fdc51 (merged as e5aff2347c).
 Task5 native integration now passes all three tracked journeys: mixed six-input import with failed-only retry and reload/history/saved review; max10-history mobile/landscape/large-text Inspector selection and reversible trash; forty selected items with thirty-detail reading window then remaining ten. Affected 42 files/370 tests pass. Real Modal/store retry persistence and real Query/StrictMode readiness regressions repaired. Final current builds, actual HTTPS sidebar capture, documentation, patch reviewability and independent source reviews remain. A fresh dev fetch found 61589721bc (test fixture only); sequential integration will precede final whole-branch review.
 Latest dev 61589721bc integrated by 0b36ab27e5: only the 20-line privilege-registry fixture changed since the prior integrated backend, JSON validated and upstream is an ancestor. Task5 initial source eee6ad351f passed current builds, standalone native4/4 and real packaged capture/continuation gates. Independent task review found three Important history integrity defects (capture replacement owner, result normalization, superseded failed durable attempts); original implementer is completing fix round1 with mounted RED/GREEN before scoped re-review. Earlier Tasks1-4 remain reviewed; whole-branch review is the next gate after Task5 acceptance.
 Task5 history fix36c1f22346 passed independent scoped re-review: all3Important findings addressed, no new breakage. Six affected suites90pass and both semantic checks pass. Latest fetched dev49cec71190 merged cleanly as7918323e01; upstream delta3Notes/chat docs only. Permanent verification now records source commits/review receipts and exact command recipes. Full whole-branch review and final current-source builds precede acceptance and finalization.
+Single final broad review of latest-dev branch258deddef8 found3Important issues and1Minor style finding: retained multi-review actions can adopt replacement owner/lifetime; Inspector owned-review publication incorrectly treats compatibility writes as mandatory and leaks errors; selected-reading footer retains preview position. Full final-review.md defines every affected callback, including local selection/reading/Undo/Trash. One complete delegated repair batch and scoped re-review follow; final current-source builds and acceptance remain pending. No second broad review or unrelated warning cleanup.
+All approved Media audit issues and enhancements are implemented and independently accepted. Final source ea00e5ce82 addresses every final review finding; scoped re-review found no new breakage. Remote dev49cec71190 reverified at2026-10-05T08:56UTC and already integrated. Final-source187 tests and both semantic projects pass; Next/WXT builds and shared-token checks pass, WebUI584.3KB<600KB budget. Affected40-selected native case passes with refreshed truthful desktop/mobile status. Earlier consolidated1066, affected619, four native journeys, real packaged HTTPS/restricted capture and backend3 contract cases retain their exact source boundaries. Permanent coverage, review verdicts, commands and limitations: Docs/Reviews/2026-10-04-media-ux-complete-verification.md; workflow guide: Docs/Product/WebUI/Media/Media-workflows.md. No open source finding. Bandit does not analyze TS; directory scan0PythonLOC/0findings is documented alongside applicable authority/transport tests. Existing diagnostics, simulated processing, native Notes recovery/audio/participant limits disclosed. User backend/browser/original dirty checkout untouched. Own completed plan and task-only ignored coordination/dependency/build scratch are removed; managed branch/worktree retained for integration choice.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed all five main findings, all nine additional issues, all five opportunities and persona/cognitive improvements from the accepted audit, preserving WebUI/extension parity. Five sequential implementation units and independent task/final reviews accepted. Current source and builds verified against remote dev49cec71190; permanent verification covers all accepted items and honest test boundaries. User workflow guide and regression/browser evidence committed. Review-ready branch codex/media-ux-complete-20261004; integration decision remains with requester.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
