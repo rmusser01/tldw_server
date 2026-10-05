@@ -538,10 +538,10 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                 size="small"
                 className="min-w-[12rem]"
                 placeholder={t("mediaPage.pickItem", "Pick an item")}
-                value={focusedId ?? undefined}
+                value={(state.readingActive ? focusedId : previewedId) ?? undefined}
                 onChange={(val) => {
                   if (state.readingActive) startSelectedReview(val as any)
-                  else actions.previewItem(val as any)
+                  else actions.previewItem(val as string | number, true)
                 }}
                 options={(state.readingActive ? selectedIds.map(id => state.selectedMetadata[String(id)] ?? {id, title: details[id]?.title}) : (state.previewNavigationIds ?? []).map(id => state.selectedMetadata[String(id)] ?? {id, title: details[id]?.title})).map((m, idx) => ({
                   label: `${idx + 1}. ${m.title || `Media ${m.id}`}`,

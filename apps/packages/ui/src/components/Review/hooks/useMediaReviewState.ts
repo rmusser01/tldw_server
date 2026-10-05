@@ -222,7 +222,7 @@ export function useMediaReviewState(
     let cancelled = false
     const restoreRevision = selectionRevision.current
     void (async () => {
-      const snapshot = await getSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING)
+      const snapshot = await getSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, {throwOnError: true})
       if (cancelled) return
       if (restoreRevision === selectionRevision.current && snapshot?.version === 1 && snapshot.authorityKey === authorityKey) {
         const ids = snapshot.selectedIds.filter((id, index, all) => all.findIndex(candidate => String(candidate) === String(id)) === index)

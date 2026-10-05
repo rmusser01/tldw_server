@@ -92,9 +92,8 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
   } = s
 
   // Reading, comparison, content filtering and export share the same request ceiling.
-  const fetchDetail = React.useCallback(async (id: string | number): Promise<MediaDetail> => {
-    const operation = captureOperation()
-    if (!operation) throw new Error('Review owner is unavailable')
+  const fetchDetail = React.useCallback(async (id: string | number, operation = captureOperation()): Promise<MediaDetail> => {
+    if (!operation?.isCurrent()) throw new Error('Review owner is unavailable')
     const key = `${authorityKey}:${id}`
     while (detailRequests.current.size >= openAllLimit && !detailRequests.current.has(key)) {
       await Promise.race([...detailRequests.current.values()].map(promise => promise.catch(() => null)))
@@ -130,6 +129,8 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       return items
     }
 
+    const operation = captureOperation()
+    if (!operation) return []
     const runId = contentFilterRunRef.current + 1
     contentFilterRunRef.current = runId
     setContentLoading(true)
@@ -154,7 +155,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       let d = details[m.id]
       if (!d) {
         try {
-          d = await fetchDetail(m.id)
+          d = await fetchDetail(m.id, operation)
           if (contentFilterRunRef.current !== runId) return []
           setDetails((prev) => (prev[m.id] ? prev : { ...prev, [m.id]: d! }))
         } catch {
@@ -189,7 +190,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       })
     }
     return filtered
-  }, [fetchDetail, details, includeContent, keywordTokens, query, contentFilterRunRef, setContentLoading, setContentFilterProgress, setDetails])
+  }, [captureOperation, fetchDetail, details, includeContent, keywordTokens, query, contentFilterRunRef, setContentLoading, setContentFilterProgress, setDetails])
 
   const mapMediaItems = React.useCallback((items: any[]): MediaItem[] => (
     items.map((m: any) => ({
@@ -214,7 +215,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       })
     }
     try {
-      const d = await fetchDetail(id)
+      const d = await fetchDetail(id, operation)
       if (!operation.isCurrent()) return
       const base = Array.isArray(data) ? (data as MediaItem[]).find((x) => idsEqual(x.id, id)) : undefined
       const enriched = { ...d, id, title: (d as any)?.title ?? base?.title, type: (d as any)?.type ?? base?.type, created_at: (d as any)?.created_at ?? base?.created_at } as any
@@ -495,14 +496,13 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
 
   React.useEffect(() => { if (isOnline) void loadKeywordSuggestions() }, [loadKeywordSuggestions, isOnline])
 
-  const resolveDetailForCompare = React.useCallback(async (id: string | number): Promise<MediaDetail | null> => {
-    const operation = captureOperation()
-    if (!operation) return null
+  const resolveDetailForCompare = React.useCallback(async (id: string | number, operation = captureOperation()): Promise<MediaDetail | null> => {
+    if (!operation?.isCurrent()) return null
 
     const existing = details[id]
     if (existing) return existing
     try {
-      const fetched = await fetchDetail(id)
+      const fetched = await fetchDetail(id, operation)
       if (!operation.isCurrent()) return null
       const base = allResults.find((item) => item.id === id)
       const enriched = {
@@ -515,7 +515,6 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       setDetails((prev) => ({ ...prev, [id]: enriched }))
       return enriched
     } catch {
-      if (!operation.isCurrent()) return
       return null
     }
   }, [captureOperation, fetchDetail, allResults, details, setDetails])
@@ -526,8 +525,9 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
 
     if (selectedIds.length !== 2) return
     const [leftId, rightId] = selectedIds
-    const leftDetail = await resolveDetailForCompare(leftId)
-    const rightDetail = await resolveDetailForCompare(rightId)
+    const leftDetail = await resolveDetailForCompare(leftId, operation)
+    if (!operation.isCurrent()) return
+    const rightDetail = await resolveDetailForCompare(rightId, operation)
 
     if (!operation.isCurrent()) return
     if (!leftDetail || !rightDetail) {
@@ -804,7 +804,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         if (!operation.isCurrent()) return
         const row = selectedMetadata[String(id)] ?? currentResults.find((candidate) => idsEqual(candidate.id, id))
         // Fetch missing export content one at a time; do not populate the reading window.
-        const detail = details[id] ?? await fetchDetail(id)
+        const detail = details[id] ?? await fetchDetail(id, operation)
         if (!operation.isCurrent()) return
         const analysisText = extractMediaDetailAnalysis(detail)
         exportItems.push({

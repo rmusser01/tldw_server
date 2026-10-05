@@ -267,7 +267,7 @@ export interface MediaReviewActions {
   startSelectedReview: (id?: string | number) => void
   returnToPreview: () => void
   changeReadingWindow: (delta: number) => void
-  previewItem: (id: string | number) => void
+  previewItem: (id: string | number, preserveContext?: boolean) => void
   toggleSelect: (id: string | number, event?: React.MouseEvent) => Promise<void>
   ensureDetail: (id: string | number, isRetry?: boolean) => Promise<void>
   retryFetch: (id: string | number) => void

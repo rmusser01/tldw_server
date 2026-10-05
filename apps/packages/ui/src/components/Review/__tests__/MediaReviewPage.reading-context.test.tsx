@@ -1,11 +1,13 @@
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import * as mediaHandoff from "@/services/tldw/media-chat-handoff"
 import React from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import axe from 'axe-core'
 import MediaReviewPage from '../MediaReviewPage'
+import { useMediaReviewState } from '../hooks/useMediaReviewState'
+import { useMediaReviewActions } from '../hooks/useMediaReviewActions'
 
 const mediaItems = Array.from({ length: 40 }).map((_, idx) => ({
   id: idx + 1,
@@ -20,6 +22,7 @@ vi.mock('@/hooks/useHomeMilestoneScope', () => ({ useHomeMilestoneScope: () => '
 const mocks = vi.hoisted(() => ({
   authorityKey: 'verified-alice' as string | null,
   locationKey: 'initial',
+  realFocusDropdown: false,
   items: null as any,
   downloadBlob: vi.fn(),
   bgRequest: vi.fn(),
@@ -248,6 +251,7 @@ vi.mock('antd', async (importOriginal) => {
   )
 
   const SelectComponent = ({ value, onChange, options = [], children, mode, ...rest }: any) => {
+    if (mocks.realFocusDropdown && rest.className === "min-w-[12rem]") return <div data-testid="real-focus-dropdown"><actual.Select value={value} onChange={onChange} options={options} {...rest} /></div>
     const resolvedOptions = options.length > 0
       ? options
       : React.Children.toArray(children).map((child: any) => ({
@@ -413,6 +417,7 @@ describe('MediaReviewPage active reading context', () => {
   beforeEach(() => {
     mocks.authorityKey = 'verified-alice'
     mocks.locationKey = 'initial'
+    mocks.realFocusDropdown = false
     mocks.items = null
     mocks.downloadBlob.mockReset()
     mocks.bgRequest.mockReset()
@@ -704,6 +709,82 @@ describe('MediaReviewPage active reading context', () => {
     fireEvent.click(within(screen.getByTestId('selected-item-31')).getByRole('button', {name:'Remove from selection'}))
     await waitFor(() => expect(screen.getByTestId('media-review-reading-window')).toHaveTextContent('Reading 1–30 of 39 selected'))
     expect(screen.getByText('Item 1 of 39')).toBeInTheDocument()
+  })
+
+  it('does not recapture a replacement owner for the second comparison detail', async () => {
+    let resolveLeft!: (detail: unknown) => void
+    mocks.bgRequest.mockImplementation(({path}) => String(path).includes('/media/1?')
+      ? new Promise(resolve => { resolveLeft = resolve })
+      : Promise.resolve({id:2, content:'Replacement owner content'}))
+    const {result, rerender} = renderHook(() => {
+      const state = useMediaReviewState(React.useRef(null))
+      return {state, actions:useMediaReviewActions(state)}
+    })
+    act(() => result.current.state.setSelectedIds([1,2]))
+    let comparison!: Promise<void>
+    act(() => { comparison = result.current.actions.handleCompareContent() })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    mocks.authorityKey = 'verified-bob'
+    rerender()
+    await act(async () => {
+      resolveLeft({id:1, content:'Old owner content'})
+      await comparison
+    })
+    expect(mocks.bgRequest.mock.calls.filter(([request]) => String(request.path).includes('/media/2?'))).toHaveLength(0)
+    expect(result.current.state.details).toEqual({})
+    expect(result.current.state.compareDiffOpen).toBe(false)
+  })
+
+  it('keeps an unread snapshot intact when the real registry storage read fails', async () => {
+    const registry = await vi.importActual<typeof import('@/services/settings/registry')>('@/services/settings/registry')
+    const storage = registry.getStorageForSetting({key:'media-review-selection-snapshot', defaultValue:null})
+    vi.spyOn(storage, 'rawGet').mockRejectedValue(new Error('Storage unavailable'))
+    mocks.getSetting.mockImplementation(registry.getSetting)
+    render(<MediaReviewPage />)
+    await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith('Could not load the saved selection. Reopen Review to try again.'))
+    expect(mocks.setSetting).not.toHaveBeenCalled()
+    // Default registry callers retain the historical fallback behavior.
+    await expect(registry.getSetting({key:'other-setting', defaultValue:null})).resolves.toBeNull()
+  })
+
+  it('persists an empty owned set after successful absence at the real registry boundary', async () => {
+    const registry = await vi.importActual<typeof import('@/services/settings/registry')>('@/services/settings/registry')
+    const storage = registry.getStorageForSetting({key:'media-review-selection-snapshot', defaultValue:null})
+    vi.spyOn(storage, 'rawGet').mockResolvedValue(undefined)
+    mocks.getSetting.mockImplementation(registry.getSetting)
+    render(<MediaReviewPage />)
+    await waitFor(() => expect(mocks.setSetting).toHaveBeenCalledWith(expect.objectContaining({key:'media-review-selection-snapshot'}), {version:1, authorityKey:'verified-alice', selectedIds:[]}))
+    expect(mocks.messageError).not.toHaveBeenCalled()
+  })
+
+  it('binds the real focus dropdown to the displayed preview after selected reading', async () => {
+    setMobileViewport(true)
+    mocks.realFocusDropdown = true
+    render(<MediaReviewPage />)
+    selectItemByCheckbox('Item 1')
+    fireEvent.click(screen.getByRole('button', {name:'Review selected (1)'}))
+    await screen.findByText('Content 1')
+    fireEvent.click(screen.getByRole('button', {name:'Back to results'}))
+    fireEvent.click(getResultRowByTitle('Item 2'))
+    await screen.findByText('Content 2')
+    expect(screen.getByTestId('real-focus-dropdown')).toHaveTextContent('2. Item 2')
+  })
+
+  it('preserves captured preview neighbors through the real focus dropdown after a search-page change', async () => {
+    setMobileViewport(true)
+    mocks.realFocusDropdown = true
+    const {rerender} = render(<MediaReviewPage />)
+    fireEvent.click(getResultRowByTitle('Item 2'))
+    await screen.findByText('Content 2')
+    mocks.items = mediaItems.slice(30)
+    rerender(<MediaReviewPage />)
+    await userEvent.click(within(screen.getByTestId('real-focus-dropdown')).getByRole('combobox'))
+    await userEvent.click(await screen.findByText('3. Item 3'))
+    await screen.findByText('Content 3')
+    expect(screen.getByText('Item 3 of 40')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name:'Next'}))
+    await screen.findByText('Content 4')
+    expect(screen.getByText('Item 4 of 40')).toBeInTheDocument()
   })
 
 })
