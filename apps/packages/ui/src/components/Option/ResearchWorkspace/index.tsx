@@ -364,7 +364,7 @@ type WorkspaceNoteKeywordLike =
     }
 
 type WorkspaceNoteSearchItem = {
-  id?: number
+  id?: string | number
   title?: string
   content?: string
   version?: number
@@ -499,8 +499,8 @@ const buildWorkspaceNotesSearchPath = (workspaceTag: string): AllowedPath => {
   return `/api/v1/notes/search/?${params.toString()}` as AllowedPath
 }
 
-const buildWorkspaceNotePath = (noteId: number): AllowedPath =>
-  `/api/v1/notes/${noteId}` as AllowedPath
+const buildWorkspaceNotePath = (noteId: string | number): AllowedPath =>
+  `/api/v1/notes/${encodeURIComponent(String(noteId))}` as AllowedPath
 
 const isDesktopLayout = (): boolean => {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -2284,9 +2284,12 @@ const ResearchWorkspaceBody: React.FC = () => {
         })
         if (cancelled) return
 
-        const noteById = new Map<number, WorkspaceGlobalSearchNoteDocument>()
+        const noteById = new Map<string | number, WorkspaceGlobalSearchNoteDocument>()
         for (const note of pickNotesArray(response)) {
-          if (typeof note.id !== "number" || !Number.isFinite(note.id)) {
+          if (
+            !(typeof note.id === "string" && note.id.trim()) &&
+            !(typeof note.id === "number" && Number.isFinite(note.id))
+          ) {
             continue
           }
           noteById.set(note.id, {
@@ -2317,7 +2320,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     async (result: WorkspaceGlobalSearchResult) => {
       if (
         result.noteId != null &&
-        Number.isFinite(result.noteId) &&
+        (typeof result.noteId === "string" || Number.isFinite(result.noteId)) &&
         currentNote?.id !== result.noteId
       ) {
         try {

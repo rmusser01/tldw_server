@@ -1,5 +1,16 @@
+import { normalizeNoteKeyword } from "@/services/note-keywords"
+import { bgRequest } from "@/services/background-proxy"
+import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
+import {
+  retainKnowledgeNoteProvenance,
+  readKnowledgeNoteProvenance,
+} from "./knowledge-note-provenance"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { createWorkspaceStorage, useWorkspaceStore } from "@/store/workspace"
+import {
+  createWorkspaceStorage,
+  hasResearchWorkspaceMigrationTombstone,
+  useWorkspaceStore,
+} from "@/store/workspace"
 import { isWorkspaceSourceSelectable } from "@/store/workspace-source-status"
 import { WORKSPACE_STORAGE_KEY } from "@/store/workspace-events"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -301,30 +312,178 @@ export function useResearchWorkspacePrefill(
             mode: "append",
           })
         }
-        const stored = await createWorkspaceStorage().getItem(
-          WORKSPACE_STORAGE_KEY,
-        )
-        assertCurrent()
-        const snapshot = stored
-          ? JSON.parse(stored).state?.workspaceSnapshots?.[workspaceId]
-          : null
-        const draftPersisted =
-          payload.draftRetained ||
-          snapshot?.currentNote?.content?.includes(
-            `Import reference: ${payload.id}`,
+        if (hasResearchWorkspaceMigrationTombstone(workspaceId)) {
+          const current = useWorkspaceStore.getState()
+          const draft = current.currentNote
+          // Client-supplied canonical UUID makes a lost create response retryable.
+          payload.canonicalNoteId ||=
+            typeof draft.id === "string" ? draft.id : payload.id
+          await saveResearchWorkspacePrefill(payload)
+          assertCurrent()
+          let draftDiscarded = Boolean(
+            payload.draftRetained && draft.id !== payload.canonicalNoteId,
           )
-        const sourcesPersisted = useWorkspaceStore
-          .getState()
-          .sources.every(
-            (source) =>
-              source.knowledgeQaEvidence?.importId !== payload.id ||
-              snapshot?.sources?.some(
-                (saved: { mediaId: number }) =>
-                  saved.mediaId === source.mediaId,
-              ),
+          const stopWatchingDraft = useWorkspaceStore.subscribe((next) => {
+            if (
+              !next.currentNote.id &&
+              !next.currentNote.title &&
+              !next.currentNote.content
+            )
+              draftDiscarded = true
+          })
+          try {
+            const request = {
+              ...requestScopeFields(requestScope),
+              abortSignal: controller.signal,
+            }
+            const path =
+              `/api/v1/notes/${encodeURIComponent(payload.canonicalNoteId)}` as const
+            type CanonicalNote = {
+              id: string
+              title: string
+              content: string
+              keywords?: unknown[]
+              version: number
+            }
+            let existing: CanonicalNote | null = null
+            try {
+              existing = await bgRequest<CanonicalNote>({
+                ...request,
+                path,
+                method: "GET",
+              })
+            } catch (error) {
+              if ((error as { status?: number })?.status !== 404) throw error
+            }
+            assertCurrent()
+            if (existing && existing.id !== payload.canonicalNoteId)
+              throw new Error("Canonical note identity changed")
+            // Preserve edits on retry; append the transfer only when absent.
+            const alreadyRetained = existing?.content.includes(
+              `Import reference: ${payload.id}`,
+            )
+            const body = alreadyRetained ? existing!.content : draft.content
+            const content = retainKnowledgeNoteProvenance(body, {
+              origin:
+                payload.threadId || payload.query || payload.answer
+                  ? "knowledge_qa"
+                  : "reviewed_sources",
+              trust_state: payload.answerTrustState,
+              evidence_origin: payload.answerEvidenceOrigin,
+              thread_id: payload.threadId,
+              research: {
+                workspace_id: workspaceId,
+                import_id: payload.id,
+                sources: current.sources
+                  .filter((source) => source.knowledgeQaEvidence)
+                  .map((source) => ({
+                    mediaId: source.mediaId,
+                    evidence: source.knowledgeQaEvidence,
+                  })),
+              },
+            })
+            const saved = await bgRequest<CanonicalNote>({
+              ...request,
+              path: existing
+                ? `${path}?expected_version=${existing.version}`
+                : "/api/v1/notes/",
+              method: existing ? "PUT" : "POST",
+              body: {
+                ...(existing ? {} : { id: payload.canonicalNoteId }),
+                title:
+                  (alreadyRetained ? existing?.title : draft.title) ||
+                  "Knowledge research",
+                content,
+                keywords: [
+                  ...new Set(
+                    [
+                      ...(alreadyRetained
+                        ? existing?.keywords || []
+                        : draft.keywords
+                      )
+                        .map(normalizeNoteKeyword)
+                        .filter(
+                          (keyword): keyword is string => keyword !== null,
+                        ),
+                      current.workspaceTag,
+                      `workspace:${workspaceId}`,
+                    ].filter(Boolean),
+                  ),
+                ],
+                ...(payload.threadId && !payload.threadId.startsWith("shared-")
+                  ? { conversation_id: payload.threadId }
+                  : {}),
+              },
+            })
+            assertCurrent()
+            const confirmed = await bgRequest<CanonicalNote>({
+              ...request,
+              path,
+              method: "GET",
+            })
+            assertCurrent()
+            const keywords = (confirmed.keywords || [])
+              .map(normalizeNoteKeyword)
+              .filter((keyword): keyword is string => keyword !== null)
+            const provenance = readKnowledgeNoteProvenance(confirmed.content)
+            if (
+              saved.id !== payload.canonicalNoteId ||
+              confirmed.id !== payload.canonicalNoteId ||
+              confirmed.content !== content ||
+              !keywords.includes(`workspace:${workspaceId}`) ||
+              provenance?.research?.import_id !== payload.id
+            )
+              throw new Error("Canonical research note was not retained")
+            // Do not replace edits made while canonical persistence was pending.
+            const latest = useWorkspaceStore.getState().currentNote
+            if (!draftDiscarded && latest === draft)
+              current.loadNote({
+                ...confirmed,
+                keywords: keywords.filter(
+                  (keyword) =>
+                    keyword !== current.workspaceTag &&
+                    keyword !== `workspace:${workspaceId}`,
+                ),
+              })
+            else if (!draftDiscarded && latest.id === draft.id)
+              current.setCurrentNote({
+                ...latest,
+                id: confirmed.id,
+                version: confirmed.version,
+                content: retainKnowledgeNoteProvenance(
+                  latest.content,
+                  provenance,
+                ),
+              })
+          } finally {
+            stopWatchingDraft()
+          }
+        } else {
+          const stored = await createWorkspaceStorage().getItem(
+            WORKSPACE_STORAGE_KEY,
           )
-        if (!draftPersisted || !sourcesPersisted)
-          throw new Error("Workspace persistence is unavailable")
+          assertCurrent()
+          const snapshot = stored
+            ? JSON.parse(stored).state?.workspaceSnapshots?.[workspaceId]
+            : null
+          const draftPersisted =
+            payload.draftRetained ||
+            snapshot?.currentNote?.content?.includes(
+              `Import reference: ${payload.id}`,
+            )
+          const sourcesPersisted = useWorkspaceStore
+            .getState()
+            .sources.every(
+              (source) =>
+                source.knowledgeQaEvidence?.importId !== payload.id ||
+                snapshot?.sources?.some(
+                  (saved: { mediaId: number }) =>
+                    saved.mediaId === source.mediaId,
+                ),
+            )
+          if (!draftPersisted || !sourcesPersisted)
+            throw new Error("Workspace persistence is unavailable")
+        }
         payload.draftRetained = true
         payload.completed = failed === 0
         syncImportedSelection()

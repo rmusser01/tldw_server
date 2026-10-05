@@ -1,3 +1,8 @@
+import {
+  readKnowledgeNoteProvenance,
+  retainKnowledgeNoteProvenance,
+  stripKnowledgeNoteProvenance
+} from '@/utils/knowledge-note-provenance'
 import React from 'react'
 import type { InputRef } from 'antd'
 import { Button, Modal } from 'antd'
@@ -340,7 +345,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
               ? selectedVersion
               : null,
         title,
-        content,
+        content: retainKnowledgeNoteProvenance(content, originalMetadata),
         keywords: [...editorKeywords],
         metadata: originalMetadata ? { ...originalMetadata } : null,
         backlinkConversationId,
@@ -365,12 +370,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   const applyOfflineDraftToEditor = React.useCallback((draft: OfflineDraftEntry) => {
     setTitle(String(draft.title || ''))
-    setContent(String(draft.content || ''))
+    setContent(stripKnowledgeNoteProvenance(String(draft.content || '')))
     setEditorKeywords(Array.isArray(draft.keywords) ? [...draft.keywords] : [])
-    setOriginalMetadata(
-      draft.metadata && typeof draft.metadata === 'object'
-        ? { ...(draft.metadata as Record<string, any>) }
-        : null
+    const provenance = readKnowledgeNoteProvenance(String(draft.content || ''))
+    setOriginalMetadata(provenance
+      ? { ...(draft.metadata || {}), ...provenance, knowledge_provenance: provenance }
+      : draft.metadata && typeof draft.metadata === 'object' ? { ...draft.metadata } : null
     )
     setBacklinkConversationId(draft.backlinkConversationId)
     setBacklinkMessageId(draft.backlinkMessageId)
@@ -621,13 +626,16 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const loadedTitle = String(d?.title || `Note ${id}`)
       setSelectedId(id)
       setTitle(String(d?.title || ''))
-      setContent(String(d?.content || ''))
+      setContent(stripKnowledgeNoteProvenance(String(d?.content || '')))
       setEditorKeywords(extractKeywords(d))
       setSelectedVersion(toNoteVersion(d))
       setSelectedLastSavedAt(toNoteLastModified(d))
       const rawMeta = d && typeof d === "object" ? (d as any).metadata : null
+      const provenance = readKnowledgeNoteProvenance(String(d?.content || ''))
       setOriginalMetadata(
-        rawMeta && typeof rawMeta === "object" ? { ...(rawMeta as Record<string, any>) } : null
+        provenance
+          ? { ...(rawMeta && typeof rawMeta === 'object' ? rawMeta : {}), ...provenance, knowledge_provenance: provenance }
+          : rawMeta && typeof rawMeta === "object" ? { ...(rawMeta as Record<string, any>) } : null
       )
       const rawStudio = d && typeof d === 'object' ? (d as any).studio : null
       setSelectedStudioSummary(
@@ -1246,7 +1254,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         if (backlinkMessageId) metadata.message_id = backlinkMessageId
         const payload: Record<string, any> = {
           title: title || undefined,
-          content,
+          content: retainKnowledgeNoteProvenance(content, originalMetadata),
           metadata,
           keywords: editorKeywords
         }
@@ -1481,7 +1489,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (draft.backlinkMessageId) metadata.message_id = draft.backlinkMessageId
       const payload: Record<string, any> = {
         title: draft.title || undefined,
-        content: draft.content,
+        content: retainKnowledgeNoteProvenance(draft.content, draft.metadata),
         metadata,
         keywords: draft.keywords
       }

@@ -153,3 +153,15 @@ describe("workspace global search", () => {
     expect(noteResult?.noteField).toBe("title")
   })
 })
+
+it("retains canonical UUID identity and hides persistence markers in note search", () => {
+  const id = "e3b16146-9e38-42e0-bd15-549e60bd31a3"
+  const marker = `<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify({ origin: "knowledge_qa" }))} -->`
+  const note = { id, title: "Study", content: `Original excerpt\n\n${marker}`, keywords: [], isDirty: false }
+  const input = { sources: [], chatMessages: [], currentNote: note, workspaceNotes: [note] }
+  const results = buildWorkspaceGlobalSearchResults({ ...input, query: "excerpt" })
+  expect(results).toHaveLength(1)
+  expect(results[0].noteId).toBe(id)
+  expect(results[0].snippet).not.toContain("tldw-knowledge")
+  expect(buildWorkspaceGlobalSearchResults({ ...input, query: "tldw-knowledge" })).toEqual([])
+})

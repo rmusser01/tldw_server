@@ -632,7 +632,7 @@ export const DEFAULT_AUDIO_SETTINGS: AudioGenerationSettings = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface WorkspaceNote {
-  id?: number // undefined = new note, number = existing note
+  id?: string | number // Canonical Notes UUID or legacy workspace note ID
   title: string
   content: string
   keywords: string[]

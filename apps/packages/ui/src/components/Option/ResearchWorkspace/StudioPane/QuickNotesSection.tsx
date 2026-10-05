@@ -1,3 +1,8 @@
+import {
+  readKnowledgeNoteProvenance,
+  retainKnowledgeNoteProvenance,
+  stripKnowledgeNoteProvenance
+} from "@/utils/knowledge-note-provenance"
 import React, { useState, useCallback, useRef, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { Input, Button, Modal, AutoComplete, message, Tag, Empty, Spin } from "antd"
@@ -40,7 +45,7 @@ type NoteKeyword =
     }
 
 interface NoteListItem {
-  id: number
+  id: string | number
   title?: string
   content?: string
   keywords?: NoteKeyword[]
@@ -187,7 +192,7 @@ const mergeUniqueNotes = (
   prioritized: NoteListItem[],
   fallback: NoteListItem[]
 ): NoteListItem[] => {
-  const mergedMap = new Map<number, NoteListItem>()
+  const mergedMap = new Map<string | number, NoteListItem>()
   for (const note of [...prioritized, ...fallback]) {
     if (!mergedMap.has(note.id)) {
       mergedMap.set(note.id, note)
@@ -387,7 +392,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   }
 
   // Track if keywords were just loaded from a note (to avoid sync loops)
-  const lastLoadedNoteId = useRef<number | undefined>(undefined)
+  const lastLoadedNoteId = useRef<string | number | undefined>(undefined)
 
   // Sync keywords input when note is loaded or cleared
   useEffect(() => {
@@ -663,7 +668,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     setIsSaving(true)
     try {
       const persistedKeywords = buildPersistedKeywords(
-        currentNote.keywords,
+        [
+          ...currentNote.keywords,
+          ...(readKnowledgeNoteProvenance(currentNote.content)?.research
+            ? [`workspace:${readKnowledgeNoteProvenance(currentNote.content)!.research!.workspace_id}`]
+            : [])
+        ],
         workspaceTag
       )
 
@@ -1063,10 +1073,15 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         {editorMode === "edit" ? (
           <TextArea
             ref={contentInputRef}
-            value={currentNote.content}
+            value={stripKnowledgeNoteProvenance(currentNote.content)}
             onChange={(e) => {
               hideSavedIndicator()
-              updateNoteContent(e.target.value)
+              updateNoteContent(
+                retainKnowledgeNoteProvenance(
+                  e.target.value,
+                  readKnowledgeNoteProvenance(currentNote.content)
+                )
+              )
             }}
             aria-label={t("playground:studio.noteContentLabel", "Note content")}
             placeholder={t(
@@ -1082,7 +1097,10 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             className="custom-scrollbar h-full overflow-y-auto rounded-md border border-border bg-surface2/40 p-3"
           >
             {currentNote.content.trim() ? (
-              <MarkdownPreview content={currentNote.content} size="sm" />
+              <MarkdownPreview
+                content={stripKnowledgeNoteProvenance(currentNote.content)}
+                size="sm"
+              />
             ) : (
               <p className="text-xs text-text-muted">
                 {t(

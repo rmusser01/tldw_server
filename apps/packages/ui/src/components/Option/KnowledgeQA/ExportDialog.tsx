@@ -5,6 +5,7 @@
 import { getMeasuredRelevance } from "./sourceListUtils"
 
 import React, { useState, useCallback, useEffect, useRef } from "react"
+import { retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { Link } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import {
@@ -413,10 +414,16 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         metadata.thread_id = currentThreadId
       }
 
-      const savedNote = await tldwClient.createNote(noteContent, {
-        title,
-        metadata,
-      })
+      const savedNote = await tldwClient.createNote(
+        retainKnowledgeNoteProvenance(noteContent, metadata),
+        {
+          title,
+          metadata,
+          ...(currentThreadId && !currentThreadId.startsWith("shared-")
+            ? { conversation_id: currentThreadId }
+            : {}),
+        },
+      )
       if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }

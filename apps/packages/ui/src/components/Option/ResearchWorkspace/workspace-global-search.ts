@@ -1,3 +1,4 @@
+import { stripKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import type { Message } from "@/store/option"
 import type { WorkspaceNote, WorkspaceSource } from "@/types/workspace"
 
@@ -21,12 +22,12 @@ export interface WorkspaceGlobalSearchResult {
   score: number
   sourceId?: string
   chatMessageId?: string
-  noteId?: number
+  noteId?: string | number
   noteField?: "title" | "content"
 }
 
 export interface WorkspaceGlobalSearchNoteDocument {
-  id?: number
+  id?: string | number
   title: string
   content: string
   keywords?: string[]
@@ -234,7 +235,7 @@ export const buildWorkspaceGlobalSearchResults = ({
 
   if (allowDomain(parsedQuery.filter, "note")) {
     const noteDocuments: WorkspaceGlobalSearchNoteDocument[] = []
-    const seenNoteIds = new Set<number>()
+    const seenNoteIds = new Set<string | number>()
 
     if (currentNote) {
       noteDocuments.push({
@@ -244,14 +245,14 @@ export const buildWorkspaceGlobalSearchResults = ({
         keywords: currentNote.keywords || [],
         isDraft: currentNote.id == null
       })
-      if (typeof currentNote.id === "number" && Number.isFinite(currentNote.id)) {
+      if (typeof currentNote.id === "string" || (typeof currentNote.id === "number" && Number.isFinite(currentNote.id))) {
         seenNoteIds.add(currentNote.id)
       }
     }
 
     for (const workspaceNote of workspaceNotes) {
       const workspaceNoteId =
-        typeof workspaceNote.id === "number" && Number.isFinite(workspaceNote.id)
+        typeof workspaceNote.id === "string" || (typeof workspaceNote.id === "number" && Number.isFinite(workspaceNote.id))
           ? workspaceNote.id
           : undefined
       if (workspaceNoteId != null && seenNoteIds.has(workspaceNoteId)) {
@@ -268,7 +269,7 @@ export const buildWorkspaceGlobalSearchResults = ({
 
     for (const noteDocument of noteDocuments) {
       const noteTitle = noteDocument.title || ""
-      const noteContent = noteDocument.content || ""
+      const noteContent = stripKnowledgeNoteProvenance(noteDocument.content || "")
       const noteKeywords = (noteDocument.keywords || []).join(" ")
 
       const titleScore = scoreText(noteTitle, parsedQuery.terms)

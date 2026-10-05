@@ -1,3 +1,4 @@
+import { readKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -19,7 +20,7 @@ const {
 
   const storeState = {
     currentNote: {
-      id: 7,
+      id: 7 as string | number,
       title: "My Study Note",
       content: "Line one\nLine two",
       keywords: ["analysis", "physics"],
@@ -108,7 +109,7 @@ describe("QuickNotesSection Stage 4 layout and export", () => {
       content: "Line one\nLine two",
       keywords: ["analysis", "physics"],
       version: 1,
-      isDirty: false
+      isDirty: false,
     }
     workspaceStoreState.noteFocusTarget = null
     mockGetNoteKeywords.mockResolvedValue([])
@@ -187,12 +188,12 @@ describe("QuickNotesSection Stage 4 layout and export", () => {
     render(
       <div style={{ height: "260px" }}>
         <QuickNotesSection />
-      </div>
+      </div>,
     )
 
     expect(screen.getByText("Quick Notes")).toBeInTheDocument()
     expect(
-      screen.getByPlaceholderText("Jot down notes, ideas, or observations...")
+      screen.getByPlaceholderText("Jot down notes, ideas, or observations..."),
     ).toBeInTheDocument()
   })
 
@@ -201,13 +202,59 @@ describe("QuickNotesSection Stage 4 layout and export", () => {
 
     expect(screen.getByLabelText("Note title")).toHaveValue("My Study Note")
     expect(screen.getByLabelText("Note keywords")).toBeInTheDocument()
-    expect(screen.getByLabelText("Note content")).toHaveValue("Line one\nLine two")
+    expect(screen.getByLabelText("Note content")).toHaveValue(
+      "Line one\nLine two",
+    )
     expect(
-      screen.getByRole("button", { name: "Clear current note" })
+      screen.getByRole("button", { name: "Clear current note" }),
     ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Load note" }))
 
     expect(await screen.findByLabelText("Search notes")).toBeInTheDocument()
+  })
+
+  it("preserves canonical provenance when Quick Notes replaces the entire body", async () => {
+    const original = {
+      origin: "knowledge_qa",
+      trust_state: "uncited_degraded_answer",
+      thread_id: "owned-thread",
+      research: {
+        workspace_id: "workspace-a",
+        import_id: "import-a",
+        sources: [],
+      },
+    }
+    const marker = `<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(original))} -->`
+    workspaceStoreState.currentNote.id = "e3b16146-9e38-42e0-bd15-549e60bd31a3"
+    workspaceStoreState.currentNote.content = `Original excerpt\n\n${marker}`
+    const view = render(<QuickNotesSection />)
+    expect(screen.getByLabelText("Note content")).toHaveValue(
+      "Original excerpt",
+    )
+    fireEvent.change(screen.getByLabelText("Note content"), {
+      target: { value: "Edited body" },
+    })
+    const edited = workspaceStoreState.updateNoteContent.mock.lastCall![0]
+    expect(edited).toContain("Edited body")
+    expect(readKnowledgeNoteProvenance(edited)).toEqual(original)
+    workspaceStoreState.currentNote.content = edited
+    view.rerender(<QuickNotesSection />)
+    fireEvent.click(screen.getByRole("button", { name: "Update" }))
+    await waitFor(() =>
+      expect(mockBgRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: "/api/v1/notes/e3b16146-9e38-42e0-bd15-549e60bd31a3?expected_version=1",
+          method: "PUT",
+          body: expect.objectContaining({
+            content: edited,
+            keywords: expect.arrayContaining([
+              "workspace:workspace-a",
+              "workspace:test",
+            ]),
+          }),
+        }),
+      ),
+    )
   })
 })

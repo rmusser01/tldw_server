@@ -153,6 +153,15 @@ describe("ExportDialog accessibility", () => {
     state.searchDetails = null
   })
 
+  it("persists provenance in canonical content when NoteResponse drops metadata", async () => {
+    createNoteMock.mockImplementation(async (content, fields) => ({ id: "canonical-export", title: fields.title, content, conversation_id: fields.conversation_id, version: 1 }))
+    render(<ExportDialog open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+    await waitFor(() => expect(createNoteMock).toHaveBeenCalled())
+    expect(createNoteMock.mock.calls[0][0]).toContain("<!-- tldw-knowledge:v1:")
+    expect(createNoteMock.mock.calls[0][1].conversation_id).toBe("thread-1")
+    expect(await screen.findByRole("link", { name: "Open saved note" })).toHaveAttribute("href", "/notes?source_ref_id=canonical-export")
+  })
   it("exposes modal dialog semantics", () => {
     render(<ExportDialog open onClose={vi.fn()} />)
 

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   values: new Map<string, unknown>(),
   upload: vi.fn(),
   details: vi.fn(),
+  request: vi.fn(),
   persistent: true,
   writeError: false,
   readGate: null as Promise<void> | null,
@@ -44,6 +45,16 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   },
 }))
 vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => ({
+    scopeKey: mocks.owner,
+    requestScope: {
+      config: { serverUrl: mocks.owner, authMode: "single-user" },
+      userId: null,
+    },
+    scopeSignal: new AbortController().signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    release: () => {},
+  }),
   resolveServicePromptScope: async () => ({
     config: {
       serverUrl: mocks.owner,
@@ -79,7 +90,9 @@ vi.mock("@/hooks/useFeatureFlags", () => ({
   FEATURE_FLAGS: {},
   useFeatureFlag: () => [true],
 }))
-vi.mock("@/services/background-proxy", () => ({ bgRequest: async () => ({}) }))
+vi.mock("@/services/background-proxy", () => ({
+  bgRequest: (...args: unknown[]) => mocks.request(...args),
+}))
 vi.mock("@/components/Option/ResearchWorkspace/WorkspaceHeader", () => ({
   WorkspaceHeader: () => null,
 }))
@@ -137,11 +150,13 @@ beforeEach(() => {
   mocks.values.clear()
   mocks.upload.mockReset()
   mocks.details.mockReset()
+  mocks.request.mockReset().mockResolvedValue({})
   mocks.writeError = false
   mocks.readGate = null
   localStorage.clear()
   useWorkspaceStore.setState({
     workspaceId: "workspace-a",
+    workspaceTag: "workspace:research",
     sources: [],
     selectedSourceIds: [],
     selectedSourceFolderIds: [],
@@ -442,6 +457,11 @@ describe("mounted Knowledge research import", () => {
       "First excerpt",
       "Second excerpt",
     ])
+    useWorkspaceStore.getState().loadNote({
+      id: "e3b16146-9e38-42e0-bd15-549e60bd31a3",
+      title: "Canonical draft",
+      content: firstNote,
+    })
     view.unmount()
     const persisted = new Map(
       Array.from(
@@ -460,6 +480,9 @@ describe("mounted Knowledge research import", () => {
     })
     for (const [key, value] of persisted) localStorage.setItem(key, value)
     await useWorkspaceStore.persist.rehydrate()
+    expect(useWorkspaceStore.getState().currentNote.id).toBe(
+      "e3b16146-9e38-42e0-bd15-549e60bd31a3",
+    )
     expect(useWorkspaceStore.getState().sources).toHaveLength(3)
     expect(
       useWorkspaceStore.getState().sources[0].knowledgeQaEvidence?.sources[0]
@@ -617,4 +640,264 @@ describe("mounted Knowledge research import", () => {
     expect(useWorkspaceStore.getState().sources[0].mediaId).toBe(101)
     view.unmount()
   })
+})
+
+it.each([false, true])(
+  "retains canonical Quick Notes and matching source evidence after a tombstoned workspace reload (lost response=%s)",
+  async (loseResponse) => {
+    const { restoreMigratedResearchWorkspace } =
+      await import("@/components/Option/ResearchWorkspace/workspace-server-restore")
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-a",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-a",
+        serverWorkspaceId: "workspace-a",
+        migrationId: "migration-a",
+        serverScopeKey: "alice",
+        contentRetained: false,
+        deletedAt: "2026-10-03T00:00:00Z",
+      }),
+    )
+    let canonical: any = null
+    let droppedResponse = false
+    mocks.request.mockImplementation(async ({ path, method, body }: any) => {
+      if (path === "/api/v1/notes/" && method === "POST") {
+        canonical = {
+          id: body.id,
+          title: body.title,
+          content: body.content,
+          keywords: body.keywords.map((keyword: string) => ({ keyword })),
+          conversation_id: body.conversation_id,
+          version: 1,
+        }
+        if (loseResponse && !droppedResponse) {
+          droppedResponse = true
+          throw new Error("response lost")
+        }
+        return canonical
+      }
+      if (path.startsWith("/api/v1/notes/search/"))
+        return { notes: canonical ? [canonical] : [] }
+      if (path.startsWith("/api/v1/notes/")) {
+        if (!canonical)
+          throw Object.assign(new Error("missing"), { status: 404 })
+        return canonical
+      }
+      if (path.endsWith("/context"))
+        return {
+          workspace_id: "workspace-a",
+          workspace: {
+            id: "workspace-a",
+            name: "Research",
+            created_at: "2026-10-01T00:00:00Z",
+            version: 1,
+          },
+          sources: {
+            items: [
+              {
+                id: "saved-source",
+                workspace_id: "workspace-a",
+                media_id: 101,
+                title: "Field note — retrieved excerpts",
+                source_type: "text",
+                selected: false,
+                state: "queryable",
+                added_at: "2026-10-01T00:00:00Z",
+              },
+            ],
+          },
+          partial_errors: [],
+        }
+      return []
+    })
+    const transfer = payload()
+    transfer.sources = transfer.sources.slice(0, 2)
+    mocks.upload.mockResolvedValue({ id: 101 })
+    await queueResearchWorkspacePrefill(transfer)
+    const receiver = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().currentNote.content).toContain(
+        "Import reference:",
+      ),
+    )
+    await waitFor(() => expect(receiver.result.current.importing).toBe(false))
+    if (loseResponse) {
+      expect(receiver.result.current.error).toContain("could not be saved")
+      await act(async () => {
+        await receiver.result.current.retry()
+      })
+      await waitFor(() => expect(receiver.result.current.error).toBeNull())
+      await waitFor(() => expect(receiver.result.current.importing).toBe(false))
+    }
+    expect(receiver.result.current.error).toBeNull()
+    expect(canonical.id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(useWorkspaceStore.getState().currentNote.id).toBe(canonical.id)
+    await act(async () => {
+      useWorkspaceStore.setState({ selectedSourceFolderIds: ["manual-folder"] })
+    })
+    await waitFor(() =>
+      expect(
+        [...mocks.values.values()].some(
+          (value: any) => value.selectionIntent === null,
+        ),
+      ).toBe(true),
+    )
+    receiver.unmount()
+    useWorkspaceStore.setState({
+      workspaceId: null,
+      selectedSourceFolderIds: [],
+      sources: [],
+      currentNote: { title: "", content: "", keywords: [], isDirty: false },
+      workspaceSnapshots: {},
+      selectedSourceIds: [],
+    })
+    await restoreMigratedResearchWorkspace({
+      signal: new AbortController().signal,
+      apply: useWorkspaceStore.getState().restoreServerWorkspace,
+    })
+    const reopened = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().currentNote.content).toContain(
+        "Unsupported draft",
+      ),
+    )
+    const state = useWorkspaceStore.getState()
+    expect(state.currentNote.id).toBe(canonical.id)
+    expect(state.sources.map((source) => source.mediaId)).toEqual([101])
+    expect(state.sources[0].knowledgeQaEvidence).toMatchObject({
+      trustState: "uncited_degraded_answer",
+      sources: [
+        { originalId: "note-uuid", excerpt: "First excerpt" },
+        { originalId: "note-uuid", excerpt: "Second excerpt" },
+      ],
+    })
+    expect(state.selectedSourceIds).toEqual([])
+    expect(mocks.upload).toHaveBeenCalledTimes(1)
+    expect(
+      mocks.request.mock.calls.filter(([request]) => request.method === "POST"),
+    ).toHaveLength(1)
+    reopened.unmount()
+  },
+)
+
+it.each(["edit", "clear", "owner", "workspace"])(
+  "fences canonical save acknowledgment after %s",
+  async (change) => {
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-a",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-a",
+        serverWorkspaceId: "workspace-a",
+        migrationId: "migration-a",
+        contentRetained: false,
+      }),
+    )
+    let finish!: () => void
+    let canonical: any = null
+    mocks.request.mockImplementation(async ({ method, body }: any) => {
+      if (method === "POST") {
+        canonical = {
+          id: body.id,
+          title: body.title,
+          content: body.content,
+          keywords: body.keywords.map((keyword: string) => ({ keyword })),
+          version: 1,
+        }
+        await new Promise<void>((resolve) => {
+          finish = resolve
+        })
+        return canonical
+      }
+      if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
+      return canonical
+    })
+    const transfer = payload()
+    transfer.sources = transfer.sources.slice(3)
+    await queueResearchWorkspacePrefill(transfer)
+    const receiver = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    await waitFor(() => expect(canonical).not.toBeNull())
+    await act(async () => {
+      if (change === "clear") useWorkspaceStore.getState().clearCurrentNote()
+      else useWorkspaceStore.getState().updateNoteContent("Later unsaved body")
+      if (change === "owner") {
+        mocks.owner = "bob"
+        window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+      }
+      if (change === "workspace")
+        useWorkspaceStore.setState({ workspaceId: "workspace-b" })
+      finish()
+    })
+    if (change === "edit") {
+      await waitFor(() =>
+        expect(useWorkspaceStore.getState().currentNote.id).toBe(canonical.id),
+      )
+      expect(useWorkspaceStore.getState().currentNote.content).toContain(
+        "Later unsaved body",
+      )
+      expect(useWorkspaceStore.getState().currentNote.content).toContain(
+        "tldw-knowledge:v1:",
+      )
+      expect(useWorkspaceStore.getState().currentNote.isDirty).toBe(true)
+    } else {
+      expect(useWorkspaceStore.getState().currentNote.id).toBeUndefined()
+      expect(useWorkspaceStore.getState().currentNote.content).toBe(
+        change === "clear" ? "" : "Later unsaved body",
+      )
+    }
+    receiver.unmount()
+  },
+)
+
+it("retains an existing canonical note's unsaved title and body when appending the handoff", async () => {
+  localStorage.setItem(
+    "tldw:research-workspace:migration:tombstone:workspace-a",
+    JSON.stringify({
+      legacyWorkspaceId: "workspace-a",
+      serverWorkspaceId: "workspace-a",
+      migrationId: "migration-a",
+      contentRetained: false,
+    }),
+  )
+  let canonical = {
+    id: "e3b16146-9e38-42e0-bd15-549e60bd31a3",
+    title: "Server title",
+    content: "Server body",
+    keywords: [{ keyword: "old" }],
+    version: 1,
+  }
+  useWorkspaceStore.getState().loadNote({ ...canonical, keywords: ["new"] })
+  useWorkspaceStore.getState().updateNoteTitle("Unsaved title")
+  useWorkspaceStore.getState().updateNoteContent("Unsaved body")
+  mocks.request.mockImplementation(async ({ method, body }: any) => {
+    if (method === "PUT")
+      canonical = {
+        ...canonical,
+        title: body.title,
+        content: body.content,
+        keywords: body.keywords.map((keyword: string) => ({ keyword })),
+        version: 2,
+      }
+    return canonical
+  })
+  const transfer = payload()
+  transfer.sources = transfer.sources.slice(3)
+  await queueResearchWorkspacePrefill(transfer)
+  const receiver = renderHook(() =>
+    useResearchWorkspacePrefill("workspace-a", true),
+  )
+  await waitFor(() =>
+    expect(useWorkspaceStore.getState().currentNote.version).toBe(2),
+  )
+  expect(canonical.title).toBe("Unsaved title")
+  expect(canonical.content).toContain("Unsaved body")
+  expect(canonical.content).toContain("Unsupported draft")
+  expect(canonical.keywords).toContainEqual({ keyword: "new" })
+  expect(receiver.result.current.error).toBeNull()
+  receiver.unmount()
 })

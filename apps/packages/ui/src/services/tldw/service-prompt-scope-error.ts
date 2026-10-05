@@ -125,6 +125,7 @@ export const isServicePromptRequestPath = (
     /^\/api\/v1\/characters(?:\/search)?\/?$/.test(pathname) ||
     pathname === "/api/v1/chat/conversations" ||
     /^\/api\/v1\/chat\/conversations\/[^/]+\/messages-with-context$/.test(pathname) ||
+    pathname === "/api/v1/notes/search/" ||
     pathname === "/api/v1/rag/source-health" ||
     /^\/api\/v1\/chatbooks\/download\/[^/]+$/.test(pathname)
   )) return true
