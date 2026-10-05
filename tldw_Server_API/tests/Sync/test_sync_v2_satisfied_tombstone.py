@@ -379,6 +379,31 @@ def test_a_baseless_tombstone_of_a_message_the_server_holds_is_still_a_conflict(
     assert _state(sync_service, INPUT_ID).deleted is False
 
 
+def test_a_tombstone_that_names_a_base_the_dataset_never_issued_is_a_push_conflict_that_blocks_nothing(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    third_device: str,
+) -> None:
+    """The device claims server history that does not exist. It is told so, and nothing is held up.
+
+    Unchanged by the satisfied rule: the head check refuses it before any projection.
+    """
+    claimed = _push_tombstone(
+        sync_service,
+        object_revision=2,
+        base_server_cursor=7,
+        base_object_revision=1,
+        base_object_hash="sha256:a-base-this-dataset-never-issued",
+    )
+
+    assert claimed.accepted == []
+    assert [item.entity_id for item in claimed.conflicts] == [GONE]
+    assert _state(sync_service) is None
+    assert _blocker(sync_service) is None
+    assert _pull(sync_service, third_device) == []
+    assert client.post("/api/v1/chats/", json={"title": "Still healthy"}).status_code == 201
+
+
 def test_a_tombstone_never_deletes_a_message_in_another_owners_chat(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
