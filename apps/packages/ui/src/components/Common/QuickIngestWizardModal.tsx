@@ -4,6 +4,7 @@ import {
 } from "@/routes/route-paths"
 import { setSetting } from "@/services/settings/registry"
 import { MEDIA_REVIEW_SELECTION_SETTING, MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING } from "@/services/settings/ui-settings"
+import { buildKnowledgeMediaScopePath } from "@/utils/knowledge-scope-handoff"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { type ConferenceRetryRequestItem,
   buildConferenceRetryRequestItems
@@ -1825,10 +1826,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     return () => { cancelled = true }
   }, [currentStep, navigate, onClose, open, operation, presetConfig, queueItems, results, reviewRetry, session.id])
 
-  const handleSearchKnowledge = useCallback(() => {
-    if (!operation.isCurrent()) return
-    navigate("/knowledge")
-  }, [navigate, operation])
+  const handleSearchKnowledge = useCallback(
+    (mediaIds: number[]) => {
+      if (!operation.isCurrent()) return
+      navigate(buildKnowledgeMediaScopePath(mediaIds))
+    },
+    [navigate, operation],
+  )
 
   const handleIngestMore = useCallback(() => {
     if (!operation.isCurrent()) return

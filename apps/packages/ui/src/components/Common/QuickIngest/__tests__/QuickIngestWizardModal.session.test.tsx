@@ -1125,6 +1125,90 @@ describe("QuickIngestWizardModal session runtime", () => {
     }
   )
 
+  it("continues only successfully added canonical media IDs into Knowledge", async () => {
+    mocks.useActualResultsStep = true
+    useQuickIngestSessionStore.getState().createDraftSession({
+      ...createEmptyQuickIngestSession(),
+      currentStep: 5,
+      lifecycle: "completed",
+      processingState: {
+        status: "complete",
+        perItemProgress: [],
+        elapsed: 1,
+        estimatedRemaining: 0,
+      },
+      results: [
+        {
+          id: "added",
+          title: "Added source",
+          status: "ok",
+          outcome: "ingested",
+          type: "pdf",
+          mediaId: 3,
+        },
+        {
+          id: "warning",
+          title: "Saved with warning",
+          status: "ok",
+          warning: "Analysis unavailable",
+          type: "pdf",
+          mediaId: "7",
+        },
+        {
+          id: "duplicate",
+          title: "Existing source",
+          status: "ok",
+          outcome: "skipped",
+          type: "pdf",
+          mediaId: 11,
+        },
+        {
+          id: "failed",
+          title: "Failed source",
+          status: "error",
+          type: "pdf",
+          mediaId: 13,
+        },
+      ],
+    })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Ask added items" }),
+    )
+    expect(mocks.navigate.mock.calls.at(-1)?.[0]).toBe(
+      "/knowledge?media_ids=3%2C7",
+    )
+  })
+
+  it("does not offer a whole-library continuation for successful extraction without a canonical saved media ID", async () => {
+    mocks.useActualResultsStep = true
+    useQuickIngestSessionStore.getState().createDraftSession({
+      ...createEmptyQuickIngestSession(),
+      currentStep: 5,
+      lifecycle: "completed",
+      processingState: {
+        status: "complete",
+        perItemProgress: [],
+        elapsed: 1,
+        estimatedRemaining: 0,
+      },
+      results: [
+        {
+          id: "local",
+          title: "Process only source",
+          status: "ok",
+          type: "pdf",
+          mediaId: null,
+        },
+      ],
+    })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    expect(await screen.findByText("Process only source")).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: /Ask added|Search your ingested/ }),
+    ).toBeNull()
+  })
+
   it("ignores the cancelled StrictMode poll after its replacement accepts terminal results", async () => {
     const staleRead = deferred<{ ok: boolean; data: { status: string; error_message: string } }>()
     const reattach = await vi.importActual<typeof import("@/services/tldw/quick-ingest-session-reattach")>("@/services/tldw/quick-ingest-session-reattach")

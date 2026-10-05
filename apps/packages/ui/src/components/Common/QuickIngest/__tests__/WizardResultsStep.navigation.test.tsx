@@ -78,7 +78,9 @@ describe("WizardResultsStep navigation buttons", () => {
     expect(onOpenMedia).toHaveBeenCalledWith(expect.objectContaining({ mediaId: 42 }))
     fireEvent.click(screen.getByRole("button", { name: "Open document in Document Workspace" }))
     expect(onOpenWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mediaId: 42 }))
-    expect(screen.getByRole("button", { name: /search your ingested content/i })).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Ask added items" }),
+    ).toBeVisible()
   })
 
   it("keeps saved warnings, unknown failures, and cancelled items separate in a mixed batch", () => {
@@ -146,7 +148,7 @@ describe("WizardResultsStep navigation buttons", () => {
     setSinglePdfResult()
   })
 
-  it("renders Search in Knowledge button when onSearchKnowledge is provided", () => {
+  it("renders Ask added items button when onSearchKnowledge is provided", () => {
     const onSearchKnowledge = vi.fn()
     render(
       <WizardResultsStep
@@ -154,10 +156,10 @@ describe("WizardResultsStep navigation buttons", () => {
         onSearchKnowledge={onSearchKnowledge}
       />
     )
-    const btn = screen.getByText("Search in Knowledge")
+    const btn = screen.getByText("Ask added items")
     expect(btn).toBeTruthy()
     fireEvent.click(btn)
-    expect(onSearchKnowledge).toHaveBeenCalledTimes(1)
+    expect(onSearchKnowledge).toHaveBeenCalledWith([42])
   })
 
   it("renders Open in Workspace button when onOpenWorkspace provided and PDF ingested", () => {
@@ -354,7 +356,7 @@ describe("WizardResultsStep navigation buttons", () => {
 
   it("does not render navigation buttons when callbacks are not provided", () => {
     render(<WizardResultsStep onClose={vi.fn()} />)
-    expect(screen.queryByText("Search in Knowledge")).toBeNull()
+    expect(screen.queryByText("Ask added items")).toBeNull()
     expect(screen.queryByText("Open in Workspace")).toBeNull()
   })
 
@@ -466,7 +468,7 @@ describe("WizardResultsStep navigation buttons", () => {
     })
     fireEvent.click(askButton)
     expect(onSearchKnowledge).toHaveBeenCalledTimes(1)
-    expect(screen.queryByText("Search in Knowledge")).toBeNull()
+    expect(screen.getByText("Ask added items")).toBeVisible()
   })
 
   it("keeps the collection handoff available when every item failed", () => {

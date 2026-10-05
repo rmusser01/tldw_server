@@ -13,6 +13,8 @@ import React, {
   useState,
   type ReactNode,
 } from "react"
+import { useInRouterContext, useLocation } from "react-router-dom"
+import { parseKnowledgeMediaScope } from "@/utils/knowledge-scope-handoff"
 import { useStorage } from "@plasmohq/storage/hook"
 import type {
   KnowledgeQAState,
@@ -390,6 +392,13 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
             : {
                 ...presetSettings,
                 ...KNOWLEDGE_QA_SETTINGS_OVERRIDES,
+                sources: state.settings.sources,
+                include_media_ids: state.settings.include_media_ids,
+                include_note_ids: state.settings.include_note_ids,
+                collection_id: state.settings.collection_id,
+                keyword_filter: state.settings.keyword_filter,
+                generation_provider: state.settings.generation_provider,
+                generation_model: state.settings.generation_model,
                 enable_web_fallback: state.settings.enable_web_fallback,
               },
       }
@@ -1678,12 +1687,73 @@ function mergeStringFilters(
 // Provider component
 export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
   const authority = useKnowledgeQAAuthority()
-  return <OwnedKnowledgeQAProvider key={authority.key} authority={authority}>{children}</OwnedKnowledgeQAProvider>
+  const inRouter = useInRouterContext()
+  const handoffOwner = useRef<{ routeKey: string; scopeKey: string } | null>(
+    null,
+  )
+  return inRouter ? (
+    <RoutedKnowledgeQAProvider
+      authority={authority}
+      handoffOwner={handoffOwner}
+    >
+      {children}
+    </RoutedKnowledgeQAProvider>
+  ) : (
+    <OwnedKnowledgeQAProvider key={authority.key} authority={authority}>
+      {children}
+    </OwnedKnowledgeQAProvider>
+  )
 }
 
-function OwnedKnowledgeQAProvider({ children, authority }: {
+function RoutedKnowledgeQAProvider({
+  authority,
+  handoffOwner,
+  children,
+}: {
+  authority: ReturnType<typeof useKnowledgeQAAuthority>
+  handoffOwner: React.MutableRefObject<{
+    routeKey: string
+    scopeKey: string
+  } | null>
+  children: ReactNode
+}) {
+  const location = useLocation()
+  const scopeKey = authority.snapshot?.scopeKey
+  const ownerChanged =
+    handoffOwner.current?.routeKey === location.key &&
+    scopeKey &&
+    handoffOwner.current.scopeKey !== scopeKey
+  useEffect(() => {
+    if (
+      scopeKey &&
+      parseKnowledgeMediaScope(location.search) &&
+      !ownerChanged
+    ) {
+      handoffOwner.current = { routeKey: location.key, scopeKey }
+    }
+  }, [location.key, location.search, ownerChanged, scopeKey, handoffOwner])
+  return (
+    <OwnedKnowledgeQAProvider
+      key={authority.key}
+      authority={authority}
+      scopeSearch={ownerChanged ? "?media_ids=" : location.search}
+      scopeArrivalKey={location.key}
+    >
+      {children}
+    </OwnedKnowledgeQAProvider>
+  )
+}
+
+function OwnedKnowledgeQAProvider({
+  children,
+  authority,
+  scopeSearch = "",
+  scopeArrivalKey = "",
+}: {
   children: ReactNode
   authority: ReturnType<typeof useKnowledgeQAAuthority>
+  scopeSearch?: string
+  scopeArrivalKey?: string
 }) {
   const [state, rawDispatch] = useReducer(reducer, initialState)
   const mounted = useRef(true)
@@ -1705,13 +1775,16 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
     return () => { mounted.current = false }
   }, [])
   const [historyHydrated, setHistoryHydrated] = useState(false)
-  const [storedPreset] = useStorage<RagPresetName>("ragSearchPreset", "balanced")
-  const [storedSettings] = useStorage<RagSettings>(
+  const [storedPreset, , presetStorage] = useStorage<RagPresetName>("ragSearchPreset", "balanced")
+  const [storedSettings, , settingsStorage] = useStorage<RagSettings>(
     "ragSearchSettingsV2",
     DEFAULT_RAG_SETTINGS
   )
   const [streamingFeatureFlag] = useStorage<boolean>("ff_knowledgeQaStreaming", true)
   const hydratedDefaultsRef = useRef<string | null>(null)
+  const [defaultsHydrated, setDefaultsHydrated] = useState(false)
+  const scopeHandoffAppliedRef = useRef<string | null>(null)
+  const invalidScopeHandoffRef = useRef(false)
   const activeSearchAbortRef = useRef<AbortController | null>(null)
   const activeSearchRequestIdRef = useRef(0)
   const activeThreadHydrationRequestIdRef = useRef(0)
@@ -1730,6 +1803,12 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
   const defaultCharacterPromiseRef = useRef<Promise<number | null> | null>(null)
 
   useEffect(() => {
+    if (
+      presetStorage?.isLoading ||
+      settingsStorage?.isLoading ||
+      scopeHandoffAppliedRef.current !== null
+    )
+      return
     if (state.currentThreadId || state.messages.length > 0) {
       hydratedDefaultsRef.current = null
       return
@@ -1756,6 +1835,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       return
     }
     hydratedDefaultsRef.current = serialized
+    setDefaultsHydrated(true)
 
     dispatch({
       type: "HYDRATE_DEFAULTS",
@@ -1764,7 +1844,68 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         settings: normalizedSettings,
       },
     })
-  }, [dispatch, state.currentThreadId, state.messages.length, storedPreset, storedSettings])
+  }, [
+    dispatch,
+    presetStorage?.isLoading,
+    settingsStorage?.isLoading,
+    state.currentThreadId,
+    state.messages.length,
+    storedPreset,
+    storedSettings,
+  ])
+
+  useEffect(() => {
+    const scope = parseKnowledgeMediaScope(scopeSearch)
+    if (
+      !scope ||
+      !defaultsHydrated ||
+      presetStorage?.isLoading ||
+      settingsStorage?.isLoading ||
+      !canStartPrivateOperation()
+    )
+      return
+    const arrival = `${scopeArrivalKey}:${scopeSearch}`
+    if (scopeHandoffAppliedRef.current === arrival) return
+    scopeHandoffAppliedRef.current = arrival
+    invalidScopeHandoffRef.current = scope.invalid
+    activeSearchAbortRef.current?.abort("clear")
+    activeSearchAbortRef.current = null
+    activeSearchRequestIdRef.current += 1
+    activeThreadHydrationRequestIdRef.current += 1
+    dispatch({ type: "CLEAR_RESULTS" })
+    dispatch({ type: "SET_THREAD_ID", payload: null })
+    dispatch({ type: "SET_LOCAL_ONLY_THREAD", payload: false })
+    dispatch({ type: "SET_MESSAGES", payload: [] })
+    dispatch({ type: "SET_QUERY", payload: "" })
+    dispatch({
+      type: "SET_SETTINGS",
+      payload: {
+        ...state.settings,
+        sources: scope.invalid ? [] : ["media_db"],
+        include_media_ids: scope.mediaIds,
+        include_note_ids: [],
+        collection_id: null,
+        keyword_filter: "",
+        corpus: "",
+        index_namespace: "",
+      },
+    })
+    if (scope.invalid)
+      dispatch({
+        type: "SET_ERROR",
+        payload:
+          "This source selection is empty or invalid. Choose specific sources before asking.",
+      })
+  }, [
+    canStartPrivateOperation,
+    defaultsHydrated,
+    dispatch,
+    presetStorage?.isLoading,
+    scopeArrivalKey,
+    scopeSearch,
+    settingsStorage?.isLoading,
+    state.settings,
+  ])
 
   const resolveDefaultCharacterId = useCallback(async (): Promise<number | null> => {
     if (defaultCharacterIdRef.current != null) {
@@ -2265,6 +2406,14 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       settingsOverrides?: Partial<RagSettings>
     ) => {
       if (!canStartPrivateOperation()) return
+      if (invalidScopeHandoffRef.current) {
+        dispatch({
+          type: "SET_ERROR",
+          payload:
+            "This source selection is empty or invalid. Choose specific sources before asking.",
+        })
+        return
+      }
       const trimmedQuery = question.trim()
       if (!trimmedQuery) return
       const queryWasTruncated = trimmedQuery.length > RAG_QUERY_MAX_LENGTH
@@ -3324,9 +3473,22 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
     dispatch({ type: "SET_PRESET", payload: preset })
   }, [dispatch])
 
-  const updateSetting = useCallback(<K extends keyof RagSettings>(key: K, value: RagSettings[K]) => {
-    dispatch({ type: "UPDATE_SETTING", payload: { key, value } })
-  }, [dispatch])
+  const updateSetting = useCallback(
+    <K extends keyof RagSettings>(key: K, value: RagSettings[K]) => {
+      if (
+        (key === "sources" ||
+          key === "include_media_ids" ||
+          key === "include_note_ids") &&
+        Array.isArray(value) &&
+        value.length > 0
+      ) {
+        invalidScopeHandoffRef.current = false
+        dispatch({ type: "SET_ERROR", payload: null })
+      }
+      dispatch({ type: "UPDATE_SETTING", payload: { key, value } })
+    },
+    [dispatch],
+  )
 
   const resetSettings = useCallback(() => {
     dispatch({ type: "SET_SETTINGS", payload: { ...DEFAULT_RAG_SETTINGS, ...KNOWLEDGE_QA_SETTINGS_OVERRIDES } })

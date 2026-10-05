@@ -1,3 +1,4 @@
+import { MediaKnowledgeActions } from "./MediaKnowledgeActions"
 import FeatureEmptyState from '@/components/Common/FeatureEmptyState'
 import FeatureHint from '@/components/Common/FeatureHint'
 import { ContentViewer } from '@/components/Media/ContentViewer'
@@ -1262,16 +1263,27 @@ const MediaPageContent: React.FC = () => {
           hidden={!isMobile && viewPrefs.sidebarCollapsedValue}
           aria-hidden={!isMobile && viewPrefs.sidebarCollapsedValue}>
           {selection.bulkSelectionMode ? (
-            <React.Suspense fallback={null}>
-              <LazyMediaBulkToolbar
+            <>
+              <div className="flex flex-wrap gap-2 border-b border-border p-2">
+                <MediaKnowledgeActions
+                  navigate={navigate}
+                  key={selection.bulkSelectedMediaItems.map((item) => item.id).join(",")}
+                  selection
+                  items={selection.bulkSelectedMediaItems}
+                  isCurrent={isMediaCurrent}
+                />
+              </div>
+              <React.Suspense fallback={null}>
+                <LazyMediaBulkToolbar
                 deleteDisabledReason={selection.bulkSelectedMediaItems.length > 0 ? deleteDisabledReason : undefined}
                 selection={{
                   ...selection,
                   handleSelectAllVisibleItems
                 }}
                 t={t}
-              />
-            </React.Suspense>
+                />
+              </React.Suspense>
+            </>
           ) : null}
 
           {/* Header */}
@@ -1871,6 +1883,22 @@ const MediaPageContent: React.FC = () => {
                 </button>
               </div>
             ) : null}
+            {nav.selected?.kind === "media" && (
+              <div className="flex flex-wrap gap-2 border-b border-border p-2">
+                <MediaKnowledgeActions
+                  navigate={navigate}
+                  key={String(nav.selected.id)}
+                  items={[
+                    {
+                      id: nav.selected.id,
+                      title: nav.selected.title,
+                      type: nav.selected.raw?.type,
+                    },
+                  ]}
+                  isCurrent={isMediaCurrent}
+                />
+              </div>
+            )}
             <ContentViewer
               selectedMedia={nav.selected}
               content={nav.selectedContent}

@@ -47,7 +47,7 @@ type WizardResultsStepProps = {
   ) => void
   onOpenMedia?: (item: WizardResultItem) => void
   onDiscussInChat?: (item: WizardResultItem) => void
-  onSearchKnowledge?: () => void
+  onSearchKnowledge?: (mediaIds: number[]) => void
   onOpenWorkspace?: (item: WizardResultItem) => void
   onOpenCollection?: (collectionId: string) => void
   onReviewSavedItems?: (ids: Array<string | number>) => void | Promise<void>
@@ -420,8 +420,14 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
     readyCollectionItemCount > 0 &&
     Boolean(onSearchKnowledge) &&
     Boolean(capabilities?.hasKnowledgeQaMediaScope)
+  const savedMediaIds = savedItems
+    .map((item) => Number(item.mediaId))
+    .filter((id) => Number.isSafeInteger(id) && id > 0)
+  const collectionMediaIds = [...savedItems, ...skippedExisting]
+    .map((item) => Number(item.mediaId))
+    .filter((id) => Number.isSafeInteger(id) && id > 0)
   const showGenericSearch =
-    savedIds.length > 0 && Boolean(onSearchKnowledge) && !hasDurableCollection
+    savedMediaIds.length > 0 && Boolean(onSearchKnowledge)
   const hasWorkspaceOpenTarget =
     Boolean(onOpenWorkspace) &&
     savedItems.some((item) => item.persisted && shouldKeepOriginalFile(item.type))
@@ -647,7 +653,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
               {canAskCollection && (
                 <button
                   type="button"
-                  onClick={onSearchKnowledge}
+                  onClick={() => onSearchKnowledge?.(collectionMediaIds)}
                   className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 transition-colors"
                   aria-label={qi("wizard.results.askCollectionAria", "Ask this collection")}
                 >
@@ -658,12 +664,15 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
               {showGenericSearch && onSearchKnowledge && (
                 <button
                   type="button"
-                  onClick={onSearchKnowledge}
+                  onClick={() => onSearchKnowledge(savedMediaIds)}
                   className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 transition-colors"
-                  aria-label={qi("wizard.results.searchKnowledgeAria", "Search your ingested content in Knowledge QA")}
+                  aria-label={qi(
+                    "wizard.results.askAddedItemsAria",
+                    "Ask added items",
+                  )}
                 >
                   <Search className="h-3.5 w-3.5" aria-hidden="true" />
-                  {qi("wizard.results.searchKnowledge", "Search in Knowledge")}
+                  {qi("wizard.results.askAddedItems", "Ask added items")}
                 </button>
               )}
               {hasWorkspaceOpenTarget && onOpenWorkspace && (
