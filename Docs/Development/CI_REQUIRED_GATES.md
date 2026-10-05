@@ -267,8 +267,8 @@ gh variable get MERGE_QUEUE
    the back of the line.
 4. Never click "Approve and run" on a queue-rebased PR. The empty approval-pending runs are expected; approving them
    starts duplicates.
-5. An evicted PR gets one comment saying why (conflicts, a gate failed twice, unresolved conversations, auto-merge did
-   not fire). Fix the cause and arm again.
+5. An evicted PR gets one comment saying why (conflicts, a gate failed twice, `dev` changed workflow files, auto-merge
+   did not fire). Fix the cause and arm again.
 
 Fork PRs and PRs opened by bots or apps are never queued and stay manual.
 
@@ -284,7 +284,12 @@ Fork PRs and PRs opened by bots or apps are never queued and stay manual.
 
 Non-required workflows (`ci.yml` and the rest) are not re-run on the rebased head.
 
-### Two details that surprise people
+### Three details that surprise people
+
+- **The queue cannot rebase a PR across a change to workflow files.** GitHub does not let an Actions token create or
+  update anything under `.github/workflows`. If `dev` gained a workflow change after your branch was cut, the queue
+  removes the PR from the line with the steps to take: `git fetch origin dev && git rebase origin/dev`, force-push with
+  lease, arm again. After that the queue can rebase it itself until the next workflow change lands.
 
 - `frontend-required.yml` publishes `frontend-required-diagnostic`, not the protected name, when a person dispatches
   it. Only a dispatch made by `github-actions[bot]`, which is how the queue starts it, publishes `frontend-required`.

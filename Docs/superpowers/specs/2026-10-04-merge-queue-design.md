@@ -154,6 +154,9 @@ publishes `frontend-required`; every other dispatch still publishes the diagnost
 A workflow in a PR branch could dispatch with its own `GITHUB_TOKEN` and so reach the real name. That needs write
 access and an edited workflow, the same trust level as editing `frontend-required.yml` in the branch.
 
+The queue ignores a `frontend-required.yml` dispatch that it did not start. Such a run can never report the required
+name, so its failing is not a gate failure and its being live is not the gate running.
+
 ### 4.9 A gate whose change detection failed must be red
 
 In the five gates with a `changes` job, the gate job required `needs.changes.result == 'success'`. When `changes`
@@ -188,9 +191,12 @@ is not queued.
 | `BEHIND` | Rebase (section 7), then dispatch all seven contexts, cancel the old head's live runs, comment once |
 | `DIRTY` | Evict: conflicts with `dev` |
 | Up to date, verdict per 4.1 is evict, retry, wait or dispatch | That action |
-| All passed, `BLOCKED` with unresolved review threads | Evict: blocked by unresolved conversations |
 | All passed, last context completed 15 minutes ago or less | Wait: auto-merge is about to fire |
 | All passed, last context completed more than 15 minutes ago | Evict: auto-merge did not fire, re-arm to retry |
+
+Review threads are not consulted. `dev`'s rules do not require conversations to be resolved, so an unresolved thread
+never blocks a merge here; `BLOCKED` with everything green is the merge state lagging the checks. (The chatbook queue
+evicts on unresolved threads because that repository does require resolution.)
 
 After an eviction the queue evaluates the new front in the same run, at most 10 times. PRs behind the front are never
 rebased, dispatched or commented on.
@@ -205,6 +211,15 @@ summary with no side effects; `on` acts.
   dispatching. A refused rebase is re-read, and re-read once more after 3 seconds, before it counts as this run's own
   failure: head moved means someone else acted; `DIRTY` evicts; otherwise one `rebase-failed` comment, then eviction on
   the second failure for the same head.
+- **A rebase across workflow files is impossible.** GitHub refuses to let an Actions token create or update a file
+  under `.github/workflows`, and `GITHUB_TOKEN` can never hold the `workflows` permission. When `dev` has changed a
+  workflow file since the PR's branch point, the rebase is refused every time. The queue recognises that refusal and
+  evicts at once (`evict-workflows`), with the hand-rebase steps in the comment: retrying cannot work, and waiting
+  would hold up everyone behind. The author rebases by hand and re-arms; the queue can rebase that PR again until the
+  next workflow change lands. This is the cost of the no-PAT constraint.
+- **Before acting,** for any decision other than wait, the queue re-reads the line and acts only if this PR is still
+  armed, on the same head and first in line. Reading seven contexts takes a dozen calls; another run may have evicted
+  the PR, or its author may have disarmed or pushed, in that time.
 - **Dispatch:** immediately before dispatching a context, re-read its live runs on the head and skip it if one
   appeared. A branch refusing a dispatch (HTTP 422 or 404) evicts the PR; any other error fails the queue run, so an
   outage never disarms a PR. A check context is never dispatched without `dev`'s tip as `base_sha`.
@@ -228,6 +243,7 @@ summary with no side effects; `on` acts.
    - dependency review accepts explicit refs on a dispatch (4.3);
    - the job-level write permissions of `queue-tick` are granted;
    - a tick that dispatches its own workflow completes everything else first (4.6);
+   - the exact refusal GitHub returns for a rebase across workflow-file changes (section 7);
    - what result a gate job reports when it hits its timeout (4.6).
 5. `on` for all traffic.
 

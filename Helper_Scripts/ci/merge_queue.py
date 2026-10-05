@@ -57,6 +57,11 @@ QUEUE_ACTOR = "github-actions[bot]"
 # gh reports API errors as `gh: <message> (HTTP NNN)`. These two mean the PR's branch itself
 # refuses the dispatch; every other error is GitHub's and fails the run so the next event retries.
 BRANCH_REFUSALS = ("(HTTP 422)", "(HTTP 404)")
+# GitHub refuses to let an Actions token create or update a file under .github/workflows
+# ("refusing to allow a GitHub App to create or update workflow ... without `workflows`
+# permission"), and GITHUB_TOKEN can never hold that permission. A rebase that would bring
+# dev's workflow changes into the PR branch therefore fails every time it is tried.
+WORKFLOW_REFUSAL = ("workflow", "permission")
 
 MISSING, RUNNING, PASSED, FAILED, FAILED_TWICE = "missing", "running", "passed", "failed", "failed twice"
 
@@ -72,19 +77,24 @@ class Context:
             the PR's branch; `status` for a commit status on the PR head, produced by the
             workflow dispatched on `dev` with the `pr` input.
         base_sha: Whether a `check` dispatch takes dev's tip as its `base_sha` input.
+        queue_only_dispatch: Whether a dispatch of the workflow reports this context only when
+            the queue made it. `frontend-required.yml` names its gate
+            `frontend-required-diagnostic` on a dispatch by anyone else (spec 4.8), so such a
+            run is not a run of this context at all.
     """
 
     name: str
     workflow: str
     kind: str = "check"
     base_sha: bool = True
+    queue_only_dispatch: bool = False
 
 
 CONTEXTS = (
     Context("backend-required", "backend-required.yml"),
     Context("security-required", "security-required.yml"),
     Context("coverage-required", "coverage-required.yml"),
-    Context("frontend-required", "frontend-required.yml"),
+    Context("frontend-required", "frontend-required.yml", queue_only_dispatch=True),
     Context("e2e-required", "e2e-required.yml"),
     Context("container-build-check", "container-build-check.yml", base_sha=False),
     Context("frontend-license-policy/trusted/dev", "frontend-license-gate.yml", kind="status"),
@@ -131,7 +141,6 @@ class PrState:
         head_committed_at: The head commit's date.
         base_sha: dev's tip, read together with the PR; sent as the `base_sha` dispatch input.
         checks: The required contexts' runs on the head, stand-ins included.
-        unresolved_threads: How many review threads are unresolved.
         human_author: Whether a user, not a bot or app, opened the PR.
     """
 
@@ -146,7 +155,6 @@ class PrState:
     head_committed_at: datetime
     base_sha: str = ""
     checks: tuple[CheckRun, ...] = ()
-    unresolved_threads: int = 0
     human_author: bool = True
 
 
@@ -241,9 +249,11 @@ def decide_front(pr: PrState, now: datetime) -> Action:
     states = {name: context_state(runs[name], now) for name in ALL_CONTEXTS}
 
     def named(wanted: str) -> tuple[str, ...]:
+        """The contexts in the wanted state, in table order."""
         return tuple(name for name in ALL_CONTEXTS if states[name] == wanted)
 
     def failed_urls(names: tuple[str, ...], last: int) -> tuple[str, ...]:
+        """The URLs of each named context's last `last` failed runs."""
         urls: list[str] = []
         for name in names:
             failed = [c for c in _finished(runs[name], now) if c.conclusion not in PASSING][-last:]
@@ -262,9 +272,9 @@ def decide_front(pr: PrState, now: datetime) -> Action:
         if now - pr.head_committed_at <= YOUNG_HEAD:
             return Action("wait", "head is under 3 minutes old; its own runs may not be visible yet", contexts=missing)
         return Action("dispatch", f"no run on the up-to-date head: {', '.join(missing)}", contexts=missing)
-    if state == "BLOCKED" and pr.unresolved_threads > 0:
-        return Action("evict", "green but blocked by unresolved conversations", slug="blocked")
-    # BLOCKED with nothing unresolved is usually mergeStateStatus lagging the green checks.
+    # BLOCKED with everything green is mergeStateStatus lagging the checks. Review threads are
+    # not consulted: dev's rules do not require conversations to be resolved, so an unresolved
+    # thread never blocks the merge and must never evict a green PR.
     if state in ("CLEAN", "UNSTABLE", "HAS_HOOKS", "BLOCKED"):
         last_green = max(_finished(runs[name], now)[-1].completed_at or now for name in ALL_CONTEXTS)
         if now - last_green > STUCK_GREEN:
@@ -315,6 +325,7 @@ class GhApi(Protocol):
 
 
 def _run_gh(args: list[str]) -> str:
+    """Run `gh` with the given arguments and return its stdout; raise GhError on a non-zero exit."""
     # `gh` is resolved from PATH (preinstalled on hosted runners); argv is a list built from
     # constants and API values, with no shell.
     proc = subprocess.run(["gh", *args], capture_output=True, text=True, check=False)  # nosec B603 B607
@@ -362,7 +373,6 @@ PR_FIELDS = """
   baseRef { target { oid } }
   autoMergeRequest { enabledAt }
   commits(last: 1) { nodes { commit { committedDate } } }
-  reviewThreads(first: 100) { nodes { isResolved } }
 """
 LINE_QUERY = (
     "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {"
@@ -387,15 +397,18 @@ DISARM_MUTATION = (
 
 
 def _ts(value: str | None) -> datetime | None:
+    """Parse a GitHub ISO-8601 timestamp (`...Z`) into an aware datetime; None stays None."""
     return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
 
 
 def _owner_name() -> tuple[str, str]:
+    """Split REPO (`owner/name`) into the two GraphQL variables."""
     owner, name = REPO.split("/")
     return owner, name
 
 
 def _parse_pr(node: dict) -> PrState:
+    """Build a PrState (without its checks) from one GraphQL pull-request node of PR_FIELDS."""
     commits = node["commits"]["nodes"]
     auto = node.get("autoMergeRequest")
     head_repo = (node.get("headRepository") or {}).get("nameWithOwner")
@@ -410,7 +423,6 @@ def _parse_pr(node: dict) -> PrState:
         merge_state=node["mergeStateStatus"],
         head_committed_at=_ts(commits[0]["commit"]["committedDate"]) if commits else datetime.now(timezone.utc),
         base_sha=((node.get("baseRef") or {}).get("target") or {}).get("oid") or "",
-        unresolved_threads=sum(1 for t in node["reviewThreads"]["nodes"] if not t["isResolved"]),
         human_author=(node.get("author") or {}).get("__typename") == "User",
     )
 
@@ -567,6 +579,7 @@ def _workflow_name(run: dict) -> str:
 
 
 def _own_run_id() -> int:
+    """The id of the workflow run executing this script, or 0 outside Actions."""
     return int(os.environ.get("GITHUB_RUN_ID", "0") or 0)
 
 
@@ -593,6 +606,9 @@ def required_run_stand_ins(runs: list[dict], checks: tuple[CheckRun, ...]) -> tu
       run whose suite DID report the check is not a gate failure (its queue-tick may have
       failed); that check run already speaks for it.
 
+    A hand-started `frontend-required.yml` dispatch is skipped: it publishes a diagnostic name,
+    never the required one (spec 4.8).
+
     A workflow-run conclusion is only ever read as a failure here, never as a merge signal.
     The queue's own run (GITHUB_RUN_ID) is never counted: a queue-tick runs inside the required
     workflow run it reports on. The license gate runs on `dev`, not on this head, so it has no
@@ -605,13 +621,20 @@ def required_run_stand_ins(runs: list[dict], checks: tuple[CheckRun, ...]) -> tu
     Returns:
         One stand-in per live run and per completed run that counts as a failure.
     """
-    by_workflow = {c.workflow: c.name for c in CONTEXTS if c.kind == "check"}
+    by_workflow = {c.workflow: c for c in CONTEXTS if c.kind == "check"}
     reported = {(c.context, c.suite_id) for c in checks if c.suite_id is not None}
     stand_ins = []
     for run in runs:
-        context = by_workflow.get(_workflow_name(run))
-        if context is None or run.get("id") == _own_run_id():
+        ctx = by_workflow.get(_workflow_name(run))
+        if ctx is None or run.get("id") == _own_run_id():
             continue
+        # A diagnostic dispatch can never report the required name, so neither its being live
+        # nor its failing says anything about the context. `actor` is who started the run and,
+        # unlike `triggering_actor`, does not change when someone re-runs it.
+        if (ctx.queue_only_dispatch and run.get("event") == "workflow_dispatch"
+                and (run.get("actor") or {}).get("login") != QUEUE_ACTOR):
+            continue
+        context = ctx.name
         url, conclusion = run.get("html_url", ""), run.get("conclusion")
         if run.get("status") in LIVE_RUN_STATUSES:
             stand_ins.append(CheckRun(context, run["status"], None, None, url))
@@ -646,6 +669,7 @@ def read_contexts(gh: GhApi, sha: str) -> tuple[CheckRun, ...]:
 
 
 def _best_effort(log: Callable[[str], None], what: str, fn: Callable[[], object]) -> None:
+    """Run `fn`; log a GhError as `what` instead of raising, for calls the queue can do without."""
     try:
         fn()
     except GhError as exc:
@@ -724,6 +748,7 @@ def dispatch_request(ctx: Context, pr: PrState) -> tuple[str, str, dict[str, str
 
 
 def _evict(gh: GhApi, pr: PrState, action: Action, log: Callable[[str], None]) -> bool:
+    """Disarm the PR and tell it why, once per cause and head; always returns True (it left the line)."""
     # Best-effort: a merge fires both push:dev and pull_request:closed, so two racing runs can
     # evict the same PR and the second disarm hits an already-disarmed PR.
     _best_effort(log, f"disarm #{pr.number}", lambda: gh.graphql(DISARM_MUTATION, id=pr.node_id))
@@ -794,6 +819,12 @@ def _dispatch_contexts(
 
 
 def _rebase(gh: GhApi, pr: PrState, log: Callable[[str], None], sleep: Callable[[float], None]) -> bool:
+    """Rebase the front PR onto dev with its head pinned, then start the seven contexts (spec section 7).
+
+    Returns:
+        True if the PR was evicted (conflicts, a rebase the token may not do, a second failed
+        rebase, or a refused dispatch), False otherwise.
+    """
     try:
         gh.graphql(REBASE_MUTATION, id=pr.node_id, oid=pr.head_sha)
     except GhError as exc:
@@ -808,6 +839,14 @@ def _rebase(gh: GhApi, pr: PrState, log: Callable[[str], None], sleep: Callable[
             return False
         if fresh.merge_state == "DIRTY":
             return _evict(gh, fresh, Action("evict", "conflicts with dev (rebase refused)", slug="conflict"), log)
+        if all(word in str(exc).lower() for word in WORKFLOW_REFUSAL):
+            # Retrying cannot help, and waiting would hold up everyone behind this PR.
+            reason = (
+                "dev changed workflow files since this branch was cut, and the queue's token is not allowed to "
+                "rebase across them; rebase onto dev by hand (`git fetch origin dev && git rebase origin/dev`, "
+                "then force-push with lease)"
+            )
+            return _evict(gh, fresh, Action("evict", reason, slug="workflows"), log)
         error = str(exc)[:200]
         posted = comment_once(
             gh, pr.number, "rebase-failed", pr.head_sha,
@@ -832,6 +871,7 @@ def _rebase(gh: GhApi, pr: PrState, log: Callable[[str], None], sleep: Callable[
     old_runs = runs_on(gh, pr.head_sha)
 
     def finish() -> None:
+        """Cancel the old head's runs, drop empty approval runs and announce the rebase."""
         # The run executing this script is never cancelled: a queue-tick runs inside a required
         # workflow's run on the old head, and an auto_merge_enabled-triggered merge-queue.yml
         # run shares that head too.
@@ -907,6 +947,7 @@ def apply(
             return False
 
         def finish() -> None:
+            """Announce a retry; a plain dispatch says nothing."""
             if action.kind == "retry":
                 links = "".join(f"\n- {u}" for u in action.links)
                 comment_once(
@@ -997,6 +1038,26 @@ def settle_unknown(gh: GhApi, pr: PrState, sleep: Callable[[float], None]) -> Pr
     return pr
 
 
+def _still_front(gh: GhApi, pr: PrState, left: set[int]) -> bool:
+    """Whether the PR is still armed, on the same head, and first in line.
+
+    A decision is taken on a snapshot, and reading seven contexts takes a dozen calls. In that
+    time another queue run may have evicted the PR, or its author may have disarmed it or
+    pushed. Acting on the stale snapshot would start checks on a PR that has left the line.
+
+    Args:
+        gh: The GitHub client.
+        pr: The PR as it was decided on.
+        left: PRs this run has already removed from the line. Their disarm is best-effort and
+            may not show in a read made a moment later, so they never count as being ahead.
+
+    Returns:
+        True if a fresh read of the line, without `left`, still starts with this PR on this head.
+    """
+    line = [p for p in line_of(read_prs(gh)) if p.number not in left]
+    return bool(line) and line[0].number == pr.number and line[0].head_sha == pr.head_sha
+
+
 def run(
     gh: GhApi,
     mode: str | None,
@@ -1026,6 +1087,7 @@ def run(
     prs = read_prs(gh)
     comment_unqueued(gh, prs, mode, log)
     decisions: list[tuple[int, Action]] = []
+    left: set[int] = set()
     for pr in line_of(prs)[:MAX_FRONTS_PER_RUN]:
         pr = settle_unknown(gh, pr, sleep)
         if pr.armed_at is None:
@@ -1036,10 +1098,14 @@ def run(
         log(f"#{pr.number}: {action.kind} - {action.reason}")
         left_line = action.kind == "evict"
         if mode == "on":
+            if action.kind != "wait" and not _still_front(gh, pr, left):
+                log(f"#{pr.number}: no longer the armed front PR on this head; nothing done, the next wake decides")
+                break
             cleanup_approval_runs(gh, pr, log)
             left_line = apply(gh, pr, action, log, sleep, now())
         if not left_line:
             break
+        left.add(pr.number)
     return decisions
 
 

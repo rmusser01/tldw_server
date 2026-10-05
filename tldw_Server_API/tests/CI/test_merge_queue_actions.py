@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import subprocess
@@ -37,7 +38,7 @@ def _no_real_run_id(monkeypatch):
 
 
 def _node(number, *, head=OLD, armed="2026-10-04T10:00:00Z", state="BEHIND", repo=None, draft=False,
-          committed="2026-10-04T09:00:00Z", ref=None, threads=(), author="User", base=DEV):
+          committed="2026-10-04T09:00:00Z", ref=None, author="User", base=DEV):
     return {
         "number": number, "id": f"PR_{number}", "isDraft": draft, "headRefOid": head,
         "headRefName": ref or f"feat/{number}", "mergeStateStatus": state,
@@ -46,7 +47,6 @@ def _node(number, *, head=OLD, armed="2026-10-04T10:00:00Z", state="BEHIND", rep
         "baseRef": {"target": {"oid": base}} if base else None,
         "autoMergeRequest": {"enabledAt": armed} if armed else None,
         "commits": {"nodes": [{"commit": {"committedDate": committed}}]},
-        "reviewThreads": {"nodes": [{"isResolved": resolved} for resolved in threads]},
     }
 
 
@@ -118,6 +118,9 @@ class FakeGh:
     filters them; `check_names_read` records the names asked for. Statuses come back as a bare
     list, newest first.
 
+    `late_nodes`, if given, replaces the line from its second read on: what another queue run
+    or the author did between this run's decision and its action.
+
     `late_runs[sha]` joins the head's runs from its second unfiltered runs read on, and
     `late_statuses[sha]` its statuses from the second statuses read on: a run another queue run
     started after this one decided. A dispatch of a `dispatch_refused` workflow fails with
@@ -126,7 +129,8 @@ class FakeGh:
 
     def __init__(self, nodes, *, checks=None, statuses=None, runs=None, comments=None, rebase_error=False,
                  reread=None, dispatch_refused=(), rebase_lag=1, disarm_error=False, line_page_size=None,
-                 late_runs=None, late_statuses=None, dispatch_status=422, rebased_base=None):
+                 late_runs=None, late_statuses=None, dispatch_status=422, rebased_base=None,
+                 late_nodes=None, rebase_error_text="rebase refused"):
         self.nodes = {n["number"]: n for n in nodes}
         self.checks = checks or {}
         self.statuses = statuses or {}
@@ -142,6 +146,9 @@ class FakeGh:
         self.late_statuses = late_statuses or {}
         self.dispatch_status = dispatch_status
         self.rebased_base = rebased_base
+        self.late_nodes = late_nodes
+        self.rebase_error_text = rebase_error_text
+        self.line_reads = 0
         self.runs_reads = {}
         self.statuses_reads = {}
         self.reread_counts = {}
@@ -163,7 +170,7 @@ class FakeGh:
         if "updatePullRequestBranch" in query:
             self._record(("rebase", v["id"], v["oid"]))
             if self.rebase_error:
-                raise mq.GhError("rebase refused")
+                raise mq.GhError(self.rebase_error_text)
             self.rereads_since_rebase = 0
             return {"data": {"updatePullRequestBranch": {"pullRequest": {"headRefOid": v["oid"]}}}}
         if "disablePullRequestAutoMerge" in query:
@@ -190,7 +197,11 @@ class FakeGh:
             self.events.append(("read_pr", node["headRefOid"]))
             return {"data": {"repository": {"pullRequest": node}}}
         if "pullRequests(" in query:
+            if v.get("after") is None:
+                self.line_reads += 1
             nodes = list(self.nodes.values())
+            if self.late_nodes is not None and self.line_reads >= 2:
+                nodes = list(self.late_nodes)
             self.line_cursors.append(v.get("after"))
             size = self.line_page_size or len(nodes) or 1
             start = int(v.get("after") or 0)
@@ -664,13 +675,110 @@ def test_disarm_failure_still_comments():
     assert any(c[0] == "comment" and "conflicts with dev" in c[2] for c in gh.calls)
 
 
-def test_blocked_green_evicts_only_with_unresolved_threads():
-    """All green with BLOCKED is often mergeStateStatus lagging; only real unresolved
-    conversations evict at once."""
-    gh = FakeGh([_node(1, state="BLOCKED", threads=(True, False))], **_green())
-    decision = _run(gh)[0][1]
-    assert decision.kind == "evict" and "unresolved conversations" in decision.reason
-    gh = FakeGh([_node(1, state="BLOCKED", threads=(True,))], **_green())
+def test_blocked_green_waits_for_auto_merge_and_never_asks_about_review_threads():
+    """dev does not require conversations to be resolved, so BLOCKED with everything green is
+    the merge state lagging the checks. The queue must not evict a mergeable PR over a thread,
+    and does not even read them."""
+    gh = FakeGh([_node(1, state="BLOCKED")], **_green())
+    assert _run(gh)[0][1].kind == "wait"
+    assert gh.calls == []
+    assert "reviewThreads" not in mq.PR_FIELDS
+
+
+# --- acting on a stale snapshot --------------------------------------------------------------
+
+
+def test_a_pr_disarmed_since_the_decision_gets_no_checks():
+    """Another queue run evicted it, or its author disarmed it, while this run was reading the
+    seven contexts. Starting checks now would spend runners on a PR that has left the line."""
+    gh = FakeGh([_node(1, state="BLOCKED")], late_nodes=[_node(1, state="BLOCKED", armed=None)])
+    decisions = _run(gh)
+    assert [d[1].kind for d in decisions] == ["dispatch"]
+    assert gh.calls == []
+
+
+def test_a_pr_pushed_to_since_the_decision_is_left_for_the_next_wake():
+    gh = FakeGh([_node(1)], late_nodes=[_node(1, head=NEW)])
+    _run(gh)
+    assert gh.calls == []
+
+
+def test_a_pr_that_is_no_longer_first_in_line_is_not_acted_on():
+    earlier = _node(2, armed="2026-10-04T08:00:00Z", state="BLOCKED")
+    gh = FakeGh([_node(1)], late_nodes=[_node(1), earlier])
+    _run(gh)
+    assert gh.calls == []
+
+
+def test_a_wait_decision_does_not_reread_the_line():
+    gh = FakeGh([_node(1, state="BLOCKED")], **_green())
+    _run(gh)
+    assert gh.line_reads == 1
+
+
+# --- a rebase the token is not allowed to make -----------------------------------------------
+
+
+WORKFLOW_REFUSAL = (
+    "gh: refusing to allow a GitHub App to create or update workflow `.github/workflows/ci.yml` "
+    "without `workflows` permission"
+)
+
+
+def test_a_rebase_across_workflow_changes_evicts_at_once_with_the_hand_rebase_steps():
+    """GITHUB_TOKEN can never update a branch with dev's workflow-file changes. Retrying cannot
+    work and waiting would block everyone behind, so the PR leaves the line straight away, told
+    exactly what to do, and the next PR is taken in the same run."""
+    gh = FakeGh([_node(1), _node(2, armed="2026-10-04T11:00:00Z")], rebase_error=True,
+                rebase_error_text=WORKFLOW_REFUSAL)
+    _run(gh)
+    assert gh.calls[0] == ("rebase", "PR_1", OLD)
+    assert gh.calls[1] == ("disarm", "PR_1")
+    comments = [c for c in gh.calls if c[0] == "comment" and c[1] == 1]
+    assert len(comments) == 1
+    body = comments[0][2]
+    assert f"<!-- merge-queue:evict-workflows:{OLD} -->" in body
+    assert "workflow files" in body and "git rebase origin/dev" in body and "force-push" in body
+    assert "will retry once" not in body
+    assert ("rebase", "PR_2", OLD) in gh.calls
+
+
+def test_any_other_rebase_refusal_still_gets_one_retry():
+    gh = FakeGh([_node(1)], rebase_error=True)
+    _run(gh)
+    assert not any(c[0] == "disarm" for c in gh.calls)
+    assert any(c[0] == "comment" and "will retry once" in c[2] for c in gh.calls)
+
+
+# --- hand-started frontend diagnostics -------------------------------------------------------
+
+
+@pytest.mark.parametrize(("status", "conclusion"), [("completed", "failure"), ("in_progress", None)])
+def test_a_hand_started_frontend_diagnostic_is_not_a_run_of_the_required_context(status, conclusion):
+    """frontend-required.yml names its gate frontend-required-diagnostic unless the queue
+    dispatched it (spec 4.8). A person's diagnostic run can never report the required name, so
+    its failing must not count as a gate failure and its being live must not read as running."""
+    by_hand = _run_of("frontend-required.yml", 71, status, conclusion, actor={"login": "octocat"},
+                      updated_at="2026-10-04T11:50:00Z")
+    stand_ins = mq.required_run_stand_ins([by_hand], ())
+    assert stand_ins == ()
+    by_queue = dict(by_hand, id=72, actor={"login": mq.QUEUE_ACTOR})
+    assert [c.context for c in mq.required_run_stand_ins([by_queue], ())] == ["frontend-required"]
+    # Only frontend-required has the diagnostic name; a hand dispatch of any other gate reports
+    # the real one and still counts.
+    other = _run_of("security-required.yml", 73, status, conclusion, actor={"login": "octocat"},
+                    updated_at="2026-10-04T11:50:00Z")
+    assert [c.context for c in mq.required_run_stand_ins([other], ())] == ["security-required"]
+
+
+def test_two_failed_hand_diagnostics_do_not_evict_a_green_pr():
+    """Both diagnostics finished after the real check went green, so if they counted they would
+    be the two latest runs of the context: failed twice."""
+    runs = {OLD: [
+        _run_of("frontend-required.yml", rid, "completed", "failure", actor={"login": "octocat"},
+                updated_at=f"2026-10-04T11:59:{rid}Z") for rid in (10, 20)
+    ]}
+    gh = FakeGh([_node(1, state="BLOCKED")], runs=runs, **_green())
     assert _run(gh)[0][1].kind == "wait"
     assert gh.calls == []
 
@@ -812,7 +920,7 @@ def test_run_that_failed_without_reporting_its_check_counts_as_a_failure_of_that
 def _queue_run(rid, conclusion="success", actor="github-actions[bot]", event="workflow_dispatch", suite=None):
     return _run_of("frontend-required.yml", rid, "completed", conclusion, event=event,
                    check_suite_id=suite or 700 + rid, updated_at=f"2026-10-04T11:{rid}:00Z",
-                   triggering_actor={"login": actor})
+                   actor={"login": actor}, triggering_actor={"login": actor})
 
 
 def test_a_queue_dispatched_run_that_finished_green_without_its_check_is_a_failure_not_a_reason_to_redispatch():
@@ -1023,7 +1131,54 @@ def test_the_queue_can_never_merge_arm_or_push():
         assert forbidden not in source, forbidden
     assert not re.search(r"\[\s*[\"']pr[\"']", source), "the queue never runs `gh pr ...` subcommands"
     assert re.findall(r"mutation\(.*?\{\s*(\w+)", source) == ["updatePullRequestBranch", "disablePullRequestAutoMerge"]
-    assert source.count("subprocess.run(") == 1 and '["gh", *args]' in source, "gh is the only program ever run"
+    # gh is the only program the script can run. Checked on the syntax tree, so reformatting or
+    # renaming does not trip it, while a second process call or a different program does.
+    tree = ast.parse(source)
+    process_calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name) and node.func.value.id in ("subprocess", "os")
+        and node.func.attr in ("run", "Popen", "call", "check_call", "check_output", "system", "popen",
+                               "execv", "execvp", "spawnv")
+    ]
+    assert len(process_calls) == 1, "exactly one process is ever started"
+    argv = process_calls[0].args[0]
+    assert isinstance(argv, ast.List) and isinstance(argv.elts[0], ast.Constant) and argv.elts[0].value == "gh"
+    assert not any(keyword.arg == "shell" for keyword in process_calls[0].keywords), "never through a shell"
+    imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+    assert not imported & {"pty", "shlex", "ctypes", "multiprocessing"}, imported
+
+
+def test_the_guard_reads_real_commands_not_only_the_source():
+    """The same prohibition seen from outside: whatever the queue does in a full pass, every
+    command it hands to the runner is `gh api ...`, and none of them merges, arms or pushes."""
+    seen: list[list[str]] = []
+
+    def runner(args: list[str]) -> str:
+        seen.append(args)
+        joined = " ".join(args)
+        if "pullRequests(" in joined:
+            return json.dumps({"data": {"repository": {"pullRequests": {
+                "pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [_node(1, state="DIRTY")],
+            }}}})
+        if "comments(last" in joined:
+            return json.dumps({"data": {"repository": {"pullRequest": {"comments": {"nodes": []}}}}})
+        if "pullRequest(number" in joined:
+            return json.dumps({"data": {"repository": {"pullRequest": _node(1, state="DIRTY")}}})
+        if "/check-runs" in joined:
+            return json.dumps({"total_count": 0, "check_runs": []})
+        if "/statuses" in joined:
+            return "[]"
+        if "/actions/runs?" in joined:
+            return json.dumps({"total_count": 0, "workflow_runs": []})
+        return "{}"
+
+    mq.run(mq.Gh(runner=runner), "on", now=lambda: NOW, sleep=lambda s: None, log=lambda m: None)
+    assert seen and all(args[0] == "api" for args in seen)
+    text = " ".join(" ".join(args) for args in seen)
+    assert "disablePullRequestAutoMerge" in text, "the eviction really went through this runner"
+    for forbidden in ("enablePullRequestAutoMerge", "mergePullRequest", "/merge", "git/refs"):
+        assert forbidden not in text, forbidden
 
 
 def test_gh_only_ever_calls_the_api_subcommand():
@@ -1107,6 +1262,7 @@ def test_main_drives_the_real_gh_argv_end_to_end(monkeypatch, tmp_path):
         [*get, f"{repo}/actions/runs?head_sha={OLD}&{page}"],
         *[[*get, f"{repo}/commits/{OLD}/check-runs?check_name={check}&filter=all&{page}"] for check in CHECK_NAMES],
         [*get, f"{repo}/commits/{OLD}/statuses?{page}"],
+        ["gh", "api", "graphql", "-f", f"query={mq.LINE_QUERY}", *who],  # still the armed front PR?
         [*get, f"{repo}/actions/runs?head_sha={OLD}&status=action_required&{page}"],
         ["gh", "api", "graphql", "-f", f"query={mq.REBASE_MUTATION}", "-f", "id=PR_7", "-f", f"oid={OLD}"],
         ["gh", "api", "graphql", "-f", f"query={mq.PR_QUERY}", *who, "-F", "number=7"],

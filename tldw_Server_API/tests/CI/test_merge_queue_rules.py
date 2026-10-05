@@ -15,18 +15,25 @@ BACKEND, E2E, CONTAINER = "backend-required", "e2e-required", "container-build-c
 LICENSE = "frontend-license-policy/trusted/dev"
 
 
-def _run(context=BACKEND, conclusion="success", minutes_ago=1, status="completed", url="u", started_ago=None):
+def _run(
+    context: str = BACKEND,
+    conclusion: str = "success",
+    minutes_ago: int = 1,
+    status: str = "completed",
+    url: str = "u",
+    started_ago: int | None = None,
+) -> mq.CheckRun:
     done = NOW - timedelta(minutes=minutes_ago) if status == "completed" else None
     started = NOW - timedelta(minutes=started_ago) if started_ago is not None else None
     return mq.CheckRun(context, status, conclusion if status == "completed" else None, done, url, started_at=started)
 
 
-def _green(minutes_ago=1, without=()):
+def _green(minutes_ago: int = 1, without: tuple[str, ...] = ()) -> tuple[mq.CheckRun, ...]:
     """Every required context passed, except the ones named in `without`."""
     return tuple(_run(name, minutes_ago=minutes_ago) for name in mq.ALL_CONTEXTS if name not in without)
 
 
-def _pr(**kw):
+def _pr(**kw: object) -> mq.PrState:
     base = {
         "number": 1, "node_id": "PR_1", "head_sha": "a" * 40, "head_ref": "feat/x", "same_repo": True,
         "armed_at": NOW - timedelta(hours=1), "is_draft": False, "merge_state": "CLEAN",
@@ -36,7 +43,7 @@ def _pr(**kw):
     return mq.PrState(**base)
 
 
-def test_the_seven_required_contexts_and_how_each_is_started():
+def test_the_seven_required_contexts_and_how_each_is_started() -> None:
     """Spec 4.1 table: six check runs dispatched on the PR branch, one status dispatched on dev."""
     assert [(c.name, c.workflow, c.kind, c.base_sha) for c in mq.CONTEXTS] == [
         ("backend-required", "backend-required.yml", "check", True),
@@ -50,7 +57,7 @@ def test_the_seven_required_contexts_and_how_each_is_started():
     assert mq.REPO.count("/") == 1 and mq.BASE == "dev"
 
 
-def test_line_is_armed_non_draft_same_repo_oldest_first():
+def test_line_is_armed_non_draft_same_repo_oldest_first() -> None:
     a = _pr(number=1, armed_at=NOW - timedelta(minutes=5))
     b = _pr(number=2, armed_at=NOW - timedelta(minutes=50))
     unarmed = _pr(number=3, armed_at=None)
@@ -60,7 +67,7 @@ def test_line_is_armed_non_draft_same_repo_oldest_first():
     assert [p.number for p in mq.line_of([a, b, unarmed, draft, fork, bot])] == [2, 1]
 
 
-def test_rearmed_pr_rejoins_at_the_back():
+def test_rearmed_pr_rejoins_at_the_back() -> None:
     first = _pr(number=1, armed_at=NOW - timedelta(minutes=30))
     rearmed = _pr(number=2, armed_at=NOW - timedelta(minutes=1))  # was first before eviction
     assert [p.number for p in mq.line_of([rearmed, first])] == [1, 2]
@@ -92,7 +99,7 @@ def test_rearmed_pr_rejoins_at_the_back():
         "failure-after-a-pass", "pending-status", "stale-pending-status", "stale-pending-after-a-failure",
     ],
 )
-def test_context_state_table(runs, state):
+def test_context_state_table(runs: list[mq.CheckRun], state: str) -> None:
     assert mq.context_state(list(runs), NOW) == state
 
 
@@ -119,8 +126,9 @@ def test_context_state_table(runs, state):
         (_pr(merge_state="UNSTABLE", checks=_green(5)), "wait", ()),
         (_pr(merge_state="CLEAN", checks=_green(16)), "evict", ()),
         (_pr(merge_state="CLEAN", checks=_green(16, without=(E2E,)) + (_run(E2E, minutes_ago=14),)), "wait", ()),
-        (_pr(merge_state="BLOCKED", checks=_green(), unresolved_threads=1), "evict", ()),
-        (_pr(merge_state="BLOCKED", checks=_green(), unresolved_threads=0), "wait", ()),
+        # dev does not require conversations to be resolved: BLOCKED with everything green is
+        # the merge state lagging the checks, whatever the review threads say.
+        (_pr(merge_state="BLOCKED", checks=_green()), "wait", ()),
         (_pr(merge_state="CLEAN", checks=_green(3) + (_run(E2E, "failure", 20),)), "wait", ()),
         (_pr(merge_state="DRAFT", checks=_green()), "wait", ()),
         # Combinations: the order of the 4.1 rows.
@@ -130,8 +138,6 @@ def test_context_state_table(runs, state):
          "retry", (E2E,)),
         (_pr(merge_state="BLOCKED", checks=_green(without=(E2E, CONTAINER)) + (_run(E2E, status="queued"),)),
          "wait", (E2E,)),
-        (_pr(merge_state="BLOCKED", checks=_green(without=(E2E,)) + (_run(E2E, "failure"),), unresolved_threads=2),
-         "retry", (E2E,)),
     ],
     ids=[
         "unknown-waits", "behind-rebases-and-starts-all-seven", "dirty-evicts",
@@ -139,18 +145,17 @@ def test_context_state_table(runs, state):
         "missing-dispatches-only-those-contexts", "no-run-at-all-dispatches-all-seven",
         "only-cancelled-dispatches", "missing-on-a-young-head-waits",
         "green-clean-waits", "green-unstable-waits", "stuck-green-evicts",
-        "green-is-timed-from-the-last-context-to-finish", "green-blocked-unresolved-evicts",
-        "green-blocked-nothing-unresolved-waits", "retry-that-passed-waits", "green-other-merge-state-waits",
+        "green-is-timed-from-the-last-context-to-finish",
+        "green-blocked-waits-for-auto-merge", "retry-that-passed-waits", "green-other-merge-state-waits",
         "failed-twice-beats-failed-once", "failed-once-beats-missing", "running-beats-missing",
-        "a-red-context-is-retried-before-threads-matter",
     ],
 )
-def test_decide_front_table(pr, kind, contexts):
+def test_decide_front_table(pr: mq.PrState, kind: str, contexts: tuple[str, ...]) -> None:
     action = mq.decide_front(pr, NOW)
     assert (action.kind, action.contexts) == (kind, contexts)
 
 
-def test_a_failure_is_acted_on_while_other_contexts_are_still_running():
+def test_a_failure_is_acted_on_while_other_contexts_are_still_running() -> None:
     """Only a FAILED gate wakes the queue (spec 4.6). If it waited for the slower gates, and they
     then passed, nothing would wake it again and the failed context would never be retried."""
     still_running = tuple(_run(n, status="in_progress") for n in mq.ALL_CONTEXTS if n != BACKEND)
@@ -161,14 +166,14 @@ def test_a_failure_is_acted_on_while_other_contexts_are_still_running():
     assert (twice.kind, twice.contexts, twice.slug) == ("evict", (BACKEND,), "failed-twice")
 
 
-def test_a_context_being_retried_is_running_not_failed():
+def test_a_context_being_retried_is_running_not_failed() -> None:
     """The retry is in flight: no second retry, no eviction, until it finishes."""
     checks = _green(without=(BACKEND,)) + (_run(BACKEND, "failure", 9), _run(BACKEND, status="queued"))
     action = mq.decide_front(_pr(merge_state="BLOCKED", checks=checks), NOW)
     assert (action.kind, action.contexts) == ("wait", (BACKEND,))
 
 
-def test_failed_twice_links_both_runs_of_each_such_context():
+def test_failed_twice_links_both_runs_of_each_such_context() -> None:
     checks = _green(without=(BACKEND, LICENSE)) + (
         _run(BACKEND, "failure", 40, url="b0"), _run(BACKEND, "failure", 30, url="b1"),
         _run(BACKEND, "failure", 2, url="b2"),
@@ -179,12 +184,12 @@ def test_failed_twice_links_both_runs_of_each_such_context():
     assert action.reason == f"{BACKEND}, {LICENSE} failed twice"
 
 
-def test_retry_links_the_failed_run_of_each_failed_context():
+def test_retry_links_the_failed_run_of_each_failed_context() -> None:
     checks = _green(without=(BACKEND, E2E)) + (_run(BACKEND, "failure", url="b"), _run(E2E, "failure", url="e"))
     action = mq.decide_front(_pr(merge_state="BLOCKED", checks=checks), NOW)
     assert (action.kind, action.contexts, action.links) == ("retry", (BACKEND, E2E), ("b", "e"))
 
 
-def test_a_run_of_an_unknown_context_is_ignored():
+def test_a_run_of_an_unknown_context_is_ignored() -> None:
     checks = _green() + (mq.CheckRun("ci / lint", "completed", "failure", NOW, "x"),)
     assert mq.decide_front(_pr(merge_state="CLEAN", checks=checks), NOW).kind == "wait"
