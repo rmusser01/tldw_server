@@ -68,7 +68,7 @@ import {
   type ChatModelSettings,
   useStoreChatModelSettings,
 } from "@/store/model";
-import { usePlaygroundSessionStore } from "@/store/playground-session";
+import { hasCurrentServerChatSelection, usePlaygroundSessionStore } from "@/store/playground-session";
 import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
 import {
@@ -778,6 +778,8 @@ const PlaygroundContent = () => {
     clearPersistedSession,
     sessionScopeReady,
     hasPersistedSession,
+    hasPersistedDraftHandle,
+    hasPersistedFreshDraft,
     persistedHistoryId,
     persistedServerChatId,
   } = usePlaygroundSessionPersistence();
@@ -812,6 +814,7 @@ const PlaygroundContent = () => {
   const shouldRestorePersistedSessionOnInit =
     shouldRestorePersistedPlaygroundSession({
       hasPersistedSession,
+      hasPersistedDraftHandle,
       persistedHistoryId,
       persistedServerChatId,
       initialHistoryId: initialConversationRef.current.historyId,
@@ -1045,8 +1048,10 @@ const PlaygroundContent = () => {
   React.useEffect(() => {
     if (retiredRouteLocationRef.current === routeLocationKey) return;
     if (!routeCharacterIntentChatId) return;
-    if (serverChatId === routeCharacterIntentChatId) return;
+    if (serverChatId === routeCharacterIntentChatId && hasCurrentServerChatSelection(routeCharacterIntentChatId)) return;
     usePlaygroundSessionStore.getState().cancelPendingRestore();
+    const acceptDraft = captureChatDraftLoad("switch", () => retiredRouteLocationRef.current !== routeLocationKey);
+    usePlaygroundSessionStore.getState().requestServerChatSelection(routeCharacterIntentChatId, acceptDraft);
     setServerChatId(routeCharacterIntentChatId);
     routeCharacterIntentAppliedRef.current = null;
     routeCharacterIntentInFlightRef.current = null;
@@ -1797,8 +1802,14 @@ const PlaygroundContent = () => {
     // rather than surfacing a malformed stored reference as an error.
     if (!handoff && historySelection.canAutomaticallyLoad?.() === false) return;
     try { storedHistoryReference = historySelection.getStoredReference(); }
-    catch { await historySelection.open({ kind: "unavailable", code: "invalid_history_reference" }); return; }
+    catch {
+      if (!hasPersistedFreshDraft) {
+        await historySelection.open({ kind: "unavailable", code: "invalid_history_reference" });
+        return;
+      }
+    }
     if (handoff) {
+      usePlaygroundSessionStore.getState().cancelPendingRestore();
       const acceptDraft = captureChatDraftLoad("switch", () => !signal.aborted);
       let draftAccepted = false;
       const loaded = await historySelection.loadConversation(handoff.owner_kind === "local" ? { historyId: handoff.conversation_id, isCurrent: acceptDraft.isCurrent } : { serverChatId: handoff.conversation_id, isCurrent: acceptDraft.isCurrent }, handoff, receipt => { draftAccepted = acceptDraft(receipt); });
@@ -1871,6 +1882,8 @@ const PlaygroundContent = () => {
       return;
     }
 
+    if (hasCurrentServerChatSelection(useStoreMessageOption.getState().serverChatId)) return;
+
     // 1. Try session persistence first (restores exact state from nav-away)
     if (storedHistoryReference || shouldRestorePersistedSessionOnInit) {
       const restoreOutcome = await restoreSession();
@@ -1895,15 +1908,21 @@ const PlaygroundContent = () => {
       if (!snapshot) return;
       try {
         let selectionCurrent = () => true;
-        const canPublish = () => isCurrent() && !snapshot.scopeSignal.aborted &&
-          !snapshot.scopeInvalidatedSignal.aborted && selectionCurrent();
+        const scopeCurrent = () => isCurrent() && !snapshot.scopeSignal.aborted && !snapshot.scopeInvalidatedSignal.aborted;
+        const canPublish = () => scopeCurrent() && selectionCurrent();
         if (!canPublish()) return;
         const recentChat = await getRecentChatFromWebUI(snapshot);
         if (recentChat && canPublish()) {
-          const loaded = await historySelection.loadConversation({ historyId: recentChat.history.id });
+          const acceptDraft = captureChatDraftLoad("switch", scopeCurrent);
+          let draftAccepted = false;
+          const loaded = await historySelection.loadConversation({ historyId: recentChat.history.id, isCurrent: acceptDraft.isCurrent }, null, receipt => { draftAccepted = acceptDraft(receipt); });
           selectionCurrent = historySelection.fence();
-          if (!loaded || !canPublish() || historySelection.getCurrent().owner?.kind === "unavailable") return;
-          setHistoryId(recentChat.history.id);
+          const selected = historySelection.getCurrent();
+          if (loaded && !draftAccepted && selected.owner && selected.owner.kind !== "unavailable" && selected.view &&
+            selected.owner.conversation_id === (recentChat.history.server_chat_id || recentChat.history.id)) draftAccepted = acceptDraft({ owner: selected.owner, view: selected.view });
+          if (!loaded || !draftAccepted || !acceptDraft.isCurrent() || !canPublish() || selected.owner?.kind === "unavailable") return;
+          setHistoryId(recentChat.history.id, { preserveServerChatId: selected.owner?.kind === "native" });
+          setServerChatId(selected.owner?.kind === "native" ? selected.owner.conversation_id : null);
           if (historySelection.getCurrent().capture?.status !== "captured") {
             setHistory(formatToChatHistory(recentChat.messages));
             setMessages(formatToMessage(recentChat.messages));
@@ -1948,6 +1967,7 @@ const PlaygroundContent = () => {
     setSelectedSystemPrompt,
     setSystemPrompt,
     shouldRestorePersistedSessionOnInit,
+    hasPersistedFreshDraft,
   ]);
 
   React.useEffect(() => {

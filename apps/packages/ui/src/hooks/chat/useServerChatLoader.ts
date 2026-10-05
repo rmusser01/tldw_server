@@ -832,9 +832,11 @@ export const useServerChatLoader = ({
             handledSelectionIntent.current = selectionIntent
             const control = selectionRef.current
             let accepted = !selectionIntent?.onLoaded
+            let selectionAccepted = false
             if (control && !await control.loadConversation({ serverChatId, scope, temporary: temporaryChat,
               isCurrent: () => selectionIntent?.isCurrent?.() !== false && !controller.signal.aborted &&
-                usePlaygroundSessionStore.getState().serverChatSelectionIntent === selectionIntent &&
+                (usePlaygroundSessionStore.getState().serverChatSelectionIntent === selectionIntent ||
+                  (selectionAccepted && usePlaygroundSessionStore.getState().serverChatSelectionIntent === null)) &&
                 useStoreMessageOption.getState().serverChatId === serverChatId
             }, null, receipt => { accepted = selectionIntent?.onLoaded?.(receipt) ?? true })) return
             selectionCurrent = control?.fence() || (() => true)
@@ -845,6 +847,10 @@ export const useServerChatLoader = ({
             // Temporary history is a display-only read; H1 supplies no owned receipt.
             if ((!accepted && !temporaryChat) || selectionIntent?.isCurrent?.() === false) return
             if (controller.signal.aborted || usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
+            // The qualified navigation has committed. Retire its single-use
+            // callback while preserving this load's H1 lease until a new intent.
+            selectionAccepted = true
+            usePlaygroundSessionStore.getState().completeServerChatSelection(selectionIntent)
           } else if (selectionRef.current?.canAutomaticallyLoad?.() === false) return
           setIsLoading(true)
           setServerChatLoadState("loading")

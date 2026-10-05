@@ -5,6 +5,7 @@ import { createJSONStorage, persist, type StateStorage } from "zustand/middlewar
 import type { QueuedRequest } from "@/utils/chat-request-queue"
 import type { AssistantSelection } from "@/types/assistant-selection"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { isChatDraftHandle, type ChatDraftHandle } from "@/utils/chat-draft-address"
 
 const STORAGE_KEY = "tldw-playground-session"
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000 // 24 hours
@@ -65,6 +66,7 @@ const createBrowserStorage = (): StateStorage => {
 }
 
 export interface PlaygroundSessionData {
+  chatDraftHandle?: ChatDraftHandle | null
   // Core identifier (used to restore messages from Dexie)
   historySelectionReference?: HistorySelectionReference | null
   historyId: string | null
@@ -100,6 +102,7 @@ export interface PlaygroundSessionData {
 interface PlaygroundSessionState extends PlaygroundSessionData {
   serverChatSelectionIntent: { chatId: string; onLoaded?: (receipt: HistoryLoadReceipt) => boolean; isCurrent?: () => boolean } | null
   requestServerChatSelection: (chatId: string, onLoaded?: ((receipt: HistoryLoadReceipt) => boolean) & { isCurrent?: () => boolean }) => void
+  completeServerChatSelection: (intent: PlaygroundSessionState["serverChatSelectionIntent"]) => void
   restoreRevision: number
   sourceSelectionRevision: number
   // Actions
@@ -112,6 +115,7 @@ interface PlaygroundSessionState extends PlaygroundSessionData {
 }
 
 const initialState: PlaygroundSessionData = {
+  chatDraftHandle: null,
   historySelectionReference: null,
   historyId: null,
   serverChatId: null,
@@ -146,6 +150,9 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       serverChatSelectionIntent: null,
       requestServerChatSelection: (chatId, onLoaded) =>
         set({ serverChatSelectionIntent: { chatId, onLoaded, isCurrent: onLoaded?.isCurrent } }),
+      completeServerChatSelection: (intent) => {
+        if (intent && get().serverChatSelectionIntent === intent) set({ serverChatSelectionIntent: null })
+      },
 
       saveSession: (data) =>
         set((state) => ({
@@ -176,6 +183,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
 
       isSessionValid: (expectedScopeKey) => {
         const {
+          chatDraftHandle,
           historyId,
           serverChatId,
           scopeKey,
@@ -186,6 +194,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
         const hasConversationOrQueue =
           historyId !== null ||
           serverChatId !== null ||
+          isChatDraftHandle(chatDraftHandle) ||
           queuedMessages.length > 0
         const isNotStale = lastUpdated > 0 && Date.now() - lastUpdated <= STALE_THRESHOLD_MS
         const matchesScope =
@@ -205,6 +214,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
         typeof window !== "undefined" ? createBrowserStorage() : createMemoryStorage()
       ),
       partialize: (state) => ({
+        chatDraftHandle: state.chatDraftHandle,
         historySelectionReference: state.historySelectionReference,
         historyId: state.historyId,
         serverChatId: state.serverChatId,
@@ -232,6 +242,12 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
     }
   )
 )
+
+/** An explicit navigation intent takes precedence over automatic session recovery. */
+export const hasCurrentServerChatSelection = (serverChatId: string | null): boolean => {
+  const intent = usePlaygroundSessionStore.getState().serverChatSelectionIntent
+  return Boolean(intent && intent.chatId === serverChatId && intent.isCurrent?.() !== false)
+}
 
 const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
   if (invalidated) usePlaygroundSessionStore.getState().clearSession()

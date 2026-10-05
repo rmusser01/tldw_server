@@ -12,6 +12,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
 import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
+import { usePlaygroundSessionStore } from "@/store/playground-session";
+import { useStoreMessageOption } from "@/store/option";
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
+import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition";
+import { characterToAssistantSelection } from "@/types/assistant-selection";
+import { resolveHistorySelection } from "@/utils/history-selection";
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -66,10 +72,12 @@ const messageOptionState = vi.hoisted(() => ({
 
 const sessionPersistenceState = vi.hoisted(() => ({
   value: {
-    restoreSession: vi.fn(async () => false),
+    restoreSession: vi.fn(async (): Promise<"restored" | "not-restored" | "cancelled"> => "not-restored"),
     clearPersistedSession: vi.fn(async () => undefined),
     sessionScopeReady: true,
     hasPersistedSession: false,
+    hasPersistedDraftHandle: false,
+    hasPersistedFreshDraft: false,
     persistedHistoryId: null as string | null,
     persistedServerChatId: null as string | null,
   },
@@ -78,6 +86,22 @@ const sessionPersistenceState = vi.hoisted(() => ({
 const storageState = vi.hoisted(() => ({
   values: new Map<string, unknown>(),
 }));
+const recentChatState = vi.hoisted(() => ({ enabled: false, recent: vi.fn(), capture: vi.fn() }));
+vi.mock("@/db/dexie/chat", () => ({
+  PageAssistDatabase: class {
+    getHistoryInfo = async (id: string) => ({ id, local_owner_key: "local-owner" });
+  }
+}));
+vi.mock("@/db/dexie/history-selection", () => ({
+  ensureLocalProfileId: async () => "profile",
+  getLocalHistoryOwner: async (id: string) => ({ kind: "local", profile_id: "profile", owner_key: "local-owner", conversation_id: id }),
+  loadHistoryTurnRecoveries: async () => [],
+  dismissHistoryTurnRecovery: async () => {},
+  loadHistoryBookmark: async () => null,
+  saveHistoryBookmark: async () => {}
+}));
+vi.mock("@/db/dexie/fork-operations", () => ({ findForkCandidate: async () => null, loadForkOperations: async () => [] }));
+vi.mock("@/services/chat-history-selection", () => ({ captureHistorySnapshot: (...args: unknown[]) => recentChatState.capture(...args) }));
 
 const darkModeState = vi.hoisted(() => ({
   mode: "dark" as "system" | "dark" | "light",
@@ -132,7 +156,8 @@ const routerNavigateState = vi.hoisted(() => ({
 
 vi.mock("@/services/service-prompts", async importOriginal => ({
   ...await importOriginal<typeof import("@/services/service-prompts")>(),
-  resolveServicePromptScope: async () => ({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" })
+  resolveServicePromptScope: async () => ({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" }),
+  loadServicePromptSnapshot: async () => ({ requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" }, scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal, release: vi.fn() })
 }));
 
 vi.mock("react-i18next", () => ({
@@ -192,19 +217,27 @@ vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
 }));
 
 vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => messageOptionState.value,
+  useMessageOption: () => {
+    // The real hook derives selectedCharacter from the unified assistant. Older
+    // cases use the character shorthand to arrange a tracked draft selection.
+    const character = characterToAssistantSelection(messageOptionState.value.selectedCharacter);
+    const selectedAssistant = messageOptionState.value.selectedAssistant ?? (character && {
+      ...character, metadata: { ...character.metadata, selectionMode: "tracked" }
+    });
+    return { ...messageOptionState.value, selectedAssistant, effectiveAssistantState: resolveEffectiveAssistantState({
+      tracked: { assistantKind: messageOptionState.value.serverChatAssistantKind, assistantId: messageOptionState.value.serverChatAssistantId, characterId: messageOptionState.value.serverChatCharacterId },
+      draftSelection: selectedAssistant
+    }) };
+  },
 }));
 
 vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
   usePlaygroundSessionPersistence: () => sessionPersistenceState.value,
 }));
 
-vi.mock("@/hooks/playground-session-restore", () => ({
-  shouldRestorePersistedPlaygroundSession: () => false,
-}));
 
 vi.mock("@/services/app", () => ({
-  webUIResumeLastChat: vi.fn(async () => false),
+  webUIResumeLastChat: vi.fn(async () => recentChatState.enabled),
 }));
 
 vi.mock("@/services/chat-settings", () => ({
@@ -231,12 +264,13 @@ vi.mock("@/components/Option/Playground/CharacterChatSessionsPanel", () => ({
   },
 }));
 
-vi.mock("@/db/dexie/helpers", () => ({
+vi.mock("@/db/dexie/helpers", async importOriginal => ({
+  ...await importOriginal<typeof import("@/db/dexie/helpers")>(),
   formatToChatHistory: vi.fn(),
   formatToMessage: vi.fn(),
   getHistoryByServerChatId: vi.fn(async () => null),
   getPromptById: vi.fn(async () => null),
-  getRecentChatFromWebUI: vi.fn(async () => null),
+  getRecentChatFromWebUI: (...args: unknown[]) => recentChatState.recent(...args),
 }));
 
 vi.mock("@/store/model", () => ({
@@ -269,17 +303,6 @@ vi.mock("@/services/settings/ui-settings", () => ({
 
 vi.mock("../Knowledge/utils/unsupported-types", () => ({
   otherUnsupportedTypes: [],
-}));
-
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (
-    selector?: (state: {
-      compareParentByHistory: Record<string, never>;
-    }) => unknown,
-  ) =>
-    typeof selector === "function"
-      ? selector({ compareParentByHistory: {} })
-      : { compareParentByHistory: {} },
 }));
 
 vi.mock("@/store/artifacts", () => ({
@@ -383,6 +406,15 @@ vi.mock("react-router-dom", async () => {
 describe("Playground cockpit shell", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    recentChatState.enabled = false;
+    recentChatState.recent.mockReset().mockResolvedValue(null);
+    recentChatState.capture.mockReset().mockImplementation(async (owner, request) => {
+      const view = { ...request, owner_key: "local-owner" };
+      const snapshot = { version: 1, owner_key: "local-owner", conversation_id: owner.conversation_id, source_digest: "source", storage_context_digest: "storage", fences: {}, interpretation_status: { kind: "parent_graph_v1" }, nodes: [] };
+      const result = resolveHistorySelection(snapshot, view, "send", "");
+      if (result.status !== "ready") return { ...result, view, snapshot };
+      return { status: "captured", view, snapshot, rows: result.rows, selected_content: [], storage_context_digest: "storage", purpose: "send" };
+    });
     window.history.replaceState({}, "", "/chat");
     storageState.values.clear();
     storageState.values.set("playgroundChatContextRailVisible", true);
@@ -411,6 +443,13 @@ describe("Playground cockpit shell", () => {
     messageOptionState.value.contextFiles = [];
     messageOptionState.value.regenerateLastMessage = vi.fn();
     sessionPersistenceState.value.sessionScopeReady = true;
+    sessionPersistenceState.value.hasPersistedSession = false;
+    sessionPersistenceState.value.hasPersistedDraftHandle = false;
+    sessionPersistenceState.value.hasPersistedFreshDraft = false;
+    sessionPersistenceState.value.restoreSession.mockReset().mockResolvedValue("not-restored");
+    sessionStorage.removeItem("tldw-h1-playground-reference");
+    useStoreMessageOption.setState({ chatDraftAddress: null, chatDraftRevision: 0, chatDraftTransition: null, historyId: null, serverChatId: null, compareParentByHistory: {} });
+    usePlaygroundSessionStore.getState().clearSession();
     sessionPersistenceState.value.clearPersistedSession.mockClear();
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
     darkModeState.mode = "dark";
@@ -626,6 +665,54 @@ describe("Playground cockpit shell", () => {
     expect(
       await screen.findByTestId("playground-empty-mode-deck"),
     ).toBeInTheDocument();
+  });
+
+  it("restores a verified fresh handle despite a malformed older H1 bookmark", async () => {
+    sessionPersistenceState.value.hasPersistedSession = true;
+    sessionPersistenceState.value.hasPersistedDraftHandle = true;
+    sessionPersistenceState.value.hasPersistedFreshDraft = true;
+    sessionPersistenceState.value.restoreSession.mockResolvedValue("restored");
+    sessionStorage.setItem("tldw-h1-playground-reference", "{broken");
+    render(<Playground />);
+    await waitFor(() => expect(sessionPersistenceState.value.restoreSession).toHaveBeenCalledTimes(1));
+  });
+
+  it("publishes the canonical draft address when the actual H1 recent-chat fallback opens a local conversation", async () => {
+    useStoreMessageOption.getState().startNewChatDraft();
+    recentChatState.enabled = true;
+    recentChatState.recent.mockResolvedValue({ history: { id: "local-resume", local_owner_key: "local-owner" }, messages: [] });
+    messageOptionState.value.setHistoryId = vi.fn((id, options) => useStoreMessageOption.getState().setHistoryId(id, options));
+    messageOptionState.value.setServerChatId = vi.fn((id) => useStoreMessageOption.getState().setServerChatId(id));
+    render(<Playground />);
+    await waitFor(() => expect(useStoreMessageOption.getState()).toMatchObject({ historyId: "local-resume", serverChatId: null, chatDraftAddress: { kind: "local", id: "local-resume", profileId: "profile" } }));
+    expect(recentChatState.capture).toHaveBeenCalledTimes(1);
+    expect(useStoreMessageOption.getState().chatDraftTransition?.kind).toBe("switch");
+  });
+
+  it("qualifies an explicit saved-character URL through the shared draft selection callback", async () => {
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=char-route&chatId=route-chat");
+    render(<Playground />);
+    await waitFor(() => expect(usePlaygroundSessionStore.getState().serverChatSelectionIntent).toMatchObject({ chatId: "route-chat", onLoaded: expect.any(Function), isCurrent: expect.any(Function) }));
+    const intent = usePlaygroundSessionStore.getState().serverChatSelectionIntent!;
+    expect(intent.isCurrent?.()).toBe(true);
+    act(() => useStoreMessageOption.getState().startNewChatDraft());
+    expect(intent.isCurrent?.()).toBe(false);
+  });
+
+  it("lets a current incoming sidebar selection own initialization before a fresh restore", async () => {
+    sessionPersistenceState.value.hasPersistedSession = true;
+    sessionPersistenceState.value.hasPersistedDraftHandle = true;
+    sessionPersistenceState.value.hasPersistedFreshDraft = true;
+    useStoreMessageOption.getState().startNewChatDraft();
+    const accept = captureChatDraftLoad("switch");
+    usePlaygroundSessionStore.getState().requestServerChatSelection("sidebar-B", accept);
+    useStoreMessageOption.getState().setServerChatId("sidebar-B");
+    messageOptionState.value.serverChatId = "sidebar-B";
+    render(<Playground />);
+    await screen.findByTestId("playground-cockpit-shell");
+    await act(async () => { await Promise.resolve(); });
+    expect(sessionPersistenceState.value.restoreSession).not.toHaveBeenCalled();
+    expect(accept.isCurrent()).toBe(true);
   });
 
   it("does not report standard chat runtime ready when no chat models are usable", async () => {

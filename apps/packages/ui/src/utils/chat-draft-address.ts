@@ -12,6 +12,18 @@ export type ChatDraftTransition = {
   revision: number;
 };
 
+export type ChatDraftHandle = { address: ChatDraftAddress; ownerHash: string };
+
+export const isChatDraftHandle = (value: unknown): value is ChatDraftHandle => {
+  if (!value || typeof value !== 'object') return false;
+  const handle = value as Record<string, unknown>;
+  return (
+    typeof handle.ownerHash === 'string' &&
+    /^[a-f0-9]{64}$/.test(handle.ownerHash) &&
+    isChatDraftAddress(handle.address)
+  );
+};
+
 /** An address locates private draft text; it never grants history authority. */
 export const chatDraftAddressKey = (address: ChatDraftAddress): string =>
   JSON.stringify(

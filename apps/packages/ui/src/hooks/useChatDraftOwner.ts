@@ -3,9 +3,18 @@ import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { isServicePromptScopeUnresolvedError, resolveServicePromptScope } from "@/services/service-prompts"
+import type { ServicePromptScope } from "@/services/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 type DraftOwner = { key: string }
+
+/** The same credential-free locator is used by composer records and session handles. */
+export const chatDraftOwnerKey = (scope: Pick<ServicePromptScope, "config" | "userId">) =>
+  bytesToHex(sha256(utf8ToBytes(JSON.stringify([
+    scope.config.serverUrl.replace(/\/+$/, ""), scope.config.authMode,
+    scope.config.authSource || "manual", scope.config.orgId ?? null,
+    scope.userId, scope.config.expectedSingleUserApiKeyScope ?? null
+  ]))))
 
 /** Keep a composer and its pending storage work bound to a verified account. */
 export const useChatDraftOwner = (clearComposer: () => void) => {
@@ -29,11 +38,7 @@ export const useChatDraftOwner = (clearComposer: () => void) => {
         const scope = await resolveServicePromptScope()
         if (!mounted || check !== generation) return
         // Include the full server identity and auth source; never put credentials in storage keys.
-        const key = bytesToHex(sha256(utf8ToBytes(JSON.stringify([
-          scope.config.serverUrl.replace(/\/+$/, ""), scope.config.authMode,
-          scope.config.authSource || "manual", scope.config.orgId ?? null,
-          scope.userId, scope.config.expectedSingleUserApiKeyScope ?? null
-        ]))))
+        const key = chatDraftOwnerKey(scope)
         if (currentOwner.current?.key === key) return
         if (currentOwner.current) clear()
         const nextOwner = { key }

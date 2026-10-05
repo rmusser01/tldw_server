@@ -1,6 +1,8 @@
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
+import { resolveHistorySelection } from "@/utils/history-selection"
+import { hasCurrentServerChatSelection } from "@/store/playground-session"
 import type { ServerChatMessage } from "@/services/tldw/TldwApiClient"
 // @vitest-environment jsdom
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react"
@@ -117,6 +119,8 @@ vi.mock("@/db/dexie/server-chat-mirror", async importOriginal => ({
   linkServerChatMirror: mocks.linkServerChatMirror
 }))
 vi.mock("@/services/service-prompts", () => ({
+  resolveServicePromptScope: async () => ({ config: { serverUrl: "http://server", authMode: "multi-user" }, userId: "A" }),
+  subscribeToServicePromptConfigChanges: () => () => {},
   loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal: AbortSignal }) => ({
     scopeKey: "scope-A", scopeSignal: signal, scopeInvalidatedSignal: signal,
     requestScope: { config: { serverUrl: "http://server", authMode: "multi-user" }, userId: "A" }, release: vi.fn()
@@ -774,5 +778,55 @@ it("TASK-13389 temporary read of a missing saved chat reports failure instead of
   expect(mocks.store.setServerChatLoadError).toHaveBeenLastCalledWith("server_chat_not_found")
   expect(mocks.ensureLocalProfileId).not.toHaveBeenCalled()
   mounted.unmount()
+  vi.useRealTimers()
+})
+
+it("reloads canonical metadata after a successful deliberate selection unmounts and remounts", async () => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  usePlaygroundSessionStore.getState().clearSession()
+  const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+  actual.useStoreMessageOption.getState().startNewChatDraft(false)
+  mocks.store.serverChatId = null
+  mocks.store.temporaryChat = false
+  mocks.store.serverChatMetaLoaded = false
+  mocks.store.serverChatAssistantKind = null
+  mocks.store.serverChatCharacterId = null
+  mocks.store.setServerChatId.mockImplementation(id => { mocks.store.serverChatId = id })
+  mocks.initialize.mockResolvedValue(undefined)
+  mocks.listChatMessages.mockResolvedValue([])
+  mocks.syncChatSettingsForServerChat.mockResolvedValue(null)
+  mocks.getChat.mockResolvedValue({ id: "B", title: "Before departure", scope_type: "global", version: 1 })
+  mocks.captureHistorySnapshot.mockImplementation(async (owner, incoming) => {
+    const view = { ...incoming, owner_key: "native-B" }
+    const snapshot = { version: 1, owner_key: "native-B", conversation_id: owner.conversation_id, nodes: [], source_digest: "source", storage_context_digest: "storage", fences: {}, interpretation_status: { kind: "parent_graph_v1" } }
+    const result = resolveHistorySelection(snapshot, view, "send", "")
+    if (result.status !== "ready") return { ...result, view, snapshot }
+    return { status: "captured", view, snapshot, rows: result.rows, selected_content: [], storage_context_digest: "storage", purpose: "send" }
+  })
+  const options = { ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((key: string) => key) as TFunction }
+  const mount = () => renderHook(() => {
+    const control = useHistorySelection()
+    mocks.selection = control
+    useServerChatLoader(options)
+    return { control, select: useSelectServerChat() }
+  }, { wrapper: MemoryRouter })
+  let mounted = mount()
+  act(() => mounted.result.current.select({ id: "B", title: "B" }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  expect(mocks.store.setServerChatTitle).toHaveBeenCalledWith("Before departure")
+  const address = actual.useStoreMessageOption.getState().chatDraftAddress
+  expect(address).toMatchObject({ kind: "native", id: "B" })
+  mounted.unmount()
+  mocks.store.setServerChatTitle.mockClear()
+  mocks.getChat.mockResolvedValue({ id: "B", title: "Changed while away", scope_type: "global", version: 2 })
+  mounted = mount()
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  expect(mocks.store.setServerChatTitle).toHaveBeenCalledWith("Changed while away")
+  expect(hasCurrentServerChatSelection("B")).toBe(false)
+  expect(actual.useStoreMessageOption.getState().chatDraftAddress).toEqual(address)
+  mounted.unmount()
+  mocks.store.setServerChatId.mockReset()
+  usePlaygroundSessionStore.getState().clearSession()
   vi.useRealTimers()
 })

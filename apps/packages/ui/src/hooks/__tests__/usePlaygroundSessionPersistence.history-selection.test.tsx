@@ -3,6 +3,8 @@ import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, expect, it, vi } from "vitest"
 import { resolveHistorySelection } from "@/utils/history-selection"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 
 const mocks = vi.hoisted(() => ({
   bookmarks: new Map<string, any>(),
@@ -18,7 +20,18 @@ const mocks = vi.hoisted(() => ({
   setAssistant: vi.fn(),
   currentScope: "current",
   assistantLoading: false,
-  configChanged: null as (() => void) | null
+  configChanged: null as (() => void) | null,
+  ownerScope: vi.fn(),
+  draftRecords: new Map<string, unknown>()
+}))
+vi.mock("@/utils/safe-storage", async importOriginal => ({
+  ...await importOriginal<typeof import("@/utils/safe-storage")>(),
+  createSafeStorage: () => ({
+    get: async (key: string) => mocks.draftRecords.get(key),
+    set: async (key: string, value: unknown) => { mocks.draftRecords.set(key, value) },
+    remove: async (key: string) => { mocks.draftRecords.delete(key) },
+    getAll: async () => Object.fromEntries(mocks.draftRecords)
+  })
 }))
 const bookmarkKey = (scope: any, owner: any) =>
   JSON.stringify([
@@ -64,9 +77,10 @@ vi.mock("@/services/chat-history-selection", () => ({
   captureHistorySnapshot: (...args: any[]) => mocks.capture(...args),
   confirmLegacyHistoryProjection: (...args: any[]) => mocks.confirm(...args)
 }))
-vi.mock("@/services/service-prompts", () => ({
-  loadServicePromptSnapshot: async () => ({ requestScope: {}, scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal, release: vi.fn() }),
-  resolveServicePromptScope: async () => ({ scopeKey: "current" }),
+vi.mock("@/services/service-prompts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  loadServicePromptSnapshot: async () => ({ requestScope: verifiedScope, scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal, release: vi.fn() }),
+  resolveServicePromptScope: () => mocks.ownerScope(),
   subscribeToServicePromptConfigChanges: (listener: () => void) => { mocks.configChanged = listener; return () => {} }
 }))
 vi.mock("@/db/dexie/server-chat-mirror", () => ({
@@ -104,11 +118,17 @@ import { HistorySelectionReview } from "@/components/Common/Playground/HistorySe
 import { usePlaygroundSessionPersistence } from "../usePlaygroundSessionPersistence"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
+import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
+import { conversationDraftKey } from "@/utils/chat-draft-address"
+import { buildQueuedRequest } from "@/utils/chat-request-queue"
 
 let controller: HistorySelectionController
 let outcome: string | undefined
 let restoreAgain: () => Promise<string>
 let sessionReady: boolean
+const verifiedScope = { config: { serverUrl: "http://current", authMode: "multi-user" }, userId: "alice", scopeKey: "current", clientPrincipalVerified: true }
+const ownerHash = bytesToHex(sha256(utf8ToBytes(JSON.stringify(["http://current", "multi-user", "manual", null, "alice", null]))))
 const reference = {
   profile_id: "profile",
   client_session_id: "saved-tab",
@@ -116,24 +136,41 @@ const reference = {
   conversation_id: "local-A",
   owner_kind: "local"
 }
-function ColdSession() {
+function ColdDraft() {
+  const address = useStoreMessageOption(state => state.chatDraftAddress)
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+  React.useLayoutEffect(() => {
+    if (!useStoreMessageOption.getState().chatDraftAddress) useStoreMessageOption.getState().startNewChatDraft()
+  }, [])
+  const composer = useComposerText({
+    draftKey: address ? conversationDraftKey("cold-composer", address) : "cold-composer",
+    draftEnabled: address !== null,
+    tabScopedDraft: true,
+    textareaRef
+  })
+  return <textarea ref={textareaRef} aria-label="Restored draft" value={composer.form.values.message} readOnly />
+}
+function ColdSession({ automaticRestore = true, withDraft = false }: { automaticRestore?: boolean; withDraft?: boolean }) {
   const selection = useHistorySelectionContext()!
   React.useLayoutEffect(() => { controller = selection }, [selection])
   const session = usePlaygroundSessionPersistence()
-  restoreAgain = session.restoreSession
-  sessionReady = session.sessionScopeReady
+  React.useLayoutEffect(() => {
+    restoreAgain = session.restoreSession
+    sessionReady = session.sessionScopeReady
+  }, [session.restoreSession, session.sessionScopeReady])
   const started = React.useRef(false)
   const { historyId, serverChatId, messages } = useStoreMessageOption()
   React.useEffect(() => {
-    if (!session.sessionScopeReady || started.current) return
+    if (!automaticRestore || !session.sessionScopeReady || started.current) return
     started.current = true
     void session.restoreSession().then((result) => {
       outcome = result
       if (result === "not-restored") mocks.recent()
     })
-  }, [session.sessionScopeReady, session.restoreSession])
+  }, [automaticRestore, session.sessionScopeReady, session.restoreSession])
   return (
     <>
+      {withDraft && <ColdDraft />}
       <output data-testid="transcript">
         {messages.map((row) => row.message).join(" / ")}
       </output>
@@ -150,7 +187,7 @@ function ColdSession() {
     </>
   )
 }
-const mount = () =>
+const mount = (automaticRestore = true, withDraft = false) =>
   render(
     <HistorySelectionProvider
       storageKey="cold-h1"
@@ -166,7 +203,7 @@ const mount = () =>
         )
       }}
     >
-      <ColdSession />
+      <ColdSession automaticRestore={automaticRestore} withDraft={withDraft} />
     </HistorySelectionProvider>
   )
 
@@ -234,9 +271,11 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.assistantLoading = false
   mocks.configChanged = null
+  mocks.ownerScope.mockReset().mockResolvedValue(verifiedScope)
   localStorage.clear()
   sessionStorage.clear()
   mocks.bookmarks.clear()
+  mocks.draftRecords.clear()
   outcome = undefined
   mocks.profile.mockResolvedValue("profile")
   mocks.details.mockImplementation(async (id: string) => ({ id, local_owner_key: "local-owner" }))
@@ -292,6 +331,9 @@ beforeEach(() => {
     }
   })
   useStoreMessageOption.setState({
+    chatDraftAddress: null,
+    chatDraftRevision: 0,
+    chatDraftTransition: null,
     historyId: null,
     serverChatId: null,
     history: [],
@@ -307,6 +349,192 @@ beforeEach(() => {
     contextFiles: []
   })
   usePlaygroundSessionStore.getState().clearSession()
+  usePlaygroundSessionStore.setState({ chatDraftHandle: null })
+})
+
+it.each([false, true])("restores a verified fresh draft before an old H1 bookmark (temporary %s)", async temporary => {
+  seedBookmark()
+  const address = { kind: "fresh" as const, id: "retained-new", scope: { type: "global" as const }, temporary }
+  usePlaygroundSessionStore.getState().saveSession({
+    chatDraftHandle: { address, ownerHash }, scopeKey: "current", historyId: null, serverChatId: null
+  })
+  mount()
+  await waitFor(() => expect(outcome).toBe("restored"))
+  expect(useStoreMessageOption.getState()).toMatchObject({ chatDraftAddress: address, temporaryChat: temporary, historyId: null, serverChatId: null, messages: [] })
+  expect(controller.getCurrent().owner).toBeNull()
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(mocks.recent).not.toHaveBeenCalled()
+})
+
+it.each([false, true])("cold restores the retained unsent text through the actual composer and fresh handle (temporary %s)", async temporary => {
+  seedBookmark()
+  const address = { kind: "fresh" as const, id: "unsent-next", scope: { type: "global" as const }, temporary }
+  mocks.draftRecords.set(`registry:draft:${conversationDraftKey("cold-composer", address)}:owner:${ownerHash}`, {
+    value: { content: "UNSENT NEXT TURN" }, updatedAt: Date.now()
+  })
+  usePlaygroundSessionStore.getState().saveSession({ chatDraftHandle: { address, ownerHash }, scopeKey: "current" })
+  mount(true, true)
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Restored draft" })).toHaveValue("UNSENT NEXT TURN"))
+  expect(outcome).toBe("restored")
+  expect(useStoreMessageOption.getState()).toMatchObject({ chatDraftAddress: address, temporaryChat: temporary, historyId: null, serverChatId: null, messages: [], history: [] })
+  expect(controller.getCurrent().owner).toBeNull()
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(mocks.recent).not.toHaveBeenCalled()
+})
+
+it("defers a fresh handle while owner verification is pending, then rejects another account", async () => {
+  let finish!: (value: typeof verifiedScope) => void
+  mocks.ownerScope.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  usePlaygroundSessionStore.getState().saveSession({
+    chatDraftHandle: { address: { kind: "fresh", id: "private", scope: { type: "global" }, temporary: false }, ownerHash }, scopeKey: "current"
+  })
+  mount()
+  await waitFor(() => expect(mocks.ownerScope).toHaveBeenCalled())
+  expect(outcome).toBeUndefined()
+  await act(async () => finish({ ...verifiedScope, userId: "bob" }))
+  await waitFor(() => expect(outcome).toBe("cancelled"))
+  expect(useStoreMessageOption.getState().chatDraftAddress).toBeNull()
+  expect(mocks.recent).not.toHaveBeenCalled()
+})
+
+it.each([false, true])("immediately retains the new draft handle without saving Temporary queued content (%s)", async temporary => {
+  const view = mount()
+  await waitFor(() => expect(outcome).toBe("not-restored"))
+  act(() => {
+    useStoreMessageOption.getState().setTemporaryChat(temporary)
+    useStoreMessageOption.getState().startNewChatDraft()
+    if (temporary) useStoreMessageOption.getState().setQueuedMessages([buildQueuedRequest({ id: "private-queue", clientRequestId: "private-request", promptText: "private temporary queue" })])
+  })
+  const address = useStoreMessageOption.getState().chatDraftAddress
+  await waitFor(() => expect(usePlaygroundSessionStore.getState()).toMatchObject({ chatDraftHandle: { address, ownerHash }, historySelectionReference: null, historyId: null, serverChatId: null, queuedMessages: [] }))
+  view.unmount()
+})
+
+it("does not persist a target ID while the draft still addresses its source", async () => {
+  const view = mount()
+  await waitFor(() => expect(outcome).toBe("not-restored"))
+  act(() => useStoreMessageOption.getState().startNewChatDraft())
+  const address = useStoreMessageOption.getState().chatDraftAddress
+  await waitFor(() => expect(usePlaygroundSessionStore.getState()).toMatchObject({ chatDraftHandle: { address, ownerHash } }))
+  act(() => useStoreMessageOption.getState().setServerChatId("held-target"))
+  view.unmount()
+  await act(async () => { await Promise.resolve(); await Promise.resolve() })
+  expect(usePlaygroundSessionStore.getState()).toMatchObject({ chatDraftHandle: { address, ownerHash }, serverChatId: null })
+})
+
+it("does not publish the automatic fresh allocation before a retained handle is verified", async () => {
+  let finish!: (value: typeof verifiedScope) => void
+  mocks.ownerScope.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const address = { kind: "fresh" as const, id: "retained", scope: { type: "global" as const }, temporary: true }
+  usePlaygroundSessionStore.getState().saveSession({ chatDraftHandle: { address, ownerHash }, scopeKey: "current" })
+  useStoreMessageOption.getState().startNewChatDraft()
+  mount()
+  await waitFor(() => expect(mocks.ownerScope).toHaveBeenCalled())
+  expect(usePlaygroundSessionStore.getState().chatDraftHandle).toEqual({ address, ownerHash })
+  await act(async () => finish(verifiedScope))
+  await waitFor(() => expect(outcome).toBe("restored"))
+  expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(address)
+})
+
+it.each(["local", "native-global", "native-workspace"])("installs a saved %s draft address only after its matching H1 receipt", async kind => {
+  const address = kind === "local"
+    ? { kind: "local" as const, id: "local-A", profileId: "profile" }
+    : { kind: "native" as const, id: "native-A", ownerKey: "native-current", scope: kind === "native-workspace" ? { type: "workspace" as const, workspaceId: "workspace-A" } : { type: "global" as const } }
+  usePlaygroundSessionStore.getState().saveSession({ chatDraftHandle: { address, ownerHash }, scopeKey: "current", historyId: kind === "local" ? address.id : null, serverChatId: kind === "local" ? null : address.id })
+  mount()
+  await waitFor(() => expect(outcome).toBe("restored"))
+  expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(address)
+  expect(controller.getCurrent().owner?.conversation_id).toBe(address.id)
+})
+
+it.each(["local-profile", "native-owner"])("rejects a mismatched saved %s address after H1 qualification", async kind => {
+  const address = kind === "local-profile"
+    ? { kind: "local" as const, id: "local-A", profileId: "other-profile" }
+    : { kind: "native" as const, id: "native-A", ownerKey: "other-owner", scope: { type: "global" as const } }
+  usePlaygroundSessionStore.getState().saveSession({ chatDraftHandle: { address, ownerHash }, scopeKey: "current", historyId: kind === "local-profile" ? address.id : null, serverChatId: kind === "local-profile" ? null : address.id })
+  mount()
+  await waitFor(() => expect(outcome).toBe("cancelled"))
+  expect(useStoreMessageOption.getState().chatDraftAddress).toBeNull()
+  expect(mocks.recent).not.toHaveBeenCalled()
+})
+
+it("honours a deliberate external selection after it cancels the initial handle restore", async () => {
+  usePlaygroundSessionStore.getState().saveSession({ chatDraftHandle: { address: { kind: "fresh", id: "old", scope: { type: "global" }, temporary: false }, ownerHash }, scopeKey: "current" })
+  useStoreMessageOption.getState().startNewChatDraft()
+  const view = mount(false)
+  await waitFor(() => expect(sessionReady).toBe(true))
+  act(() => {
+    usePlaygroundSessionStore.getState().cancelPendingRestore()
+    useStoreMessageOption.getState().setServerChatId("explicit-B")
+  })
+  // A target-ID/source-address pair cannot overwrite the retained pointer while B loads.
+  expect(usePlaygroundSessionStore.getState().chatDraftHandle?.address.id).toBe("old")
+  const accept = captureChatDraftLoad("switch")
+  await act(async () => { expect(await controller.loadConversation({ serverChatId: "explicit-B", isCurrent: accept.isCurrent }, null, accept)).toBe(true) })
+  await waitFor(() => expect(usePlaygroundSessionStore.getState()).toMatchObject({ chatDraftHandle: { address: { kind: "native", id: "explicit-B" }, ownerHash }, serverChatId: "explicit-B" }))
+  view.unmount()
+})
+
+it("lets a current sidebar selection made before mount supersede the retained fresh handle", async () => {
+  useStoreMessageOption.getState().startNewChatDraft()
+  const source = useStoreMessageOption.getState().chatDraftAddress!
+  usePlaygroundSessionStore.getState().saveSession({ chatDraftHandle: { address: source, ownerHash }, scopeKey: "current" })
+  usePlaygroundSessionStore.getState().cancelPendingRestore()
+  const accept = captureChatDraftLoad("switch")
+  usePlaygroundSessionStore.getState().requestServerChatSelection("sidebar-B", accept)
+  useStoreMessageOption.getState().setServerChatId("sidebar-B")
+  const view = mount()
+  await waitFor(() => expect(outcome).toBe("cancelled"))
+  expect(useStoreMessageOption.getState()).toMatchObject({ serverChatId: "sidebar-B", chatDraftAddress: source })
+  await act(async () => { expect(await controller.loadConversation({ serverChatId: "sidebar-B", isCurrent: accept.isCurrent }, null, accept)).toBe(true) })
+  await waitFor(() => expect(usePlaygroundSessionStore.getState()).toMatchObject({ serverChatId: "sidebar-B", chatDraftHandle: { address: { kind: "native", id: "sidebar-B" }, ownerHash } }))
+  view.unmount()
+})
+
+it.each(["legacy-debounce", "legacy-departure", "bookmark-debounce", "bookmark-departure"])("does not replace a pending %s restore with the composer's automatic fresh address", async path => {
+  seedBookmark()
+  if (path.startsWith("legacy")) usePlaygroundSessionStore.getState().saveSession({ historyId: "local-A", scopeKey: "current" })
+  useStoreMessageOption.getState().startNewChatDraft()
+  const capture = mocks.capture.getMockImplementation()!
+  let finish!: () => void
+  mocks.capture.mockImplementationOnce((...args) => new Promise(resolve => { finish = () => resolve(capture(...args)) }))
+  const view = mount()
+  await waitFor(() => expect(mocks.capture).toHaveBeenCalled())
+  if (path.endsWith("departure")) view.unmount()
+  else await act(async () => { await new Promise(resolve => setTimeout(resolve, 1100)) })
+  expect(usePlaygroundSessionStore.getState().chatDraftHandle).toBeNull()
+  if (path.startsWith("legacy")) expect(usePlaygroundSessionStore.getState().historyId).toBe("local-A")
+  await act(async () => finish())
+  if (!path.endsWith("departure")) {
+    await waitFor(() => expect(outcome).toBe("restored"))
+    expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "local", id: "local-A" })
+    view.unmount()
+  }
+})
+it.each(["mounted", "departure"])("retains accepted New before a cancelled held restore settles (%s)", async path => {
+  seedBookmark()
+  usePlaygroundSessionStore.getState().saveSession({ historyId: "local-A", scopeKey: "current" })
+  useStoreMessageOption.getState().startNewChatDraft()
+  const capture = mocks.capture.getMockImplementation()!
+  let finish!: () => void
+  mocks.capture.mockImplementationOnce((...args) => new Promise(resolve => { finish = () => resolve(capture(...args)) }))
+  const view = mount()
+  await waitFor(() => expect(mocks.capture).toHaveBeenCalled())
+  act(() => {
+    controller.reset()
+    usePlaygroundSessionStore.getState().clearSession()
+    useStoreMessageOption.getState().setHistoryId(null)
+    useStoreMessageOption.getState().setServerChatId(null)
+    useStoreMessageOption.getState().startNewChatDraft()
+  })
+  const address = useStoreMessageOption.getState().chatDraftAddress!
+  await waitFor(() => expect(usePlaygroundSessionStore.getState().chatDraftHandle).toEqual({ address, ownerHash }))
+  if (path === "departure") view.unmount()
+  await act(async () => finish())
+  await waitFor(() => expect(outcome).toBe("cancelled"))
+  expect(usePlaygroundSessionStore.getState().chatDraftHandle).toEqual({ address, ownerHash })
+  expect(useStoreMessageOption.getState()).toMatchObject({ chatDraftAddress: address, messages: [], historyId: null, serverChatId: null })
+  if (path !== "departure") view.unmount()
 })
 it.each(["remote scope changed", "shared session expired"])(
   "restores the matching local tab before checking whether %s",
