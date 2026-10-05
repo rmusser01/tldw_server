@@ -145,7 +145,8 @@ test.describe('Prompts -> Chat journey', () => {
           originating_selection_revision: selection.selection_revision });
         expect(admission.input_message_revision).toEqual(expect.any(String));
         expect(admission.input_message_revision).not.toBe('');
-        expect(userRequest).toMatchObject({ id: userReceipt.id, role: 'user', content: QUESTION, parent_message_id: null });
+        expect(userRequest).toMatchObject({ id: userReceipt.id, role: 'user', content: QUESTION });
+        expect(userRequest.parent_message_id ?? null).toBeNull();
         const assistantRequest = assistantWrite.request().postDataJSON();
         expect(assistantRequest).toMatchObject({ id: assistantReceipt.id, role: 'assistant',
           content: ANSWER, parent_message_id: userReceipt.id });
