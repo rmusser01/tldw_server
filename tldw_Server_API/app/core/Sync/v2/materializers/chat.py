@@ -13,6 +13,9 @@ from ..models import SyncEnvelope, SyncObjectState
 from ..store import SyncV2Store
 from .base import MaterializationResult
 
+# Recorded on a conflict that is closed because its tombstone turned out to be satisfied.
+SATISFIED_TOMBSTONE_NOTE = "tombstone_of_message_the_dataset_never_held"
+
 
 @dataclass(slots=True)
 class ChatConversationMaterializer:
@@ -154,7 +157,12 @@ class ChatMessageMaterializer:
             )
 
         current_state = store.get_object_state(envelope.dataset_id, envelope.domain, envelope.object_id)
-        if envelope.apply_status == "conflict":
+        # A recorded conflict stands when the envelope is projected again. The one exception
+        # is a tombstone of a message the dataset still holds no state for: that conflict
+        # came from the rule this materializer no longer applies, so it is settled below.
+        if envelope.apply_status == "conflict" and not (
+            envelope.operation == "tombstone" and current_state is None
+        ):
             return _message_conflict_result(envelope, current_state=current_state)
         if _is_already_materialized(envelope, current_state):
             return _complete_already_materialized(
@@ -211,21 +219,35 @@ class ChatMessageMaterializer:
                     return result
                 deleted = False
             elif envelope.operation == "tombstone":
-                conflict = _detect_message_tombstone_conflict(envelope, current_state)
-                if conflict is not None:
-                    store.mark_envelope_apply_status(
-                        envelope.server_cursor,
-                        apply_status="conflict",
-                        apply_error_code=conflict.conflict_type or "message_base_conflict",
-                        apply_error_message=conflict.message,
+                # A message the dataset holds no state for is already gone, which is all a
+                # tombstone asks for. It is applied as a no-op (and a copy kept outside Sync
+                # is deleted with it) instead of being rejected: a rejection blocks the
+                # dataset and keeps the delete from every other device.
+                satisfied = current_state is None and (
+                    self.note_db.tombstone_unsynced_message_from_sync(
+                        stable_message_id=envelope.object_id,
+                        sync_client_id=_projection_client_id(self.note_db),
+                        object_revision=object_revision,
+                        object_hash=object_hash,
                     )
-                    return conflict
-                self.note_db.tombstone_message_from_sync(
-                    stable_message_id=envelope.object_id,
-                    sync_client_id=_projection_client_id(self.note_db),
-                    object_revision=object_revision,
-                    object_hash=current_state.object_hash if current_state is not None else object_hash,
+                    != "foreign"
                 )
+                if not satisfied:
+                    conflict = _detect_message_tombstone_conflict(envelope, current_state)
+                    if conflict is not None:
+                        store.mark_envelope_apply_status(
+                            envelope.server_cursor,
+                            apply_status="conflict",
+                            apply_error_code=conflict.conflict_type or "message_base_conflict",
+                            apply_error_message=conflict.message,
+                        )
+                        return conflict
+                    self.note_db.tombstone_message_from_sync(
+                        stable_message_id=envelope.object_id,
+                        sync_client_id=_projection_client_id(self.note_db),
+                        object_revision=object_revision,
+                        object_hash=current_state.object_hash if current_state is not None else object_hash,
+                    )
                 deleted = True
             else:
                 raise ValueError(f"Unsupported chat.message operation: {envelope.operation}")
@@ -256,6 +278,9 @@ class ChatMessageMaterializer:
                 message=_safe_error_message(exc),
             )
 
+        if envelope.apply_status == "conflict":
+            # Only the satisfied tombstone gets this far with a recorded conflict.
+            return MaterializationResult(status="applied", metadata={"settles_conflict": SATISFIED_TOMBSTONE_NOTE})
         return MaterializationResult(status="applied")
 
 

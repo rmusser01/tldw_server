@@ -37,8 +37,8 @@ from tldw_Server_API.app.core.Sync.v2.models import (
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
     SERVER_ORIGIN_DEVICE_ID,
-    SyncServerOriginMaterializationError,
     SyncServerOriginMutationNotSupportedError,
+    canonical_payload_hash,
     capture_server_origin_mutation,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
@@ -153,34 +153,62 @@ def _apply_to_replica(replica: CharactersRAGDB, envelopes: list[SyncEnvelope]) -
 
 
 def _leave_the_old_bug_behind(service: SyncV2Service, message_id: str, chat_id: str) -> SyncEnvelope:
-    """Reproduce what the delete routes did before the fix: tombstone a row Sync never saw.
+    """Leave what the delete routes left before the fix: the blocked dataset of #3181.
 
-    The capture raises and leaves the tombstone accepted with ``apply_status =
-    conflict`` and an unresolved projection conflict: the blocked dataset of #3181.
+    That is the server's own tombstone of a row Sync never saw, accepted, with
+    ``apply_status = conflict`` and an unresolved projection conflict. It is
+    stored directly, because projecting such a tombstone no longer rejects it.
     """
-    with pytest.raises(SyncServerOriginMaterializationError) as raised:
-        capture_server_origin_mutation(
-            service,
-            user_id=USER,
+    dataset_id = _dataset_id(service)
+    payload: dict[str, object] = {
+        "id": message_id,
+        "deleted": True,
+        "conversation_id": chat_id,
+        "client_id": USER,
+        "owner_user_id": USER,
+    }
+    payload_hash, payload_size = canonical_payload_hash(payload)
+    stranded = service.store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id=dataset_id,
+            client_envelope_id=f"server-origin-stranded-{message_id}",
             domain="chat.message",
             operation="tombstone",
             object_id=message_id,
+            device_id=SERVER_ORIGIN_DEVICE_ID,
+            client_sequence=None,
+            object_revision=1,
             parent_id=chat_id,
-            payload={
-                "id": message_id,
-                "deleted": True,
-                "conversation_id": chat_id,
-                "client_id": USER,
-                "owner_user_id": USER,
-            },
-            source="server_api",
+            payload=payload,
+            payload_hash=payload_hash,
+            payload_size_bytes=payload_size,
+            deleted=True,
+            encryption_metadata={"policy": "server_trusted_v1"},
+            routing_metadata={"source": "server_api", "origin": "server", "server_device_id": SERVER_ORIGIN_DEVICE_ID},
+            status="accepted",
         )
-    envelope = raised.value.envelope
-    assert envelope.apply_status == "conflict"
-    assert envelope.apply_error_code == "message_base_conflict"
+    )
+    stranded = service.store.mark_envelope_apply_status(
+        stranded.server_cursor,
+        apply_status="conflict",
+        apply_error_code="message_base_conflict",
+        apply_error_message="chat.message tombstone requires an existing server message base state",
+    )
+    service.store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id=f"conflict-stranded-{message_id}",
+            dataset_id=dataset_id,
+            domain="chat.message",
+            entity_id=message_id,
+            conflict_type="message_base_conflict",
+            local_envelope_id=stranded.client_envelope_id,
+            server_sequence=stranded.server_cursor,
+            metadata={"reason": "missing_server_message"},
+        )
+    )
     blocker = _blocker(service)
     assert blocker is not None and blocker.metadata["reason"] == "missing_server_message"
-    return envelope
+    return stranded
 
 
 # ---------------------------------------------------------------------------
@@ -693,7 +721,11 @@ def test_recovery_leaves_every_other_conflict_for_review(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
 ) -> None:
-    """Only the server's own tombstone of a row with no Sync history is dismissed."""
+    """Only a tombstone of a message with no Sync state is settled.
+
+    A device's stranded tombstone is applied instead of dismissed; that is in
+    test_sync_v2_satisfied_tombstone.py.
+    """
     _legacy_chat(chacha_db, messages=(LEGACY_QUESTION,))
     _block_dataset(sync_service)
 
@@ -703,54 +735,6 @@ def test_recovery_leaves_every_other_conflict_for_review(
     assert refused.json()["detail"]["error_code"] == "sync_server_origin_append_failed"
     blocker = _blocker(sync_service)
     assert (blocker.conflict_id, blocker.status) == ("conflict-unresolved", "unresolved")
-
-
-def test_recovery_does_not_dismiss_a_device_tombstone_of_an_unknown_message(
-    client: TestClient,
-    sync_service: SyncV2Service,
-    chacha_db: CharactersRAGDB,
-) -> None:
-    """A device's delete is that device's claim; dismissing it would hide a disagreement from review."""
-    _legacy_chat(chacha_db, messages=(LEGACY_QUESTION,))
-    dataset_id = _dataset_id(sync_service)
-    stranded = sync_service.store.insert_envelope(
-        SyncEnvelopeCreate(
-            dataset_id=dataset_id,
-            client_envelope_id="env-device-tombstone",
-            domain="chat.message",
-            operation="tombstone",
-            object_id=LEGACY_QUESTION,
-            device_id="offline-device",
-            client_sequence=1,
-            object_revision=1,
-            parent_id=LEGACY_CHAT,
-            payload={"id": LEGACY_QUESTION, "deleted": True},
-            payload_hash="sha256:device-tombstone",
-            deleted=True,
-            encryption_metadata={"policy": "server_trusted_v1"},
-            status="accepted",
-        )
-    )
-    sync_service.store.mark_envelope_apply_status(
-        stranded.server_cursor, apply_status="conflict", apply_error_code="message_base_conflict",
-    )
-    sync_service.store.insert_conflict(
-        SyncConflictCreate(
-            conflict_id="conflict-device-tombstone",
-            dataset_id=dataset_id,
-            domain="chat.message",
-            entity_id=LEGACY_QUESTION,
-            conflict_type="message_base_conflict",
-            local_envelope_id=stranded.client_envelope_id,
-            server_sequence=stranded.server_cursor,
-            metadata={"reason": "missing_server_message"},
-        )
-    )
-
-    refused = client.post("/api/v1/chats/", json={"title": "Still blocked"})
-
-    assert refused.status_code == 503, refused.text
-    assert _blocker(sync_service).conflict_id == "conflict-device-tombstone"
 
 
 # ---------------------------------------------------------------------------

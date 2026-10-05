@@ -45959,6 +45959,7 @@ for _message_store_method in (
     "settle_history_admission",
     "append_message_from_sync",
     "tombstone_message_from_sync",
+    "tombstone_unsynced_message_from_sync",
     "get_messages_by_sync_stable_id",
     "_insert_message_images",
     "append_message_image",
