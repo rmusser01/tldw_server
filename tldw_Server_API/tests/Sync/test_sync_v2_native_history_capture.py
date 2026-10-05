@@ -505,6 +505,55 @@ def test_refused_admission_writes_no_message_and_no_envelope(
     assert chacha_db.count_messages_for_conversation(CHAT_ID) == 1
 
 
+def test_stale_extend_latest_admission_is_refused_and_publishes_nothing(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    """D7 P1 on the Sync path: the leaf check runs inside the published write."""
+    _send_turn(client)
+    tip = _selection(client, CHAT_ID, {"kind": "after_message", "message_id": REPLY_ID})
+    # Another tab extends the chat from the same reply first.
+    other_tab = _admit(client, CHAT_ID, tip, message_id="second-input", content="and then?")
+    assert other_tab.status_code == 201, other_tab.text
+    before = _log(sync_service)
+
+    def send_late(history_branch: bool):
+        return client.post(
+            f"/api/v1/chats/{CHAT_ID}/messages",
+            json={
+                "id": "late-input",
+                "role": "user",
+                "content": "sent from the stale tab",
+                "tldw_history_selection_v1": tip,
+                "tldw_history_branch": history_branch,
+            },
+        )
+
+    refused = send_late(False)
+
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"] == {
+        "status": "stale_selection",
+        "code": "history_branch_changed",
+        "conversation_id": CHAT_ID,
+        "parent_message_id": REPLY_ID,
+        "leaf_ids": ["second-input"],
+        "history_version": chacha_db.get_conversation_by_id(CHAT_ID)["history_version"],
+    }
+    assert _log(sync_service) == before
+    assert chacha_db.get_message_by_id("late-input") is None
+
+    # An explicit branch from the same tip is admitted and published.
+    branched = send_late(True)
+
+    assert branched.status_code == 201, branched.text
+    published = [item for item in _envelopes(sync_service) if item.object_id == "late-input"]
+    assert [(item.domain, item.operation, item.payload["parent_message_id"]) for item in published] == [
+        ("chat.message", "append", REPLY_ID)
+    ]
+
+
 def test_settlement_publishes_an_input_whose_capture_was_lost(
     monkeypatch: pytest.MonkeyPatch,
     client: TestClient,
