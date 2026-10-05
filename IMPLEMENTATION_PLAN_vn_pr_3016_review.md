@@ -433,3 +433,41 @@ Pre-integration full-range hooks identify those same 20 old task formats, not a
 new source failure. The incoming normalization must be preserved and full hooks
 rerun after merge-preserving rebase. Exact remote publication lease remains 5cd;
 fresh new-head review and all seven current required contexts remain mandatory.
+
+## Task77: Offline Daily-Accounting CI Repair
+
+Original TASK13369; all engineering approvals granted. Design amendment:
+Docs/Design/2026-10-04-vn-pr-3016-post-publication-repairs.md.
+
+### Stage 1: Verify The Exact-Head Failure
+**Goal**: Trace the new media-ingestion teardown error without weakening offline validation.
+**Success Criteria**: Exact job/run/head and complete argument-free caller trace retained.
+**Tests**: Raw job111546965676/run37234156622 and source-boundary trace.
+**Status**: Complete
+240passed/1skipped/1error540.81s; Redis DNS comes from AuthNZ migration locking.
+Daily upload accounting escapes the fixture's declared auth/quota exclusion;
+unlimited uploads still record, so a quota master-switch change is insufficient.
+
+### Stage 2: Isolate And Verify The Fixture
+**Goal**: Isolate only the existing daily-accounting boundary in the offline fixture.
+**Success Criteria**: Real upload cannot bootstrap AuthNZ; parser/persistence and
+strict tripwire/privacy behavior remain unchanged; no production/CI changes.
+**Tests**: AuthNZ-entry RED/GREEN, all fixture consumers, static/Bandit and independent SPEC/QUALITY.
+**Status**: Complete
+Three original files archived byte-exact before edits. Lagrange implementation
+and Hume independent SPEC/QUALITY PASS are frozen; both agents closed, sessions
+reaped. Intended RED records two intercepted AuthNZ pool calls; GREEN103 fixture
+consumers and26 separate accounting controls retain strict guard/privacy behavior.
+Independent4GREEN plus in-memory RED verify regression sensitivity without source
+mutation. Scoped Ruff is clean; Bandit0newnonassert, inherited/new B101 retained.
+Python3.11/pytest8.4/asyncio1.1 remain below declared floors; no future CI claim.
+
+### Stage 3: Reconcile, Publish And Complete Gates
+**Goal**: Publish the reviewed fix with fresh actual-dev integration and normally merge parent3016.
+**Success Criteria**: Preserved baseline union/shared contracts, normal hooks/commit,
+exact publication, full current-head Qodo, seven required passes, strict dev/rules
+and independently verified MERGED.
+**Tests**: Fresh actual-dev evidence and complete current-head external arrays/replies.
+**Status**: In Progress
+Known Qodo billing block is not waived; child3067 remains read-only. Old-head CI
+and current-dev fixture-only path inventories do not establish integration.

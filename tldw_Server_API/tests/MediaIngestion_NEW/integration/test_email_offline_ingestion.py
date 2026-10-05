@@ -124,6 +124,7 @@ def offline_client(tmp_path, monkeypatch):
     # Quota remains outside this native parser/persistence harness.
     quota_service = SimpleNamespace(check_quota=AsyncMock(return_value=(True, {})))
     monkeypatch.setattr(storage_quota_service, "get_storage_quota_service", lambda: quota_service)
+    monkeypatch.setattr(persistence, "_enforce_and_record_media_bytes", AsyncMock())
     db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="offline-email-test")
     app = FastAPI()
     app.state.offline_forbidden_calls = calls
@@ -252,6 +253,31 @@ def search(client, query: str):
     response = client.get("/api/v1/email/search", params={"q": query})
     assert response.status_code == 200, response.text
     return response.json()["items"]
+
+
+def test_offline_upload_does_not_enter_authnz_pool(
+    offline_client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Daily accounting cannot bootstrap AuthNZ in the native email harness."""
+    from tldw_Server_API.app.core.AuthNZ import database
+    from tldw_Server_API.app.core.DB_Management import Resource_Daily_Ledger
+    from tldw_Server_API.app.core.Usage import quota_resolver
+
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
+    quota_resolver.invalidate_all()
+    monkeypatch.setattr(persistence, "_media_ingestion_daily_ledger", None)
+    pool_entry = AsyncMock(side_effect=RuntimeError("AuthNZ is outside the offline email harness"))
+    monkeypatch.setattr(database, "get_db_pool", pool_entry)
+    monkeypatch.setattr(Resource_Daily_Ledger, "get_db_pool", pool_entry)
+
+    result = upload(offline_client, "synthetic-quota.eml", synthetic_message(77).as_bytes())
+    rows = search(offline_client, "uniquequartz")
+    assert len(rows) == 1
+    detail = offline_client.get(f"/api/v1/email/messages/{rows[0]['email_message_id']}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["media"]["id"] == result["db_id"]
+    assert detail.json()["body_text"] == "Uniquequartz synthetic body 77."
+    pool_entry.assert_not_called()
 
 
 @pytest.mark.parametrize("same_body", [False, True])

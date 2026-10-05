@@ -96,3 +96,35 @@ with sensitive tests. Avoid restarting list loads on unrelated recovery errors.
 
 Bounded TDD, scoped baseline Bandit/static checks and independent SPEC/QUALITY
 precede publication. Future exact-head Qodo/CI still govern normal merge.
+
+## Task77 Offline Daily-Accounting Isolation
+
+Exact a2d9 CI job111546965676 reports240passed/1skipped/1teardownerror.
+The strict argument-free diagnostic now identifies Redis DNS from AuthNZ
+migration locking, not email/model work. The upload's positive synthetic user
+reaches daily accounting, which resolves quotas and initializes the shared
+AuthNZ ledger. The fixture declares auth/quota/billing outside its native email
+scope but isolates only storage quotas. Disabling enforcement alone would not
+isolate the unlimited-user shadow record.
+
+Under the requester's all-engineering-approvals authorization, substitute only
+the existing daily-accounting boundary inside this offline fixture. Preserve
+real upload/form validation, parser, persistence, search/detail and every strict
+network/model tripwire. Do not alter production quota accounting, migration
+locking, Redis settings or CI workflows, and do not allowlist or clear the
+observed forbidden call. Add a real-upload regression that detects AuthNZ pool
+entry with fresh daily-ledger state and usage quotas enabled, without touching
+operator databases. Observe RED before the fixture repair, then GREEN for all
+fixture consumers and existing guard/privacy controls. Scoped static/Bandit
+and fresh independent SPEC/QUALITY review precede publication.
+
+This diagnoses the new exact-head CI caller; it does not retroactively certify
+the earlier unlabelled call, a whole-repository result or current-dev integration.
+
+Task77 implementation and independent SPEC/QUALITY are complete. One fixture
+substitution and one actual-upload regression preserve every original guard/test
+AST. RED records two intercepted pool entries; all103 consumers and26 separate
+accounting controls pass locally. Independent4GREEN and in-memory RED confirm
+sensitivity; no new nonassert Bandit findings. Both agents are closed. Local
+runtime remains below declared floors; fresh actual-dev integration and new-head
+external review/CI remain mandatory before normal merge.
