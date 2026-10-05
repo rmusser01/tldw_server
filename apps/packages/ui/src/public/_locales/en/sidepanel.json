@@ -1979,5 +1979,20 @@
     "resetPosition": "Reset position",
     "manage": "Manage Buddy & Persona",
     "detach": "Detach Buddy"
+  },
+  "multiSelect_organizationLoadError": {
+    "message": "Unable to load folders and tags for this account."
+  },
+  "multiSelect_organizationRefreshRequired": {
+    "message": "Refresh folders and tags for this account."
+  },
+  "multiSelect_tagsApplyPartialError": {
+    "message": "Some tags could not be created or applied. Your selection is kept so you can try again."
+  },
+  "multiSelect_folderApplyPartialError": {
+    "message": "Some chats could not be added to folders. Your selection is kept so you can try again."
+  },
+  "folderPicker_createError": {
+    "message": "Unable to create the folder. Try again."
   }
 }

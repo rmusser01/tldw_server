@@ -126,6 +126,12 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "GET" && (/^\/api\/v1\/media\/ingest\/jobs\/[0-9]+$/.test(pathname) || /^\/api\/v1\/media\/[0-9]+\/file$/.test(pathname) || pathname === "/api/v1/media")) return true
   if (requestMethod === "POST" && (/^\/api\/v1\/media\/(?:ingest\/jobs(?:\/cancel)?|process-(?:audios|videos|pdfs|ebooks|documents|web-scraping)|search|collections)$/.test(pathname) || /^\/api\/v1\/media\/collections\/[0-9]+\/items$/.test(pathname))) return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/collections\/[0-9]+\/items\/[0-9]+$/.test(pathname)) return true
+  if (pathname === "/api/v1/notes/collections" || pathname === "/api/v1/notes/keywords") return ["GET", "POST"].includes(requestMethod)
+  if (pathname === "/api/v1/notes/collections/keyword-links" || pathname === "/api/v1/notes/conversations/keyword-links") return requestMethod === "GET"
+  if (/^\/api\/v1\/notes\/collections\/[0-9]+$/.test(pathname)) return ["PATCH", "DELETE"].includes(requestMethod)
+  if (/^\/api\/v1\/notes\/keywords\/[0-9]+$/.test(pathname)) return requestMethod === "DELETE"
+  if (/^\/api\/v1\/notes\/(?:collections\/[0-9]+|conversations\/[^/]+)\/keywords$/.test(pathname)) return requestMethod === "GET"
+  if (/^\/api\/v1\/notes\/(?:collections\/[0-9]+|conversations\/[^/]+)\/keywords\/[0-9]+$/.test(pathname)) return ["POST", "DELETE"].includes(requestMethod)
   if (pathname === "/api/v1/notes/") return requestMethod === "POST"
   if (/^\/api\/v1\/notes\/[^/]+$/.test(pathname)) {
     return ["GET", "PUT"].includes(requestMethod)

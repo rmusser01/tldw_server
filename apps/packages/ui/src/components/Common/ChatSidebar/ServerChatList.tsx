@@ -268,7 +268,8 @@ export function ServerChatList({
 
   const { folderApiAvailable } = useFolderStore(
     (state) => ({
-      folderApiAvailable: state.folderApiAvailable
+      folderApiAvailable: state.serverDataScope?.requestScope === historyRequestScope &&
+        state.serverDataScope.isCurrent() ? state.folderApiAvailable : null
     }),
     shallow
   )
@@ -1827,6 +1828,7 @@ export function ServerChatList({
         {bulkFolderPickerOpen && managementAction.current?.isCurrent() && (
           <BulkFolderPickerModal
             open={bulkFolderPickerOpen}
+            operation={managementAction.current}
             conversationIds={selectedConversationIds}
             onClose={handleBulkFolderPickerClose}
             onSuccess={clearSelection}
@@ -1835,6 +1837,7 @@ export function ServerChatList({
         {bulkTagPickerOpen && managementAction.current?.isCurrent() && (
           <BulkTagPickerModal
             open={bulkTagPickerOpen}
+            operation={managementAction.current}
             conversationIds={selectedConversationIds}
             onClose={handleBulkTagPickerClose}
             onSuccess={clearSelection}

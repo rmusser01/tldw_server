@@ -509,7 +509,11 @@
     "deleteFailed": "Unable to move chats to trash.",
     "deletePartial": "Some chats could not be moved to trash.",
     "deleteSuccess": "Chats moved to trash.",
-    "localOnlyClosed": "{{count}} local chat(s) were closed."
+    "localOnlyClosed": "{{count}} local chat(s) were closed.",
+    "organizationLoadError": "Unable to load folders and tags for this account.",
+    "organizationRefreshRequired": "Refresh folders and tags for this account.",
+    "tagsApplyPartialError": "Some tags could not be created or applied. Your selection is kept so you can try again.",
+    "folderApplyPartialError": "Some chats could not be added to folders. Your selection is kept so you can try again."
   },
   "contextMenu": {
     "status": "Status"
@@ -824,5 +828,8 @@
     "resetPosition": "Reset position",
     "manage": "Manage Buddy & Persona",
     "detach": "Detach Buddy"
+  },
+  "folderPicker": {
+    "createError": "Unable to create the folder. Try again."
   }
 }

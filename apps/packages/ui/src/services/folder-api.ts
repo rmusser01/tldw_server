@@ -8,6 +8,7 @@
  * single-flight pattern to deduplicate concurrent identical requests.
  */
 
+import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { bgRequestClient } from "@/services/background-proxy"
 import type {
   AllowedPath,
@@ -39,6 +40,33 @@ export interface ApiResult<T> {
   status?: number
 }
 
+export type FolderRequestOptions = {
+  abortSignal?: AbortSignal
+  timeoutMs?: number
+  requestScope?: ServicePromptRequestScope
+}
+
+// Captured scope and cancellation lifetimes never join another account or a
+// canceled picker. Object identities keep credentials out of request keys.
+const requestLifetimeIds = new WeakMap<object, number>()
+let nextRequestLifetimeId = 0
+const requestLifetimeId = (value?: object): number | "-" => {
+  if (!value) return "-"
+  let id = requestLifetimeIds.get(value)
+  if (id === undefined) {
+    id = ++nextRequestLifetimeId
+    requestLifetimeIds.set(value, id)
+  }
+  return id
+}
+const scopedRequestKey = (key: string, options?: FolderRequestOptions): string =>
+  `${key} scope:${requestLifetimeId(options?.requestScope)} signal:${requestLifetimeId(options?.abortSignal)}`
+const requestOptions = (options?: FolderRequestOptions) => ({
+  abortSignal: options?.abortSignal,
+  timeoutMs: options?.timeoutMs,
+  ...requestScopeFields(options?.requestScope)
+})
+
 const inFlightRequests = new Map<string, Promise<ApiResult<unknown>>>()
 
 const normalizeArrayResponse = <T, K extends string>(
@@ -60,6 +88,41 @@ const normalizeArrayResponse = <T, K extends string>(
     ? ` keys=[${keys.slice(0, 8).join(', ')}${keys.length > 8 ? ', …' : ''}]`
     : ''
   throw new Error(`Unexpected response shape (expected array or { ${key}: [] }, got ${tag}${keysPart})`)
+}
+
+const ORGANIZATION_PAGE_SIZE = 1000
+
+// Complete the existing offset API before publishing a usable picker snapshot.
+// A later-page failure rejects the whole read; it is not an empty/full result.
+const readAllPages = async <T, K extends string>(
+  key: K,
+  read: (offset: number, limit: number) => Promise<unknown>,
+  signal?: AbortSignal
+): Promise<T[]> => {
+  const rows: T[] = []
+  let offset = 0
+  while (true) {
+    signal?.throwIfAborted()
+    const response = await read(offset, ORGANIZATION_PAGE_SIZE)
+    signal?.throwIfAborted()
+    const page = normalizeArrayResponse<T, K>(response as ArrayOrWrapped<T, K>, key)
+    rows.push(...page)
+    const metadata = response && typeof response === "object" && !Array.isArray(response)
+      ? response as Record<string, unknown> : {}
+    const pagination = metadata.pagination && typeof metadata.pagination === "object"
+      ? metadata.pagination as Record<string, unknown> : {}
+    const total = metadata.total ?? pagination.total
+    const hasMore = metadata.has_more ?? pagination.has_more
+    const next = metadata.next_offset ?? pagination.next_offset
+    const more = hasMore === true || (typeof total === "number" && offset + page.length < total) ||
+      (hasMore === undefined && total == null && page.length === ORGANIZATION_PAGE_SIZE)
+    if (!more) return rows
+    const nextOffset = typeof next === "number" ? next : offset + page.length
+    if (page.length === 0 || !Number.isSafeInteger(nextOffset) || nextOffset <= offset) {
+      throw new Error("Incomplete folder/tag page sequence; refresh and try again.")
+    }
+    offset = nextOffset
+  }
 }
 
 const buildRequestKey = (method: string, path: string, body?: unknown): string => {
@@ -183,17 +246,13 @@ const singleFlight = async <T>(
  * Fetch all folders from server
  */
 export const fetchFolders = async (
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<Folder[]>> => {
   const path = '/api/v1/notes/collections' as ClientPathOrUrlWithQuery
-  const key = buildRequestKey('GET', path)
-  return singleFlight<Folder[]>(key, async () => {
-    const response = await foldersClient.list<ArrayOrWrapped<Folder, "collections">>(
-      undefined,
-      options
-    )
-    return normalizeArrayResponse(response, "collections")
-  })
+  const key = scopedRequestKey(buildRequestKey('GET', path), options)
+  return singleFlight<Folder[]>(key, () => readAllPages<Folder, "collections">(
+    "collections", (offset, limit) => foldersClient.list({ offset, limit }, requestOptions(options)), options?.abortSignal
+  ))
 }
 
 /**
@@ -202,13 +261,13 @@ export const fetchFolders = async (
 export const createFolder = async (
   name: string,
   parentId?: number | null,
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<Folder>> => {
   const path = '/api/v1/notes/collections' as ClientPathOrUrlWithQuery
   const body = { name, parent_id: parentId ?? null }
-  const key = buildRequestKey('POST', path, body)
+  const key = scopedRequestKey(buildRequestKey('POST', path, body), options)
   return singleFlight<Folder>(key, async () => {
-    return foldersClient.create<Folder>(body, options)
+    return foldersClient.create<Folder>(body, requestOptions(options))
   })
 }
 
@@ -218,12 +277,12 @@ export const createFolder = async (
 export const updateFolder = async (
   id: number,
   data: { name?: string; parent_id?: number | null },
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<Folder>> => {
   const path = `/api/v1/notes/collections/${id}` as ClientPathOrUrlWithQuery
-  const key = buildRequestKey('PATCH', path, data)
+  const key = scopedRequestKey(buildRequestKey('PATCH', path, data), options)
   return singleFlight<Folder>(key, async () => {
-    return foldersClient.update<Folder>(id, data, options)
+    return foldersClient.update<Folder>(id, data, requestOptions(options))
   })
 }
 
@@ -232,12 +291,12 @@ export const updateFolder = async (
  */
 export const deleteFolder = async (
   id: number,
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<void>> => {
   const path = `/api/v1/notes/collections/${id}` as ClientPathOrUrlWithQuery
-  const key = buildRequestKey('DELETE', path)
+  const key = scopedRequestKey(buildRequestKey('DELETE', path), options)
   return singleFlight<void>(key, async () => {
-    await foldersClient.remove<void>(id, undefined, options)
+    await foldersClient.remove<void>(id, undefined, requestOptions(options))
   })
 }
 
@@ -249,17 +308,13 @@ export const deleteFolder = async (
  * Fetch all keywords from server
  */
 export const fetchKeywords = async (
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<Keyword[]>> => {
   const path = '/api/v1/notes/keywords' as ClientPathOrUrlWithQuery
-  const key = buildRequestKey('GET', path)
-  return singleFlight<Keyword[]>(key, async () => {
-    const response = await keywordsClient.list<ArrayOrWrapped<Keyword, "keywords">>(
-      undefined,
-      options
-    )
-    return normalizeArrayResponse(response, "keywords")
-  })
+  const key = scopedRequestKey(buildRequestKey('GET', path), options)
+  return singleFlight<Keyword[]>(key, () => readAllPages<Keyword, "keywords">(
+    "keywords", (offset, limit) => keywordsClient.list({ offset, limit }, requestOptions(options)), options?.abortSignal
+  ))
 }
 
 /**
@@ -267,13 +322,13 @@ export const fetchKeywords = async (
  */
 export const createKeyword = async (
   keyword: string,
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<Keyword>> => {
   const path = '/api/v1/notes/keywords' as ClientPathOrUrlWithQuery
   const body = { keyword }
-  const key = buildRequestKey('POST', path, body)
+  const key = scopedRequestKey(buildRequestKey('POST', path, body), options)
   return singleFlight<Keyword>(key, async () => {
-    return keywordsClient.create<Keyword>(body, options)
+    return keywordsClient.create<Keyword>(body, requestOptions(options))
   })
 }
 
@@ -282,12 +337,12 @@ export const createKeyword = async (
  */
 export const deleteKeyword = async (
   id: number,
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<void>> => {
   const path = `/api/v1/notes/keywords/${id}` as ClientPathOrUrlWithQuery
-  const key = buildRequestKey('DELETE', path)
+  const key = scopedRequestKey(buildRequestKey('DELETE', path), options)
   return singleFlight<void>(key, async () => {
-    await keywordsClient.remove<void>(id, undefined, options)
+    await keywordsClient.remove<void>(id, undefined, requestOptions(options))
   })
 }
 
@@ -301,16 +356,15 @@ export const deleteKeyword = async (
 export const linkKeywordToFolder = async (
   folderId: number,
   keywordId: number,
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<void>> => {
   const path = `/api/v1/notes/collections/${folderId}/keywords/${keywordId}` as ClientPathOrUrlWithQuery
-  const key = buildRequestKey('POST', path)
+  const key = scopedRequestKey(buildRequestKey('POST', path), options)
   return singleFlight<void>(key, async () => {
     await bgRequestClient({
       path,
       method: 'POST',
-      abortSignal: options?.abortSignal,
-      timeoutMs: options?.timeoutMs
+      ...requestOptions(options)
     })
   })
 }
@@ -321,16 +375,15 @@ export const linkKeywordToFolder = async (
 export const unlinkKeywordFromFolder = async (
   folderId: number,
   keywordId: number,
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<void>> => {
   const path = `/api/v1/notes/collections/${folderId}/keywords/${keywordId}` as ClientPathOrUrlWithQuery
-  const key = buildRequestKey('DELETE', path)
+  const key = scopedRequestKey(buildRequestKey('DELETE', path), options)
   return singleFlight<void>(key, async () => {
     await bgRequestClient({
       path,
       method: 'DELETE',
-      abortSignal: options?.abortSignal,
-      timeoutMs: options?.timeoutMs
+      ...requestOptions(options)
     })
   })
 }
@@ -340,16 +393,15 @@ export const unlinkKeywordFromFolder = async (
  */
 export const getKeywordsForFolder = async (
   folderId: number,
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<Keyword[]>> => {
   const path = `/api/v1/notes/collections/${folderId}/keywords` as ClientPathOrUrlWithQuery
-  const key = buildRequestKey('GET', path)
+  const key = scopedRequestKey(buildRequestKey('GET', path), options)
   return singleFlight<Keyword[]>(key, async () => {
     const response = await bgRequestClient<ArrayOrWrapped<Keyword, "keywords">>({
       path,
       method: 'GET',
-      abortSignal: options?.abortSignal,
-      timeoutMs: options?.timeoutMs
+      ...requestOptions(options)
     })
     return normalizeArrayResponse(response, "keywords")
   })
@@ -365,17 +417,16 @@ export const getKeywordsForFolder = async (
 export const linkKeywordToConversation = async (
   conversationId: string,
   keywordId: number,
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<void>> => {
   const cid = encodeURIComponent(conversationId)
   const path = `/api/v1/notes/conversations/${cid}/keywords/${keywordId}` as ClientPathOrUrlWithQuery
-  const key = buildRequestKey('POST', path)
+  const key = scopedRequestKey(buildRequestKey('POST', path), options)
   return singleFlight<void>(key, async () => {
     await bgRequestClient({
       path,
       method: 'POST',
-      abortSignal: options?.abortSignal,
-      timeoutMs: options?.timeoutMs
+      ...requestOptions(options)
     })
   })
 }
@@ -386,17 +437,16 @@ export const linkKeywordToConversation = async (
 export const unlinkKeywordFromConversation = async (
   conversationId: string,
   keywordId: number,
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<void>> => {
   const cid = encodeURIComponent(conversationId)
   const path = `/api/v1/notes/conversations/${cid}/keywords/${keywordId}` as ClientPathOrUrlWithQuery
-  const key = buildRequestKey('DELETE', path)
+  const key = scopedRequestKey(buildRequestKey('DELETE', path), options)
   return singleFlight<void>(key, async () => {
     await bgRequestClient({
       path,
       method: 'DELETE',
-      abortSignal: options?.abortSignal,
-      timeoutMs: options?.timeoutMs
+      ...requestOptions(options)
     })
   })
 }
@@ -406,17 +456,16 @@ export const unlinkKeywordFromConversation = async (
  */
 export const getKeywordsForConversation = async (
   conversationId: string,
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<Keyword[]>> => {
   const cid = encodeURIComponent(conversationId)
   const path = `/api/v1/notes/conversations/${cid}/keywords` as ClientPathOrUrlWithQuery
-  const key = buildRequestKey('GET', path)
+  const key = scopedRequestKey(buildRequestKey('GET', path), options)
   return singleFlight<Keyword[]>(key, async () => {
     const response = await bgRequestClient<ArrayOrWrapped<Keyword, "keywords">>({
       path,
       method: 'GET',
-      abortSignal: options?.abortSignal,
-      timeoutMs: options?.timeoutMs
+      ...requestOptions(options)
     })
     return normalizeArrayResponse(response, "keywords")
   })
@@ -430,18 +479,22 @@ export const getKeywordsForConversation = async (
  * Fetch all folder-keyword links (for building the tree)
  */
 export const fetchFolderKeywordLinks = async (
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<FolderKeywordLink[]>> => {
   const path = '/api/v1/notes/collections/keyword-links' as ClientPathOrUrlWithQuery
-  const key = buildRequestKey('GET', path)
+  const key = scopedRequestKey(buildRequestKey('GET', path), options)
   return singleFlight<FolderKeywordLink[]>(key, async () => {
-    const response = await bgRequestClient<ArrayOrWrapped<FolderKeywordLink, "links">>({
-      path,
-      method: 'GET',
-      abortSignal: options?.abortSignal,
-      timeoutMs: options?.timeoutMs
+    const links = await readAllPages<{ collection_id: number; keyword_id: number }, "links">(
+      "links", (offset, limit) => bgRequestClient({
+        path: `${path}${buildQuery({ offset, limit })}` as ClientPathOrUrlWithQuery,
+        method: 'GET', ...requestOptions(options)
+      }), options?.abortSignal)
+    return links.map((link) => {
+      if (!Number.isSafeInteger(link.collection_id) || !Number.isSafeInteger(link.keyword_id)) {
+        throw new Error("Invalid collection-keyword link response.")
+      }
+      return { folder_id: link.collection_id, keyword_id: link.keyword_id }
     })
-    return normalizeArrayResponse(response, "links")
   })
 }
 
@@ -450,21 +503,15 @@ export const fetchFolderKeywordLinks = async (
  */
 export const fetchConversationKeywordLinks = async (
   conversationIds?: string[],
-  options?: { abortSignal?: AbortSignal; timeoutMs?: number }
+  options?: FolderRequestOptions
 ): Promise<ApiResult<ConversationKeywordLink[]>> => {
-  const query = conversationIds?.length
-    ? buildQuery({ ids: conversationIds }, { arrayFormat: "comma" })
-    : ""
-  const path = `/api/v1/notes/conversations/keyword-links${query}` as ClientPathOrUrlWithQuery
-
-  const key = buildRequestKey('GET', path)
-  return singleFlight<ConversationKeywordLink[]>(key, async () => {
-    const response = await bgRequestClient<ArrayOrWrapped<ConversationKeywordLink, "links">>({
-      path,
-      method: 'GET',
-      abortSignal: options?.abortSignal,
-      timeoutMs: options?.timeoutMs
-    })
-    return normalizeArrayResponse(response, "links")
-  })
+  const ids = conversationIds?.length ? conversationIds : undefined
+  const path = `/api/v1/notes/conversations/keyword-links${buildQuery({ ids }, { arrayFormat: "comma" })}` as ClientPathOrUrlWithQuery
+  const key = scopedRequestKey(buildRequestKey('GET', path), options)
+  return singleFlight<ConversationKeywordLink[]>(key, () => readAllPages<ConversationKeywordLink, "links">(
+    "links", (offset, limit) => bgRequestClient({
+      path: `/api/v1/notes/conversations/keyword-links${buildQuery({ ids, offset, limit }, { arrayFormat: "comma" })}` as ClientPathOrUrlWithQuery,
+      method: 'GET', ...requestOptions(options)
+    }), options?.abortSignal
+  ))
 }
