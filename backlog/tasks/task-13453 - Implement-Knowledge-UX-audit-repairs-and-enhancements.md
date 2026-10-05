@@ -26,6 +26,7 @@ Implement the user-approved K01-K15 repairs and five enhancement themes from Doc
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 User approved the audited solutions and both default choices on 2026-10-04. Work happens in the attached isolated checkout; original dirty checkout is untouched. ADR check: no new ownership or public-API rule; ADR-007 canonical ResearchWorkspace, ADR-008 split persistence and source lineage, and ADR-053 mixed-source retrieval govern. Reuse existing ingestion for non-media evidence snapshots and existing shared UI on both surfaces. Reassess ADR scope only if those existing contracts cannot express a required repair.
 Approved design: Docs/Design/2026-10-04-knowledge-ux-remediation.md. Four-unit execution plan: IMPLEMENTATION_PLAN_knowledge_ux_remediation_20261004.md. All implementation is based on 75ab224081bf140ef52017c1a9b0a04f6878d488 plus the committed audit. Sequential implementation and independent task reviews; no new packages or public API.
+Final latest-dev refresh encountered upstream active TASK-13452 for cached chat settings, colliding with this already-completed historical Knowledge audit. Archived only our completed audit through official backlog CLI before refresh; its full record and Docs/Reviews/KNOWLEDGE_NNG_UX_REVIEW_2026_10_04.md remain retained. Implementation tracking stays TASK-13453 and four children; upstream task is untouched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
