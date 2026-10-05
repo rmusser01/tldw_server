@@ -190,6 +190,14 @@ mixed legacy matrix, preserve the production path guard and record conclusive
 group results under pytest's trusted temp root; never weaken storage validation
 to make evidence paths prettier.
 
+**Follow-up incident (TASK-13423, 2026-10-04):** A shared database/startup
+integration run passed 77 cases but produced five Persona fixture setup errors
+after its launcher placed basetemp under `/private/tmp`. The database guard
+correctly rejected that path. Rerunning only those same five cases beneath the
+macOS system temporary root passed all five without source or assertion changes.
+The original 82-case report and the exact five-case retry remain separately
+attributed in `/private/tmp/buddy-pr3091-claims-integration-20261004.json`.
+
 ## Security report formatters can fail on deliberate invalid-Unicode fixtures
 
 **Incident (TASK-13173, 2026-09-05):** Bandit's text and JSON report writers both
