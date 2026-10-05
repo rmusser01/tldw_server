@@ -616,3 +616,35 @@ describe("isRecoverableServerChatHistoryError", () => {
     ).toBe(false)
   })
 })
+
+
+describe("exact character filter and scoped cache", () => {
+  it("forwards character ID, paged offset and verified workspace/account scope together", async () => {
+    listChatsWithMetaMock.mockResolvedValueOnce({ chats: [createChat(26, { character_id: 7 })], total: 60 })
+    const owner = { key: "account-A", requestScope: { userId: "A", config: { serverUrl: "https://chat.test", authMode: "multi-user" as const } }, isCurrent: () => true }
+    const { queryClient, wrapper } = createWrapper()
+    const { result } = renderHook(() => useServerChatHistory("", {
+      characterId: 7, filterMode: "character", page: 2, limit: 25, owner,
+      scope: { type: "workspace", workspaceId: "workspace-A" }
+    }), { wrapper })
+    await waitFor(() => expect(result.current.data.map(row => row.id)).toEqual(["chat-26"]))
+    expect(listChatsWithMetaMock).toHaveBeenCalledWith(expect.objectContaining({ character_id: 7, character_scope: "character", offset: 25, limit: 25 }),
+      expect.objectContaining({ requestScope: owner.requestScope, scope: { type: "workspace", workspaceId: "workspace-A" } }))
+    queryClient.clear()
+  })
+
+  it("isolates exact character search results in distinct query keys", async () => {
+    searchConversationsWithMetaMock.mockResolvedValueOnce({ chats: [createChat(7, { title: "Campfire", character_id: 7 })], total: 1 })
+      .mockResolvedValueOnce({ chats: [createChat(9, { title: "Campfire", character_id: 9 })], total: 1 })
+    const { queryClient, wrapper } = createWrapper()
+    const { result, rerender } = renderHook(({ characterId }) => useServerChatHistory("campfire", {
+      mode: "search", filterMode: "character", characterId, page: 1, limit: 25
+    }), { wrapper, initialProps: { characterId: 7 } })
+    await waitFor(() => expect(result.current.data.map(row => row.id)).toEqual(["chat-7"]))
+    rerender({ characterId: 9 })
+    await waitFor(() => expect(result.current.data.map(row => row.id)).toEqual(["chat-9"]))
+    expect(searchConversationsWithMetaMock).toHaveBeenLastCalledWith(expect.objectContaining({ query: "campfire", character_id: 9 }), expect.anything())
+    expect(queryClient.getQueryCache().getAll()).toHaveLength(2)
+    queryClient.clear()
+  })
+})

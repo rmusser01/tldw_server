@@ -7,7 +7,7 @@ import { isServicePromptScopeUnresolvedError, resolveServicePromptScope } from "
 import type { ServicePromptScope } from "@/services/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
-type DraftOwner = { key: string; serverScopeKey: string }
+type DraftOwner = { key: string; serverScopeKey: string; requestScope: ServicePromptScope }
 
 /** The same credential-free locator is used by composer records and session handles. */
 export const chatDraftOwnerKey = (scope: Pick<ServicePromptScope, "config" | "userId">) =>
@@ -21,6 +21,9 @@ export const chatDraftOwnerKey = (scope: Pick<ServicePromptScope, "config" | "us
 export const useChatDraftOwner = (clearComposer: () => void) => {
   const [owner, setOwner] = React.useState<DraftOwner | null>(null)
   const currentOwner = React.useRef<DraftOwner | null>(null)
+  const [verificationState, setVerificationState] = React.useState<"pending" | "ready" | "error">("pending")
+  const retryRef = React.useRef<(() => void) | null>(null)
+  const retryVerification = React.useCallback(() => retryRef.current?.(), [])
   const clearRef = React.useRef(clearComposer)
   React.useLayoutEffect(() => { clearRef.current = clearComposer }, [clearComposer])
 
@@ -35,15 +38,17 @@ export const useChatDraftOwner = (clearComposer: () => void) => {
     const resolve = async (invalidated = false) => {
       const check = ++generation
       if (invalidated) clear()
+      if (!currentOwner.current) setVerificationState("pending")
       try {
         const scope = await resolveServicePromptScope()
         if (!mounted || check !== generation) return
         // Include the full server identity and auth source; never put credentials in storage keys.
+        setVerificationState("ready")
         const key = chatDraftOwnerKey(scope)
         const serverScopeKey = serverChatMirrorOwnerKey({ requestScope: scope })
         if (currentOwner.current?.key === key && currentOwner.current.serverScopeKey === serverScopeKey) return
         if (currentOwner.current) clear()
-        const nextOwner = { key, serverScopeKey }
+        const nextOwner = { key, serverScopeKey, requestScope: scope }
         currentOwner.current = nextOwner
         setOwner(nextOwner)
       } catch (error) {
@@ -52,11 +57,15 @@ export const useChatDraftOwner = (clearComposer: () => void) => {
         const authorityLost = isServicePromptScopeUnresolvedError(error) ||
           isRequestConfigScopeChangedError(error) ||
           (error && typeof error === "object" && (error as { status?: unknown }).status === 401)
-        if (mounted && check === generation && currentOwner.current && authorityLost) clear()
+        if (mounted && check === generation) {
+          if (currentOwner.current && authorityLost) clear()
+          setVerificationState(currentOwner.current ? "ready" : "error")
+        }
       }
     }
     const stop = watchChatAccountChanges((invalidated) => { void resolve(invalidated) })
     const revalidate = () => { void resolve() }
+    retryRef.current = revalidate
     window.addEventListener("focus", revalidate)
     window.addEventListener("pageshow", revalidate)
     void resolve()
@@ -64,6 +73,7 @@ export const useChatDraftOwner = (clearComposer: () => void) => {
       mounted = false
       generation++
       currentOwner.current = null
+      retryRef.current = null
       stop()
       window.removeEventListener("focus", revalidate)
       window.removeEventListener("pageshow", revalidate)
@@ -74,5 +84,5 @@ export const useChatDraftOwner = (clearComposer: () => void) => {
     () => owner !== null && currentOwner.current === owner,
     [owner]
   )
-  return { ownerKey: owner?.key ?? null, serverScopeKey: owner?.serverScopeKey ?? null, isCurrent }
+  return { ownerKey: owner?.key ?? null, serverScopeKey: owner?.serverScopeKey ?? null, requestScope: owner?.requestScope ?? null, isCurrent, verificationState, retryVerification }
 }

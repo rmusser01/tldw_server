@@ -3781,5 +3781,155 @@
   },
   "composer_persistence_historyControl": {
     "message": "Chat history"
+  },
+  "characterChatSessions_regionLabel": {
+    "message": "Character chat sessions"
+  },
+  "characterChatSessions_label": {
+    "message": "Character sessions"
+  },
+  "characterChatSessions_title": {
+    "message": "Character conversations"
+  },
+  "characterChatSessions_resumeTitle": {
+    "message": "Resume role-play"
+  },
+  "characterChatSessions_resumeDetail": {
+    "message": "Recent character conversations stay separate from saved role-play setups."
+  },
+  "characterChatSessions_characterFallback": {
+    "message": "Character {{id}}"
+  },
+  "characterChatSessions_untitled": {
+    "message": "Untitled character chat"
+  },
+  "characterChatSessions_saved": {
+    "message": "Saved"
+  },
+  "characterChatSessions_messageCount": {
+    "message": "{{count}} messages"
+  },
+  "characterChatSessions_messageCount_one": {
+    "message": "{{count}} message"
+  },
+  "characterChatSessions_messageCount_other": {
+    "message": "{{count}} messages"
+  },
+  "characterChatSessions_current": {
+    "message": "Current"
+  },
+  "characterChatSessions_resume": {
+    "message": "Resume"
+  },
+  "characterChatSessions_currentSessionAction": {
+    "message": "Current {{title}}"
+  },
+  "characterChatSessions_resumeSessionAction": {
+    "message": "Resume {{title}}"
+  },
+  "characterChatSessions_resumeLast": {
+    "message": "Resume last character chat"
+  },
+  "characterChatSessions_resumeLastAction": {
+    "message": "Resume last character chat: {{title}}"
+  },
+  "characterChatSessions_currentCharacterListLabel": {
+    "message": "Recent sessions for {{name}}"
+  },
+  "characterChatSessions_allCharacterListLabel": {
+    "message": "All sessions for {{name}}"
+  },
+  "characterChatSessions_currentCharacterFallbackLabel": {
+    "message": "Recent character sessions"
+  },
+  "characterChatSessions_otherCharactersListLabel": {
+    "message": "Other character sessions"
+  },
+  "characterChatSessions_loading": {
+    "message": "Loading character sessions..."
+  },
+  "characterChatSessions_refreshFailed": {
+    "message": "Unable to refresh character sessions right now."
+  },
+  "characterChatSessions_loadFailed": {
+    "message": "Character sessions could not be loaded."
+  },
+  "characterChatSessions_stale": {
+    "message": "Showing character sessions from the last successful refresh."
+  },
+  "characterChatSessions_offlineCached": {
+    "message": "Reconnect to load or resume character sessions. Showing the last loaded page."
+  },
+  "characterChatSessions_unavailable": {
+    "message": "Connect to your server to view character sessions."
+  },
+  "characterChatSessions_localCard": {
+    "message": "Server sessions are available for characters saved on this server."
+  },
+  "characterChatSessions_retry": {
+    "message": "Retry character sessions"
+  },
+  "characterChatSessions_otherEmpty": {
+    "message": "No other characters in this recent sample."
+  },
+  "characterChatSessions_pageEmpty": {
+    "message": "No sessions on this page. Return to the previous page to see earlier results."
+  },
+  "characterChatSessions_characterEmpty": {
+    "message": "No conversations with this character yet."
+  },
+  "characterChatSessions_empty": {
+    "message": "No character conversations yet."
+  },
+  "characterChatSessions_unverified": {
+    "message": "Some sessions in this page could not be verified for this character. Retry to refresh."
+  },
+  "characterChatSessions_backToRecent": {
+    "message": "Back to recent sessions"
+  },
+  "characterChatSessions_allSessions": {
+    "message": "All sessions for this character"
+  },
+  "characterChatSessions_allCharacters": {
+    "message": "All character sessions"
+  },
+  "characterChatSessions_pagination": {
+    "message": "Character sessions pages"
+  },
+  "characterChatSessions_previousPage": {
+    "message": "Previous sessions page"
+  },
+  "characterChatSessions_nextPage": {
+    "message": "Next sessions page"
+  },
+  "characterChatSessions_previous": {
+    "message": "Previous"
+  },
+  "characterChatSessions_next": {
+    "message": "Next"
+  },
+  "characterChatSessions_page": {
+    "message": "Page {{page}}"
+  },
+  "characterChatSessions_otherRecents": {
+    "message": "Recent chats with other characters"
+  },
+  "characterChatSessions_otherSample": {
+    "message": "A sample from the {{count}} most recent character chats; older chats may not appear here."
+  },
+  "characterChatSessions_verifyingAccount": {
+    "message": "Verifying your server account..."
+  },
+  "characterChatSessions_verificationFailed": {
+    "message": "Could not verify your server account. Retry or check your connection settings."
+  },
+  "characterChatSessions_retryVerification": {
+    "message": "Retry account verification"
+  },
+  "characterChatSessions_titleReference": {
+    "message": "{{title}}, session {{id}}"
+  },
+  "characterChatSessions_sessionReference": {
+    "message": "Session {{id}}"
   }
 }
