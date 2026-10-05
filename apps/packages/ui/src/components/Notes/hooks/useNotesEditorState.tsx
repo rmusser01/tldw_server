@@ -188,10 +188,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [title, setTitle] = React.useState('')
   const [content, setContent] = React.useState('')
   const setEditorTitle = React.useCallback((value: React.SetStateAction<string>) => {
-    if (pendingSelectionEpochRef.current == null) setTitle(value)
+    if (pendingSelectionEpochRef.current == null || selectedIdRef.current == null) {
+      setTitle(value)
+    }
   }, [])
   const setEditorContent = React.useCallback((value: React.SetStateAction<string>) => {
-    if (pendingSelectionEpochRef.current == null) setContent(value)
+    if (pendingSelectionEpochRef.current == null || selectedIdRef.current == null) {
+      setContent(value)
+    }
   }, [])
   const [loadingDetail, setLoadingDetail] = useNotesAuthorityState(authorityScope, false)
   const [saving, setSaving] = React.useState(false)
@@ -476,7 +480,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         provenance?: 'manual' | NotesAssistAction
       }
     ) => {
-      if (pendingSelectionEpochRef.current != null) return
+      // Freeze an existing note during a switch; preserve edits to a new draft.
+      if (pendingSelectionEpochRef.current != null && selectedIdRef.current != null) {
+        return
+      }
       contentRef.current = nextContent
       setContent(nextContent)
       setIsDirty(true)
@@ -1266,6 +1273,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           setSaveRecoveryNotice(null)
           setRemoteVersionInfo(null)
           if (created?.id != null) {
+            // Hydration can start before React commits the acknowledged identity.
+            selectedIdRef.current = created.id
             setSelectedId(created.id)
             acknowledgeOfflineDraft(created.id, createdVersion)
           }

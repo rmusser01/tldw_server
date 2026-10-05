@@ -227,12 +227,16 @@ describe('Notes saved-state hydration and optional monitoring', () => {
     act(() => {
       loading = view.result.current.loadDetail('one')
     })
-    act(() => view.result.current.setContentDirty('Typed during load'))
+    act(() => {
+      view.result.current.setContentDirty('Typed during load')
+      view.result.current.setTitle('Title typed during load')
+    })
     await act(async () => {
       pending.resolve(note())
       await loading
     })
     expect(view.result.current.content).toBe('Typed during load')
+    expect(view.result.current.title).toBe('Title typed during load')
     expect(view.result.current.saveIndicator).toBe('dirty')
   })
 

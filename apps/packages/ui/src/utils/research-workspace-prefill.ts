@@ -7,6 +7,13 @@ import type { WorkspaceSourceType } from "@/types/workspace"
 
 const PREFILL_KEY = "__tldw_research_workspace_prefill"
 const storage = createSafeStorage({ area: "local" })
+let pendingPrefillWrite: Promise<void> = Promise.resolve()
+// Keep readiness checkpoints ordered across receiver unmount/remount and new handoffs.
+const persistPrefill = (write: () => Promise<void>): Promise<void> => {
+  const next = pendingPrefillWrite.catch(() => {}).then(write)
+  pendingPrefillWrite = next
+  return next
+}
 
 type KnowledgeQaResultLike = {
   id?: string
@@ -47,6 +54,10 @@ export type ResearchWorkspacePrefill = {
   workspaceId?: string
   draftRetained?: boolean
   completed?: boolean
+  selectionIntent?: {
+    mediaIds: number[]
+    selectedSourceIds: string[]
+  } | null
   answerTrustState?: string | null
   answerEvidenceOrigin?: string | null
   answerTrustReasonCodes?: string[]
@@ -252,7 +263,10 @@ export const queueResearchWorkspacePrefill = async (
     const owner = await getResearchWorkspaceOwner()
     if (invalidated || (expectedOwner && owner !== expectedOwner))
       throw new Error("Account changed. Try again.")
-    await storage.set(prefillKey(owner), { ...payload, ownerScope: owner })
+    await persistPrefill(async () => {
+      if (invalidated) throw new Error("Account changed. Try again.")
+      await storage.set(prefillKey(owner), { ...payload, ownerScope: owner })
+    })
     if (invalidated) throw new Error("Account changed. Try again.")
   } finally {
     stop()
@@ -262,12 +276,16 @@ export const queueResearchWorkspacePrefill = async (
 /** Read without deleting: progress remains available after failures or navigation. */
 export const consumeResearchWorkspacePrefill = async (
   owner?: string,
+  includeSelectionIntent = false,
 ): Promise<ResearchWorkspacePrefill | null> => {
+  // Writes report failures to their callers; a later read may still recover evidence.
+  await pendingPrefillWrite.catch(() => {})
   const expectedOwner = owner ?? (await getResearchWorkspaceOwner())
   const payload = await storage.get<ResearchWorkspacePrefill | null>(
     prefillKey(expectedOwner),
   )
-  return payload?.ownerScope === expectedOwner && !payload.completed
+  return payload?.ownerScope === expectedOwner &&
+    (!payload.completed || (includeSelectionIntent && payload.selectionIntent))
     ? payload
     : null
 }
@@ -277,12 +295,16 @@ export const saveResearchWorkspacePrefill = async (
 ): Promise<void> => {
   assertPersistentStorage()
   if (!payload.ownerScope) throw new Error("Missing import owner")
-  const current = await storage.get<ResearchWorkspacePrefill | null>(
-    prefillKey(payload.ownerScope),
-  )
-  if (current && current.id !== payload.id)
-    throw new Error("A newer Knowledge handoff is waiting.")
-  await storage.set(prefillKey(payload.ownerScope), payload)
+  const owner = payload.ownerScope
+  const checkpoint = structuredClone(payload)
+  await persistPrefill(async () => {
+    const current = await storage.get<ResearchWorkspacePrefill | null>(
+      prefillKey(owner),
+    )
+    if (current && current.id !== checkpoint.id)
+      throw new Error("A newer Knowledge handoff is waiting.")
+    await storage.set(prefillKey(owner), checkpoint)
+  })
 }
 
 const truncate = (value: string, max: number): string =>

@@ -144,12 +144,24 @@ beforeEach(() => {
     workspaceId: "workspace-a",
     sources: [],
     selectedSourceIds: [],
+    selectedSourceFolderIds: [],
+    sourceFolders: [],
+    sourceFolderMemberships: [],
+    savedWorkspaces: [],
+    workspaceSnapshots: {},
     currentNote: { title: "", content: "", keywords: [], isDirty: false },
     storeHydrated: true,
   })
 })
+const selectUnrelatedFolder = (sourceId: string) => {
+  const state = useWorkspaceStore.getState()
+  const folder = state.createSourceFolder("Unrelated folder")
+  state.assignSourceToFolders(sourceId, [folder.id])
+  state.toggleSourceFolderSelection(folder.id)
+  return folder.id
+}
 describe("mounted Knowledge research import", () => {
-  it.each([false, true])(
+  it.each([false, true, "folder"])(
     "selects a note-only snapshot through actual workspace readiness polling unless selection changes (%s)",
     async (manuallySelected) => {
       useWorkspaceStore
@@ -183,7 +195,8 @@ describe("mounted Knowledge research import", () => {
       expect(useWorkspaceStore.getState().selectedSourceIds).toEqual([])
       if (manuallySelected)
         await act(async () => {
-          useWorkspaceStore.getState().setSelectedSourceIds([unrelatedId])
+          if (manuallySelected === "folder") selectUnrelatedFolder(unrelatedId)
+          else useWorkspaceStore.getState().setSelectedSourceIds([unrelatedId])
         })
       await act(async () => {
         finish({
@@ -198,15 +211,109 @@ describe("mounted Knowledge research import", () => {
             .sources.find((source) => source.mediaId === 101)?.status,
         ).toBe("ready"),
       )
-      const state = useWorkspaceStore.getState()
       expect(
-        state.sources
-          .filter((source) => state.selectedSourceIds.includes(source.id))
-          .map((source) => source.mediaId),
+        useWorkspaceStore.getState().getEffectiveSelectedMediaIds(),
       ).toEqual(manuallySelected ? [50] : [101])
       view.unmount()
     },
   )
+  it.each(["none", "direct", "folder"])(
+    "resumes durable readiness after full workspace remount, preserving %s choices",
+    async (choice) => {
+      useWorkspaceStore
+        .getState()
+        .addSources([{ mediaId: 50, title: "Unrelated", type: "text" }])
+      const unrelatedId = useWorkspaceStore.getState().sources[0].id
+      const handoff = payload()
+      handoff.sources = handoff.sources.filter(
+        (source) => source.sourceType === "notes",
+      )
+      await queueResearchWorkspacePrefill(handoff, "alice")
+      mocks.upload.mockResolvedValue({ media_id: 101 })
+      mocks.details.mockImplementation(() => new Promise(() => {}))
+      const first = render(<ResearchWorkspace />)
+      await waitFor(async () =>
+        expect(await consumeResearchWorkspacePrefill("alice")).toBeNull(),
+      )
+      await waitFor(() => expect(mocks.details).toHaveBeenCalled())
+      const draft = useWorkspaceStore.getState().currentNote.content
+      first.unmount()
+      await useWorkspaceStore.persist.rehydrate()
+      if (choice === "direct")
+        useWorkspaceStore.getState().setSelectedSourceIds([unrelatedId])
+      if (choice === "folder") selectUnrelatedFolder(unrelatedId)
+      let finish!: (value: unknown) => void
+      mocks.details.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve
+          }),
+      )
+      const second = render(<ResearchWorkspace />)
+      await waitFor(() => expect(finish).toBeTypeOf("function"))
+      await act(async () => {
+        finish({
+          content: { text: "First excerpt" },
+          vector_processing_status: "completed",
+        })
+      })
+      await waitFor(() =>
+        expect(
+          useWorkspaceStore
+            .getState()
+            .sources.find((source) => source.mediaId === 101)?.status,
+        ).toBe("ready"),
+      )
+      expect(
+        useWorkspaceStore.getState().getEffectiveSelectedMediaIds(),
+      ).toEqual(choice === "none" ? [101] : [50])
+      expect(mocks.upload).toHaveBeenCalledTimes(1)
+      expect(useWorkspaceStore.getState().currentNote.content).toBe(draft)
+      second.unmount()
+    },
+  )
+  it("does not replay completed cached imports after same-hook workspace switching", async () => {
+    useWorkspaceStore
+      .getState()
+      .addSources([{ mediaId: 50, title: "Unrelated", type: "text" }])
+    const unrelatedId = useWorkspaceStore.getState().sources[0].id
+    const handoff = payload()
+    handoff.sources = handoff.sources.filter((source) => source.mediaId === 7)
+    await queueResearchWorkspacePrefill(handoff, "alice")
+    const view = renderHook(() =>
+      useResearchWorkspacePrefill(
+        useWorkspaceStore((state) => state.workspaceId),
+        true,
+      ),
+    )
+    await waitFor(async () =>
+      expect(await consumeResearchWorkspacePrefill("alice")).toBeNull(),
+    )
+    const draft = useWorkspaceStore.getState().currentNote.content
+    act(() => {
+      const state = useWorkspaceStore.getState()
+      state.removeSource(
+        state.sources.find((source) => source.mediaId === 7)!.id,
+      )
+      state.setSelectedSourceIds([unrelatedId])
+      state.createNewWorkspace("Workspace B")
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    act(() => useWorkspaceStore.getState().switchWorkspace("workspace-a"))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(
+      useWorkspaceStore.getState().sources.map((source) => source.mediaId),
+    ).toEqual([50])
+    expect(useWorkspaceStore.getState().getEffectiveSelectedMediaIds()).toEqual(
+      [50],
+    )
+    expect(useWorkspaceStore.getState().currentNote.content).toBe(draft)
+    view.unmount()
+  })
   it("replaces unrelated active sources with the transferred set through partial retry", async () => {
     const state = useWorkspaceStore.getState()
     state.addSources([
@@ -214,13 +321,10 @@ describe("mounted Knowledge research import", () => {
     ])
     const unrelatedId = useWorkspaceStore.getState().sources[0].id
     state.setSelectedSourceIds([unrelatedId])
+    selectUnrelatedFolder(unrelatedId)
     state.captureToCurrentNote({ content: "Existing draft", mode: "append" })
-    const selectedMediaIds = () => {
-      const current = useWorkspaceStore.getState()
-      return current.sources
-        .filter((source) => current.selectedSourceIds.includes(source.id))
-        .map((source) => source.mediaId)
-    }
+    const selectedMediaIds = () =>
+      useWorkspaceStore.getState().getEffectiveSelectedMediaIds()
     await queueResearchWorkspacePrefill(payload(), "alice")
     let finish!: (value: unknown) => void
     mocks.upload
@@ -283,6 +387,7 @@ describe("mounted Knowledge research import", () => {
     useWorkspaceStore
       .getState()
       .setSelectedSourceIds([useWorkspaceStore.getState().sources[0].id])
+    selectUnrelatedFolder(useWorkspaceStore.getState().sources[0].id)
     const handoff = payload()
     handoff.sources = handoff.sources.filter((source) => source.mediaId == null)
     await queueResearchWorkspacePrefill(handoff, "alice")
@@ -291,7 +396,9 @@ describe("mounted Knowledge research import", () => {
       useResearchWorkspacePrefill("workspace-a", true),
     )
     await waitFor(() => expect(view.result.current.failed).toBe(2))
-    expect(useWorkspaceStore.getState().selectedSourceIds).toEqual([])
+    expect(useWorkspaceStore.getState().getEffectiveSelectedMediaIds()).toEqual(
+      [],
+    )
     expect(
       useWorkspaceStore.getState().sources.map((source) => source.mediaId),
     ).toEqual([50])

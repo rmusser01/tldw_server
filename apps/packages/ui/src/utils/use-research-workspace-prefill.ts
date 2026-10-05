@@ -63,9 +63,9 @@ export function useResearchWorkspacePrefill(
         assertCurrent()
         const cached = retained.current
         const payload =
-          cached?.ownerScope === owner
+          cached?.ownerScope === owner && !cached.completed
             ? cached
-            : await consumeResearchWorkspacePrefill(owner)
+            : await consumeResearchWorkspacePrefill(owner, true)
         assertCurrent()
         if (!payload) return
         if (payload.workspaceId && payload.workspaceId !== workspaceId) {
@@ -85,44 +85,70 @@ export function useResearchWorkspacePrefill(
           })
           return
         }
-        // Keep the library, but carry the handoff's exact evidence selection.
-        useWorkspaceStore.getState().setSelectedSourceIds([])
-        const attachedMediaIds = new Set<number>()
-        let expectedSelection: string[] = []
-        let followReadiness = true
-        const syncImportedSelection = () => {
-          if (!isCurrent() || !followReadiness) return
-          const current = useWorkspaceStore.getState()
-          // A deliberate selection change takes precedence over later readiness.
-          if (
-            current.selectedSourceIds.length !== expectedSelection.length ||
-            current.selectedSourceIds.some(
-              (id, index) => id !== expectedSelection[index],
-            )
-          ) {
-            followReadiness = false
-            return
-          }
-          const readyIds = current.sources
-            .filter(
-              (source) =>
-                attachedMediaIds.has(source.mediaId) &&
-                isWorkspaceSourceSelectable(source),
-            )
-            .map((source) => source.id)
-          if (
-            readyIds.length === expectedSelection.length &&
-            readyIds.every((id, index) => id === expectedSelection[index])
-          )
-            return
-          expectedSelection = readyIds
-          current.setSelectedSourceIds(readyIds)
-        }
-        // The workspace's existing status projection/polling promotes snapshots.
-        // Follow that lifecycle even after this payload has finished attaching.
-        stopSelection = useWorkspaceStore.subscribe(syncImportedSelection)
         retained.current = payload
         payload.workspaceId = workspaceId
+        if (!payload.completed) {
+          // Clear both direct and folder-expanded scope, retaining the library.
+          const state = useWorkspaceStore.getState()
+          state.setSelectedSourceIds([])
+          for (const id of state.selectedSourceFolderIds)
+            state.toggleSourceFolderSelection(id)
+          payload.selectionIntent = { mediaIds: [], selectedSourceIds: [] }
+        }
+        const checkpointSelection = () => {
+          void saveResearchWorkspacePrefill(payload).catch(() => {
+            if (isCurrent())
+              setStatus((previous) => ({
+                ...previous,
+                error:
+                  "Research selection could not be saved. Retry unfinished imports.",
+              }))
+          })
+        }
+        const syncImportedSelection = () => {
+          const intent = payload.selectionIntent
+          if (!isCurrent() || !intent) return
+          const current = useWorkspaceStore.getState()
+          // Direct and folder choices both supersede unfinished automatic selection.
+          if (
+            current.selectedSourceFolderIds.length > 0 ||
+            current.selectedSourceIds.length !==
+              intent.selectedSourceIds.length ||
+            current.selectedSourceIds.some(
+              (id, index) => id !== intent.selectedSourceIds[index],
+            )
+          ) {
+            payload.selectionIntent = null
+            checkpointSelection()
+            return
+          }
+          const imported = current.sources.filter((source) =>
+            intent.mediaIds.includes(source.mediaId),
+          )
+          const readyIds = imported
+            .filter(isWorkspaceSourceSelectable)
+            .map((source) => source.id)
+          const selectionChanged =
+            readyIds.length !== intent.selectedSourceIds.length ||
+            readyIds.some((id, index) => id !== intent.selectedSourceIds[index])
+          if (selectionChanged) {
+            intent.selectedSourceIds = readyIds
+            current.setSelectedSourceIds(readyIds)
+          }
+          // Missing sources were deliberately removed; never restore them here.
+          if (
+            payload.completed &&
+            imported.every(isWorkspaceSourceSelectable)
+          ) {
+            payload.selectionIntent = null
+            checkpointSelection()
+          } else if (selectionChanged) checkpointSelection()
+        }
+        // Resume only the unfinished selection after completion; attachments and the
+        // retained draft must never replay on remount or workspace switches.
+        stopSelection = useWorkspaceStore.subscribe(syncImportedSelection)
+        syncImportedSelection()
+        if (payload.completed) return
         await saveResearchWorkspacePrefill(payload)
         assertCurrent()
         const requestScope = await resolveServicePromptScope({
@@ -244,7 +270,12 @@ export function useResearchWorkspacePrefill(
               },
             ])
           }
-          attachedMediaIds.add(mediaId)
+          if (
+            payload.selectionIntent &&
+            !payload.selectionIntent.mediaIds.includes(mediaId)
+          ) {
+            payload.selectionIntent.mediaIds.push(mediaId)
+          }
           syncImportedSelection()
           attached += 1
           setStatus({
@@ -296,6 +327,7 @@ export function useResearchWorkspacePrefill(
           throw new Error("Workspace persistence is unavailable")
         payload.draftRetained = true
         payload.completed = failed === 0
+        syncImportedSelection()
         await saveResearchWorkspacePrefill(payload)
         assertCurrent()
         setStatus({
