@@ -55,7 +55,8 @@ const messageStoreState = vi.hoisted(() => ({
   }
 }))
 
-vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
+vi.mock("@/hooks/chat-modes/normalChatMode", async original => ({
+  ...await original<typeof import("@/hooks/chat-modes/normalChatMode")>(),
   normalChatMode: (...args: any[]) => normalChatModeMock(...args)
 }))
 
@@ -272,6 +273,7 @@ const createHookOptions = () => ({
 })
 
 const h1 = vi.hoisted(() => ({
+  connected: false,
   create: vi.fn(),
   live: vi.fn(() => {
     throw new Error("live card deleted")
@@ -287,6 +289,9 @@ const h1 = vi.hoisted(() => ({
   localAppend: vi.fn(),
   localSettle: vi.fn(),
   beforeModel: vi.fn()
+}))
+vi.mock("@/store/connection", () => ({
+  useConnectionStore: { getState: () => ({ state: { isConnected: h1.connected, phase: "connected", mode: "normal" } }) }
 }))
 vi.mock("@/hooks/chat/useHistorySelection", async (original) => ({
   ...(await original<any>()),
@@ -452,6 +457,7 @@ const makeController = () => {
 afterEach(() => vi.restoreAllMocks())
 
 beforeEach(async () => {
+  h1.connected = false
   vi.clearAllMocks()
   localStorage.clear()
   sessionStorage.clear()
@@ -771,6 +777,44 @@ it("unknown admission after navigation retains immutable original intent and dis
     request_context_digest: expect.any(String)
   })
   expect(addChatMessageMock).toHaveBeenCalledTimes(1)
+})
+
+it.each(["direct", "clear cached target"])("connected fresh saved normal send adopts a verified native owner before admission (%s)", async target => {
+  h1.connected = true
+  const options = { ...ordinaryOptions(), historyId: target === "clear cached target" ? "cached-history" : null, serverChatId: null, messages: [], history: [] }
+  let current: any = { owner: null, view: null, status: "idle" }
+  h1.controller = {
+    getCurrent: () => current,
+    fence: () => { const origin = current; return () => current === origin },
+    loadConversation: vi.fn(async (target, _reference, onLoaded) => {
+      expect(target).toMatchObject({ serverChatId: "tracked-chat-1" })
+      expect(options.setServerChatId).not.toHaveBeenCalled()
+      current = makeController().getCurrent()
+      current.view = { ...current.view, cursor: { kind: "empty" } }
+      current.capture = captureFor(current.view)
+      onLoaded({ owner: current.owner, view: current.view })
+      return true
+    }),
+    followResult: vi.fn(async () => true)
+  }
+  createChatMock.mockResolvedValue({ id: "tracked-chat-1" })
+  options.setServerChatId.mockImplementation(() => {
+    expect(current.owner.kind).toBe("native")
+  })
+  h1.wire.mockImplementation(async function* (request) {
+    expect(addChatMessageMock).toHaveBeenCalledOnce()
+    expect(request.save_to_db).toBe(false)
+    yield { choices: [{ delta: { content: "new answer" } }] }
+  })
+  const hook = renderHook(() => useChatActions(options as any))
+  await act(async () => { expect(await hook.result.current.onSubmit({ message: "first", image: "", ...(target === "clear cached target" ? { requestOverrides: { historyId: null, serverChatId: null } } : {}) })).toEqual({ status: "submitted" }) })
+  const draftStore = (await vi.importActual<typeof import("@/store/option")>("@/store/option")).useStoreMessageOption
+  expect(draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+  expect(createChatMock).toHaveBeenCalledOnce()
+  expect(options.setServerChatId).toHaveBeenCalledWith("tracked-chat-1")
+  expect(h1.saveHistory).not.toHaveBeenCalled()
+  expect(addChatMessageMock).toHaveBeenCalledTimes(2)
+  expect(h1.wire).toHaveBeenCalledOnce()
 })
 
 it("first durable ordinary send creates its local owner and admits before inference without a server conversation", async () => {
@@ -2431,3 +2475,72 @@ it.each(["newer-H1", "source-intent"])("creation Review does not adopt %s during
   expect(mounted.draftStore.getState().chatDraftAddress).toBe(mounted.sourceDraft)
   write.mockRestore(); composer.unmount(); snapshot.release(); mounted.hook.unmount(); mounted.selection.unmount()
 })
+
+
+it.each(["scope", "actor"].flatMap(stage => ["model", "settings", "tools", "new", "ABA", "explicit", "background"].map(boundary => ({ stage, boundary }))))(
+  "ordinary caller handles $boundary changes during held $stage setup before native create", async ({ stage, boundary }) => {
+    h1.connected = true
+    const modelStore = (await import("@/store/model")).useStoreChatModelSettings
+    modelStore.getState().reset()
+    const draftStore = (await vi.importActual<typeof import("@/store/option")>("@/store/option")).useStoreMessageOption
+    const source = draftStore.getState().chatDraftAddress
+    const options = { ...ordinaryOptions(), historyId: null, serverChatId: null, messages: [], history: [] }
+    let current: ReturnType<ReturnType<typeof makeController>["getCurrent"]> | { owner: null; view: null; status: "idle" } = { owner: null, view: null, status: "idle" }
+    h1.controller = {
+      getCurrent: () => current,
+      fence: () => { const origin = current; return () => current === origin },
+      loadConversation: vi.fn(async (_target, _reference, onLoaded) => {
+        current = makeController().getCurrent()
+        current.view = { ...current.view, cursor: { kind: "empty" } }
+        current.capture = captureFor(current.view)
+        onLoaded({ owner: current.owner, view: current.view })
+        return true
+      }),
+      followResult: vi.fn(async () => true)
+    }
+    createChatMock.mockResolvedValue({ id: "tracked-chat-1" })
+    let enter!: () => void, release!: () => void
+    const entered = new Promise<void>(resolve => { enter = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    if (stage === "scope") {
+      const scope = vi.mocked((await import("@/services/service-prompts")).loadServicePromptSnapshot)
+      const original = scope.getMockImplementation()!
+      scope.mockImplementationOnce(async (...args) => { enter(); await held; return original(...args) })
+    } else {
+      const actor = vi.mocked((await import("@/services/actor-settings")).getActorSettingsForChat)
+      actor.mockImplementationOnce(async () => { enter(); await held; return null })
+    }
+    const hook = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    let pending!: Promise<unknown>
+    act(() => { pending = hook.result.current.onSubmit({ message: "first", image: "",
+      ...(boundary === "explicit" ? { requestOverrides: { selectedModel: "explicit-model", toolChoice: "none" as const } } : {})
+    }) })
+    await entered
+    act(() => {
+      if (boundary === "explicit") { messageStoreState.value.selectedModel = "changed-model"; messageStoreState.value.toolChoice = "none" }
+      else if (boundary === "background") modelStore.getState().updateScopedSetting("unused:other", "temperature", 0.41)
+      else if (boundary === "model") messageStoreState.value.selectedModel = "changed-model"
+      else if (boundary === "settings") modelStore.getState().setTemperature(0.73)
+      else if (boundary === "tools") messageStoreState.value.toolChoice = "none"
+      else {
+        draftStore.getState().startNewChatDraft()
+        if (boundary === "ABA") draftStore.getState().setChatDraftAddress(source)
+      }
+    })
+    let outcome: unknown
+    await act(async () => { release(); outcome = await pending })
+    if (boundary === "explicit" || boundary === "background") {
+      expect(outcome).toEqual({ status: "submitted" })
+      expect(createChatMock).toHaveBeenCalledOnce()
+      expect(addChatMessageMock).toHaveBeenCalledTimes(2)
+      expect(h1.wire).toHaveBeenCalledOnce()
+    } else {
+      expect(createChatMock).not.toHaveBeenCalled()
+      expect(h1.controller.loadConversation).not.toHaveBeenCalled()
+      expect(options.setServerChatId).not.toHaveBeenCalled()
+      expect(addChatMessageMock).not.toHaveBeenCalled()
+      expect(h1.wire).not.toHaveBeenCalled()
+    }
+    hook.unmount()
+  }
+)

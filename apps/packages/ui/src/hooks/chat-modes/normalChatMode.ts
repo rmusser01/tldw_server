@@ -58,13 +58,18 @@ import {
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
-import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { chatSubmitFailed, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { createChatWithRecovery, markChatCreationBound, markChatCreationSettled } from "@/services/pending-chat-promotion"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
+import type { ChatDraftAddress, ChatDraftHandle } from "@/utils/chat-draft-address"
 import {
   loadServicePromptSnapshot,
   renderServicePromptPart,
   type ServicePromptSnapshot
 } from "@/services/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import type { ChatScope } from "@/types/chat-scope"
+import { WEBUI_CHAT_SOURCE } from "@/utils/character-chat-session"
 
 interface WebSearchPayload {
   query: string
@@ -154,10 +159,17 @@ const buildWebSearchSources = (results: any[]) => {
 }
 
 type NormalChatModeParams = {
+  surface?: "playground" | "sidepanel"
+  historyPreparation?: {
+    dispatchIsCurrent: () => boolean
+    acceptDraftBind: ReturnType<typeof captureChatDraftLoad> | null
+    sourceDraft: ChatDraftAddress | null
+  }
   historySelection?: {
     controller: HistorySelectionController
     originIsCurrent: () => boolean
     temporary?: boolean
+    createServerChat?: boolean
   }
   historyTurn?: HistorySendTurn
 
@@ -194,6 +206,8 @@ type NormalChatModeParams = {
   discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
   serverChatId?: string | null
+  setServerChatId?: (id: string) => void
+  scope?: ChatScope
   setHistoryId: (id: string) => void
   uploadedFiles?: any[]
   actorSettings?: ActorSettings
@@ -638,93 +652,10 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
   }
 }
 
-/** Establish one operation-lived adapter; display leases never authorize its later writes. */
-const captureNormalHistoryTurn = async (
-  params: NormalChatModeParams,
-  message: string,
-  snapshot: ServicePromptSnapshot,
-  signal: AbortSignal
-): Promise<HistorySendTurn> => {
-  const { controller, originIsCurrent, temporary } = params.historySelection!
-  const acceptDraftBind = !params.historyId && !params.serverChatId && useStoreMessageOption.getState().chatDraftAddress?.kind === "fresh" ? captureChatDraftLoad("bind") : null
-  if (temporary || params.historyId === "temp")
-    throw new Error("temporary_history_unavailable")
-  if (!originIsCurrent()) throw new Error("stale_selection")
-  let current = controller.getCurrent()
-  let selectionCurrent = originIsCurrent
-  let targetHistoryId = params.historyId
-  if (!current.owner && current.status === "idle") {
-    let localId = params.historyId
-    if (!localId && !params.serverChatId) {
-      const created = await saveHistory(
-        message.trim().slice(0, 80) || "Untitled Chat",
-        false,
-        "web-ui",
-        undefined,
-        undefined,
-        snapshot.requestScope
-      )
-      // Creation may have succeeded after navigation. It remains its own local history.
-      if (!originIsCurrent() || acceptDraftBind?.isCurrent() === false) throw new Error("stale_selection")
-      localId = created.id
-      params.setHistoryId(localId)
-    }
-    if (!originIsCurrent()) throw new Error("stale_selection")
-    targetHistoryId = localId
-    const target = { historyId: localId, serverChatId: params.serverChatId, isCurrent: acceptDraftBind?.isCurrent }
-    let receipt: HistoryLoadReceipt | undefined
-    const loaded = await controller.loadConversation(target, null, (value) => {
-      receipt = value
-    })
-    current = controller.getCurrent()
-    if (
-      !loaded ||
-      !receipt ||
-      current.owner !== receipt.owner ||
-      current.view !== receipt.view
-    ) {
-      throw new Error("stale_selection")
-    }
-    // A historyId-only bound mirror is resolved by the loader; no metadata reread.
-    // Explicit native targets and newly created local targets must still match.
-    const expectedId =
-      target.serverChatId || (!params.historyId ? localId : null)
-    const expectedKind = target.serverChatId ? "native" : "local"
-    if (
-      expectedId &&
-      (receipt.owner.kind !== expectedKind ||
-        receipt.owner.conversation_id !== expectedId)
-    ) {
-      throw new Error("owner_conversation_mismatch")
-    }
-    if (acceptDraftBind && !acceptDraftBind(receipt)) throw new Error("stale_selection")
-    selectionCurrent = controller.fence()
-  }
-  if (
-    current.status !== "ready" ||
-    !current.owner ||
-    current.owner.kind === "unavailable" ||
-    !current.view ||
-    !current.bookmarkScope ||
-    current.capture?.status !== "captured"
-  ) {
-    throw new Error(current.error || "history_selection_not_ready")
-  }
-  await assertHistoryConversationTarget(current.owner, { historyId: targetHistoryId, serverChatId: params.serverChatId })
-  if (!selectionCurrent() || controller.getCurrent().owner !== current.owner || controller.getCurrent().view !== current.view)
-    throw new Error("stale_selection")
-  const view = structuredClone(current.view)
-  const bookmarkScope = { ...current.bookmarkScope }
-  const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
-  const owner =
-    current.owner.kind === "native"
-      ? {
-          ...current.owner,
-          owner_key: view.owner_key,
-          request_scope: snapshot.requestScope,
-          validate_lease: authValid
-        }
-      : current.owner
+/** Capture once before caller setup waits; explicit overrides retain their own values. */
+export const captureNormalChatPreparation = (params: Pick<NormalChatModeParams,
+  "selectedModel" | "selectionSource" | "toolChoice" | "historyId" | "serverChatId"
+>) => {
   // A Zustand publication replaces the store object even for loading flags or
   // settings for another model. Bind the lease to dispatch inputs instead.
   const dispatchSettings = () => {
@@ -752,9 +683,151 @@ const captureNormalHistoryTurn = async (
     })
   }
   const capturedDispatchSettings = dispatchSettings()
+  const dispatchIsCurrent = () => dispatchSettings() === capturedDispatchSettings
+  const sourceAddress = useStoreMessageOption.getState().chatDraftAddress
+  const sourceDraft = sourceAddress ? structuredClone(sourceAddress) : null
+  const acceptDraftBind = !params.historyId && !params.serverChatId && sourceAddress?.kind === "fresh"
+    ? captureChatDraftLoad("bind") : null
+  return { dispatchIsCurrent, acceptDraftBind, sourceDraft }
+}
+
+/** Establish one operation-lived adapter; display leases never authorize its later writes. */
+const captureNormalHistoryTurn = async (
+  params: NormalChatModeParams,
+  message: string,
+  snapshot: ServicePromptSnapshot,
+  signal: AbortSignal,
+  dispatchIsCurrent: () => boolean,
+  acceptDraftBind: ReturnType<typeof captureChatDraftLoad> | null,
+  sourceDraft: ChatDraftAddress | null
+): Promise<HistorySendTurn> => {
+  const { controller, originIsCurrent, temporary } = params.historySelection!
+  let creationHandle: ChatDraftHandle | undefined
+  if (temporary || params.historyId === "temp")
+    throw new Error("temporary_history_unavailable")
+  if (!originIsCurrent()) throw new Error("stale_selection")
+  let current = controller.getCurrent()
+  let selectionCurrent = originIsCurrent
+  let targetHistoryId = params.historyId
+  let targetServerChatId = params.serverChatId
+  const preparationIsCurrent = () => acceptDraftBind?.isCurrent() !== false &&
+    !signal.aborted && !snapshot.scopeInvalidatedSignal.aborted && dispatchIsCurrent()
+  if (!preparationIsCurrent()) throw new Error("stale_selection")
+  if (!current.owner && current.status === "idle") {
+    const scope = params.scope ? structuredClone(params.scope) : undefined
+    let localId = params.historyId
+    let serverId = params.serverChatId
+    const toolsState = useMcpToolsStore.getState()
+    const toolRequest = resolveChatToolRequest({
+      tools: toolsState.chatTools ?? toolsState.tools,
+      toolChoice: params.toolChoice ?? useStoreMessageOption.getState().toolChoice,
+      mcpHealthState: toolsState.healthState,
+      hasMcp: toolsState.healthState !== "unavailable"
+    })
+    if (!localId && !serverId && !current.view &&
+      params.historySelection!.createServerChat && !toolRequest.tools?.length) {
+      if (!sourceDraft || sourceDraft.kind !== "fresh" || !params.surface)
+        throw new Error("chat_creation_source_invalid")
+      creationHandle = { address: sourceDraft, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
+      const created = await createChatWithRecovery({
+        snapshot, handle: creationHandle, scope, surface: params.surface,
+        inputText: message, setup: {},
+        isCurrent: () => originIsCurrent() && preparationIsCurrent(),
+        create: () => tldwClient.createChat(
+          { title: message.trim().slice(0, 80) || "Untitled Chat", source: scope?.type === "workspace" ? undefined : WEBUI_CHAT_SOURCE },
+          { scope, signal, requestScope: snapshot.requestScope }
+        )
+      })
+      // The recovery record keeps a late ACK even when this view can no longer bind.
+      if (!originIsCurrent() || !preparationIsCurrent()) throw new Error("stale_selection")
+      serverId = created.id
+    }
+    if (!localId && !serverId) {
+      const created = await saveHistory(
+        message.trim().slice(0, 80) || "Untitled Chat",
+        false,
+        "web-ui",
+        undefined,
+        undefined,
+        snapshot.requestScope
+      )
+      // Creation may have succeeded after navigation. It remains its own local history.
+      if (!originIsCurrent() || acceptDraftBind?.isCurrent() === false) throw new Error("stale_selection")
+      localId = created.id
+      params.setHistoryId(localId)
+    }
+    if (!originIsCurrent()) throw new Error("stale_selection")
+    targetHistoryId = localId
+    targetServerChatId = serverId
+    let loadPhase: "preparing" | "accepted" | "rejected" = "preparing"
+    const target = {
+      historyId: localId, serverChatId: serverId, scope,
+      // Accepted saved ownership is independent of the originating turn's Stop.
+      isCurrent: () => acceptDraftBind?.isCurrent() !== false &&
+        (loadPhase === "accepted" || (loadPhase === "preparing" && preparationIsCurrent()))
+    }
+    let receipt: HistoryLoadReceipt | undefined
+    let adoptionIsCurrent: (() => boolean) | undefined
+    try {
+      const loaded = await controller.loadConversation(target, null, value => {
+        loadPhase = "rejected"
+        const now = controller.getCurrent()
+        if (!preparationIsCurrent() || now.owner !== value.owner || now.view !== value.view) return
+        const expectedId = target.serverChatId || (!params.historyId ? localId : null)
+        const expectedKind = target.serverChatId ? "native" : "local"
+        if (expectedId && (value.owner.kind !== expectedKind || value.owner.conversation_id !== expectedId)) return
+        // Draft binding validates this owner's lease through the same guard.
+        loadPhase = "preparing"
+        if (acceptDraftBind && !acceptDraftBind(value)) {
+          loadPhase = "rejected"
+          return
+        }
+        receipt = value
+        loadPhase = "accepted"
+        adoptionIsCurrent = controller.fence()
+        if (serverId) params.setServerChatId?.(serverId)
+      })
+      current = controller.getCurrent()
+      if (!loaded || !receipt || current.owner !== receipt.owner || current.view !== receipt.view ||
+        !adoptionIsCurrent?.() || !preparationIsCurrent() || receipt.owner.kind === "unavailable" || receipt.owner.validate_lease?.() === false)
+        throw new Error("stale_selection")
+      selectionCurrent = adoptionIsCurrent
+      if (creationHandle && serverId) await markChatCreationBound(creationHandle, serverId)
+      if (!selectionCurrent() || !preparationIsCurrent() || controller.getCurrent().owner !== receipt.owner || controller.getCurrent().view !== receipt.view)
+        throw new Error("stale_selection")
+    } finally {
+      if (!receipt || !adoptionIsCurrent?.()) loadPhase = "rejected"
+    }
+  }
+  if (
+    current.status !== "ready" ||
+    !current.owner ||
+    current.owner.kind === "unavailable" ||
+    !current.view ||
+    !current.bookmarkScope ||
+    current.capture?.status !== "captured"
+  ) {
+    throw new Error(current.error || "history_selection_not_ready")
+  }
+  if (current.owner.validate_lease?.() === false) throw new Error("stale_selection")
+  await assertHistoryConversationTarget(current.owner, { historyId: targetHistoryId, serverChatId: targetServerChatId })
+  if (!selectionCurrent() || controller.getCurrent().owner !== current.owner || controller.getCurrent().view !== current.view || current.owner.validate_lease?.() === false)
+    throw new Error("stale_selection")
+  const view = structuredClone(current.view)
+  const bookmarkScope = { ...current.bookmarkScope }
+  const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
+  const owner =
+    current.owner.kind === "native"
+      ? {
+          ...current.owner,
+          owner_key: view.owner_key,
+          request_scope: snapshot.requestScope,
+          validate_lease: authValid
+        }
+      : current.owner
   const validateLease = () =>
     authValid() &&
-    dispatchSettings() === capturedDispatchSettings
+    dispatchIsCurrent()
   const canUpdateView = () => {
     const now = controller.getCurrent().view
     return (
@@ -837,6 +910,8 @@ const captureNormalHistoryTurn = async (
         operationId,
         "completed"
       )
+      if (creationHandle && owner.kind === "native")
+        await markChatCreationSettled(creationHandle, owner.conversation_id)
     },
     followResult: async (id) => {
       await controller.followResult(view, id)
@@ -855,6 +930,9 @@ export const normalChatMode = async (
   params: NormalChatModeParams
 ): Promise<ChatSubmitResult> => {
   console.log("Using normalChatMode")
+  const preparation = params.historySelection
+    ? params.historyPreparation ?? captureNormalChatPreparation(params)
+    : undefined
   const ownsServicePromptSnapshot =
     !params.servicePromptSnapshot &&
     (params.webSearch || !!params.historySelection)
@@ -880,6 +958,8 @@ export const normalChatMode = async (
     ? servicePromptSnapshot.scopeSignal
     : signal
   try {
+    if (servicePromptSnapshot?.scopeInvalidatedSignal.aborted || executionSignal.aborted)
+      return chatSubmitFailed("Request cancelled")
     if (params.webSearch) {
       getRequiredServicePrompt(servicePromptSnapshot, "chat.web_search.answer")
     }
@@ -891,7 +971,10 @@ export const normalChatMode = async (
         params,
         message,
         servicePromptSnapshot!,
-        executionSignal
+        executionSignal,
+        preparation!.dispatchIsCurrent,
+        preparation!.acceptDraftBind,
+        preparation!.sourceDraft
       )
       // Canonical roles/content come from the captured owner, not display normalization.
       const selected = historyTurn.capture.rows.map((node, index) => {

@@ -44,7 +44,7 @@ import {
   MISSING_FINAL_ANSWER_MESSAGE
 } from "@/libs/reasoning"
 import type { ChatDocuments } from "@/models/ChatTypes"
-import { normalChatMode } from "@/hooks/chat-modes/normalChatMode"
+import { captureNormalChatPreparation, normalChatMode } from "@/hooks/chat-modes/normalChatMode"
 import { getRequiredServicePrompt } from "@/hooks/chat-modes/chatModePipeline"
 import { continueChatMode } from "@/hooks/chat-modes/continueChatMode"
 import { ragMode } from "@/hooks/chat-modes/ragMode"
@@ -127,6 +127,8 @@ import { hydrateTrackedCharacterForSend } from "@/hooks/chat/tracked-character-h
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat"
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing"
 import { WEBUI_CHAT_SOURCE } from "@/utils/character-chat-session"
+import { useConnectionStore } from "@/store/connection"
+import { ConnectionPhase } from "@/types/connection"
 import { resolveVisualIdentityBindingWithCache } from "@/hooks/useVisualIdentityResolver"
 import {
   aggregateChatSubmitResults,
@@ -3507,6 +3509,21 @@ export const useChatActions = ({
           ? historySelection
           : null
       )
+      const normalSelectionSource: Parameters<typeof normalChatMode>[6]["selectionSource"] = {
+        model: normalizeSelectedModel(requestOverrides?.selectedModel) ? "explicit" : "global",
+        toolChoice: requestOverrides?.toolChoice === "auto" || requestOverrides?.toolChoice === "required" || requestOverrides?.toolChoice === "none"
+          ? "explicit" : "global"
+      }
+      const normalHistoryPreparation = normalHistorySelection
+        ? captureNormalChatPreparation({
+            selectedModel: effectiveSelectedModel || "",
+            selectionSource: normalSelectionSource,
+            toolChoice: requestOverrides?.toolChoice === "auto" || requestOverrides?.toolChoice === "required" || requestOverrides?.toolChoice === "none"
+              ? requestOverrides.toolChoice : toolChoice,
+            historyId: Object.prototype.hasOwnProperty.call(requestOverrides ?? {}, "historyId") ? requestOverrides?.historyId : historyId,
+            serverChatId: requestOverrides?.serverChatId === undefined ? serverChatId : requestOverrides.serverChatId
+          })
+        : undefined
       // Every persisted turn needs an owner, including local Compare and image
       // histories that have no server conversation or service prompt yet.
       if (turnPromptIds.length > 0 || !temporaryChat) {
@@ -3542,17 +3559,7 @@ export const useChatActions = ({
           userMetadataExtra: turnUserMetadataExtra
         },
         turnServicePromptSnapshot ?? compareServicePromptSnapshot,
-        {
-          model: normalizeSelectedModel(requestOverrides?.selectedModel)
-            ? "explicit"
-            : "global",
-          toolChoice:
-            requestOverrides?.toolChoice === "auto" ||
-            requestOverrides?.toolChoice === "required" ||
-            requestOverrides?.toolChoice === "none"
-              ? "explicit"
-              : "global"
-        }
+        normalSelectionSource
       )
       const baseMessages = chatHistory || messages
       const baseHistory = memory || history
@@ -4010,13 +4017,26 @@ export const useChatActions = ({
             signal,
             {
               ...scopedNormalModeParams,
+              surface: "playground",
+              historyPreparation: normalHistoryPreparation,
+              setServerChatId,
+              scope,
               ownsAbortController: (turnSignal: AbortSignal) =>
                 activeAbortControllerRef.current?.signal === turnSignal,
               historySelection: normalHistorySelection
                 ? {
                     controller: normalHistorySelection,
                     originIsCurrent: historyOriginIsCurrent!,
-                    temporary: temporaryChat
+                    temporary: temporaryChat,
+                    createServerChat:
+                      resolvedSendMode === "plain" &&
+                      !image &&
+                      !baseMessages.length && !baseHistory.length &&
+                      !normalModeParams.webSearch && !normalModeParams.dynamicUIRequest &&
+                      useConnectionStore.getState().state.isConnected &&
+                      useConnectionStore.getState().state.phase === ConnectionPhase.CONNECTED &&
+                      useConnectionStore.getState().state.mode === "normal" &&
+                      !useConnectionStore.getState().state.offlineBypass
                   }
                 : undefined
             }

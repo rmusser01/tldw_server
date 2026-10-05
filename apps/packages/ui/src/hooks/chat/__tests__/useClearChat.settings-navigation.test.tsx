@@ -16,6 +16,8 @@ const focusTextAreaMock = vi.hoisted(() => vi.fn())
 const resetModelSettingsMock = vi.hoisted(() => vi.fn())
 const clearSessionMock = vi.hoisted(() => vi.fn())
 const optionStoreSetStateMock = vi.hoisted(() => vi.fn())
+const historySelectionResetMock = vi.hoisted(() => vi.fn())
+const historySelectionContextMock = vi.hoisted(() => vi.fn())
 
 const baseState = vi.hoisted(() => ({
   setMessages: vi.fn(),
@@ -65,6 +67,10 @@ vi.mock("@/hooks/chat/useChatBaseState", () => ({
   useChatBaseState: () => baseState
 }))
 
+vi.mock("@/hooks/chat/useHistorySelection", () => ({
+  useHistorySelectionContext: historySelectionContextMock
+}))
+
 vi.mock("@/hooks/utils/messageHelpers", () => ({
   focusTextArea: focusTextAreaMock
 }))
@@ -102,6 +108,7 @@ vi.mock("@/utils/update-page-title", () => ({
 describe("useClearChat settings navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    historySelectionContextMock.mockReturnValue({ reset: historySelectionResetMock })
     window.history.replaceState({}, "", "/settings/prompt")
   })
 
@@ -132,6 +139,7 @@ describe("useClearChat settings navigation", () => {
     expect(updatePageTitleMock).not.toHaveBeenCalled()
     expect(focusTextAreaMock).not.toHaveBeenCalled()
     expect(clearSessionMock).not.toHaveBeenCalled()
+    expect(historySelectionResetMock).not.toHaveBeenCalled()
   })
 
   it("navigates and resets once when navigation is allowed", () => {
@@ -149,5 +157,20 @@ describe("useClearChat settings navigation", () => {
     expect(updatePageTitleMock).toHaveBeenCalledOnce()
     expect(focusTextAreaMock).toHaveBeenCalledOnce()
     expect(clearSessionMock).toHaveBeenCalledOnce()
+    expect(historySelectionResetMock).toHaveBeenCalledOnce()
+    expect(historySelectionResetMock.mock.invocationCallOrder[0]).toBeLessThan(
+      navigateMock.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("still clears standalone surfaces without a history selection provider", () => {
+    historySelectionContextMock.mockReturnValue(null)
+    const { result } = renderHook(() => useClearChat())
+
+    act(() => expect(result.current()).toBe(true))
+
+    expect(navigateMock).toHaveBeenCalledWith("/chat")
+    expect(clearSessionMock).toHaveBeenCalledOnce()
+    expect(historySelectionResetMock).not.toHaveBeenCalled()
   })
 })
