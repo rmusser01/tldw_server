@@ -284,6 +284,7 @@ vi.mock('@/components/Media/ContentViewer', () => ({
     ...readingProps
   }: any) => (
     <div data-testid="mock-content-viewer">
+      <output data-testid="navigation-target">{JSON.stringify(readingProps.navigationTarget)}</output>
       {mocks.readingProbe && <ReadingProgressProbe selectedMedia={selectedMedia} {...readingProps} />}
       <div data-testid="selected-media-id">
         {selectedMedia?.id != null ? String(selectedMedia.id) : 'none'}
@@ -499,6 +500,25 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     expect(scroller.scrollTop).toBe(0)
     await act(async () => { await vi.advanceTimersByTimeAsync(1100) })
     expect(mocks.updateReadingProgress).toHaveBeenLastCalledWith('1', expect.objectContaining({ percentage: 0, zoom_level: 100 }))
+  })
+
+  it('omits metadata-only sections and aligns article targets while retaining the stored source', async () => {
+    const prefix = '[METADATA]\n{"title":"Envelope"}\n[/METADATA]\n\n'
+    const body = 'Article body'
+    mocks.readingProbe = true
+    mocks.detailById['1'] = { media_id: 1, source: { title: 'Article' }, content: { text: prefix + body } }
+    mocks.navigationData = { nodes: [
+      { id: 'metadata', title: '[METADATA]', level: 1, target_type: 'char_range', target_start: 0, target_end: prefix.length - 2 },
+      { id: 'article', title: 'Article body', level: 1, target_type: 'char_range', target_start: prefix.length, target_end: prefix.length + body.length }
+    ] }
+    renderMediaPage('/media?id=1')
+    const article = await screen.findByRole('button', { name: 'Jump to Article body' })
+    expect(screen.queryByRole('button', { name: 'Jump to [METADATA]' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('reading-scroller')).toHaveTextContent('[METADATA]')
+    fireEvent.click(article)
+    expect(JSON.parse(screen.getByTestId('navigation-target').textContent!)).toEqual({
+      target_type: 'char_range', target_start: 0, target_end: body.length, target_href: undefined
+    })
   })
 
   it('clears a deleted deep link without hydrating its cached row again', async () => {

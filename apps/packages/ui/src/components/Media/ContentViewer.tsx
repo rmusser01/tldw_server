@@ -455,7 +455,7 @@ export function ContentViewer({
   const readingProgress = useReadingProgress({
     selectedMedia,
     mediaDetail,
-    content,
+    content: rendering.readingContent,
     contentScrollContainerRef,
     contentBodyRef,
     navigationTarget,

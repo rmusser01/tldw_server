@@ -169,8 +169,9 @@ describe('ContentViewer stage 14 export action', () => {
 
   it('reads an extracted web body while exporting the complete stored source', async () => {
     const content = '[METADATA]\n{"url":"https://example.com/","content_hash":"fixture"}\n[/METADATA]\n\nArticle body'
-    render(<ContentViewer selectedMedia={selectedMedia} content={content} contentDisplayMode="plain" />)
+    render(<ContentViewer selectedMedia={selectedMedia} content={content} mediaDetail={{ content: { word_count: 99 } }} contentDisplayMode="plain" />)
     expect(await screen.findByText('Article body')).toBeVisible()
+    expect(screen.getByText('2 words')).toBeVisible()
     expect(screen.queryByText(/content_hash/)).toBeNull()
     fireEvent.click(screen.getByTestId('menu-item-export-media'))
     fireEvent.click(await screen.findByTestId('media-export-confirm'))
