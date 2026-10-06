@@ -15,6 +15,7 @@ import React, { useCallback, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { useIngestWizard } from "./IngestWizardContext"
 import { getEligibleQueueItems, getQueueItemExclusionReason } from "./queue-items"
+import { getSavedMediaIds } from "./result-actions"
 import type { DetectedMediaType, IngestPreset, PresetConfig, WizardQueueItem } from "./types"
 // ---------------------------------------------------------------------------
 // Helpers
@@ -113,7 +114,8 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
     [processingItems, queueItems]
   )
 
-  const savedItemIds = new Set(state.results.filter(result => result.status === "ok").map(result => result.id))
+  const savedItemIds = new Set(state.results.filter(result => getSavedMediaIds([result]).length > 0).map(result => result.id))
+  const completedItems = new Map(state.results.filter(result => result.status === "ok").map(result => [result.id, result]))
   const processingItemIds = new Set(selectedQueueItems.map(item => item.id))
 
   // Preset display name
@@ -238,9 +240,14 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
             const exclusion = getQueueItemExclusionReason(item, queueItems)
             const saved = savedItemIds.has(item.id)
             const selected = processingItemIds.has(item.id)
+            const completed = completedItems.get(item.id)
             const ops = saved
               ? qi("queueSavedExcluded", "Saved — excluded from this run")
-              : exclusion === "duplicate"
+              : completed?.outcome === "skipped"
+                ? qi("queueSkippedExcluded", "Skipped — excluded from this run")
+                : completed
+                  ? qi("queueCompletedExcluded", "Completed — excluded from this run")
+                  : exclusion === "duplicate"
               ? qi("queueDuplicateExcluded", "Already queued — excluded")
               : exclusion === "invalid"
                 ? qi("queueInvalidExcluded", "Invalid — excluded")

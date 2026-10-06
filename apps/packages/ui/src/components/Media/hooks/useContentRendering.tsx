@@ -228,6 +228,7 @@ export function useContentRendering(deps: UseContentRenderingDeps) {
     richTextTypographyClass,
     shouldHideTranscriptTimings,
     displayContent,
+    readingContent,
     effectiveRenderMode,
     contentForPreview,
     transcriptLines,

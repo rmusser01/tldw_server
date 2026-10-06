@@ -29,6 +29,7 @@ Real URL ingestion of https://example.com stores a [METADATA] JSON wrapper at th
 Confirmed screenshot: saved-batch-mobile.png. Existing extractMediaDetailContent returns raw content.text. ADR required: no; presentation change within existing ingestion/detail contract. No source fix made during validation.
 Plan: IMPLEMENTATION_PLAN_media_live_ux_fixes_20261006.md. Preserve raw content for analysis/export; clean only the reading presentation. ADR required: no; same persistence and detail contract.
 Red: both real reader components displayed the stored content_hash envelope. Implemented a presentation-only envelope parser with JSON validation and string/escape-aware object boundary; default single/multi readers and inline comparison use clean text. Raw detail, structured export, editing and analysis inputs remain unchanged. Green: parser/content/comparison/single export suites 31/31; full reading suite 144/144 after correcting a helper-rename import. Real-browser verification pending.
+Independent review reproduced hidden metadata spoken by Read full item. Added a real playback regression (red: first audio was [METADATA]); read-along and transcript segmentation now receive the cleaned reading source while export/edit/analysis retain raw content. Full read-along suite and session/localization checks passed (128 tests across 3 files).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

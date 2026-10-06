@@ -28,6 +28,7 @@ Real corrected-PDF import on latest dev succeeds with one saved item but its rev
 Minor copy finding from actual latest-dev results, not an ingestion failure. ADR required: no; reuse current translation/count convention. No source fix made during validation.
 Plan: IMPLEMENTATION_PLAN_media_live_ux_fixes_20261006.md. Use existing translation plural/count conventions for saved-item CTAs. ADR required: no.
 Result and recent-import CTA fallback wording uses singular for one; actual English resources use existing ICU plural formatting. Also corrected Configure eligible-item singular copy in the same flow. Red: rendered one-item CTA and real English resource assertions failed. Green: one/many button and actual ICU resource checks passed with the supporting suites. Existing authoritative handoff/owner-fencing checks were updated for singular labels and remain green. WebUI typecheck/Chrome production build passed. No dependency or localization framework added.
+Independent review caught history using review:mediaPage.reviewImportSaved rather than option namespace. Reproduced against the actual consumed English resource, fixed en/review.json and removed unused option entry; one/many actual ICU checks now pass.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -335,7 +335,7 @@ export function ContentViewer({
   const readAlong = useMediaReadAlongSession({
     mediaId: selectedMediaId,
     mediaKind: selectedMedia?.kind || null,
-    content,
+    content: rendering.readingContent,
     displayContent: rendering.displayContent,
     renderMode: rendering.effectiveRenderMode,
     hideTranscriptTimings: rendering.shouldHideTranscriptTimings,
@@ -400,7 +400,7 @@ export function ContentViewer({
   // --- Hook: Transcript Display ---
   const transcript = useTranscriptDisplay({
     displayContent: rendering.displayContent,
-    content,
+    content: rendering.readingContent,
     selectedMedia,
     effectiveRenderMode: rendering.effectiveRenderMode,
     shouldHideTranscriptTimings: rendering.shouldHideTranscriptTimings,

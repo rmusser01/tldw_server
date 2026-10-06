@@ -1446,11 +1446,15 @@ describe("QuickIngestWizardModal session runtime", () => {
         { id: "saved-url", kind: "url", url: "https://example.com/", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } },
         { id: "duplicate-url", kind: "url", url: "https://example.com/", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } },
         { id: "saved-file", kind: "file", fileName: "saved.md", detectedType: "document", icon: "FileText", fileSize: 4, validation: { valid: false } },
+        { id: "processed-source", kind: "url", url: "https://example.com/processed", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } },
+        { id: "skipped-source", kind: "url", url: "https://example.com/skipped", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } },
         { id: "failed-file", kind: "file", fileName: "broken.pdf", detectedType: "pdf", icon: "FileText", fileSize: 4, validation: { valid: false } }
       ],
       results: [
         { id: "saved-url", type: "html", status: "ok", mediaId: 3 },
         { id: "saved-file", fileName: "saved.md", type: "document", status: "ok", mediaId: 4 },
+        { id: "processed-source", type: "html", status: "ok", outcome: "processed", persisted: false, mediaId: null },
+        { id: "skipped-source", type: "html", status: "ok", outcome: "skipped", persisted: false, mediaId: null },
         { id: "failed-file", fileName: "broken.pdf", type: "pdf", status: "error", outcome: "failed", error: "Invalid PDF 422" }
       ]
     })
@@ -1462,6 +1466,8 @@ describe("QuickIngestWizardModal session runtime", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next" }))
     const list = screen.getByRole("list", { name: "Items to process" })
     expect(within(list).getAllByText(/Saved — excluded from this run/)).toHaveLength(2)
+    expect(within(list).getByText(/Completed — excluded from this run/)).toBeVisible()
+    expect(within(list).getByText(/Skipped — excluded from this run/)).toBeVisible()
     expect(within(list).getByText(/Already queued — excluded/)).toBeVisible()
     expect(within(list).queryByText(/Invalid — excluded/)).toBeNull()
     expect(within(list).getByText(/Extract/)).toBeVisible()
