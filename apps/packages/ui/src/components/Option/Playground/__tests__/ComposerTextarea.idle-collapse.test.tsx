@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { ComposerTextarea } from "../ComposerTextarea"
 
@@ -52,5 +52,22 @@ describe("ComposerTextarea idle collapse", () => {
 
     const textarea = screen.getByTestId("chat-input")
     expect(textarea).toHaveStyle({ minHeight: "44px" })
+  })
+})
+
+
+describe("ComposerTextarea native semantics", () => {
+  it("keeps multiline input and composition handlers without claiming an expandable textbox", () => {
+    const draft = "  Exact opening\nKeep trailing spaces  "
+    const props = createProps({ value: draft, displayValue: draft, ariaExpanded: true })
+    render(<ComposerTextarea {...props} />)
+    const textarea = screen.getByRole("textbox", { name: "Message input" })
+    expect(textarea.tagName).toBe("TEXTAREA")
+    expect(textarea).not.toHaveAttribute("aria-expanded")
+    expect(textarea).toHaveValue(draft)
+    fireEvent.compositionStart(textarea)
+    fireEvent.compositionEnd(textarea)
+    expect(props.onCompositionStart).toHaveBeenCalledTimes(1)
+    expect(props.onCompositionEnd).toHaveBeenCalledTimes(1)
   })
 })

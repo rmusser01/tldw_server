@@ -47,6 +47,12 @@ export function useModelSelector({
   const scopedApiProvider = useStoreChatModelSettings(state => state.activeSettingsScope ? state.scopedSettingsByModelKey?.[state.activeSettingsScope]?.apiProvider : undefined)
 
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false)
+  const favoriteFocusRef = React.useRef<{
+    key: string
+    button: HTMLButtonElement
+    menu: HTMLElement
+  } | null>(null)
+  React.useEffect(() => () => { favoriteFocusRef.current = null }, [modelDropdownOpen])
   const [modelSearchQuery, setModelSearchQuery] = React.useState("")
   const [favoriteModels, setFavoriteModels, favoriteModelsMeta] = useStorage<string[]>(
     "favoriteChatModels",
@@ -487,14 +493,14 @@ export function useModelSelector({
             styles={{ root: { maxWidth: 280 } }}
           >
             <div
-              className="flex items-center gap-2 text-sm"
+              className="flex min-w-0 flex-wrap items-center gap-2 text-sm"
               data-testid="model-selector-option"
               data-model-key={modelKey}
               data-model-id={modelId}
               data-provider={providerRaw}
             >
               <ProviderIcons provider={providerRaw} className="h-3 w-3 text-text-subtle" />
-              <span className="truncate flex-1">{modelLabel}</span>
+              <span className="min-w-0 flex-1 basis-40 truncate" title={modelLabel}>{modelLabel}</span>
               {isRecommended && (
                 <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
                   {t("playground:composer.recommended", "Recommended")}
@@ -507,7 +513,17 @@ export function useModelSelector({
               ))}
               <button
                 type="button"
-                className="rounded p-0.5 text-text-subtle transition hover:bg-surface2"
+                ref={(button) => {
+                  const pending = favoriteFocusRef.current
+                  if (!button || !pending || pending.key !== modelKey || button === pending.button) return
+                  favoriteFocusRef.current = null
+                  if (modelDropdownOpen && pending.menu.isConnected && pending.menu.contains(button) &&
+                    (document.activeElement === document.body || document.activeElement === pending.button)) button.focus()
+                }}
+                className="shrink-0 rounded p-0.5 text-text-subtle transition hover:bg-surface2"
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") event.stopPropagation()
+                }}
                 onMouseDown={(event) => {
                   event.preventDefault()
                   event.stopPropagation()
@@ -515,6 +531,10 @@ export function useModelSelector({
                 onClick={(event) => {
                   event.preventDefault()
                   event.stopPropagation()
+                  const button = event.currentTarget
+                  const menu = button.closest<HTMLElement>('[role="menu"]')
+                  favoriteFocusRef.current = document.activeElement === button && menu
+                    ? { key: modelKey, button, menu } : null
                   toggleFavoriteModel(model)
                 }}
                 aria-label={favoriteTitle}
@@ -643,6 +663,7 @@ export function useModelSelector({
     isFavoriteModel,
     modelsLoading,
     modelSortMode,
+    modelDropdownOpen,
     navigate,
     normalizedModelUsageByKey,
     recordModelUsage,

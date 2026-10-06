@@ -1,8 +1,12 @@
 import React from "react"
-import { act, render, renderHook, screen } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useModelSelector } from "../useModelSelector"
+import { ConfigProvider } from "antd"
+import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
+import { ChatModelSelectorDropdown } from "@/components/Option/Playground/ChatModelSelectorDropdown"
 import { validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
 import { normalizeTldwModels } from "@/services/tldw/model-normalization"
 
@@ -57,10 +61,6 @@ vi.mock("@plasmohq/storage/hook", () => ({
     const [value, setValue] = React.useState(initialValue)
     return [value, setValue, { isLoading: false }] as const
   }
-}))
-
-vi.mock("antd", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
 
 vi.mock("@/components/Common/ProviderIcon", () => ({
@@ -496,5 +496,73 @@ describe("useModelSelector capability rendering", () => {
     expect(groups[1]?.key).toBe("recent-models")
     expect(groups[1]?.children?.[0]?.key).toBe("google:gemini-1.5-pro")
     expect(groups.some((group: any) => group.key === "group-anthropic")).toBe(true)
+  })
+})
+
+
+describe("actual model row keyboard actions", () => {
+  function Selector({ select, alternative = false }: { select: (key: string) => void; alternative?: boolean }) {
+    const models = useModelSelector({
+      composerModels: [{ model: "gpt-test", provider: "openai" }, ...(alternative ? [{ model: "other-test", provider: "openai" }] : [])],
+      selectedModel: "openai:gpt-test",
+      setSelectedModel: select,
+      navigate: () => undefined
+    })
+    return <ChatModelSelectorDropdown {...models} selectedModel="openai:gpt-test" connectionStatusLabel="Healthy" />
+  }
+  const open = async (select: (key: string) => void) => {
+    storageSeed.values.clear()
+    render(<MemoryRouter><ConfigProvider theme={{ token: { motion: false } }}><Selector select={select} /></ConfigProvider></MemoryRouter>)
+    const trigger = screen.getByRole("button", { name: "OPENAI / gpt-test" })
+    fireEvent.click(trigger)
+    const favorite = await screen.findByRole("button", { name: "Add to favorites" })
+    await waitFor(() => expect(favorite).toBeVisible())
+    return { trigger, favorite }
+  }
+
+  it.each([['Enter', 13], [' ', 32]] as const)("favorites with %s without selecting or closing the model chooser", async (key, keyCode) => {
+    const select = vi.fn()
+    const { trigger, favorite } = await open(select)
+    favorite.focus()
+    fireEvent.keyDown(favorite, { key, keyCode, which: keyCode })
+    expect(select).not.toHaveBeenCalled()
+    // Native button activation dispatches a click after its keyboard event.
+    fireEvent.click(favorite)
+    expect(await screen.findByRole("button", { name: "Remove from favorites" })).toBeVisible()
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it.each(["{Enter}", " "])("keeps Favorite focus when an unselected row changes groups with %s", async key => {
+    storageSeed.values.clear()
+    const select = vi.fn()
+    const user = userEvent.setup()
+    render(<MemoryRouter><ConfigProvider theme={{ token: { motion: false } }}><Selector select={select} alternative /></ConfigProvider></MemoryRouter>)
+    const trigger = screen.getByRole("button", { name: "OPENAI / gpt-test" })
+    fireEvent.click(trigger)
+    await screen.findByRole("textbox", { name: "Search models" })
+    const otherRow = () => screen.getAllByTestId("model-selector-option").find(row => row.dataset.modelKey === "openai:other-test")!
+    const favorite = within(otherRow()).getByRole("button", { name: "Add to favorites" })
+    favorite.focus()
+    await user.keyboard(key)
+    const remove = within(otherRow()).getByRole("button", { name: "Remove from favorites" })
+    expect(favorite.isConnected).toBe(false)
+    expect(remove).toHaveFocus()
+    await user.keyboard(key)
+    expect(remove.isConnected).toBe(false)
+    expect(within(otherRow()).getByRole("button", { name: "Add to favorites" })).toHaveFocus()
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it("selects a keyboard-focused row once and returns focus to the visible trigger", async () => {
+    const select = vi.fn()
+    const { trigger, favorite } = await open(select)
+    const row = favorite.closest('[role="menuitem"]') as HTMLElement
+    row.focus()
+    fireEvent.keyDown(row, { key: "Enter", keyCode: 13, which: 13 })
+    expect(select).toHaveBeenCalledExactlyOnceWith("openai:gpt-test")
+    await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"))
+    expect(trigger).toHaveFocus()
   })
 })

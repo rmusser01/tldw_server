@@ -1,7 +1,7 @@
 ---
 id: TASK-13457
 title: 'Chat UX stage 4: accessible responsive controls and extension continuity'
-status: To Do
+status: In Progress
 labels:
 - chat
 - ux
@@ -37,6 +37,8 @@ Program: TASK-13453. Design: Docs/Design/2026-10-04-chat-conversation-ux-remedia
 Scheduling clarification: Stage 4 follows the reliable state/navigation work in Stages 1 and 2 and may proceed while the conditional native roleplay server dependency in Stage 3 remains open. Stage 5 still requires all stage outcomes.
 Pre-implementation review gate: document three existing mechanisms separately: selected-history expansion, same-origin one-shot draft/page-context/route-intent package, and WebUI URL-fragment package. The current bounded-package ControlRow action opens extension options; its label must name that destination. The package has no model/history/settings payload; verify any independent tab-state restoration before promising it. Source reports Opened/unconfirmed; destination reports Imported/Partially imported. No new acknowledgement protocol. Foreign local IDs cannot prevent draft import; portable references require provenance and the destination owner-bound loader, never direct server-ID authority. Reuse insert/replace/cancel conflicts before consuming payloads; verify truncation, unsupported/missing context, different origins/accounts/workspaces and actual destination URLs.
 Stage 2 organization review identified adjacent baseline unqualified Option Sidebar and compact Sidebar/FolderPickerModal/legacy bulk consumers. Stage 2 .6 qualifies actual ServerChatList bulk pickers; .7 covers shared ChatSidebar Folders discovery. Stage 4 must capture existing owner/view operations through compact/Option folder consumers, qualify visible labels/feature availability, stop stale single/bulk callbacks and guard read-only/Temporary operations. Reuse the existing store/operation/transport; do not invent another folder cache authority.
+2026-10-06: Started bounded TASK-13507 shared model picker/composer accessibility repair. Active-character paged history already implemented in TASK-13455.3; not repeated. Native responsive viewport/VoiceOver and extension/handoff gates remain open. Baseline94854ca3db6ec3eaa0c27b4e9537bdd47d222611 current; detailed plan Docs/Plans/IMPLEMENTATION_PLAN_TASK_13507_chat_accessible_model_picker.md.
+TASK-13507 bounded picker/composer accessibility checkpoint complete: final9suites182passed, both independent reviews clear, shared types/extension entrypoint compile/no-new lint/locale/diff pass. Source/adapter AX proof recorded in master; native320/390px/zoom/themes/touch/VoiceOver/package and handoff continuity remain open. Stage4 stays In Progress.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

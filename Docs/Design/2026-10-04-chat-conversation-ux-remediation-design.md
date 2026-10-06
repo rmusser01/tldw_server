@@ -6,7 +6,7 @@ Status: Approved by the user on 2026-10-04, with the pre-implementation review c
 
 Program: TASK-13453; delivery stages TASK-13454–TASK-13458.
 
-Initial baseline: `origin/dev` at `75ab224081bf140ef52017c1a9b0a04f6878d488`. Current baseline: latest fetched `origin/dev` at `94854ca3db6ec3eaa0c27b4e9537bdd47d222611`, integrated in `292ea526d1` on 2026-10-06. This latest change is CI-only; its153 contract checks pass. Reviewed implementation checkpoints below record the frontend evidence. Remaining staged acceptance is still open.
+Initial baseline: `origin/dev` at `75ab224081bf140ef52017c1a9b0a04f6878d488`. Current baseline: latest fetched `origin/dev` at `94854ca3db6ec3eaa0c27b4e9537bdd47d222611`, integrated in `292ea526d1` on 2026-10-06. This latest change is CI-only; its 153 contract checks pass. Reviewed implementation checkpoints below record the frontend evidence. Remaining staged acceptance is still open.
 
 ## Outcome and evidence
 
@@ -219,7 +219,7 @@ Each stage delivers a reviewable behavior change. This is a design sequence, not
 
 ### Stage 4 — Accessible narrow layouts and extension continuity
 
-**Task:** TASK-13457. **Status:** Not Started.
+**Task:** TASK-13457. **Status:** In Progress.
 
 **Goal:** equivalent usable controls and identifiable conversations across surfaces. Findings 5, 9.
 
@@ -339,3 +339,14 @@ The shared header now reuses the existing History on/Temporary mode copy. The te
 Failed main Character Library reads now reject after the existing notification, reaching the existing error/Retry renderer. Successful empty results retain onboarding, and supported legacy route fallback remains available. The original read failure remains identifiable. The production query client retains its existing one-retry policy; the new actual-query tests use IO doubles and disable automatic retries for deterministic state checks. They do not establish broader account/cache ownership or network timing.
 
 Four behavior checks failed before the change. After the fix,55 checks in five query/header/renderer/mode suites pass, plus four targeted Manager fallback/error regressions. Both independent source reviewers clear the bounded changes. Final WebUI types, extension entrypoint/config compile, no-new touched lint and diff checks pass. This bounded task is complete. The real browser header displays History on beside retained acknowledged creation, and Library reads currently display all four owned cards. A failing post-change browser read was not imposed, and native successful generation/physical storage/assistive/packaged-extension gates remain open.
+
+
+## Accessible shared model picker — TASK-13507
+
+The existing Dropdown now uses viewport bounds, wrapped controls/rows and scrollable content. Search and Sort retain accessible names; the trigger advertises its actual menu and retains the full provider/model name beside readiness warnings. The native multiline textarea no longer exposes unsupported expansion semantics. Selection, favorite storage, exact unsent input and existing composer behavior remain intact. No popup framework or dependency is added.
+
+Keyboard checks cover both control variants, nested Sort, Search/menu/Help Tab reachability and departure, Escape, Favorite Enter/Space without model selection, replacement Favorite focus as unselected rows move between groups, and native row selection. Opening focus uses the repository's cancellable frame pattern. Native trigger clicks close once without premature blur/reopening. The actual full Form consumes an external return request on departure and qualifies/cancels deliberate delayed return on changed focus, reopen or unmount.
+
+Source failures were reproduced before each correction, including the retained default-motion opening-focus race, Favorite group movement, actual Form external click/Tab return and trigger pointer ordering. The final nine-suite run passes182 checks (/private/tmp/chat-accessible-model-final-regressions.log). WebUI shared types, extension entrypoint/config compilation, official English locale mirror agreement, no-new touched ESLint and diff checks pass. Both authorized independent source reviewers clear the final changes; they did not execute tests. Remote dev94854ca3db6ec3eaa0c27b4e9537bdd47d222611 is unchanged and remains integrated at292ea526d1. Bandit is not applicable to TS/TSX/JSON/docs; no Python implementation was changed.
+
+The Form focus harness uses the actual Form callback and installed Dropdown/Tooltip, with declared model-state, storage, other controls and service doubles. The browser AX walkthrough confirms Search/Sort names, open focus and Escape return while retaining the exact draft. It does not establish native geometry: the current IAB reports0x0 viewport and cannot capture screenshots after documented resize/reset/presentation attempts. Actual320/390px,200%zoom, visual motion/themes, touch, VoiceOver, packaged extension, positive native browser generation and complete handoff journeys remain parent gates. This closes the bounded model-picker unit, not the all-ten program.

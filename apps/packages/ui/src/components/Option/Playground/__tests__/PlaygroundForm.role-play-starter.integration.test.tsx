@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import React from "react"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
-import { act, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { ConfigProvider } from "antd"
+import { openModelSelector } from "../playground-cockpit-actions"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
@@ -27,6 +29,7 @@ const ownerGuardFixture = vi.hoisted(() => ({ capture: null as null | (() => () 
 type ModelSettingsStore = ReturnType<typeof import("@/store/model").useStoreChatModelSettings.getState>
 const nativeSetupFixture = vi.hoisted(() => ({
   realSettings: false,
+  realModelPicker: false,
   realDrafts: false,
   ownerCurrent: true,
   destinationCurrent: null as null | (() => boolean),
@@ -261,7 +264,8 @@ vi.mock("@tanstack/react-query", () => ({
   })
 }))
 
-vi.mock("antd", async () => {
+vi.mock("antd", async original => {
+  const actual = await original<typeof import("antd")>()
   const React = await import("react")
 
   const InputComponent = React.forwardRef<HTMLInputElement, any>(
@@ -392,6 +396,7 @@ vi.mock("antd", async () => {
   ModalComponent.confirm = vi.fn()
 
   return {
+    ConfigProvider: actual.ConfigProvider,
     Button: ButtonComponent,
     Checkbox: ({
       children,
@@ -416,7 +421,7 @@ vi.mock("antd", async () => {
         {children}
       </label>
     ),
-    Dropdown,
+    Dropdown: (props: React.ComponentProps<typeof actual.Dropdown>) => nativeSetupFixture.realModelPicker ? <actual.Dropdown {...props} /> : <Dropdown {...props} />,
     Input: InputComponent,
     InputNumber: ({ value, onChange, disabled, ...rest }: any) => (
       <input
@@ -470,7 +475,7 @@ vi.mock("antd", async () => {
         disabled={disabled}
       />
     ),
-    Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
+    Tooltip: (props: React.ComponentProps<typeof actual.Tooltip>) => nativeSetupFixture.realModelPicker ? <actual.Tooltip {...props} /> : <>{props.children}</>
   }
 })
 
@@ -1029,10 +1034,12 @@ vi.mock("@/utils/onboarding-ingestion-telemetry", () => ({
 }))
 
 vi.mock("@/hooks/playground", () => ({
-  useModelSelector: () => ({
+  useModelSelector: () => {
+    const [open, setOpen] = React.useState(false)
+    return {
     selectedModelKey: nativeSetupFixture.controller ? (String(playgroundFormMessageOptionState.value.selectedModel).includes(":") ? playgroundFormMessageOptionState.value.selectedModel : `openai:${playgroundFormMessageOptionState.value.selectedModel}`) : undefined,
-    modelDropdownOpen: false,
-    setModelDropdownOpen: vi.fn(),
+    modelDropdownOpen: nativeSetupFixture.realModelPicker && open,
+    setModelDropdownOpen: nativeSetupFixture.realModelPicker ? setOpen : vi.fn(),
     modelSearchQuery: "",
     setModelSearchQuery: vi.fn(),
     modelSortMode: "favorites",
@@ -1053,7 +1060,8 @@ vi.mock("@/hooks/playground", () => ({
     filteredModels: [],
     modelDropdownMenuItems: [],
     isSmallModel: false
-  }),
+    }
+  },
   useComposerTokens: () => ({
     draftTokenCount: 0,
     conversationTokenCount: 0,
@@ -1146,6 +1154,7 @@ vi.mock("@/hooks/playground", () => ({
 beforeEach(() => {
   localStorage.clear()
   nativeSetupFixture.realSettings = false
+  nativeSetupFixture.realModelPicker = false
   queuedDocumentPreparation.mockReset()
   nativeSetupFixture.realDrafts = false
   nativeSetupFixture.ownerCurrent = true
@@ -1222,6 +1231,86 @@ const prepareNativeSource = () => {
 }
 
 describe("PlaygroundForm role-play starter", () => {
+  it.each(["click", "Tab"])("preserves outside focus when an externally opened real picker departs by %s", async departure => {
+    nativeSetupFixture.realModelPicker = true
+    const user = userEvent.setup()
+    render(<ConfigProvider theme={{ token: { motion: false } }}>
+      <button>Another task</button>
+      <button data-testid="external-model-opener" onClick={() => openModelSelector({ returnFocusSelector: "[data-testid='external-model-opener']" })}>Choose another model</button>
+      <PlaygroundForm droppedFiles={[]} />
+    </ConfigProvider>)
+    await user.click(screen.getByRole("button", { name: "Choose another model" }))
+    const trigger = screen.getByTestId("model-selector")
+    const search = await screen.findByRole("textbox", { name: "Search models" })
+    await act(() => new Promise(resolve => window.requestAnimationFrame(resolve)))
+    search.focus()
+    if (departure === "click") {
+      await user.click(screen.getByRole("button", { name: "Another task" }))
+    } else {
+      screen.getByRole("link", { name: "Help me choose a model" }).focus()
+      await user.tab()
+      await user.tab()
+    }
+    await act(() => new Promise(resolve => window.requestAnimationFrame(resolve)))
+    expect(screen.getByRole("button", { name: "Another task" })).toHaveFocus()
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("returns externally opened picker Escape to its visible opener", async () => {
+    nativeSetupFixture.realModelPicker = true
+    const user = userEvent.setup()
+    render(<ConfigProvider theme={{ token: { motion: false } }}>
+      <button data-testid="external-model-opener" onClick={() => openModelSelector({ returnFocusSelector: "[data-testid='external-model-opener']" })}>Choose another model</button>
+      <PlaygroundForm droppedFiles={[]} />
+    </ConfigProvider>)
+    const opener = screen.getByRole("button", { name: "Choose another model" })
+    await user.click(opener)
+    const search = await screen.findByRole("textbox", { name: "Search models" })
+    await waitFor(() => expect(search).toHaveFocus())
+    fireEvent.keyDown(search, { key: "Escape", keyCode: 27 })
+    await waitFor(() => expect(screen.getByTestId("model-selector")).toHaveAttribute("aria-expanded", "false"))
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
+  it.each(["reopen", "unmount", "outside focus"])("retires a held external return on %s", async retirement => {
+    nativeSetupFixture.realModelPicker = true
+    const user = userEvent.setup()
+    const view = (show = true) => <ConfigProvider theme={{ token: { motion: false } }}>
+      <button>Another task</button>
+      <button data-testid="external-model-opener" onClick={() => openModelSelector({ returnFocusSelector: "[data-testid='external-model-opener']" })}>Choose another model</button>
+      {show && <PlaygroundForm droppedFiles={[]} />}
+    </ConfigProvider>
+    const { rerender, unmount } = render(view())
+    await user.click(screen.getByRole("button", { name: "Choose another model" }))
+    const search = await screen.findByRole("textbox", { name: "Search models" })
+    await waitFor(() => expect(search).toHaveFocus())
+    const frames = new Map<number, FrameRequestCallback>()
+    let id = 0
+    const request = vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => { frames.set(++id, callback); return id })
+    const cancel = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(frame => { frames.delete(frame) })
+    try {
+      fireEvent.keyDown(search, { key: "Escape", keyCode: 27 })
+      expect(screen.getByTestId("model-selector")).toHaveAttribute("aria-expanded", "false")
+      if (retirement === "reopen") {
+        act(() => openModelSelector({ returnFocusSelector: "[data-testid='external-model-opener']" }))
+      } else {
+        if (retirement === "unmount") rerender(view(false))
+        screen.getByRole("button", { name: "Another task" }).focus()
+      }
+      for (let frame = 0; frame < 4; frame++) {
+        const pending = [...frames.values()]
+        frames.clear()
+        act(() => pending.forEach(callback => callback(0)))
+      }
+      if (retirement === "reopen") expect(screen.getByRole("textbox", { name: "Search models" })).toHaveFocus()
+      else expect(screen.getByRole("button", { name: "Another task" })).toHaveFocus()
+    } finally {
+      unmount()
+      request.mockRestore()
+      cancel.mockRestore()
+    }
+  })
+
   it.each([false, true])("keeps one real Casual customization trigger and primary controls in the mobile cockpit: %s", async mobile => {
     viewportState.mobile = mobile
     viewportState.mode = "casual"

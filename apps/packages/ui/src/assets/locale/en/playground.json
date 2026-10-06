@@ -475,6 +475,8 @@
     "chooseModelAndProvider": "Choose model and provider",
     "toolsButton": "+Tools",
     "modelSearchPlaceholder": "Search models",
+    "modelSearchLabel": "Search models",
+    "modelSortLabel": "Sort models",
     "noModelsMatch": "No models match your search.",
     "favorites": "Favorites",
     "favoriteAdd": "Add to favorites",

@@ -22,7 +22,7 @@ type ChatModelSelectorDropdownProps = {
   placement?: "topLeft" | "bottomLeft"
   resolvedProviderKey: string
   selectedModel?: string | null | undefined
-  setModelDropdownOpen: (open: boolean) => void
+  setModelDropdownOpen: (open: boolean, restoreFocus?: boolean) => void
   setModelSearchQuery: (query: string) => void
   setModelSortMode?: (mode: ModelSortMode) => void
 }
@@ -49,6 +49,29 @@ export const ChatModelSelectorDropdown = React.memo(
     setModelSortMode = () => undefined
   }: ChatModelSelectorDropdownProps) {
     const { t } = useTranslation(["playground", "common"])
+    const selectorRef = React.useRef<HTMLButtonElement>(null)
+    const popupRef = React.useRef<HTMLDivElement>(null)
+    const returningFocusRef = React.useRef(false)
+    const returnFocusToSelector = () => {
+      returningFocusRef.current = true
+      selectorRef.current?.focus()
+      returningFocusRef.current = false
+    }
+    React.useEffect(() => {
+      if (!modelDropdownOpen) return
+      const openingFocus = document.activeElement
+      let current = true
+      const frame = window.requestAnimationFrame(() => {
+        if (!current || !popupRef.current?.isConnected) return
+        const active = document.activeElement
+        if (active !== openingFocus && active !== document.body) return
+        popupRef.current.querySelector<HTMLInputElement>("input")?.focus()
+      })
+      return () => {
+        current = false
+        window.cancelAnimationFrame(frame)
+      }
+    }, [modelDropdownOpen])
     // When no model is selected, the provider connection may well be "Healthy",
     // but showing that green badge next to "Select a model" is contradictory —
     // you cannot chat yet. Surface a truthful "No model selected" state instead.
@@ -71,7 +94,12 @@ export const ChatModelSelectorDropdown = React.memo(
     return (
       <Dropdown
         open={modelDropdownOpen}
+        destroyOnHidden
+        styles={{ root: { maxWidth: "calc(100vw - 16px)", minWidth: 0 } }}
         onOpenChange={(open) => {
+          if (!open && popupRef.current?.contains(document.activeElement)) {
+            returnFocusToSelector()
+          }
           setModelDropdownOpen(open)
           if (!open) {
             setModelSearchQuery("")
@@ -79,27 +107,53 @@ export const ChatModelSelectorDropdown = React.memo(
         }}
         menu={{
           items: modelDropdownMenuItems,
-          className: "no-scrollbar",
+          className: "no-scrollbar [&_.ant-dropdown-menu-item]:whitespace-normal",
+          style: { minWidth: 0 },
           activeKey: selectedModel ?? undefined
         }}
         popupRender={(menu) => (
-          <div className="rounded-lg border border-border bg-surface shadow-lg">
+          <div
+            ref={popupRef}
+            tabIndex={-1}
+            onFocus={(event) => {
+              if (event.target === event.currentTarget) {
+                event.currentTarget.querySelector<HTMLInputElement>("input")?.focus()
+              }
+            }}
+            onBlur={(event) => {
+              if (!returningFocusRef.current && !event.currentTarget.contains(event.relatedTarget)) {
+                setModelDropdownOpen(false, false)
+                setModelSearchQuery("")
+              }
+            }}
+            className="flex max-h-[calc(100dvh-16px)] min-w-0 flex-col overflow-y-auto rounded-lg border border-border bg-surface shadow-lg"
+            onKeyDown={(event) => {
+              // Keep Tab available to the search, sort, menu and help controls.
+              if (event.key === "Tab") event.stopPropagation()
+              // Dropdown wraps a Tooltip; its ref cannot focus the native button.
+              if (event.key === "Escape") returnFocusToSelector()
+            }}
+          >
             {catalogControls ?? (
-              <div className="flex items-center gap-2 border-b border-border p-2">
+              <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border p-2">
                 <Input
                   size="small"
+                  aria-label={t("playground:composer.modelSearchLabel", "Search models")}
                   placeholder={t(
                     "playground:composer.modelSearchPlaceholder",
                     "Search models"
                   )}
                   value={modelSearchQuery}
                   allowClear
-                  className="flex-1"
+                  className="min-w-0 flex-1 basis-36"
                   onChange={(event) => setModelSearchQuery(event.target.value)}
-                  onKeyDown={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape") event.stopPropagation()
+                  }}
                 />
                 <Select
                   size="small"
+                  aria-label={t("playground:composer.modelSortLabel", "Sort models")}
                   value={modelSortMode}
                   onChange={(value) => setModelSortMode(value as ModelSortMode)}
                   options={[
@@ -126,15 +180,17 @@ export const ChatModelSelectorDropdown = React.memo(
                       )
                     }
                   ]}
-                  className="min-w-[120px]"
-                  onKeyDown={(event) => event.stopPropagation()}
+                  className="min-w-0 flex-1 basis-32"
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape") event.stopPropagation()
+                  }}
                 />
               </div>
             )}
-            <div className="no-scrollbar max-h-[400px] overflow-y-auto">
+            <div className="no-scrollbar min-h-0 flex-auto max-h-[400px] overflow-y-auto">
               {menu}
             </div>
-            <div className="border-t border-border p-2">
+            <div className="shrink-0 border-t border-border p-2">
               <Link
                 to="/docs/models"
                 className="flex items-center gap-1.5 text-xs text-primary transition-colors hover:text-primary/80"
@@ -168,12 +224,16 @@ export const ChatModelSelectorDropdown = React.memo(
         >
           <button
             type="button"
+            ref={selectorRef}
+            onMouseDown={(event) => {
+              if (modelDropdownOpen) event.preventDefault()
+            }}
             title={modelDropdownOpen ? undefined : statusTitle}
-            aria-label={statusTitle}
-            aria-haspopup="listbox"
+            aria-label={statusTitle === apiModelLabel ? apiModelLabel : `${apiModelLabel}. ${statusTitle}`}
+            aria-haspopup="menu"
             aria-expanded={modelDropdownOpen}
             data-testid="model-selector"
-            className={`inline-flex min-h-[44px] min-w-0 cursor-pointer items-center gap-1 rounded-full border px-2 text-[10px] transition-colors ${
+            className={`inline-flex min-h-[44px] min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-full border px-2 text-[10px] transition-colors ${
               statusWarning
                 ? "border-warn/50 bg-warn/10 text-warn hover:bg-warn/20"
                 : "border-border bg-surface hover:bg-surface-hover"
@@ -187,7 +247,7 @@ export const ChatModelSelectorDropdown = React.memo(
             />
             <span className="max-w-[120px] truncate">{apiModelLabel}</span>
             <span
-              className={`rounded-full px-1.5 py-0.5 text-[9px] ${
+              className={`min-w-0 truncate rounded-full px-1.5 py-0.5 text-[9px] ${
                 statusWarning
                   ? "bg-warn/10 text-warn"
                   : "bg-success/10 text-success"

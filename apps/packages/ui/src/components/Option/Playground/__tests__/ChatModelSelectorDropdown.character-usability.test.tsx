@@ -96,12 +96,12 @@ describe("ChatModelSelectorDropdown character model usability", () => {
 
   it("keeps an offline connection visible before provider selection", () => {
     render(<ChatModelSelectorDropdown {...baseProps} apiModelLabel="Choose provider / gpt-4o-mini" selectedModel="tldw:gpt-4o-mini" modelSelectorWarning connectionStatusLabel="Offline" connectionStatusWarning />)
-    expect(screen.getByRole("button", { name: "Offline" })).toHaveTextContent("Offline")
+    expect(screen.getByRole("button", { name: "Choose provider / gpt-4o-mini. Offline" })).toHaveTextContent("Offline")
   })
 
   it("keeps loading readiness visible before provider selection", () => {
     render(<ChatModelSelectorDropdown {...baseProps} apiModelLabel="Choose provider / gpt-4o-mini" selectedModel="tldw:gpt-4o-mini" modelSelectorWarning modelUsabilityLabel="Checking model readiness" modelUsabilityTitle="Checking chat model readiness" modelUsabilityWarning />)
-    expect(screen.getByRole("button", { name: "Checking chat model readiness" })).toHaveTextContent("Checking model readiness")
+    expect(screen.getByRole("button", { name: "Choose provider / gpt-4o-mini. Checking chat model readiness" })).toHaveTextContent("Checking model readiness")
   })
 
   it("keeps provider and model visible while naming provider setup blockers", () => {

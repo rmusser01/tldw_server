@@ -4069,5 +4069,11 @@
   },
   "draftRecovery_savedChatDraft": {
     "message": "Retained message for a saved chat"
+  },
+  "composer_modelSearchLabel": {
+    "message": "Search models"
+  },
+  "composer_modelSortLabel": {
+    "message": "Sort models"
   }
 }

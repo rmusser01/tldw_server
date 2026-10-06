@@ -25,7 +25,6 @@ export type ComposerTextareaProps = {
   isMobile: boolean
   isConnectionReady: boolean
   isCollapsed: boolean
-  ariaExpanded: boolean
   compactWhenInactive?: boolean
   rows?: number
   // Form bindings
@@ -66,7 +65,6 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
   isProMode,
   isMobile,
   isCollapsed,
-  ariaExpanded,
   compactWhenInactive = false,
   rows = 1,
   formInputProps,
@@ -131,7 +129,6 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
             console.error("[ComposerTextarea] onPaste error:", err)
           }
         }}
-        aria-expanded={ariaExpanded}
         rows={rows}
         style={{
           minHeight

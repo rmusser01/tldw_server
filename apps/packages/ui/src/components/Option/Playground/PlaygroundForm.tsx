@@ -141,6 +141,7 @@ import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection";
 import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant";
 import {
   normalizeFocusSelector,
+  focusFirstVisibleElement,
   scheduleFocusFirstVisibleElement,
 } from "@/utils/focus-return";
 // resolveApiProviderForModel moved to usePlaygroundRawPreview and usePlaygroundImageGen
@@ -709,6 +710,7 @@ export const PlaygroundForm = ({
     React.useState<string | null>(null);
   const modelSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const modelSelectorReturnFocusSelectorRef = React.useRef<string | null>(null);
+  const modelSelectorFocusFrameRef = React.useRef<number | null>(null);
   const mcpSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const [openActorSettings, setOpenActorSettings] = React.useState(false);
   const [rolePlaySetupOpen, setRolePlaySetupOpen] = React.useState(false);
@@ -1448,21 +1450,34 @@ export const PlaygroundForm = ({
     navigate,
     modelsLoading: composerModelsLoading,
   });
-  const restoreModelSelectorFocus = React.useCallback(() => {
+  const cancelModelSelectorFocus = React.useCallback(() => {
+    if (modelSelectorFocusFrameRef.current == null) return;
+    window.cancelAnimationFrame(modelSelectorFocusFrameRef.current);
+    modelSelectorFocusFrameRef.current = null;
+  }, []);
+  React.useEffect(() => cancelModelSelectorFocus, [cancelModelSelectorFocus]);
+  const restoreModelSelectorFocus = React.useCallback((restoreFocus = true) => {
     const returnFocusSelector = modelSelectorReturnFocusSelectorRef.current;
     if (!returnFocusSelector) return;
     modelSelectorReturnFocusSelectorRef.current = null;
-
-    scheduleFocusFirstVisibleElement(returnFocusSelector);
-  }, []);
+    cancelModelSelectorFocus();
+    if (!restoreFocus) return;
+    const closingFocus = document.activeElement;
+    if (closingFocus !== document.body &&
+      !(closingFocus instanceof HTMLElement && closingFocus.matches("[data-testid='model-selector']"))) return;
+    modelSelectorFocusFrameRef.current = window.requestAnimationFrame(() => {
+      modelSelectorFocusFrameRef.current = null;
+      if (document.activeElement !== closingFocus && document.activeElement !== document.body) return;
+      focusFirstVisibleElement(returnFocusSelector);
+    });
+  }, [cancelModelSelectorFocus]);
   const setModelDropdownOpenWithFocusRestore = React.useCallback(
-    (nextOpen: boolean) => {
+    (nextOpen: boolean, restoreFocus = true) => {
+      if (nextOpen) cancelModelSelectorFocus();
       setModelDropdownOpen(nextOpen);
-      if (!nextOpen) {
-        restoreModelSelectorFocus();
-      }
+      if (!nextOpen) restoreModelSelectorFocus(restoreFocus);
     },
-    [restoreModelSelectorFocus, setModelDropdownOpen],
+    [cancelModelSelectorFocus, restoreModelSelectorFocus, setModelDropdownOpen],
   );
   React.useEffect(() => {
     setActiveChatModelSettingsScope(selectedModelSettingsScope ?? null);
@@ -2386,11 +2401,11 @@ export const PlaygroundForm = ({
     if (typeof window === "undefined") return;
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<ModelSelectorOpenDetail>).detail;
+      focusFirstVisibleElement("[data-testid='model-selector']");
       modelSelectorReturnFocusSelectorRef.current = normalizeFocusSelector(
         detail?.returnFocusSelector,
       );
       openModelApiSelector();
-      scheduleFocusFirstVisibleElement("[data-testid='model-selector']");
     };
     window.addEventListener(OPEN_MODEL_SELECTOR_EVENT, handler);
     return () => {
@@ -6155,7 +6170,6 @@ export const PlaygroundForm = ({
                                     isMobile={isMobileViewport}
                                     isConnectionReady={isConnectionReady}
                                     isCollapsed={isMessageCollapsed}
-                                    ariaExpanded={!isMessageCollapsed}
                                     compactWhenInactive={
                                       shouldCompactComposerTextarea
                                     }
