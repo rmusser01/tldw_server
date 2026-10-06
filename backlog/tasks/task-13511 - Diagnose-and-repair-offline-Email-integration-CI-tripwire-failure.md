@@ -1,7 +1,7 @@
 ---
 id: TASK-13511
 title: Diagnose and repair offline Email integration CI tripwire failure
-status: In Progress
+status: Done
 labels:
 - ci
 - knowledge-followup
@@ -17,7 +17,7 @@ Follow up the single optional CI failure on merged Knowledge PR3196: run37412488
 <!-- AC:BEGIN -->
 - [x] #1 Identify the forbidden operation and reproduce or deterministically exercise its caller
 - [x] #2 Preserve rejection of model work, background jobs, DNS and outbound requests
-- [ ] #3 Run the affected integration coverage, formatting and touched-scope Bandit
+- [x] #3 Run the affected integration coverage, formatting and touched-scope Bandit
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -28,17 +28,18 @@ Diagnosis reproduced on latest dev1fc353c3f6: local SQLite four cases pass; conf
 Recorded full diagnosis and existing repair ownership in Docs/Reviews/KNOWLEDGE_FOLLOWUP_RESULTS_2026_10_06.md. Disposable accounting-boundary isolation passes 44 Email integration tests with the original offline guards preserved. No CI product/test patch duplicated here; PR3016/PR3084 integration and green remote CI remain required. Bandit is not applicable to this task because it changes no production Python.
 Published bounded follow-up fixes/evidence as draft PR3205 against latest dev: https://github.com/rmusser01/tldw_server/pull/3205 . The separate human Change summary, unresolved device/participant qualifications, independent provenance design and existing CI integration remain explicit in the PR/report. Disposable task runtimes/browser profiles are stopped; managed worktree retained for review.
 Current dev1e06e03b587310ec023f3810c4480ea4e69b05f5 now includes merged PR3016 (2026-10-06T20:57:17Z), including test(email) isolate offline daily accounting. PR3084 remains open. No duplicate patch added here; affected current-dev verification and corresponding remote CI qualification remain pending.
+Verified integrated repair on current dev1e06e03b587310ec023f3810c4480ea4e69b05f5 in an isolated tracked archive: all25 offline Email tests passed with8 warnings in7.11s, including upload/quota pool tripwire. Local Python3.11 is below declared dependency floors; no operator database or primary checkout was modified. Exact merged PR3016 head a6250c853bbb875686a3fc793de4c8749cf41868 has a successful Ubuntu/Python3.12 media-ingestion-new-integration shard:241passed,1skipped,5492warnings,593.71s; log names test_email_offline_ingestion.py. Shard URL https://github.com/rmusser01/tldw_server/actions/runs/37522638581/job/112473175804 . Same head backend-required, security-required and Lint & Type Check succeeded. All existing offline network/model/job/DNS guards remain. No duplicate product patch; production Bandit not applicable to this documentation/investigation task. PR3084 remains separately open but is no longer required to resolve the demonstrated PR3196 failure.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Diagnosis complete: PostgreSQL quota/ledger accounting enters sockets under the offline guard. Existing PR3016/PR3084 own the repair. Keep this task In Progress until that repair is integrated and confirmed by CI.
+Resolved through upstream PR3016, now merged into dev. Verified25 current-dev offline Email cases and the successful241-case Python3.12 ingestion CI shard at the repair head, with original forbidden-call guards preserved. No duplicate patch or operator-data mutation. Local dependency-floor and existing warning qualifications remain recorded.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip

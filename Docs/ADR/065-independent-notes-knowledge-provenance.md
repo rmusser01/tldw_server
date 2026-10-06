@@ -5,7 +5,7 @@
 **Backfilled from:** not backfilled
 **Decision owner:** Requester approval in the Knowledge follow-up session
 **Related task:** TASK-13514
-**Related spec/plan:** Docs/Design/2026-10-06-knowledge-followup-source-context.md; Docs/superpowers/plans/IMPLEMENTATION_PLAN_knowledge_provenance_20261006.md
+**Related spec/plan:** [Approved source-context spec](../Design/2026-10-06-knowledge-followup-source-context.md); [historical implementation plan](https://github.com/rmusser01/tldw_server/blob/16980cb84e6395d73c680a19982c612112012924/Docs/superpowers/plans/IMPLEMENTATION_PLAN_knowledge_provenance_20261006.md)
 
 ## Decision
 

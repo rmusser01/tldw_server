@@ -1,7 +1,7 @@
 ---
 id: TASK-13514
 title: Retain Knowledge provenance and full non-media Research source context
-status: In Progress
+status: Done
 labels:
 - knowledge
 - research
@@ -16,7 +16,7 @@ Follow up PR3196 limitations: canonical note provenance currently depends on a c
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Preserve original Knowledge provenance independently of editable note content and across updates
+- [x] #1 Preserve original Knowledge provenance independently of editable note content and across updates
 - [x] #2 Use available canonical full non-media source content in Research while retaining identity, citations and evidence excerpts
 - [x] #3 Preserve owner, deleted-source and stale-save fences with regression coverage
 - [x] #4 Fresh server workspace imports wait for existing server confirmation and retain canonical note provenance without replaying completed imports
@@ -40,17 +40,21 @@ Sync stage independently reviewed and complete after fixes344b24d4cc and93143bfd
 API stage db774657d8 implemented structured read/write and portable export, with 44 new API and225 legacy regressions passing. Independent review found inactive durable-retry and encryption read-policy gaps; both are being fixed before shared-client integration. Local receipt extension reuses the provenance store and canonical Notes transaction; final reviewed verification remains pending.
 API stage complete and independently reviewed after db774657d8 plus9169853b38. Structured Notes reads/writes/restore and all portable exports preserve independent heads; durable local owner-scoped receipts recover sourced create/update/bulk/import/restore acknowledgments atomically even with Sync disabled. SQLite76/PostgreSQL80 migrations and forced receipt RLS verified with real restricted-role Postgres. Final150API/storage/organization tests and65affected Sync cases passed; zeroBandit and hooks passed, unchanged lint/deprecation diagnostics recorded. Read/export/replay policy gates reject unavailable encryption without leaking markers. Scoped re-review clean; shared clients now in progress.
 Shared clients complete after cb2e58c7dd,968dff2c05 and f17d581923; original-question snapshots, independent tombstone restoration, stale editor ownership and immutable retries survive loss, throttling, authentication and policy/readiness rejection. Scoped reviews clean after both fix rounds. Final affected225tests/six suites passed, following overlapping364tests/19suites; both client types/builds and normal hooks passed. Lint baseline debt qualified in report, no production errors or added file warnings. Real disposable API receipts/delete/restore/export and browser Ask→save→marker removal→Notes reopen→explicit history restoration→JSON export→full v2 Research snapshot→Quick Note save/reopen passed. Active Sync/PG qualifications come from reviewed automated fixtures, not live browser attestation. Release Bandit all24production Python paths zero findings/errors. Final whole-branch review/publication remains in progress.
+Final whole-branch review at 16980cb84e found one demonstrated Important/P2 read/export integration defect: accepted failed Sync provenance v2 can be projected onto committed Note body v1. Named shared helper and real rollback fixture inspected; final single fix dispatch and scoped re-review will preserve canonical tombstone/policy fences and verify failed replacement reads/exports plus recovery. No other actionable final findings. Existing human Change summary and seven current-head CI gates remain separate.
+Final review finding fixed in05afed42d7ee9ab817cc628b6004d84503507fee: shared read/export keeps committed history and requires both independent applied canonical heads to match product versions/deletion and child hash; projection gaps return409 notes_provenance_projection_incomplete. Historical receipts remain policy-gated immutable acknowledgments. RED14 failed; affected389 passed/9warnings/no skips including live PostgreSQL, zero touched Bandit, Ruff/formatting/normal hooks passed. The single scoped final re-review found the issue addressed with no new breakage or out-of-scope findings. A disposable merge-tree preview combined that fix head with current dev1e06e03b587310ec023f3810c4480ea4e69b05f5 without conflicts; all124 affected REST/lifecycle cases passed/4warnings/no skips in108.43s. This verifies the combined tree without rebasing the draft. Final publication/task cleanup follows; human Change summary and seven current-head required statuses separately gate merge.
+Completed approved implementation and final review; product code05afed42d7 and rewritten scope/validation are published on draft PR3205 https://github.com/rmusser01/tldw_server/pull/3205 . Existing human summary still pending; no merge claimed. Real API/browser proof and current-dev combined-tree124-case verification retained in Docs/Reviews/KNOWLEDGE_FOLLOWUP_RESULTS_2026_10_06.md. Owned headless/native browsers and runtime services are stopped; disposable profiles/archive, four dependency links and generated build/Playwright outputs removed; primary checkout and user model9099 preserved. Completed task-specific implementation plan will be retired per AGENTS, with historical version https://github.com/rmusser01/tldw_server/blob/16980cb84e6395d73c680a19982c612112012924/Docs/superpowers/plans/IMPLEMENTATION_PLAN_knowledge_provenance_20261006.md . Native/device/participants/broad frontend lint and external-web refresh remain separate documented follow-ups.
+Controller ruling retained before deleting only this plan’s ignored SDD workspace: enroll provenance-bearing parents plus the exact existing target rather than every plain Note, because unrelated large valid Notes must not block a sourced save. Required oversized/missing evidence still fails visibly; if the ruling misses a required parent, exact append rejects instead of inventing a base. No other controller rulings or parked final findings. Final task-specific plan retired after publication, with historical16980 link and current release report retained.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented independent owner-scoped canonical Notes provenance, exact separate versions and tombstones, atomic Sync pairing/recovery, durable inactive-Sync acknowledgment receipts, policy-gated reads/replay/exports and shared WebUI/extension save/reopen compatibility. Original question/scope/trust/excerpts survive Markdown-only edits; core restoration does not revive history; full owned Notes snapshots retain current version alongside original retrieval evidence. Tasks1–4 independently reviewed and real API/browser workflows verified. Final whole-branch review, PR update and merge prerequisites remain pending; native/device/participant and broad-suite qualifications are recorded separately.
+Approved independent source history is implemented across Notes storage, Sync, REST and shared WebUI/extension clients. Exact independent versions, atomic pair lifecycle, owner policies, durable retry receipts and explicit retained-history restoration preserve original question/scope/trust/excerpts through ordinary edits, delete/retry, export/import and full-source Research handoffs. Independent task and final reviews are clean after fixes. Final389 backend and124 current-dev preview cases passed with PostgreSQL; final225 client cases, both types/builds and touched Bandit passed, with baseline qualifications recorded. Updated draft PR3205 is published; merge remains gated by its own human-written Change summary, serial latest-dev rebase and seven required current-head checks.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
