@@ -9,6 +9,7 @@ import {
   stripLeadingTranscriptTimings
 } from '@/utils/media-transcript-display'
 import type { MediaResultItem } from '../types'
+import { stripMediaMetadata } from '@/utils/media-metadata-display'
 import type { MediaTextSizePreset } from '@/services/settings/ui-settings'
 
 const PLAIN_TEXT_MEDIA_TYPES = new Set(['audio', 'video', 'transcript', 'subtitle'])
@@ -105,12 +106,17 @@ export function useContentRendering(deps: UseContentRenderingDeps) {
 
   const shouldHideTranscriptTimings = hideTranscriptTimings ?? true
 
+  const readingContent = useMemo(
+    () => selectedMedia?.kind === 'media' ? stripMediaMetadata(content) : content,
+    [content, selectedMedia?.kind]
+  )
+
   const displayContent = useMemo(
     () =>
       shouldHideTranscriptTimings
-        ? stripLeadingTranscriptTimings(content)
-        : content,
-    [content, shouldHideTranscriptTimings]
+        ? stripLeadingTranscriptTimings(readingContent)
+        : readingContent,
+    [readingContent, shouldHideTranscriptTimings]
   )
 
   const effectiveRenderMode = useMemo(
@@ -134,13 +140,13 @@ export function useContentRendering(deps: UseContentRenderingDeps) {
   }, [displayContent, selectedMedia?.kind, selectedMedia?.meta?.type])
 
   const transcriptLines = useMemo(
-    () => (content ? content.replace(/\r\n/g, '\n').split('\n') : []),
-    [content]
+    () => (readingContent ? readingContent.replace(/\r\n/g, '\n').split('\n') : []),
+    [readingContent]
   )
 
   const hasTranscriptTimingLines = useMemo(
-    () => hasLeadingTranscriptTimings(content),
-    [content]
+    () => hasLeadingTranscriptTimings(readingContent),
+    [readingContent]
   )
 
   const hasClickableTranscriptTimestamps = useMemo(

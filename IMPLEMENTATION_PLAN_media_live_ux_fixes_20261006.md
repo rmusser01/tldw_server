@@ -12,13 +12,13 @@ Approved scope: user continuation of the solutions in Docs/Reviews/2026-10-05-me
 **Goal**: Remove valid ingestion metadata envelopes from default single/multi reading while preserving raw content for other uses.
 **Success Criteria**: Actual web article reads cleanly; malformed envelopes and ordinary metadata mentions remain intact; raw exports/analysis unchanged.
 **Tests**: Valid/malformed/body text parser checks plus reader integration against actual stored payload.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: Retry confirmation and count copy — TASK-13506/13507
 **Goal**: Configure/Review reflects actual retry scope and prior saved states; saved-item CTA wording respects item count.
 **Success Criteria**: Resumed mixed batch shows and submits only the failed item; previous successes remain accurately labeled; one/many labels agree visually and accessibly.
 **Tests**: Existing wizard session integration and result/history localization checks.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Stage 4: Verification and review
 **Goal**: Verify the changed flows on real isolated API content and current client builds; create a reviewable result.

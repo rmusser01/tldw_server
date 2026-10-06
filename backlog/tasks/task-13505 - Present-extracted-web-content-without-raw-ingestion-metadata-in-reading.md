@@ -1,7 +1,7 @@
 ---
 id: TASK-13505
 title: Present extracted web content without raw ingestion metadata in reading
-status: To Do
+status: In Progress
 labels:
 - media
 - ux
@@ -18,8 +18,8 @@ Real URL ingestion of https://example.com stores a [METADATA] JSON wrapper at th
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Default content reading presents the article with readable provenance; retain raw stored content for export or explicit inspection.
-- [ ] #2 Handle the known metadata envelope safely without removing ordinary article text that happens to mention metadata.
+- [x] #1 Default content reading presents the article with readable provenance; retain raw stored content for export or explicit inspection.
+- [x] #2 Handle the known metadata envelope safely without removing ordinary article text that happens to mention metadata.
 - [ ] #3 Verify actual extracted web payloads in single and multiple-item reading on mobile.
 <!-- AC:END -->
 
@@ -27,6 +27,8 @@ Real URL ingestion of https://example.com stores a [METADATA] JSON wrapper at th
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Confirmed screenshot: saved-batch-mobile.png. Existing extractMediaDetailContent returns raw content.text. ADR required: no; presentation change within existing ingestion/detail contract. No source fix made during validation.
+Plan: IMPLEMENTATION_PLAN_media_live_ux_fixes_20261006.md. Preserve raw content for analysis/export; clean only the reading presentation. ADR required: no; same persistence and detail contract.
+Red: both real reader components displayed the stored content_hash envelope. Implemented a presentation-only envelope parser with JSON validation and string/escape-aware object boundary; default single/multi readers and inline comparison use clean text. Raw detail, structured export, editing and analysis inputs remain unchanged. Green: parser/content/comparison/single export suites 31/31; full reading suite 144/144 after correcting a helper-rename import. Real-browser verification pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

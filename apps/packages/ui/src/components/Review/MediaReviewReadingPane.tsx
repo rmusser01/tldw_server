@@ -20,7 +20,7 @@ import { InContentSearch } from "@/components/Review/InContentSearch"
 import { SectionNavigator, type ContentSection } from "@/components/Review/SectionNavigator"
 import { ComparisonSplit } from "@/components/Review/ComparisonSplit"
 import type { MediaReviewState, MediaReviewActions, MediaDetail } from "@/components/Review/media-review-types"
-import { getContent, includesId, MINIMAP_COLLAPSE_THRESHOLD } from "@/components/Review/media-review-types"
+import { getReadingContent, includesId, MINIMAP_COLLAPSE_THRESHOLD } from "@/components/Review/media-review-types"
 import { scrollSectionIntoView } from "@/components/Review/reading-pane-section-navigation"
 import { extractMediaDetailAnalysis } from "@/utils/media-detail-content"
 
@@ -72,7 +72,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
   const primaryContent = React.useMemo(() => {
     const first = effectiveItems[0]
     if (!first) return ""
-    const raw = getContent(first) || ""
+    const raw = getReadingContent(first) || ""
     return shouldHideTranscriptTimings ? stripLeadingTranscriptTimings(raw) : raw
   }, [effectiveItems, shouldHideTranscriptTimings])
 
@@ -126,7 +126,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
     const { virtualRow, isAllMode } = opts || {}
     const key = String(d.id)
     const isFocused = d.id === focusedId
-    const rawContent = getContent(d) || ""
+    const rawContent = getReadingContent(d) || ""
     const content = shouldHideTranscriptTimings
       ? stripLeadingTranscriptTimings(rawContent)
       : rawContent

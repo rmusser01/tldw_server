@@ -740,6 +740,16 @@ describe('MediaReviewPage active reading context', () => {
     expect(screen.getByText('Item 1 of 39')).toBeInTheDocument()
   })
 
+  it('reads the article body without its stored metadata envelope in multi review', async () => {
+    const content = '[METADATA]\n{"url":"https://example.com/","content_hash":"fixture"}\n[/METADATA]\n\nArticle body'
+    mocks.bgRequest.mockResolvedValue({ media_id: 1, source: { title: 'Example Domain', type: 'html' }, content: { text: content } })
+    render(<MediaReviewPage />)
+    fireEvent.click(getResultRowByTitle('Item 1'))
+    const body = await screen.findByTestId('media-review-content-body-1')
+    await waitFor(() => expect(body).toHaveTextContent('Article body'))
+    expect(body).not.toHaveTextContent('[METADATA]')
+  })
+
   it('uses nested source identity for off-page reading and export from the real detail DTO', async () => {
     mocks.bgRequest.mockResolvedValue({
       media_id: 99,
