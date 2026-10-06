@@ -605,7 +605,10 @@ Target: actual dev1fc353c3f67c93ba05102e7b0136ac4acac8f510.
 **Success Criteria**: Parent outcomes and incoming ledger seeds both survive;
 every other tree path equals the precomputed union. Child stays read-only.
 **Tests**: Clean status, backup ref, tree comparison and original assertions.
-**Status**: In Progress
+**Status**: Complete
+Rebased191bea70e6 onto1fc353c3. Every non-conflict tree byte equals the
+precomputed uniond663856c; all five parent audio test functions are AST-identical.
+Incoming ledger seeding is retained and reset runs for every profile fixture arm.
 
 ### Stage 2: Verify Shared Contracts
 **Goal**: Execute affected audio/profile/cache/override/nullability/reporting,
@@ -614,7 +617,21 @@ Media/Workflows headers/settings/CI and native VN ownership/quota contracts.
 with bounded RED/GREEN, Ruff/Bandit and fresh independent SPEC/QUALITY.
 **Tests**: Official PostgreSQL and selected SQLite/API/CI regressions. Evidence
 stays scoped and runtime-qualified, never a whole-repository certificate.
-**Status**: Not Started
+**Status**: Complete
+Reconciled audio native8PASS and owning VN native27PASS, both without skips.
+Final enabled shared351PASS/0skip on original failing seed2389112953; frontend5PASS.
+Offline Evaluation fixtures now seed the existing healthy provider snapshot and
+server test key, mark concurrent RAG for the existing external-provider mock, and
+clear the fixture-owned service cache after canonical user-key migration.
+All original test bodies/assertions are retained. Credential fail-closed coverage
+remains real-route503. Failed13/1/3-case reports and the randomly reversed two-case
+control remain frozen; explicit ordered cache RED1 then GREEN4 is verified.
+Audio/union, provider fixture and exact one-line cache-teardown independent
+SPEC/QUALITY PASS. Independent native2/provider3/cache2PASS; all reviewers closed
+and sessions reaped. Final source162 hashes are frozen.
+Ruff inherited13+24 findings unchanged; Bandit adds only two B101 assertions,
+with zero new nonassert findings/errors. Local runtimes and frontend runner are
+qualified; no whole-repo/supported-runtime/live-provider/external-CI certificate.
 
 ### Stage 3: Publish And Gate Merge
 **Goal**: Publish verified combined head with an exact fresh force-with-lease.
@@ -623,4 +640,6 @@ external CI and full exact-head Qodo before normal merge. Human summary retained
 **Tests**: Complete comments/replies, all seven app15368 integration contexts
 with audited license provenance, current dev/rules/mode and GitHub MERGED proof.
 Billing is not a review waiver. No bypass, queue or PR3067 mutation.
-**Status**: Not Started
+**Status**: In Progress
+Local verification is complete; normal repair commit and exact lease publication
+precede fresh current-head CI and full Qodo. No historical gate transfers.
