@@ -418,7 +418,11 @@ def ensure_notes_provenance_ready(
         ),
         None,
     )
-    if dataset is None or dataset.encryption_policy != "server_trusted_v1":
+    if (
+        dataset is None
+        or dataset.encryption_policy != "server_trusted_v1"
+        or not service.settings.server_trusted_encryption.ready
+    ):
         raise SyncStoreError("notes_provenance_encryption_unsupported")
     dataset = service.store.db.begin_notes_provenance_bootstrap(
         dataset.dataset_id, owner_user_id=user_id, bootstrap_id=service.id_factory("notes-provenance-bootstrap")
