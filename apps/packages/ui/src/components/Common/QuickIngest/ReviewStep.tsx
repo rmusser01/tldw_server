@@ -82,6 +82,7 @@ const TYPE_ICONS: Record<DetectedMediaType, React.ElementType> = {
 // ---------------------------------------------------------------------------
 
 type ReviewStepProps = {
+  processingItems?: WizardQueueItem[]
   isOnlineForIngest?: boolean
   isCheckingConnection?: boolean
   connectionRecoveryMessage?: string
@@ -89,6 +90,7 @@ type ReviewStepProps = {
 }
 
 export const ReviewStep: React.FC<ReviewStepProps> = ({
+  processingItems,
   isOnlineForIngest = true,
   isCheckingConnection = false,
   connectionRecoveryMessage,
@@ -107,9 +109,12 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
 
   const { queueItems, selectedPreset, presetConfig, conferenceBatchMetadata } = state
   const selectedQueueItems = useMemo(
-    () => getEligibleQueueItems(queueItems),
-    [queueItems]
+    () => processingItems ?? getEligibleQueueItems(queueItems),
+    [processingItems, queueItems]
   )
+
+  const savedItemIds = new Set(state.results.filter(result => result.status === "ok").map(result => result.id))
+  const processingItemIds = new Set(selectedQueueItems.map(item => item.id))
 
   // Preset display name
   const presetLabel = useMemo(
@@ -231,11 +236,15 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
           {queueItems.map((item) => {
             const IconComponent = TYPE_ICONS[item.detectedType] ?? File
             const exclusion = getQueueItemExclusionReason(item, queueItems)
-            const ops = exclusion === "duplicate"
+            const saved = savedItemIds.has(item.id)
+            const selected = processingItemIds.has(item.id)
+            const ops = saved
+              ? qi("queueSavedExcluded", "Saved — excluded from this run")
+              : exclusion === "duplicate"
               ? qi("queueDuplicateExcluded", "Already queued — excluded")
               : exclusion === "invalid"
                 ? qi("queueInvalidExcluded", "Invalid — excluded")
-                : exclusion === "unselected"
+                : exclusion === "unselected" || !selected
                   ? qi("queueUnselected", "Not selected — excluded")
                   : getOperationDescription(item.detectedType, selectedPreset, presetConfig)
             const label = getItemLabel(item)

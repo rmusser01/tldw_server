@@ -633,7 +633,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
               {savedIds.length > 0 && onReviewSavedItems && <button type="button" onClick={() => {
                 void Promise.resolve(onReviewSavedItems(savedIds)).catch(() => setExportNotice(qi("wizard.results.savedReviewFailed", "Unable to open saved items. Try again.")))
               }} className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text hover:bg-surface2">
-                {qi("wizard.results.reviewSaved", "Review these {{count}} saved items", { count: savedIds.length })}
+                {qi("wizard.results.reviewSaved", savedIds.length === 1 ? "Review this {{count}} saved item" : "Review these {{count}} saved items", { count: savedIds.length })}
               </button>}
               {showCollectionOpen && collectionId && (
                 <button

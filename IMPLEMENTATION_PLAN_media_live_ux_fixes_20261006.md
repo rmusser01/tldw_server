@@ -18,10 +18,10 @@ Approved scope: user continuation of the solutions in Docs/Reviews/2026-10-05-me
 **Goal**: Configure/Review reflects actual retry scope and prior saved states; saved-item CTA wording respects item count.
 **Success Criteria**: Resumed mixed batch shows and submits only the failed item; previous successes remain accurately labeled; one/many labels agree visually and accessibly.
 **Tests**: Existing wizard session integration and result/history localization checks.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 4: Verification and review
 **Goal**: Verify the changed flows on real isolated API content and current client builds; create a reviewable result.
 **Success Criteria**: Scoped tests/builds pass, screenshots prove desktop/mobile behavior, source review complete, tracking and evidence updated; original checkout unchanged and test services stopped.
 **Tests**: Red/green regressions, affected suites, static/type/build checks, real browser checks, canonical task checks and applicable security validation.
-**Status**: Not Started
+**Status**: In Progress

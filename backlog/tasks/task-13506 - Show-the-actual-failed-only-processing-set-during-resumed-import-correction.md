@@ -1,7 +1,7 @@
 ---
 id: TASK-13506
 title: Show the actual failed-only processing set during resumed import correction
-status: To Do
+status: In Progress
 labels:
 - media
 - ux
@@ -18,8 +18,8 @@ A real mixed import saved one URL and two Markdown files, excluded a duplicate U
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Configure and Review display the same actual target set used by failed-only processing, while keeping prior outcomes visible with accurate states.
-- [ ] #2 Previously saved files do not appear Invalid merely because browser File handles are unavailable for a retry that does not target them.
+- [x] #1 Configure and Review display the same actual target set used by failed-only processing, while keeping prior outcomes visible with accurate states.
+- [x] #2 Previously saved files do not appear Invalid merely because browser File handles are unavailable for a retry that does not target them.
 - [ ] #3 Verify the displayed count and real submitted source set on a mixed import resumed after reload.
 <!-- AC:END -->
 
@@ -28,6 +28,8 @@ A real mixed import saved one URL and two Markdown files, excluded a duplicate U
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Confirmed presentation mismatch before submission. Correction: handleCorrectItems does set retryIds; validQueueItems correctly filters the execution scope. The initial investigation guessed a submission defect too early; this task records the narrower confirmed review/configuration inconsistency. Code: Common/QuickIngestWizardModal.tsx validQueueItems/handleCorrectItems; WizardConfigureStep and ReviewConfirmStep recompute general queue eligibility. ADR required: no. No source fix made during validation.
 Real submission checked: review claimed 2 items but POST /media/ingest/jobs accepted exactly one job (id 10), source recoverable.pdf, batch 6cfe3c5e-ef47-4966-8e1a-a5c140d22edf. Prior 3 successes stayed saved and no URL job was enqueued. Execution scope passed; Configure/Review count and status presentation remain wrong.
+Plan: IMPLEMENTATION_PLAN_media_live_ux_fixes_20261006.md. Reuse the existing actual retry target selection for display, preserving prior outcomes and duplicate exclusions. ADR required: no; no change to worker/session ownership.
+Configure and Review now receive validQueueItems from the modal, matching the unchanged worker target filter. Review shows prior ok outcomes as Saved before considering missing File handles, and keeps duplicate/unselected exclusions. Regression uses actual Configure/Review after original-file reattachment, checks count/status, submits only failed-file and preserves saved ids 3/4. Initial test setup assumed persisted File handles and incorrect button casing; aligned it with the existing reattach pattern before the red count assertion. Green: full session suite 107/107; supporting Configure/Review/history/result/localization suites 64/64. WebUI typecheck and Chrome production build passed. Real mixed-session check pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

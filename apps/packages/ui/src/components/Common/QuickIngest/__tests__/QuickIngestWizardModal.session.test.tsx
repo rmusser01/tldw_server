@@ -3,7 +3,7 @@ import { flushSync } from "react-dom"
 import i18n from "i18next"
 import { File as NodeFile } from "node:buffer"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { useQuickIngestEvents } from "@/components/Layouts/QuickIngestButton"
@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => ({
   useActualAddContentStep: false,
   useActualProcessingStep: false,
   useActualResultsStep: false,
+  useActualReviewStep: false,
+  useActualConfigureStep: false,
   queueSourceFile: false,
   queuedReviewFile: null as File | null,
   reviewBatches: new Map<string, Record<string, unknown>>(),
@@ -252,6 +254,8 @@ vi.mock("@/services/tldw/quick-ingest-session-reattach", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: (...args: unknown[]) => mocks.initialize(...args),
+    getProvidersStatus: vi.fn().mockResolvedValue({ providers: [], any_configured: false }),
+    getTranscriptionModels: vi.fn().mockResolvedValue({ all_models: [] }),
     ensureConfigForRequest: async () => JSON.parse(localStorage.getItem("tldwConfig") || "null"),
   },
 }))
@@ -361,22 +365,31 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
   }
 })
 
-vi.mock("@/components/Common/QuickIngest/ReviewStep", () => ({
-  ReviewStep: () => <div data-testid="wizard-review" />,
-}))
+vi.mock("@/components/Common/QuickIngest/ReviewStep", async () => {
+  const { ReviewStep } = await vi.importActual<typeof import("@/components/Common/QuickIngest/ReviewStep")>("@/components/Common/QuickIngest/ReviewStep")
+  return { ReviewStep: (props: React.ComponentProps<typeof ReviewStep>) => mocks.useActualReviewStep ? <ReviewStep {...props} /> : <div data-testid="wizard-review" /> }
+})
 
 vi.mock("@/components/Common/QuickIngest/WizardConfigureStep", async () => {
+  const { WizardConfigureStep: ActualConfigureStep } = await vi.importActual<typeof import("@/components/Common/QuickIngest/WizardConfigureStep")>("@/components/Common/QuickIngest/WizardConfigureStep")
   const actual = await vi.importActual<
     typeof import("@/components/Common/QuickIngest/IngestWizardContext")
   >("@/components/Common/QuickIngest/IngestWizardContext")
   return {
-    WizardConfigureStep: ({
+    WizardConfigureStep: (props: React.ComponentProps<typeof ActualConfigureStep>) => {
+      if (mocks.useActualConfigureStep) return <ActualConfigureStep {...props} />
+      const { analysisProviderWarning, focusAnalysisProvider } = props
+      return <StubConfigureStep analysisProviderWarning={analysisProviderWarning} focusAnalysisProvider={focusAnalysisProvider} />
+    },
+  }
+
+  function StubConfigureStep({
       analysisProviderWarning,
       focusAnalysisProvider,
     }: {
       analysisProviderWarning?: string | null
       focusAnalysisProvider?: boolean
-    }) => {
+    }) {
       const { state, setCustomOptions } = actual.useIngestWizard()
       const helpId = "analysis-provider-help"
       const warningId = "analysis-provider-warning"
@@ -412,8 +425,7 @@ vi.mock("@/components/Common/QuickIngest/WizardConfigureStep", async () => {
           ) : null}
         </div>
       )
-    },
-  }
+    }
 })
 
 vi.mock("@/components/Common/QuickIngest/ProcessingStep", async () => {
@@ -647,7 +659,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed", results: [{ id: "saved", status: "ok", type: "pdf", mediaId: 18 }] })
     const authorityKey = useQuickIngestSessionStore.getState().authorityKey
     render(<QuickIngestWizardModal open onClose={vi.fn()} />)
-    fireEvent.click(await screen.findByRole("button", { name: "Review these 1 saved items" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Review this 1 saved item" }))
     await waitFor(() => expect(mocks.reviewSelectionMirrorStarted).toHaveBeenCalledTimes(1))
     // Raw IDs still belong to the previous owner while the mirror write is suspended.
     expect(JSON.parse(localStorage.getItem("media-review-selection") || "null")).toEqual([42])
@@ -843,7 +855,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => expect(mocks.bgUpload).toHaveBeenCalledTimes(1))
     act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })))
     await act(async () => { upload.resolve({ batch_id: "old-owner", jobs: [{ id: 99 }] }); await upload.promise })
-    expect(screen.queryByRole("button", { name: /Review.*saved items/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /Review.*saved items?/ })).toBeNull()
     expect(mocks.bgRequest).not.toHaveBeenCalled()
     expect(mocks.navigate).not.toHaveBeenCalled()
     expect(mocks.cancelQuickIngestSession).not.toHaveBeenCalled()
@@ -867,13 +879,13 @@ describe("QuickIngestWizardModal session runtime", () => {
       results: [{ id: "saved-file", status: "ok", type: "document", fileName: "saved.txt", mediaId: 9, persisted: true }],
     })
     render(<QuickIngestWizardModal open onClose={vi.fn()} />)
-    fireEvent.click(await screen.findByRole("button", { name: "Review these 1 saved items" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Review this 1 saved item" }))
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("/media-multi"))
     expect(JSON.parse(localStorage.getItem("media-review-selection") || "null")).toEqual([9])
   })
 
   it.each([
-    ["Review these 1 saved items", "/media-multi"],
+    ["Review this 1 saved item", "/media-multi"],
     ["Open saved.pdf in Media", "/media?id=7"],
     ["Ask added items", "/knowledge?media_ids=7"],
   ])("opens sidebar result action %s in the full-page workspace", async (label, route) => {
@@ -902,7 +914,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     const onClose = vi.fn()
     useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed", results: [{ id: "saved", status: "ok", type: "pdf", mediaId: 18 }] })
     const view = render(<QuickIngestWizardModal open onClose={onClose} />)
-    fireEvent.click(await screen.findByRole("button", { name: "Review these 1 saved items" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Review this 1 saved item" }))
     await waitFor(() => expect(mocks.createTab).toHaveBeenCalledTimes(1))
     expect(onClose).not.toHaveBeenCalled()
     if (outcome === "owner transition") act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })))
@@ -922,7 +934,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed", results: [{ id: "saved", status: "ok", type: "pdf", mediaId: 18 }] })
     const authorityKey = useQuickIngestSessionStore.getState().authorityKey
     render(<QuickIngestWizardModal open onClose={vi.fn()} />)
-    fireEvent.click(await screen.findByRole("button", { name: "Review these 1 saved items" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Review this 1 saved item" }))
     await waitFor(() => expect(mocks.reviewSelectionMirrorStarted).toHaveBeenCalledTimes(1))
     act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })))
     await act(async () => { mirror.resolve(); await mirror.promise })
@@ -939,12 +951,12 @@ describe("QuickIngestWizardModal session runtime", () => {
       { id: "unsaved", status: "ok", type: "pdf", persisted: false, mediaId: null }, { id: "failed", status: "error", type: "pdf", mediaId: 10 },
     ] })
     const view = render(<QuickIngestWizardModal open onClose={vi.fn()} />)
-    fireEvent.click(await screen.findByRole("button", { name: /Review.*saved items/ }))
+    fireEvent.click(await screen.findByRole("button", { name: /Review.*saved items?/ }))
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("/media-multi"))
     expect(mocks.createTab).not.toHaveBeenCalled()
     expect(JSON.parse(localStorage.getItem("media-review-selection") || "null")).toEqual([7])
     expect(JSON.parse(localStorage.getItem("media-review-selection-snapshot") || "null")).toEqual({ version: 1, authorityKey: useQuickIngestSessionStore.getState().authorityKey, selectedIds: [7] })
-    const staleButton = screen.getByRole("button", { name: /Review.*saved items/ })
+    const staleButton = screen.getByRole("button", { name: /Review.*saved items?/ })
     mocks.navigate.mockClear()
     act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })))
     fireEvent.click(staleButton)
@@ -1423,6 +1435,45 @@ describe("QuickIngestWizardModal session runtime", () => {
     }
   )
 
+  it("confirms only the failed retry target through actual Configure and Review while keeping prior outcomes", async () => {
+    mocks.useActualResultsStep = true
+    mocks.useActualConfigureStep = true
+    mocks.useActualReviewStep = true
+    const file = new NodeFile(["text"], "broken.pdf", { type: "application/pdf" }) as unknown as File
+    useQuickIngestSessionStore.getState().createDraftSession({
+      ...createEmptyQuickIngestSession(), currentStep: 5, highestStep: 5, lifecycle: "partial_failure",
+      queueItems: [
+        { id: "saved-url", kind: "url", url: "https://example.com/", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } },
+        { id: "duplicate-url", kind: "url", url: "https://example.com/", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } },
+        { id: "saved-file", kind: "file", fileName: "saved.md", detectedType: "document", icon: "FileText", fileSize: 4, validation: { valid: false } },
+        { id: "failed-file", kind: "file", fileName: "broken.pdf", detectedType: "pdf", icon: "FileText", fileSize: 4, validation: { valid: false } }
+      ],
+      results: [
+        { id: "saved-url", type: "html", status: "ok", mediaId: 3 },
+        { id: "saved-file", fileName: "saved.md", type: "document", status: "ok", mediaId: 4 },
+        { id: "failed-file", fileName: "broken.pdf", type: "pdf", status: "error", outcome: "failed", error: "Invalid PDF 422" }
+      ]
+    })
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-correction" })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.change(await screen.findByLabelText("Reattach broken.pdf"), { target: { files: [file] } })
+    fireEvent.click(await screen.findByRole("button", { name: "Correct settings for broken.pdf" }))
+    expect(await screen.findByText("1 eligible item in this run")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Next" }))
+    const list = screen.getByRole("list", { name: "Items to process" })
+    expect(within(list).getAllByText(/Saved — excluded from this run/)).toHaveLength(2)
+    expect(within(list).getByText(/Already queued — excluded/)).toBeVisible()
+    expect(within(list).queryByText(/Invalid — excluded/)).toBeNull()
+    expect(within(list).getByText(/Extract/)).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Start processing" }))
+    await waitFor(() => expect(mocks.startQuickIngestSession).toHaveBeenCalledOnce())
+    expect(mocks.startQuickIngestSession.mock.calls[0][0]).toMatchObject({ entries: [], files: [{ id: "failed-file", name: "broken.pdf" }] })
+    expect(useQuickIngestSessionStore.getState().session?.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "saved-url", status: "ok", mediaId: 3 }),
+      expect.objectContaining({ id: "saved-file", status: "ok", mediaId: 4 })
+    ]))
+  })
+
   it("requires a missing queued file to be reattached and keeps its settings and result ID", async () => {
     mocks.useActualResultsStep = true
     useQuickIngestSessionStore
@@ -1565,6 +1616,8 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.useActualModal = false
     mocks.useActualProcessingStep = false
     mocks.useActualResultsStep = false
+    mocks.useActualReviewStep = false
+    mocks.useActualConfigureStep = false
     mocks.queueSourceFile = false
     mocks.queuedReviewFile = null
     mocks.reviewBatches.clear()
