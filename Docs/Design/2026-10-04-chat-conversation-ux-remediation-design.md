@@ -6,7 +6,7 @@ Status: Approved by the user on 2026-10-04, with the pre-implementation review c
 
 Program: TASK-13453; delivery stages TASK-13454–TASK-13458.
 
-Initial baseline: `origin/dev` at `75ab224081bf140ef52017c1a9b0a04f6878d488`. Current baseline: latest `origin/dev` at `c2260945ee021353b55baa6b1a83c887d7a6297d`, integrated in `10d6abff30`; that incoming range adds the accepted D7 design only.
+Initial baseline: `origin/dev` at `75ab224081bf140ef52017c1a9b0a04f6878d488`. Current baseline: latest `origin/dev` at `5775d3fbbe3ed4b38a57f9a4b72775e434d06685`, integrated in `c0e14c9b44` on 2026-10-05. The verified setup/recovery checkpoint is `2a2d029d04`; post-integration WebUI types, extension entrypoint compile and84 focused regressions pass. Remaining staged acceptance is still open.
 
 ## Outcome and evidence
 
