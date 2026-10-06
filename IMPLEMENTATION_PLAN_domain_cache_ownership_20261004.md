@@ -332,3 +332,39 @@ authority/epoch IPC, checked worker dispatch, cancellation, and no fallback.
 Owner Change Summary waiver remains recorded. Fresh rebased-head native
 verification, published-head Qodo and all seven active required contexts remain
 publication/merge gates; no merge or deployment is claimed at this checkpoint.
+
+### Frontend CI Typecheck Follow-Up (2026-10-06)
+
+**Status:** Verified locally; publication and final-head review/CI pending.
+TASK-13425 tracks this authorized repair.
+
+Clean rebase onto current dev `1fc353c3f67c93ba05102e7b0136ac4acac8f510`
+preserves all seven patches; two range-diff entries change only surrounding
+context because dev replaced the cache maps with its bounded TTL cache.
+
+The actual frontend compiler reproduced the only diagnostic from the failed
+`frontend-required` job: TS2339 on `processEnv.NEXT_PUBLIC_X_API_KEY`. The
+conditional empty-object fallback inferred `{}`. Replace that temporary object
+with guarded direct optional access to `process.env`, following existing
+deployment helpers. Vite-first precedence and absent-process handling remain.
+No new dependency, authentication protocol, or ADR is needed.
+
+RED, from `apps/tldw-frontend`:
+
+```sh
+node --max-old-space-size=8192 node_modules/typescript/bin/tsc \
+  --noEmit --incremental false
+```
+
+Exit 2 with the single TS2339. GREEN: the identical full frontend compiler
+command exited 0 with zero diagnostics. The documented 17-file native matrix
+plus `background.effective-auth.test.ts` passed **676/676 across 18 files**,
+zero failed or pending. Touched-helper ESLint has zero errors/warnings; task
+normalization and whitespace checks pass. Bandit was attempted in the project
+venv but cannot parse this TypeScript helper. Manual security review confirms
+unchanged key precedence, absent-process handling and no credential logging or
+IPC changes. Independent incremental review found no actionable issues, and a
+read-only in-memory check with installed Next Webpack confirmed synthetic
+public-key substitution with zero emitted files. Publication remains pending.
+All eleven Qodo inline threads are resolved; final-head review still requires available Qodo
+credits. The owner's Change Summary waiver remains in force.

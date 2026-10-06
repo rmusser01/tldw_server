@@ -38,8 +38,8 @@ export const getBuildTimeApiKey = (): string | null => {
       VITE_TLDW_API_KEY?: string
       VITE_TLDW_DEFAULT_API_KEY?: string
     }
-    const processEnv = typeof process === "undefined" ? {} : process.env || {}
-    const raw = env.VITE_TLDW_API_KEY ?? env.VITE_TLDW_DEFAULT_API_KEY ?? processEnv.NEXT_PUBLIC_X_API_KEY
+    const raw = env.VITE_TLDW_API_KEY ?? env.VITE_TLDW_DEFAULT_API_KEY ??
+      (typeof process === "undefined" ? undefined : process.env?.NEXT_PUBLIC_X_API_KEY)
     return typeof raw === "string" ? raw.trim() || null : null
   } catch {
     return null
