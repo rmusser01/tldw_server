@@ -67,7 +67,7 @@ class _SqliteDbWithPgTraps:
         if "from users" in q and "count(*) as total_users" in q:
             return _CursorStub(row=(10, 8, 7, 1, 2))
         if "sum(storage_used_mb) as total_used_mb" in q:
-            return _CursorStub(row=(100.0, 1000.0, 12.5, 50.0))
+            return _CursorStub(row=(100.0, 12.5, 50.0))
         if "from sessions" in q and "count(distinct user_id) as unique_users" in q:
             return _CursorStub(row=(4, 3))
         if "select count(*)" in q and "from audit_logs a" in q:
@@ -180,6 +180,10 @@ async def test_get_system_stats_sqlite_backend_selection_uses_execute() -> None:
 
     assert response.users.total == 10
     assert response.storage.total_used_mb == 100.0
+    # The real SELECT is now 3 columns (total_used_mb, avg_used_mb, max_used_mb); storage_keys
+    # must match that shape or these two map to the wrong values in the raw-tuple fallback.
+    assert response.storage.average_used_mb == 12.5
+    assert response.storage.max_used_mb == 50.0
     assert response.sessions.active == 4
     assert db.execute_calls
     assert not db.fetchrow_calls
@@ -222,7 +226,8 @@ async def test_get_system_stats_sqlite_row_objects_use_row_keys() -> None:
     response = await svc.get_system_stats(db)
 
     assert response.users.total == 10
-    assert response.storage.total_quota_mb == 1000.0
+    # total_quota_mb no longer sums the legacy column; it is always null (spec 2 Sec. 5).
+    assert response.storage.total_quota_mb is None
     assert response.sessions.unique_users == 3
 
 

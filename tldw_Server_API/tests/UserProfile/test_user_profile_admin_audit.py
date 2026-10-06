@@ -47,14 +47,21 @@ def test_admin_profile_update_emits_audit(auth_headers, monkeypatch) -> None:
         _stub_emit,
     )
 
+    from tldw_Server_API.tests.UserProfile._storage_quota_helpers import patch_quota
+
     with TestClient(app) as client:
         user_id = _get_user_id(client, auth_headers)
-        resp = client.patch(
-            f"/api/v1/admin/users/{user_id}/profile",
-            headers=auth_headers,
-            json={"updates": [{"key": "limits.storage_quota_mb", "value": 2048}]},
-        )
-        assert resp.status_code == 200
+        try:
+            resp = client.patch(
+                f"/api/v1/admin/users/{user_id}/profile",
+                headers=auth_headers,
+                json={"updates": [{"key": "limits.storage_quota_mb", "value": 2048}]},
+            )
+            assert resp.status_code == 200
+        finally:
+            # This sets the shared single-user id's override; clear it so later tests
+            # in this worker don't see a stale 2048 quota (spec 2 Sec. 5).
+            patch_quota(client, auth_headers, user_id, None)
 
     assert calls
     assert calls[0].get("action") == "user_profile.update"

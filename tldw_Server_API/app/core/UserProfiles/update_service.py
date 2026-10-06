@@ -146,9 +146,7 @@ class UserProfileUpdateService:
                 continue
 
             if value is None:
-                if key.startswith("preferences.") or (
-                    key.startswith("limits.") and key != "limits.storage_quota_mb"
-                ):
+                if key.startswith("preferences.") or key.startswith("limits."):
                     if not dry_run:
                         repo = repo_holder.get("repo")
                         if repo is None:
@@ -296,33 +294,8 @@ class UserProfileUpdateService:
                 anchor.mark_changed()
             return True
 
-        if key == "limits.storage_quota_mb":
-            if not dry_run:
-                await _update_user_field(
-                    db_conn,
-                    user_id,
-                    "storage_quota_mb",
-                    int(value),
-                    anchor=anchor,
-                    is_postgres_backend=is_postgres_backend,
-                )
-                try:
-                    from tldw_Server_API.app.services.storage_quota_service import (
-                        invalidate_storage_cache_for_user,
-                    )
-
-                    invalidate_storage_cache_for_user(int(user_id))
-                except Exception as exc:
-                    logger.debug(
-                        "Failed to invalidate storage quota cache for user {}: {}",
-                        user_id,
-                        exc,
-                    )
-            return True
-
         if key.startswith("limits."):
-            # Every limits.* key except storage (PR C) is a plain user override the
-            # quota resolver reads (spec 2 §3).
+            # Every limits.* key is a plain user override the quota resolver reads (spec 2 §3).
             if not dry_run:
                 repo = repo_holder.get("repo")
                 if repo is None:

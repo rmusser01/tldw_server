@@ -332,12 +332,12 @@ class TestAdminStorageQuotaEndpointErrorMapping:
     @pytest.mark.asyncio
     async def test_get_user_storage_quota_sanitizes_generic_failure(self, monkeypatch):
         logger_stub = _LoggerStub()
-        repo = MagicMock()
-        repo.check_quota_status = AsyncMock(
+        service = MagicMock()
+        service.user_quota_status = AsyncMock(
             side_effect=RuntimeError("quota backend exploded at /private/storage-quota.db")
         )
         monkeypatch.setattr(quotas_module, "logger", logger_stub)
-        monkeypatch.setattr(quotas_module, "_get_repo", AsyncMock(return_value=repo))
+        monkeypatch.setattr(quotas_module, "get_storage_service", AsyncMock(return_value=service))
 
         with pytest.raises(HTTPException) as exc_info:
             await quotas_module.get_user_storage_quota(1)
@@ -349,17 +349,17 @@ class TestAdminStorageQuotaEndpointErrorMapping:
     @pytest.mark.asyncio
     async def test_update_user_storage_quota_sanitizes_generic_failure(self, monkeypatch):
         logger_stub = _LoggerStub()
-        repo = MagicMock()
-        repo.upsert_org_quota = AsyncMock(
+        service = MagicMock()
+        service.set_user_quota = AsyncMock(
             side_effect=RuntimeError("quota backend exploded at /private/storage-quota.db")
         )
         monkeypatch.setattr(quotas_module, "logger", logger_stub)
-        monkeypatch.setattr(quotas_module, "_get_repo", AsyncMock(return_value=repo))
+        monkeypatch.setattr(quotas_module, "get_storage_service", AsyncMock(return_value=service))
 
         with pytest.raises(HTTPException) as exc_info:
             await quotas_module.update_user_storage_quota(
                 1,
-                quotas_module.UpdateQuotaRequest(quota_mb=1000),
+                quotas_module.UpdateUserQuotaRequest(quota_mb=1000),
             )
 
         assert exc_info.value.status_code == 500

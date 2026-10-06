@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGa
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 
 _OWNER_ONLY_DIR_MODE = stat.S_IRWXU
 
@@ -375,10 +376,8 @@ class RegistrationService:
                 if privileged_creation:
                     if role_override:
                         role = role_override
-                    if storage_quota_override is not None:
-                        if int(storage_quota_override) < 0:
-                            raise ValueError("storage_quota_override must be non-negative")
-                        storage_quota = storage_quota_override
+                    if storage_quota_override is not None and int(storage_quota_override) < 0:
+                        raise ValueError("storage_quota_override must be non-negative")
 
                 if registration_code and not privileged_creation:
                     # Validate and use registration code (optional when not required)
@@ -388,10 +387,6 @@ class RegistrationService:
                         user_email=email,
                     )
                     role = code_info.get('role_to_grant', role)
-
-                    # Check if code specifies storage quota
-                    if 'storage_quota_mb' in code_info:
-                        storage_quota = code_info['storage_quota_mb']
                 elif self.require_code and not privileged_creation:
                     raise InvalidRegistrationCodeError("Registration code required")
 
@@ -430,6 +425,15 @@ class RegistrationService:
                     },
                 )
                 user_id = insert_result.affected_user_ids[0]
+
+                if privileged_creation and storage_quota_override is not None:
+                    await UserProfileOverridesRepo(self.db_pool).upsert_override(
+                        user_id=int(user_id),
+                        key="limits.storage_quota_mb",
+                        value=int(storage_quota_override),
+                        updated_by=created_by,
+                        db_conn=conn,
+                    )
 
                 await self._insert_role_membership(
                     conn,
@@ -498,7 +502,11 @@ class RegistrationService:
                     "role": role,
                     "is_active": is_active,
                     "is_verified": is_verified,
-                    "storage_quota_mb": storage_quota,
+                    "storage_quota_mb": (
+                        int(storage_quota_override)
+                        if privileged_creation and storage_quota_override is not None
+                        else None
+                    ),
                     "registration_code_id": code_info.get("id") if code_info else None,
                     "registration_code_org_id": code_info.get("org_id") if code_info else None,
                     "registration_code_org_role": code_info.get("org_role") if code_info else None,

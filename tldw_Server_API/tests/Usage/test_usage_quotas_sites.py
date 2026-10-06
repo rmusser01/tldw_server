@@ -7,6 +7,7 @@ import pytest
 from tldw_Server_API.app.api.v1.API_Deps import storage_quota_guard
 from tldw_Server_API.app.api.v1.endpoints import workflows as workflows_ep
 from tldw_Server_API.app.core.Chatbooks.quota_manager import QuotaManager
+from tldw_Server_API.app.core.Usage import quota_resolver
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
 pytestmark = pytest.mark.unit
@@ -49,8 +50,18 @@ async def test_storage_never_raises_when_quotas_off(quotas_off: None, monkeypatc
 
 
 async def test_storage_still_enforced_when_quotas_on(quotas_on: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    """With quotas on, a user already at the storage cap fails the quota check."""
+    """With quotas on, a user already at the storage cap fails the quota check.
+
+    The quota now comes from the spec 2 resolver, not the row's legacy
+    storage_quota_mb column, so the resolver is stubbed with the same 5 GB value.
+    """
     service = _full_storage_service(monkeypatch)
+
+    async def _user_quota(_user_id: int, _key: str):
+        """The user's limit, matching the old 5 GB default the row used to carry."""
+        return 5120
+
+    monkeypatch.setattr(quota_resolver, "user_quota", _user_quota)
     has_quota, _info = await service.check_quota(1, 1024 * 1024)
     assert has_quota is False
 

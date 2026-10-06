@@ -335,9 +335,9 @@ export interface ChatbookAccountScopeResponse {
 export interface CurrentUserStorageQuotaResponse {
   user_id: number
   storage_used_mb: number
-  storage_quota_mb: number
-  available_mb: number
-  usage_percentage: number
+  storage_quota_mb: number | null
+  available_mb: number | null
+  usage_percentage: number | null
 }
 
 export interface OpenAIOAuthAuthorizeRequest {
@@ -1474,7 +1474,7 @@ export interface AdminUserSummary {
   is_verified: boolean
   created_at: string
   last_login?: string | null
-  storage_quota_mb: number
+  storage_quota_mb: number | null
   storage_used_mb: number
 }
 
@@ -1492,7 +1492,7 @@ export interface AdminUserUpdateRequest {
   is_active?: boolean
   is_verified?: boolean
   is_locked?: boolean
-  storage_quota_mb?: number
+  storage_quota_mb?: number | null
 }
 
 export interface AdminUserCreateRequest {
