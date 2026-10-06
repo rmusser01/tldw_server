@@ -61,7 +61,12 @@ it("hides only recognized provenance while preserving user comments and text", (
 })
 
 it("keeps malformed provenance-like user comments when saving recognized original provenance", () => {
-  expect(retainKnowledgeNoteProvenance("Body\n<!-- tldw-knowledge:v1:invalid -->", original)).toContain("<!-- tldw-knowledge:v1:invalid -->")
+  expect(
+    retainKnowledgeNoteProvenance(
+      "Body\n<!-- tldw-knowledge:v1:invalid -->",
+      original,
+    ),
+  ).toContain("<!-- tldw-knowledge:v1:invalid -->")
 })
 
 it.each([
@@ -96,5 +101,44 @@ it.each([
       },
     })
     expect(provenance !== null).toBe(valid)
+  },
+)
+
+it.each([4, 0, -1, 1.5, "4"])(
+  "retains only valid original note revisions (%j)",
+  (originalVersion) => {
+    const provenance = validateKnowledgeNoteProvenance({
+      origin: "knowledge_qa",
+      research: {
+        workspace_id: "workspace-a",
+        import_id: "import-a",
+        sources: [
+          {
+            mediaId: 101,
+            evidence: {
+              importId: "import-a",
+              threadId: null,
+              snapshot: true,
+              sources: [
+                {
+                  originalId: "note-uuid",
+                  originalVersion,
+                  excerpt: "Retrieved evidence",
+                  mediaId: null,
+                  title: "Field note",
+                  type: "text",
+                  sourceType: "notes",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    })
+    if (originalVersion !== 4) expect(provenance).toBeNull()
+    else
+      expect(provenance?.research?.sources[0].evidence.sources[0]).toEqual(
+        expect.objectContaining({ originalVersion: 4 }),
+      )
   },
 )

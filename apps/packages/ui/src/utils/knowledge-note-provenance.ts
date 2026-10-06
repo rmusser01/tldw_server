@@ -121,9 +121,12 @@ const validateResearch = (
       if (
         (source.url != null &&
           (typeof source.url !== "string" || source.url.length > 4096)) ||
-        [source.snapshotMediaId, source.pageNumber, source.citationIndex].some(
-          (item) => item != null && !positiveId(item),
-        )
+        [
+          source.snapshotMediaId,
+          source.originalVersion,
+          source.pageNumber,
+          source.citationIndex,
+        ].some((item) => item != null && !positiveId(item))
       )
         return null
       retained.push({
@@ -136,6 +139,9 @@ const validateResearch = (
         ...(source.url ? { url: source.url } : {}),
         ...(source.snapshotMediaId
           ? { snapshotMediaId: source.snapshotMediaId }
+          : {}),
+        ...(source.originalVersion
+          ? { originalVersion: source.originalVersion }
           : {}),
         ...(source.pageNumber ? { pageNumber: source.pageNumber } : {}),
         ...(source.citationIndex

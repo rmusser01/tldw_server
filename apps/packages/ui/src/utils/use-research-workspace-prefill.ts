@@ -5,6 +5,7 @@ import {
   retainKnowledgeNoteProvenance,
   readKnowledgeNoteProvenance,
   validateKnowledgeNoteProvenance,
+  stripKnowledgeNoteProvenance,
 } from "./knowledge-note-provenance"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
@@ -40,6 +41,7 @@ const emptyStatus = {
 export function useResearchWorkspacePrefill(
   workspaceId: string | null,
   hydrated: boolean,
+  serverBacked = false,
 ) {
   const [status, setStatus] = useState(emptyStatus)
   const [attempt, setAttempt] = useState(0)
@@ -197,23 +199,70 @@ export function useResearchWorkspacePrefill(
           let mediaId = source.mediaId ?? source.snapshotMediaId
           if (mediaId == null) {
             try {
-              if (!sources.some((item) => item.excerpt.trim()))
+              const isNote = /note/i.test(source.sourceType || "")
+              let fullNote: { content: string; version: number } | null = null
+              if (isNote) {
+                if (source.originalId == null)
+                  throw new Error("Missing original note identity")
+                const note = await bgRequest<{
+                  id: string
+                  content: string
+                  version: number
+                  deleted?: boolean
+                }>({
+                  ...requestScopeFields(requestScope),
+                  abortSignal: controller.signal,
+                  path: `/api/v1/notes/${encodeURIComponent(String(source.originalId))}`,
+                  method: "GET",
+                })
+                assertCurrent()
+                if (
+                  note?.id !== String(source.originalId) ||
+                  note.deleted === true ||
+                  typeof note.content !== "string" ||
+                  !note.content.length ||
+                  note.content.length > 5_000_000 ||
+                  !Number.isSafeInteger(note.version) ||
+                  note.version <= 0
+                )
+                  throw new Error(
+                    "Original note content or revision is unavailable",
+                  )
+                fullNote = {
+                  content: stripKnowledgeNoteProvenance(note.content),
+                  version: note.version,
+                }
+              } else if (!sources.some((item) => item.excerpt.trim())) {
                 throw new Error("No retrieved excerpt to import")
-              const text = buildKnowledgeQaSeedNote({
+              }
+              const snapshotLabel = fullNote
+                ? `full note snapshot (v${fullNote.version})`
+                : "retrieved excerpts"
+              const evidence = buildKnowledgeQaSeedNote({
                 ...payload,
                 answer: null,
-                sources,
+                sources: fullNote
+                  ? sources.map((item) => ({
+                      ...item,
+                      originalVersion: fullNote.version,
+                    }))
+                  : sources,
               })
+              const text = fullNote
+                ? `${evidence}\n\nFull note content (version ${fullNote.version}):\n${fullNote.content}`
+                : evidence
               const file = new File(
                 [text],
-                `${source.title} - retrieved excerpts.txt`,
-                { type: "text/plain" },
+                `${source.title} - ${snapshotLabel}.txt`,
+                {
+                  type: "text/plain",
+                },
               )
               const result = await tldwClient.uploadMedia(
                 file,
                 {
                   media_type: "document",
-                  title: `${source.title} — retrieved excerpts`,
+                  title: `${source.title} — ${snapshotLabel}`,
                   overwrite: false,
                   perform_analysis: false,
                   perform_chunking: true,
@@ -230,6 +279,7 @@ export function useResearchWorkspacePrefill(
               mediaId = id
               for (const item of sources) {
                 item.snapshotMediaId = id
+                if (fullNote) item.originalVersion = fullNote.version
                 delete item.importError
               }
               // Checkpoint under the original owner/destination even if navigation just
@@ -240,8 +290,9 @@ export function useResearchWorkspacePrefill(
               assertCurrent()
               failed += 1
               for (const item of sources)
-                item.importError =
-                  "Could not import retrieved excerpts. Retry when the server is available."
+                item.importError = /note/i.test(item.sourceType || "")
+                  ? "Could not import the full note. Retry when the server is available."
+                  : "Could not import retrieved excerpts. Retry when the server is available."
               await saveResearchWorkspacePrefill(payload)
               assertCurrent()
               setStatus({
@@ -256,15 +307,20 @@ export function useResearchWorkspacePrefill(
           }
           assertCurrent()
           const state = useWorkspaceStore.getState()
+          // Snapshot ingestion can reuse media also returned by retrieval.
+          // ponytail: scans each handoff per attachment; index if large batches slow it.
+          const evidenceSources = payload.sources.filter(
+            (item) => (item.mediaId ?? item.snapshotMediaId) === mediaId,
+          )
           const knowledgeQaEvidence = {
             importId: payload.id,
             threadId: payload.threadId,
-            sources,
+            sources: evidenceSources,
             trustState: payload.answerTrustState,
             trustReasonCodes: payload.answerTrustReasonCodes,
             evidenceOrigin: payload.answerEvidenceOrigin,
             scope: payload.scope,
-            snapshot: source.mediaId == null,
+            snapshot: evidenceSources.some((item) => item.mediaId == null),
           }
           if (!state.sources.some((item) => item.mediaId === mediaId)) {
             state.addSources([
@@ -272,7 +328,9 @@ export function useResearchWorkspacePrefill(
                 mediaId,
                 title:
                   source.mediaId == null
-                    ? `${source.title} — retrieved excerpts`
+                    ? source.originalVersion != null
+                      ? `${source.title} — full note snapshot (v${source.originalVersion})`
+                      : `${source.title} — retrieved excerpts`
                     : source.title,
                 type: source.mediaId == null ? "text" : source.type,
                 ...(source.mediaId == null
@@ -325,7 +383,10 @@ export function useResearchWorkspacePrefill(
             mode: "append",
           })
         }
-        if (hasResearchWorkspaceMigrationTombstone(workspaceId)) {
+        if (
+          serverBacked ||
+          hasResearchWorkspaceMigrationTombstone(workspaceId)
+        ) {
           const current = useWorkspaceStore.getState()
           const draft = current.currentNote
           // Retain the original legacy identity across a lost response and remount.
@@ -559,6 +620,6 @@ export function useResearchWorkspacePrefill(
       stopSelection()
       stop()
     }
-  }, [workspaceId, hydrated, attempt])
+  }, [workspaceId, hydrated, serverBacked, attempt])
   return { ...status, retry }
 }

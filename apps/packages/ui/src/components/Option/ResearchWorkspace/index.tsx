@@ -1398,6 +1398,11 @@ const ResearchWorkspaceBody: React.FC = () => {
     workspaceServerSourcesRef.current = sources
   }, [sources])
 
+  const canReconcileWorkspaceServer =
+    typeof tldwClient.upsertWorkspace === "function" &&
+    typeof tldwClient.getWorkspaceSources === "function" &&
+    typeof tldwClient.addWorkspaceSource === "function"
+
   React.useLayoutEffect(() => {
     workspaceServerReconcileRequestSeqRef.current += 1
     workspaceServerReconcileSignatureRef.current = null
@@ -1407,10 +1412,6 @@ const ResearchWorkspaceBody: React.FC = () => {
   React.useEffect(() => {
     if (!isStoreHydrated || !workspaceId) return
 
-    const canReconcileWorkspaceServer =
-      typeof tldwClient.upsertWorkspace === "function" &&
-      typeof tldwClient.getWorkspaceSources === "function" &&
-      typeof tldwClient.addWorkspaceSource === "function"
     if (!canReconcileWorkspaceServer) {
       if (statusGuardrailsEnabled) {
         setWorkspaceStatusProjectionError("Workspace server sync unavailable")
@@ -1487,6 +1488,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       workspaceServerReconcileRequestSeqRef.current += 1
     }
   }, [
+    canReconcileWorkspaceServer,
     isStoreHydrated,
     selectedSourceIds,
     statusGuardrailsEnabled,
@@ -2857,7 +2859,9 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   const knowledgeImport = useResearchWorkspacePrefill(
     workspaceId,
-    isStoreHydrated,
+    isStoreHydrated &&
+      (!canReconcileWorkspaceServer || serverWorkspaceIdentity === workspaceId),
+    workspaceId !== null && serverWorkspaceIdentity === workspaceId,
   )
 
   useEffect(() => {
@@ -3647,7 +3651,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           <p>
             {t("playground:workspace.excerptSnapshotNotice", {
               defaultValue:
-                "Note and web sources are retrieved-excerpt snapshots, not live or complete copies. Original references, excerpts, and answer qualifications are in the imported draft.",
+                "Notes use full versioned snapshots; web results use retrieved excerpts. These copies do not update automatically. Original references, excerpts, and answer qualifications are in the imported note.",
             })}
           </p>
           {knowledgeImport.error && <p role="alert">{knowledgeImport.error}</p>}
