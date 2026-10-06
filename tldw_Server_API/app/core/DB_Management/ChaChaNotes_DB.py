@@ -794,8 +794,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 76  # Retired Sync placeholder persona cleared after client-id create fingerprints
-    _POSTGRES_SCHEMA_VERSION = 80
+    _CURRENT_SCHEMA_VERSION = 77  # Independent Knowledge provenance after retired Sync placeholder repair
+    _POSTGRES_SCHEMA_VERSION = 81
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -7799,6 +7799,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import NoteProvenanceStore
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
             PersonaStateStore,
         )
@@ -7817,6 +7818,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.message_store = MessageStore(self)
         self.chat_imports = ChatImportStore(self)
         self.note_store = NoteStore(self)
+        self.note_provenance_store = NoteProvenanceStore(self)
         self.moodboard_sync_store = MoodboardSyncStore(self)
         self.note_attachment_store = NoteAttachmentStore(self)
         self.notes_link_store = NotesLinkStore(self)
@@ -8808,6 +8810,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (73, "_migrate_from_v73_to_v74"),
             (74, "_migrate_from_v74_to_v75"),
             (75, "_migrate_from_v75_to_v76"),
+            (76, "_migrate_from_v76_to_v77"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17990,6 +17993,26 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 76:
             raise SchemaError("Native fork PostgreSQL migration V75->V76 failed version verification.")  # noqa: TRY003
 
+    def _migrate_from_v76_to_v77(self, conn: sqlite3.Connection) -> None:
+        """Install owner-bound Knowledge evidence in the registered SQLite migration."""
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
+
+        conn.execute(notes_provenance_schema_sql(postgres=False))
+        conn.execute("UPDATE db_schema_version SET version = 77 WHERE schema_name = ? AND version = 76", (self._SCHEMA_NAME,))
+        if self._get_db_version(conn) != 77:
+            raise SchemaError("Knowledge provenance SQLite migration failed version verification.")
+
+    def _migrate_from_v80_to_v81_postgres(self, conn: Any) -> None:
+        """Install owner-bound Knowledge evidence and forced RLS before version bump."""
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
+        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_notes_provenance_rls_sql
+
+        for statement in (notes_provenance_schema_sql(postgres=True), *build_notes_provenance_rls_sql()):
+            self.backend.execute(statement, connection=conn)
+        self.backend.execute("UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 80", (81, self._SCHEMA_NAME), connection=conn)
+        if self._get_schema_version_postgres(conn) != 81:
+            raise SchemaError("Knowledge provenance PostgreSQL migration failed version verification.")
+
     def _migrate_from_v73_to_v74(self, conn: sqlite3.Connection) -> None:
         """Install permanent startup receipts inside the registered SQLite migration."""
         from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
@@ -21291,6 +21314,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 76 and current_db_version == 75:
                         self._migrate_from_v75_to_v76(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 77 and current_db_version == 76:
+                        self._migrate_from_v76_to_v77(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21767,6 +21793,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 76 and current_db_version == 75:
                     self._migrate_from_v75_to_v76(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 77 and current_db_version == 76:
+                    self._migrate_from_v76_to_v77(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25628,7 +25657,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25659,6 +25688,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 80 and current_version < 80:
                     self._migrate_from_v79_to_v80_postgres(conn)
                     current_version = 80
+                if target_version >= 81 and current_version < 81:
+                    self._migrate_from_v80_to_v81_postgres(conn)
+                    current_version = 81
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -26105,7 +26137,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v77_to_v78_postgres(conn)
                 self._runtime_schema_version = 78
                 current_version = 78
-
             if target_version >= 79 and current_version < 79:
                 self._migrate_from_v78_to_v79_postgres(conn)
                 self._runtime_schema_version = 79
@@ -26115,6 +26146,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v79_to_v80_postgres(conn)
                 self._runtime_schema_version = 80
                 current_version = 80
+
+            if target_version >= 81 and current_version < 81:
+                self._migrate_from_v80_to_v81_postgres(conn)
+                self._runtime_schema_version = 81
+                current_version = 81
 
             if current_version < target_version:
                 logger.warning(
