@@ -811,6 +811,18 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     getBufferedBlob
   } = useStreamingAudioPlayer()
   const wsRef = React.useRef<WebSocket | null>(null)
+  const streamRunRef = React.useRef(0)
+  const retireStreamingSocket = React.useCallback(() => {
+    streamRunRef.current++
+    const ws = wsRef.current
+    wsRef.current = null
+    if (!ws) return
+    ws.onopen = null
+    ws.onmessage = null
+    ws.onerror = null
+    ws.onclose = null
+    try { ws.close() } catch {}
+  }, [])
   const streamMetaRef = React.useRef<{
     provider: string
     model?: string
@@ -1143,6 +1155,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
   React.useEffect(() => {
     return () => {
+      retireStreamingSocket()
       if (ttsJobAbortRef.current) {
         try {
           ttsJobAbortRef.current.abort()
@@ -1150,7 +1163,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         ttsJobAbortRef.current = null
       }
     }
-  }, [])
+  }, [retireStreamingSocket])
 
   React.useEffect(() => {
     if (!ttsSettings) return
@@ -1506,19 +1519,14 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   }, [])
 
   const stopStreaming = React.useCallback(() => {
-    if (wsRef.current) {
-      try {
-        wsRef.current.close()
-      } catch {}
-      wsRef.current = null
-    }
+    retireStreamingSocket()
     streamMetaRef.current = null
     streamStop()
     setStreamStatus("idle")
     setStreamErrorSafe(null)
     setStreamChunks(0)
     setStreamBytes(0)
-  }, [setStreamErrorSafe, streamStop])
+  }, [retireStreamingSocket, setStreamErrorSafe, streamStop])
 
   const stopTtsJob = React.useCallback(() => {
     if (ttsJobAbortRef.current) {
@@ -1538,6 +1546,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   const handleStreamPlay = React.useCallback(async () => {
     if (!ttsText.trim()) return
     stopStreaming()
+    const run = streamRunRef.current
     clearSegments()
     setActiveSegmentIndex(null)
     setCurrentTime(0)
@@ -1546,6 +1555,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     setStreamErrorSafe(null)
 
     const config = await tldwClient.getConfig()
+    if (streamRunRef.current !== run) return
     const serverUrl = String(config?.serverUrl || "").trim()
     if (!serverUrl) {
       const classified = classifyAudioError("tldw server not configured")
@@ -1583,6 +1593,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     wsRef.current = ws
 
     ws.onopen = () => {
+      if (wsRef.current !== ws) return
       void (async () => {
         const requestedFormat = (tldwFormat || ttsSettings?.tldwTtsResponseFormat || "mp3").toLowerCase()
         const format = STREAMING_FORMATS.has(requestedFormat) ? requestedFormat : "mp3"
@@ -1610,6 +1621,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         } catch {
           // fallback to markdownToText
         }
+        if (wsRef.current !== ws) return
         streamMetaRef.current = {
           provider: "tldw",
           model,
@@ -1633,6 +1645,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     }
 
     ws.onmessage = (event) => {
+      if (wsRef.current !== ws) return
       if (typeof event.data === "string") {
         try {
           const payload = JSON.parse(event.data)
@@ -1654,12 +1667,15 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     }
 
     ws.onerror = () => {
+      if (wsRef.current !== ws) return
       const classified = classifyAudioError("Streaming connection error")
       setStreamStatus("error")
       setStreamErrorSafe(classified.recovery)
     }
 
     ws.onclose = () => {
+      if (wsRef.current !== ws) return
+      wsRef.current = null
       streamFinish()
       setStreamStatus((prev) => (prev === "error" ? prev : "complete"))
       const blob = getBufferedBlob()
