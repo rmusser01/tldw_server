@@ -41,3 +41,33 @@ async def test_summary_reports_the_resolved_cap(caps: dict, tmp_path) -> None:
     assert summary["remaining"]["daily_evaluations"] == 3
     assert summary["limits"]["daily"]["tokens"] == 0
     assert summary["remaining"]["daily_tokens"] == 0
+
+
+async def _headers_for(tmp_path) -> dict:
+    """Headers `_apply_rate_limit_headers` sets for user 7 on a fresh limiter."""
+    from fastapi import Response
+
+    from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import _apply_rate_limit_headers
+
+    response = Response()
+    limiter = UserRateLimiter(db_path=str(tmp_path / "evals.db"))
+    await _apply_rate_limit_headers(limiter, "7", response)
+    return dict(response.headers)
+
+
+async def test_daily_headers_present_when_a_cap_is_set(caps: dict, tmp_path) -> None:
+    """A set cap is advertised in the three daily headers."""
+    caps["limits.evaluations_per_day"] = 5
+    caps["limits.evaluation_tokens_per_day"] = 1000
+    headers = await _headers_for(tmp_path)
+    assert headers["x-ratelimit-daily-limit"] == "5"
+    assert headers["x-ratelimit-daily-remaining"] == "5"
+    assert headers["x-ratelimit-tokens-remaining"] == "1000"
+
+
+async def test_daily_headers_absent_when_unlimited(caps: dict, tmp_path) -> None:
+    """No cap set: the three daily headers are left out."""
+    headers = await _headers_for(tmp_path)
+    assert "x-ratelimit-daily-limit" not in headers
+    assert "x-ratelimit-daily-remaining" not in headers
+    assert "x-ratelimit-tokens-remaining" not in headers
