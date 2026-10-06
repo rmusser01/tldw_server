@@ -20,7 +20,10 @@ self.onmessage = (event: MessageEvent<DiffWorkerRequest>) => {
     const request = event.data
     const result: DiffWorkerResult = {
       type: 'result',
-      lines: computeDiffSync(request?.leftText || '', request?.rightText || '')
+      lines: computeDiffSync(request?.leftText || '', request?.rightText || '', {
+        maxEditLength: 2048,
+        timeout: 1000
+      })
     }
     self.postMessage(result)
   } catch (error) {

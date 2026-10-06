@@ -195,6 +195,70 @@ it('retains document width after narrower single-page measurements and mode swit
   expect(canvas.parentElement?.parentElement?.parentElement?.style.width).toBe('1200px')
 })
 
+it.each([1, 500])(
+  'keeps a user scroll made before metadata arrives instead of restoring initial page %s',
+  async (initialPage) => {
+    let ready!: () => void
+    metrics.gate = new Promise<void>((resolve) => {
+      ready = resolve
+    })
+    const onPageChange = vi.fn()
+    const view = render(
+      <PdfDocument
+        url="/large.pdf"
+        documentId={1}
+        currentPage={initialPage}
+        zoomLevel={100}
+        viewMode="continuous"
+        onLoadSuccess={vi.fn()}
+        onLoadError={vi.fn()}
+        onPageChange={onPageChange}
+      />
+    )
+    await screen.findByLabelText('Page ' + initialPage)
+    const container = view.container.firstElementChild as HTMLElement
+    await act(async () => {
+      fireEvent.wheel(container, { deltaY: 1 })
+      container.scrollTop = 6160
+      fireEvent.scroll(container)
+      ready()
+      await new Promise((resolve) => setTimeout(resolve, 180))
+    })
+    expect(container.scrollTop).toBe(6160)
+    expect(onPageChange).toHaveBeenLastCalledWith(11)
+  }
+)
+
+it('does not navigate backwards when a scroll-reported page reaches the parent during momentum', async () => {
+  const props = {
+    url: '/large.pdf',
+    documentId: 1,
+    currentPage: 1,
+    zoomLevel: 100,
+    viewMode: 'continuous' as const,
+    onLoadSuccess: vi.fn(),
+    onLoadError: vi.fn(),
+    onPageChange: vi.fn()
+  }
+  const view = render(<PdfDocument {...props} />)
+  await screen.findByLabelText('Page 1')
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+  const container = view.container.firstElementChild as HTMLElement
+  container.scrollTop = 6160
+  fireEvent.scroll(container)
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+  expect(props.onPageChange).toHaveBeenLastCalledWith(11)
+  container.scrollTop = 6776
+  view.rerender(<PdfDocument {...props} currentPage={11} />)
+  expect(container.scrollTop).toBe(6776)
+  view.rerender(<PdfDocument {...props} currentPage={500} />)
+  await screen.findByLabelText('Page 500')
+})
+
 it('routes an internal PDF link to a destination that has no mounted canvas', async () => {
   const onPageChange = vi.fn()
   render(
@@ -212,6 +276,37 @@ it('routes an internal PDF link to a destination that has no mounted canvas', as
   await screen.findByLabelText('Page 1')
   fireEvent.click(screen.getByText('Internal PDF link'))
   expect(onPageChange).toHaveBeenCalledWith(500)
+})
+
+it('restores a scroll-reported page after switching from single back to continuous mode', async () => {
+  const props = {
+    url: '/large.pdf',
+    documentId: 1,
+    currentPage: 1,
+    zoomLevel: 100,
+    viewMode: 'continuous' as const,
+    onLoadSuccess: vi.fn(),
+    onLoadError: vi.fn(),
+    onPageChange: vi.fn()
+  }
+  const view = render(<PdfDocument {...props} />)
+  await screen.findByLabelText('Page 1')
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+  const container = view.container.firstElementChild as HTMLElement
+  container.scrollTop = 6160
+  fireEvent.scroll(container)
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+  expect(props.onPageChange).toHaveBeenLastCalledWith(11)
+  view.rerender(<PdfDocument {...props} currentPage={11} />)
+  view.rerender(<PdfDocument {...props} currentPage={11} viewMode="single" />)
+  container.scrollTop = 0 // Browser clamps the scrollable height in single mode.
+  view.rerender(<PdfDocument {...props} currentPage={11} />)
+  await screen.findByLabelText('Page 11')
+  expect(container.scrollTop).toBe(6160)
 })
 
 it('uses current navigation after React-PDF retains its initial link handler across modes', async () => {
@@ -234,6 +329,40 @@ it('uses current navigation after React-PDF retains its initial link handler acr
   view.rerender(<PdfDocument {...props} viewMode="single" />)
   fireEvent.click(screen.getByText('Current page PDF link'))
   expect(scroll).toHaveBeenCalled()
+})
+
+it('retires a queued continuous-scroll frame before changing view mode', async () => {
+  const props = {
+    url: '/large.pdf',
+    documentId: 1,
+    currentPage: 11,
+    zoomLevel: 100,
+    viewMode: 'continuous' as const,
+    onLoadSuccess: vi.fn(),
+    onLoadError: vi.fn(),
+    onPageChange: vi.fn()
+  }
+  const view = render(<PdfDocument {...props} />)
+  await screen.findByLabelText('Page 11')
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+  const frames = new Map<number, FrameRequestCallback>()
+  let id = 0
+  vi.stubGlobal('requestAnimationFrame', (frame: FrameRequestCallback) => {
+    frames.set(++id, frame)
+    return id
+  })
+  vi.stubGlobal('cancelAnimationFrame', (frameId: number) => frames.delete(frameId))
+  const container = view.container.firstElementChild as HTMLElement
+  container.scrollTop = 6776
+  fireEvent.scroll(container)
+  view.rerender(<PdfDocument {...props} viewMode="single" />)
+  container.scrollTop = 0
+  act(() => {
+    for (const frame of frames.values()) frame(0)
+  })
+  expect(props.onPageChange).not.toHaveBeenCalled()
 })
 
 it('scrolls back to the page for a same-page internal link', async () => {

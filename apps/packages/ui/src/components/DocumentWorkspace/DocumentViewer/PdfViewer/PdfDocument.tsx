@@ -86,6 +86,9 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
   const scrollTimeoutRef = useRef<number | null>(null)
   const scrollRafRef = useRef<number | null>(null)
   const navigationRef = useRef<{ page: number; top: number } | null>(null)
+  const scrollReportedPageRef = useRef<number | null>(null)
+  const lastCurrentPageRef = useRef(currentPage)
+  const scrolledBeforeMetricsRef = useRef(false)
   const wheelAccumulatorRef = useRef(0)
   const wheelResetRef = useRef<number | null>(null)
   const [pageHeights, setPageHeights] = useState<number[]>([])
@@ -178,6 +181,8 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
   // Compute per-page dimensions for virtual single-page scrolling.
   useEffect(() => {
     setMetricsFailed(false)
+    scrollReportedPageRef.current = null
+    scrolledBeforeMetricsRef.current = false
     if (!pdfInstance) {
       setDocumentWidth(0)
       setPageHeights([])
@@ -275,7 +280,7 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
     initialRect: { width: 800, height: 800 },
     useFlushSync: false
   })
-  useEffect(() => { continuousPages.measure() }, [continuousPages, pageHeights])
+  useLayoutEffect(() => { continuousPages.measure() }, [continuousPages, pageHeights])
 
   // Binary search: find 1-based page whose offset region contains scrollTop
   const findPageAtOffset = useCallback(
@@ -300,6 +305,8 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
   }, [totalPageCount, findPageAtOffset])
 
   const scrollToPage = useCallback((page: number) => {
+    scrolledBeforeMetricsRef.current = false
+    scrollReportedPageRef.current = null
     if (viewMode === 'continuous' && containerRef.current) {
       const container = containerRef.current
       const targetTop = pageOffsets[page - 1] ?? (page - 1) * virtualPageHeight
@@ -307,9 +314,11 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
         page,
         top: Math.max(0, Math.min(targetTop, container.scrollHeight - container.clientHeight))
       }
-      continuousPages.scrollToIndex(page - 1, { align: 'start' })
+      // Page dimensions are fixed. Native scrolling avoids virtualizer retries
+      // that can fight a reader who scrolls away during metadata loading.
+      container.scrollTo({ top: targetTop, behavior: 'auto' })
     } else pageRefs.current.get(page)?.scrollIntoView()
-  }, [viewMode, pageOffsets, virtualPageHeight, continuousPages])
+  }, [viewMode, pageOffsets, virtualPageHeight])
 
   // React-PDF retains its initial link handler, so delegate to current navigation.
   const pageNavigationRef = useRef({ onPageChange, scrollToPage })
@@ -322,18 +331,48 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
   }, [])
 
   useEffect(() => {
-    if (viewMode !== 'continuous') navigationRef.current = null
-    if (viewMode !== 'continuous' || !totalPageCount || !containerRef.current) return
+    const pageChanged = lastCurrentPageRef.current !== currentPage
+    lastCurrentPageRef.current = currentPage
+    if (viewMode !== 'continuous') {
+      navigationRef.current = null
+      scrollReportedPageRef.current = null
+      scrolledBeforeMetricsRef.current = false
+      return
+    }
+    if (!totalPageCount || !containerRef.current) return
+    // A page reported by scrolling is feedback, not a navigation request.
+    if (scrollReportedPageRef.current === currentPage) return
+    if (pageChanged) scrolledBeforeMetricsRef.current = false
+    if (scrolledBeforeMetricsRef.current && (perPageReady || metricsFailed) && !navigationRef.current) {
+      scrolledBeforeMetricsRef.current = false
+      const page = findVisiblePage(containerRef.current)
+      scrollReportedPageRef.current = page
+      if (page !== currentPage) onPageChange(page)
+      return
+    }
     // Scroll tracking feeds currentPage back to us; explicit navigation also
     // reaches pages not currently mounted, including clamped tail pages.
     if (findVisiblePage(containerRef.current) !== currentPage) scrollToPage(currentPage)
-  }, [viewMode, totalPageCount, currentPage, pageHeights, scrollToPage, findVisiblePage])
+  }, [viewMode, totalPageCount, currentPage, pageHeights, perPageReady, metricsFailed, onPageChange, scrollToPage, findVisiblePage])
+
+  const handleScrollInput = useCallback(() => {
+    // Wheel, keyboard and scrollbar/touch input supersede a pending page jump.
+    navigationRef.current = null
+  }, [])
+
+  useLayoutEffect(
+    () => () => {
+      // Retire callbacks before a mode/geometry change can clamp scrollTop.
+      if (scrollRafRef.current) {
+        cancelAnimationFrame(scrollRafRef.current)
+        scrollRafRef.current = null
+      }
+    },
+    [viewMode, pageOffsets]
+  )
 
   const handleVirtualScroll = useCallback(() => {
     if ((!virtualScrollEnabled && viewMode !== "continuous") || !containerRef.current) return
-    // Estimated offsets change while metadata loads; keep explicit navigation
-    // until real dimensions arrive, or use the estimate if metadata fails.
-    if (viewMode === "continuous" && !perPageReady && !metricsFailed) return
     const container = containerRef.current
 
     isUserScrollingRef.current = true
@@ -343,6 +382,13 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
     scrollTimeoutRef.current = window.setTimeout(() => {
       isUserScrollingRef.current = false
     }, 120)
+
+    // Record reader movement without reporting a page from estimated offsets.
+    // Programmatic jumps retain their destination until real metrics arrive.
+    if (viewMode === "continuous" && !perPageReady && !metricsFailed) {
+      if (!navigationRef.current) scrolledBeforeMetricsRef.current = true
+      return
+    }
 
     if (scrollRafRef.current) {
       cancelAnimationFrame(scrollRafRef.current)
@@ -354,6 +400,7 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
         ? navigation.page
         : findVisiblePage(container)
       if (nextPage !== currentPage) {
+        scrollReportedPageRef.current = nextPage
         onPageChange(nextPage)
       }
     })
@@ -415,10 +462,6 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
 
   useEffect(() => {
     return () => {
-      if (scrollRafRef.current) {
-        cancelAnimationFrame(scrollRafRef.current)
-        scrollRafRef.current = null
-      }
       if (scrollTimeoutRef.current) {
         window.clearTimeout(scrollTimeoutRef.current)
         scrollTimeoutRef.current = null
@@ -450,6 +493,9 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
       ref={containerRef}
       className="flex h-full min-h-0 w-full flex-col items-center overflow-x-auto overflow-y-auto py-4 px-2 sm:px-4"
       onScroll={virtualScrollEnabled || viewMode === "continuous" ? handleVirtualScroll : undefined}
+      onWheelCapture={handleScrollInput}
+      onPointerDownCapture={handleScrollInput}
+      onKeyDownCapture={handleScrollInput}
     >
       {/* Text Selection Popover */}
       {selection && selection.text.length > 0 && (

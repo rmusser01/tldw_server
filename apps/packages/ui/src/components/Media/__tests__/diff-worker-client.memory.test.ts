@@ -7,6 +7,38 @@ import {
 
 afterEach(() => vi.unstubAllGlobals())
 
+it('keeps unchanged lines for an ordinary revision with more than 128 changed lines', () => {
+  const left = Array.from({ length: 500 }, (_, i) => 'line ' + i)
+  const right = left.map((line, i) => (i % 3 === 0 ? 'updated ' + i : line))
+  const lines = computeDiffSync(left.join('\n'), right.join('\n'))
+  expect(lines.filter((line) => line.type === 'same').length).toBe(333)
+})
+
+it('keeps common leading and trailing lines when the edit budget is exhausted', () => {
+  const left = ['heading', ...Array.from({ length: 1200 }, (_, i) => 'old ' + i), 'ending']
+  const right = ['heading', ...Array.from({ length: 1200 }, (_, i) => 'new ' + i), 'ending']
+  const lines = computeDiffSync(left.join('\n'), right.join('\n'))
+  expect(lines.filter((line) => line.type === 'same').map((line) => line.text)).toEqual([
+    'heading',
+    'ending'
+  ])
+  expect(lines.filter((line) => line.type !== 'add').map((line) => line.text)).toEqual(left)
+  expect(lines.filter((line) => line.type !== 'del').map((line) => line.text)).toEqual(right)
+})
+
+it('allows the actual worker a larger bounded edit budget than the main thread', async () => {
+  const left = Array.from({ length: 2500 }, (_, i) => 'line ' + i)
+  const right = left.map((line, i) => (i < 1700 && i % 2 === 0 ? 'updated ' + i : line))
+  const worker = { onmessage: null as ((event: MessageEvent) => void) | null, postMessage: vi.fn() }
+  vi.stubGlobal('self', worker)
+  await import('../diff.worker')
+  worker.onmessage?.({
+    data: { leftText: left.join('\n'), rightText: right.join('\n') }
+  } as MessageEvent)
+  const lines = worker.postMessage.mock.calls[0][0].lines
+  expect(lines.filter((line: { type: string }) => line.type === 'same').length).toBe(1650)
+})
+
 it('reconstructs both sides of an ordinary line diff', () => {
   const lines = computeDiffSync('one\ntwo\nthree', 'one\nnew\nthree')
   expect(
