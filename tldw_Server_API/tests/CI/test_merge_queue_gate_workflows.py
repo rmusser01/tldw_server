@@ -286,8 +286,8 @@ def _outcome(job: dict, row: Row) -> str:
 def _expected_outcome(name: str, row: Row) -> str:
     if row.cancelled:
         return "skipped"  # a cancelled run stays cancelled
-    if name == "backend-required.yml" and row.license_negative:
-        return "license"  # the one gate that turns a negative license verdict red
+    if row.license_negative:
+        return "license"  # every gate turns a cancelled, failed or negative license wait red (TASK-13502)
     if not row.admitted:
         return "skipped"  # e.g. workflow_run with admission declined: skipped by design
     return "proceeds" if row.changes == "success" else "changes"
@@ -308,10 +308,10 @@ def test_gate_is_red_when_change_detection_did_not_succeed(name):
     assert newly_red, "no row exercised a failed change detection"
 
 
-@pytest.mark.parametrize("name", ["backend-required.yml", "security-required.yml"])
+@pytest.mark.parametrize("name", CHANGE_GATED)
 def test_gate_that_sees_admission_is_red_if_changes_was_skipped_when_it_should_have_run(name):
-    """These two gates need admission and await_license themselves, so they can tell "skipped by
-    design" from "skipped although admitted" (which the `changes` condition should make impossible)."""
+    """Every gate needs admission and await_license itself, so it can tell "skipped by design" from
+    "skipped although admitted" (which the `changes` condition should make impossible)."""
     gate = _gate(name)
     assert {"changes", "admission", "await_license"} <= set(gate["needs"])
     rows = [r for r in _rows(reachable_only=False) if r.admitted and r.changes == "skipped" and not r.cancelled]
@@ -326,8 +326,8 @@ def test_change_detection_guard_fails_before_any_other_work(name):
     steps = gate["steps"]
     names = [step.get("name") for step in steps]
     index = names.index(CHANGES_STEP)
-    # Only the license refusal may come first: when it fails, the guard is skipped with the rest.
-    assert names[:index] == ([LICENSE_STEP] if name == "backend-required.yml" else [])
+    # Only the license refusal comes first: when it fails, the guard is skipped with the rest.
+    assert names[:index] == [LICENSE_STEP]
 
     guard = steps[index]
     assert guard["if"] == "needs.changes.result != 'success'"
@@ -347,13 +347,43 @@ def test_change_detection_guard_fails_before_any_other_work(name):
         assert not re.search(r"\b(always|failure|cancelled)\(\)", condition), step.get("name")
 
 
-def test_backend_required_still_turns_a_negative_license_verdict_red():
-    refusal = _gate("backend-required.yml")["steps"][0]
+@pytest.mark.parametrize("name", GATES)
+def test_every_gate_turns_a_license_wait_that_did_not_pass_red(name):
+    """Each workflow has its own await_license job. When it is cancelled (a runner never picked it
+    up), fails, or reports a negative verdict, the gate used to be skipped in every workflow but
+    backend-required, and GitHub counts a skipped required job as satisfied (TASK-13502)."""
+    gate = _gate(name)
+    assert {"admission", "await_license"} <= set(gate["needs"])
+    refusal = gate["steps"][0]
     assert refusal["name"] == LICENSE_STEP
+    assert refusal["if"] == (
+        "github.event_name != 'workflow_run' && needs.await_license.result != 'skipped' && "
+        "needs.await_license.outputs.license_passed != 'true'"
+    )
     assert refusal["run"] == (
         'echo "::error::License audit did not pass for this PR head, so the gates were not run. '
         'Fix the licence policy failure and re-run."\nexit 1\n'
     )
+    for awaited, passed in (("cancelled", ""), ("failure", ""), ("success", "false"), ("success", "")):
+        values = {
+            "github.event_name": "pull_request",
+            "needs.admission.result": "skipped",
+            "needs.admission.outputs.should_run": "",
+            "needs.await_license.result": awaited,
+            "needs.await_license.outputs.license_passed": passed,
+            "needs.changes.result": "skipped",
+        }
+        assert _evaluate(gate["if"], values), (awaited, passed)
+        assert _evaluate(refusal["if"], values), (awaited, passed)
+    passing = {
+        "github.event_name": "pull_request",
+        "needs.admission.result": "skipped",
+        "needs.admission.outputs.should_run": "",
+        "needs.await_license.result": "success",
+        "needs.await_license.outputs.license_passed": "true",
+        "needs.changes.result": "success",
+    }
+    assert not _evaluate(refusal["if"], passing)
 
 
 # --- 4.6: waking the queue after a red gate ---------------------------------------------------

@@ -571,6 +571,9 @@ jobs:
     # Same condition as the changes job, and deliberately no test of its result: GitHub counts
     # a skipped required job as satisfied, so a change detection that did not succeed has to
     # reach the first step and fail there (TASK-13462, spec 4.9).
+    # The last arm makes a license wait that was cancelled, failed or negative
+    # reach the refusal step below and go red. Without it this job is skipped,
+    # and GitHub counts a skipped required job as satisfied (TASK-13502).
     if: >-
       always() && !cancelled() &&
       (
@@ -585,6 +588,11 @@ jobs:
             needs.await_license.result == 'skipped' ||
             needs.await_license.outputs.license_passed == 'true'
           )
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
         )
       )
     timeout-minutes: 120
@@ -597,6 +605,15 @@ jobs:
       PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
       SKIP_WXT_PREPARE: '1'
     steps:
+      - name: Require the license audit to have passed
+        if: >-
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        run: |
+          echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
+          exit 1
+
       - name: Require change detection success
         shell: bash
         env:

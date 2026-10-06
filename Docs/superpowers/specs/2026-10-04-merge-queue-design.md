@@ -164,8 +164,8 @@ failed, the gate job was skipped, and GitHub counts a skipped required job as sa
 runner flake in `changes` is enough) and a dispatch adds one more way to reach it (a `base_sha` that is not a commit in
 the clone). The gate job now also runs when `changes` did not succeed, and fails in a guard step before anything
 else runs. In `backend-required.yml` the existing arm and step that turn a negative license verdict red are unchanged
-and stay first. The other four gates never had that arm: on a negative verdict they are still skipped, and
-`backend-required` and the license status are what block the merge.
+and stay first. TASK-13502 gives the other five gates the same arm and step, because each workflow has its own
+license wait and a cancelled one used to skip only that gate.
 
 ## 5. Architecture
 

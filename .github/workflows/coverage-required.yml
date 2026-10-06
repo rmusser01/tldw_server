@@ -106,20 +106,46 @@ jobs:
   coverage-required:
     name: coverage-required
     runs-on: ubuntu-latest
-    needs: [changes]
-    # Runs whenever `changes` ran, not only when it succeeded: when change
-    # detection failed this job was skipped, and GitHub counts a skipped
-    # required job as satisfied. It now runs and the first step fails it
-    # (TASK-13462). `changes` is skipped only when it was not admitted
-    # (workflow_run admission declined, or no passing license verdict), and
-    # then this job is skipped with it, as before.
+    needs: [changes, admission, await_license]
+    # Runs whenever change detection was admitted, not only when it succeeded,
+    # and also when the license wait did not pass: in both cases this job used
+    # to be skipped, and GitHub counts a skipped required job as satisfied. It
+    # now runs and its first steps fail it (TASK-13462, TASK-13502). Only the
+    # workflow_run path with admission declined still skips it, as before.
     if: >-
       always() && !cancelled() &&
-      needs.changes.result != 'skipped'
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        )
+      )
     timeout-minutes: 30
     steps:
-      # Stays first: no later step uses a status function, so none runs once
-      # this has failed.
+      - name: Require the license audit to have passed
+        if: >-
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        run: |
+          echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
+          exit 1
+
+      # Stays directly after the license refusal: no later step uses a status
+      # function, so none runs once either has failed.
       - name: Require change detection to have succeeded
         if: needs.changes.result != 'success'
         env:
@@ -136,7 +162,7 @@ jobs:
         if: needs.changes.outputs.coverage_required == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)

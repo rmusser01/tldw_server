@@ -196,7 +196,17 @@ ALWAYS_ROLLUPS = {
     ("ci.yml", "full-suite-macos-312-summary"),
     ("ci.yml", "full-suite-windows-312-summary"),
 }
-DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | {
+# The six required gate jobs. Each turns a license wait that was cancelled, failed or negative
+# red rather than being skipped, which GitHub would count as satisfied (TASK-13502).
+LICENSE_RED_GATES = {
+    ("backend-required.yml", "backend-required"),
+    ("container-build-check.yml", "container-build-check"),
+    ("coverage-required.yml", "coverage-required"),
+    ("e2e-required.yml", "e2e-required"),
+    ("frontend-required.yml", "frontend-required"),
+    ("security-required.yml", "security-required"),
+}
+DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | LICENSE_RED_GATES | {
     ("backend-required.yml", "backend-required"),
     ("frontend-required.yml", "frontend-unit-tests"),
     ("frontend-required.yml", "frontend-required"),
@@ -626,21 +636,17 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                         "needs.changes.result == 'success' && "
                         "needs.changes.outputs.tldw_frontend_changed == 'true'"
                     )
-                # The three required gates here carry no `needs.changes.result == 'success'`
+                # The gates with a `changes` job carry no `needs.changes.result == 'success'`
                 # term (TASK-13462): they run whenever change detection was started and fail
                 # in a guard step if it did not succeed, instead of being skipped.
-                if (name, job_name) in {
-                    ("backend-required.yml", "backend-required"),
-                    ("frontend-required.yml", "frontend-required"),
-                    ("security-required.yml", "security-required"),
-                }:
+                if (name, job_name) in LICENSE_RED_GATES and name != "container-build-check.yml":
                     _assert_fails_when_change_detection_did_not_succeed(name, job)
                 expected_condition = admission_clause
                 if extra_condition:
                     expected_condition += f" && ({extra_condition})"
-                if (name, job_name) == ("backend-required.yml", "backend-required"):
-                    # The required rollup must report a negative verdict as failure,
-                    # even when the changes job was not admitted.
+                if (name, job_name) in LICENSE_RED_GATES:
+                    # A required gate must report a license wait that did not pass as failure,
+                    # even when the changes job was not admitted (TASK-13502).
                     expected_condition = """
                         always() && !cancelled() && (
                           (github.event_name == 'workflow_run' &&
@@ -685,17 +691,6 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     ), (name, job_name)
                 elif (name, job_name) == ("jobs-suite.yml", "jobs-postgres"):
                     assert _normalized(job.get("if")) == _normalized(dependencies_succeeded)
-                elif (name, job_name) in {
-                    ("coverage-required.yml", "coverage-required"),
-                    ("e2e-required.yml", "e2e-required"),
-                }:
-                    # `changes` is skipped exactly when it was not admitted. Any other
-                    # result means the gate was supposed to run, so it runs, and fails in
-                    # its guard step unless change detection succeeded (TASK-13462).
-                    assert _normalized(job.get("if")) == _normalized(
-                        "always() && !cancelled() && needs.changes.result != 'skipped'"
-                    )
-                    _assert_fails_when_change_detection_did_not_succeed(name, job)
                 else:
                     assert job.get("if") is None, (name, job_name)
 
