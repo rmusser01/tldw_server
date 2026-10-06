@@ -24,6 +24,6 @@ Final proof includes 152 affected frontend tests, exact canonical-note snapshots
 **Goal**: Make the coordinated backend provenance design reviewable and publish verified follow-up changes.
 **Success Criteria**: Notes/Sync compatibility choices documented, remaining required inputs explicit, tests/hooks/security checks complete.
 **Tests**: Review against ADR031 and canonical Notes contracts; touched-scope validation.
-**Status**: In Progress
+**Status**: Complete
 
-The coordinated Notes/Sync proposal is reviewable. Publish the bounded fixes as a draft PR; independent backend provenance, real device/participant testing and the existing Email CI integration remain separately open. See Docs/Reviews/KNOWLEDGE_FOLLOWUP_RESULTS_2026_10_06.md for evidence and limits.
+The coordinated Notes/Sync proposal is reviewable. The bounded fixes are published in [draft PR3205](https://github.com/rmusser01/tldw_server/pull/3205); independent backend provenance, real device/participant testing and the existing Email CI integration remain separately open. See Docs/Reviews/KNOWLEDGE_FOLLOWUP_RESULTS_2026_10_06.md for evidence and limits.
