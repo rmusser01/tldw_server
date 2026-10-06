@@ -14,6 +14,7 @@ const runtimeListeners = new Set<
 
 const mocks = vi.hoisted(() => ({
   ensureSidepanelOpen: vi.fn(),
+  captureMessage: vi.fn(),
   sendMessage: vi.fn(),
   notify: vi.fn()
 }))
@@ -35,6 +36,10 @@ vi.mock("@/services/background-helpers", () => ({
 
 vi.mock("wxt/browser", () => ({
   browser: {
+    tabs: {
+      sendMessage: (...args: unknown[]) =>
+        (mocks.captureMessage as (...args: unknown[]) => unknown)(...args)
+    },
     runtime: {
       sendMessage: (...args: unknown[]) =>
         (mocks.sendMessage as (...args: unknown[]) => unknown)(...args),
@@ -187,6 +192,8 @@ describe("web clipper background launcher", () => {
     vi.clearAllMocks()
     vi.useRealTimers()
     mocks.sendMessage.mockResolvedValue({ handled: true })
+    mocks.captureMessage.mockResolvedValue(undefined)
+    mocks.ensureSidepanelOpen.mockResolvedValue(undefined)
 
     Object.defineProperty(globalThis, "browser", {
       configurable: true,
@@ -282,6 +289,44 @@ describe("web clipper background launcher", () => {
     )
   })
 
+  it("opens the sidebar during the menu gesture before awaiting page capture", async () => {
+    let finishCapture: (value: unknown) => void = () => {}
+    mocks.captureMessage.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCapture = resolve
+        }),
+    )
+
+    const handoff = launchWebClipperFromContextMenu(
+      { pageUrl: "https://example.com/story" },
+      { id: 8, title: "Story" },
+    )
+
+    expect(mocks.ensureSidepanelOpen).toHaveBeenCalledWith(8)
+    await Promise.resolve()
+    finishCapture(undefined)
+    await handoff
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports a failed sidebar opening without delivering a clipper draft", async () => {
+    mocks.ensureSidepanelOpen.mockRejectedValueOnce(
+      new Error("Sidebar opening was denied"),
+    )
+
+    await launchWebClipperFromContextMenu(
+      { pageUrl: "https://example.com/story" },
+      { id: 8, title: "Story" },
+    )
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Clipper"),
+      expect.any(String),
+    )
+  })
+
   it("retries clipper delivery until the sidepanel listener is ready", async () => {
     vi.useFakeTimers()
     mocks.sendMessage
@@ -301,7 +346,7 @@ describe("web clipper background launcher", () => {
       { id: 9, url: "https://example.com/story", title: "Story" }
     )
 
-    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(0)
 
     expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
 
