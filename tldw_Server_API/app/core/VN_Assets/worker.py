@@ -1131,6 +1131,12 @@ class VNAssetGenerationWorker:
                 await self.repo.run_worker_replay_operation(
                     partial(self._require_current_job_lease, job, user_id=user_id)
                 )
+            stored_bytes = generated_file_size_bytes(file_record, fallback=image.bytes_len)
+            backend_metadata = {
+                **backend_metadata,
+                "content_type": _first_text(file_record.get("mime_type"), image.content_type),
+                "bytes_len": stored_bytes,
+            }
             item = self.repo.update_item_storage(
                 item_id,
                 generated_file_id=_positive_int(file_record.get("id")),
@@ -1138,7 +1144,7 @@ class VNAssetGenerationWorker:
                 mime_type=_first_text(file_record.get("mime_type"), image.content_type),
                 width=width,
                 height=height,
-                bytes=image.bytes_len,
+                bytes=stored_bytes,
                 backend_metadata=backend_metadata,
                 batch_id=batch_id if attempt_token else None,
                 slot_id=slot_id if attempt_token else None,

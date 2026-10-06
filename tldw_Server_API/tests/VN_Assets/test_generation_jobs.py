@@ -3190,6 +3190,55 @@ async def test_completed_variant_redelivery_reuses_item_without_generating_again
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_competing_registration_size_survives_completed_redelivery(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A converged registration, not the losing render, defines stored bytes."""
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    winner = b"previous-delivery-winner"
+    storage = StoredVNSaver(tmp_path)
+    saves = []
+
+    async def save_winner(**kwargs: Any) -> dict[str, Any]:
+        saves.append(kwargs)
+        return await storage(**{**kwargs, "image_bytes": winner})
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    adapter = FakeImageAdapter()
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", staticmethod(lambda _user_id: tmp_path))
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(adapter), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=save_winner, generated_files_repo=storage,
+    )
+    payload = {
+        "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+        "batch_id": batch.batch_id, "user_id": 1,
+    }
+    first = await worker.handle_generate_variant(payload)
+    item = service.repo.get_item(first["item_id"])
+    assert item["bytes"] == len(winner)
+    assert json.loads(item["backend_metadata_json"])["bytes_len"] == len(winner)
+    service.repo.update_item_review(first["item_id"], review_status="approved", preferred=True)
+    assert await worker.handle_generate_variant(payload) == first
+    assert len(adapter.requests) == len(saves) == 1
+    assert service.repo.get_batch(batch.batch_id)["completed_count"] == 1
+    assert service.repo.get_item(first["item_id"])["review_status"] == "approved"
+    assert service.repo.get_item(first["item_id"])["preferred"] == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_cancelled_batch_does_not_publish_reserved_variant(
     fake_jobs: FakeJobs,
     service: VNAssetPackService,

@@ -316,6 +316,74 @@ async def main() -> None:
                 user_id=owner, source_feature='vn_assets', source_ref='vn_asset_item:42',
             )
             result['committed_bytes_preserved'] = (outputs / record['storage_path']).is_file()
+        elif case == 'postcommit_cache':
+            await service.check_quota(owner, 0)
+            service.storage_cache[f'storage_calc:{owner}'] = {'total_mb': 0}
+            transaction = pool.transaction
+            cancelled = asyncio.CancelledError('after committed registration')
+            @contextlib.asynccontextmanager
+            async def cancel_after_commit(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
+                """Cancel the response only after the actual transaction commits."""
+                async with transaction(*args, **kwargs) as conn:
+                    yield conn
+                raise cancelled
+            with patch.object(pool, 'transaction', cancel_after_commit):
+                try:
+                    await save()
+                except asyncio.CancelledError as exc:
+                    result['cancellation_preserved'] = exc is cancelled
+            committed = await snapshot()
+            record = await repo.get_file_by_source_ref(
+                user_id=owner, source_feature='vn_assets', source_ref='vn_asset_item:42',
+            )
+            result['cache_evicted_after_commit'] = (
+                f'quota:{owner}' not in service.quota_cache
+                and f'storage_calc:{owner}' not in service.storage_cache
+            )
+            await service.check_quota(owner, 0)
+            result['fresh_usage'] = service.quota_cache[f'quota:{owner}'] == 5 / 1048576
+            service.quota_cache[f'quota:{owner}'] = 0
+            service.storage_cache[f'storage_calc:{owner}'] = {'total_mb': 0}
+            replay = await service.register_generated_file(
+                user_id=owner, filename='replacement.png', storage_path='vn_assets/replacement.png',
+                file_category='image', source_feature='vn_assets', source_ref='vn_asset_item:42',
+                file_size_bytes=99, org_id=51, team_id=52,
+            )
+            result.update(
+                replay_identity=replay['id'] == record['id'],
+                cache_evicted_after_replay=(
+                    f'quota:{owner}' not in service.quota_cache
+                    and f'storage_calc:{owner}' not in service.storage_cache
+                ),
+                charged_once=committed['usage'] == [5 / 1048576] * 3,
+                replay_unchanged=await snapshot() == committed,
+                bytes_preserved=(outputs / record['storage_path']).read_bytes() == b'image',
+            )
+        elif case.startswith('unregister_'):
+            record = await save()
+            registered = await snapshot()
+            kind = case.removeprefix('unregister_')
+            method = {'user': 'update_usage', 'org': 'update_org_usage',
+                      'team': 'update_team_usage', 'cancel': 'update_team_usage'}[kind]
+            original = getattr(StorageQuotaService, method)
+            cancelled = asyncio.CancelledError('during unregistration accounting')
+            async def fail_removal(self: StorageQuotaService, *args: Any, **kwargs: Any) -> None:
+                """Fail after a real decrement to verify record/accounting rollback."""
+                await original(self, *args, **kwargs)
+                if kind == 'cancel':
+                    raise cancelled
+                raise RuntimeError('injected removal accounting failure')
+            with patch.object(StorageQuotaService, method, fail_removal):
+                try:
+                    await service.unregister_generated_file(record['id'], hard_delete=True)
+                except asyncio.CancelledError as exc:
+                    result['failed'] = exc is cancelled
+                except Exception:
+                    result['failed'] = kind != 'cancel'
+            result['rolled_back'] = await snapshot() == registered
+            result['retry_removed'] = await service.unregister_generated_file(record['id'], hard_delete=True)
+            final = await snapshot()
+            result.update(live=final['live'], usage_restored=final['usage'] == baseline['usage'])
         elif case.startswith('quota_policy_'):
             level = case.removeprefix('quota_policy_')
             if level == 'user':
@@ -655,6 +723,32 @@ def test_vn_registration_error_never_unlinks_committed_live_bytes(
 ) -> None:
     assert _storage_result(tmp_path, request, backend, "postcommit") == {
         "failed": True, "committed_bytes_preserved": True,
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+def test_vn_postcommit_cancellation_and_replay_evict_original_usage_cache(
+    tmp_path: Path, request: pytest.FixtureRequest, backend: str,
+) -> None:
+    """Committed accounting remains authoritative despite response cancellation."""
+    assert _storage_result(tmp_path, request, backend, "postcommit_cache") == {
+        "cancellation_preserved": True, "cache_evicted_after_commit": True,
+        "fresh_usage": True, "replay_identity": True, "cache_evicted_after_replay": True,
+        "charged_once": True, "replay_unchanged": True, "bytes_preserved": True,
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+@pytest.mark.parametrize("case", ["user", "org", "team", "cancel"])
+def test_vn_unregister_accounting_failure_retains_retryable_registration(
+    tmp_path: Path, request: pytest.FixtureRequest, backend: str, case: str,
+) -> None:
+    """Removal either commits all decrements or retains the full recovery record."""
+    assert _storage_result(tmp_path, request, backend, f"unregister_{case}") == {
+        "failed": True, "rolled_back": True, "retry_removed": True,
+        "live": 0, "usage_restored": True,
     }
 
 

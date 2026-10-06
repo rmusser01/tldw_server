@@ -871,25 +871,26 @@ class StorageQuotaService:
         """Commit a VN file and all applicable usage deltas together."""
         repo = await self.get_generated_files_repo()
         user_id = file_values["user_id"]
-        async with repo.vn_item_transaction(user_id=user_id, source_ref=file_values["source_ref"]) as bound_repo:
-            # A separate service view keeps concurrent requests on this instance
-            # from sharing the transaction connection or uncommitted quota cache.
-            bound_service = copy.copy(self)
-            bound_service.db_pool = bound_repo.db_pool
-            bound_service._quota_db_pool = bound_repo.db_pool
-            bound_service.quota_cache = TTLCache(maxsize=1000, ttl=300)
-            bound_service.storage_cache = TTLCache(maxsize=1000, ttl=600)
-            existing = await bound_service.get_vn_generated_file(
-                user_id=user_id, source_ref=file_values["source_ref"],
-            )
-            if existing is not None:
-                return existing
-            await bound_repo.lock_quota_scopes(
-                user_id=user_id, org_id=file_values["org_id"], team_id=file_values["team_id"],
-            )
-            record = await bound_service._register_and_account_generated_file(file_values, check_quota=check_quota)
-        self.invalidate_user_cache(user_id)
-        return record
+        try:
+            async with repo.vn_item_transaction(user_id=user_id, source_ref=file_values["source_ref"]) as bound_repo:
+                # A separate service view keeps concurrent requests on this instance
+                # from sharing the transaction connection or uncommitted quota cache.
+                bound_service = copy.copy(self)
+                bound_service.db_pool = bound_repo.db_pool
+                bound_service._quota_db_pool = bound_repo.db_pool
+                bound_service.quota_cache = TTLCache(maxsize=1000, ttl=300)
+                bound_service.storage_cache = TTLCache(maxsize=1000, ttl=600)
+                existing = await bound_service.get_vn_generated_file(
+                    user_id=user_id, source_ref=file_values["source_ref"],
+                )
+                if existing is not None:
+                    return existing
+                await bound_repo.lock_quota_scopes(
+                    user_id=user_id, org_id=file_values["org_id"], team_id=file_values["team_id"],
+                )
+                return await bound_service._register_and_account_generated_file(file_values, check_quota=check_quota)
+        finally:
+            self.invalidate_user_cache(user_id)
 
     async def register_generated_file(
         self,
@@ -1094,6 +1095,34 @@ class StorageQuotaService:
         if not file_record:
             return False
 
+        user_id = file_record.get("user_id")
+        source_ref = file_record.get("source_ref")
+        if is_vn_item_source_ref(file_record.get("source_feature"), source_ref):
+            try:
+                async with files_repo.vn_item_transaction(user_id=user_id, source_ref=source_ref) as bound_repo:
+                    current = await bound_repo.get_file_by_id(file_id)
+                    if not current:
+                        return False
+                    await bound_repo.lock_quota_scopes(
+                        user_id=user_id, org_id=current.get("org_id"), team_id=current.get("team_id"),
+                    )
+                    bound_service = copy.copy(self)
+                    bound_service.db_pool = bound_repo.db_pool
+                    bound_service._quota_db_pool = bound_repo.db_pool
+                    bound_service.quota_cache = TTLCache(maxsize=1000, ttl=300)
+                    bound_service.storage_cache = TTLCache(maxsize=1000, ttl=600)
+                    return await bound_service._unregister_generated_file_record(
+                        bound_repo, current, hard_delete=hard_delete,
+                    )
+            finally:
+                self.invalidate_user_cache(user_id)
+        return await self._unregister_generated_file_record(files_repo, file_record, hard_delete=hard_delete)
+
+    async def _unregister_generated_file_record(
+        self, files_repo: AuthnzGeneratedFilesRepo, file_record: dict[str, Any], *, hard_delete: bool,
+    ) -> bool:
+        """Remove one loaded registration and its usage using this service's pool."""
+        file_id = file_record["id"]
         was_deleted = bool(file_record.get("is_deleted"))
         user_id = file_record.get("user_id")
         org_id = file_record.get("org_id")

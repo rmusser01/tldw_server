@@ -375,8 +375,10 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await page.screenshot({ path: testInfo.outputPath('generation-failure.png'), fullPage: true });
     await retry.click();
     await expect.poll(() => requests.length).toBe(1);
-    await expect(retry).toBeEnabled();
-    await retry.click();
+    await expect(retry).toBeDisabled();
+    const recover = page.getByRole('button', { name: 'Recover pending request' });
+    await expect(recover).toBeEnabled();
+    await recover.click();
     await expect.poll(() => requests.length).toBe(2);
     expect(requests[0].idempotency_key).toEqual(expect.any(String));
     expect(requests[1]).toEqual(requests[0]);

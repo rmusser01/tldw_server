@@ -685,3 +685,45 @@ human summary; current-head external gates, not old04 passes, before normal merg
 **Tests**: Independent Git/REST checks and all seven exact-head app15368 gates.
 **Status**: In Progress
 Full exact-head Qodo remains credit-blocked; no waiver/retry/child3067 mutation.
+
+## Task 82: Human-Requested Manual Review And Merge
+
+Original TASK-13369 remains the associated task. Direct requester: "do a manual
+review and merge it". This replaces ONLY the unavailable Qodo-only review gate;
+the seven exact-head integration gates, human summary and normal merge remain.
+Design and qualified verification: Docs/Design/2026-10-06-vn-pr-3016-manual-review.md.
+
+### Stage 1: Full Manual Review
+**Goal**: Review all99 current PR paths at f1f063f/dev1fc353c.
+**Success Criteria**: Independent disjoint source/test review, verified findings.
+**Tests**: Eleven storage/accounting regressions RED on original production.
+**Status**: Complete
+Three verified production findings; conditional RLS grant proposal withdrawn.
+Child3067 strictly read-only, no new Qodo request or credit purchase.
+
+### Stage 2: Bounded Repairs
+**Goal**: Use winning registration metadata, evict owning caches on all exits and
+commit VN removal/accounting atomically on the existing connection and locks.
+**Success Criteria**: Original policy, dimensions, authority and cancellation
+controls retained; regressions/adjacent tests pass; no new security findings.
+**Tests**: Native/SQLite matrix135PASS/0skip; selected frontend recovery123PASS,
+134outsidefilter; browser smoke blocked by local React dependency runtime error.
+**Status**: Complete
+Bandit540->549B101/sixB106 inherited/errors[]/zero new nonassert; Ruff one inherited
+BLE001. FullPR99 configured hooks11PASS/3no-fileSKIP/nochanges/no bypass. Initial
+GREEN10PASS/1FAIL wrong new test field retained; corrected lookup only.
+
+### Stage 3: Independent Review And Publication
+**Goal**: Fresh SPEC/QUALITY of exact repair delta, normal commit and publication.
+**Success Criteria**: No actionable findings, preserved WIP/source/human summary,
+independently verified actual remote/PR head/tree containing latest dev.
+**Tests**: Exact source hashes, scoped hooks, Git/REST attribution.
+**Status**: In Progress
+
+### Stage 4: Normal Merge
+**Goal**: Fresh current-head seven app15368 gates and trusted-license audit,
+actual dev/effective rules/mode plus verbatim human Change summary.
+**Success Criteria**: Normal exact-head merge independently verified MERGED;
+then delete the heartbeat officially. Never admin/bypass/queue/child mutation.
+**Tests**: Complete REST/GraphQL pagination and emitted license status provenance.
+**Status**: Not Started
