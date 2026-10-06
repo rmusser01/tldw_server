@@ -141,18 +141,25 @@ def test_coverage_required_is_path_conditional() -> None:
 
 
 def test_conditional_required_lanes_run_whenever_change_detection_ran() -> None:
-    """Not only when it succeeded: a failed `changes` used to skip the required job, which
-    GitHub counts as satisfied. The lane now runs and its first step fails (TASK-13462;
-    truth table in test_merge_queue_gate_workflows.py)."""
+    """Not only when it succeeded: a failed `changes`, or a license wait that did not pass, used
+    to skip the required job, which GitHub counts as satisfied. The lane now runs and its first
+    steps fail it (TASK-13462, TASK-13502; truth table in test_merge_queue_gate_workflows.py)."""
     for workflow_path, job_name in (
         (".github/workflows/coverage-required.yml", "coverage-required"),
         (".github/workflows/e2e-required.yml", "e2e-required"),
     ):
         job = _load(workflow_path)["jobs"][job_name]
-        assert job["needs"] == ["changes"]
-        assert " ".join(job["if"].split()) == (
-            "always() && !cancelled() && needs.changes.result != 'skipped'"
-        )
+        assert job["needs"] == ["changes", "admission", "await_license"]
+        condition = " ".join(job["if"].split())
+        assert "needs.changes.result" not in condition
+        assert (
+            "github.event_name != 'workflow_run' && needs.await_license.result != 'skipped' && "
+            "needs.await_license.outputs.license_passed != 'true'"
+        ) in condition
+        assert [step["name"] for step in job["steps"][:2]] == [
+            "Require the license audit to have passed",
+            "Require change detection to have succeeded",
+        ]
 
 
 def test_coverage_required_installs_portaudio_for_pyaudio_builds() -> None:

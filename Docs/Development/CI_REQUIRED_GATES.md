@@ -52,6 +52,10 @@ and check current behaviour rather than assuming.
 - If relevant paths did not change, the gate exits with an explicit no-op success message.
 - If the change-detection job itself fails, the gate reports failure. Before TASK-13462 the gate job was skipped in
   that case, and GitHub counts a skipped required job as satisfied.
+- If the gate's own license wait (`await_license`) is cancelled, fails, or reports a negative verdict, the gate reports
+  failure. Each required workflow has its own `await_license` job, so a runner that never picks one up affects only
+  that workflow. Before TASK-13502 only `backend-required` reported this; the other five were skipped and read as
+  passed (seen on #3188, where `container-build-check` showed as satisfied with nothing built).
 
 Examples:
 
