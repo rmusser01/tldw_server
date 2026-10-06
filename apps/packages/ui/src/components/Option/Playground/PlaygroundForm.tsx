@@ -1740,7 +1740,7 @@ export const PlaygroundForm = ({
           if (!preparationIsCurrent()) return false;
           if (replacing && !requestSettingsNavigation("/chat")) return false;
           // A failed identity write must not release the acknowledged source owner.
-          if (options.applyIdentity !== false) await setSelectedAssistant(selection, { isCurrent: preparationIsCurrent });
+          if (options.applyIdentity !== false && !await setSelectedAssistant(selection, { isCurrent: preparationIsCurrent })) return false;
           if (!preparationIsCurrent()) return false;
         }
       if (replacing) {
@@ -1768,7 +1768,7 @@ export const PlaygroundForm = ({
       const isCurrent = captureAssistantActionGuard();
       const destination = useStoreMessageOption.getState();
       options.onDestination?.({ historyId: destination.historyId, serverChatId: destination.serverChatId, isCurrent });
-      if (!nativeCharacter && options.applyIdentity !== false) await setSelectedAssistant(selection, { isCurrent });
+      if (!nativeCharacter && options.applyIdentity !== false && !await setSelectedAssistant(selection, { isCurrent })) return false;
       return isCurrent() && options.isCurrent?.() !== false;
       } finally { snapshot?.release(); }
     },

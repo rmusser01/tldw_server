@@ -96,6 +96,8 @@ export const nativeCharacterPreflightMessage = (
     );
   }
   const messages: Record<string, string> = {
+    assistant_selection_restore_failed:
+      'Assistant preferences could not be restored. Your chat and draft are still here; try choosing the assistant again.',
     native_history_greeting_requires_fresh:
       'Start a new saved character chat before choosing an opening. Your current chat and draft are still here.',
     native_history_greeting_not_stored:

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   setSelectedAssistant: vi.fn(async () => undefined),
   beforeTrackedStart: vi.fn(async () => undefined),
   onRequestClose: vi.fn(),
+  onTrackedSelection: vi.fn(async () => true),
   tabsCreate: vi.fn(async () => undefined),
   windowOpen: vi.fn(),
   assistantSelect: vi.fn((props: Record<string, unknown>) => props)
@@ -74,7 +75,12 @@ vi.mock("@/components/Common/AssistantSelect", () => ({
     return (
       <button
         type="button"
-        onClick={() => {
+        onClick={async () => {
+          const onTrackedSelection = props.onTrackedSelection as
+            | ((selection: Record<string, unknown>, isCurrent: () => boolean) => Promise<boolean>)
+            | undefined
+          const selected = { kind: "character", id: "char-2", name: "Tracked Character" }
+          if (onTrackedSelection && await onTrackedSelection(selected, () => true) === false) return
           const onSelectionComplete = props.onSelectionComplete as
             | ((selection: Record<string, unknown>) => void | Promise<void>)
             | undefined
@@ -112,8 +118,8 @@ vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
 }))
 
 vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (input: typeof state.option) => unknown) =>
-    selector(state.option)
+  useStoreMessageOption: Object.assign((selector: (input: typeof state.option) => unknown) =>
+    selector(state.option), { getState: () => state.option })
 }))
 
 vi.mock("@/utils/assistant-select-events", () => ({
@@ -157,6 +163,7 @@ import { CharacterControlsSheet } from "../CharacterControlsSheet"
 describe("CharacterControlsSheet", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.onTrackedSelection.mockResolvedValue(true)
     window.open = mocks.windowOpen as unknown as typeof window.open
     state.runtime = null
     state.selectedAssistant = null
@@ -196,7 +203,6 @@ describe("CharacterControlsSheet", () => {
   it("shows overlay and tracked actions separately for plain chats", () => {
     render(
       <CharacterControlsSheet
-        beforeTrackedStart={mocks.beforeTrackedStart}
         onRequestClose={mocks.onRequestClose}
       />
     )
@@ -225,6 +231,23 @@ describe("CharacterControlsSheet", () => {
 
     expect(screen.getByRole("button", { name: "Change overlay" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Clear overlay" })).toBeInTheDocument()
+  })
+
+  it.each(["tracked choice", "close", "source changes"])("retires an older held overlay clear after %s", async intent => {
+    state.settings = { assistantOverlay: { kind: "persona", id: "p", name: "Source overlay", system_prompt_snapshot: "Source prompt" } }
+    let finish!: (value: null) => void
+    mocks.updateSettings.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const user = userEvent.setup()
+    const mounted = render(<CharacterControlsSheet onTrackedSelection={mocks.onTrackedSelection} />)
+    await user.click(screen.getByRole("button", { name: "Clear overlay" }))
+    if (intent === "tracked choice") {
+      await user.click(screen.getByRole("button", { name: "Start tracked character chat" }))
+      await user.click(screen.getByRole("button", { name: "Choose tracked assistant" }))
+      expect(mocks.onTrackedSelection).toHaveBeenCalledOnce()
+    } else if (intent === "source changes") state.option = { ...state.option, historyId: "new-source" }
+    else mounted.unmount()
+    await act(async () => { finish(null) })
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
   })
 
   it("hides overlay actions when the current chat is already tracked", () => {
@@ -260,74 +283,41 @@ describe("CharacterControlsSheet", () => {
     expect(screen.getByRole("button", { name: "Start tracked character chat" })).toBeInTheDocument()
   })
 
-  it("clears overlay state before starting a tracked chat", async () => {
+  it("opens a tracked picker without changing the source assistant or overlay", async () => {
     const user = userEvent.setup()
-    state.settings = {
-      assistantOverlay: {
-        kind: "persona",
-        id: "persona-1",
-        name: "Guide Persona",
-        avatar_url: null,
-        system_prompt_snapshot: "Persona prompt",
-        updatedAt: "2026-05-22T12:00:00.000Z"
-      }
-    }
+    state.settings = { assistantOverlay: { kind: "persona", id: "persona-1", name: "Guide Persona" } }
+    render(<CharacterControlsSheet onTrackedSelection={mocks.onTrackedSelection} onRequestClose={mocks.onRequestClose} />)
+    await user.click(screen.getByRole("button", { name: "Start tracked character chat" }))
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(mocks.beforeTrackedStart).not.toHaveBeenCalled()
+    expect(mocks.assistantSelect).toHaveBeenLastCalledWith(expect.objectContaining({
+      variant: "inline", selectionModePreference: "tracked", initialTab: "character", onTrackedSelection: expect.any(Function)
+    }))
+    await user.click(screen.getByRole("button", { name: "Choose tracked assistant" }))
+    expect(mocks.onTrackedSelection).toHaveBeenCalledWith(expect.objectContaining({ id: "char-2" }), expect.any(Function))
+    expect(mocks.onRequestClose).toHaveBeenCalledOnce()
+    expect(mocks.clearChat).not.toHaveBeenCalled()
+    expect(mocks.setServerChatCharacterId).not.toHaveBeenCalled()
+  })
 
-    render(
-      <CharacterControlsSheet
-        beforeTrackedStart={mocks.beforeTrackedStart}
-        onRequestClose={mocks.onRequestClose}
-        resetChat={mocks.surfaceResetChat}
-      />
-    )
-
-    await user.click(
-      screen.getByRole("button", { name: "Start tracked character chat" })
-    )
-
-    expect(mocks.beforeTrackedStart).toHaveBeenCalledTimes(1)
-    expect(mocks.updateSettings).toHaveBeenCalledWith({
-      assistantOverlay: null
-    })
-    expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(null)
+  it("leaves the picker and source intact after a declined tracked selection", async () => {
+    const user = userEvent.setup()
+    mocks.onTrackedSelection.mockResolvedValue(false)
+    render(<CharacterControlsSheet onTrackedSelection={mocks.onTrackedSelection} onRequestClose={mocks.onRequestClose} />)
+    await user.click(screen.getByRole("button", { name: "Start tracked persona chat" }))
+    await user.click(screen.getByRole("button", { name: "Choose tracked assistant" }))
+    expect(screen.getByTestId("tracked-assistant-picker")).toBeInTheDocument()
     expect(mocks.onRequestClose).not.toHaveBeenCalled()
-    expect(mocks.surfaceResetChat).not.toHaveBeenCalled()
-    expect(mocks.clearChat).not.toHaveBeenCalled()
-    expect(mocks.dispatchOpenAssistantSelect).not.toHaveBeenCalled()
-    expect(mocks.assistantSelect).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        variant: "inline",
-        selectionModePreference: "tracked",
-        initialTab: "character",
-        onSelectionComplete: expect.any(Function)
-      })
-    )
-
-    await user.click(
-      screen.getByRole("button", { name: "Choose tracked assistant" })
-    )
-
-    expect(mocks.onRequestClose).toHaveBeenCalledTimes(1)
-    expect(mocks.surfaceResetChat).toHaveBeenCalledTimes(1)
-    expect(mocks.clearChat).not.toHaveBeenCalled()
-    expect(mocks.setServerChatAssistantKind).toHaveBeenCalledWith("character")
-    expect(mocks.setServerChatAssistantId).toHaveBeenCalledWith("char-2")
-    expect(mocks.setServerChatCharacterId).toHaveBeenCalledWith("char-2")
-    expect(mocks.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(null)
-    expect(mocks.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
-    expect(mocks.surfaceResetChat.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.setServerChatAssistantKind.mock.invocationCallOrder[0]
-    )
-    expect(mocks.setServerChatMetaLoaded.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.onRequestClose.mock.invocationCallOrder[0]
-    )
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(mocks.setServerChatAssistantKind).not.toHaveBeenCalled()
   })
 
   it("opens tracked sessions through the standard server-chat selection path", async () => {
     const user = userEvent.setup()
     render(
       <CharacterControlsSheet
-        beforeTrackedStart={mocks.beforeTrackedStart}
         onRequestClose={mocks.onRequestClose}
       />
     )

@@ -4039,5 +4039,14 @@
   },
   "composer_queueConnectionUnavailable": {
     "message": "Connection was interrupted. Review this request and run it after reconnecting."
+  },
+  "characterRail_nativePersonaUnavailable": {
+    "message": "Saved persona chats cannot start in this view. Use an overlay personality instead; your current chat and draft are still here."
+  },
+  "characterRail_selectionError": {
+    "message": "The assistant could not be selected. Your current chat and draft are still here; try choosing again."
+  },
+  "composer_assistant_selection_restore_failed": {
+    "message": "Assistant preferences could not be restored. Your chat and draft are still here; try choosing the assistant again."
   }
 }

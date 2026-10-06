@@ -1,21 +1,25 @@
-import React from "react"
-import { useTranslation } from "react-i18next"
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { Button } from "@/components/Common/Button"
-import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
-import { useClearChat } from "@/hooks/chat/useClearChat"
+import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
-import { useServerChatHistory, type ServerChatHistoryItem } from "@/hooks/useServerChatHistory"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import {
+  type ServerChatHistoryItem,
+  useServerChatHistory
+} from "@/hooks/useServerChatHistory"
 import { useStoreMessageOption } from "@/store/option"
 import type { AssistantSelection } from "@/types/assistant-selection"
 import { openCharactersWorkspace } from "@/utils/characters-route"
+import React from "react"
+import { useTranslation } from "react-i18next"
 
 type CharacterControlsSheetProps = {
-  beforeTrackedStart?: (() => Promise<void>) | (() => void)
+  onTrackedSelection?: (
+    selection: AssistantSelection,
+    isCurrent?: () => boolean
+  ) => boolean | Promise<boolean>
   onRequestClose?: () => void
-  resetChat?: () => void
 }
 
 const isTrackedSession = (item: ServerChatHistoryItem): boolean =>
@@ -33,9 +37,8 @@ const resolveAssistantModeLabel = (
 }
 
 export const CharacterControlsSheet = ({
-  beforeTrackedStart,
-  onRequestClose,
-  resetChat
+  onTrackedSelection,
+  onRequestClose
 }: CharacterControlsSheetProps) => {
   const { t } = useTranslation(["playground", "common"])
   const historyId = useStoreMessageOption((state) => state.historyId)
@@ -49,31 +52,47 @@ export const CharacterControlsSheet = ({
   const serverChatCharacterId = useStoreMessageOption(
     (state) => state.serverChatCharacterId
   )
-  const setServerChatAssistantKind = useStoreMessageOption(
-    (state) => state.setServerChatAssistantKind
-  )
-  const setServerChatAssistantId = useStoreMessageOption(
-    (state) => state.setServerChatAssistantId
-  )
-  const setServerChatCharacterId = useStoreMessageOption(
-    (state) => state.setServerChatCharacterId
-  )
-  const setServerChatPersonaMemoryMode = useStoreMessageOption(
-    (state) => state.setServerChatPersonaMemoryMode
-  )
-  const setServerChatMetaLoaded = useStoreMessageOption(
-    (state) => state.setServerChatMetaLoaded
-  )
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
-  const [trackedPickerTab, setTrackedPickerTab] = React.useState<
-    "character" | "persona" | null
-  >(null)
+  const [trackedPicker, setTrackedPicker] = React.useState<{
+    tab: "character" | "persona"
+    intent: number
+  } | null>(null)
+  const trackedPickerTab = trackedPicker?.tab ?? null
+  const trackedPickerIntentRef = React.useRef(0)
+  React.useLayoutEffect(
+    () => () => {
+      trackedPickerIntentRef.current++
+    },
+    []
+  )
+  const retireTrackedPicker = React.useCallback(() => {
+    trackedPickerIntentRef.current++
+    setTrackedPicker(null)
+  }, [])
+  const handleOverlayOpenChange = React.useCallback(
+    (open: boolean) => {
+      if (open) retireTrackedPicker()
+    },
+    [retireTrackedPicker]
+  )
+  const handleTrackedSelection = React.useCallback(
+    (selection: AssistantSelection, pickerIsCurrent?: () => boolean) => {
+      const intent = trackedPickerIntentRef.current
+      return (
+        onTrackedSelection?.(
+          selection,
+          () =>
+            trackedPickerIntentRef.current === intent &&
+            pickerIsCurrent?.() !== false
+        ) ?? false
+      )
+    },
+    [onTrackedSelection]
+  )
   const { settings, updateSettings } = useChatSettingsRecord({
     historyId,
     serverChatId
   })
-  const fallbackClearChat = useClearChat()
-  const clearChat = resetChat ?? fallbackClearChat
   const selectServerChat = useSelectServerChat()
   const { data: serverChatHistory = [] } = useServerChatHistory("", {
     filterMode: "all"
@@ -119,52 +138,35 @@ export const CharacterControlsSheet = ({
       : null
 
   const handleClearAssistantOverlay = React.useCallback(async () => {
+    retireTrackedPicker()
+    const intent = trackedPickerIntentRef.current
+    const source = useStoreMessageOption.getState()
+    const isCurrent = () => {
+      const chat = useStoreMessageOption.getState()
+      return (
+        trackedPickerIntentRef.current === intent &&
+        chat.chatDraftAddress === source.chatDraftAddress &&
+        chat.chatDraftRevision === source.chatDraftRevision &&
+        chat.historyId === source.historyId &&
+        chat.serverChatId === source.serverChatId
+      )
+    }
     await updateSettings({
       assistantOverlay: null
     })
-    await setSelectedAssistant(null)
-  }, [setSelectedAssistant, updateSettings])
+    if (!isCurrent()) return
+    await setSelectedAssistant(null, { isCurrent })
+  }, [retireTrackedPicker, setSelectedAssistant, updateSettings])
 
-  const handleStartTracked = React.useCallback(
-    async (tab: "character" | "persona") => {
-      await updateSettings({
-        assistantOverlay: null
-      })
-      await setSelectedAssistant(null)
-      await beforeTrackedStart?.()
-      setTrackedPickerTab(tab)
-    },
-    [beforeTrackedStart, setSelectedAssistant, updateSettings]
-  )
+  const handleStartTracked = (tab: "character" | "persona") => {
+    trackedPickerIntentRef.current++
+    setTrackedPicker({ tab, intent: trackedPickerIntentRef.current })
+  }
 
-  const handleTrackedSelectionComplete = React.useCallback((selection: AssistantSelection) => {
-    setTrackedPickerTab(null)
-    clearChat()
-    const personaMemoryMode = selection.metadata?.personaMemoryMode
-    setServerChatAssistantKind(selection.kind)
-    setServerChatAssistantId(selection.id)
-    setServerChatCharacterId(
-      selection.kind === "character" ? selection.id : null
-    )
-    setServerChatPersonaMemoryMode(
-      selection.kind === "persona" &&
-        (personaMemoryMode === "read_only" || personaMemoryMode === "read_write")
-        ? personaMemoryMode
-        : null
-    )
-    // clearChat resets server metadata. Restore the draft tracked identity
-    // afterwards so the first send creates the matching server session.
-    setServerChatMetaLoaded(false)
+  const handleTrackedSelectionComplete = () => {
+    setTrackedPicker(null)
     onRequestClose?.()
-  }, [
-    clearChat,
-    onRequestClose,
-    setServerChatAssistantId,
-    setServerChatAssistantKind,
-    setServerChatCharacterId,
-    setServerChatMetaLoaded,
-    setServerChatPersonaMemoryMode
-  ])
+  }
 
   const handleOpenExpressionEditor = React.useCallback(async () => {
     await openCharactersWorkspace({
@@ -176,17 +178,17 @@ export const CharacterControlsSheet = ({
 
   const handleOpenTrackedSession = React.useCallback(
     (item: ServerChatHistoryItem) => {
+      retireTrackedPicker()
       onRequestClose?.()
       selectServerChat(item)
     },
-    [onRequestClose, selectServerChat]
+    [onRequestClose, retireTrackedPicker, selectServerChat]
   )
 
   return (
     <div
       data-testid="chat-character-controls-sheet"
-      className="flex flex-col gap-4"
-    >
+      className="flex flex-col gap-4">
       <div className="space-y-2">
         <div className="space-y-1">
           <p className="text-sm text-text">
@@ -201,8 +203,7 @@ export const CharacterControlsSheet = ({
         {expressionCharacterId != null ? (
           <Button
             variant="outline"
-            onClick={() => void handleOpenExpressionEditor()}
-          >
+            onClick={() => void handleOpenExpressionEditor()}>
             {t(
               "playground:characterRail.editExpressions",
               "Edit character expressions"
@@ -234,6 +235,7 @@ export const CharacterControlsSheet = ({
               variant="dropdown"
               showLabel
               selectionModePreference="overlay"
+              onOpenChange={handleOverlayOpenChange}
               labelOverride={overlayActionLabel}
               iconClassName="h-4 w-4"
               className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2"
@@ -241,8 +243,7 @@ export const CharacterControlsSheet = ({
             {effectiveAssistantState.mode === "overlay" ? (
               <Button
                 variant="outline"
-                onClick={() => void handleClearAssistantOverlay()}
-              >
+                onClick={() => void handleClearAssistantOverlay()}>
                 {t("playground:characterRail.clearOverlay", "Clear overlay")}
               </Button>
             ) : null}
@@ -265,8 +266,7 @@ export const CharacterControlsSheet = ({
         <div className="flex flex-col gap-2">
           <Button
             variant="outline"
-            onClick={() => void handleStartTracked("character")}
-          >
+            onClick={() => void handleStartTracked("character")}>
             {t(
               "playground:characterRail.startTrackedCharacter",
               "Start tracked character chat"
@@ -274,8 +274,7 @@ export const CharacterControlsSheet = ({
           </Button>
           <Button
             variant="outline"
-            onClick={() => void handleStartTracked("persona")}
-          >
+            onClick={() => void handleStartTracked("persona")}>
             {t(
               "playground:characterRail.startTrackedPersona",
               "Start tracked persona chat"
@@ -285,9 +284,11 @@ export const CharacterControlsSheet = ({
         {trackedPickerTab ? (
           <div data-testid="tracked-assistant-picker" className="pt-2">
             <AssistantSelect
+              key={trackedPicker?.intent}
               variant="inline"
               selectionModePreference="tracked"
               initialTab={trackedPickerTab}
+              onTrackedSelection={handleTrackedSelection}
               onSelectionComplete={handleTrackedSelectionComplete}
             />
           </div>
@@ -306,8 +307,7 @@ export const CharacterControlsSheet = ({
                 type="button"
                 onClick={() => handleOpenTrackedSession(item)}
                 aria-label={item.title || t("common:untitled", "Untitled")}
-                className="flex items-start justify-between rounded-md border border-border bg-surface px-3 py-2 text-left hover:bg-surface2"
-              >
+                className="flex items-start justify-between rounded-md border border-border bg-surface px-3 py-2 text-left hover:bg-surface2">
                 <span className="min-w-0">
                   <span className="block truncate text-sm text-text">
                     {item.title || t("common:untitled", "Untitled")}
@@ -315,7 +315,10 @@ export const CharacterControlsSheet = ({
                   <span className="mt-1 block text-[11px] text-text-muted">
                     {item.assistant_kind === "persona"
                       ? t("playground:characterRail.personaSession", "Persona")
-                      : t("playground:characterRail.characterSession", "Character")}
+                      : t(
+                          "playground:characterRail.characterSession",
+                          "Character"
+                        )}
                   </span>
                 </span>
               </button>

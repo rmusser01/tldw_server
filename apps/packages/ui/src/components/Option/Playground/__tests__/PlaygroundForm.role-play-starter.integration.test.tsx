@@ -99,7 +99,7 @@ const selectedAssistantMock = vi.hoisted(() => ({
   initialSelection: null as any,
   currentSelection: undefined as AssistantSelection | null | undefined,
   externalMirror: null as null | ((value: AssistantSelection | null) => void),
-  setSelectedAssistant: vi.fn(async (_next: unknown) => undefined)
+  setSelectedAssistant: vi.fn(async (_next: unknown): Promise<boolean | void> => undefined)
 }))
 const selectedCharacterState = vi.hoisted(() => ({
   value: null as any,
@@ -704,9 +704,11 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
     selectedAssistantMock.externalMirror = publishSelection
     const setSelectedAssistantWithBroadcast = async (next: any, options: { isCurrent?: () => boolean } = {}) => {
       nativeSetupFixture.identityGuard = options.isCurrent ?? null
-      await selectedAssistantMock.setSelectedAssistant(next)
-      if (options.isCurrent?.() === false) return
+      const acknowledged = await selectedAssistantMock.setSelectedAssistant(next)
+      if (acknowledged === false) return false
+      if (options.isCurrent?.() === false) return false
       publishSelection(next)
+      return true
     }
     return [
       selectedAssistant,
@@ -1284,11 +1286,11 @@ describe("PlaygroundForm role-play starter", () => {
     }
   })
 
-  it.each(["cancelled", "failed"])("retains the source when character identity persistence is %s", async outcome => {
+  it.each(["cancelled", "failed", "declined"])("retains the source when character identity persistence is %s", async outcome => {
     const { reset, source, owner } = prepareNativeSource()
-    let finish!: () => void
+    let finish!: (accepted?: boolean) => void
     let fail!: (error: Error) => void
-    const pending = new Promise<void>((resolve, reject) => { finish = resolve; fail = reject })
+    const pending = new Promise<boolean | void>((resolve, reject) => { finish = resolve; fail = reject })
     selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(pending)
     const user = userEvent.setup()
     render(<PlaygroundForm droppedFiles={[]} />)
@@ -1300,6 +1302,9 @@ describe("PlaygroundForm role-play starter", () => {
       await user.click(screen.getByRole("button", { name: "Cancel setup" }))
       expect(nativeSetupFixture.identityGuard?.()).toBe(false)
       await act(async () => { finish(); await pending })
+    } else if (outcome === "declined") {
+      await act(async () => { finish(false); await pending })
+      await screen.findByText("Apply failed")
     } else {
       await act(async () => { fail(new Error("storage unavailable")); await pending.catch(() => undefined) })
       await screen.findByText("Apply failed")

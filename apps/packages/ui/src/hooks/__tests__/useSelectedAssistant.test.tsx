@@ -18,7 +18,13 @@ const mocks = vi.hoisted(() => {
         map.delete(key)
         return
       }
-      map.set(key, value)
+      if (name === "assistantLocal" && key.startsWith("selectedAssistant:owner:")) {
+        const barrier = assistantSetBarriers.shift()
+        if (barrier) await barrier
+        const selection = (value as { selection?: unknown }).selection ?? null
+        if (selection === null) map.delete(key)
+        else map.set(key, selection)
+      } else map.set(key, value)
     }),
     remove: vi.fn(async (key: string) => {
       operations.push(`${name}.remove:${key}`)
@@ -222,8 +228,8 @@ describe("useSelectedAssistant", () => {
     )
     const { result } = renderHook(() => useSelectedAssistant())
 
-    let firstWrite: Promise<void> | undefined
-    let secondWrite: Promise<void> | undefined
+    let firstWrite: Promise<boolean> | undefined
+    let secondWrite: Promise<boolean> | undefined
     act(() => {
       firstWrite = result.current[1]({
         kind: "persona",
@@ -271,7 +277,7 @@ describe("useSelectedAssistant", () => {
       })
     )
     let restoreIsCurrent = true
-    let restoreWrite: Promise<void> | undefined
+    let restoreWrite: Promise<boolean> | undefined
 
     act(() => {
       restoreWrite = result.current[1](

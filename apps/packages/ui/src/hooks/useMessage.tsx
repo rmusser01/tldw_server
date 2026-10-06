@@ -3310,6 +3310,7 @@ export const useMessage = () => {
 
   return {
     conversationMetadata,
+    setSelectedAssistant,
     messages,
     setMessages,
     editMessage,

@@ -131,7 +131,7 @@ export const AssistantSelect: React.FC<Props> = ({
   onTrackedSelection,
   onSelectionComplete
 }) => {
-  const { t } = useTranslation(["option", "common"])
+  const { t } = useTranslation(["option", "common", "playground"])
   const [storedAssistant, setSelectedAssistant, assistantMeta] =
     useSelectedAssistant(null)
   const selectedAssistant =
@@ -181,10 +181,12 @@ export const AssistantSelect: React.FC<Props> = ({
   React.useEffect(() => {
     onOpenChange?.(open)
   }, [open, onOpenChange])
-  const trackedSelectionPendingRef = React.useRef(false)
+  const trackedSelectionPendingRef = React.useRef<object | null>(null)
   const selectionLifetimeRef = React.useRef(0)
   const invalidateSelectionLifetime = React.useCallback(() => {
     selectionLifetimeRef.current++
+    trackedSelectionPendingRef.current = null
+    setTrackedSelectionPending(false)
   }, [])
   React.useLayoutEffect(() => {
     invalidateSelectionLifetime()
@@ -379,66 +381,79 @@ export const AssistantSelect: React.FC<Props> = ({
     }
   }, [open])
 
+  const catalogOwnerIsCurrent = assistantMeta?.isCurrent
+  React.useLayoutEffect(() => {
+    invalidateSelectionLifetime()
+    setCharacters([])
+    setPersonas([])
+  }, [assistantMeta?.assistantKey, catalogOwnerIsCurrent, invalidateSelectionLifetime])
+
   const loadCharacters = React.useCallback(
     async (isCancelled: () => boolean = () => false) => {
+      const current = () => !isCancelled() && (catalogOwnerIsCurrent?.() ?? true)
+      if (!current()) return
       setCharactersLoading(true)
       setCharactersError(false)
       try {
         await tldwClient.initialize()
+        if (!current()) return
         if (typeof tldwClient.listAllCharacters !== "function") {
-          if (!isCancelled()) {
+          if (current()) {
             setCharacters([])
           }
           return
         }
         const result = await tldwClient.listAllCharacters()
-        if (!isCancelled()) {
+        if (current()) {
           setCharacters(
             Array.isArray(result) ? (result as CharacterSummary[]) : []
           )
         }
       } catch {
-        if (!isCancelled()) {
+        if (current()) {
           setCharacters([])
           setCharactersError(true)
         }
       } finally {
-        if (!isCancelled()) {
+        if (current()) {
           setCharactersLoading(false)
         }
       }
     },
-    []
+    [catalogOwnerIsCurrent]
   )
 
   const loadPersonas = React.useCallback(
     async (isCancelled: () => boolean = () => false) => {
+      const current = () => !isCancelled() && (catalogOwnerIsCurrent?.() ?? true)
+      if (!current()) return
       setPersonasLoading(true)
       setPersonasError(false)
       try {
         await tldwClient.initialize()
+        if (!current()) return
         if (typeof tldwClient.listPersonaProfiles !== "function") {
-          if (!isCancelled()) {
+          if (current()) {
             setPersonas([])
           }
           return
         }
         const result = await tldwClient.listPersonaProfiles()
-        if (!isCancelled()) {
+        if (current()) {
           setPersonas(Array.isArray(result) ? (result as PersonaInfo[]) : [])
         }
       } catch {
-        if (!isCancelled()) {
+        if (current()) {
           setPersonas([])
           setPersonasError(true)
         }
       } finally {
-        if (!isCancelled()) {
+        if (current()) {
           setPersonasLoading(false)
         }
       }
     },
-    []
+    [catalogOwnerIsCurrent]
   )
 
   React.useEffect(() => {
@@ -595,7 +610,8 @@ export const AssistantSelect: React.FC<Props> = ({
         }
       }
       if (!onSelectionChange && nextMode === "tracked" && onTrackedSelection) {
-        trackedSelectionPendingRef.current = true
+        const attempt = {}
+        trackedSelectionPendingRef.current = attempt
         setTrackedSelectionPending(true)
         const lifetime = selectionLifetimeRef.current
         try {
@@ -610,8 +626,10 @@ export const AssistantSelect: React.FC<Props> = ({
           await onSelectionComplete?.(nextEntry)
           if (selectionLifetimeRef.current !== lifetime) return
         } finally {
-          trackedSelectionPendingRef.current = false
-          setTrackedSelectionPending(false)
+          if (trackedSelectionPendingRef.current === attempt) {
+            trackedSelectionPendingRef.current = null
+            setTrackedSelectionPending(false)
+          }
         }
         setOpen(false)
         setSearchText("")
@@ -789,7 +807,27 @@ export const AssistantSelect: React.FC<Props> = ({
     "Loading characters and personas"
   )
 
-  const activeTabContent = activeTabLoading ? (
+  const activeTabContent = assistantMeta?.verificationState === "error" ? (
+    <div
+      role="alert"
+      className="space-y-2 px-3 py-4 text-center text-sm text-text-subtle">
+      <p>
+        {t(
+          "playground:characterChatSessions.verificationFailed",
+          "Could not verify your server account. Retry or check your connection settings."
+        )}
+      </p>
+      <button
+        type="button"
+        className="rounded-md border border-border bg-surface px-2 py-1 text-xs font-medium text-text hover:bg-surface2"
+        onClick={assistantMeta.retryVerification}>
+        {t(
+          "playground:characterChatSessions.retryVerification",
+          "Retry account verification"
+        )}
+      </button>
+    </div>
+  ) : activeTabLoading ? (
     <div
       role="status"
       aria-label={catalogLoadingLabel}

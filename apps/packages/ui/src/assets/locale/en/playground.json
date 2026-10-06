@@ -710,7 +710,8 @@
       "characterRole": "Character & your role",
       "responseSettings": "Response settings"
     },
-    "customizePreferenceUnavailable": "Display preference unavailable. Customize chat still works for this visit."
+    "customizePreferenceUnavailable": "Display preference unavailable. Customize chat still works for this visit.",
+    "assistant_selection_restore_failed": "Assistant preferences could not be restored. Your chat and draft are still here; try choosing the assistant again."
   },
   "tour": {
     "modelTitle": "Choose a Model",
@@ -1494,5 +1495,9 @@
       "explicitSelectionDescription": "Your character and draft are kept. Open the model selector and choose a model from the provider you want to use.",
       "explicitSelectionAction": "Choose model and provider"
     }
+  },
+  "characterRail": {
+    "nativePersonaUnavailable": "Saved persona chats cannot start in this view. Use an overlay personality instead; your current chat and draft are still here.",
+    "selectionError": "The assistant could not be selected. Your current chat and draft are still here; try choosing again."
   }
 }

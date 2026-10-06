@@ -14,6 +14,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   realSelection: false,
   ownerReady: null as Promise<void> | null,
+  ownerFailed: false,
+  assistantMeta: { isLoading: false, assistantKey: "alice", isCurrent: () => true, setRenderValue: vi.fn() },
   listAllCharacters: vi.fn(async () => []),
   listPersonaProfiles: vi.fn(async () => []),
   getPersonaProfile: vi.fn(async () => null),
@@ -67,6 +69,7 @@ vi.mock("@/services/service-prompts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/service-prompts")>()),
   resolveServicePromptScope: async () => {
     await mocks.ownerReady
+    if (mocks.ownerFailed) throw new Error("Account unavailable")
     return {
       scopeKey: "alice",
       userId: "alice",
@@ -100,7 +103,7 @@ vi.mock("@/hooks/useSelectedAssistant", async (importOriginal) => {
         : [
             mocks.selectedAssistant.value,
             mocks.setSelectedAssistant,
-            { isLoading: false, setRenderValue: vi.fn() }
+            mocks.assistantMeta
           ]
   }
 })
@@ -120,6 +123,9 @@ vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
     chatKey: "chat-overlay-1"
   })
 }))
+
+vi.mock("@/hooks/useServerChatHistory", () => ({ useServerChatHistory: () => ({ data: [] }) }))
+vi.mock("@/hooks/chat/useSelectServerChat", () => ({ useSelectServerChat: () => vi.fn() }))
 
 vi.mock("antd", async () => {
   const React = await import("react")
@@ -184,6 +190,7 @@ vi.mock("antd", async () => {
 })
 
 import { AssistantSelect } from "../AssistantSelect"
+import { CharacterControlsSheet } from "@/components/Sidepanel/Chat/CharacterControlsSheet"
 
 const renderAssistantSelect = (
   props: React.ComponentProps<typeof AssistantSelect> = {}
@@ -217,6 +224,102 @@ const renderAssistantSelect = (
 }
 
 describe("AssistantSelect behavior", () => {
+  it("uses the actual compact sheet and picker without fallback writes after refusal or outer close", async () => {
+    let decide!: (accepted: boolean) => void
+    let current!: () => boolean
+    const onTrackedSelection = vi.fn((_selection, isCurrent: () => boolean) => { current = isCurrent; return new Promise<boolean>(resolve => { decide = resolve }) })
+    const close = vi.fn()
+    const user = userEvent.setup()
+    const mounted = render(<CharacterControlsSheet onTrackedSelection={onTrackedSelection} onRequestClose={close} />)
+    await user.click(screen.getByRole("button", { name: "Start tracked character chat" }))
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+    await user.click(await screen.findByRole("button", { name: "Alpha" }))
+    expect(onTrackedSelection).toHaveBeenCalledOnce()
+    await act(async () => { decide(false) })
+    expect(screen.getByTestId("tracked-assistant-picker")).toBeInTheDocument()
+    expect(close).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Alpha" }))
+    mounted.unmount()
+    expect(current()).toBe(false)
+    await act(async () => { decide(true) })
+    expect(close).not.toHaveBeenCalled()
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(state.option.setServerChatId).not.toHaveBeenCalled()
+  })
+
+  it.each(["persona", "overlay", "character"])("retires held compact selection when a newer %s intent opens", async intent => {
+    let current!: () => boolean
+    let decide!: (accepted: boolean) => void
+    const onTrackedSelection = vi.fn((_selection, isCurrent: () => boolean) => { current = isCurrent; return new Promise<boolean>(resolve => { decide = resolve }) })
+    const close = vi.fn()
+    const user = userEvent.setup()
+    render(<CharacterControlsSheet onTrackedSelection={onTrackedSelection} onRequestClose={close} />)
+    await user.click(screen.getByRole("button", { name: "Start tracked character chat" }))
+    await user.click(await screen.findByRole("button", { name: "Alpha" }))
+    await user.click(screen.getByRole("button", { name: intent === "persona" ? "Start tracked persona chat" : intent === "character" ? "Start tracked character chat" : "Apply overlay" }))
+    expect(current()).toBe(false)
+    await act(async () => { decide(true) })
+    expect(close).not.toHaveBeenCalled()
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+  })
+
+  it("allows the current account to choose while retired work is still settling", async () => {
+    let aliceCurrent = true
+    let resolveAlice!: (accepted: boolean) => void
+    let resolveBob!: (accepted: boolean) => void
+    const onTrackedSelection = vi.fn()
+      .mockImplementationOnce(() => new Promise<boolean>(resolve => { resolveAlice = resolve }))
+      .mockImplementationOnce(() => new Promise<boolean>(resolve => { resolveBob = resolve }))
+    mocks.assistantMeta = { isLoading: false, assistantKey: "alice", isCurrent: () => aliceCurrent, setRenderValue: vi.fn() }
+    const user = userEvent.setup()
+    const mounted = renderAssistantSelect({ variant: "inline", onTrackedSelection })
+    await user.click(await screen.findByRole("button", { name: "Alpha" }))
+    aliceCurrent = false
+    mocks.assistantMeta = { isLoading: false, assistantKey: "bob", isCurrent: () => true, setRenderValue: vi.fn() }
+    mounted.rerenderAssistantSelect({ variant: "inline", onTrackedSelection })
+    await user.click(await screen.findByRole("button", { name: "Alpha" }))
+    expect(onTrackedSelection).toHaveBeenCalledTimes(2)
+    await act(async () => { resolveAlice(true) })
+    expect(screen.getByRole("button", { name: "Alpha" })).toBeDisabled()
+    await act(async () => { resolveBob(false) })
+    expect(screen.getByRole("button", { name: "Alpha" })).toBeEnabled()
+  })
+
+  it("shows account verification failure and retries verification before fetching private catalogs", async () => {
+    mocks.realSelection = true
+    mocks.ownerFailed = true
+    const user = userEvent.setup()
+    renderAssistantSelect()
+    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    const retry = await screen.findByRole("button", { name: "Retry account verification" })
+    expect(screen.queryByRole("status", { name: /loading character and persona catalogs/i })).toBeNull()
+    expect(mocks.listAllCharacters).not.toHaveBeenCalled()
+    mocks.ownerFailed = false
+    await user.click(retry)
+    expect(await screen.findByRole("button", { name: "Alpha" })).toBeEnabled()
+  })
+
+  it("retires an old account catalog and rejects its held response", async () => {
+    let aliceCurrent = true
+    let resolveAlice!: (rows: unknown[]) => void
+    mocks.assistantMeta = { isLoading: false, assistantKey: "alice", isCurrent: () => aliceCurrent, setRenderValue: vi.fn() }
+    mocks.listAllCharacters.mockImplementationOnce(() => new Promise(resolve => { resolveAlice = resolve }))
+    const user = userEvent.setup()
+    const mounted = renderAssistantSelect()
+    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    await waitFor(() => expect(resolveAlice).toBeTypeOf("function"))
+    aliceCurrent = false
+    mocks.assistantMeta = { isLoading: false, assistantKey: "bob", isCurrent: () => true, setRenderValue: vi.fn() }
+    mocks.listAllCharacters.mockResolvedValueOnce([{ id: "bob-card", name: "Bob card" }] as never)
+    mounted.rerenderAssistantSelect({})
+    expect(await screen.findByRole("button", { name: "Bob card" })).toBeInTheDocument()
+    await act(async () => { resolveAlice([{ id: "alice-private", name: "Alice private card" }]) })
+    expect(screen.queryByRole("button", { name: "Alice private card" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Bob card" })).toBeInTheDocument()
+    mocks.assistantMeta = { isLoading: false, assistantKey: "alice", isCurrent: () => true, setRenderValue: vi.fn() }
+  })
+
   it("owns Escape throughout the real popup before an enclosing disclosure can see it", async () => {
     const parentEscape = vi.fn()
     const user = userEvent.setup()
@@ -293,7 +396,9 @@ describe("AssistantSelect behavior", () => {
     localStorage.clear()
     vi.clearAllMocks()
     mocks.realSelection = false
+    mocks.assistantMeta = { isLoading: false, assistantKey: "alice", isCurrent: () => true, setRenderValue: vi.fn() }
     mocks.ownerReady = null
+    mocks.ownerFailed = false
     mocks.selectedAssistant.value = null
     state.option = {
       historyId: "history-overlay-1",
@@ -345,14 +450,14 @@ describe("AssistantSelect behavior", () => {
     await user.click(
       screen.getByRole("button", { name: "Select character or persona" })
     )
-    const choice = await screen.findByRole("button", { name: "Alpha" })
-    expect(choice).toBeDisabled()
-    await user.click(choice)
+    expect(screen.queryByRole("button", { name: "Alpha" })).toBeNull()
+    expect(mocks.listAllCharacters).not.toHaveBeenCalled()
     expect(state.option.setServerChatId).not.toHaveBeenCalled()
     expect(complete).not.toHaveBeenCalled()
     await act(async () => {
       release()
     })
+    const choice = await screen.findByRole("button", { name: "Alpha" })
     await waitFor(() => expect(choice).toBeEnabled())
     await user.click(choice)
     await waitFor(() =>

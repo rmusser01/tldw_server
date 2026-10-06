@@ -1,3 +1,12 @@
+import { getSelectedAssistantOperationRevision } from "@/hooks/useSelectedAssistant"
+import type { AssistantSelection } from "@/types/assistant-selection"
+import { validateNativeCharacterConfiguration, nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight"
+import { getActorSettingsForChat } from "@/services/actor-settings"
+import { loadServicePromptSnapshot } from "@/services/service-prompts"
+import { useMcpToolsStore } from "@/store/mcp-tools"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { resolveMessageSteering } from "@/utils/message-steering"
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { ChatGreetingPicker } from "@/components/Common/ChatGreetingPicker"
 import { useCharacterGreetingStart } from "@/hooks/useCharacterGreetingStart"
@@ -807,6 +816,7 @@ export const SidepanelForm = ({
   const placeholderTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const {
     onSubmit: submitMessageAction,
+    setSelectedAssistant,
     selectedModel,
     setSelectedModel,
     chatMode,
@@ -888,14 +898,6 @@ export const SidepanelForm = ({
     () => getSidepanelOverlayResumeMarkerKey(storageKey),
     [storageKey]
   )
-  const handlePrepareTrackedStart = React.useCallback(async () => {
-    if (!overlayResumeMarkerKey) return
-    try {
-      await sidepanelOverlayResumeStorageRef.current.remove(overlayResumeMarkerKey)
-    } catch {
-      // no-op
-    }
-  }, [overlayResumeMarkerKey])
 
 
   React.useEffect(() => {
@@ -930,6 +932,267 @@ export const SidepanelForm = ({
         .join(" ")
     : ""
   const pageContextActive = chatMode === "rag" && chatWithWebsiteEmbedding
+
+  const greetingHistorySelection = useHistorySelectionContext()
+  const trackedSelectionPendingRef = React.useRef<{
+    isCurrent: () => boolean
+  } | null>(null)
+  React.useLayoutEffect(() => {
+    trackedSelectionPendingRef.current = null
+  }, [characterControlsOpen])
+  const trackedSelectionViewRef = React.useRef({
+    open: characterControlsOpen,
+    ready: draftReady && isConnectionReady,
+    streaming,
+    model: selectedModel,
+    models: chatModels,
+    chatMode,
+    documents: selectedDocuments,
+    files: contextFiles,
+    pageContext: pageContextActive,
+    messageRevision,
+    message: form.values.message,
+    image: form.values.image
+  })
+  React.useLayoutEffect(() => {
+    trackedSelectionViewRef.current = {
+      open: characterControlsOpen,
+      ready: draftReady && isConnectionReady,
+      streaming,
+      model: selectedModel,
+      models: chatModels,
+      chatMode,
+      documents: selectedDocuments,
+      files: contextFiles,
+      pageContext: pageContextActive,
+      messageRevision,
+      message: form.values.message,
+      image: form.values.image
+    }
+  }, [
+    characterControlsOpen,
+    draftReady,
+    isConnectionReady,
+    streaming,
+    selectedModel,
+    chatModels,
+    chatMode,
+    selectedDocuments,
+    contextFiles,
+    pageContextActive,
+    messageRevision,
+    form.values.message,
+    form.values.image
+  ])
+  const handleTrackedAssistantSelection = React.useCallback(
+    async (
+      selection: AssistantSelection,
+      callerIsCurrent?: () => boolean
+    ): Promise<boolean> => {
+      if (trackedSelectionPendingRef.current?.isCurrent()) return false
+      const attempt = {
+        isCurrent: () =>
+          callerIsCurrent?.() !== false && characterMeta.isCurrent()
+      }
+      trackedSelectionPendingRef.current = attempt
+      const source = useStoreMessageOption.getState()
+      const session = usePlaygroundSessionStore.getState()
+      const settings = useStoreChatModelSettings.getState()
+      const tools = useMcpToolsStore.getState()
+      const historyIsCurrent = greetingHistorySelection?.fence() ?? (() => true)
+      const connectionGeneration = connectionGenerationRef.current
+      const composerRevision = form.getRevision()
+      const assistantRevision = getSelectedAssistantOperationRevision()
+      let writingIdentity = false
+      const readInputs = () => {
+        const view = trackedSelectionViewRef.current
+        const chat = useStoreMessageOption.getState()
+        return [
+          view.open,
+          view.ready,
+          view.streaming,
+          view.model,
+          view.models,
+          view.chatMode,
+          view.documents,
+          view.files,
+          view.pageContext,
+          view.messageRevision,
+          view.message,
+          view.image,
+          chat.selectedModel,
+          chat.toolChoice,
+          chat.history,
+          chat.messages,
+          chat.temporaryChat,
+          chat.webSearch,
+          chat.selectedSystemPrompt,
+          chat.replyTarget,
+          chat.messageSteeringMode,
+          chat.messageSteeringForceNarrate,
+          chat.isProcessing,
+          chat.streaming
+        ]
+      }
+      const inputs = readInputs()
+      let snapshot:
+        | Awaited<ReturnType<typeof loadServicePromptSnapshot>>
+        | undefined
+      const isCurrent = () => {
+        const chat = useStoreMessageOption.getState()
+        const activeSession = usePlaygroundSessionStore.getState()
+        return (
+          trackedSelectionPendingRef.current === attempt &&
+          callerIsCurrent?.() !== false &&
+          characterMeta.isCurrent() &&
+          historyIsCurrent() &&
+          form.getRevision() === composerRevision &&
+          (getSelectedAssistantOperationRevision() === assistantRevision ||
+            (writingIdentity &&
+              getSelectedAssistantOperationRevision() ===
+                assistantRevision + 1)) &&
+          connectionGenerationRef.current === connectionGeneration &&
+          chat.chatDraftAddress === source.chatDraftAddress &&
+          chat.chatDraftRevision === source.chatDraftRevision &&
+          chat.historyId === source.historyId &&
+          chat.serverChatId === source.serverChatId &&
+          activeSession.restoreRevision === session.restoreRevision &&
+          activeSession.sourceSelectionRevision ===
+            session.sourceSelectionRevision &&
+          useStoreChatModelSettings.getState() === settings &&
+          useMcpToolsStore.getState() === tools &&
+          !snapshot?.scopeSignal.aborted &&
+          !snapshot?.scopeInvalidatedSignal.aborted &&
+          readInputs().every((value, index) => value === inputs[index])
+        )
+      }
+      attempt.isCurrent = isCurrent
+      try {
+        const view = trackedSelectionViewRef.current
+        if (
+          !view.open ||
+          !view.ready ||
+          view.streaming ||
+          source.isProcessing ||
+          source.streaming ||
+          !isCurrent()
+        )
+          return false
+        if (selection.kind === "persona" && greetingHistorySelection)
+          throw new Error("native_history_persona_unsupported")
+        if (selection.kind === "character") {
+          const actor = await getActorSettingsForChat({
+            historyId: null,
+            serverChatId: null
+          })
+          if (!isCurrent()) return false
+          const steering = resolveMessageSteering({
+            mode: source.messageSteeringMode,
+            forceNarrate: source.messageSteeringForceNarrate
+          })
+          const prepared = validateNativeCharacterConfiguration({
+            temporary:
+              Boolean(
+                source.temporaryChat &&
+                (source.history.length || source.messages.length)
+              ) || source.historyId === "temp",
+            image: view.image,
+            model: view.model || "",
+            currentModel: view.model,
+            settings,
+            toolChoice: source.toolChoice,
+            clientToolCount: tools.tools.length,
+            actorEnabled: actor?.isEnabled,
+            unsupportedContext: Boolean(
+              view.chatMode !== "normal" ||
+              view.documents.length ||
+              view.files.length ||
+              view.pageContext ||
+              source.webSearch ||
+              source.selectedSystemPrompt ||
+              source.replyTarget ||
+              steering.continueAsUser ||
+              steering.impersonateUser ||
+              steering.forceNarrate
+            )
+          })
+          if (
+            !buildChatModelUsability({
+              selectedModel: `${prepared.provider}:${prepared.model}`,
+              availableModels: view.models,
+              modelsLoading: !view.models,
+              isServerConnected: true
+            }).canSend
+          )
+            throw new Error("native_history_model_unavailable")
+        }
+        snapshot = await loadServicePromptSnapshot([])
+        if (!isCurrent()) return false
+        if (!(await retainCurrentDraft()))
+          throw new Error("native_history_draft_not_retained")
+        if (!isCurrent() || !requestSettingsNavigation("/") || !isCurrent())
+          return false
+        writingIdentity = true
+        if (
+          !(await setSelectedAssistant(selection, { isCurrent })) ||
+          !isCurrent()
+        )
+          return false
+        // The accepted transition reuses the full form's targeted reset. Response
+        // settings and the source overlay record stay owned by their existing scopes.
+        usePlaygroundSessionStore.getState().clearSession()
+        source.startNewChatDraft(false)
+        greetingHistorySelection?.reset()
+        source.setHistoryId(null)
+        source.setHistory([])
+        source.setMessages([])
+        source.setServerChatId(null)
+        source.setIsFirstMessage(true)
+        source.setIsLoading(false)
+        source.setIsProcessing(false)
+        source.setStreaming(false)
+        source.clearReplyTarget()
+        source.setServerChatAssistantKind(selection.kind)
+        source.setServerChatAssistantId(selection.id)
+        source.setServerChatCharacterId(
+          selection.kind === "character" ? selection.id : null
+        )
+        source.setServerChatMetaLoaded(false)
+        return true
+      } catch (error) {
+        if (isCurrent())
+          notification.error({
+            message: t("common:error", "Error"),
+            description:
+              error instanceof Error &&
+              error.message === "native_history_persona_unsupported"
+                ? t(
+                    "playground:characterRail.nativePersonaUnavailable",
+                    "Saved persona chats cannot start in this view. Use an overlay personality instead; your current chat and draft are still here."
+                  )
+                : (nativeCharacterPreflightMessage(error, t) ??
+                  t(
+                    "playground:characterRail.selectionError",
+                    "The assistant could not be selected. Your current chat and draft are still here; try choosing again."
+                  ))
+          })
+        return false
+      } finally {
+        snapshot?.release()
+        if (trackedSelectionPendingRef.current === attempt)
+          trackedSelectionPendingRef.current = null
+      }
+    },
+    [
+      characterMeta,
+      form,
+      greetingHistorySelection,
+      notification,
+      retainCurrentDraft,
+      setSelectedAssistant,
+      t
+    ]
+  )
   const getVisiblePageContextForHandoff = React.useCallback(async (): Promise<
     SidepanelChatHandoffPageContext | undefined
   > => {
@@ -2489,7 +2752,6 @@ export const SidepanelForm = ({
       }
     }
   }, [selectedQuickPrompt])
-  const greetingHistorySelection = useHistorySelectionContext()
   const { starting: greetingStarting, isPreparing: isGreetingPreparing, start: startCharacterGreeting } = useCharacterGreetingStart({
     form, retainCurrentDraft, submit: submitMessageAction, controller: greetingHistorySelection, focusComposer: () => textareaRef.current?.focus(),
     ready: draftReady, isConnectionReady, busy: streaming,
@@ -4453,11 +4715,10 @@ export const SidepanelForm = ({
         title={t("playground:characterRail.title", "Character controls")}
         centered
       >
-        <CharacterControlsSheet
-          beforeTrackedStart={handlePrepareTrackedStart}
+        {characterControlsOpen && <CharacterControlsSheet
+          onTrackedSelection={handleTrackedAssistantSelection}
           onRequestClose={() => setCharacterControlsOpen(false)}
-          resetChat={clearChat}
-        />
+        />}
       </Modal>
       {documentGeneratorOpen && (
         <DocumentGeneratorDrawer
