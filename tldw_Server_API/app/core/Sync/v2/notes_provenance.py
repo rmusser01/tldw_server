@@ -252,7 +252,7 @@ def capture_note_with_provenance(
         load_server_origin_mutation_batch_manifest,
     )
 
-    dataset = ensure_notes_provenance_ready(service=service, note_db=note_db, user_id=user_id)
+    dataset = ensure_notes_provenance_ready(service=service, note_db=note_db, user_id=user_id, required_note_id=note_id)
     payload = validate_notes_note_upsert_payload(note_payload)
     value = validate_notes_provenance_payload(provenance)
     fingerprint = hashlib.sha256(
@@ -389,10 +389,14 @@ def expand_provenance_tombstone(envelope: SyncEnvelopeCreate, *, store: SyncV2St
     return [replace(item, mutation_plan_hash=digest) for item in plan]
 
 
-def ensure_notes_provenance_ready(*, service: SyncV2Service, note_db: CharactersRAGDB, user_id: str) -> SyncDataset:
+def ensure_notes_provenance_ready(
+    *, service: SyncV2Service, note_db: CharactersRAGDB, user_id: str, required_note_id: str | None = None
+) -> SyncDataset:
     """Enroll an old default profile in bounded 200-note pages and two-step groups.
 
-    Existing canonical heads, especially independent tombstones, always win.
+    Enroll provenance-bearing parents; source-verify a requested existing parent
+    separately, including on an already-ready profile. Unrelated plain Notes
+    cannot block readiness. Existing canonical heads and tombstones always win.
     Source-only heads retain product revisions. Retryable interruptions retain
     their bootstrap ID and durable manifests; malformed/drifting sources fail
     closed without inventing a parent base or replaying product revisions.
@@ -420,8 +424,6 @@ def ensure_notes_provenance_ready(*, service: SyncV2Service, note_db: Characters
         dataset.dataset_id, owner_user_id=user_id, bootstrap_id=service.id_factory("notes-provenance-bootstrap")
     )
     metadata = dataset.metadata[READINESS_KEY]
-    if metadata["state"] == "ready":
-        return dataset
     bootstrap_id = metadata["bootstrap_id"]
     captured_count = 0
     expected_count = 0
@@ -459,7 +461,8 @@ def ensure_notes_provenance_ready(*, service: SyncV2Service, note_db: Characters
                             # put holds the parent row lock until this exact-version check commits.
                             if source_note(note_id)["version"] != note["version"]:
                                 raise SyncStoreError("notes_provenance_bootstrap_source_changed")
-                yield note, record
+                if canonical is not None or record is not None:
+                    yield note, record
             after_note_id = page[-1]["id"]
 
     def summary(*, prepare_markers: bool = False, verify_heads: bool = False):
@@ -487,6 +490,79 @@ def ensure_notes_provenance_ready(*, service: SyncV2Service, note_db: Characters
             count += 1
         return count, digest.hexdigest()
 
+    def capture_source(note: dict, record: dict | None) -> None:
+        note_id = note["id"]
+        key = f"{bootstrap_id}:{note_id}"
+        steps = load_server_origin_mutation_batch_manifest(
+            service=service, dataset_id=dataset.dataset_id, source="notes-provenance-bootstrap", idempotency_key=key
+        )
+        if steps is None:
+            parent = service.store.get_current_head(dataset.dataset_id, "notes.note", note_id)
+            canonical = service.store.get_current_head(dataset.dataset_id, "notes.provenance", note_id)
+            routing = {"bootstrap_id": bootstrap_id, "notes_provenance_parent_version": note["version"]}
+            steps = []
+            if parent is None:
+                steps.append(
+                    ServerOriginMutationStep(
+                        domain="notes.note",
+                        operation="tombstone" if note["deleted"] else "upsert",
+                        object_id=note_id,
+                        payload=core_payload(note),
+                        object_revision=note["version"],
+                        routing_metadata=routing,
+                    )
+                )
+            elif (
+                parent.object_revision != note["version"]
+                or parent.operation != ("tombstone" if note["deleted"] else "upsert")
+                or (
+                    parent.operation == "upsert"
+                    and parent.payload_hash != canonical_payload_hash(core_payload(note))[0]
+                )
+            ):
+                raise SyncStoreError("notes_provenance_bootstrap_parent_changed")
+            if canonical is None and record is not None:
+                steps.append(
+                    ServerOriginMutationStep(
+                        domain="notes.provenance",
+                        operation="tombstone" if record["deleted"] else "upsert",
+                        object_id=note_id,
+                        parent_id=note_id,
+                        payload=record["payload"],
+                        object_revision=record["version"],
+                        routing_metadata=routing,
+                    )
+                )
+            elif canonical is not None and (
+                record is None
+                or canonical.object_revision != record["version"]
+                or canonical.payload_hash != record["object_hash"]
+            ):
+                raise SyncStoreError("notes_provenance_bootstrap_source_changed")
+        if steps:
+            capture_server_origin_mutation_batch(
+                service=service,
+                user_id=user_id,
+                steps=steps,
+                source="notes-provenance-bootstrap",
+                idempotency_key=key,
+                trusted_notes_provenance_bootstrap_id=bootstrap_id,
+                bootstrap_step_verifier=verified,
+            )
+
+    def capture_required_parent() -> None:
+        if required_note_id is None:
+            return
+        note = note_db.get_note_by_id(required_note_id, include_deleted=True)
+        if note is not None:
+            note = source_note(required_note_id)
+            record = note_db.note_provenance_store.get(required_note_id, include_deleted=True)
+            capture_source(note, record)
+
+    if metadata["state"] == "ready":
+        capture_required_parent()
+        return dataset
+
     try:
         expected_count, digest = summary(prepare_markers=True)
         if source_hash is not None and source_hash != digest:
@@ -502,70 +578,13 @@ def ensure_notes_provenance_ready(*, service: SyncV2Service, note_db: Characters
             source_hash=source_hash,
         )
         for note, record in sources():
-            note_id = note["id"]
-            key = f"{bootstrap_id}:{note_id}"
-            steps = load_server_origin_mutation_batch_manifest(
-                service=service, dataset_id=dataset.dataset_id, source="notes-provenance-bootstrap", idempotency_key=key
-            )
-            if steps is None:
-                parent = service.store.get_current_head(dataset.dataset_id, "notes.note", note_id)
-                canonical = service.store.get_current_head(dataset.dataset_id, "notes.provenance", note_id)
-                routing = {"bootstrap_id": bootstrap_id, "notes_provenance_parent_version": note["version"]}
-                steps = []
-                if parent is None:
-                    steps.append(
-                        ServerOriginMutationStep(
-                            domain="notes.note",
-                            operation="tombstone" if note["deleted"] else "upsert",
-                            object_id=note_id,
-                            payload=core_payload(note),
-                            object_revision=note["version"],
-                            routing_metadata=routing,
-                        )
-                    )
-                elif (
-                    parent.object_revision != note["version"]
-                    or parent.operation != ("tombstone" if note["deleted"] else "upsert")
-                    or (
-                        parent.operation == "upsert"
-                        and parent.payload_hash != canonical_payload_hash(core_payload(note))[0]
-                    )
-                ):
-                    raise SyncStoreError("notes_provenance_bootstrap_parent_changed")
-                if canonical is None and record is not None:
-                    steps.append(
-                        ServerOriginMutationStep(
-                            domain="notes.provenance",
-                            operation="tombstone" if record["deleted"] else "upsert",
-                            object_id=note_id,
-                            parent_id=note_id,
-                            payload=record["payload"],
-                            object_revision=record["version"],
-                            routing_metadata=routing,
-                        )
-                    )
-                elif canonical is not None and (
-                    record is None
-                    or canonical.object_revision != record["version"]
-                    or canonical.payload_hash != record["object_hash"]
-                ):
-                    raise SyncStoreError("notes_provenance_bootstrap_source_changed")
-            if steps:
-                capture_server_origin_mutation_batch(
-                    service=service,
-                    user_id=user_id,
-                    steps=steps,
-                    source="notes-provenance-bootstrap",
-                    idempotency_key=key,
-                    trusted_notes_provenance_bootstrap_id=bootstrap_id,
-                    bootstrap_step_verifier=verified,
-                )
+            capture_source(note, record)
             captured_count += 1
 
         def ready() -> bool:
             return summary(verify_heads=True) == (expected_count, source_hash)
 
-        return service.store.db.transition_notes_provenance_bootstrap(
+        dataset = service.store.db.transition_notes_provenance_bootstrap(
             dataset.dataset_id,
             bootstrap_id=bootstrap_id,
             expected_state="initializing",
@@ -590,3 +609,5 @@ def ensure_notes_provenance_ready(*, service: SyncV2Service, note_db: Characters
             error_code="notes_provenance_bootstrap_incomplete",
         )
         raise SyncStoreError("notes_provenance_sync_not_ready") from exc
+    capture_required_parent()
+    return dataset

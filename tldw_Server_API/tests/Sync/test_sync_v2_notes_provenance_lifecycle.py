@@ -796,7 +796,7 @@ def test_single_parent_bootstrap_repair_is_source_verified(env, monkeypatch):
 
     monkeypatch.setattr(service.store.db, "mark_bootstrap_envelope_verified", fail)
     with pytest.raises(SyncStoreError):
-        ensure_notes_provenance_ready(service=service, note_db=db, user_id="alice")
+        ensure_notes_provenance_ready(service=service, note_db=db, user_id="alice", required_note_id="note")
     monkeypatch.setattr(service.store.db, "mark_bootstrap_envelope_verified", original)
     db.upsert_note_from_sync(
         note_id="note",
@@ -980,3 +980,92 @@ def test_claimed_database_append_fences_unexpanded_parent_delete(env):
             )
     assert (head(service, "notes.note"), head(service)) == before
     assert service.store.get_conflict(conflict_id).resolution_action is None
+
+
+def test_unrelated_large_plain_note_does_not_block_small_sourced_create(env):
+    service, db = env
+    db.add_note("Large plain", "x" * 300_000, note_id="unrelated-large")
+    assert save(env).fully_applied
+    assert service.store.get_current_head("personal", "notes.note", "unrelated-large") is None
+    assert len(db.get_note_by_id("unrelated-large")["content"]) == 300_000
+    assert service.store.get_dataset("personal").metadata["notes_provenance_v1"]["expected_count"] == 0
+
+
+def test_ready_profile_source_verifies_only_requested_existing_plain_parent(env):
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance import ensure_notes_provenance_ready
+
+    service, db = env
+    ensure_notes_provenance_ready(service=service, note_db=db, user_id="alice")
+    db.add_note("Unrelated", "x" * 300_000, note_id="unrelated-large")
+    db.upsert_note_from_sync(
+        note_id="note",
+        title="Plain",
+        content="Original",
+        conversation_id=None,
+        message_id=None,
+        sync_client_id="alice",
+        object_revision=9,
+        object_hash="ignored",
+    )
+    assert save(env, core_expected=9).fully_applied
+    assert db.get_note_by_id("note")["version"] == 10
+    assert head(service).object_revision == 1
+    assert service.store.get_current_head("personal", "notes.note", "unrelated-large") is None
+
+
+def test_oversized_provenance_parent_still_fails_closed_without_losing_evidence(env):
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance import ensure_notes_provenance_ready
+
+    service, db = env
+    db.add_note("Required source", "x" * 300_000, note_id="required")
+    retained = db.note_provenance_store.put("required", PAYLOAD, expected_version=0)
+    with pytest.raises(SyncStoreError, match="notes_provenance_sync_not_ready"):
+        ensure_notes_provenance_ready(service=service, note_db=db, user_id="alice")
+    assert db.note_provenance_store.get("required") == retained
+    assert service.store.get_dataset("personal").metadata["notes_provenance_v1"]["state"] == "failed"
+
+
+def test_required_large_plain_parent_does_not_poison_ready_profile(env):
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance import ensure_notes_provenance_ready
+
+    service, db = env
+    ensure_notes_provenance_ready(service=service, note_db=db, user_id="alice")
+    db.add_note("Large requested parent", "x" * 300_000, note_id="large-target")
+    with pytest.raises(SyncStoreError, match="payload exceeds"):
+        ensure_notes_provenance_ready(service=service, note_db=db, user_id="alice", required_note_id="large-target")
+    assert service.store.get_current_head("personal", "notes.note", "large-target") is None
+    assert save(env).fully_applied
+
+
+def test_ready_profile_required_parent_bootstrap_resumes_exact_source(env, monkeypatch):
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance import ensure_notes_provenance_ready
+
+    service, db = env
+    ensure_notes_provenance_ready(service=service, note_db=db, user_id="alice")
+    db.upsert_note_from_sync(
+        note_id="note",
+        title="Plain",
+        content="Original",
+        conversation_id=None,
+        message_id=None,
+        sync_client_id="alice",
+        object_revision=9,
+        object_hash="ignored",
+    )
+    original = service.store.db.mark_bootstrap_envelope_verified
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("interrupted required parent checkpoint")
+
+    monkeypatch.setattr(service.store.db, "mark_bootstrap_envelope_verified", fail)
+    with pytest.raises(SyncStoreError):
+        save(env, core_expected=9)
+    source_head = head(service, "notes.note")
+    assert source_head.object_revision == db.get_note_by_id("note")["version"] == 9
+    assert service.store.get_dataset("personal").metadata["notes_provenance_v1"]["state"] == "ready"
+    monkeypatch.setattr(service.store.db, "mark_bootstrap_envelope_verified", original)
+    result = save(env, core_expected=9)
+    assert result.fully_applied
+    assert result.envelopes[0].base_server_cursor == source_head.server_cursor
+    assert db.get_note_by_id("note")["version"] == 10
+    assert save(env, core_expected=9).fully_applied
