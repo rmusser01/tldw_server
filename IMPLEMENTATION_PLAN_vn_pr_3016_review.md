@@ -643,3 +643,45 @@ Billing is not a review waiver. No bypass, queue or PR3067 mutation.
 **Status**: In Progress
 Local verification is complete; normal repair commit and exact lease publication
 precede fresh current-head CI and full Qodo. No historical gate transfers.
+
+## Task81: Worker Container Cold Build Budget
+
+Original TASK13369; standing repair/publication approvals apply. Exact04 required
+container gate112363232534/run37486649087 failed because worker112348327092
+exceeded30m during Docker image load. Wheel build and in-image package imports
+completed; post-load smoke did not execute. Four other images succeeded. The
+aggregate correctly rejects cancellation; no Dockerfile/package/VN defect is
+proven. Retain the failed run and all original gate controls.
+
+### Stage 1: Preserve And Reproduce
+**Goal**: Freeze logs, annotations and WIP; observe a focused regression RED.
+**Success Criteria**: Original failure remains immutable; only worker budget
+changes, with finite30m defaults for the other four images.
+**Tests**: Existing YAML loader regression for worker45/others30 and wiring.
+**Status**: Complete
+Focused1RED at the original30m workflow timeout, zero errors/skips; failure kept.
+
+### Stage 2: Repair And Review
+**Goal**: Add worker-only finite45m matrix override, preserving all actual builds,
+isolated imports, license/admission/refusal, result aggregation and queue controls.
+**Success Criteria**: Bounded CI contracts GREEN, Ruff/Bandit with no new
+nonassert security findings; fresh independent SPEC/QUALITY PASS. Native workflow
+execution remains an external gate when local actionlint is unavailable.
+**Tests**: Release/container packaging and shared license/queue workflow contracts.
+**Status**: Complete
+This finite headroom is a duration/cost tradeoff, not a future-runtime guarantee.
+No dependency, image, package, runtime, CI skip or timeout suppression change.
+Controller104PASS/0skip with root fixtures; independent17PASS/0skip with conftest
+disabled, plus four copied omission/budget/wiring controls RED. SPEC/QUALITY PASS,
+reviewer closed/all sessions reaped. Ruff clean; Bandit41->43B101 only/errors[]/
+zero new nonassert. Source51 and earlier Task80 source162 hashes exact. FullPR99
+hooks11PASS/3no-fileSKIP, no changes/no bypass. Actionlint unavailable; local
+runtimes below declared floors, no native CI or supported-runtime certificate.
+
+### Stage 3: Publish And Gate
+**Goal**: Normal repair commit and exact fresh04 lease publication after review.
+**Success Criteria**: Fresh head/base identity, source preservation and original
+human summary; current-head external gates, not old04 passes, before normal merge.
+**Tests**: Independent Git/REST checks and all seven exact-head app15368 gates.
+**Status**: In Progress
+Full exact-head Qodo remains credit-blocked; no waiver/retry/child3067 mutation.
