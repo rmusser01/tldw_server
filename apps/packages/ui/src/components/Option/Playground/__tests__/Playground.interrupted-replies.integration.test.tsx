@@ -15,6 +15,7 @@ import {
   completionMessages,
   createFakeTldwServer,
   deferred,
+  getHarnessDb,
   HARNESS_WAIT,
   openSavedServerChat,
   renderPlayground,
@@ -28,6 +29,7 @@ import {
   type PlaygroundView
 } from "./harness/playground-harness"
 import { beforeEach, describe, expect, it } from "vitest"
+import { useConnectionStore } from "@/store/connection"
 import { useStoreMessageOption } from "@/store/option"
 import { getServerChatSaveStatus } from "@/store/server-chat-save-status"
 import { resolveChatPersistenceKind } from "@/utils/chat-persistence-status"
@@ -65,6 +67,36 @@ const waitForStreamedText = async (text: string) => {
 const interruptionNotice = async (label: "Interrupted" | "Stopped") => {
   const marker = await screen.findByText(label, { selector: "[data-interruption-label]" }, HARNESS_WAIT)
   return marker.closest("[role='status']") as HTMLElement
+}
+
+type StoredRow = { id: string; role: string; content: string; parent_message_id?: string | null }
+
+/** A server chat's messages, with their parents. */
+const serverRows = (server: ReturnType<typeof createFakeTldwServer>, chatId: string): StoredRow[] =>
+  (server.chats.get(chatId)?.messages ?? []).map(({ id, role, content, parent_message_id }) => ({
+    id,
+    role,
+    content,
+    parent_message_id
+  }))
+
+/** The local chat database's messages, with their parents and interruption marker. */
+const localRows = async () =>
+  (await getHarnessDb().messages.toArray()).map((row) => ({
+    id: String(row.id),
+    role: String(row.role),
+    content: String(row.content),
+    parent_message_id: row.parent_message_id ?? null,
+    interrupted: Boolean((row.generationInfo as Record<string, unknown> | undefined)?.interrupted)
+  }))
+
+/** Click Retry on the "Interrupted" notice and wait for the new reply to finish. */
+const retryInterruptedReply = async (view: PlaygroundView, server: ReturnType<typeof createFakeTldwServer>) => {
+  const before = server.completionRequests().length
+  const notice = await interruptionNotice("Interrupted")
+  await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
+  await waitFor(() => expect(server.completionRequests()).toHaveLength(before + 1), HARNESS_WAIT)
+  await waitForChatIdle()
 }
 
 describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
@@ -319,5 +351,162 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
         serverSaveStatus: getServerChatSaveStatus(state.serverChatId)
       })
     ).toBe("serverFailed")
+  })
+
+  // Retry answers the question that is already saved; it never saves it again.
+  describe("Retry after a dropped reply answers the saved question once", () => {
+    const planDroppedThenComplete = (server: ReturnType<typeof createFakeTldwServer>) => {
+      const resume = deferred()
+      server.planCompletion({
+        chunks: ["Partial answer", " lost"],
+        pauseAfterChunks: 1,
+        resume: resume.promise,
+        end: "drop"
+      })
+      server.planCompletion({ reply: "Complete answer" })
+      return resume
+    }
+
+    it("in a saved server chat: one copy of the question on screen and on the server, answered by the new reply", async () => {
+      const server = createFakeTldwServer()
+      server.seedChat({
+        id: "saved-chat",
+        title: "Saved topic",
+        turns: [
+          { role: "user", content: "Saved question" },
+          { role: "assistant", content: "Saved answer" }
+        ]
+      })
+      const resume = planDroppedThenComplete(server)
+      const view = await renderPlayground({
+        server,
+        extras: <SidebarServerChatButton chatId="saved-chat" title="Saved topic" />
+      })
+      await openSavedServerChat(view, { title: "Saved topic", lastMessage: "Saved answer" })
+
+      await startSend(view, "Follow-up question")
+      await waitForStreamedText("Partial answer")
+      resume.resolve()
+      await waitForChatIdle()
+      await retryInterruptedReply(view, server)
+
+      const expectedTranscript = [
+        { role: "user", text: "Saved question" },
+        { role: "assistant", text: "Saved answer" },
+        { role: "user", text: "Follow-up question" },
+        { role: "assistant", text: "Complete answer" }
+      ]
+      await waitFor(() => expect(transcript()).toEqual(expectedTranscript), HARNESS_WAIT)
+      const rows = serverRows(server, "saved-chat")
+      expect(rows.map((row) => `${row.role}: ${row.content}`)).toEqual([
+        "user: Saved question",
+        "assistant: Saved answer",
+        "user: Follow-up question",
+        "assistant: Complete answer"
+      ])
+      // The new reply answers the question saved by the first send.
+      expect(rows[3].parent_message_id).toBe(rows[2].id)
+      // Retry asked the same question, with the same context, without the cut-off answer.
+      expect(completionMessages(server.completionRequests()[1])).toEqual(
+        completionMessages(server.completionRequests()[0])
+      )
+      // Nothing waits for review or keeps the cut-off reply on screen.
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      expect(transcript()).toEqual(expectedTranscript)
+      expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()
+      const state = useStoreMessageOption.getState()
+      expect(
+        resolveChatPersistenceKind({
+          temporaryChat: state.temporaryChat,
+          serverChatId: state.serverChatId,
+          serverSaveStatus: getServerChatSaveStatus(state.serverChatId)
+        })
+      ).toBe("server")
+    })
+
+    it("in a fresh chat, owned by the server chat its first send created", async () => {
+      const server = createFakeTldwServer()
+      const resume = planDroppedThenComplete(server)
+      const view = await renderPlayground({ server })
+
+      await startSend(view, "Explain drops")
+      await waitForStreamedText("Partial answer")
+      resume.resolve()
+      await waitForChatIdle()
+      await retryInterruptedReply(view, server)
+
+      await waitFor(
+        () =>
+          expect(transcript()).toEqual([
+            { role: "user", text: "Explain drops" },
+            { role: "assistant", text: "Complete answer" }
+          ]),
+        HARNESS_WAIT
+      )
+      expect(server.find("POST", /^\/api\/v1\/chats\/?$/)).toHaveLength(1)
+      const chatId = useStoreMessageOption.getState().serverChatId as string
+      const rows = serverRows(server, chatId)
+      expect(rows.map((row) => `${row.role}: ${row.content}`)).toEqual([
+        "user: Explain drops",
+        "assistant: Complete answer"
+      ])
+      expect(rows[1].parent_message_id).toBe(rows[0].id)
+    })
+
+    it("in a local chat: one copy of the question, and the cut-off reply stays as an alternative", async () => {
+      const server = createFakeTldwServer()
+      const resume = planDroppedThenComplete(server)
+      const view = await renderPlayground({ server })
+      // A fresh chat stays on this device when it cannot get a server owner
+      // before its first send (here: the offline bypass).
+      useConnectionStore.setState((store) => ({ state: { ...store.state, offlineBypass: true } }))
+
+      await startSend(view, "Explain drops")
+      await waitForStreamedText("Partial answer")
+      resume.resolve()
+      await waitForChatIdle()
+      await waitFor(
+        () =>
+          expect(transcript()).toEqual([
+            { role: "user", text: "Explain drops" },
+            { role: "assistant", text: "Partial answer", interrupted: true }
+          ]),
+        HARNESS_WAIT
+      )
+      expect(useStoreMessageOption.getState().serverChatId).toBeFalsy()
+      await retryInterruptedReply(view, server)
+
+      await waitFor(
+        () =>
+          expect(transcript()).toEqual([
+            { role: "user", text: "Explain drops" },
+            { role: "assistant", text: "Complete answer" }
+          ]),
+        HARNESS_WAIT
+      )
+      expect(completionMessages(server.completionRequests()[1])).toEqual([
+        { role: "user", content: "Explain drops" }
+      ])
+      const rows = await localRows()
+      const questions = rows.filter((row) => row.role === "user")
+      expect(questions.map((row) => row.content)).toEqual(["Explain drops"])
+      // Both replies answer that one question: the new one, and the cut-off
+      // one kept as an alternative.
+      const replies = rows.filter((row) => row.role === "assistant")
+      expect(replies.map(({ content, interrupted, parent_message_id }) => ({ content, interrupted, parent_message_id }))).toEqual(
+        expect.arrayContaining([
+          { content: "Partial answer", interrupted: true, parent_message_id: questions[0].id },
+          { content: "Complete answer", interrupted: false, parent_message_id: questions[0].id }
+        ])
+      )
+      expect(replies).toHaveLength(2)
+      const reply = useStoreMessageOption.getState().messages.at(-1)
+      expect(reply?.variants?.map((variant) => variant.message)).toEqual(
+        expect.arrayContaining(["Partial answer", "Complete answer"])
+      )
+      // The chat never moved to the server.
+      expect(server.find("POST", /^\/api\/v1\/chats\/?$/)).toHaveLength(0)
+      expect(server.chats.size).toBe(0)
+    })
   })
 })

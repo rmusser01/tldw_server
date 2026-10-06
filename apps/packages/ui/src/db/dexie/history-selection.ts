@@ -861,6 +861,40 @@ export const appendLocalSelectedUser = (
     return admission
   })
 }
+/**
+ * The admission a local question was accepted with, while the question is
+ * unchanged. A retried reply settles against it again (CS-04), so the
+ * question is not admitted a second time. Null when there is none.
+ */
+export const loadLocalHistoryAdmission = (
+  owner: LocalHistoryOwnerV1,
+  messageId: string,
+  opts?: HistoryOperationOptions
+): Promise<HistoryAdmissionReferenceV1 | null> =>
+  transaction("r", opts, async () => {
+    await ownedHistory(owner)
+    const message = await db.messages.get(messageId)
+    const admission = message?.history_admission
+    if (
+      !message ||
+      !admission ||
+      message.history_id !== owner.conversation_id ||
+      admission.version !== 1 ||
+      admission.owner_key !== owner.owner_key ||
+      admission.conversation_id !== owner.conversation_id ||
+      admission.input_message_id !== message.id ||
+      admission.input_message_revision !== messageRevision(message)
+    )
+      return null
+    return {
+      version: admission.version,
+      owner_key: admission.owner_key,
+      conversation_id: admission.conversation_id,
+      input_message_id: admission.input_message_id,
+      input_message_revision: admission.input_message_revision,
+      selection_digest: admission.selection_digest
+    }
+  })
 export const settleLocalAcceptedAssistant = (
   owner: LocalHistoryOwnerV1,
   admission: HistoryAdmissionReferenceV1,

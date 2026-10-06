@@ -802,16 +802,25 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         historyTurn.currentView()!
       )
       historyTurn.dispatched = true
-      // A response received after display navigation is still the original operation's result.
-      historyTurn.admission = await appendSelectedUser(
-        historyTurn.owner,
-        selection,
-        input,
-        {
-          signal,
-          validate_lease: () => historyTurn.validateLease()
-        }
-      )
+      if (historyTurn.retryAdmission) {
+        // Retry (CS-04): the owner already holds this question. The new reply
+        // settles against its admission; admitting it again would save a
+        // second copy of the question.
+        if (historyTurn.retryAdmission.input_message_id !== input.id)
+          throw new Error("invalid_history_retry")
+        historyTurn.admission = historyTurn.retryAdmission
+      } else {
+        // A response received after display navigation is still the original operation's result.
+        historyTurn.admission = await appendSelectedUser(
+          historyTurn.owner,
+          selection,
+          input,
+          {
+            signal,
+            validate_lease: () => historyTurn.validateLease()
+          }
+        )
+      }
       await historyTurn.afterAdmission?.()
       if (!historyTurn.validateLease() || signal.aborted)
         throw new Error("request_config_scope_changed")

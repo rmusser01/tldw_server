@@ -3,6 +3,7 @@ import type {
   HistorySelectionController
 } from "@/hooks/chat/useHistorySelection"
 import type { HistorySendTurn } from "@/types/chat-modes"
+import type { HistoryAdmissionReferenceV1 } from "@/types/history-selection"
 import {
   captureHistorySnapshot,
   historyAdmissionReference
@@ -166,6 +167,11 @@ type NormalChatModeParams = {
     originIsCurrent: () => boolean
     temporary?: boolean
     createServerChat?: boolean
+    /**
+     * Retry of a reply that ended early (CS-04): the admission the question
+     * already has. The view must stand just before that question.
+     */
+    retryAdmission?: HistoryAdmissionReferenceV1
   }
   historyTurn?: HistorySendTurn
 
@@ -766,6 +772,17 @@ const captureNormalHistoryTurn = async (
   }
   if (current.owner.validate_lease?.() === false) throw new Error("stale_selection")
   const view = structuredClone(current.view)
+  const retryAdmission = params.historySelection!.retryAdmission
+  // A retry reasks the question from the point just before it, in the chat
+  // that admitted it.
+  if (
+    retryAdmission &&
+    (retryAdmission.owner_key !== view.owner_key ||
+      retryAdmission.conversation_id !== view.conversation_id ||
+      view.cursor.kind !== "before_message" ||
+      view.cursor.message_id !== retryAdmission.input_message_id)
+  )
+    throw new Error("invalid_history_retry")
   const bookmarkScope = { ...current.bookmarkScope }
   const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
   const owner =
@@ -847,7 +864,9 @@ const captureNormalHistoryTurn = async (
   ): HistoryTurnRecovery => ({
     operation_id: operationId,
     origin_view: view,
-    selection_digest: turn.selection!.selection_digest,
+    // A retry's input was admitted under the selection of its first send.
+    selection_digest:
+      turn.retryAdmission?.selection_digest ?? turn.selection!.selection_digest,
     request_context_digest: turn.selection!.request_context_digest,
     owner_key: view.owner_key,
     conversation_id: view.conversation_id,
@@ -896,6 +915,7 @@ const captureNormalHistoryTurn = async (
   const turn: HistorySendTurn = {
     owner,
     capture,
+    ...(retryAdmission ? { retryAdmission } : {}),
     currentView: () => controller.getCurrent().view,
     validateLease,
     canUpdateView,
@@ -1091,6 +1111,10 @@ export const normalChatMode = async (
       params = {
         ...params,
         historyTurn,
+        // A retry shows and settles under the question it reasks.
+        ...(historyTurn.retryAdmission
+          ? { userMessageId: historyTurn.retryAdmission.input_message_id }
+          : {}),
         userParentMessageId: selectedParent,
         historyForModel: selected as ChatHistory,
         historyId:

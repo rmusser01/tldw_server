@@ -297,8 +297,14 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
       id: message.id,
       revision: String(message.version),
       role: message.role,
+      // A stored null parent is a root (e.g. a question reasked from the
+      // start); only rows that never recorded a parent read as linear.
       parent_id:
-        message.parent_message_id ?? (index ? chat.messages[index - 1].id : null),
+        message.parent_message_id !== undefined
+          ? message.parent_message_id
+          : index
+            ? chat.messages[index - 1].id
+            : null,
       settled: true,
       preview: message.content.slice(0, 120)
     }))
@@ -490,10 +496,10 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
       if (method === "POST") {
         const selection = body?.tldw_history_selection_v1
         const admission = body?.tldw_history_admission_v1
+        // Like append_selected_history_input: the input follows the last
+        // selected message, whatever the cursor kind.
         const parent = selection
-          ? selection.cursor?.kind === "after_message"
-            ? selection.cursor.message_id
-            : null
+          ? (selection.messages?.at(-1)?.id ?? null)
           : admission
             ? admission.input_message_id
             : (body?.parent_message_id ?? chat.messages.at(-1)?.id ?? null)

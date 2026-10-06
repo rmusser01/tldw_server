@@ -239,6 +239,46 @@ describe("selected normal send admission boundary", () => {
   })
 })
 
+describe("Retry of a reply that ended early (CS-04)", () => {
+  const retryAdmission = {
+    version: 1 as const,
+    owner_key: "local-key",
+    conversation_id: "chat",
+    input_message_id: "question",
+    input_message_revision: "question-rev",
+    selection_digest: "first-send-selection"
+  }
+  it("settles the new reply against the question's admission and admits nothing", async () => {
+    const turn = { ...makeTurn(), retryAdmission }
+    const save = vi.fn(async () => "chat")
+    mocks.stream.mockImplementation(async function* () {
+      // The provider is asked only once the turn owns the earlier admission.
+      expect(turn.admission).toEqual(retryAdmission)
+      yield "answer"
+    })
+    expect(
+      await invoke(turn, { userMessageId: "question", saveMessageOnSuccess: save })
+    ).toEqual({ status: "submitted" })
+    expect(mocks.append).not.toHaveBeenCalled()
+    expect(mocks.stream).toHaveBeenCalledTimes(1)
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        historyTurn: turn,
+        userMessageId: "question",
+        assistantParentMessageId: "question"
+      })
+    )
+  })
+  it("refuses an admission that belongs to another question", async () => {
+    const turn = { ...makeTurn(), retryAdmission }
+    const result = await invoke(turn, { userMessageId: "another-question" })
+    expect(result).toEqual({ status: "failed", errorMessage: "invalid_history_retry" })
+    expect(mocks.append).not.toHaveBeenCalled()
+    expect(mocks.stream).not.toHaveBeenCalled()
+    expect(turn.admission).toBeUndefined()
+  })
+})
+
 it("clears owned streaming state before following a settled result changes the cursor", async () => {
   const turn = makeTurn()
   const streaming = vi.fn()

@@ -1,6 +1,6 @@
 import type { HistoryOwnerV1 } from "@/services/chat-history-selection"
 import type {
-  HistoryAdmissionV1,
+  HistoryAdmissionReferenceV1,
   HistorySelectionCaptureV1,
   HistoryViewSelectionV1,
   HistorySelectionV1
@@ -17,7 +17,13 @@ export interface HistorySendTurn {
   currentView: () => HistoryViewSelectionV1 | null
   validateLease: () => boolean
   canUpdateView: () => boolean
-  admission?: HistoryAdmissionV1
+  admission?: HistoryAdmissionReferenceV1
+  /**
+   * Retry of a reply that ended early (CS-04): the question was admitted when
+   * it was first sent, so the turn settles a new reply against this admission
+   * instead of admitting the question a second time.
+   */
+  retryAdmission?: HistoryAdmissionReferenceV1
   selection?: HistorySelectionV1
   input?: StoredMessage
   resultId?: string
