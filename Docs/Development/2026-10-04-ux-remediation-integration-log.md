@@ -111,6 +111,9 @@ Commits after the merges:
 | `5a9b4dd54b` | B2: a11y spec waits for the open note to finish loading; baseline 8 |
 | `43a74bcd44` | S8: two P3 Postgres tests that fail on #3174's own tip |
 | `f871694cde` | G1: fingerprint regenerated after merge 16 |
+| `01644d47ae` | X1: Retry answers the saved question, no second copy (section 13) |
+| `ee7b6e92e1` | X2: no rename offer after leaving /notes (section 13) |
+| `12ff96eae5` | X3: NE-01, a space typed during the first-save reload is kept (section 13) |
 
 ## 2. Which PRs conflict with which
 
@@ -720,7 +723,8 @@ owner (`server.chats` in the fake server):
 
 Kept failing on purpose: "CS-04: a reply cut off by a dropped connection ...
 Retry resends the question". See section 8: Retry duplicates the question in
-any server-owned chat.
+any server-owned chat. **Resolved** by X1 (`01644d47ae`, section 13); the
+test passes unchanged.
 
 ### S8. Two #3174 (P3) Postgres tests that fail on its own tip (`43a74bcd44`)
 
@@ -915,7 +919,8 @@ Behaviour that exists only when the PRs are combined.
   "Load latest version" go through `loadDetail`, which calls
   `replaceWysiwygHtml`, so the uncontrolled editor is rewritten with the
   server copy. The old "Reload" notice no longer exists (S1).
-- **Rename offer after a flushed save (NS + #3190). Not fixed here.** The offer
+- **Rename offer after a flushed save (NS + #3190). Resolved by X2
+  (`ee7b6e92e1`, section 13).** The offer
   now fires from the save's own snapshot (R5), including a save the leave
   guard triggers. That exposes a race in `useNotesWikilinkRename`: the offer
   counts the linking notes with a request, and nothing stops it from opening
@@ -952,7 +957,8 @@ Behaviour that exists only when the PRs are combined.
   so the persistence label reads "Saving to server..." then "Saved on server"
   (#3147) instead of "Saved on this device", CS-03 holds (F5), and CS-04's
   interrupted-reply handling runs on the server-chat path for fresh chats too.
-- **Retry duplicates the question in a server chat (#3163). Not fixed here.**
+- **Retry duplicates the question in a server chat (#3163). Resolved by X1
+  (`01644d47ae`, section 13).**
   After a reply is cut off by a dropped connection, Retry sends the question
   again as a new message. In a server-owned chat the question was already
   admitted, so the transcript and the server chat end with
@@ -981,14 +987,16 @@ Behaviour that exists only when the PRs are combined.
 | `integration3` | `5a9b4dd54b`, full suite | 20 passed, 0 failed |
 | `integration4` | `f871694cde` (after merge 16), full suite | 19 passed, 1 failed: NE-01 "typing continues at the caret after the new note's first autosave" |
 | `ne01a`, `ne01b` | `f871694cde`, NE-01 specs only | 3 passed, 3 passed |
+| `ne01-x1` to `ne01-x3` | `12ff96eae5` (X1 to X3), NE-01 specs only | 3 passed, 3 passed, 3 passed |
 
 The `integration4` NE-01 failure: the space typed right after the first
 autosave was lost ("Hello worldagain"). That spec passed in every other run,
 before and after merge 16, including both reruns. It looks like a timing race
 under heavy machine load. The likely window: the reload after the first save
 checks for newer edits, then writes the WYSIWYG document in a later render; a
-keystroke landing between the check and the write is overwritten. This is not
-confirmed; see section 12.
+keystroke landing between the check and the write is overwritten. **Resolved**
+by X3 (`12ff96eae5`, section 13). The cause was close but not exactly this: a
+space at the end of a line is not an edit to the newer-edits check at all.
 
 `integration3` still exited 1 after the tests: the runner's post-run guard
 found `Databases/` in the worktree (moved aside before `integration4`). Backend pytest runs started from the same
@@ -1024,7 +1032,7 @@ on both sides. Vitest groups ran with `--testTimeout=30000`; pytest with
 | Suite | dev | head | Head-only failures |
 |---|---|---|---|
 | Vitest `components/Notes` | 485 passed / 50 failed | 769 / 33 | none (head fixes 16 dev failures) |
-| Vitest `Option/Playground` | 840 / 45 | 884 / 46 | 1: the CS-04 Retry duplicate, left failing on purpose (section 8) |
+| Vitest `Option/Playground` | 840 / 45 | 884 / 46 | 1: the CS-04 Retry duplicate, left failing on purpose (section 8; fixed by X1) |
 | Vitest Sidepanel + `routes/__tests__/sidepanel*` | 468 / 0 | 516 / 0 | none |
 | Vitest `hooks/chat`, `hooks/chat-modes` | 639 / 1 | 651 / 1 | none |
 | Vitest `models`, `services/tldw`, `db/dexie` | 1,080 / 0 | 1,109 / 0 | none |
@@ -1086,12 +1094,13 @@ was not repeated after it.
 
 ## 12. Follow-ups
 
-- **Retry duplicate in server chats** (#3163), section 8.
-- **Rename offer after leaving the page** (#3190 + #3164), section 8.
+- ~~**Retry duplicate in server chats** (#3163), section 8.~~ Resolved: X1
+  (`01644d47ae`); the fix belongs in #3163.
+- ~~**Rename offer after leaving the page** (#3190 + #3164), section 8.~~
+  Resolved: X2 (`ee7b6e92e1`); the fix belongs in #3190.
 - **Harness scope fields** (S6) belong in #3139 and in #3147's harness copy.
-- **Possible NE-01 race** (section 9): a keystroke typed while the reload after
-  a new note's first save is being applied may be overwritten. Seen once in
-  six runs of that spec; not reproduced on demand.
+- ~~**Possible NE-01 race** (section 9).~~ Resolved: a real bug, X3
+  (`12ff96eae5`); the fix belongs in #3158.
 - **P3 Postgres tests** (S8) belong in #3174.
 - **Knowledge provenance marker in WYSIWYG** (dev #3196, not caused by these
   PRs): `loadDetail` and `applyOfflineDraftToEditor` strip the marker from the
@@ -1103,3 +1112,99 @@ was not repeated after it.
   `refs/remotes/origin/DEV` over `refs/remotes/origin/dev`, because the
   filesystem ignores case. `git fetch origin dev` puts it back. Fetch branches
   by name until `DEV` is deleted.
+
+## 13. Fixes after integration (X1 to X3)
+
+The three items left open in sections 8, 9 and 12, fixed on this branch.
+Line numbers are at `99775ea12f`. Each fix belongs in the PR named, whichever
+reaches `dev` first.
+
+### X1. Retry sends the question a second time (`01644d47ae`, belongs in #3163)
+
+- **Cause.** `retryInterruptedHistoryTurn` (`useChatActions.ts:4866-4884`)
+  moved the view to just before the question and resent it through `onSubmit`.
+  The selected-history send always admits its input
+  (`chatModePipeline.ts:806`, `appendSelectedUser`), but the question was
+  already admitted before the reply streamed. A server chat got a second user
+  message. A local chat got a hidden second question as a sibling branch: the
+  transcript showed one, the database held two. The harness made the server
+  case look linear (`user: Q, user: Q`). Its fake server gave a
+  `before_message` admission a null parent, and its capture's `??` chained
+  that onto the previous row.
+- **Fix.** Retry reuses the question's admission. For a server chat it comes
+  from the retained record; for a local chat it is read from the stored
+  question (`loadLocalHistoryAdmission`). It goes to the send as
+  `historyRetryAdmission`; `normalChatMode` checks it against the captured
+  view, and the pipeline assigns it instead of admitting. The reply settles
+  through the normal `settleAcceptedAssistant`. Settlement never runs P1's
+  leaf check, and the client sends no `tldw_history_branch`, so P1 and P2 are
+  untouched. A local chat keeps the cut-off reply as an alternative to the
+  new one. Without a recorded admission, Retry still resends. The fake server
+  now parents an admission on the selection's last message, like
+  `append_selected_history_input`.
+- **Tests.** The CS-04 drop/Retry test passes unchanged. Three new harness
+  tests check exactly one user message on screen and on the server (saved
+  server chat, fresh chat) or in Dexie (local chat, both replies under the one
+  question). All three failed before the fix. Two pipeline unit tests cover
+  the reused admission and a mismatched one; both failed before.
+
+### X2. Rename offer opens after leaving /notes (`ee7b6e92e1`, belongs in #3190)
+
+- **Cause.** `offer` (`useNotesWikilinkRename.tsx:590-611`) awaits the owner
+  check and the referrers count (595), then opens the prompt (608). The unmount
+  cleanup's `closePrompts()` (648) runs before a late count answers, and the
+  prompt has `duration: 0`. A failed rewrite's retry offer (511) has the same
+  window. #3164's leave flush saves a rename typed just before leaving, which
+  starts such a count while navigation waits.
+- **Fix.** The hook records whether the page is shown, set in the mount effect
+  and cleared in its cleanup. It checks this before counting, after the owner
+  check (so no referrers request is sent), before opening the prompt, and on a
+  retry offer. A rewrite or Undo the user already confirmed still finishes.
+- **Tests.** Four hook tests: a count or owner check answering after leave, a
+  rename announced after leave, and a failed rewrite after leave. A page test
+  drives the real `LeaveGuard` flush and leaves while the count is pending.
+  All fail without the fix.
+
+### X3. NE-01 lost keystroke (`12ff96eae5`, belongs in #3158)
+
+- **Cause: a real race, not test timing.** `wysiwygHtmlToMarkdown` trims every
+  block (`notes-manager-utils.ts:1039`, `1073`). A space at the end of a line,
+  or an empty new line, therefore leaves the Markdown unchanged, and the edit
+  snapshot that drives `editRevisionRef` (`useNotesEditorState.tsx:451`) does
+  not move. The reload after a new note's first save checks that revision once
+  its GET answers (803). It saw no newer edit, cleared the dirty flag (829) and
+  wrote the server copy into the editor (841), dropping the space. Under load,
+  the GET answer was handled after the spec's next keystroke.
+- **Fix.** `recordWysiwygEditorHtml`, which only the user's own input and
+  in-place toolbar commands call, counts edits, and the count is part of the
+  edit snapshot. Any WYSIWYG input now bumps the revision, so the reload
+  stands down and autosave saves the text.
+- **Test.** The reload's GET is held while a space is typed, then answered
+  before "world" is typed. Before the fix the editor read "Helloworld" (the
+  browser failure); now it reads "Hello world", with the caret at the end.
+
+### Results, X1 to X3 against `99775ea12f`
+
+Vitest from `apps/packages/ui` with `--testTimeout=30000`, same commands on
+both sides. "New failures" are tests that fail after the fixes and passed
+before.
+
+| Group | `99775ea12f` | after X1 to X3 | New failures |
+|---|---|---|---|
+| `Option/Playground/__tests__` | 852 passed / 46 failed | 857 / 44 | none; the CS-04 Retry test now passes |
+| `hooks/chat`, `hooks/chat-modes` | 681 / 1 | 683 / 1 | none |
+| `components/Notes` | 769 / 33 | 775 / 33 | none |
+| `services` | 4,406 / 9 | 4,406 / 9 | none |
+
+- The other Playground failures are the same on both sides (41 in
+  `Playground.cockpit-shell`, 3 in `sticky-composer-layout`). "CS-04: Stop"
+  failed once in the baseline run under load and passed after.
+- Typecheck (`bun run typecheck`): 0 errors. ESLint on the 13 changed files:
+  the same counts as at `99775ea12f` for each file. The one error,
+  `require-yield` in `chatModePipeline.history-admission.test.ts:207`, is on
+  `dev` already (`da0f1cd3a34`).
+- No backend code changed.
+- The NE-01 browser spec ran 3 times (`ne01-x1` to `ne01-x3`): 3 of 3 passed
+  each time. The live backend writes `Databases/` (circuit breaker,
+  governance) into the worktree root during the run; it was moved aside
+  afterwards.
