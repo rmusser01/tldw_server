@@ -139,50 +139,97 @@ def test_jobs_models_owns_terminal_status_classification():
     assert models.is_terminal_job_status(None) is False
 
 
+@pytest.mark.unit
 def test_pg_ensure_ignores_optional_index_psycopg_error_after_required_indexes(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An optional index error must not prevent events/counters after admission."""
     import psycopg
 
     from tldw_Server_API.app.core.Jobs import pg_migrations
 
     connections = []
     maintenance_calls = []
+    optional_errors = []
 
     class _Cursor:
-        def __init__(self, phase):
-            self.phase = phase
+        """Supply only the known tuple reads while retaining optional DDL failure."""
 
-        def __enter__(self):
+        def __init__(self) -> None:
+            """Start without any pending query response."""
+            self.rows: list[tuple[object, ...] | None] = []
+
+        def __enter__(self) -> "_Cursor":
+            """Expose this cursor within the real migration context."""
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: object) -> bool:
+            """Propagate errors to the migration's own handlers."""
             return False
 
-        def execute(self, query, params=None):
-            del params
-            if self.phase == 3 and "idx_jobs_status_available_at" in str(query):
+        def execute(self, query: str, params: tuple[object, ...] | None = None) -> None:
+            """Handle known reads explicitly; unknown SELECTs cannot fake success."""
+            self.rows = []
+            query = " ".join(query.split())
+            responses: dict[str, tuple[object, ...] | None] = {
+                "SELECT MIN(NULLIF(setting,'0')::bigint) FROM pg_settings "
+                "WHERE name IN ('lock_timeout','statement_timeout')": (30_000,),
+                "SELECT pg_try_advisory_lock(hashtextextended(%s, 0))": (True,),
+                "SELECT pg_advisory_unlock(hashtextextended(%s, 0))": (True,),
+                "SELECT depends_on_terminal_status, "
+                "depends_on_cancellation_reason FROM job_dependencies LIMIT 0": None,
+            }
+            if query in responses:
+                self.rows = [responses[query]]
+            elif query.startswith("SELECT set_config(") and params is not None:
+                self.rows = [(params[0],)]
+            elif query.startswith("SELECT CASE WHEN i.indexrelid IS NULL") and (
+                "idx.relname='idx_job_events_retry_admissions'" in query
+            ):
+                self.rows = [(True, True, True)]
+            elif query.startswith("SELECT index_state.indisvalid AS is_valid,") and (
+                "table_class.relname='jobs_archive'" in query
+            ):
+                self.rows = [None]
+            elif query.startswith(("SELECT", "WITH", "SHOW", "VALUES", "TABLE", "EXPLAIN")):
+                pytest.fail("Unexpected read in optional-index migration probe")
+            elif "idx_jobs_status_available_at" in query:
+                optional_errors.append(query)
                 raise psycopg.OperationalError("optional index unavailable")
 
-    class _Connection:
-        def __init__(self, phase):
-            self.cursor_instance = _Cursor(phase)
+        def fetchone(self) -> tuple[object, ...] | None:
+            """Consume a known result, rejecting missing or repeated reads."""
+            if not self.rows:
+                pytest.fail("No pending result in optional-index migration probe")
+            return self.rows.pop(0)
 
-        def __enter__(self):
+    class _Connection:
+        """Keep connection ownership at the external PostgreSQL I/O boundary."""
+
+        def __init__(self) -> None:
+            """Give each migration connection its own cursor."""
+            self.cursor_instance = _Cursor()
+
+        def __enter__(self) -> "_Connection":
+            """Expose this connection without replacing migration logic."""
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: object) -> bool:
+            """Leave exception handling to the migration."""
             return False
 
-        def cursor(self):
+        def cursor(self) -> _Cursor:
+            """Return this connection's owned cursor."""
             return self.cursor_instance
 
-        def commit(self):
+        def commit(self) -> None:
+            """Accept commits without a live PostgreSQL database."""
             return None
 
-    def _connect(_dsn, *, autocommit=False):
+    def _connect(_dsn: str, *, autocommit: bool = False) -> _Connection:
+        """Allocate a fresh external-I/O double for each migration phase."""
         del autocommit
-        connection = _Connection(len(connections) + 1)
+        connection = _Connection()
         connections.append(connection)
         return connection
 
@@ -231,6 +278,7 @@ def test_pg_ensure_ignores_optional_index_psycopg_error_after_required_indexes(
     pg_migrations.ensure_jobs_tables_pg("postgresql://jobs.test/jobs")
 
     assert maintenance_calls == ["events", "counters"]
+    assert len(optional_errors) == 1
 
 
 def test_create_and_acquire_and_complete(jobs_db):

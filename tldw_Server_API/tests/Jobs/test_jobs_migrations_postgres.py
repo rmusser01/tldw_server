@@ -1547,24 +1547,55 @@ def test_pg_archive_migration_session_overrides_request_timeouts(monkeypatch):
     ]
 
 
-def test_pg_ensure_configures_timeouts_before_each_schema_phase(monkeypatch):
+def test_pg_ensure_configures_timeouts_before_each_schema_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Configure every owning phase before DDL, including required index repair."""
     connections = []
 
     class _RecordingCursor:
-        def __init__(self):
-            self.calls = []
+        def __init__(self) -> None:
+            """Record statements and model only this test's required catalog reads."""
+            self.calls: list[tuple[str, object]] = []
             self.description = ()
+            self.retry_index_created = False
 
-        def __enter__(self):
+        def __enter__(self) -> "_RecordingCursor":
+            """Return the owning driver's cursor."""
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: object) -> bool:
+            """Retain native error propagation through the cursor context."""
             return False
 
-        def execute(self, query, params=None):
-            self.calls.append((str(query), params))
+        def execute(self, query: object, params: object = None) -> None:
+            """Record DDL and expose the created retry index to later verification."""
+            statement = str(query)
+            self.calls.append((statement, params))
+            if statement.startswith(
+                "CREATE INDEX CONCURRENTLY idx_job_events_retry_admissions "
+            ):
+                self.retry_index_created = True
 
-        def fetchall(self):
+        def fetchone(self) -> tuple[object, ...] | None:
+            """Supply bounded settings, lock and catalog responses; reject new reads."""
+            query, params = self.calls[-1]
+            if "FROM pg_settings" in query:
+                return (30_000,)
+            if query.startswith("SELECT pg_try_advisory_lock("):
+                assert params == ("tldw.jobs.job_events.retry_admission_index.v1",)
+                return (True,)
+            if "idx.relname='idx_job_events_retry_admissions'" in query:
+                return (True, True, True) if self.retry_index_created else None
+            if "index_class.relname=%s" in query and params in (
+                ("idx_jobs_archive_slides_scope",),
+                ("idx_jobs_archive_uuid_unique",),
+            ):
+                return None
+            raise AssertionError("Unexpected recording-cursor scalar query")
+
+        def fetchall(self) -> list[object]:
+            """Keep the existing empty legacy-row/catalog response."""
             return []
 
     class _RecordingConnection:
@@ -1658,3 +1689,18 @@ def test_pg_ensure_configures_timeouts_before_each_schema_phase(monkeypatch):
                 ("30000ms", local),
             ),
         ]
+
+    index_calls = configured_connections[-1].recording_cursor.calls
+    index_statements = [query for query, _params in index_calls]
+    assert sum(
+        "idx.relname='idx_job_events_retry_admissions'" in query
+        for query in index_statements
+    ) == 2
+    assert sum(
+        query.startswith("CREATE INDEX CONCURRENTLY idx_job_events_retry_admissions ")
+        for query in index_statements
+    ) == 1
+    assert (
+        "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
+        ("tldw.jobs.job_events.retry_admission_index.v1",),
+    ) in index_calls
