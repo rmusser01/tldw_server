@@ -63,10 +63,10 @@ import {
   type ServicePromptSnapshot
 } from "@/services/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
-import { WEBUI_CHAT_SOURCE } from "@/utils/character-chat-session"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { getSelectedDurableTurnSupport } from "@/services/tldw/server-capabilities"
 import { toChatScopeParams, type ChatScope } from "@/types/chat-scope"
+import { WEBUI_CHAT_SOURCE } from "@/utils/character-chat-session"
 
 interface WebSearchPayload {
   query: string
@@ -198,9 +198,9 @@ type NormalChatModeParams = {
   discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
   serverChatId?: string | null
-  setServerChatId?: (id: string) => void
   conversationId?: string
   tldwTurn?: ChatTurnIdentity
+  setServerChatId?: (id: string) => void
   setHistoryId: (id: string) => void
   uploadedFiles?: any[]
   actorSettings?: ActorSettings

@@ -96,12 +96,16 @@ const expectDialogClosingOrGone = (name: string) => {
   if (dialog) expect(dialog).toHaveClass("ant-zoom-leave")
 }
 
-const testState = {
+let testState = {
   isMobile: false,
   storeHydrated: true,
   leftPaneCollapsed: false,
   rightPaneCollapsed: false,
-  workspaceId: "workspace-1",
+  workspaceId: "workspace-1" as string | null,
+  workspaceChatReferenceId: "",
+  serverWorkspace: null,
+  notes: "",
+  workspaceBanner: { title: "", subtitle: "", image: null },
   initializeWorkspace: vi.fn(),
   addSources: vi.fn(),
   setSelectedSourceIds: vi.fn(),
@@ -135,6 +139,16 @@ const testState = {
   setSourceStatusByMediaId: vi.fn()
 }
 
+const workspaceListeners = new Set<
+  (state: typeof testState, previous: typeof testState) => void
+>()
+
+const setTestState = (patch: Partial<typeof testState>) => {
+  const previous = testState
+  testState = { ...testState, ...patch }
+  workspaceListeners.forEach((listener) => listener(testState, previous))
+}
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -156,83 +170,29 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => testState.isMobile
 }))
 
-vi.mock("@/store/workspace", () => ({
-  createWorkspaceStorage: () => ({
-    getItem: vi.fn().mockResolvedValue("1")
-  }),
-  useWorkspaceStore: (
-    selector: (state: {
-      storeHydrated?: boolean
-      workspaceId: string | null
-      initializeWorkspace: () => void
-      addSources: (
-        sources: Array<{ mediaId: number; title: string; type: string }>
-      ) => unknown
-      setSelectedSourceIds: (ids: string[]) => void
-      captureToCurrentNote: (input: {
-        title?: string
-        content: string
-        mode?: "append" | "replace"
-      }) => void
-      leftPaneCollapsed: boolean
-      rightPaneCollapsed: boolean
-      setLeftPaneCollapsed: (collapsed: boolean) => void
-      setRightPaneCollapsed: (collapsed: boolean) => void
-      sourceSearchQuery: string
-      activeFolderId: string | null
-      selectedSourceIds: string[]
-      generatedArtifacts: Array<{ id: string }>
-      sources: Array<{
-        id: string
-        mediaId: number
-        title: string
-        type: "pdf" | "video" | "audio" | "website" | "document" | "text"
-        addedAt: Date
-      }>
-      currentNote: {
-        title: string
-        content: string
-        keywords: string[]
-        isDirty: boolean
+vi.mock("@/store/workspace", async () => {
+  const actual = await vi.importActual<typeof import("@/store/workspace")>(
+    "@/store/workspace"
+  )
+  return {
+    hasRetainedWorkspaceContent: actual.hasRetainedWorkspaceContent,
+    createWorkspaceStorage: () => ({
+      getItem: vi.fn().mockResolvedValue("1")
+    }),
+    useWorkspaceStore: Object.assign(
+      (selector: (state: typeof testState) => unknown) => selector(testState),
+      {
+        getState: () => testState,
+        subscribe: (
+          listener: (state: typeof testState, previous: typeof testState) => void
+        ) => {
+          workspaceListeners.add(listener)
+          return () => workspaceListeners.delete(listener)
+        }
       }
-      workspaceChatSessions: Record<
-        string,
-        { messages: Array<{ message: string; sources: unknown[]; isBot: boolean; name: string }> }
-      >
-      focusSourceById: (id: string) => boolean
-      focusChatMessageById: (messageId: string) => boolean
-      focusWorkspaceNote: (field?: "title" | "content") => void
-      setSourceStatusByMediaId: (
-        mediaId: number,
-        status: "processing" | "ready" | "error",
-        statusMessage?: string
-      ) => void
-    }) => unknown
-  ) =>
-    selector({
-      storeHydrated: testState.storeHydrated,
-      workspaceId: testState.workspaceId,
-      initializeWorkspace: testState.initializeWorkspace,
-      addSources: testState.addSources,
-      setSelectedSourceIds: testState.setSelectedSourceIds,
-      captureToCurrentNote: testState.captureToCurrentNote,
-      leftPaneCollapsed: testState.leftPaneCollapsed,
-      rightPaneCollapsed: testState.rightPaneCollapsed,
-      setLeftPaneCollapsed: testState.setLeftPaneCollapsed,
-      setRightPaneCollapsed: testState.setRightPaneCollapsed,
-      sourceSearchQuery: testState.sourceSearchQuery,
-      activeFolderId: testState.activeFolderId,
-      selectedSourceIds: testState.selectedSourceIds,
-      generatedArtifacts: testState.generatedArtifacts,
-      sources: testState.sources,
-      currentNote: testState.currentNote,
-      workspaceChatSessions: testState.workspaceChatSessions,
-      focusSourceById: testState.focusSourceById,
-      focusChatMessageById: testState.focusChatMessageById,
-      focusWorkspaceNote: testState.focusWorkspaceNote,
-      setSourceStatusByMediaId: testState.setSourceStatusByMediaId
-    })
-}))
+    )
+  }
+})
 
 vi.mock("@/utils/use-research-workspace-prefill", () => ({
   useResearchWorkspacePrefill: () => ({
@@ -445,24 +405,30 @@ describe("ResearchWorkspace source list view state", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    testState.isMobile = false
-    testState.storeHydrated = true
-    testState.leftPaneCollapsed = false
-    testState.rightPaneCollapsed = false
-    testState.workspaceId = "workspace-1"
-    testState.sourceSearchQuery = ""
-    testState.activeFolderId = null
-    testState.selectedSourceIds = []
-    testState.generatedArtifacts = []
-    testState.sources = []
-    testState.currentNote = {
-      title: "",
-      content: "",
-      keywords: [],
-      isDirty: false
-    }
-    testState.workspaceChatSessions = {}
-    testState.setSourceStatusByMediaId = vi.fn()
+    setTestState({
+      isMobile: false,
+      storeHydrated: true,
+      leftPaneCollapsed: false,
+      rightPaneCollapsed: false,
+      workspaceId: "workspace-1",
+      workspaceChatReferenceId: "",
+      serverWorkspace: null,
+      notes: "",
+      workspaceBanner: { title: "", subtitle: "", image: null },
+      sourceSearchQuery: "",
+      activeFolderId: null,
+      selectedSourceIds: [],
+      generatedArtifacts: [],
+      sources: [],
+      currentNote: {
+        title: "",
+        content: "",
+        keywords: [],
+        isDirty: false
+      },
+      workspaceChatSessions: {},
+      setSourceStatusByMediaId: vi.fn()
+    })
     savedViewHarness.nextId = 1
     savedViewHarness.rows = []
     savedViewHarness.paneControllers = []
@@ -583,7 +549,7 @@ describe("ResearchWorkspace source list view state", () => {
       )
     )
 
-    testState.workspaceId = "workspace-2"
+    setTestState({ workspaceId: "workspace-2" })
     rerender(<ResearchWorkspace />)
     await waitFor(() =>
       expect(savedViewHarness.upsertWorkspace).toHaveBeenCalledWith(
@@ -636,11 +602,11 @@ describe("ResearchWorkspace source list view state", () => {
 
     expect(screen.getByTestId("source-list-sort-state")).toHaveTextContent("name_asc")
 
-    testState.leftPaneCollapsed = true
+    setTestState({ leftPaneCollapsed: true })
     rerender(<ResearchWorkspace />)
     expect(screen.queryByTestId("workspace-sources-pane")).not.toBeInTheDocument()
 
-    testState.leftPaneCollapsed = false
+    setTestState({ leftPaneCollapsed: false })
     rerender(<ResearchWorkspace />)
     expect(await screen.findByTestId("source-list-sort-state")).toHaveTextContent(
       "name_asc"
@@ -649,7 +615,7 @@ describe("ResearchWorkspace source list view state", () => {
 
   it("shares one controller and one real overlay host across desktop and drawer panes", async () => {
     const user = userEvent.setup()
-    testState.isMobile = true
+    setTestState({ isMobile: true })
     const { rerender } = render(<ResearchWorkspace />)
     expect(
       savedViewHarness.hookInvocations.mock.calls.every(
@@ -658,7 +624,7 @@ describe("ResearchWorkspace source list view state", () => {
     ).toBe(true)
     await user.click(screen.getByRole("button", { name: "Toggle sources" }))
 
-    testState.isMobile = false
+    setTestState({ isMobile: false })
     rerender(<ResearchWorkspace />)
 
     const controllerIdentities = await screen.findAllByTestId(
@@ -699,7 +665,7 @@ describe("ResearchWorkspace source list view state", () => {
       )
     )
 
-    testState.workspaceId = null
+    setTestState({ workspaceId: null })
     rerender(<ResearchWorkspace />)
 
     expect(savedViewHarness.hookInvocations).toHaveBeenLastCalledWith(
@@ -717,8 +683,8 @@ describe("ResearchWorkspace source list view state", () => {
     expect(savedViewHarness.listWorkspaceSourceViews).not.toHaveBeenCalledWith(
       "local"
     )
-    expect(screen.getByRole("button", { name: "Save source view" })).toBeDisabled()
-    fireEvent.click(screen.getByRole("button", { name: "Save source view" }))
+    expect(screen.getByTestId("research-workspace-skeleton")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Save source view" })).not.toBeInTheDocument()
     expect(screen.queryByRole("dialog", { name: "Save source view" })).not.toBeInTheDocument()
   })
 
@@ -734,7 +700,7 @@ describe("ResearchWorkspace source list view state", () => {
       const dialog = await screen.findByRole("dialog", { name: "Save source view" })
       await user.type(within(dialog).getByRole("textbox", { name: "View name" }), "Draft A")
 
-      testState.workspaceId = nextWorkspaceId
+      setTestState({ workspaceId: nextWorkspaceId })
       rerender(<ResearchWorkspace />)
 
       expectDialogClosingOrGone("Save source view")
@@ -770,7 +736,7 @@ describe("ResearchWorkspace source list view state", () => {
         name: "Replace saved view?"
       })
 
-      testState.workspaceId = nextWorkspaceId
+      setTestState({ workspaceId: nextWorkspaceId })
       rerender(<ResearchWorkspace />)
 
       expectDialogClosingOrGone("Replace saved view?")
@@ -780,7 +746,7 @@ describe("ResearchWorkspace source list view state", () => {
 
   it("restores focus to the real Sources tab after the invoking mobile pane unmounts", async () => {
     const user = userEvent.setup()
-    testState.isMobile = true
+    setTestState({ isMobile: true })
     render(<ResearchWorkspace />)
     await user.click(screen.getByRole("tab", { name: /Sources/ }))
     await user.click(screen.getByRole("button", { name: "Save source view" }))
@@ -796,9 +762,11 @@ describe("ResearchWorkspace source list view state", () => {
 
   it("persists a created view through the server boundary and restores it only when reselected", async () => {
     const user = userEvent.setup()
-    testState.sourceSearchQuery = "Alpha"
-    testState.activeFolderId = "folder-1"
-    testState.selectedSourceIds = ["source-1"]
+    setTestState({
+      sourceSearchQuery: "Alpha",
+      activeFolderId: "folder-1",
+      selectedSourceIds: ["source-1"]
+    })
     const first = render(<ResearchWorkspace />)
     await user.click(
       await screen.findByRole("button", { name: "Set current filters" })

@@ -129,6 +129,7 @@ const instruction =
 const mountSettings = async (
   settingsScope?: string,
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  tab: "conversation" | "model" = "conversation",
 ) => {
   const close = vi.fn()
   const view = render(
@@ -140,8 +141,12 @@ const mountSettings = async (
       />
     </QueryClientProvider>,
   )
-  fireEvent.click(await screen.findByRole("tab", { name: "Conversation" }))
-  const editor = await screen.findByPlaceholderText("Enter System Prompt")
+  if (tab === "conversation") {
+    fireEvent.click(await screen.findByRole("tab", { name: "Conversation" }))
+  }
+  const editor = tab === "conversation"
+    ? await screen.findByPlaceholderText("Enter System Prompt")
+    : await screen.findByLabelText("modelSettings.form.temperature.label")
   return { ...view, close, editor }
 }
 
@@ -196,8 +201,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
-    const first = await mountSettings(undefined, client)
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    const first = await mountSettings(undefined, client, "model")
     fireEvent.change(screen.getByLabelText("modelSettings.form.numPredict.label"), {
       target: { value: "48" },
     })
@@ -209,8 +213,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     expect(useStoreChatModelSettings.getState().numPredict).toBe(48)
     first.unmount()
 
-    const reopened = await mountSettings(undefined, client)
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    const reopened = await mountSettings(undefined, client, "model")
     expect(screen.getByLabelText("modelSettings.form.numPredict.label")).toHaveValue("48")
     expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.25")
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
@@ -231,8 +234,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
       queryFn: getAllModelSettings,
     })
     useStoreChatModelSettings.getState().setTemperature(0.25)
-    const clearing = await mountSettings(undefined, client)
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    const clearing = await mountSettings(undefined, client, "model")
     expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.25")
     fireEvent.change(screen.getByLabelText("modelSettings.form.temperature.label"), {
       target: { value: "" },
@@ -242,8 +244,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
       expect(useStoreChatModelSettings.getState().temperature).toBeUndefined(),
     )
     clearing.unmount()
-    const reopened = await mountSettings(undefined, client)
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    const reopened = await mountSettings(undefined, client, "model")
     expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("")
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
     await waitFor(() => expect(reopened.close).toHaveBeenCalledWith(false))

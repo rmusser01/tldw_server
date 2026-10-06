@@ -338,6 +338,9 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   const listings = useRef({ search: 0, pinned: 0 })
   const [verifiedNotesScope, setVerifiedNotesScope] = useState<string | null>(null)
   const canonicalNotesReady = Boolean(serverWorkspace && verifiedNotesScope === serverWorkspace.scopeKey)
+  const noteOwnerReady = !notesReadOnly || (canonicalNotesReady &&
+    (!currentNote.serverWorkspaceId || (currentNote.serverWorkspaceId === workspaceId &&
+      currentNote.serverScopeKey === verifiedNotesScope)))
   React.useLayoutEffect(() => { latestFrame.current = { workspaceId, currentNote } })
   React.useLayoutEffect(() => {
     const lifecycle = settlement.current
@@ -375,6 +378,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         settlement.current.request === request && latest.workspaceId === frame.workspaceId && latest.currentNote === frame.currentNote
     }
   }, [])
+  const noteOwnerCurrent = captureWorkspaceSettlement()
   useEffect(() => {
     setVerifiedNotesScope(null)
     if (!serverWorkspace) return
@@ -1062,6 +1066,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   }
 
   const handleExportNote = () => {
+    if (!noteOwnerReady || !noteOwnerCurrent()) return
     const title = currentNote.title.trim() || t("playground:studio.untitledNote", "Untitled")
     if (!title && !currentNote.content.trim()) {
       messageApi.warning(
@@ -1095,7 +1100,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       <div className="mb-3 flex shrink-0 items-center justify-between">
         <h3 className="text-xs font-semibold uppercase text-text-muted">
           {t("playground:studio.quickNotes", "Quick Notes")}
-          {currentNote.id && (
+          {noteOwnerReady && currentNote.id && (
             <span className="ml-2 font-normal normal-case text-primary">
               (ID: {currentNote.id})
             </span>
@@ -1108,6 +1113,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             size="small"
             icon={<FolderOpen className="h-3.5 w-3.5" />}
             onClick={handleOpenLoadModal}
+            disabled={!noteOwnerReady}
             aria-label={t("playground:studio.loadNote", "Load note")}
             title={t("playground:studio.loadNote", "Load note")}
           />
@@ -1118,7 +1124,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             onClick={handleExportNote}
             aria-label={t("playground:studio.exportNote", "Download .md")}
             title={t("playground:studio.exportNote", "Download .md")}
-            disabled={!currentNote.content.trim() && !currentNote.title.trim()}
+            disabled={!noteOwnerReady || (!currentNote.content.trim() && !currentNote.title.trim())}
           />
           <Button
             type="text"
@@ -1148,6 +1154,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         </div>
       </div>
 
+      {noteOwnerReady ? <>
       {workspaceTag && (
         <div className="mb-3 shrink-0 rounded-md border border-border/80 bg-surface2/40 p-2">
           <div className="mb-2 flex items-center justify-between">
@@ -1466,6 +1473,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           )}
         </div>
       </Modal>
+      </> : <div role="status" className="text-sm text-text-muted">This note isn't available.</div>}
     </div>
   )
 }

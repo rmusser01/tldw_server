@@ -25,9 +25,9 @@ const focusTextAreaMock = vi.hoisted(() => vi.fn())
 const resetModelSettingsMock = vi.hoisted(() => vi.fn())
 const clearSessionMock = vi.hoisted(() => vi.fn())
 const optionStoreSetStateMock = vi.hoisted(() => vi.fn())
+const integration = vi.hoisted(() => ({ active: false, bookmarks: new Map<string, unknown>(), capture: vi.fn() }))
 const historySelectionResetMock = vi.hoisted(() => vi.fn())
 const historySelectionContextMock = vi.hoisted(() => vi.fn())
-const integration = vi.hoisted(() => ({ active: false, bookmarks: new Map<string, unknown>(), capture: vi.fn() }))
 
 const baseState = vi.hoisted(() => ({
   setMessages: vi.fn(),
@@ -205,7 +205,6 @@ function RouteHarness({ origin }: { origin: string }) {
 describe("useClearChat settings navigation", () => {
   beforeEach(async () => {
     vi.clearAllMocks()
-    historySelectionContextMock.mockReturnValue({ reset: historySelectionResetMock })
     navigateMock.mockReset()
     integration.active = true
     useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: null,
@@ -227,6 +226,7 @@ describe("useClearChat settings navigation", () => {
     })
     localStorage.setItem("tldw:feature-rollout:workspace_indexeddb_offload_v1:enabled", "0")
     useWorkspaceStore.setState({ workspaceId: "workspace-A", workspaceChatReferenceId: "reference-A", storeHydrated: true, workspaceChatSessions: {} })
+    historySelectionContextMock.mockReturnValue({ reset: historySelectionResetMock })
     window.history.replaceState({}, "", "/settings/prompt")
   })
 
@@ -278,17 +278,6 @@ describe("useClearChat settings navigation", () => {
     expect(historySelectionResetMock.mock.invocationCallOrder[0]).toBeLessThan(
       navigateMock.mock.invocationCallOrder[0]
     )
-  })
-
-  it("still clears standalone surfaces without a history selection provider", () => {
-    historySelectionContextMock.mockReturnValue(null)
-    const { result } = renderHook(() => useClearChat(), { wrapper: RouterWrapper })
-
-    act(() => expect(result.current()).toBe(true))
-
-    expect(navigateMock).toHaveBeenCalledWith("/chat")
-    expect(clearSessionMock).toHaveBeenCalledOnce()
-    expect(historySelectionResetMock).not.toHaveBeenCalled()
   })
 
   it.each(["/chat-workspace", "/research-workspace"])("real New Chat from %s cannot resurrect the old qualified checkpoint on return", async origin => {
@@ -360,5 +349,16 @@ describe("useClearChat settings navigation", () => {
     const { result } = renderHook(() => useClearChat(), { wrapper: RouterWrapper })
     act(() => expect(result.current()).toBe(true))
     expect(useWorkspaceStore.getState().workspaceChatReferenceId).toBe(missing === "reference" ? "" : "reference-A")
+  })
+
+  it("still clears standalone surfaces without a history selection provider", () => {
+    historySelectionContextMock.mockReturnValue(null)
+    const { result } = renderHook(() => useClearChat(), { wrapper: RouterWrapper })
+
+    act(() => expect(result.current()).toBe(true))
+
+    expect(navigateMock).toHaveBeenCalledWith("/chat")
+    expect(clearSessionMock).toHaveBeenCalledOnce()
+    expect(historySelectionResetMock).not.toHaveBeenCalled()
   })
 })

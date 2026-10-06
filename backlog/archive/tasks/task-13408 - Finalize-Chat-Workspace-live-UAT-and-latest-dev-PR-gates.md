@@ -36,8 +36,10 @@ Stage1: investigate exact CI causes and latest-dev semantic overlaps; preserve o
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Final no-mock native acceptance is complete: real Chrome raw CDP with actual authentication, SQLite, IndexedDB, Gemma and embeddings; no interception, fabricated app state, plugin or focus emulation. Owner account/backend A/B/A passes three real turns and six canonical rows with no transition/reload autosends. Browse/staging/Clear preserve a typed draft, both real previews return 200, external site loads, and mobile composer/Send fit 390x844 after the bounded transcript recovery-notice fix. Fresh owner and mobile screenshots were inspected. Latest dev ec86ba4e871d844ff4a3a53c607e80eb85bd0e9b merged in 9ebc3bdfb141b8f044e9da927c39a5eb020ab3a6; actual API gracefully restarted on FastAPI0.142.1 with its preserved environment/data and coherent existing OTel SDK/exporter1.45.0. Fresh real grounded Gemma send verifies canonical receipts, citations, saved draft and fresh-document restore with no resend. Original10/eight-row hashes, original tabs, all68stashes and served capability predicates/12negative controls preserved. Direct owning tests:82shared files2228assertions plus3frontend files50assertions; latest upstream backend34pass0skip; fullTSC0; scoped Bandit0new findings; cached precommit0. Independent final9path review48pass/no actionable findings/immutable hashes. Matched isolated final Turbopack539.9KBshared/842.3KBheaviest, unchanged600/900limits andtoken-sync0; direct checkout preexisting node_modules external symlink cannot be followed by Turbopack, no config/budget bypass. GitHub old fd32aad jobs110516627382/110516627352 logs confirm failure at654.1/958.0 and651.1/955.0 bundle gates; browser steps never reached, laterUXhealth failure follows stoppedbuild. Final publication/remote checks next. Known broader neighboring failures and unrelated inherited pip metadata/ML/typer conflicts are recorded, not disabled or claimed green. Archive completed historical13398 family via official CLI to preserve both histories while removing upstream IDcollision; leave new13408 unique active tracker. Acceptance doc owns evidence links; runtime evidence remains private outside PR.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Official completed-history archive finished: 32 exact-content records moved via backlog task archive; upstream Pin-FastAPI record SHA unchanged. Catalog/result retained externally. Removed only the completed owner-checkpoint plan, preserving unrelated plans. Final acceptance doc and PR body include verified old remote bundle failures and new-head CI limits.
 
@@ -56,12 +58,16 @@ Fresh native Stop found keyless owner Verify bug before GET; fixed only callback
 Fresh final no-mock Chrome matrix complete: grounded1realRAG/1Gemma; exact StopVerifyGET200zeroVerifyinference/explicitReprepare2dispatch1canonicalinput; route6zeroautosends;workspace11zeroautosends;preview/mobile3twoHTTP200realexternal/nooverflow;freshownerbaseline0sends/account-backend19checks2newGemma4canonicalrows/oldArestored/foreign404/inactivefullSHAunchanged;freshAloadedvisualbefore-afterpassed/inspected. Historical negative fixture staleclient-session failed before anysend; current real pre-switch Acheckpoint captured and identical fullSHAguards pass. Final production sourcebound Turbopack/token-sync/budgets540.3/842.7KBunder600/900; externaldependency roots aligned only in snapshot, repo unchanged. Original10/eightAPIrowSHA/servedcapability12negatives/all68stashes/sixcurrentbaselineTargets retained; historicaloriginalIDs ANDsameURLtabs unavailable, no preservation claim/replacement. Latest fetcheddevd81. Current remoteCIpending/no failures in last snapshot; localPGunavailable/broaderHypothesis timing failure explicit. Publishing final recoveryincrement and evidence next; keepdraft/unmerged andtaskInProgresspendingcurrentCI qualification.
 
 Final publication verification freshly rerun: recovery/transport207pass0fail, fullfrontendTSC8192exit0, fourproductionPythonBandit0findings0errors, normalcachedprecommitapplicablehooksallpass, diffcheck0. Final reviewed recovery increment and corrected current-vs-historical UAT/production claims prepared for commit/push to existingPR3071; human summary retained exact. Stage3 remainsInProgressforcurrentCIqualification, notmarkingallCIgreen or freshPGpass.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fresh latest-dev no-mock Chat Workspace UAT and final production build/token/bundle gates pass. Final reviewed recovery increment fixes keyless-owner Verify with unchanged leases/identity and207freshchecks. PR3071 remains draft/unmerged pending currentCIqualification; requester summary is retained verbatim. Exact original conversation data/all68stashes/current baseline targets retained, while historical original tabs, fresh PostgreSQL and broader local Hypothesis timing qualification remain explicit limits.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

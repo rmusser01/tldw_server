@@ -1,10 +1,12 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import React from "react"
+import { Modal } from "antd"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import axe from "axe-core"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { ResearchWorkspace } from "../index"
 import type { ServerWorkspaceCache } from "@/store/workspace-api"
+import type { WorkspaceState } from "@/store/workspace"
 import { buildResearchWorkspaceServerSourceSignature } from "../workspace-server-reconcile"
 import { serverWorkspaceMetadata } from "@/store/__tests__/workspace-activation.fixtures"
 
@@ -72,8 +74,11 @@ const testState = {
   studyMaterialsPolicy: null as "general" | "workspace" | null,
   serverWorkspace: null as ServerWorkspaceCache | null,
   workspaceTag: "workspace:test",
+  workspaceChatReferenceId: "",
+  notes: "",
+  workspaceBanner: { title: "", subtitle: "", image: null },
   initializeWorkspace: vi.fn(),
-  restoreServerWorkspace: vi.fn(),
+  installServerWorkspace: vi.fn(() => true),
   createNewWorkspace: vi.fn(),
   addSources: vi.fn(),
   setSelectedSourceIds: vi.fn(),
@@ -111,6 +116,7 @@ const testState = {
 }
 
 const workspaceChangeListeners = new Set<() => void>()
+const realWorkspace = vi.hoisted(() => ({ enabled: false, invalidated: new AbortController() }))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -133,13 +139,17 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => testState.isMobile
 }))
 
-vi.mock("@/store/workspace", async original => ({
-  ...await original<typeof import("@/store/workspace")>(),
+vi.mock("@/store/workspace", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/store/workspace")>()
+  return {
+  ...actual,
   useWorkspaceStore: Object.assign(
-    (selector: (state: typeof testState) => unknown) => selector(testState),
+    (selector: (state: WorkspaceState | typeof testState) => unknown) => realWorkspace.enabled
+      ? actual.useWorkspaceStore(selector) : selector(testState),
     {
-      getState: () => testState,
+      getState: () => realWorkspace.enabled ? actual.useWorkspaceStore.getState() : testState,
       subscribe: (listener: () => void) => {
+        if (realWorkspace.enabled) return actual.useWorkspaceStore.subscribe(listener)
         workspaceChangeListeners.add(listener)
         return () => workspaceChangeListeners.delete(listener)
       }
@@ -150,7 +160,8 @@ vi.mock("@/store/workspace", async original => ({
     setItem: vi.fn(),
     removeItem: vi.fn()
   })
-}))
+  }
+})
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -184,7 +195,7 @@ vi.mock("@/services/service-prompts", () => ({
     scopeKey: "workspace-alice",
     requestScope: { config: { serverUrl: "https://workspace.test", authMode: "multi-user" }, userId: "alice" },
     scopeSignal: options.signal,
-    scopeInvalidatedSignal: options.signal,
+    scopeInvalidatedSignal: realWorkspace.enabled ? realWorkspace.invalidated.signal : options.signal,
     release: vi.fn()
   })
 }))
@@ -409,6 +420,7 @@ const createDeferred = <T,>() => {
 describe("ResearchWorkspace stage 3 global navigation", () => {
   const migrationReceipt = () => {
     testState.workspaceId = ""
+    testState.currentNote.id = undefined
     localStorage.setItem("tldw:research-workspace:migration:tombstone:workspace-original", JSON.stringify({
       legacyWorkspaceId: "workspace-original", serverWorkspaceId: "workspace-original",
       migrationId: "migration-original", contentRetained: false, deletedAt: "2026-10-03T00:00:00Z",
@@ -420,15 +432,15 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     migrationReceipt()
     mockBgRequest.mockImplementation(async ({ path }: { path: string }) => path.endsWith("/context") ? {
       workspace_id: "workspace-original",
-      workspace: { id: "workspace-original", name: "Saved Research", created_at: "2026-10-01T00:00:00Z", version: 1 },
+      workspace: { id: "workspace-original", name: "Saved Research", created_at: "2026-10-01T00:00:00Z", version: 1, workspace_profile: "research", study_materials_policy: "workspace" },
       sources: { items: [{ id: "source-original", workspace_id: "workspace-original", media_id: 7, title: "Larch", source_type: "text", selected: true, added_at: "2026-10-01T00:00:00Z" }] },
       partial_errors: []
     } : [])
     render(<ResearchWorkspace />)
-    await waitFor(() => expect(testState.restoreServerWorkspace).toHaveBeenCalledWith(expect.objectContaining({
-      workspaceId: "workspace-original", workspaceName: "Saved Research",
+    await waitFor(() => expect(testState.installServerWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+      id: "workspace-original", name: "Saved Research",
       sources: [expect.objectContaining({ id: "source-original", mediaId: 7 })], selectedSourceIds: ["source-original"]
-    })))
+    }), { scopeKey: "workspace-alice", expectedWorkspaceId: "" }))
     expect(testState.initializeWorkspace).not.toHaveBeenCalled()
   })
 
@@ -438,7 +450,27 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     render(<ResearchWorkspace />)
     expect(await screen.findByRole("alert")).toHaveTextContent("Unable to restore your Research Workspace")
     expect(testState.initializeWorkspace).not.toHaveBeenCalled()
-    expect(testState.restoreServerWorkspace).not.toHaveBeenCalled()
+    expect(testState.installServerWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("keeps the initial body unavailable while migrated notes are pending", async () => {
+    migrationReceipt()
+    const notes = createDeferred<unknown[]>()
+    mockBgRequest.mockImplementation(async ({ path }: { path: string }) => {
+      if (path.endsWith("/notes")) return notes.promise
+      if (path.endsWith("/context")) return {
+        workspace_id: "workspace-original",
+        workspace: { id: "workspace-original", name: "Saved Research", created_at: "2026-10-01T00:00:00Z", version: 1, workspace_profile: "research", study_materials_policy: "workspace" },
+        sources: { items: [] }, partial_errors: []
+      }
+      return []
+    })
+    const view = render(<ResearchWorkspace />)
+    await waitFor(() => expect(mockBgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/workspaces/workspace-original/notes" })))
+    expect(screen.queryByTestId("workspace-chat-pane")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-studio-pane")).not.toBeInTheDocument()
+    view.unmount()
+    await act(async () => notes.resolve([]))
   })
 
   it("starts a separate workspace only on explicit recovery action and retains the saved receipt", async () => {
@@ -464,7 +496,79 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     render(<ResearchWorkspace />)
     await waitFor(() => expect(testState.initializeWorkspace).toHaveBeenCalledOnce())
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
-    expect(testState.restoreServerWorkspace).not.toHaveBeenCalled()
+    expect(testState.installServerWorkspace).not.toHaveBeenCalled()
+  })
+
+  it.each(["absent", "foreign"])("retains an empty-ID note when the migration receipt is %s", async receipt => {
+    testState.workspaceId = ""
+    testState.currentNote = { id: undefined, title: "Retained title", content: "Retained draft", keywords: [], isDirty: false }
+    if (receipt === "foreign") localStorage.setItem("tldw:research-workspace:migration:tombstone:foreign", JSON.stringify({
+      serverWorkspaceId: "foreign", migrationId: "foreign", contentRetained: false,
+      serverScopeKey: "other-account", deletedAt: "2026-10-03T00:00:00Z",
+    }))
+    render(<ResearchWorkspace />)
+    await screen.findByRole("alert")
+    expect(testState.initializeWorkspace).not.toHaveBeenCalled()
+    expect(testState.currentNote.content).toBe("Retained draft")
+  })
+
+  it("requires explicit discard before starting a separate workspace over retained content", async () => {
+    testState.workspaceId = ""
+    testState.currentNote = { id: undefined, title: "Retained title", content: "Retained draft", keywords: [], isDirty: false }
+    const confirm = vi.spyOn(Modal, "confirm").mockReturnValue({ destroy: vi.fn(), update: vi.fn() })
+    render(<ResearchWorkspace />)
+    await screen.findByRole("alert")
+    fireEvent.click(screen.getByRole("button", { name: "Start new workspace" }))
+    expect(testState.createNewWorkspace).not.toHaveBeenCalled()
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      okText: "Discard and start new", onOk: expect.any(Function),
+    }))
+    confirm.mock.calls[0][0].onOk?.()
+    expect(testState.createNewWorkspace).toHaveBeenCalledOnce()
+    confirm.mockRestore()
+  })
+
+  it.each(["switch", "unmount", "account", "success"])("fences a mounted real-store deferred restore through %s", async transition => {
+    const { useWorkspaceStore: store } = await vi.importActual<typeof import("@/store/workspace")>("@/store/workspace")
+    realWorkspace.enabled = true
+    store.getState().reset()
+    store.setState({ storeHydrated: true, savedWorkspaces: [], workspaceSnapshots: {} })
+    migrationReceipt()
+    const notes = createDeferred<unknown[]>()
+    mockBgRequest.mockImplementation(async ({ path }: { path: string }) => {
+      if (path.endsWith("/notes")) return notes.promise
+      if (path.endsWith("/context")) return {
+        workspace_id: "workspace-original",
+        workspace: { id: "workspace-original", name: "Saved Research", created_at: "2026-10-01T00:00:00Z", version: 1, workspace_profile: "research", study_materials_policy: "workspace" },
+        sources: { items: [] }, partial_errors: []
+      }
+      return []
+    })
+    const view = render(<React.StrictMode><ResearchWorkspace /></React.StrictMode>)
+    await waitFor(() => expect(mockBgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/workspaces/workspace-original/notes" })))
+    expect(store.getState().workspaceId).toBe("")
+    expect(screen.queryByTestId("workspace-studio-pane")).not.toBeInTheDocument()
+    let outgoing = ""
+    act(() => {
+      if (transition === "switch") {
+        outgoing = store.getState().initializeWorkspace("Selected while restoring")
+        store.getState().updateNoteContent("New selected draft")
+      }
+      if (transition === "unmount") view.unmount()
+      if (transition === "account") realWorkspace.invalidated.abort()
+    })
+    await act(async () => notes.resolve([]))
+    if (transition === "success") {
+      await waitFor(() => expect(store.getState().workspaceId).toBe("workspace-original"))
+      expect(store.getState().serverWorkspace).toMatchObject({ scopeKey: "workspace-alice", metadata: { id: "workspace-original" } })
+      expect(mockUpsertWorkspace).not.toHaveBeenCalled()
+    } else {
+      expect(store.getState().workspaceSnapshots["workspace-original"]).toBeUndefined()
+      expect(store.getState().workspaceId).toBe(transition === "switch" ? outgoing : "")
+      if (transition === "switch") expect(store.getState().currentNote.content).toBe("New selected draft")
+    }
+    view.unmount()
+    realWorkspace.enabled = false
   })
 
   const originalMatchMedia = window.matchMedia
@@ -493,6 +597,8 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
   })
 
   beforeEach(() => {
+    realWorkspace.enabled = false
+    realWorkspace.invalidated = new AbortController()
     vi.clearAllMocks()
     workspaceChangeListeners.clear()
     ensureLocalStorage()
@@ -626,6 +732,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
 
   it("does not migrate current persistence created by first-run initialization", async () => {
     testState.workspaceId = ""
+    testState.currentNote.id = undefined
     testState.workspaceName = ""
     testState.initializeWorkspace.mockReturnValueOnce("workspace-1")
 
@@ -685,6 +792,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
 
   it("still migrates a different workspace discovered after fresh initialization", async () => {
     testState.workspaceId = ""
+    testState.currentNote.id = undefined
     testState.workspaceName = ""
     testState.initializeWorkspace.mockReturnValueOnce("workspace-fresh")
 
@@ -716,6 +824,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
 
   it("initializes a missing workspace once when StrictMode replays effects", async () => {
     testState.workspaceId = ""
+    testState.currentNote.id = undefined
     testState.workspaceName = ""
 
     render(

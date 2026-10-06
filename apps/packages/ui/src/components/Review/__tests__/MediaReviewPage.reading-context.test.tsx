@@ -822,7 +822,9 @@ describe('MediaReviewPage active reading context', () => {
     await screen.findByText("Content 3")
     const footer = screen.getByTestId("media-review-status-bar")
     expect(footer).toHaveTextContent("Previewing 3 of 40")
-    for (let id = 1; id <= 40; id++) selectItemByCheckbox(`Item ${id}`)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add visible to selection (40)" })
+    )
     fireEvent.click(screen.getByRole("button", { name: "Review selected (40)" }))
     await waitFor(() =>
       expect(

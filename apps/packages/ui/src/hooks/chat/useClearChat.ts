@@ -36,8 +36,8 @@ type ResettableChatBase = {
 
 export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   const navigate = useNavigate()
-  const historySelection = useHistorySelectionContext()
   const { pathname } = useLocation()
+  const historySelection = useHistorySelectionContext()
   const currentChatModelSettings = useStoreChatModelSettings()
   const [defaultInternetSearchOn] = useStorage("defaultInternetSearchOn", false)
 

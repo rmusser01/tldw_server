@@ -156,7 +156,7 @@ async def test_chat_completions_streaming_unified_sse_simple(monkeypatch):
                 # SSE headers
                 ct = resp.headers.get("content-type", "").lower()
                 assert ct.startswith("text/event-stream")
-                assert resp.headers.get("Cache-Control") == "no-cache"
+                assert set(resp.headers.get("Cache-Control", "").replace(" ", "").split(",")) >= {"no-cache", "no-transform"}
                 assert resp.headers.get("X-Accel-Buffering") == "no"
 
                 lines = []
@@ -216,7 +216,7 @@ async def test_chat_completions_streaming_unified_sse_slow_async_heartbeat(monke
                 assert resp.status_code == 200
                 ct = resp.headers.get("content-type", "").lower()
                 assert ct.startswith("text/event-stream")
-                assert resp.headers.get("Cache-Control") == "no-cache"
+                assert set(resp.headers.get("Cache-Control", "").replace(" ", "").split(",")) >= {"no-cache", "no-transform"}
                 assert resp.headers.get("X-Accel-Buffering") == "no"
 
                 lines = []
@@ -277,7 +277,7 @@ async def test_chat_completions_streaming_unified_sse_provider_duplicate_done(mo
                 assert resp.status_code == 200
                 ct = resp.headers.get("content-type", "").lower()
                 assert ct.startswith("text/event-stream")
-                assert resp.headers.get("Cache-Control") == "no-cache"
+                assert set(resp.headers.get("Cache-Control", "").replace(" ", "").split(",")) >= {"no-cache", "no-transform"}
                 assert resp.headers.get("X-Accel-Buffering") == "no"
 
                 done_count = 0

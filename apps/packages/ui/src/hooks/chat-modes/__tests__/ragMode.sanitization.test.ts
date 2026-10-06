@@ -396,6 +396,24 @@ describe("ragMode sanitizer", () => {
     )
   })
 
+  it("prepares serialized note evidence without generating or dropping its semantic type", async () => {
+    mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Exact serialized note excerpt.",
+      metadata: { source: "notes_db", title: "Selected note", type: "note", media_type: "text",
+        media_id: 7, chunk_id: 17, note_id: "note-7", record_id: 19, start: 0, end: 35 } }] })
+    const context = createRagContext({ historyTurn: { serverOwned: true } })
+
+    await expect(__testing__.ragModeDefinition.preflight?.(context)).resolves.toBeNull()
+    const prompt = await __testing__.ragModeDefinition.preparePrompt(context)
+
+    expect(prompt.sources).toEqual([{ name: "Selected note", type: "note", mode: "rag", url: "",
+      pageContent: "Exact serialized note excerpt.", metadata: { source: "notes_db", title: "Selected note",
+        media_id: "7", chunk_id: "17", source_type: "note" } }])
+    expect(mocks.ragSearch).toHaveBeenCalledTimes(1)
+    expect(mocks.ragSearch.mock.calls[0][1].enable_generation).toBe(false)
+    expect(mocks.stream).not.toHaveBeenCalled()
+    expect(mocks.runChatPipeline).not.toHaveBeenCalled()
+  })
+
   it.each([true, false])("retrieves server-owned evidence without generating an unadmitted answer when generation is %s", async (ragEnableGeneration) => {
     mocks.ragSearch.mockResolvedValue({
       documents: [{

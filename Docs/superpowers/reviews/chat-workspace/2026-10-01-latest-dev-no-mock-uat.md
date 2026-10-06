@@ -281,7 +281,8 @@ earlier symlink-verification and mismatched external-root failures are retained.
 Three existing documentation-pattern tracing warnings and stale Browserslist
 data remain; no warning-free build claim is made.
 
-The latest inspected upstream remains `d81c13f`. Current remote CI is pending,
+At the preceding publication the latest inspected upstream was `d81c13f`. Its
+remote CI was pending,
 not certified green; fresh PostgreSQL is unavailable and the broader local
 Hypothesis timing failure remains recorded above. These are explicit remaining
 qualification limits, not fabricated UAT successes.

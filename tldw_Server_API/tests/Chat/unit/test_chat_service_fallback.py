@@ -5827,6 +5827,8 @@ async def test_queued_stream_factory_timeout_does_not_exhaust_queue_or_block_shu
     monkeypatch,
 ):
     _install_slow_stream_preflight(monkeypatch)
+    usage_log = AsyncMock(return_value=None)
+    monkeypatch.setattr(chat_service, "log_llm_usage", usage_log)
     release = threading.Event()
     blocked_started = threading.Event()
     queue = RequestQueue(max_queue_size=10, max_concurrent=1, timeout=1.0)
@@ -5913,6 +5915,8 @@ async def test_queued_stream_factory_timeout_does_not_exhaust_queue_or_block_shu
     assert '"code": "provider_unavailable"' in blocked_wire
     assert "late queued output" not in blocked_wire
     assert "healthy queued output" in healthy_wire
+    usage_log.assert_awaited_once()
+    assert usage_log.await_args.kwargs["conversation_id"] == "healthy"
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ const boundary = vi.hoisted(() => ({
   location: { search: "?workspace=server-research", key: "first", hash: "" },
   scope: { scopeKey: "owner-a", config: { serverUrl: "https://owner.test", authMode: "multi-user" }, userId: 42 },
   resolve: vi.fn(),
+  request: vi.fn(),
   changed: null as null | ((invalidated: boolean) => void),
   getWorkspace: vi.fn(), getWorkspaceSources: vi.fn(), getWorkspaceArtifacts: vi.fn(), getWorkspaceNotes: vi.fn()
 }))
@@ -19,6 +20,7 @@ vi.mock("react-router-dom", async importOriginal => ({
   useLocation: () => boundary.location
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: boundary }))
+vi.mock("@/services/background-proxy", () => ({ bgRequest: boundary.request }))
 vi.mock("@/services/service-prompts", () => ({ resolveServicePromptScope: boundary.resolve }))
 vi.mock("@/services/chat-account-boundary", () => ({
   watchChatAccountChanges: (changed: (invalidated: boolean) => void) => {
@@ -49,6 +51,7 @@ describe("canonical route activation (unit regression doubles)", () => {
     boundary.location = { search: "?workspace=server-research", key: "first", hash: "" }
     boundary.scope.scopeKey = "owner-a"
     boundary.resolve.mockImplementation(async () => boundary.scope)
+    boundary.request.mockResolvedValue({ notes: [] })
     const payload = serverWorkspacePayload()
     boundary.getWorkspace.mockResolvedValue(payload.metadata)
     boundary.getWorkspaceSources.mockResolvedValue(payload.sources)

@@ -229,9 +229,16 @@ def test_rejected_projection_records_consumed_tokens_before_next_quota_check(iso
     assert db.count_messages_for_conversation(next_cid) == 0
 
 
-@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
+    ("stream", "unified", "settled_before_admission"),
+    [(False, False, False), (True, False, False), (True, True, False),
+     (True, False, True), (True, True, True)],
+    ids=["json", "legacy", "unified", "settled-legacy", "settled-unified"],
+)
 @pytest.mark.parametrize("cited", [False, True])
-def test_receipt_is_server_owned_verified_atomic_result(selected_api, monkeypatch, stream, cited):
+def test_receipt_is_server_owned_verified_atomic_result(
+    selected_api, monkeypatch, stream, cited, unified, settled_before_admission,
+):
     client, db, cid, headers = selected_api
     sources = (
         [
@@ -255,9 +262,22 @@ def test_receipt_is_server_owned_verified_atomic_result(selected_api, monkeypatc
 
     monkeypatch.setattr(db, "insert_or_validate_user_turn", forbidden)
     monkeypatch.setattr(db, "append_selected_history_inputs", forbidden)
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.Chat import chat_service, streaming_utils
 
+    monkeypatch.setenv("STREAMS_UNIFIED", str(int(unified)))
     monkeypatch.setattr(chat_service, "CHAT_STREAM_INCLUDE_METADATA", False)
+    monkeypatch.setattr(streaming_utils, "CHAT_STREAM_INCLUDE_METADATA", False)
+    if settled_before_admission:
+        prime = endpoint._prime_provider_stream_response
+
+        async def prime_after_settlement(response, error_state):
+            buffered, code, has_output, _ = await prime(response, error_state)
+            chunks = list(buffered)
+            async for chunk in response.body_iterator:
+                chunks.append(chunk)
+            return tuple(chunks), code, has_output, True
+
+        monkeypatch.setattr(endpoint, "_prime_provider_stream_response", prime_after_settlement)
 
     def provider(*args, **kwargs):
         assert "tldw_turn" not in kwargs

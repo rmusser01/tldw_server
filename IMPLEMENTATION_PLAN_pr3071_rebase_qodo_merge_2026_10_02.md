@@ -1026,3 +1026,319 @@ Protected rows, seven accepted bindings,70 stashes and separate model head remai
 exact; browser preservation remains unverified. No runtime/application code changed.
 Complete locally only; fresh published-head CI/Qodo gates and applicable native
 acceptance remain mandatory. The original hosted failure is not relabeled a pass.
+
+## Stage 22: Fresh Native Owner Dev Integration
+**Goal**: Integrate actual dev27ce9763870e5fb5de40dece8e2744b6b2475c28 while
+retaining durable history ownership, request-scope and checkpoint safety.
+**Success Criteria**: Resolve the four verified merge conflicts as a semantic
+union, retain incoming native creation/adoption and New Chat reset, and qualify
+the resulting source before publishing with normal hooks and an exact lease.
+**Tests**: Incoming native-owner regressions, mounted New Chat/checkpoint safety,
+focused and owning frontend, types/lint/immutable build, hooks and independent review.
+**Status**: In Progress
+
+PR3195 adds14 incoming files. Independent merge-tree is conflicted, not a qualified
+integration. Current ec9 hosted CI is passing but cannot qualify this new source.
+Fresh Qodo remains billing-blocked; native/profile acceptance limits remain intact.
+Preserve the original running source, all data, stashes, profiles and services.
+
+Four conflicts are resolved as a semantic union retaining durable owner admission,
+scope/fence guards, checkpoint error safety, native creation/adoption and New Chat
+reset. New Chat reset RED15pass/1fail remains retained. Independent queue review
+found own native server-ID promotion incorrectly invalidated queue completion;
+mounted real-store/useMessage/metadata/queue RED retained the first sending item.
+The existing guarded publisher now serves Persona/overlay/plain normal dispatch;
+GREEN137/3files removes the first item and dispatches the next. Its mode boundary
+double is not provider/native UAT. Foreign replacement protections remain intact.
+
+Initial post-fix owning1883pass/2cached-dialog five-second timeouts and unchanged
+isolated29pass/1timeout remain failed. The two Model-only cache cases now mount
+the default Model tab directly instead of detouring through Conversation.
+Real Form/cache/store/Save/value assertions and five-second limits remain.
+Corrected isolated30 and final source-bound owning1885/98files pass with zero
+failures/skips. Bohr, Helmholtz and final Lorentz reviews are completed/closed;
+no actionable final queue or test-helper finding remains. Initial two new-any
+lint findings were corrected using existing types; that collector failure stays
+retained. Types8GB0, matched14-file lint0errors/192inheritedwarnings/0new,
+fresh28-production-file Bandit0findings/errors,295scope-union normal hooks and
+immutable7226-entry production build/tokens/unchanged budgets pass.
+
+API/config/helper/CI/packaging roots remain exact ec9, so prior backend tests are
+source-equivalent evidence, not fresh reruns. Original running source retains its
+13 dirty files. Protected rows/seven accepted inputs/70 stashes/model head remain
+exact; browser verification remains false. Normal merge commit/publication are
+next; fresh new-head CI/Qodo and applicable acceptance remain mandatory.
+
+Stage22 publication completed historically at cff586f80ce496ede0f5e0c462d5e328feb0f7fb.
+Exact-head hosted required/owning CI completed successfully; this does not qualify
+the subsequent rebase, fresh Qodo review or outstanding native acceptance.
+
+## Stage 23: Human-Requested Latest Dev Rebase
+**Goal**: Rebase the published PR onto independently verified current dev while
+preserving every qualified correction, incoming contract and protected resource.
+**Success Criteria**: Source-bound semantic conflict union, retained merge-only
+corrections, official OpenAPI generation, owning tests/types/lint/build/security
+and independent review; exact-lease publication and fresh hosted/review gates.
+**Tests**: Workspace UUID Notes and authoritative membership/draft/currentness,
+bounded transport/body-read cancellation, durable recovery, queue/settings,
+incoming quota/PG/profile/WebClipper/CI contracts, frontend owning union and build.
+**Status**: In Progress
+
+The direct human request supersedes the prior deferred latest-dev integration.
+An owned managed worktree protects the original running source, old integration
+receipts, dirty main and separate model worktree. Recovery cff backup is retained.
+Initial no-rebase-cousins trial was safely aborted only in the owned new checkout;
+rebase-cousins replay completed onto dev94854ca3db6ec3eaa0c27b4e9537bdd47d222611.
+Seven final conflicts require semantic unions, not wholesale side selection.
+Final independent merge-tree comparison exposed old merge-only corrections;
+their exact published implementation and existing assertions are restored.
+
+UUID canonical Notes data travels through the existing authoritative installer.
+Provenance enriches existing sources but never adds membership or selection.
+Optional note authority validates string ID, workspace and captured owner;
+dirty and retained draft fences remain. Intermediate restoration/activation80,
+transport205, Notes/RAG31 and durable-source65 tests pass. Original collection,
+transport and fixture failures remain separately retained, not relabeled.
+Official OpenAPI/client generation completed from this integrated checkout.
+Broader source qualification, final review, corrective commit/publication and
+new-head hosted CI are pending. No native Send, inference, new fixture, protected
+database/service/browser mutation or PR merge has occurred. Fresh Qodo remains
+billing-blocked; native/profile acceptance and three exhausted Character-root
+probes are not waived. Normal merge requires actual gate qualification.
+
+Independent Workspace review reproduced two actionable defects in mounted real
+store/component regressions: stale-owner UUID note display/export after account
+invalidation and dropped clean UUID Notes on ordinary canonical activation.
+The focused RED report retains both failures. Minimum corrections must reuse the
+existing verified owner fence and captured-scope UUID recovery without changing
+authoritative membership, dirty draft retention, numeric note separation or
+atomic install/currentness checks.
+
+Initial broad frontend qualification completed 5180 pass/23 fail across 260 files,
+zero skips and unchanged bound source. The original failure is retained; remaining
+canonical fixture contract, incomplete store mock and timing failures need causal
+inspection and distinct qualification. Raw 37-production-file Bandit exits 1 with
+23 low findings, all byte-identical to dev948 and exactly matched by a separate
+baseline scan; zero new findings or errors. Broad lint retains 38 inherited errors,
+3045 inherited warnings and zero new findings, not an absolute clean lint claim.
+Backend/auth fixture-owned qualification remains active against the pre-fix source.
+
+Auth qualification has now completed with 207 pass/1 fail, zero errors/skips and
+unchanged bound source. The actual asyncpg pool-is-closing failure is retained.
+Independent read-only attribution establishes an existing cross-loop pool-lifetime
+race pattern, not ordinary teardown; test/database/fixture code matches both dev948
+and published cff. The exact competing caller remains unproven, so a passing retry
+would not by itself establish a causal fix or full-suite qualification.
+
+The two UUID owner defects pass the separate unserved stage's original focused
+36-test suite. Independent review of its three production changes has no actionable
+P1/P2 findings. Expanded tests retain three failed Modal fixture attempts separately:
+the dependency returns duplicate test-id labels, and presence precedes animated
+visibility. After stopping and comparing existing tooltip/Modal test patterns, the
+fixture now waits for actual dialog/title visibility using the existing deadline.
+No assertion, animation/health check, native probe or timeout is disabled. This
+revised test is held for the next source-bound qualification batch, not immediately
+retried or described as passed. The original backend run remains active and its
+application/test bindings are protected from concurrent edits.
+
+The separate canonical fixture worker stopped after three invocations: a config
+loader startup error with zero tests, then two distinct 56-pass/4-fail runs. Required
+metadata, captured-origin installation, cold-boundary reset, independent legacy
+numeric Notes seed and live store subscriptions are corrected; no guard changed.
+Residual cases incorrectly expected writes through canonical view-only Quick Notes
+and a disabled Save control during the nullable workspace skeleton. Reassessment
+traced the existing real local-workspace transition and skeleton return. The UUID
+save assertions now exercise that supported local editor after separately asserting
+canonical Update is disabled; all version/provenance/save/ACK assertions remain.
+The nullable case asserts both the visible skeleton and absence of the Save entry
+point/dialog, strengthening the original fail-closed expectation. These external
+stage changes are pending a distinct source-bound qualification, not yet passed.
+
+Reworked frozen contract batch retained 134 pass/4 fail across six files with zero
+skips/source differences. Stage12 passes; three new synchronous Update assertions
+run before verified owner readiness, and the real Modal stays in invisible CSS
+appear-active under jsdom. Independent test review confirms these two fixture P2s
+and no additional authorization/coverage/lifecycle finding. The Update assertion
+now awaits readiness, and the real Modal uses the repository's ConfigProvider
+motion:false unit fixture. Both dialog/title visibility and invalidation-removal
+assertions, every numeric save/version assertion and existing deadlines remain.
+No production animation, authorization guard, assertion or health check is disabled.
+This follows stopped retries, dependency/contract tracing and independent review;
+previous failed reports remain failed, and fresh qualification is still pending.
+
+Reviewed-fixtures-v2 contract batch now passes 138 tests/six files with zero
+failures/skips/source differences; full261-file owning UI is active against that
+same frozen unserved source. Official canonical editor/format suite149 passes,
+XML confirms zero failures/errors/skips and all16642 bound source files unchanged.
+Actual latestdev948 and publishedcff remain independently unchanged; queue unset.
+Fresh08:26 comment/thread/check readback has no new comments, actionable failures
+or credit-restoration evidence. No source publication, native operation or merge.
+
+Original backend qualification finished with 2984 pass/12 fail/3 skip across
+80 files (2999 XML cases), zero errors and all16642 bound source files unchanged.
+The failed stream factory timeout, disabled durable receipt case and ten router
+contract cases remain failed. Existing three skips are separately attributed to
+macOS Bash3, a pre-existing heartbeat coordination skip and a SQLite-only lifetime
+parameter; this is not no-skip backend qualification. Root investigation is split
+between receipt flag isolation, router policy contamination and queue lifecycle.
+The seven independently reviewed Notes/fixture changes now exactly match the
+138-pass frozen stage in the owned checkout; its broader UI run remains active.
+No HEAD change, publication, protected runtime mutation or merge has occurred.
+
+Auth unchanged isolated seed3563249916 passes one case but does not relabel the
+original207/1 failure. A deterministic added real pool-identity assertion fails
+RED because the API-key helper's asyncio.run replaces the live application pool.
+The one-line existing TestClient.portal.call correction passes both auth principal
+integration cases with zero skips and unchanged bound source. The stream factory
+unit test's original one-second failure includes unrelated awaited usage storage
+initialization/migrations0..100 before DONE. Its existing AsyncMock boundary
+pattern now isolates that dependency while asserting exactly one healthy usage
+call; every queue output/currentness/shutdown watchdog remains unchanged. One
+focused case passes. Independent review finds no actionable P1/P2 in these two
+test corrections; real usage-backend end-to-end latency remains a separate gap.
+
+Receipt investigation identifies a real pre-existing admission-first race, not a
+latest-dev import regression: settlement can populate shared runtime during stream
+priming. Deterministic real settlement-before-admission tests retain all verified
+receipt/digest/spoof/persistence assertions and fail RED5 of10 cases (including
+both streaming implementations); zero errors/skips/source differences. Only the
+first emitted admission frame now excludes completed result runtime, while later
+verified result and error delivery remain unchanged. Fresh green/review pending.
+
+Receipt ordering GREEN now passes all10 cases with zero failures/errors/skips and
+unchanged source bindings; independent Turing review has no actionable P1/P2.
+Router failures reproduce after the exact preceding official Claims test:1pass/
+10fail with an empty route cache, proving session environment contamination.
+One opt-in existing explicit-enable policy fixture preserves every original
+import/attribute/runtime-error assertion and restores environment before cache
+clear. Focused11 pass and full179 Claims-first/randomseed3244966678 both pass
+without skips; independent Tesla review finds no actionable P1/P2. Retain the
+original fixture-harness startup and sandbox Ruff cache errors separately.
+Router Bandit's1924 inherited B101 assertions are unchanged, zero new findings.
+Fresh37-production-file scan retains rawexit1/23 inherited lows, zero errors/new
+findings and unchanged bound source. Seven reviewed UI files lint0errors/25
+inherited warnings/0new findings. Frontend59 pass/four files, zero pending, source
+unchanged. Larger UI and receipt-owning qualification still active; no publication
+or native/provider acceptance claim, no merge/cleanup.
+
+Receipt/history/audit/queue owning qualification now passes459 XML cases with
+zero failures/errors/skips and unchanged bound sources. The frozen261-file UI
+attempt remains failed:5205pass/5fail plus one collection failure caused by omitted
+Chat Workspace guide files in the external stage. The full current-source test
+runner includes both exact guide inputs; this is a collector correction, not a
+repository test suppression. The unchanged isolated Media footer case passes1
+with141 explicitly deselected cases, not complete Media qualification. Its setup
+now uses the existing real Add-visible-to-selection command instead of40 redundant
+checkbox clicks; all footer/reading-window/preview assertions and5s deadline remain.
+Complete Media+guide scope passes149 cases/two files with zero skips and unchanged
+stage source. Settings dialog failures are under bounded root investigation.
+Fresh full80-file backend rerun uses the original seed3244966678 and official
+isolated database fixtures; it is active, not qualified. No publication or merge.
+
+Settings bounded sidecar stopped after three complete30-case runs, each30pass/
+0fail/0skip. Unchanged baseline and profile runs do not reproduce the historical
+four settings failures. Profiling measures91.6% in real jsdom style/selector work;
+the experimental motion:false wrapper does not improve that bottleneck and was
+reverted byte-exactly. No qualified timing correction or causal fix is claimed.
+Historical duplicate Save after two timeouts remains consistent with uncancelled
+async test continuation, an inference rather than a reproduced owner-state bug.
+No fourth isolated settings diagnostic is started; existing5s limits/assertions
+remain. Final types/build and revised current-source integration qualification
+are separate pending checks, not a relabeling of earlier failed attempts.
+
+Current-source types reviewed-v1 completes exit0 with all16642 bound files
+unchanged. Fresh369-file lint comparison records38 inherited errors/3045 inherited
+warnings and zero new findings; raw lint is not clean. Independent Media setup
+review has no actionable P1/P2 or weakened assertion, while the corrected footer
+case remains about4s against its unchanged5s deadline; broad stability is pending.
+
+Build reviewed-v1 fails before compile because the older shared installed cache
+lacks the Next executable. A fresh owned copy of installed dependencies preserves
+packages without installation or shared mutation. Installed-snapshot-v2 starts
+Next but fails1351 module resolutions: two copied absolute self-aliases point
+outside the artifact filesystem root. Only those owned-copy aliases are retargeted
+to their own directories; originals and Next executable hash remain exact. Both
+failed attempts remain failed. Relocated-snapshot-v3 is the bounded third build
+attempt, active, not qualified. Production profile, source and budgets unchanged.
+
+Full-backend-reviewed remains failed: actual XML2604pass/147fail/252setup errors/
+2skips across3005 cases, source differences empty. Setup errors split126 unavailable
+required PostgreSQL and126 unreadable owned AuthNZ SQLite startup failures; raw
+write PermissionErrors remain retained. This sandbox-denied run is not a source
+qualification or evidence to weaken startup checks. A distinct unchanged80-file
+full-backend-reviewed-unsandboxed run uses originalseed3244966678 and the same
+official owned fixtures with host access; active, not passed. No source publication,
+native send, service mutation, merge or cleanup occurred.
+
+Official final OpenAPI --check exits0 against current source, fingerprint SHA
+c123ba91cca28d5f457082140a0bc22b6a8389f8a9980e50cea97f7006bd73a5 remains
+unchanged and all3850 bound backend/helper/test files remain exact. Fresh fidelity
+records24 intentional tracked differences from the independent conflict-marker
+union, one separate new owned test, every other tracked blob exact and archived
+TASK13408 byte-exact to publishedcff. That marker tree is still not qualified.
+
+Third build relocated-snapshot-v3 now exits1 with concrete Turbopack PostCSS
+process/local-port binding Operation not permitted(os error1). It is retained as
+a sandbox execution failure, not an application import defect or passing build.
+One3s sample and22-file/840047-byte progress snapshot preceded natural failure.
+The guarded owned-stop collector aborted23!=22 before any signal or mutation;
+NO process was killed. Bounded reassessment reads both existing build-wrapper
+bundlers and production package commands: production defaults to Turbopack, so
+no bundler/profile/budget substitution or source patch is justified. A subsequent
+host-access qualification must use the unchanged source and relocated dependencies,
+after the active complete261-file full-current-reviewed-v3 UI suite ends. This is
+a verified execution-permission correction, not a speculative fourth code fix;
+all three earlier build attempts remain failed, and no current build is passed.
+
+Current host-access backend qualification completes exit0: actual XML3002pass/
+0fail/0errors/3existing skips across3005 cases, all bound sources unchanged. Skips
+are the runner-Bash>=4 contract on macOS Bash3, upstream heartbeat coordination,
+and SQLite connection-lifetime's inapplicable PostgreSQL parameter; not a claim of
+zero skips or hosted Ubuntu/Python3.12 qualification. The full32-file auth/admin
+scope now runs serialized after backend completion, originalseed3563249916 and
+official isolated owned PostgreSQL fixtures; active, not passed.
+
+Full current-source owning UI completes exit0:5217pass/261files/0fail/0pending/
+0todo/source differences empty, including exact guide inputs and the new owned
+recovery test. Both earlier failed broad UI reports and all isolated settings
+diagnostics retain their original attribution. This full-suite pass is current
+source qualification, not proof that contention alone caused old settings failures
+or that the reverted motion experiment fixed them. Production build, final hooks,
+publication, new-head hosted checks, fresh Qodo and applicable acceptance remain
+pending; fullUatPassed remains false, no native input or merge/cleanup occurred.
+
+Auth reviewed-v2 completes exit0: actual XML208pass/0fail/0errors/0skips across
+32files, all16642 bound source entries unchanged. Fresh frontend contract scope
+final-reviewed-v2 completes59pass/four files/0pending with all16643 current tracked
+source entries exact, including the newly staged owned recovery test. Explicit
+normal hook preflight covers the actual734-file PR/incoming union and passes;
+zero source differences, no dependency link included. Ruff/Black report no selected
+wizard files, not new skipped required jobs. The inherited shared hooksPath has
+only the existing Git LFS pre-push hook and no installed pre-commit hook; preserve
+that configuration and do not claim automatic commit hooks ran. Explicit normal
+pre-commit verification remains the evidence, and Git commit/push must be normal.
+
+Read-only API/Git protection confirms original10/eight rows,13canonical rows and
+all seven accepted input bindings(first six one result, last zero), all70 ordered
+stashes and separate modela7 exact. All browser probing is explicitly removed;
+browserVerified/fullUatPassed remain false. Fresh09:50 actual PR readback remains
+OPEN/cff/15historical threads all resolved/no new comments or credit restoration;
+old d912 Qodo dashboard is not fresh review. Actual dev948/publishedcff and unset
+queue are independently unchanged. Host-access-v4 production build now runs using
+original Node24, unchanged source/Turbopack/profile/budgets and relocated owned
+dependency copy; no compiler/source workaround or package installation. Earlier
+three failures remain failed. No source publication, inference, merge or cleanup.
+
+Host-access-v4 immutable production qualification completes build/token-sync/
+UNCHANGED bundle-budget exit0/0/0, all7264 unique app entries exact and unserved.
+Shared payload555594 bytes below614400, heaviest route866590 below921600. This
+distinct successful permission-corrected execution does not relabel the missing
+CLI, relocated-alias resolution or sandbox-port failures. Current local owning
+UI5217, frontend59, backend3002 with three original skips, auth208 with zero skips,
+canonical149, types8GB0, OpenAPI check0 and734-file normal hooks are qualified at
+their exact source bindings; counts overlap, not a repo-wide unique total. Fresh
+37-file production Bandit scope remains exact with raw23 inherited lows/0new/
+0errors, not zero-finding scan. Matched lint38 inherited errors/3045 inherited
+warnings/0new is not raw-clean lint. Normal commit and exact-leased publication
+are next; all new-head hosted/review/applicable acceptance and merge/cleanup gates
+remain pending, Stage23 InProgress/fullUatPassedfalse.

@@ -2,7 +2,7 @@ import { normalizeNoteKeyword } from "@/services/note-keywords";
 import { createSlug } from "@/store/workspace";
 import { readKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance";
 import { bgRequest } from "@/services/background-proxy";
-import { loadServicePromptSnapshot } from "@/services/service-prompts";
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts";
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts";
 import type {
   WorkspaceArtifactApiResponse,
@@ -69,6 +69,55 @@ const readMigrationReceipts = (storage: Storage): MigrationReceipt[] => {
 export const readMigratedResearchWorkspaceId = (
   storage: Storage,
 ): string | null => readMigrationReceipts(storage)[0]?.id ?? null;
+
+/** Recover UUID Notes without granting provenance authority over workspace membership. */
+export const hydrateCanonicalWorkspaceNote = async (
+  local: LocalWorkspaceState,
+  scope: Pick<ServicePromptSnapshot, "scopeKey" | "requestScope">,
+  signal: AbortSignal,
+): Promise<void> => {
+  const workspaceId = local.id;
+  const workspaceTag = `workspace:${createSlug(local.name) || workspaceId.slice(0, 8)}`;
+  const found = await bgRequest<{
+    notes?: Array<{
+      id: string;
+      title: string;
+      content: string;
+      keywords?: unknown[];
+      version: number;
+    }>;
+  }>({
+    method: "GET",
+    abortSignal: signal,
+    ...requestScopeFields(scope.requestScope),
+    path: `/api/v1/notes/search/?tokens=${encodeURIComponent(`workspace:${workspaceId}`)}&limit=100&include_keywords=true`,
+  });
+  const canonical = (found.notes || []).find(
+    (note) =>
+      typeof note.id === "string" &&
+      typeof note.content === "string" &&
+      readKnowledgeNoteProvenance(note.content)?.research?.workspace_id === workspaceId,
+  );
+  if (!canonical) return;
+  const provenance = readKnowledgeNoteProvenance(canonical.content)!;
+  local.currentNote = {
+    id: canonical.id,
+    title: canonical.title,
+    content: canonical.content,
+    keywords: (canonical.keywords || [])
+      .map(normalizeNoteKeyword)
+      .filter((keyword): keyword is string =>
+        keyword !== null && keyword !== workspaceTag && keyword !== `workspace:${workspaceId}`),
+    version: canonical.version,
+    isDirty: false,
+    serverWorkspaceId: workspaceId,
+    serverScopeKey: scope.scopeKey,
+  };
+  local.sources = local.sources.map((source) => {
+    const retained = provenance.research!.sources.find((item) => item.mediaId === source.mediaId);
+    return retained ? { ...source, knowledgeQaEvidence: retained.evidence } : source;
+  });
+};
 
 /** Restore one migrated workspace atomically while its captured account lease remains live. */
 export const restoreMigratedResearchWorkspace = async (options: {
@@ -198,58 +247,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
             : "processing";
       return { ...source, status, readiness: authoritative.readiness };
     });
-    // The canonical installer retains workspace notes separately from UUID Notes.
-    const workspaceTag = `workspace:${createSlug(local.name) || workspaceId.slice(0, 8)}`;
-    // Canonical Quick Notes survive the legacy snapshot tombstone. The marker is
-    // descriptive evidence only; server membership and selection stay authoritative.
-    const found = await bgRequest<{
-      notes?: Array<{
-        id: string;
-        title: string;
-        content: string;
-        keywords?: unknown[];
-        version: number;
-      }>;
-    }>({
-      ...request,
-      path: `/api/v1/notes/search/?tokens=${encodeURIComponent(`workspace:${workspaceId}`)}&limit=100&include_keywords=true`,
-    });
-    assertCurrent();
-    const canonical = (found.notes || []).find(
-      (note) =>
-        typeof note.id === "string" &&
-        typeof note.content === "string" &&
-        readKnowledgeNoteProvenance(note.content)?.research?.workspace_id ===
-          workspaceId,
-    );
-    if (canonical) {
-      const provenance = readKnowledgeNoteProvenance(canonical.content)!;
-      local.currentNote = {
-        id: canonical.id,
-        title: canonical.title,
-        content: canonical.content,
-        keywords: (canonical.keywords || [])
-          .map(normalizeNoteKeyword)
-          .filter(
-            (keyword): keyword is string =>
-              keyword !== null &&
-              keyword !== workspaceTag &&
-              keyword !== `workspace:${workspaceId}`,
-          ),
-        version: canonical.version,
-        isDirty: false,
-        serverWorkspaceId: workspaceId,
-        serverScopeKey: scope.scopeKey,
-      };
-      local.sources = local.sources.map((source) => {
-        const retained = provenance.research!.sources.find(
-          (item) => item.mediaId === source.mediaId,
-        );
-        return retained
-          ? { ...source, knowledgeQaEvidence: retained.evidence }
-          : source;
-      });
-    }
+    await hydrateCanonicalWorkspaceNote(local, scope, scope.scopeSignal);
     assertCurrent();
     if (!options.apply(local, scope.scopeKey))
       throw new Error("Workspace restoration could not be installed without replacing retained content");

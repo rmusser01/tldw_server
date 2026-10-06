@@ -527,3 +527,16 @@ Future checks must cover schema rejection before writes, digest golden vectors, 
 - S16: [supported saved-context projector](/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-workspace-a11y/tldw_Server_API/app/core/Chat/history_context.py:53), [native sync/skill fences](/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-workspace-a11y/tldw_Server_API/app/api/v1/endpoints/chat.py:4558), [selected provider content](/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-workspace-a11y/tldw_Server_API/app/core/Chat/chat_service.py:4651).
 - S17: [plain native-fork metadata rejection](/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-workspace-a11y/apps/packages/ui/src/services/chat-history-selection.ts:656).
 - S18: [selected-history display projection](/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-workspace-a11y/apps/packages/ui/src/db/dexie/helpers.ts:368).
+
+### Latest-Dev Raw Retrieval Compatibility (2026-10-01)
+
+The raw RAG adapter accepts bounded `source_id` (512 UTF-8 bytes),
+`evidence_origin` (128 bytes), `section_path` (1000 bytes), and up to 20
+`ancestry_titles` of 1000 bytes each. These are backend retrieval bookkeeping,
+not fields consumed by the Chat Workspace/Research chat citation renderer or
+its source navigation. They are validated and omitted from the existing
+17-property SourceV1 metadata projection, just like highlighting and snippets.
+KnowledgeQA's separate trust-state pipeline is unchanged. Source excerpts,
+media IDs, attribution and approved locators remain exact; malformed values,
+unknown metadata and credential fields still reject before admission. This
+does not add authority, change wire version, or relax protected recovery.

@@ -372,7 +372,7 @@ class SourceMetadataV1(HistoryWireModel):
     media_id: str = Field(default=None)
     author: str = Field(default=None)
     chunk_index: SafeInt = Field(default=None)
-    total_chunks: SafeInt = Field(default=None, ge=1)
+    total_chunks: StrictInt = Field(default=None, ge=1, le=9007199254740991)
     start_char: SafeInt = Field(default=None)
     end_char: SafeInt = Field(default=None)
     chunk_start: SafeInt = Field(default=None)

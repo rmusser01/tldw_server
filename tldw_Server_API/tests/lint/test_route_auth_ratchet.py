@@ -9,6 +9,7 @@ are read at import time.
 
 from __future__ import annotations
 
+import configparser
 import os
 import subprocess
 import sys
@@ -44,7 +45,7 @@ def _run_ratchet() -> subprocess.CompletedProcess[str]:
     )
 
 
-def _load_app_route_paths(env_overrides: dict[str, str] | None = None) -> set[str]:
+def _load_app_route_paths(env_overrides: dict[str, str | None] | None = None) -> set[str]:
     """Build the ratchet's app out-of-process and return every served path.
 
     Runs in a subprocess for the same reason ``_run_ratchet`` does: ``load_app()``
@@ -62,7 +63,12 @@ def _load_app_route_paths(env_overrides: dict[str, str] | None = None) -> set[st
         "for path, _methods, _dependant in iter_routes(app):\n"
         "    print(path)\n"
     )
-    env = {**os.environ, **(env_overrides or {})}
+    env = os.environ.copy()
+    for key, value in (env_overrides or {}).items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=REPO_ROOT,
@@ -169,6 +175,54 @@ def test_force_enabled_routers_are_mounted_with_explicit_config_file() -> None:
     assert any(p.startswith("/api/v1/benchmarks") for p in paths), sorted(paths)
     assert any(p.startswith("/api/v1/connectors") for p in paths), sorted(paths)
     assert any(p.startswith("/api/v1/personalization") for p in paths), sorted(paths)
+
+
+@pytest.fixture
+def jobs_only_config(tmp_path: Path) -> Path:
+    """Use a real production config with one explicitly enabled experimental route."""
+    parser = configparser.ConfigParser()
+    parser.read(REPO_ROOT / "tldw_Server_API" / "Config_Files" / "config.txt")
+    parser.set("API-Routes", "stable_only", "true")
+    parser.set("API-Routes", "enable", '["jobs"]')
+    parser.set("API-Routes", "disable", "chat")
+    path = tmp_path / "config.txt"
+    with path.open("w", encoding="utf-8") as handle:
+        parser.write(handle)
+    return path
+
+
+@pytest.mark.unit
+def test_json_enabled_routes_remain_in_inspection(jobs_only_config: Path) -> None:
+    """Copying a JSON list must not silently discard the operator's jobs routes."""
+    paths = _load_app_route_paths({"TLDW_CONFIG_FILE": str(jobs_only_config)})
+    assert "/api/v1/jobs/queue/status" in paths, sorted(paths)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("config_key", ["TLDW_CONFIG_FILE", "TLDW_CONFIG_PATH", "TLDW_CONFIG_DIR"])
+def test_dotenv_selected_routes_remain_in_inspection(
+    jobs_only_config: Path, tmp_path: Path, config_key: str
+) -> None:
+    """Resolve dotenv-only config selection before pinning the inspection copy."""
+    parser = configparser.ConfigParser()
+    parser.read(jobs_only_config)
+    parser.set("API-Routes", "enable", "jobs")
+    with jobs_only_config.open("w", encoding="utf-8") as handle:
+        parser.write(handle)
+    dotenv = tmp_path / ".env"
+    selection = jobs_only_config.parent if config_key == "TLDW_CONFIG_DIR" else jobs_only_config
+    dotenv.write_text(f'{config_key}="{selection}"\n', encoding="utf-8")
+    paths = _load_app_route_paths(
+        {
+            "TLDW_CONFIG_FILE": None,
+            "TLDW_CONFIG_PATH": None,
+            "TLDW_CONFIG_DIR": None,
+            "TLDW_ENV_FILE": str(dotenv),
+            "TLDW_ENV_FILE_EXCLUSIVE": "1",
+        }
+    )
+    assert "/api/v1/jobs/queue/status" in paths, sorted(paths)
+    assert "/api/v1/chat/completions" not in paths
 
 
 @pytest.mark.unit

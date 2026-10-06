@@ -73,6 +73,8 @@ vi.mock("@/services/service-prompts", () => ({
     release: () => {},
   }),
   resolveServicePromptScope: async () => ({
+    scopeKey: mocks.multiUser ? `${mocks.owner}:user-a` : mocks.owner,
+    clientPrincipalVerified: true,
     config: {
       serverUrl: mocks.owner,
       authMode: mocks.multiUser ? "multi-user" : "single-user",
@@ -193,6 +195,7 @@ beforeEach(() => {
   mocks.writeError = false
   mocks.readGate = null
   localStorage.clear()
+  useWorkspaceStore.getState().reset()
   useWorkspaceStore.setState({
     workspaceId: "workspace-a",
     workspaceTag: "workspace:research",
@@ -702,6 +705,10 @@ it.each([false, true])(
     const workspace = {
       id: "workspace-a",
       name: "Research",
+      workspace_profile: "research",
+      study_materials_policy: "workspace",
+      deleted: false,
+      archived: false,
       created_at: "2026-10-01T00:00:00Z",
       version: 1,
     }
@@ -765,11 +772,19 @@ it.each([false, true])(
         }
       return []
     })
-    const restore = () =>
-      restoreMigratedResearchWorkspace({
+    const restore = () => {
+      const origin = useWorkspaceStore.getState().workspaceId
+      return restoreMigratedResearchWorkspace({
         signal: new AbortController().signal,
-        apply: useWorkspaceStore.getState().restoreServerWorkspace,
+        apply: (workspace, scopeKey) =>
+          useWorkspaceStore.getState().installServerWorkspace(workspace, {
+            scopeKey,
+            expectedWorkspaceId: origin,
+          }),
       })
+    }
+    useWorkspaceStore.getState().reset()
+    useWorkspaceStore.setState({ workspaceId: null, storeHydrated: true })
     await restore()
     const transfer = payload()
     transfer.sources = [
@@ -859,13 +874,8 @@ it.each([false, true])(
     receiver.unmount()
     // A later server deletion must stay deleted even though the canonical note retains its evidence.
     serverSources = serverSources.filter((source) => source.media_id !== 7)
-    useWorkspaceStore.setState({
-      workspaceId: null,
-      sources: [],
-      currentNote: { title: "", content: "", keywords: [], isDirty: false },
-      workspaceSnapshots: {},
-      selectedSourceIds: [],
-    })
+    useWorkspaceStore.getState().reset()
+    useWorkspaceStore.setState({ workspaceId: null, storeHydrated: true })
     await restore()
     const reopened = renderHook(() =>
       useResearchWorkspacePrefill("workspace-a", true),
@@ -1151,6 +1161,10 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
           workspace: {
             id: "workspace-a",
             name: "Research",
+            workspace_profile: "research",
+            study_materials_policy: "workspace",
+            deleted: false,
+            archived: false,
             created_at: "2026-10-01T00:00:00Z",
             version: 1,
           },
@@ -1162,9 +1176,9 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
           {
             id: 7,
             workspace_id: "workspace-a",
-            title: "Legacy note",
-            content: "Legacy body",
-            keywords_json: '["legacy"]',
+            title: "Workspace-table note",
+            content: "Separate workspace-table body",
+            keywords_json: '["workspace-table"]',
             version: 3,
             created_at: "2026-10-01T00:00:00Z",
             last_modified: "2026-10-01T00:00:00Z",
@@ -1209,9 +1223,24 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
       }
       return []
     })
+    useWorkspaceStore.getState().reset()
+    useWorkspaceStore.setState({ workspaceId: null, storeHydrated: true })
+    const origin = useWorkspaceStore.getState().workspaceId
     await restoreMigratedResearchWorkspace({
       signal: new AbortController().signal,
-      apply: useWorkspaceStore.getState().restoreServerWorkspace,
+      apply: (workspace, scopeKey) =>
+        useWorkspaceStore.getState().installServerWorkspace(workspace, {
+          scopeKey,
+          expectedWorkspaceId: origin,
+        }),
+    })
+    // Legacy Notes and workspace-table Notes have independent numeric ID namespaces.
+    useWorkspaceStore.getState().loadNote({
+      id: 7,
+      title: "Legacy note",
+      content: "Legacy body",
+      keywords: ["legacy"],
+      version: 3,
     })
     expect(useWorkspaceStore.getState().currentNote).toMatchObject({
       id: 7,
@@ -1276,11 +1305,19 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
       },
     })
     receiver.unmount()
+    const canonicalPreview = render(<QuickNotesSection />)
+    expect(await screen.findByRole("button", { name: "Update" })).toBeDisabled()
+    canonicalPreview.unmount()
+    useWorkspaceStore.getState().createNewWorkspace("Local UUID Notes")
+    useWorkspaceStore.getState().setCurrentNote(note)
     if (change === "unversioned")
       useWorkspaceStore
         .getState()
         .setCurrentNote({ ...note, version: undefined })
-    const editor = render(<QuickNotesSection />)
+    let editor!: ReturnType<typeof render>
+    await act(async () => {
+      editor = render(<QuickNotesSection />)
+    })
     fireEvent.change(screen.getByRole("textbox", { name: "Note title" }), {
       target: { value: "Canonical title edited" },
     })
@@ -1460,6 +1497,10 @@ it.each([false, true])(
           workspace: {
             id: "workspace-a",
             name: "Research",
+            workspace_profile: "research",
+            study_materials_policy: "workspace",
+            deleted: false,
+            archived: false,
             created_at: "2026-10-01T00:00:00Z",
             version: 1,
           },
@@ -1572,18 +1613,18 @@ it.each([false, true])(
       canonical.content,
     )
     receiver.unmount()
-    useWorkspaceStore.setState({
-      workspaceId: null,
-      sources: [],
-      currentNote: { title: "", content: "", keywords: [], isDirty: false },
-      workspaceSnapshots: {},
-      selectedSourceIds: [],
-    })
+    useWorkspaceStore.getState().reset()
+    useWorkspaceStore.setState({ workspaceId: null, storeHydrated: true })
     const { restoreMigratedResearchWorkspace } =
       await import("@/components/Option/ResearchWorkspace/workspace-server-restore")
+    const origin = useWorkspaceStore.getState().workspaceId
     await restoreMigratedResearchWorkspace({
       signal: new AbortController().signal,
-      apply: useWorkspaceStore.getState().restoreServerWorkspace,
+      apply: (workspace, scopeKey) =>
+        useWorkspaceStore.getState().installServerWorkspace(workspace, {
+          scopeKey,
+          expectedWorkspaceId: origin,
+        }),
     })
     expect(useWorkspaceStore.getState().currentNote.content).toBe(
       canonical.content,

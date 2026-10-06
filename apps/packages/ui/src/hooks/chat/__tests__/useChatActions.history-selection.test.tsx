@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
 import type { HistorySendTurn } from "@/types/chat-modes"
+import type { HistorySelectionController } from "../useHistorySelection"
 
 const {
   addChatMessageMock,
@@ -837,7 +838,11 @@ it("unknown admission after navigation retains immutable original intent and dis
 it("connected fresh saved normal send adopts a verified native owner before admission", async () => {
   h1.connected = true
   const options = { ...ordinaryOptions(), historyId: null, serverChatId: null, messages: [], history: [] }
-  let current: any = { owner: null, view: null, status: "idle" }
+  let current: ReturnType<HistorySelectionController["getCurrent"]> = {
+    settingsQualified: false, forkCandidate: null, forkSettings: null,
+    owner: null, bookmarkScope: null, view: null, capture: null,
+    status: "idle", error: null, pending: null
+  }
   h1.controller = {
     getCurrent: () => current,
     fence: () => { const origin = current; return () => current === origin },
@@ -845,6 +850,7 @@ it("connected fresh saved normal send adopts a verified native owner before admi
       expect(target).toMatchObject({ serverChatId: "tracked-chat-1" })
       expect(options.setServerChatId).not.toHaveBeenCalled()
       current = makeController().getCurrent()
+      if (!current.view || !current.owner) throw new Error("Expected native adoption")
       current.view = { ...current.view, cursor: { kind: "empty" } }
       current.capture = captureFor(current.view)
       onLoaded({ owner: current.owner, view: current.view })
@@ -854,14 +860,14 @@ it("connected fresh saved normal send adopts a verified native owner before admi
   }
   createChatMock.mockResolvedValue({ id: "tracked-chat-1" })
   options.setServerChatId.mockImplementation(() => {
-    expect(current.owner.kind).toBe("native")
+    expect(current.owner?.kind).toBe("native")
   })
   h1.wire.mockImplementation(async function* (request) {
     expect(addChatMessageMock).toHaveBeenCalledOnce()
     expect(request.save_to_db).toBe(false)
     yield { choices: [{ delta: { content: "new answer" } }] }
   })
-  const hook = renderHook(() => useChatActions(options as any))
+  const hook = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
   await act(async () => { expect(await hook.result.current.onSubmit({ message: "first", image: "" })).toEqual({ status: "submitted" }) })
   expect(createChatMock).toHaveBeenCalledOnce()
   expect(options.setServerChatId).toHaveBeenCalledWith("tracked-chat-1")

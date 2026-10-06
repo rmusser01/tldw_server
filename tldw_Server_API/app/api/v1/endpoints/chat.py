@@ -5889,7 +5889,7 @@ async def create_chat_completion(
                             result_emitted = False
                             try:
                                 yield sse_data(_selected_durable_response_payload({}, final_conversation_id,
-                                    history_admission, continuation_runtime))
+                                    history_admission, {}))
                                 async for chunk in accepted_stream:
                                     if continuation_runtime.get("selected_durable_result_error"):
                                         yield sse_data(
