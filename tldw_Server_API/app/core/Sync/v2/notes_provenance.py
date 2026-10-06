@@ -389,6 +389,26 @@ def expand_provenance_tombstone(envelope: SyncEnvelopeCreate, *, store: SyncV2St
     return [replace(item, mutation_plan_hash=digest) for item in plan]
 
 
+def require_notes_provenance_read_policy(*, service: SyncV2Service, user_id: str) -> SyncDataset:
+    """Fence retained, canonical and acknowledged evidence before any payload reads."""
+    dataset = next(
+        (
+            item
+            for item in service.store.list_datasets_for_user(user_id)
+            if item.metadata.get("default_personal") is True and item.metadata.get("client_family") == "chatbook"
+        ),
+        None,
+    )
+    if (
+        dataset is None
+        or dataset.owner_user_id != str(user_id)
+        or dataset.encryption_policy != "server_trusted_v1"
+        or not service.settings.server_trusted_encryption.ready
+    ):
+        raise SyncStoreError("notes_provenance_encryption_unsupported")
+    return dataset
+
+
 def ensure_notes_provenance_ready(
     *, service: SyncV2Service, note_db: CharactersRAGDB, user_id: str, required_note_id: str | None = None
 ) -> SyncDataset:
@@ -410,20 +430,7 @@ def ensure_notes_provenance_ready(
 
     if str(note_db.owner_user_id) != str(user_id):
         raise SyncStoreError("notes_provenance_owner_mismatch")
-    dataset = next(
-        (
-            item
-            for item in service.store.list_datasets_for_user(user_id)
-            if item.metadata.get("default_personal") is True and item.metadata.get("client_family") == "chatbook"
-        ),
-        None,
-    )
-    if (
-        dataset is None
-        or dataset.encryption_policy != "server_trusted_v1"
-        or not service.settings.server_trusted_encryption.ready
-    ):
-        raise SyncStoreError("notes_provenance_encryption_unsupported")
+    dataset = require_notes_provenance_read_policy(service=service, user_id=user_id)
     dataset = service.store.db.begin_notes_provenance_bootstrap(
         dataset.dataset_id, owner_user_id=user_id, bootstrap_id=service.id_factory("notes-provenance-bootstrap")
     )

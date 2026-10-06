@@ -233,6 +233,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
     NotesOrganizationVersionConflictError,
     PlannedNotesMutation,
 )
+from tldw_Server_API.app.core.Sync.v2.notes_provenance import require_notes_provenance_read_policy
 from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import (
     read_notes_provenance,
     validate_notes_provenance_payload,
@@ -1091,6 +1092,7 @@ def _capture_notes_organization_plan(
     source: str,
 ) -> object:
     try:
+        require_notes_provenance_read_policy(service=coordinator.service, user_id=coordinator.user_id)
         result = None
         if plan.steps:
             # Plain evidence pairs need only their own capability, not organization enrollment.
@@ -1137,20 +1139,19 @@ def _capture_notes_organization_plan(
 
 def _attach_note_provenance(db: CharactersRAGDB, note: dict[str, Any], *, portable: bool = False) -> dict[str, Any]:
     """Read canonical evidence; preserve acknowledged pair snapshots on retries."""
+    # Gate even already-acknowledged snapshots and editable historical markers.
+    service = get_active_server_origin_sync_service_for_user(str(db.owner_user_id))
+    try:
+        dataset = (
+            require_notes_provenance_read_policy(service=service, user_id=str(db.owner_user_id)) if service else None
+        )
+    except SyncStoreError as exc:
+        raise _note_sync_http_error(exc) from exc
     if "knowledge_provenance_state" in note and not portable:
         return note
     store = getattr(db, "note_provenance_store", None)
     record = store.get(str(note["id"]), include_deleted=True) if store is not None else None
-    service = get_active_server_origin_sync_service_for_user(str(db.owner_user_id)) if store is not None else None
     if service is not None:
-        dataset = next(
-            (
-                item
-                for item in service.store.list_datasets_for_user(str(db.owner_user_id))
-                if item.metadata.get("default_personal") is True and item.metadata.get("client_family") == "chatbook"
-            ),
-            None,
-        )
         head = (
             service.store.get_current_head(dataset.dataset_id, "notes.provenance", str(note["id"])) if dataset else None
         )
@@ -1162,6 +1163,55 @@ def _attach_note_provenance(db: CharactersRAGDB, note: dict[str, Any], *, portab
                 "deleted": head.operation == "tombstone",
             }
     return provenance_response(note, record, supported=store is not None, portable=portable)
+
+
+def _replay_local_provenance(
+    db: CharactersRAGDB, *, key: str | None, operation: str, fields: dict[str, Any]
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Look up immutable raw request identity before title work or version checks."""
+    if not key or not key.strip():
+        return None, None
+    fingerprint = NotesOrganizationCoordinator.request_fingerprint(operation, fields)
+    return fingerprint, db.note_provenance_store.read_receipt(key.strip(), fingerprint)
+
+
+def _save_local_provenance_note(
+    db: CharactersRAGDB,
+    *,
+    note_id: str,
+    fields: dict[str, Any],
+    provenance: dict[str, Any] | None,
+    provenance_version: int | None,
+    expected_version: int = 0,
+    keywords: list[str] | None = None,
+    folder_paths: list[str] | None = None,
+    receipt_key: str | None = None,
+    request_fingerprint: str | None = None,
+    restore: bool = False,
+) -> dict[str, Any]:
+    """Include organization and the validated acknowledgment in the shared local save."""
+
+    def load_result(saved_id: str) -> dict[str, Any]:
+        summary = _sync_note_keywords(db, note_id=saved_id, keywords=keywords) if keywords is not None else None
+        if folder_paths is not None:
+            db.sync_note_folders(saved_id, folder_paths)
+        response = _attach_folders_inline(db, _attach_keywords_inline(db, db.get_note_by_id(saved_id)))
+        if summary and summary.get("failed_count", 0):
+            response["keyword_sync"] = {key: summary[key] for key in ("failed_count", "failed_keywords")}
+        return NoteResponse.model_validate(response).model_dump(mode="json")
+
+    return save_local_note(
+        db,
+        note_id=note_id,
+        fields=fields,
+        expected_note_version=expected_version,
+        provenance=provenance,
+        expected_provenance_version=provenance_version,
+        receipt_key=receipt_key.strip() if receipt_key and receipt_key.strip() else None,
+        request_fingerprint=request_fingerprint,
+        load_result=load_result,
+        restore=restore,
+    )
 
 
 def _attach_provenance_bulk(db: CharactersRAGDB, notes: list[dict[str, Any]], *, portable: bool = False) -> None:
@@ -2224,7 +2274,7 @@ async def create_note(
             note_in.id
             or (
                 compound_note_id(request_key)
-                if compound_supplied
+                if sync_service is not None and compound_supplied
                 else server_origin_object_id("notes.note", idempotency_key) if sync_service is not None else None
             )
             or str(uuid4())
@@ -2251,6 +2301,16 @@ async def create_note(
             "language": note_in.language,
         }
         request_fingerprint: str | None = None
+        if sync_service is None:
+            request_fingerprint, compound_note = _replay_local_provenance(
+                db,
+                key=idempotency_key,
+                operation="note.create",
+                fields=note_in.model_dump(exclude_unset=True),
+            )
+            if compound_note is not None:
+                note_id = compound_note["id"]
+                compound_replayed = True
         if coordinator is not None:
             request_fingerprint = compound_note_request_fingerprint(
                 coordinator,
@@ -2357,7 +2417,20 @@ async def create_note(
                 )
             except Exception as sync_exc:
                 raise _note_sync_http_error(sync_exc) from sync_exc
-        elif sync_service is None:
+        elif sync_service is None and compound_note is None and provenance is not None:
+            compound_note = _save_local_provenance_note(
+                db,
+                note_id=note_id,
+                fields=note_payload,
+                provenance=provenance,
+                provenance_version=provenance_version,
+                keywords=kw_list,
+                folder_paths=folder_paths,
+                receipt_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+            )
+            note_id = compound_note["id"]
+        elif sync_service is None and compound_note is None:
             note_id = save_local_note(
                 db,
                 note_id=note_id,
@@ -2397,12 +2470,12 @@ async def create_note(
         keyword_sync_summary: dict[str, Any] | None = None
         # Handle optional keywords without failing note creation on partial errors.
         try:
-            if sync_service is None and kw_list:
+            if sync_service is None and compound_note is None and kw_list:
                 keyword_sync_summary = _sync_note_keywords(db, note_id=note_id, keywords=kw_list)
         except _NOTES_NONCRITICAL_EXCEPTIONS as kw_outer_err:
             logger.warning(f"Keyword processing encountered an issue for note {note_id}: {kw_outer_err}")
 
-        if sync_service is None and folders_supplied:
+        if sync_service is None and compound_note is None and folders_supplied:
             db.sync_note_folders(note_id, folder_paths or [])
 
         created_note_data = compound_note or db.get_note_by_id(note_id=note_id)
@@ -3526,6 +3599,7 @@ async def import_notes(
                         parsed_note["content"]
                     )
                     provenance_version = parsed_note.get("expected_provenance_version")
+                    local_provenance_save = coordinator is None and provenance is not None
                     raw_note_payload = {
                         "title": parsed_note["title"],
                         "content": parsed_note["content"],
@@ -3533,6 +3607,21 @@ async def import_notes(
                         "message_id": None,
                     }
                     request_fingerprint = None
+                    local_receipt_key = request_key if request.headers.get("Idempotency-Key", "").strip() else None
+                    if coordinator is None:
+                        request_fingerprint, replayed_note = _replay_local_provenance(
+                            db,
+                            key=local_receipt_key,
+                            operation=f"note.import.{payload.duplicate_strategy}",
+                            fields={"item": item.model_dump(), "note_index": note_index},
+                        )
+                        if replayed_note is not None:
+                            _attach_note_provenance(db, replayed_note)
+                            if replayed_note["version"] == 1:
+                                file_result.created_count += 1
+                            else:
+                                file_result.updated_count += 1
+                            continue
                     if coordinator is not None:
                         request_note_id = str(
                             imported_id
@@ -3624,6 +3713,18 @@ async def import_notes(
                                     "Compound note projection did not return a note"
                                 )
                             overwritten_note = overwrite_result
+                        elif local_provenance_save:
+                            overwritten_note = _save_local_provenance_note(
+                                db,
+                                note_id=str(imported_id),
+                                fields=update_patch,
+                                expected_version=int(existing_note["version"]),
+                                provenance=provenance,
+                                provenance_version=provenance_version,
+                                keywords=keywords,
+                                receipt_key=local_receipt_key,
+                                request_fingerprint=request_fingerprint,
+                            )
                         else:
                             expected_version = int(existing_note.get("version", 1))
                             save_local_note(
@@ -3643,7 +3744,7 @@ async def import_notes(
                             current_user=current_user,
                             task_service=task_service,
                         )
-                        if coordinator is None and parsed_note.get("keywords_provided"):
+                        if coordinator is None and not local_provenance_save and parsed_note.get("keywords_provided"):
                             _sync_note_keywords(
                                 db,
                                 note_id=str(imported_id),
@@ -3700,6 +3801,18 @@ async def import_notes(
                                 "Compound note projection did not return a note"
                             )
                         created_note = create_result
+                    elif local_provenance_save:
+                        created_note = _save_local_provenance_note(
+                            db,
+                            note_id=str(create_with_id or uuid4()),
+                            fields=raw_note_payload,
+                            provenance=provenance,
+                            provenance_version=0,
+                            keywords=keywords,
+                            receipt_key=local_receipt_key,
+                            request_fingerprint=request_fingerprint,
+                        )
+                        created_note_id = created_note["id"]
                     else:
                         created_note_id = save_local_note(
                             db,
@@ -3723,7 +3836,7 @@ async def import_notes(
                         current_user=current_user,
                         task_service=task_service,
                     )
-                    if coordinator is None and parsed_note.get("keywords"):
+                    if coordinator is None and not local_provenance_save and parsed_note.get("keywords"):
                         _sync_note_keywords(
                             db,
                             note_id=str(created_note_id),
@@ -3740,7 +3853,11 @@ async def import_notes(
                 except ConflictError as conflict_err:
                     # If "create_copy" still conflicts (for example, stale imported ID edge case),
                     # retry once without imported ID before surfacing a failure.
-                    if payload.duplicate_strategy == "create_copy" and coordinator is None:
+                    if (
+                        payload.duplicate_strategy == "create_copy"
+                        and coordinator is None
+                        and local_receipt_key is None
+                    ):
                         try:
                             created_note_id = save_local_note(
                                 db,
@@ -6618,6 +6735,14 @@ async def update_note(
         request_fingerprint: str | None = None
         compound_note: dict[str, Any] | None = None
         compound_replayed = False
+        if sync_service is None:
+            request_fingerprint, compound_note = _replay_local_provenance(
+                db,
+                key=idempotency_key,
+                operation="note.update",
+                fields={"note_id": note_id, "expected_version": expected_version, "body": raw_data},
+            )
+            compound_replayed = compound_note is not None
         if coordinator is not None:
             request_fingerprint = compound_note_request_fingerprint(
                 coordinator,
@@ -6765,6 +6890,19 @@ async def update_note(
                     )
                 except Exception as sync_exc:
                     raise _note_sync_http_error(sync_exc) from sync_exc
+            elif provenance is not None:
+                compound_note = _save_local_provenance_note(
+                    db,
+                    note_id=note_id,
+                    fields=update_data or _note_payload_from_row(_get_current_note()),
+                    expected_version=expected_version,
+                    provenance=provenance,
+                    provenance_version=provenance_version,
+                    keywords=(kw_list or []) if keywords_supplied else None,
+                    folder_paths=(folder_paths or []) if folders_supplied else None,
+                    receipt_key=idempotency_key,
+                    request_fingerprint=request_fingerprint,
+                )
             else:
                 success = save_local_note(
                     db,
@@ -6778,10 +6916,10 @@ async def update_note(
                     raise CharactersRAGDBError("Note update reported non-success without specific exception.")
 
         keyword_sync_summary: dict[str, Any] | None = None
-        if sync_service is None and keywords_supplied:
+        if sync_service is None and compound_note is None and keywords_supplied:
             keyword_sync_summary = _sync_note_keywords(db, note_id=note_id, keywords=kw_list or [])
 
-        if sync_service is None and folders_supplied:
+        if sync_service is None and compound_note is None and folders_supplied:
             db.sync_note_folders(note_id, folder_paths or [])
 
         updated_note_data = compound_note or db.get_note_by_id(note_id=note_id)
@@ -6906,6 +7044,14 @@ async def patch_note(
         request_fingerprint: str | None = None
         compound_note: dict[str, Any] | None = None
         compound_replayed = False
+        if sync_service is None:
+            request_fingerprint, compound_note = _replay_local_provenance(
+                db,
+                key=idempotency_key,
+                operation="note.patch",
+                fields={"note_id": note_id, "expected_version": expected_version, "body": raw_data},
+            )
+            compound_replayed = compound_note is not None
         if coordinator is not None:
             request_fingerprint = compound_note_request_fingerprint(
                 coordinator,
@@ -7034,6 +7180,19 @@ async def patch_note(
                     )
                 except Exception as sync_exc:
                     raise _note_sync_http_error(sync_exc) from sync_exc
+            elif provenance is not None:
+                compound_note = _save_local_provenance_note(
+                    db,
+                    note_id=note_id,
+                    fields=update_data or _note_payload_from_row(_get_current_note()),
+                    expected_version=expected_version,
+                    provenance=provenance,
+                    provenance_version=provenance_version,
+                    keywords=(kw_list or []) if keywords_supplied else None,
+                    folder_paths=(folder_paths or []) if folders_supplied else None,
+                    receipt_key=idempotency_key,
+                    request_fingerprint=request_fingerprint,
+                )
             else:
                 success = save_local_note(
                     db,
@@ -7047,10 +7206,10 @@ async def patch_note(
                     raise CharactersRAGDBError("Note update reported non-success without specific exception.")
 
         keyword_sync_summary: dict[str, Any] | None = None
-        if sync_service is None and keywords_supplied:
+        if sync_service is None and compound_note is None and keywords_supplied:
             keyword_sync_summary = _sync_note_keywords(db, note_id=note_id, keywords=kw_list or [])
 
-        if sync_service is None and folders_supplied:
+        if sync_service is None and compound_note is None and folders_supplied:
             db.sync_note_folders(note_id, folder_paths or [])
 
         updated_note_data = compound_note or db.get_note_by_id(note_id=note_id)
@@ -7320,6 +7479,15 @@ async def restore_note_provenance(
         )
         key = _organization_request_key(idempotency_key)
         fingerprint = None
+        if service is None:
+            fingerprint, replay = _replay_local_provenance(
+                db,
+                key=idempotency_key,
+                operation="note.provenance.restore",
+                fields={"note_id": note_id, "expected_version": expected_version, **restore_in.model_dump()},
+            )
+            if replay is not None:
+                return _attach_note_provenance(db, replay)
         if coordinator is not None:
             fingerprint = coordinator.request_fingerprint(
                 "note.provenance.restore",
@@ -7362,11 +7530,17 @@ async def restore_note_provenance(
                 restore=True,
             )
             return _capture_notes_organization_plan(coordinator, plan, idempotency_key=key, source="notes-api")
-        with db.transaction() as conn:
-            # A version-checked parent write fences concurrent core edits in the same transaction.
-            db.update_note(note_id, _note_payload_from_row(current), expected_version, conn=conn)
-            db.note_provenance_store.restore(note_id, restore_in.expected_provenance_version, conn=conn)
-        return _attach_folders_inline(db, _attach_keywords_inline(db, db.get_note_by_id(note_id)))
+        return _save_local_provenance_note(
+            db,
+            note_id=note_id,
+            fields=_note_payload_from_row(current),
+            expected_version=expected_version,
+            provenance=retained["payload"],
+            provenance_version=restore_in.expected_provenance_version,
+            receipt_key=idempotency_key,
+            request_fingerprint=fingerprint,
+            restore=True,
+        )
     except _NOTES_NONCRITICAL_EXCEPTIONS as exc:
         handle_db_errors(exc, "note provenance")
 
@@ -7476,6 +7650,18 @@ async def bulk_create_notes(
             )
             compound_note: dict[str, Any] | None = None
             request_fingerprint: str | None = None
+            compound_replayed = False
+            local_receipt_key = item_key if http_request.headers.get("Idempotency-Key", "").strip() else None
+            if sync_service is None:
+                request_fingerprint, compound_note = _replay_local_provenance(
+                    db,
+                    key=local_receipt_key,
+                    operation="note.bulk_create",
+                    fields=item.model_dump(exclude_unset=True),
+                )
+                if compound_note is not None:
+                    note_id = compound_note["id"]
+                    compound_replayed = True
             if coordinator is not None:
                 request_fingerprint = compound_note_request_fingerprint(
                     coordinator,
@@ -7513,6 +7699,7 @@ async def bulk_create_notes(
                     if not isinstance(replayed, dict):
                         raise SyncStoreError("Compound note replay did not return a note")
                     compound_note = replayed
+                    compound_replayed = True
 
             effective_title = (
                 str(compound_note["title"])
@@ -7591,7 +7778,20 @@ async def bulk_create_notes(
                     )
                 except Exception as sync_exc:
                     raise _note_sync_http_error(sync_exc) from sync_exc
-            elif sync_service is None:
+            elif sync_service is None and compound_note is None and provenance is not None:
+                compound_note = _save_local_provenance_note(
+                    db,
+                    note_id=note_id,
+                    fields=note_payload,
+                    provenance=provenance,
+                    provenance_version=provenance_version,
+                    keywords=kw_list,
+                    folder_paths=folder_paths,
+                    receipt_key=local_receipt_key,
+                    request_fingerprint=request_fingerprint,
+                )
+                note_id = compound_note["id"]
+            elif sync_service is None and compound_note is None:
                 note_id = save_local_note(
                     db,
                     note_id=note_id,
@@ -7629,7 +7829,7 @@ async def bulk_create_notes(
                 pass
 
             # Attach keywords if provided
-            if sync_service is None:
+            if sync_service is None and compound_note is None:
                 try:
                     if kw_list:
                         for kw in kw_list:
@@ -7648,7 +7848,10 @@ async def bulk_create_notes(
             nd = compound_note or db.get_note_by_id(note_id=note_id)
             if not nd:
                 raise CharactersRAGDBError("Created note could not be retrieved.")
-            _reconcile_note_tasks_after_save(db=db, note_data=nd, current_user=current_user, task_service=task_service)
+            if not compound_replayed:
+                _reconcile_note_tasks_after_save(
+                    db=db, note_data=nd, current_user=current_user, task_service=task_service
+                )
             if compound_note is None:
                 nd = _attach_keywords_inline(db, nd)
                 nd = _attach_folders_inline(db, nd)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from contextlib import nullcontext
@@ -35,11 +36,60 @@ def notes_provenance_schema_sql(*, postgres: bool) -> str:
     )"""
 
 
+def notes_provenance_receipts_schema_sql() -> str:
+    """Keep local request acknowledgments independent of Sync and mutable note heads."""
+    return """CREATE TABLE IF NOT EXISTS notes_provenance_receipts (
+        owner_user_id TEXT NOT NULL,
+        request_key TEXT NOT NULL,
+        request_fingerprint TEXT NOT NULL,
+        response_json TEXT,
+        PRIMARY KEY(owner_user_id, request_key)
+    )"""
+
+
 class NoteProvenanceStore:
     """All reads and writes bind the sidecar and its parent to the DB owner."""
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
+
+    @staticmethod
+    def _receipt_key(key: str) -> str:
+        """Retain only an opaque digest of caller idempotency keys."""
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+    def read_receipt(self, key: str, fingerprint: str, conn: Any = None) -> dict[str, Any] | None:
+        """Replay the owner's immutable acknowledgment before mutable-head checks."""
+        with nullcontext(conn) if conn is not None else self._db.transaction() as connection:
+            row = connection.execute(
+                "SELECT request_fingerprint, response_json FROM notes_provenance_receipts WHERE owner_user_id = ? AND request_key = ?",
+                (self._db.owner_user_id, self._receipt_key(key)),
+            ).fetchone()
+            if row is None:
+                return None
+            if row["request_fingerprint"] != fingerprint:
+                raise ConflictError("Knowledge provenance idempotency key was used for different inputs")
+            return json.loads(row["response_json"]) if row["response_json"] is not None else None
+
+    def claim_receipt(self, key: str, fingerprint: str, conn: Any) -> dict[str, Any] | None:
+        """Serialize concurrent identical keys inside the caller's mutation transaction."""
+        conn.execute(
+            """INSERT INTO notes_provenance_receipts(owner_user_id, request_key, request_fingerprint)
+            VALUES (?, ?, ?) ON CONFLICT(owner_user_id, request_key) DO NOTHING""",
+            (self._db.owner_user_id, self._receipt_key(key), fingerprint),
+        )
+        return self.read_receipt(key, fingerprint, conn=conn)
+
+    def complete_receipt(self, key: str, fingerprint: str, response: dict[str, Any], conn: Any) -> None:
+        """Commit the exact validated response with the parent, child, and organization."""
+        encoded = json.dumps(response, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        result = conn.execute(
+            """UPDATE notes_provenance_receipts SET response_json = ?
+            WHERE owner_user_id = ? AND request_key = ? AND request_fingerprint = ? AND response_json IS NULL""",
+            (encoded, self._db.owner_user_id, self._receipt_key(key), fingerprint),
+        )
+        if result.rowcount != 1:
+            raise ConflictError("Knowledge provenance acknowledgment already completed or not claimed")
 
     def _parent(self, note_id: str, conn: Any, *, lock: bool = False) -> dict[str, Any] | None:
         """Read or lock the retained parent with an explicit authenticated owner."""

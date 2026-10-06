@@ -223,8 +223,8 @@ def test_plain_and_historical_reads_are_absent_until_exact_save(api, chacha_db):
     assert response.json()["knowledge_provenance"] == PAYLOAD
 
 
-def test_lost_ack_replays_before_stale_checks_or_title_generation(client, sync_service, monkeypatch):
-    sync_service.adapters = default_sync_v2_registry()
+def test_lost_ack_replays_before_stale_checks_or_title_generation(api, monkeypatch):
+    client, _ = api
     calls = []
 
     def title(*args, **kwargs):
@@ -344,9 +344,10 @@ def test_json_import_roundtrip_overwrite_preserves_omission_and_rejects_stale_ch
     assert client.get(path).json()["content"] == "New text"
 
 
-def test_lost_update_ack_returns_acknowledged_pair_after_later_child_edit(client, sync_service):
-    sync_service.adapters = default_sync_v2_registry()
-    saved = create((client, True))
+@pytest.mark.parametrize("method", ["put", "patch"])
+def test_lost_update_ack_returns_acknowledged_pair_after_later_child_edit(api, method):
+    client, _ = api
+    saved = create(api)
     path = BASE + "/" + saved["id"]
     headers = {"expected-version": "1", "Idempotency-Key": "update-lost"}
     body = {
@@ -356,7 +357,7 @@ def test_lost_update_ack_returns_acknowledged_pair_after_later_child_edit(client
         "keywords": ["First"],
         "folder_paths": ["First"],
     }
-    accepted = client.patch(path, headers=headers, json=body)
+    accepted = getattr(client, method)(path, headers=headers, json=body)
     assert accepted.status_code == 200, accepted.text
     later = client.put(
         path,
@@ -370,7 +371,7 @@ def test_lost_update_ack_returns_acknowledged_pair_after_later_child_edit(client
         },
     )
     assert later.status_code == 200, later.text
-    replay = client.patch(path, headers=headers, json=body)
+    replay = getattr(client, method)(path, headers=headers, json=body)
     assert replay.status_code == 200, replay.text
     assert replay.json() == accepted.json()
     assert client.get(path).json()["content"] == "Later"
@@ -494,3 +495,252 @@ def test_ready_profile_enrolls_existing_plain_target_before_organization_pair(cl
     assert child.mutation_group_id == core.mutation_group_id
     assert child.mutation_step == core.mutation_step + 1
     assert "knowledge_provenance" not in core.payload
+
+
+@pytest.mark.parametrize("policy", ["withdrawn", "unsupported"])
+@pytest.mark.parametrize("state", ["active", "deleted", "marker"])
+def test_read_and_exports_fail_closed_after_encryption_policy_change(
+    client, sync_service, chacha_db, monkeypatch, policy, state
+):
+    from dataclasses import replace
+
+    from tldw_Server_API.app.core.Sync.v2.security import server_trusted_encryption_status_from_config
+
+    sync_service.adapters = default_sync_v2_registry()
+    if state == "marker":
+        note_id = chacha_db.add_note("Historical", retain_notes_provenance("Body", PAYLOAD))
+    else:
+        saved = create((client, True), content=retain_notes_provenance("Body", PAYLOAD))
+        note_id = saved["id"]
+        if state == "deleted":
+            assert client.delete(BASE + "/" + note_id, headers={"expected-version": "1"}).status_code == 204
+            assert client.post(BASE + "/" + note_id + "/restore?expected_version=2").status_code == 200
+    if policy == "withdrawn":
+        sync_service.settings = replace(
+            sync_service.settings,
+            server_trusted_encryption=server_trusted_encryption_status_from_config(
+                mode=None, server_trusted_enabled=False, auth_mode="multi_user"
+            ),
+        )
+    else:
+        dataset = sync_service.store.list_datasets_for_user("user-1")[0]
+        monkeypatch.setattr(
+            sync_service.store,
+            "list_datasets_for_user",
+            lambda _: [replace(dataset, encryption_policy="client_e2ee_v1")],
+        )
+    for method, suffix in [
+        ("get", "/" + note_id),
+        ("get", "/"),
+        ("get", "/export"),
+        ("post", "/export"),
+        ("get", "/export.csv"),
+        ("post", "/export.csv"),
+    ]:
+        response = getattr(client, method)(
+            BASE + suffix, **({"json": {"note_ids": [note_id]}} if method == "post" else {})
+        )
+        assert response.status_code == 409, response.text
+        assert "Saved evidence" not in response.text
+        assert "notes_provenance_encryption_unsupported" in response.text
+
+
+def test_bulk_lost_ack_is_immutable_and_rejects_changed_input(api, monkeypatch):
+    client, _ = api
+    calls = []
+
+    def title(*args, **kwargs):
+        calls.append(1)
+        return "Bulk generated " + str(len(calls))
+
+    monkeypatch.setattr(endpoint, "_generate_note_title_with_service_prompt", title)
+    item = {
+        "content": "Body",
+        "auto_title": True,
+        "knowledge_provenance": PAYLOAD,
+        "expected_provenance_version": 0,
+        "keywords": ["Original"],
+        "folder_paths": ["Original"],
+    }
+    body = {"notes": [item, {**item, "content": "Second"}]}
+    headers = {"Idempotency-Key": "bulk-lost"}
+    first = client.post(BASE + "/bulk", json=body, headers=headers)
+    assert first.status_code == 200, first.text
+    assert first.json()["created_count"] == 2, first.text
+    notes = client.get(BASE + "/").json()["notes"]
+    for note in notes:
+        assert (
+            client.put(
+                BASE + "/" + note["id"],
+                headers={"expected-version": "1"},
+                json={"content": "Later", "keywords": ["Later"]},
+            ).status_code
+            == 200
+        )
+    replay = client.post(BASE + "/bulk", json=body, headers=headers)
+    assert replay.json() == first.json(), replay.text
+    assert len(calls) == 2
+    assert len(client.get(BASE + "/").json()["notes"]) == 2
+    changed = client.post(
+        BASE + "/bulk", json={"notes": [{**item, "content": "Altered"}, body["notes"][1]]}, headers=headers
+    )
+    assert changed.status_code == 207, changed.text
+    assert changed.json()["failed_count"] == 1
+    assert len(calls) == 2
+
+
+def test_inactive_receipt_rejects_retry_with_provenance_removed(client, monkeypatch):
+    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    body = {"title": "First", "content": "Body", "knowledge_provenance": PAYLOAD, "expected_provenance_version": 0}
+    headers = {"Idempotency-Key": "remove-provenance"}
+    saved = client.post(BASE + "/", json=body, headers=headers)
+    assert saved.status_code == 201, saved.text
+    changed = client.post(BASE + "/", json={"title": "First", "content": "Body"}, headers=headers)
+    assert changed.status_code == 409, changed.text
+    assert len(client.get(BASE + "/").json()["notes"]) == 1
+
+
+def test_inactive_rest_receipt_rolls_back_organization_then_replays_after_reopen(client, chacha_db, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+
+    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    store = chacha_db.note_provenance_store
+    original = store.complete_receipt
+
+    def fail(*args, **kwargs):
+        raise CharactersRAGDBError("Injected acknowledgment failure")
+
+    monkeypatch.setattr(store, "complete_receipt", fail)
+    body = {
+        "title": "First",
+        "content": "Body",
+        "knowledge_provenance": PAYLOAD,
+        "expected_provenance_version": 0,
+        "keywords": ["Atomic"],
+        "folder_paths": ["Atomic"],
+    }
+    headers = {"Idempotency-Key": "rollback-reopen"}
+    assert client.post(BASE + "/", json=body, headers=headers).status_code == 500
+    assert chacha_db.count_notes() == 0
+    assert chacha_db.get_keyword_by_text("Atomic") is None
+    with chacha_db.transaction() as conn:
+        assert conn.execute("SELECT * FROM notes_provenance_receipts").fetchall() == []
+        assert conn.execute("SELECT * FROM notes_knowledge_provenance").fetchall() == []
+        assert conn.execute("SELECT * FROM note_folders").fetchall() == []
+    monkeypatch.setattr(store, "complete_receipt", original)
+    first = client.post(BASE + "/", json=body, headers=headers)
+    assert first.status_code == 201, first.text
+    chacha_db.close_all_connections()
+    reopened = CharactersRAGDB(chacha_db.db_path, client_id="user-1")
+    client.app.dependency_overrides[endpoint.get_chacha_db_for_user] = lambda: reopened
+    try:
+        assert client.post(BASE + "/", json=body, headers=headers).json() == first.json()
+    finally:
+        reopened.close_all_connections()
+
+
+@pytest.mark.parametrize("policy", ["withdrawn", "unsupported"])
+def test_acknowledgment_replay_cannot_bypass_read_policy(client, sync_service, monkeypatch, policy):
+    from dataclasses import replace
+
+    from tldw_Server_API.app.core.Sync.v2.security import server_trusted_encryption_status_from_config
+
+    sync_service.adapters = default_sync_v2_registry()
+    body = {
+        "title": "First",
+        "content": retain_notes_provenance("Body", PAYLOAD),
+        "knowledge_provenance": PAYLOAD,
+        "expected_provenance_version": 0,
+    }
+    headers = {"Idempotency-Key": "policy-replay"}
+    assert client.post(BASE + "/", json=body, headers=headers).status_code == 201
+    if policy == "withdrawn":
+        sync_service.settings = replace(
+            sync_service.settings,
+            server_trusted_encryption=server_trusted_encryption_status_from_config(
+                mode=None, server_trusted_enabled=False, auth_mode="multi_user"
+            ),
+        )
+    else:
+        dataset = sync_service.store.list_datasets_for_user("user-1")[0]
+        monkeypatch.setattr(
+            sync_service.store,
+            "list_datasets_for_user",
+            lambda _: [replace(dataset, encryption_policy="client_e2ee_v1")],
+        )
+    denied = client.post(BASE + "/", json=body, headers=headers)
+    assert denied.status_code == 409, denied.text
+    assert "Saved evidence" not in denied.text
+
+
+@pytest.mark.parametrize("strategy", ["create_copy", "overwrite"])
+def test_inactive_import_lost_ack_replays_before_duplicate_or_child_checks(client, monkeypatch, strategy):
+    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    row = {
+        "title": "Imported",
+        "content": "Body",
+        "knowledge_provenance": PAYLOAD,
+        "expected_provenance_version": 0,
+        "keywords": ["Imported"],
+    }
+    if strategy == "overwrite":
+        saved = create((client, False))
+        row.update(id=saved["id"], expected_provenance_version=1)
+    body = {"duplicate_strategy": strategy, "items": [{"format": "json", "content": json.dumps(row)}]}
+    headers = {"Idempotency-Key": "import-lost"}
+    first = client.post(BASE + "/import", json=body, headers=headers)
+    assert first.status_code == 200, first.text
+    assert first.json()["failed_count"] == 0
+    notes = client.get(BASE + "/").json()["notes"]
+    for note in notes:
+        assert (
+            client.put(
+                BASE + "/" + note["id"], json={"content": "Later"}, headers={"expected-version": str(note["version"])}
+            ).status_code
+            == 200
+        )
+    replay = client.post(BASE + "/import", json=body, headers=headers)
+    assert replay.json() == first.json(), replay.text
+    assert len(client.get(BASE + "/").json()["notes"]) == 1
+    altered = {**body, "items": [{"format": "json", "content": json.dumps({**row, "content": "Changed"})}]}
+    rejected = client.post(BASE + "/import", json=altered, headers=headers)
+    assert rejected.json()["failed_count"] == 1, rejected.text
+    assert len(client.get(BASE + "/").json()["notes"]) == 1
+
+
+def test_lost_retained_restore_ack_uses_original_parent_child_pair(api):
+    client, _ = api
+    note = create(api)
+    path = BASE + "/" + note["id"]
+    assert client.delete(path, headers={"expected-version": "1"}).status_code == 204
+    trash = client.get(BASE + "/trash").json()["notes"][0]
+    assert client.post(path + "/restore?expected_version=2").status_code == 200
+    body = {"expected_provenance_version": 2, "expected_provenance_hash": trash["knowledge_provenance_hash"]}
+    headers = {"Idempotency-Key": "restore-lost", "expected-version": "3"}
+    first = client.post(path + "/provenance/restore", json=body, headers=headers)
+    assert first.status_code == 200, first.text
+    assert client.put(path, json={"content": "Later"}, headers={"expected-version": "4"}).status_code == 200
+    assert client.post(path + "/provenance/restore", json=body, headers=headers).json() == first.json()
+
+
+def test_inactive_owner_receipts_and_created_ids_are_independent(client, chacha_db, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    body = {"title": "Owner", "content": "Body", "knowledge_provenance": PAYLOAD, "expected_provenance_version": 0}
+    headers = {"Idempotency-Key": "same-key-for-each-owner"}
+    first = client.post(BASE + "/", json=body, headers=headers)
+    assert first.status_code == 201, first.text
+    foreign = CharactersRAGDB(str(Path(chacha_db.db_path).with_name("receipt-owner.db")), client_id="other-owner")
+    client.app.dependency_overrides[endpoint.get_chacha_db_for_user] = lambda: foreign
+    client.app.dependency_overrides[endpoint.get_request_user] = lambda: endpoint.User(
+        id="other-owner", username="other-owner", is_active=True, is_admin=True
+    )
+    try:
+        other = client.post(BASE + "/", json={**body, "title": "Other"}, headers=headers)
+        assert other.status_code == 201, other.text
+        assert other.json()["id"] != first.json()["id"]
+        assert other.json()["title"] == "Other"
+        assert client.post(BASE + "/", json={**body, "title": "Other"}, headers=headers).json() == other.json()
+    finally:
+        foreign.close_all_connections()

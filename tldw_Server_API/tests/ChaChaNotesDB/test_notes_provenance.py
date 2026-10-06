@@ -87,7 +87,7 @@ def test_upgrade_v74_repeatable(db):
         migrated = CharactersRAGDB(db.db_path, client_id="alice")
         try:
             assert migrated.note_provenance_store.get("own") is None
-            assert migrated._get_db_version(migrated.get_connection()) == 75
+            assert migrated._get_db_version(migrated.get_connection()) == 76
         finally:
             migrated.close_all_connections()
 
@@ -109,7 +109,7 @@ def test_postgres_migration_and_forced_owner_rls(pg_database_config):
                 "SELECT qual, with_check FROM pg_policies WHERE tablename = 'notes_knowledge_provenance'"
             ).fetchall()
             assert len(policies) == 1 and "app.current_user_id" in policies[0]["qual"]
-        assert database._POSTGRES_SCHEMA_VERSION == 79
+        assert database._POSTGRES_SCHEMA_VERSION == 80
     finally:
         database.close_all_connections()
 
@@ -189,7 +189,7 @@ def test_postgres_v78_upgrade_and_reopen(pg_database_config):
             ":memory:", client_id="alice", backend=DatabaseBackendFactory.create_backend(pg_database_config)
         )
         try:
-            assert migrated._runtime_schema_version == 79
+            assert migrated._runtime_schema_version == 80
             assert migrated.note_provenance_store.get("own") is None
         finally:
             migrated.close_all_connections()
@@ -206,3 +206,87 @@ def test_explicit_restore_requires_exact_retained_payload(db):
     with pytest.raises(ConflictError):
         db.note_provenance_store.apply_sync("own", changed, 3, notes_provenance_object_hash(changed), restore=True)
     assert db.note_provenance_store.restore("own", expected_version=2)["payload"] == PAYLOAD
+
+
+def test_receipt_rollback_reopen_changed_input_and_owner_isolation(db):
+    store = db.note_provenance_store
+    with pytest.raises(RuntimeError, match="rollback"):
+        with db.transaction() as conn:
+            assert store.claim_receipt("lost", "fingerprint", conn) is None
+            store.put("own", PAYLOAD, 0, conn=conn)
+            store.complete_receipt("lost", "fingerprint", {"id": "own", "version": 1}, conn)
+            raise RuntimeError("rollback")
+    assert store.read_receipt("lost", "fingerprint") is None
+    assert store.get("own") is None
+    with db.transaction() as conn:
+        assert store.claim_receipt("lost", "fingerprint", conn) is None
+        store.put("own", PAYLOAD, 0, conn=conn)
+        store.complete_receipt("lost", "fingerprint", {"id": "own", "version": 1}, conn)
+    db.update_note("own", {"content": "Later"}, 1)
+    db.close_all_connections()
+    reopened = CharactersRAGDB(db.db_path, client_id="alice")
+    foreign = CharactersRAGDB(db.db_path, client_id="bob")
+    try:
+        assert reopened.note_provenance_store.read_receipt("lost", "fingerprint") == {"id": "own", "version": 1}
+        with reopened.transaction() as conn:
+            assert reopened.note_provenance_store.claim_receipt("lost", "fingerprint", conn) == {
+                "id": "own",
+                "version": 1,
+            }
+        with pytest.raises(ConflictError):
+            reopened.note_provenance_store.read_receipt("lost", "changed")
+        assert foreign.note_provenance_store.read_receipt("lost", "fingerprint") is None
+        with foreign.transaction() as conn:
+            assert foreign.note_provenance_store.claim_receipt("lost", "different", conn) is None
+            foreign.note_provenance_store.complete_receipt("lost", "different", {"id": "foreign"}, conn)
+        assert reopened.note_provenance_store.read_receipt("lost", "fingerprint")["id"] == "own"
+    finally:
+        reopened.close_all_connections()
+        foreign.close_all_connections()
+
+
+def test_upgrade_v75_receipts_repeatable(db):
+    with db.transaction() as conn:
+        conn.execute("DROP TABLE notes_provenance_receipts")
+        conn.execute("UPDATE db_schema_version SET version = 75 WHERE schema_name = ?", (db._SCHEMA_NAME,))
+    db.close_all_connections()
+    for _ in range(2):
+        migrated = CharactersRAGDB(db.db_path, client_id="alice")
+        try:
+            assert migrated._get_db_version(migrated.get_connection()) == 76
+            assert migrated.note_provenance_store.read_receipt("missing", "fp") is None
+        finally:
+            migrated.close_all_connections()
+
+
+@pytest.mark.postgres
+def test_postgres_receipt_upgrade_reopen_and_rls(pg_restricted_backend):
+    database = CharactersRAGDB(":memory:", client_id="alice", backend=pg_restricted_backend)
+    with database.transaction() as conn:
+        conn.execute("DROP TABLE notes_provenance_receipts")
+        conn.execute("UPDATE db_schema_version SET version = 79 WHERE schema_name = ?", (database._SCHEMA_NAME,))
+    database = CharactersRAGDB(":memory:", client_id="alice", backend=pg_restricted_backend)
+    assert database._runtime_schema_version == 80
+    store = database.note_provenance_store
+    with database.transaction() as conn:
+        store.claim_receipt("same", "fingerprint", conn)
+        store.complete_receipt("same", "fingerprint", {"id": "own"}, conn)
+        flags = conn.execute(
+            "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = 'notes_provenance_receipts'"
+        ).fetchone()
+        assert flags["relrowsecurity"] and flags["relforcerowsecurity"]
+    reopened = CharactersRAGDB(":memory:", client_id="alice", backend=pg_restricted_backend)
+    assert reopened.note_provenance_store.read_receipt("same", "fingerprint") == {"id": "own"}
+    with pg_restricted_backend.transaction() as conn:
+        for owner in ("bob", ""):
+            conn.execute("SELECT set_config('app.current_user_id', %s, true)", (owner,))
+            assert conn.execute("SELECT * FROM notes_provenance_receipts").fetchall() == []
+        conn.execute("SELECT set_config('app.current_user_id', %s, true)", ("alice",))
+        assert len(conn.execute("SELECT * FROM notes_provenance_receipts").fetchall()) == 1
+    with pytest.raises(Exception, match="row-level security"):
+        with pg_restricted_backend.transaction() as conn:
+            conn.execute("SELECT set_config('app.current_user_id', %s, true)", ("bob",))
+            conn.execute(
+                "INSERT INTO notes_provenance_receipts(owner_user_id,request_key,request_fingerprint) VALUES (%s,%s,%s)",
+                ("alice", "foreign", "fp"),
+            )

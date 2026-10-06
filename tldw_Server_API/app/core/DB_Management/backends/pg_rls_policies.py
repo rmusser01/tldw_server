@@ -518,6 +518,22 @@ def build_core_chat_rls_sql() -> list[str]:
     return stmts
 
 
+def build_notes_provenance_receipts_rls_sql() -> list[str]:
+    """Retain acknowledgments for their authenticated owner, even after later edits."""
+    return [
+        """DO $notes_provenance_receipts_rls$
+        BEGIN
+          IF to_regclass('notes_provenance_receipts') IS NULL THEN RETURN; END IF;
+          ALTER TABLE notes_provenance_receipts ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE notes_provenance_receipts FORCE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS notes_provenance_receipts_owner ON notes_provenance_receipts;
+          CREATE POLICY notes_provenance_receipts_owner ON notes_provenance_receipts
+            USING (owner_user_id = current_setting('app.current_user_id', true))
+            WITH CHECK (owner_user_id = current_setting('app.current_user_id', true));
+        END $notes_provenance_receipts_rls$;"""
+    ]
+
+
 def build_notes_provenance_rls_sql() -> list[str]:
     """Require the authenticated owner on the sidecar and its retained parent."""
     predicate = """owner_user_id = current_setting('app.current_user_id', true)
@@ -960,6 +976,7 @@ def build_chacha_rls_sql() -> list[str]:
     stmts.extend(build_shared_workspace_chat_rls_sql())
     stmts.extend(build_workspace_chat_startup_rls_sql())
     stmts.extend(build_notes_provenance_rls_sql())
+    stmts.extend(build_notes_provenance_receipts_rls_sql())
     # Native fork tables. Written out per table rather than looped over
     # NATIVE_CHAT_TABLES: the RLS coverage ratchet scans source text and cannot
     # see DDL assembled from a loop variable. Keep this list in step with
