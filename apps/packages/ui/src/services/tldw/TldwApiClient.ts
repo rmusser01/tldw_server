@@ -69,6 +69,7 @@ import type {
 } from "@/services/tldw/single-user-credential"
 import {
   clearManualCredentials,
+  getBuildTimeApiKey,
   hasNewerCurrentAccessToken,
   hasInvalidatedRefreshSession,
   invalidateRefreshSessionIfCurrent,
@@ -1673,16 +1674,30 @@ export interface SandboxWorkspaceDiagnosticsResponse {
   links: SandboxWorkspaceDiagnosticsLinks
 }
 
+// Cookie-session owners can change without changing the connection config.
+// One watcher fences all client instances without retaining each instance.
+let domainCacheAccountRevision = 0
+const stopWatchingDomainCacheAccount = watchChatAccountChanges(invalidated => {
+  if (invalidated) domainCacheAccountRevision += 1
+})
+const domainCacheHot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
+domainCacheHot?.dispose(stopWatchingDomainCacheAccount)
+
 export class TldwApiClientBase {
   private storage: Storage
   private sessionStorage: Storage
   private config: TldwConfig | null = null
+  private configInitialization = 0
+  private completedConfigInitialization = 0
   private baseUrl: string = ''
   private headers: HeadersInit = {}
   characterCache = new BoundedTtlCache<any>()
   characterInFlight = new Map<string, Promise<any>>()
   chatMessagesCache = new BoundedTtlCache<ServerChatMessage[]>()
   chatMessagesInFlight = new Map<string, Promise<ServerChatMessage[]>>()
+  private domainCacheConfig: TldwConfig | null = null
+  private domainCacheAccountRevision = -1
+  private domainCacheRevision = 0
   private openApiPathSet: Set<string> | null = null
   private openApiPathSetPromise: Promise<Set<string> | null> | null = null
   private resolvedPathCache = new Map<string, string>()
@@ -1759,22 +1774,6 @@ export class TldwApiClientBase {
     }
   }
 
-  private getEnvApiKey(): string | null {
-    try {
-      const env: any = (import.meta as any)?.env || {}
-      const processEnv: Record<string, string | undefined> =
-        typeof process === "undefined" ? {} : process.env || {}
-      const raw =
-        (env?.VITE_TLDW_API_KEY as string | undefined) ??
-        (env?.VITE_TLDW_DEFAULT_API_KEY as string | undefined) ??
-        processEnv.NEXT_PUBLIC_X_API_KEY
-      const key = (raw || "").trim()
-      return key || null
-    } catch {
-      return null
-    }
-  }
-
   private isDevMode(): boolean {
     try {
       const env: any = (import.meta as any)?.env || {}
@@ -1832,6 +1831,57 @@ export class TldwApiClientBase {
     return `${chatId}${query || ""}`
   }
 
+  private invalidateDomainCaches(): void {
+    this.domainCacheRevision += 1
+    this.characterCache.clear()
+    this.characterInFlight.clear()
+    this.chatMessagesCache.clear()
+    this.chatMessagesInFlight.clear()
+  }
+
+  async getDomainCacheRevision(): Promise<number> {
+    const accountRevision = domainCacheAccountRevision
+    const startedRevision = this.domainCacheRevision
+    try {
+      // getConfig alone may retain a previous server or API-key connection.
+      await this.initialize()
+      const initializedConfig = this.config
+      const config = await this.ensureConfigForRequest(true, initializedConfig)
+      if (accountRevision !== domainCacheAccountRevision ||
+          !connectionAuthoritiesMatch(initializedConfig, this.config)) {
+        throw createServicePromptScopeChangedError()
+      }
+      if (this.domainCacheAccountRevision !== accountRevision ||
+          !connectionAuthoritiesMatch(config, this.domainCacheConfig)) {
+        this.invalidateDomainCaches()
+      }
+      this.domainCacheConfig = { ...config }
+      this.domainCacheAccountRevision = accountRevision
+      return this.domainCacheRevision
+    } catch (error) {
+      if (this.domainCacheRevision === startedRevision) {
+        this.invalidateDomainCaches()
+        this.domainCacheConfig = null
+      }
+      throw error
+    }
+  }
+
+  assertDomainCacheRevision(revision: number): void {
+    // Keep the final check synchronous with cache reads and publication.
+    if (revision !== this.domainCacheRevision ||
+        this.domainCacheAccountRevision !== domainCacheAccountRevision) {
+      throw createServicePromptScopeChangedError()
+    }
+  }
+
+  getDomainCacheConfigSnapshot(revision: number): TldwConfig {
+    this.assertDomainCacheRevision(revision)
+    if (!this.domainCacheConfig) throw createServicePromptScopeChangedError()
+    // Domain single-flight owns these reads; do not join a transport-only key.
+    return { ...this.domainCacheConfig }
+  }
+
   invalidateChatMessagesCache(chatId?: string | number): void {
     const cid = chatId != null ? String(chatId) : null
     if (!cid) {
@@ -1849,8 +1899,11 @@ export class TldwApiClientBase {
     return "tldw server API key is still set to a placeholder value. Replace it with your real API key in Settings → tldw server before continuing."
   }
 
-  async ensureConfigForRequest(requireAuth: boolean): Promise<TldwConfig> {
-    const cfg = (await this.getConfig()) || null
+  async ensureConfigForRequest(
+    requireAuth: boolean,
+    resolvedConfig?: TldwConfig | null
+  ): Promise<TldwConfig> {
+    const cfg = (resolvedConfig === undefined ? await this.getConfig() : resolvedConfig) || null
     const hostedMode = isHostedTldwDeployment()
     const runtimeApiKey = !hostedMode
       ? getRuntimeSingleUserApiKeyOverride()
@@ -2047,6 +2100,7 @@ export class TldwApiClientBase {
   }
 
   async initialize(): Promise<void> {
+    const initialization = ++this.configInitialization
     let storedManual = await this.storage.get<TldwConfig>("tldwConfig")
     if (!storedManual) {
       try {
@@ -2065,7 +2119,7 @@ export class TldwApiClientBase {
       }
     }
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
-    const envApiKey = quickstartWebUiServerUrl ? null : this.getEnvApiKey()
+    const envApiKey = quickstartWebUiServerUrl ? null : getBuildTimeApiKey()
     const storedCookieSession =
       quickstartWebUiServerUrl && !isCookieSessionConfigInvalidated()
         ? await this.storage
@@ -2166,10 +2220,11 @@ export class TldwApiClientBase {
           }
         : undefined
     )
+    let config: TldwConfig | null
     if (!stored) {
       // True first-run without quickstart auth material: leave config null so
       // callers can distinguish unconfigured from misconfigured/unreachable.
-      this.config = null
+      config = null
     } else {
       const hydrated: TldwConfig = {
         ...stored,
@@ -2185,8 +2240,17 @@ export class TldwApiClientBase {
       } else if (!hydrated.apiKey && envApiKey) {
         hydrated.apiKey = envApiKey
       }
-      this.config = hydrated
+      config = hydrated
     }
+    // An older storage read must not overwrite a newer owner's config or token.
+    if (initialization < this.completedConfigInitialization) {
+      if (!connectionAuthoritiesMatch(config, this.config)) {
+        throw createServicePromptScopeChangedError()
+      }
+      return
+    }
+    this.completedConfigInitialization = initialization
+    this.config = config
     this.applyConfigState()
   }
 
@@ -5000,6 +5064,8 @@ export class TldwApiClientBase {
         ...requestScopeFields(options.requestScope), abortSignal: options.signal
       })
     }
+    const cacheRevision = await this.getDomainCacheRevision()
+    this.assertDomainCacheRevision(cacheRevision)
     const forceRefresh = options?.forceRefresh === true
     if (!forceRefresh) {
       const cached = this.characterCache.get(cid)
@@ -5017,17 +5083,23 @@ export class TldwApiClientBase {
           "/api/v1/characters/{id}/"
         ])
         const path = this.fillPathParams(template, cid)
+        this.assertDomainCacheRevision(cacheRevision)
         const value = await bgRequest<any>({
           path,
-          method: 'GET'
+          method: 'GET',
+          configSnapshot: this.getDomainCacheConfigSnapshot(cacheRevision)
         })
+        await this.getDomainCacheRevision()
+        this.assertDomainCacheRevision(cacheRevision)
         this.characterCache.set(cid, {
           value,
           expiresAt: Date.now() + CHARACTER_CACHE_TTL_MS
         })
         return value
       } finally {
-        this.characterInFlight.delete(cid)
+        if (this.characterInFlight.get(cid) === request) {
+          this.characterInFlight.delete(cid)
+        }
       }
     })()
 
@@ -6022,6 +6094,8 @@ export class TldwApiClientBase {
     })
     const cacheKey = this.getChatMessagesCacheKey(cid, query)
     const useSharedCache = !options?.fresh && !options?.requestScope
+    const cacheRevision = useSharedCache ? await this.getDomainCacheRevision() : 0
+    if (useSharedCache) this.assertDomainCacheRevision(cacheRevision)
     const cached = useSharedCache ? this.chatMessagesCache.get(cacheKey) : undefined
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value
@@ -6040,6 +6114,7 @@ export class TldwApiClientBase {
       const data = await bgRequest<any>({
         path: `/api/v1/chats/${cid}/messages${query}`,
         method: "GET",
+        ...(useSharedCache ? { configSnapshot: this.getDomainCacheConfigSnapshot(cacheRevision) } : {}),
         abortSignal: options?.signal,
         ...(scopeFields.servicePromptConfig ? {
           headers: scopeFields.headers,
@@ -6149,10 +6224,14 @@ export class TldwApiClientBase {
           pinned
         } as ServerChatMessage
       })
-      if (useSharedCache) this.chatMessagesCache.set(cacheKey, {
-        value: normalized,
-        expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
-      })
+      if (useSharedCache) {
+        await this.getDomainCacheRevision()
+        this.assertDomainCacheRevision(cacheRevision)
+        this.chatMessagesCache.set(cacheKey, {
+          value: normalized,
+          expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
+        })
+      }
       return normalized
     })()
 
@@ -6160,7 +6239,9 @@ export class TldwApiClientBase {
     try {
       return await request
     } finally {
-      if (useSharedCache) this.chatMessagesInFlight.delete(cacheKey)
+      if (useSharedCache && this.chatMessagesInFlight.get(cacheKey) === request) {
+        this.chatMessagesInFlight.delete(cacheKey)
+      }
     }
   }
 

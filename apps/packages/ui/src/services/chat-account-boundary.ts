@@ -2,6 +2,7 @@ import { browser } from "wxt/browser"
 import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
 import { safeStorageSerde } from "@/utils/safe-storage"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import { MANUAL_SESSION_KEY, manualSessionCredentialsMatch } from "@/services/tldw/single-user-credential"
 
 /** Observe account boundaries even when the Chat route is not mounted. */
 export const watchChatAccountChanges = (
@@ -24,6 +25,13 @@ export const watchChatAccountChanges = (
     else if (configKey(event.key)) compare(event.oldValue, event.newValue)
   }
   const extensionChanged = (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, area: string) => {
+    if (area === "session") {
+      const change = changes[MANUAL_SESSION_KEY]
+      if (change && !manualSessionCredentialsMatch(
+        safeStorageSerde.deserializer(change.oldValue as string), safeStorageSerde.deserializer(change.newValue as string)
+      )) changed(true)
+      return
+    }
     if (area !== "local") return
     for (const [key, value] of Object.entries(changes)) {
       if (configKey(key)) compare(value.oldValue, value.newValue)

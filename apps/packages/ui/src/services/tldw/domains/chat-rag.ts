@@ -1130,6 +1130,8 @@ export const chatRagMethods = {
     })
     const cacheKey = this.getChatMessagesCacheKey(cid, query)
     const useSharedCache = !options?.fresh && !options?.requestScope
+    const cacheRevision = useSharedCache ? await this.getDomainCacheRevision() : 0
+    if (useSharedCache) this.assertDomainCacheRevision(cacheRevision)
     const cached = useSharedCache ? this.chatMessagesCache.get(cacheKey) : undefined
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value
@@ -1148,6 +1150,7 @@ export const chatRagMethods = {
       const data = await bgRequest<any>({
         path: `/api/v1/chats/${cid}/messages${query}`,
         method: "GET",
+        ...(useSharedCache ? { configSnapshot: this.getDomainCacheConfigSnapshot(cacheRevision) } : {}),
         abortSignal: options?.signal,
         ...(scopeFields.servicePromptConfig ? {
           headers: scopeFields.headers,
@@ -1262,10 +1265,14 @@ export const chatRagMethods = {
           pinned
         } as ServerChatMessage
       })
-      if (useSharedCache) this.chatMessagesCache.set(cacheKey, {
-        value: normalized,
-        expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
-      })
+      if (useSharedCache) {
+        await this.getDomainCacheRevision()
+        this.assertDomainCacheRevision(cacheRevision)
+        this.chatMessagesCache.set(cacheKey, {
+          value: normalized,
+          expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
+        })
+      }
       return normalized
     })()
 
@@ -1273,7 +1280,9 @@ export const chatRagMethods = {
     try {
       return await request
     } finally {
-      if (useSharedCache) this.chatMessagesInFlight.delete(cacheKey)
+      if (useSharedCache && this.chatMessagesInFlight.get(cacheKey) === request) {
+        this.chatMessagesInFlight.delete(cacheKey)
+      }
     }
   },
 
