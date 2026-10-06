@@ -7660,9 +7660,11 @@ class SyncDatabase:
     def get_existing_envelope_for_idempotency(
         self,
         envelope: SyncEnvelopeCreate,
+        *,
+        connection: Any | None = None,
     ) -> SyncEnvelope | None:
         self._validate_envelope_contract(envelope)
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             dataset_row = self._require_dataset_domain_for_update(
                 envelope.dataset_id,
                 envelope.domain,
@@ -7773,10 +7775,25 @@ class SyncDatabase:
         resolution_action: str,
         resolution_notes: str | None,
         connection: Any,
+        mutation_group: Sequence[SyncEnvelopeCreate] | None = None,
     ) -> SyncEnvelope:
         """Append a claimed resolution under the caller's dataset authority."""
 
         self._validate_envelope_contract(envelope)
+        plan = [envelope]
+        if mutation_group is not None:
+            plan = self._validate_mutation_group_plan(list(mutation_group))
+            if (
+                len(plan) != 2
+                or plan[0] != envelope
+                or envelope.domain != "notes.note"
+                or envelope.operation != "tombstone"
+                or plan[1].domain != "notes.provenance"
+                or plan[1].operation != "tombstone"
+                or plan[1].object_id != envelope.object_id
+                or any(member.status != "accepted" for member in plan)
+            ):
+                raise SyncStoreError("Sync claimed resolution group must be a complete Notes deletion")
         with self.backend.transaction(connection) as conn:
             dataset_row = self._require_dataset_domain(
                 envelope.dataset_id,
@@ -7792,6 +7809,12 @@ class SyncDatabase:
                 resolution_notes=resolution_notes,
                 connection=conn,
             )
+            if mutation_group is not None:
+                existing_rows = self._list_mutation_group_rows(
+                    envelope.dataset_id, envelope.mutation_group_id, connection=conn,
+                )
+                if existing_rows:
+                    return self._matched_mutation_group_replay(plan, existing_rows)[0]
             existing = self._find_existing_envelope_for_idempotency(
                 envelope,
                 connection=conn,
@@ -7830,7 +7853,21 @@ class SyncDatabase:
                 )
             else:
                 self._require_expected_current_head(envelope, connection=conn)
-            return self._insert_envelope_in_transaction(envelope, connection=conn)
+            planned_heads: dict[tuple[str, str], SyncEnvelopeCreate] = {}
+            for index, member in enumerate(plan):
+                if index:
+                    self._require_dataset_domain(member.dataset_id, member.domain, connection=conn)
+                    if self._find_existing_envelope_for_idempotency(member, connection=conn) is not None:
+                        raise SyncIdempotencyConflictError(
+                            "Sync mutation group idempotency key was reused with different content"
+                        )
+                    self._require_expected_current_head(member, connection=conn)
+                self._require_provenance_lifecycle(
+                    member, connection=conn, planned_heads=planned_heads, plan=plan,
+                )
+                planned_heads[(member.domain, member.object_id)] = member
+            inserted = [self._insert_envelope_in_transaction(member, connection=conn) for member in plan]
+            return inserted[0]
 
     def list_latest_applied_heads(
         self,

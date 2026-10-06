@@ -1011,8 +1011,26 @@ class SyncV2Store:
     ) -> SyncEnvelope:
         if self._connection is None:
             raise SyncStoreError("Sync conflict resolution requires a dataset guard")
+        from .notes_provenance import expand_provenance_tombstone
+
+        plan = None
+        if envelope.domain == "notes.note" and envelope.operation == "tombstone":
+            existing = self.get_existing_envelope_for_idempotency(envelope)
+            if existing is not None:
+                envelope = replace(
+                    envelope,
+                    mutation_group_id=existing.mutation_group_id,
+                    mutation_step=existing.mutation_step,
+                    mutation_step_count=existing.mutation_step_count,
+                    mutation_plan_hash=existing.mutation_plan_hash,
+                )
+            else:
+                plan = expand_provenance_tombstone(envelope, store=self)
+                if plan is not None:
+                    envelope = plan[0]
         return self.db.insert_claimed_conflict_resolution_envelope(
             envelope,
+            mutation_group=plan,
             conflict_id=conflict_id,
             dataset_id=dataset_id,
             resolved_by_device_id=resolved_by_device_id,
@@ -1090,7 +1108,7 @@ class SyncV2Store:
             if group:
                 validate_stored_mutation_group(group, dataset_id=envelope.dataset_id, mutation_group_id=group_id)
                 envelope = replace(envelope, mutation_group_id=group_id, mutation_step=0, mutation_step_count=len(group), mutation_plan_hash=group[0].mutation_plan_hash)
-        return self.db.get_existing_envelope_for_idempotency(envelope)
+        return self.db.get_existing_envelope_for_idempotency(envelope, connection=self._connection)
 
     def list_envelopes_after(
         self,

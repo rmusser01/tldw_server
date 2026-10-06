@@ -28,9 +28,26 @@ NOTE = {"title": "Title", "content": "Body", "conversation_id": None, "message_i
 
 
 @pytest.fixture
-def env(tmp_path):
-    db = CharactersRAGDB(tmp_path / "notes.db", client_id="alice")
-    store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.db"))
+def env(tmp_path, request, monkeypatch):
+    if getattr(request, "param", "sqlite") == "postgres":
+        from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+
+        config = request.getfixturevalue("pg_database_config")
+        db = CharactersRAGDB(":memory:", client_id="alice", backend=DatabaseBackendFactory.create_backend(config))
+        store = SyncV2Store(SyncDatabase(backend=DatabaseBackendFactory.create_backend(config)))
+        pool = store.db.backend.get_pool()
+        get_connection = pool.get_connection
+
+        def bounded_connection():
+            connection = get_connection()
+            store.db.execute("SET lock_timeout = '500ms'", connection=connection)
+            connection.commit()
+            return connection
+
+        monkeypatch.setattr(pool, "get_connection", bounded_connection)
+    else:
+        db = CharactersRAGDB(tmp_path / "notes.db", client_id="alice")
+        store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.db"))
     store.enroll_dataset(
         SyncDatasetCreate(
             dataset_id="personal",
@@ -803,3 +820,163 @@ def test_provenance_adapter_rejects_noncanonical_revision(env, revision):
     save(env)
     request = replace(client(service, domain="notes.provenance"), object_revision=revision)
     assert isinstance(service._evaluate_envelope(service.store.get_dataset("personal"), request), AdapterRejected)
+
+
+def conflict_delete(env):
+    service, _ = env
+    save(env)
+    register(service)
+    stale_base = head(service, "notes.note")
+    assert service.push(
+        user_id="alice",
+        dataset_id="personal",
+        device_id="old",
+        envelopes=[client(service, payload={**NOTE, "content": "Edited"}, key="edit")],
+    ).accepted
+    conflicted = service.push(
+        user_id="alice",
+        dataset_id="personal",
+        device_id="old",
+        envelopes=[client(service, base=stale_base, key="stale")],
+    )
+    return conflicted.conflicts[0].conflict_id, client(service, operation="tombstone", payload={}, key="resolution")
+
+
+@pytest.mark.parametrize("env", ["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)], indirect=True)
+@pytest.mark.parametrize("route", ["single", "batch"])
+def test_conflict_parent_delete_retries_complete_pair_and_requires_explicit_restore(env, route):
+    service, db = env
+    conflict_id, request = conflict_delete(env)
+
+    def resolve(envelope=request):
+        if route == "batch":
+            resolved, rejected, _ = service.resolve_conflicts_batch(
+                user_id="alice",
+                dataset_id="personal",
+                device_id="old",
+                resolutions=[(conflict_id, "overwrite", envelope, None, None, None)],
+            )
+            assert not rejected
+            return resolved[0][1]
+        return service.resolve_conflict(
+            user_id="alice",
+            dataset_id="personal",
+            conflict_id=conflict_id,
+            action="overwrite",
+            resolved_by_device_id="old",
+            resolution_envelope=envelope,
+        )
+
+    resolved = resolve()
+    assert resolved.status == "resolved"
+    parent, child = head(service, "notes.note"), head(service)
+    assert child.operation == "tombstone"
+    group = service.store.list_mutation_group("personal", parent.mutation_group_id)
+    assert [(item.domain, item.operation, item.apply_status) for item in group] == [
+        ("notes.note", "tombstone", "applied"),
+        ("notes.provenance", "tombstone", "applied"),
+    ]
+    assert child.server_cursor == parent.server_cursor + 1
+    retained = db.note_provenance_store.get("note", include_deleted=True)
+    assert retained["version"] == child.object_revision == 2
+    assert retained["object_hash"] == child.payload_hash
+    assert resolve() == resolved  # Lost response must replay the complete original decision.
+    assert (head(service, "notes.note"), head(service)) == (parent, child)
+
+    assert service.push(
+        user_id="alice",
+        dataset_id="personal",
+        device_id="old",
+        envelopes=[client(service, key="parent-restore", restore=True)],
+    ).accepted
+    assert db.note_provenance_store.get("note") is None
+    register(service, ("notes.note", "notes.provenance"), device="new")
+    assert service.push(
+        user_id="alice",
+        dataset_id="personal",
+        device_id="new",
+        envelopes=[client(service, domain="notes.provenance", device="new", key="child-restore", restore=True)],
+    ).accepted
+    assert db.note_provenance_store.get("note")["version"] == 3
+    assert resolve() == resolved  # Later restores cannot change retry identity or re-delete either head.
+    assert head(service).operation == head(service, "notes.note").operation == "upsert"
+    changed = replace(request, payload={"changed": True}, payload_hash=canonical_payload_hash({"changed": True})[0])
+    if route == "single":
+        with pytest.raises(SyncStoreError, match="already resolved"):
+            resolve(changed)
+    else:
+        _, rejected, _ = service.resolve_conflicts_batch(
+            user_id="alice",
+            dataset_id="personal",
+            device_id="old",
+            resolutions=[(conflict_id, "overwrite", changed, None, None, None)],
+        )
+        assert rejected == [0]
+
+
+@pytest.mark.parametrize("failure", ["product", "checkpoint"])
+def test_conflict_parent_delete_failure_preserves_claim_retry_and_pair(env, monkeypatch, failure):
+    service, db = env
+    conflict_id, request = conflict_delete(env)
+    before = (head(service, "notes.note"), head(service))
+    target = db.note_provenance_store if failure == "product" else service.store.db
+    method = "apply_sync" if failure == "product" else "upsert_object_state"
+    original = getattr(target, method)
+
+    def fail(*args, **kwargs):
+        if failure == "product" or args[0].domain == "notes.provenance":
+            raise RuntimeError("injected pair failure")
+        return original(*args, **kwargs)
+
+    def resolve():
+        return service.resolve_conflict(
+            user_id="alice",
+            dataset_id="personal",
+            conflict_id=conflict_id,
+            action="overwrite",
+            resolved_by_device_id="old",
+            resolution_envelope=request,
+        )
+
+    monkeypatch.setattr(target, method, fail)
+    with pytest.raises(SyncStoreError):
+        resolve()
+    assert (head(service, "notes.note"), head(service)) == before
+    conflict = service.store.get_conflict(conflict_id)
+    assert conflict.status == "unresolved" and conflict.resolution_action is None
+    assert service.store.get_object_state("personal", "notes.provenance", "note").object_revision == 1
+    retained = db.note_provenance_store.get("note", include_deleted=True)
+    assert retained["deleted"] == (failure == "checkpoint")
+    assert (db.get_note_by_id("note") is None) == (failure == "checkpoint")
+    monkeypatch.setattr(target, method, original)
+    assert resolve().status == "resolved"
+    assert head(service).operation == "tombstone"
+    assert db.note_provenance_store.get("note", include_deleted=True)["version"] == 2
+
+
+def test_claimed_database_append_fences_unexpanded_parent_delete(env):
+    service, _ = env
+    conflict_id, request = conflict_delete(env)
+    conflict = service.store.get_conflict(conflict_id)
+    source = service.store.get_envelope_by_server_cursor(conflict.server_sequence)
+    before = (head(service, "notes.note"), head(service))
+    with pytest.raises(SyncStoreError):
+        with service.store.materialization_guard([source], require_predecessors=False) as guarded:
+            guarded.claim_conflict_resolution(
+                conflict_id,
+                dataset_id="personal",
+                resolved_by_device_id="old",
+                resolution_action="overwrite",
+                resolution_notes=None,
+            )
+            guarded.db.insert_claimed_conflict_resolution_envelope(
+                request,
+                conflict_id=conflict_id,
+                dataset_id="personal",
+                resolved_by_device_id="old",
+                resolution_action="overwrite",
+                resolution_notes=None,
+                connection=guarded._connection,
+            )
+    assert (head(service, "notes.note"), head(service)) == before
+    assert service.store.get_conflict(conflict_id).resolution_action is None
