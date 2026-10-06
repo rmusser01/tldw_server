@@ -978,3 +978,29 @@ it.each([422, 409])('handles a rejected direct save without losing uncertain ide
   } else expect(second).toEqual(first)
   state.resultQuery = undefined
 })
+
+
+it.each([429, 401])('retains a lost-ack direct save through pre-receipt HTTP %s', async status => {
+  messageOpenMock.mockClear()
+  createNoteMock.mockReset()
+  state.resultQuery = 'Original question'
+  state.answer = 'Original answer'
+  state.answerTrustState = 'cited_answer'
+  createNoteMock.mockRejectedValueOnce(new Error('Lost acknowledgment'))
+    .mockRejectedValueOnce(Object.assign(new Error('Temporarily unavailable'), { status }))
+    .mockResolvedValue({ id: 'saved' })
+  const view = render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await waitFor(() => expect(createNoteMock).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save to Notes' })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await waitFor(() => expect(createNoteMock).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save to Notes' })).not.toBeDisabled())
+  state.answer = 'Later unsaved answer'
+  view.rerender(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await screen.findByRole('link', { name: 'Open saved note' })
+  expect(createNoteMock.mock.calls[2]).toEqual(createNoteMock.mock.calls[0])
+  expect(createNoteMock.mock.calls[0][1].knowledge_provenance.question).toBe('Original question')
+  state.resultQuery = undefined
+})

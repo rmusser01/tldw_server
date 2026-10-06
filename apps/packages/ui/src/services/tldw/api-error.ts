@@ -106,10 +106,26 @@ export const isNotesProvenancePolicyUnavailable = (error: unknown): boolean => {
     (typeof error.message === "string" && error.message.includes("notes_provenance_encryption_unsupported"))
 }
 
-/** HTTP client rejections allow corrected input; timeout/server/transport outcomes do not. */
+/** Only known input/version rejection releases identity; pre-receipt gates can hide a committed write. */
 export const isDefinitiveWriteRejection = (error: unknown): boolean => {
   if (!isRecord(error) || isNotesProvenancePolicyUnavailable(error)) return false
   const response = isRecord(error.response) ? error.response : null
   const status = error.status ?? response?.status
-  return typeof status === "number" && status >= 400 && status < 500 && status !== 408
+  const details = isRecord(error.details) ? error.details : null
+  const detail = details?.detail ?? error.detail
+  const code = isRecord(detail) ? detail.error_code ?? detail.code : error.code
+  // Legacy Notes errors and schema validation use unstructured input/conflict responses.
+  if (code == null) return status === 400 || status === 409 || status === 422
+  // Structured readiness/capability failures (including unknown future codes) stay uncertain.
+  return status === 409 && [
+    "notes_provenance_version_conflict",
+    "notes_note_version_conflict",
+    "notes_organization_version_conflict",
+    "notes_provenance_expected_version_invalid",
+    "notes_note_expected_version_invalid",
+    "notes_provenance_idempotency_conflict",
+    "sync_server_origin_idempotency_conflict",
+    "sync_server_origin_batch_idempotency_conflict",
+    "sync_server_origin_restore_conflict",
+  ].includes(String(code))
 }

@@ -821,7 +821,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       // A policy-blocked receipt remains uncertain and must retain its key/body.
       if (isNotesProvenancePolicyUnavailable(error)) {
         messageApi.error(t("playground:studio.sourceHistoryUnavailable", NOTES_PROVENANCE_UNAVAILABLE_MESSAGE))
-      } else if (error?.message?.includes("version") || error?.status === 409) {
+      } else if (isDefinitiveWriteRejection(error) && (error?.message?.includes("version") || error?.status === 409)) {
         pendingSaveRef.current = null
         if (draft.id && scope && !String(error?.message).includes("encryption_unsupported")) {
           try {

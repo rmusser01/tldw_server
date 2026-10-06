@@ -336,7 +336,11 @@ it('releases a definitively rejected request so corrected Quick Notes input gets
   expect(writes()[1][0].headers['Idempotency-Key']).not.toBe(writes()[0][0].headers['Idempotency-Key'])
 })
 
-it('preserves a lost-ack create through a normalized policy 409', async () => {
+it.each([
+    { status: 409, detail: { error_code: 'notes_provenance_encryption_unsupported' }, message: 'Policy unavailable' },
+    { status: 429, detail: 'Rate limit exceeded for notes.create', message: 'Rate limit exceeded for notes.create' },
+    { status: 409, detail: { error_code: 'notes_organization_sync_not_ready' }, message: 'Notes organization Sync is not ready for writes.' },
+  ])('preserves a lost-ack create through normalized $status $message', async ({ status, detail, message }) => {
   const history = { origin: 'knowledge_qa', question: 'Original question' }
   const marker = `<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`
   useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined, content: `Original answer\n\n${marker}` } })
@@ -344,9 +348,7 @@ it('preserves a lost-ack create through a normalized policy 409', async () => {
     if (request.path.includes('/search/')) return []
     const attempts = writes().length
     if (attempts === 1) throw new Error('Lost acknowledgment')
-    if (attempts === 2) throw Object.assign(new Error('Knowledge provenance could not be saved; refresh its state and retry.'), {
-      status: 409, details: { detail: { error_code: 'notes_provenance_encryption_unsupported', message: 'Knowledge provenance could not be saved; refresh its state and retry.' } }
-    })
+    if (attempts === 2) throw Object.assign(new Error(message), { status, details: { detail } })
     return { ...request.body, id: noteId, version: 1 }
   })
   render(<QuickNotesSection />)

@@ -1084,7 +1084,11 @@ describe('Notes saved-state hydration and optional monitoring', () => {
     expect(writes[1].headers['Idempotency-Key']).not.toBe(writes[0].headers['Idempotency-Key'])
   })
 
-  it.each([false, true])('preserves a lost-ack create through a normalized policy 409 (offline=%s)', async offline => {
+  it.each([
+    { status: 409, detail: { error_code: 'notes_provenance_encryption_unsupported' }, message: 'Policy unavailable' },
+    { status: 429, detail: 'Rate limit exceeded for notes.create', message: 'Rate limit exceeded for notes.create' },
+    { status: 409, detail: { error_code: 'notes_organization_sync_not_ready' }, message: 'Notes organization Sync is not ready for writes.' },
+  ].flatMap(rejection => [false, true].map(offline => ({ ...rejection, offline }))))('preserves a lost-ack create through normalized $status $message (offline=$offline)', async ({ status, detail, message, offline }) => {
     const history = { origin: 'knowledge_qa', question: 'Original question' }
     const marker = `<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`
     const writes: Array<{ body: Record<string, unknown>; headers: Record<string, string> }> = []
@@ -1092,9 +1096,7 @@ describe('Notes saved-state hydration and optional monitoring', () => {
       if (request.method === 'POST') {
         writes.push(request)
         if (writes.length === 1) throw new Error('Lost acknowledgment')
-        if (writes.length === 2) throw Object.assign(new Error('Knowledge provenance could not be saved; refresh its state and retry.'), {
-          status: 409, details: { detail: { error_code: 'notes_provenance_encryption_unsupported', message: 'Knowledge provenance could not be saved; refresh its state and retry.' } }
-        })
+        if (writes.length === 2) throw Object.assign(new Error(message), { status, details: { detail } })
       }
       return note('receipt-note', { ...writes[0]?.body, version: 1 })
     })

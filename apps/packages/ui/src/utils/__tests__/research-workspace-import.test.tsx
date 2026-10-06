@@ -2325,7 +2325,11 @@ it("does not finish a partial import when its recovered receipt lacks newly atta
   view.unmount()
 })
 
-it('retains the pending canonical import through a policy-blocked receipt replay', async () => {
+it.each([
+    { status: 409, detail: { error_code: 'notes_provenance_encryption_unsupported' }, message: 'Policy unavailable' },
+    { status: 429, detail: 'Rate limit exceeded for notes.create', message: 'Rate limit exceeded for notes.create' },
+    { status: 409, detail: { error_code: 'notes_organization_sync_not_ready' }, message: 'Notes organization Sync is not ready for writes.' },
+  ])('retains the pending canonical import through $status $message receipt replay', async ({ status, detail, message }) => {
   const transfer = payload()
   transfer.sources = transfer.sources.filter(source => source.sourceType === 'notes')
   await queueResearchWorkspacePrefill(transfer, 'alice')
@@ -2337,7 +2341,7 @@ it('retains the pending canonical import through a policy-blocked receipt replay
       writes.push(request)
       canonical ||= { ...request.body, version: 1, knowledge_provenance_state: 'active', knowledge_provenance_version: 1 }
       if (writes.length === 1) throw new Error('Lost response')
-      if (writes.length === 2) throw Object.assign(new Error('Policy unavailable'), { status: 409, details: { detail: { error_code: 'notes_provenance_encryption_unsupported' } } })
+      if (writes.length === 2) throw Object.assign(new Error(message), { status, details: { detail } })
     }
     if (!canonical) throw Object.assign(new Error('missing'), { status: 404 })
     return canonical
@@ -2345,7 +2349,8 @@ it('retains the pending canonical import through a policy-blocked receipt replay
   const view = renderHook(() => useResearchWorkspacePrefill('workspace-a', true, true))
   await waitFor(() => expect(view.result.current.error).not.toBeNull())
   await act(async () => { await view.result.current.retry() })
-  await waitFor(() => expect(view.result.current.error).toContain('server storage policy'))
+  await waitFor(() => expect(view.result.current.importing).toBe(false))
+  expect(view.result.current.error).not.toBeNull()
   await act(async () => { await view.result.current.retry() })
   await waitFor(() => expect(view.result.current.error).toBeNull())
   expect(writes).toHaveLength(3)

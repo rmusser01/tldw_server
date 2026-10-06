@@ -1231,7 +1231,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   // ---- version conflict ----
   const isVersionConflictError = React.useCallback((error: any) => {
-    if (isNotesProvenancePolicyUnavailable(error)) return false
+    if (!isDefinitiveWriteRejection(error)) return false
     const msg = String(error?.message || '')
     const lower = msg.toLowerCase()
     const status = error?.status ?? error?.response?.status
