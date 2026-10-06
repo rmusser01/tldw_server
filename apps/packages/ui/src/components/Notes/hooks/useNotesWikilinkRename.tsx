@@ -212,6 +212,11 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
   /** Renames the user dismissed: not offered again during this visit. */
   const dismissedRenamesRef = React.useRef(new Set<string>())
   const openPromptsRef = React.useRef(new Map<string, OpenPrompt>())
+  // True while the notes page is shown. Counting the linking notes takes
+  // requests, and a rename can be saved as the page goes away (the leave
+  // flush). An offer whose count answers after the page was left would open
+  // on the next page, where nothing closes it, so none opens then.
+  const pageShownRef = React.useRef(false)
   // The scope goes null while a session is re-checked (for example when the
   // window regains focus) and then comes back unchanged. Only a different
   // owner, a logout, or leaving the page ends an offer.
@@ -231,9 +236,17 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
     openPromptsRef.current.clear()
   }, [])
 
-  /** POST as the verified notes owner, like saving a note does. */
+  /**
+   * POST as the verified notes owner, like saving a note does. `stillWanted`
+   * is checked once the owner is verified, before anything is sent.
+   */
   const ownedRequest = React.useCallback(
-    async (scope: string, path: `/${string}`, body: Record<string, unknown>): Promise<unknown> => {
+    async (
+      scope: string,
+      path: `/${string}`,
+      body: Record<string, unknown>,
+      stillWanted?: () => boolean
+    ): Promise<unknown> => {
       const ownerChanged = () =>
         new Error(
           depsRef.current.t('option:notesSearch.wikilinkRenameOwnerChanged', {
@@ -243,6 +256,7 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
       const config = depsRef.current.connectionConfig ? { ...depsRef.current.connectionConfig } : null
       if (!config || !scopeIsCurrent(scope)) throw ownerChanged()
       const user = await tldwAuth.getCurrentUser()
+      if (stillWanted && !stillWanted()) throw new Error('No longer needed')
       if (
         !user?.is_active ||
         user.id == null ||
@@ -515,6 +529,7 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
 
   const openPrompt = React.useCallback(
     (event: NoteRenamedEvent, renameKey: string, firstPage: ReferrersPage) => {
+      if (!pageShownRef.current) return
       const { t } = depsRef.current
       const key = `notes-wikilink-rename:${renameKey}`
       const one = firstPage.count === 1
@@ -589,21 +604,33 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
 
   const offer = React.useCallback(
     async (event: NoteRenamedEvent, renameKey: string) => {
+      // Also reached by a retry after a rewrite the user confirmed before leaving.
+      if (!pageShownRef.current) return
       let page: ReferrersPage
       try {
         page = parseReferrers(
-          await ownedRequest(event.authorityScope, REFERRERS_PATH, {
-            title: event.oldTitle,
-            exclude_note_id: event.noteId,
-            unresolved_only: true
-          })
+          await ownedRequest(
+            event.authorityScope,
+            REFERRERS_PATH,
+            {
+              title: event.oldTitle,
+              exclude_note_id: event.noteId,
+              unresolved_only: true
+            },
+            () => pageShownRef.current
+          )
         )
       } catch (error) {
         // The offer is optional: without a count the links simply stay as they are.
         console.debug('[NotesManagerPage] Wikilink referrer count failed:', error)
         return
       }
-      if (!scopeIsCurrent(event.authorityScope) || dismissedRenamesRef.current.has(renameKey)) return
+      if (
+        !pageShownRef.current ||
+        !scopeIsCurrent(event.authorityScope) ||
+        dismissedRenamesRef.current.has(renameKey)
+      )
+        return
       if (page.count <= 0 || page.notes.length === 0) return
       openPrompt(event, renameKey, page)
     },
@@ -617,6 +644,8 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
       const newKey = normalizeWikilinkTitle(event.newTitle)
       // Links match titles ignoring case and spacing, so such a rename breaks nothing.
       if (!event.noteId || !oldKey || !newKey || oldKey === newKey) return
+      // A save that answers after the page was left (its unmount or leave flush).
+      if (!pageShownRef.current) return
       if (!depsRef.current.isOnline || !event.authorityScope || !scopeIsCurrent(event.authorityScope)) return
       const renameKey = JSON.stringify([event.authorityScope, event.noteId, oldKey, newKey])
       if (dismissedRenamesRef.current.has(renameKey)) return
@@ -635,8 +664,10 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
     if (previous && previous !== scope) closePrompts()
   }, [closePrompts, deps.authorityScope])
 
-  // So do a logout and leaving the page.
+  // So do a logout and leaving the page. Leaving also stops offers that are
+  // still being counted (see pageShownRef).
   React.useEffect(() => {
+    pageShownRef.current = true
     const onPrincipalChanged = (event: Event) => {
       if ((event as CustomEvent<{ kind?: string }>).detail?.kind !== 'logout') return
       lastVerifiedScopeRef.current = null
@@ -644,6 +675,7 @@ export function useNotesWikilinkRename(deps: UseNotesWikilinkRenameDeps) {
     }
     window.addEventListener('tldw:auth-principal-changed', onPrincipalChanged)
     return () => {
+      pageShownRef.current = false
       window.removeEventListener('tldw:auth-principal-changed', onPrincipalChanged)
       closePrompts()
     }

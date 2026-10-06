@@ -1,9 +1,10 @@
 import React from "react"
 import { App, ConfigProvider } from "antd"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
+import type { NotesLeaveGuardState } from "../hooks/useNotesEditorState"
 
 // Renaming a note leaves [[Old title]] links in other notes unresolved
 // (#3110, follow-up to NE-02). The owner chose to offer the update: after the
@@ -166,6 +167,20 @@ let serverNote: { id: string; title: string; content: string; version: number } 
 // Notes that link to a title, by lower-cased title.
 let linkersByTitle: Record<string, Array<{ id: string; title: string; version: number }>> = {}
 
+// The route's leave guard, captured so a test can navigate away like the router does.
+const leaveGuard: { current: NotesLeaveGuardState | null } = { current: null }
+const CaptureLeaveGuard: React.FC<NotesLeaveGuardState> = (props) => {
+  leaveGuard.current = props
+  return null
+}
+
+// Without motion a closed prompt leaves the DOM at once; jsdom never ends a CSS transition.
+const appShell = (page: React.ReactNode) => (
+  <ConfigProvider theme={{ token: { motion: false } }}>
+    <App>{page}</App>
+  </ConfigProvider>
+)
+
 const renderPage = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -173,15 +188,12 @@ const renderPage = () => {
       mutations: { retry: false }
     }
   })
-  // Without motion a closed prompt leaves the DOM at once; jsdom never ends a CSS transition.
   return render(
-    <ConfigProvider theme={{ token: { motion: false } }}>
-      <App>
-        <QueryClientProvider client={queryClient}>
-          <NotesManagerPage />
-        </QueryClientProvider>
-      </App>
-    </ConfigProvider>
+    appShell(
+      <QueryClientProvider client={queryClient}>
+        <NotesManagerPage LeaveGuard={CaptureLeaveGuard} />
+      </QueryClientProvider>
+    )
   )
 }
 
@@ -244,6 +256,7 @@ const renameNote = async (title: string, version: number) => {
 describe("NotesManagerPage stage 49 wikilink rename offer", { timeout: 60_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    leaveGuard.current = null
     serverNote = null
     linkersByTitle = {
       "old title": [
@@ -447,5 +460,40 @@ describe("NotesManagerPage stage 49 wikilink rename offer", { timeout: 60_000 },
     expect(requestsTo(REFERRERS).map((request) => request.body?.title)).toEqual(["Old title", "New title"])
     expect(requestsTo(REWRITE)).toHaveLength(0)
     expectNoPrompt()
+  })
+
+  it("opens no offer on the next page for a rename saved by the leave flush", async () => {
+    const view = renderPage()
+    await createNote("Old title")
+    // The count is still on its way when the page goes away.
+    const respond = mockBgRequest.getMockImplementation()!
+    let answerCount: () => void = () => {}
+    mockBgRequest.mockImplementation((request: ServerRequest) =>
+      request.path === REFERRERS
+        ? new Promise((resolve) => {
+            answerCount = () => resolve(respond(request))
+          })
+        : respond(request)
+    )
+    fireEvent.change(titleInput(), { target: { value: "New title" } })
+
+    // Navigating away flushes the unsaved rename first (NS-01), then leaves.
+    let leave = false
+    await act(async () => {
+      leave = (await leaveGuard.current?.onLeave()) ?? false
+    })
+    expect(leave).toBe(true)
+    expect(requestsTo("/api/v1/notes/note-a", "PUT").at(-1)?.body?.title).toBe("New title")
+    await waitFor(() => expect(requestsTo(REFERRERS)).toHaveLength(1))
+    view.rerender(appShell(<span>Another page</span>))
+
+    await act(async () => {
+      answerCount()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+
+    expect(screen.getByText("Another page")).toBeInTheDocument()
+    expectNoPrompt()
+    expect(screen.queryByText(/link to "Old title"/)).not.toBeInTheDocument()
   })
 })

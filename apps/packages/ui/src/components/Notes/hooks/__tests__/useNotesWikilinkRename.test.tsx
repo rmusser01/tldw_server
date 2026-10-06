@@ -94,6 +94,15 @@ const tree = (overrides?: Partial<UseNotesWikilinkRenameDeps>) => (
 
 const renderHarness = (overrides?: Partial<UseNotesWikilinkRenameDeps>) => render(tree(overrides))
 
+/** The app after leaving /notes: the hook is gone, the app's notifications are not. */
+const anotherPage = (
+  <ConfigProvider theme={{ token: { motion: false } }}>
+    <App>
+      <span>Another page</span>
+    </App>
+  </ConfigProvider>
+)
+
 const requestsTo = (path: string): ServerRequest[] =>
   mockBgRequest.mock.calls.map(([request]) => request as ServerRequest).filter((request) => request.path === path)
 
@@ -683,15 +692,91 @@ describe("useNotesWikilinkRename", { timeout: 30_000 }, () => {
       await rename()
       expect(await screen.findByRole("button", { name: "Update links" })).toBeInTheDocument()
 
-      view.rerender(
-        <ConfigProvider theme={{ token: { motion: false } }}>
-          <App>
-            <span>Another page</span>
-          </App>
-        </ConfigProvider>
-      )
+      view.rerender(anotherPage)
 
       await waitFor(() => expect(promptIsOpen()).toBe(false))
+    })
+  })
+
+  // A rename saved just before leaving /notes (the leave flush saves it while
+  // navigation waits) is counted after the page may already be gone. Nothing
+  // closes an offer opened then, so none may open.
+  describe("after the page is left", () => {
+    it("opens no offer when the linking notes were still being counted", async () => {
+      let answerCount: (page: unknown) => void = () => {}
+      useServer({ [REFERRERS]: () => new Promise((resolve) => { answerCount = resolve }) })
+      const view = renderHarness()
+      let renamed: Promise<void> | undefined
+      act(() => {
+        renamed = harness.handleNoteRenamed?.(RENAME)
+      })
+      await waitFor(() => expect(requestsTo(REFERRERS)).toHaveLength(1))
+
+      view.rerender(anotherPage)
+      await act(async () => {
+        answerCount(twoReferrers)
+        await renamed
+      })
+
+      expect(promptIsOpen()).toBe(false)
+      expect(screen.queryByText(/link to "Old title"/)).not.toBeInTheDocument()
+    })
+
+    it("opens no offer when the owner was still being checked", async () => {
+      let answerUser: (user: unknown) => void = () => {}
+      mockGetCurrentUser.mockImplementation(() => new Promise((resolve) => { answerUser = resolve }))
+      useServer({ [REFERRERS]: () => twoReferrers })
+      const view = renderHarness()
+      let renamed: Promise<void> | undefined
+      act(() => {
+        renamed = harness.handleNoteRenamed?.(RENAME)
+      })
+      await waitFor(() => expect(mockGetCurrentUser).toHaveBeenCalled())
+
+      view.rerender(anotherPage)
+      await act(async () => {
+        answerUser({ id: 1, is_active: true })
+        await renamed
+      })
+
+      expect(requestsTo(REFERRERS)).toHaveLength(0)
+      expect(promptIsOpen()).toBe(false)
+    })
+
+    it("does not count or offer a rename saved after the page was left", async () => {
+      useServer({ [REFERRERS]: () => twoReferrers })
+      const view = renderHarness()
+      const { handleNoteRenamed } = harness
+      view.rerender(anotherPage)
+
+      await act(async () => {
+        await handleNoteRenamed?.(RENAME)
+      })
+
+      expect(mockBgRequest).not.toHaveBeenCalled()
+      expect(promptIsOpen()).toBe(false)
+    })
+
+    it("does not offer again when a rewrite confirmed before leaving fails afterwards", async () => {
+      let failRewrite: (error: Error) => void = () => {}
+      useServer({
+        [REFERRERS]: () => twoReferrers,
+        [REWRITE]: () => new Promise((_resolve, reject) => { failRewrite = reject })
+      })
+      const view = renderHarness()
+      await rename()
+      await confirmUpdate()
+      await waitFor(() => expect(requestsTo(REWRITE)).toHaveLength(1))
+
+      view.rerender(anotherPage)
+      await act(async () => {
+        failRewrite(new Error("Server unavailable"))
+      })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // A failed request would normally bring the offer back for a retry.
+      expect(requestsTo(REFERRERS)).toHaveLength(1)
+      expect(promptIsOpen()).toBe(false)
     })
   })
 })
