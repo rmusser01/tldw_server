@@ -8,11 +8,11 @@ For canonical Notes, fetch the exact original note through the existing owner-sc
 
 Media continues to attach through its canonical ID. External web snippets continue to be explicitly labeled retrieved-excerpt snapshots. Original Knowledge answer qualifications apply to the original retrieved excerpts; adding full source context does not recertify that answer.
 
-## Backend provenance decision requiring coordinated design
+## Background to the approved backend provenance decision
 
-The canonical Notes API retains content and backlinks, but has no generic note metadata field. ADR031 owns the synchronized core-note payload, and existing Studio provenance belongs to Studio documents. A dedicated Knowledge provenance capability must preserve deletion, optimistic versions, restoration, Sync replay and old clients. Overloading Studio or graph-link records would create misleading product identity.
+Before this follow-up, the canonical Notes API retained content and backlinks but had no generic note metadata field. ADR031 owns the synchronized core-note payload, and existing Studio provenance belongs to Studio documents. A dedicated Knowledge provenance capability must preserve deletion, optimistic versions, restoration, Sync replay and old clients. Overloading Studio or graph-link records would create misleading product identity.
 
-Recommended approach: independently versioned canonical note-provenance records, with owner-scoped Notes create/read integration and the existing Sync envelope/materializer machinery. Keep source references and trust qualifications separate from editable Markdown. Content markers remain a backward-compatible fallback for existing servers and historical notes. This needs a specific Notes/Sync compatibility spec before implementation.
+Approved approach: independently versioned canonical note-provenance records, with owner-scoped Notes create/read integration and the existing Sync envelope/materializer machinery. Keep source references and trust qualifications separate from editable Markdown. Content markers remain a backward-compatible fallback for existing servers and historical notes. The approved contract below and ADR065 define its Notes/Sync compatibility.
 
 Alternative: extend the core-note payload with optional provenance under a new version and explicitly preserve it for old-client writes. This is fewer persistence concepts but increases whole-note conflict and rollout complexity. A local-only metadata column would fail the existing synchronized-capability rule and is not a complete solution.
 

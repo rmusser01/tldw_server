@@ -67,16 +67,16 @@ Files: modify `api/v1/schemas/notes_schemas.py`, `api/v1/endpoints/notes.py`, `c
 **Goal:** Preserve and display canonical history while supporting old servers and portable files.
 **Success Criteria:** Structured data wins over edited markers; deleted heads forbid fallback; direct Knowledge save, Notes Library and Research save/reopen share the contract; owned writes keep existing cancellation/draft guards.
 **Tests:** Canonical preference, divergent marker status, old-server fallback, deleted marker suppression, backfill exact version, lost acknowledgment, source import and account/workspace cancellation.
-**Status:** In Progress
+**Status:** Complete
 
 Files: modify `apps/packages/ui/src/utils/knowledge-note-provenance.ts`, both `services/tldw/domains/collections.ts` and `services/tldw/TldwApiClient.ts`, `components/Notes/hooks/useNotesEditorState.tsx`, `components/Option/KnowledgeQA/ExportDialog.tsx`, `components/Option/ResearchWorkspace/StudioPane/QuickNotesSection.tsx`, `utils/use-research-workspace-prefill.ts`, `components/Option/ResearchWorkspace/workspace-server-restore.ts`, workspace state/types and relevant existing tests. Reuse existing export helpers where a saved record must remain self-contained.
 
-- [ ] Add failing client utility and mounted workflow tests before save/reopen logic changes. Run affected Vitest files with one worker and retain behavioral RED evidence.
-- [ ] Match Task1 strict payload types/limits, including direct question/scope/reasons/source references and encoded portable marker ceiling. Use one shared canonical-resolution helper and optional independent head fields rather than scattering fallback decisions.
-- [ ] Prefer canonical active payload, surface divergent-marker reconciliation, preserve on ordinary edits and portable exports. A canonical deleted head removes/suppresses fallback markers and may only be restored explicitly with its retained version/hash; unsupported old servers retain current marker behavior.
-- [ ] Save new history from Knowledge or Research using top-level structured data plus the portable marker. Ordinary edits may omit unchanged structured history; valid marker backfill requires absent canonical state and exact current parent/child versions. Retry identity must survive a lost response without overwriting later user edits.
-- [ ] Update Notes Library/offline drafts, Quick Notes, importer acknowledgment and Workspace canonical restore to use the shared resolution and carry independent head fields. Preserve account/workspace cancellation and stale-save guards. Source pointers grant no fetch authority.
-- [ ] Run focused Vitest, both client type checks/builds and shared UI lint, then commit the verified unit.
+- [x] Add failing client utility and mounted workflow tests before save/reopen logic changes. Run affected Vitest files with one worker and retain behavioral RED evidence.
+- [x] Match Task1 strict payload types/limits, including direct question/scope/reasons/source references and encoded portable marker ceiling. Use one shared canonical-resolution helper and optional independent head fields rather than scattering fallback decisions.
+- [x] Prefer canonical active payload, surface divergent-marker reconciliation, preserve on ordinary edits and portable exports. A canonical deleted head removes/suppresses fallback markers and may only be restored explicitly with its retained version/hash; unsupported old servers retain current marker behavior.
+- [x] Save new history from Knowledge or Research using top-level structured data plus the portable marker. Ordinary edits may omit unchanged structured history; valid marker backfill requires absent canonical state and exact current parent/child versions. Retry identity must survive a lost response without overwriting later user edits.
+- [x] Update Notes Library/offline drafts, Quick Notes, importer acknowledgment and Workspace canonical restore to use the shared resolution and carry independent head fields. Preserve account/workspace cancellation and stale-save guards. Source pointers grant no fetch authority.
+- [x] Run focused Vitest, both client type checks/builds and shared UI lint, then commit the verified unit.
 
 ## Stage 5: Release verification and PR update
 
@@ -84,7 +84,7 @@ Files: modify `apps/packages/ui/src/utils/knowledge-note-provenance.ts`, both `s
 **Goal:** Publish evidence and final scope without overstating unrun device/participant work.
 **Success Criteria:** All affected checks pass; touched Python Bandit clean; independent review completed; task/ADR/report/PR current.
 **Tests:** Existing PostgreSQL fixture, browser save → remove marker → reopen → evidence retained, ordinary old-client update, delete/retry, portable export.
-**Status:** Not Started
+**Status:** In Progress
 
 - [ ] Run focused API/Sync/DB suites and affected shared client tests; use existing Postgres fixture and report availability faithfully.
 - [ ] Run Python Bandit in the project venv on every touched production Python file; fix new findings.
