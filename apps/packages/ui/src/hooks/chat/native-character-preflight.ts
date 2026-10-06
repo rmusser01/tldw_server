@@ -96,6 +96,15 @@ export const nativeCharacterPreflightMessage = (
     );
   }
   const messages: Record<string, string> = {
+    native_history_greeting_requires_fresh:
+      'Start a new saved character chat before choosing an opening. Your current chat and draft are still here.',
+    native_history_greeting_not_stored:
+      'The server did not save an opening. Your message has not been sent. Review the saved chat in retained drafts before starting again.',
+    native_history_draft_not_retained:
+      'Your draft could not be retained. Keep or copy your message before starting the character opening.',
+    stale_selection:
+      'The chat or setup changed while saving the opening. Your message has not been sent. Review retained drafts before starting again.',
+
     temporary_history_unavailable:
       'Start a new saved chat before applying this character. Keep or copy your temporary conversation first.',
     native_history_assets_unsupported:

@@ -305,6 +305,20 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
     ])
   })
 
+  it("projects saved raw greetings with distinct names and keeps canonical content unchanged on reload", async () => {
+    const raw = "{{user}} meets {{char}}\n  exact  "
+    storageState.values.set("chatUserDisplayName", "Viewer $&")
+    const props = { ...baseProps, message: raw, message_type: "character:greeting", serverChatId: "saved-chat",
+      serverMessageId: "saved-root", characterIdentityEnabled: true,
+      characterIdentity: { id: "12", name: "Guide $'" } }
+    const view = render(<PlaygroundMessage {...props} />)
+    await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe("Viewer $& meets Guide $'\n  exact  "))
+    storageState.values.set("chatUserDisplayName", "")
+    view.rerender(<PlaygroundMessage {...props} characterIdentity={{ id: "12", name: "Updated Guide" }} />)
+    await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe("{{user}} meets Updated Guide\n  exact  "))
+    expect(props.message).toBe(raw)
+  })
+
   it("enables Mermaid for a completed assistant markdown message by default", async () => {
     render(<PlaygroundMessage {...baseProps} />)
 

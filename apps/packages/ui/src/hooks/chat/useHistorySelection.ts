@@ -297,7 +297,8 @@ export function useHistorySelection(
       reference?: HistorySelectionReference | null,
       onOpened?: (receipt: HistoryLoadReceipt) => void,
       isCurrentLoad: () => boolean = () => true,
-      qualification?: { profileId: string | null; installLease: () => void }
+      qualification?: { profileId: string | null; installLease: () => void },
+      qualifyCapture?: (capture: HistoryCaptureResultV1, owner: HistoryOwnerV1) => void
     ) => {
       let qualifiedProfile: string | undefined
       if (qualification) {
@@ -433,6 +434,8 @@ export function useHistorySelection(
             )
           }
         }
+        // A deliberate startup may require an actual owned row before any bookmark or display publication.
+        qualifyCapture?.(result, owner)
         const pending = pendingBookmark?.pending_confirmation
           ? {
               scope: {
@@ -709,6 +712,7 @@ export function useHistorySelection(
         bindUnbound?: boolean
         onDeviceScope?: import("@/db/dexie/history-selection").OnDeviceHistoryScope
         isCurrent?: () => boolean
+        qualifyCapture?: (capture: HistoryCaptureResultV1, owner: HistoryOwnerV1) => void
       },
       reference?: HistorySelectionReference | null,
       onLoaded?: (receipt: HistoryLoadReceipt) => void
@@ -866,7 +870,7 @@ export function useHistorySelection(
           validate_lease: () => valid && isCurrent()
         }
         capturedOwner = owner
-        const result = await open(owner, reference, opened, isCurrent)
+        const result = await open(owner, reference, opened, isCurrent, undefined, target.qualifyCapture)
         // Only an explicit action plus an authorized owner capture can bind an old mirror.
         if (
           target.bindUnbound &&

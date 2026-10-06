@@ -1,3 +1,7 @@
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { ChatGreetingPicker } from "@/components/Common/ChatGreetingPicker"
+import { useCharacterGreetingStart } from "@/hooks/useCharacterGreetingStart"
+import { characterToAssistantSelection, getAssistantSelectionMode } from "@/types/assistant-selection"
 import { usePersistenceMode } from "@/hooks/playground/usePersistenceMode"
 import { ChatDraftRecovery, type RestoreChatDraft } from "@/components/Chat/composer/ChatDraftRecovery"
 import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection"
@@ -141,6 +145,7 @@ import { useConversationContextComposition } from "@/hooks/chat/useConversationC
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import {
+  buildChatModelUsability,
   buildAvailableChatModelIds,
   findUnavailableChatModel,
   normalizeChatModelId
@@ -382,6 +387,7 @@ export const SidepanelForm = ({
     textAreaFocus: promptAssistReturnFocus,
     draftSaved,
     draftReady,
+    retainCurrentDraft,
     clearDraft,
     creationRecovery,
     reviewCreatedChat,
@@ -800,7 +806,7 @@ export const SidepanelForm = ({
   )
   const placeholderTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const {
-    onSubmit,
+    onSubmit: submitMessageAction,
     selectedModel,
     setSelectedModel,
     chatMode,
@@ -836,6 +842,10 @@ export const SidepanelForm = ({
     serverChatId,
     conversationMetadata
   } = useMessage()
+  const greetingSubmitGateRef = React.useRef<() => boolean>(() => false)
+  const onSubmit = React.useCallback((input: Parameters<typeof submitMessageAction>[0]) =>
+    greetingSubmitGateRef.current() ? Promise.resolve({ status: "skipped" as const,
+      reason: t("sidepanel:greetingPicker.startingHelp", "Saving the character’s opening. Your message has not been sent.") }) : submitMessageAction(input), [submitMessageAction, t])
   const { captureQueuedDispatchGuard } = conversationMetadata
   const currentChatApiProvider = useStoreChatModelSettings(
     (state) => state.apiProvider
@@ -2479,6 +2489,21 @@ export const SidepanelForm = ({
       }
     }
   }, [selectedQuickPrompt])
+  const greetingHistorySelection = useHistorySelectionContext()
+  const { starting: greetingStarting, isPreparing: isGreetingPreparing, start: startCharacterGreeting } = useCharacterGreetingStart({
+    form, retainCurrentDraft, submit: submitMessageAction, controller: greetingHistorySelection, focusComposer: () => textareaRef.current?.focus(),
+    ready: draftReady, isConnectionReady, busy: streaming,
+    readContext: () => [isConnectionReady, chatModels, JSON.stringify(storedCharacter), chatMode, selectedDocuments, contextFiles, pageContextActive],
+    preflight: () => {
+      if (!isConnectionReady) throw new Error("native_history_server_unavailable")
+      if (!buildChatModelUsability({ selectedModel, availableModels: chatModels,
+        modelsLoading: !chatModels, isServerConnected: isConnectionReady }).canSend)
+        throw new Error("native_history_model_unavailable")
+      if (chatMode !== "normal" || selectedDocuments.length || contextFiles.length || pageContextActive)
+        throw new Error("native_history_explicit_context_unsupported")
+    }
+  })
+  greetingSubmitGateRef.current = isGreetingPreparing
   const { mutateAsync: sendMessage, isPending: isSending } = useMutation({
     mutationFn: onSubmit,
     onSuccess: () => {
@@ -2734,8 +2759,14 @@ export const SidepanelForm = ({
   const queuedRequestActions = queue.queuedRequestActions
   const cancelCurrentAndRunDisabledReason =
     queue.cancelCurrentAndRunDisabledReason
-  const handleRunQueuedRequest = queue.handleRunQueuedRequest
-  const handleRunNextQueuedRequest = queue.handleRunNextQueuedRequest
+  const handleRunQueuedRequest = (...args: Parameters<typeof queue.handleRunQueuedRequest>) => {
+    if (greetingSubmitGateRef.current()) return
+    return queue.handleRunQueuedRequest(...args)
+  }
+  const handleRunNextQueuedRequest = () => {
+    if (greetingSubmitGateRef.current()) return
+    return queue.handleRunNextQueuedRequest()
+  }
   const queueMetadataStatus = conversationMetadata.isReady
     ? null
     : conversationMetadata.failed
@@ -2782,6 +2813,7 @@ export const SidepanelForm = ({
       image: string,
       options?: { ignorePinnedResults?: boolean }
     ) => {
+      if (greetingStarting) return
       if (!connectionReadyRef.current) {
         notification.info({ message: t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") })
         return
@@ -2871,6 +2903,7 @@ export const SidepanelForm = ({
       availableChatModelIds,
       contextFiles.length,
       draftReady,
+      greetingStarting,
       form,
       isSending,
       notification,
@@ -3068,6 +3101,14 @@ export const SidepanelForm = ({
         ref={formContainerRef}
         className={`flex w-full min-w-0 flex-col items-center ${composerPadding}`}>
       <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={onFindConversations} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={onRecoverDraft} disabled={!draftReady} /></div>
+      <ChatGreetingPicker selectedCharacter={storedCharacter} selectedCharacterMode={getAssistantSelectionMode(characterToAssistantSelection(storedCharacter))}
+        messages={messages} historyId={historyId} serverChatId={serverChatId}
+        ready={draftReady && !characterMeta?.isLoading && !temporaryChat && greetingHistorySelection?.getCurrent().status === "idle" && !greetingHistorySelection.getCurrent().owner}
+        scope={draftAddress?.kind === "fresh" ? draftAddress.scope : undefined}
+        viewKey={String(useStoreMessageOption.getState().chatDraftRevision)}
+        disabled={isSending || streaming || greetingStarting}
+        blockedReason={creationRecovery.unavailable || (creationRecovery.active && !["prepared", "settled"].includes(creationRecovery.active.state)) ? t("sidepanel:greetingPicker.reviewCreation", "Review the previous save in Recover drafts before saving another opening.") : null}
+          inputRevision={form.getRevision()} onStartGreeting={startCharacterGreeting} onStartWithMessage={() => textareaRef.current?.focus()} className="mb-3" />
       <div
         className={`relative z-10 flex w-full min-w-0 flex-col items-center justify-center ${composerGap} text-body`}>
         <div className="relative flex w-full min-w-0 flex-row justify-center gap-2">
@@ -3172,7 +3213,7 @@ export const SidepanelForm = ({
                       <ChatQueuePanel
                         queue={queuedMessages}
                         isConnectionReady={isConnectionReady}
-                        isStreaming={isSending}
+                        isStreaming={isSending || greetingStarting}
                         onRunNext={handleRunNextQueuedRequest}
                         onRunNow={handleRunQueuedRequest}
                         onDelete={queuedRequestActions.remove}
@@ -3181,7 +3222,7 @@ export const SidepanelForm = ({
                         onClearAll={queuedRequestActions.clear}
                         onOpenDiagnostics={openDiagnostics}
                         forceRunDisabledReason={cancelCurrentAndRunDisabledReason}
-                        dispatchDisabledReason={queueMetadataStatus}
+                        dispatchDisabledReason={greetingStarting ? t("sidepanel:greetingPicker.startingHelp", "Saving the character’s opening. Your message has not been sent.") : queueMetadataStatus}
                       />
                     )}
                     {contextChips.length > 0 && (

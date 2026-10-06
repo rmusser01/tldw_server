@@ -34,7 +34,6 @@ import {
 import { useConnectionActions } from "@/hooks/useConnectionState"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
-import { useCharacterGreeting } from "@/hooks/useCharacterGreeting"
 import { useTTS } from "@/hooks/useTTS"
 import { copilotResumeLastChat } from "@/services/app"
 import {
@@ -650,16 +649,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
     DEFAULT_CHAT_SETTINGS.stickyChatInput
   )
   const [userDisplayName] = useStorage("chatUserDisplayName", "")
-  useCharacterGreeting({
-    playgroundReady: !isRestoringChat,
-    selectedCharacter,
-    selectedCharacterMode: null,
-    serverChatId,
-    historyId,
-    messagesLength: messages.length,
-    setMessages,
-    setHistory
-  })
+
   const composerPadding = composerHeight
     ? `${composerHeight + 16}px`
     : `${DEFAULT_COMPOSER_HEIGHT}px`

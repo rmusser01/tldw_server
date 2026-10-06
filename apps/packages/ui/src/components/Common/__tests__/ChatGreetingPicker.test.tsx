@@ -1,394 +1,127 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Character } from "@/types/character"
-import type { ChatHistory, Message } from "@/store/option/types"
 import { ChatGreetingPicker } from "../ChatGreetingPicker"
-import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
-import { normalizeChatSettingsRecord } from "@/services/chat-settings"
-import type { ChatSettingsRecord } from "@/types/chat-session-settings"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
-import {
-  buildGreetingOptionsFromEntries,
-  buildGreetingsChecksumFromOptions,
-  collectGreetingEntries
-} from "@/utils/character-greetings"
+const state = vi.hoisted(() => ({ displayName: "Viewer", loading: false, unavailable: false, retry: vi.fn() }))
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (_key: string, fallback: string, values?: { name?: string }) => values?.name ? fallback.replace("{{name}}", values.name) : fallback }) }))
+vi.mock("@plasmohq/storage/hook", () => ({ useStorage: () => [state.displayName] }))
+vi.mock("@/hooks/useCharacterGreeting", () => ({ useCharacterGreeting: (props: { selectedCharacter: Character | null; selectedCharacterMode: string | null; serverChatId: string | null; historyId: string | null; messagesLength: number; playgroundReady: boolean }) => ({
+  character: props.selectedCharacter, loading: state.loading, unavailable: state.unavailable, retry: state.retry,
+  fresh: props.playgroundReady && props.selectedCharacterMode === "tracked" && !!props.selectedCharacter?.id && !props.serverChatId && !props.historyId && props.messagesLength === 0
+}) }))
+vi.mock("antd", () => ({ Select: ({ value, onChange, options, disabled, ...props }: { value: string; onChange: (value: string) => void; options: { value: string; label: string }[]; disabled: boolean; "aria-label"?: string }) => <select aria-label={props["aria-label"]} value={value} onChange={event => onChange(event.target.value)} disabled={disabled}>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select> }))
+const card = { id: "card-1", name: "Guide", first_message: "{{user}} meets {{char}}", alternate_greetings: ["Alternate greeting"] } as Character
+const props = () => ({ selectedCharacter: card, selectedCharacterMode: "tracked" as const, messages: [], historyId: null, serverChatId: null, ready: true, viewKey: "fresh-1", onStartGreeting: vi.fn().mockResolvedValue(undefined), onStartWithMessage: vi.fn() })
+afterEach(cleanup)
+beforeEach(() => { state.displayName = "Viewer"; state.loading = false; state.unavailable = false; state.retry.mockClear() })
 
-const displayName = vi.hoisted(() => ({ value: "" }))
-
-const notificationErrorMock = vi.hoisted(() => vi.fn())
-
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: { defaultValue?: string }) =>
-      options?.defaultValue || key
+describe("explicit character opening", () => {
+  it("exposes explicit opening choices before committing a greeting", () => {
+    const input = props(); render(<ChatGreetingPicker {...input} />)
+    expect(screen.getByRole("button", { name: "Start with this greeting" })).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: "Start with your message" }))
+    expect(input.onStartWithMessage).toHaveBeenCalledOnce()
+    expect(input.onStartGreeting).not.toHaveBeenCalled()
   })
-}))
-
-vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: () => [displayName.value]
-}))
-
-vi.mock("antd", () => ({
-  notification: {
-    error: notificationErrorMock
-  },
-  Select: ({ value, onChange, options, disabled }: any) => (
-    <select
-      data-testid="greeting-select"
-      value={value ?? ""}
-      onChange={(event) => onChange?.(event.target.value)}
-      disabled={disabled}
-    >
-      {(options ?? []).map((option: any) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  ),
-  Switch: ({ checked, onChange }: any) => (
-    <input
-      type="checkbox"
-      role="switch"
-      checked={Boolean(checked)}
-      onChange={(event) => onChange?.(event.target.checked)}
-    />
-  )
-}))
-
-vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
-  useChatSettingsRecord: vi.fn()
-}))
-
-vi.mock("@/services/tldw/TldwApiClient", () => ({
-  tldwClient: {
-    initialize: vi.fn(),
-    addChatMessage: vi.fn()
-  }
-}))
-
-const character = {
-  id: "char-1",
-  name: "Guide",
-  greeting: "Welcome aboard",
-  alternateGreetings: ["Good to see you"]
-} as Character
-
-const greetingEntries = collectGreetingEntries(character)
-const greetingOptions = buildGreetingOptionsFromEntries(greetingEntries)
-const checksum = buildGreetingsChecksumFromOptions(greetingOptions)
-const defaultGreetingId = greetingOptions[0]?.id ?? null
-const alternateGreetingId = greetingOptions[1]?.id ?? null
-
-const renderPicker = (
-  settingsPatch: Partial<ChatSettingsRecord>,
-  updateSettings: (patch: Partial<ChatSettingsRecord>) => Promise<ChatSettingsRecord | null>,
-  extraProps: Record<string, unknown> = {}
-) => {
-  const settings = normalizeChatSettingsRecord(settingsPatch)
-  vi.mocked(useChatSettingsRecord).mockReturnValue({
-    settings,
-    updateSettings,
-    chatKey: "chat:test"
+  it.each(["Guide", ""])("renders distinct user and character identities (%s)", name => {
+    render(<ChatGreetingPicker {...props()} selectedCharacter={{ ...card, name }} />)
+    expect(screen.getByText(`Viewer meets ${name || "{{char}}"}`)).toBeInTheDocument()
   })
-
-  render(
-    <ChatGreetingPicker
-      selectedCharacter={character}
-      messages={[]}
-      historyId="history-1"
-      serverChatId={null}
-      {...extraProps}
-    />
-  )
-}
-
-describe("ChatGreetingPicker", () => {
-  afterEach(() => {
-    displayName.value = ""
-    cleanup()
-    vi.clearAllMocks()
+  it("alternate selection and reroll only change preview until explicit start", async () => {
+    const input = props(); render(<ChatGreetingPicker {...input} />)
+    fireEvent.click(screen.getByText("Alternate greetings"))
+    const select = screen.getByRole("combobox", { name: "Choose greeting" })
+    const option = screen.getByRole("option", { name: "Alternate greeting" }) as HTMLOptionElement
+    fireEvent.change(select, { target: { value: option.value } })
+    expect(input.onStartGreeting).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Reroll" }))
+    expect(input.onStartGreeting).not.toHaveBeenCalled()
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start with this greeting" })))
+    expect(input.onStartGreeting).toHaveBeenCalledWith(expect.objectContaining({ seed: { greetingStrategy: "default", rawText: card.first_message } }), expect.any(Function))
   })
-
-  it("falls back to current selection when disabling default without stored selection", () => {
-    const updateSettings = vi.fn(
-      async (_patch: Partial<ChatSettingsRecord>) => null
-    )
-    renderPicker(
-      {
-        useCharacterDefault: true,
-        greetingSelectionId: null,
-        greetingsChecksum: checksum
-      },
-      updateSettings
-    )
-
-    const [useDefaultSwitch] = screen.getAllByRole("switch")
-    fireEvent.click(useDefaultSwitch)
-
-    expect(updateSettings).toHaveBeenCalledWith({
-      useCharacterDefault: false,
-      greetingSelectionId: defaultGreetingId,
-      greetingsChecksum: checksum
-    })
+  it("passes the exact raw alternate index zero without a second random selection", async () => {
+    const input = props(); render(<ChatGreetingPicker {...input} />)
+    fireEvent.click(screen.getByText("Alternate greetings"))
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: (screen.getByRole("option", { name: "Alternate greeting" }) as HTMLOptionElement).value } })
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start with this greeting" })))
+    expect(input.onStartGreeting).toHaveBeenCalledWith(expect.objectContaining({ seed: { greetingStrategy: "alternate_index", alternateIndex: 0, rawText: "Alternate greeting" } }), expect.any(Function))
   })
-
-  it("keeps stored greeting selection when disabling default", () => {
-    const updateSettings = vi.fn(
-      async (_patch: Partial<ChatSettingsRecord>) => null
-    )
-    renderPicker(
-      {
-        useCharacterDefault: true,
-        greetingSelectionId: alternateGreetingId,
-        greetingsChecksum: checksum
-      },
-      updateSettings
-    )
-
-    const [useDefaultSwitch] = screen.getAllByRole("switch")
-    fireEvent.click(useDefaultSwitch)
-
-    expect(updateSettings).toHaveBeenCalledWith({
-      useCharacterDefault: false,
-      greetingSelectionId: alternateGreetingId,
-      greetingsChecksum: checksum
-    })
+  it("offers a first-message action when the card has no opening", () => {
+    const input = props(); render(<ChatGreetingPicker {...input} selectedCharacter={{ id: "empty", name: "Guide" } as Character} />)
+    fireEvent.click(screen.getByRole("button", { name: "Write the first message" }))
+    expect(input.onStartWithMessage).toHaveBeenCalledOnce()
+    expect(screen.queryByRole("button", { name: "Start with this greeting" })).not.toBeInTheDocument()
   })
-
-  it("updates selection when picking a different greeting", () => {
-    const updateSettings = vi.fn(
-      async (_patch: Partial<ChatSettingsRecord>) => null
-    )
-    renderPicker(
-      {
-        useCharacterDefault: false,
-        greetingSelectionId: defaultGreetingId,
-        greetingsChecksum: checksum
-      },
-      updateSettings
-    )
-
-    const select = screen.getByTestId("greeting-select")
-    fireEvent.change(select, { target: { value: alternateGreetingId } })
-
-    expect(updateSettings).toHaveBeenCalledWith({
-      greetingSelectionId: alternateGreetingId,
-      greetingsChecksum: checksum,
-      useCharacterDefault: false
-    })
+  it("explains a display-only alias and never appends it to an existing chat", () => {
+    const input = props(); render(<ChatGreetingPicker {...input} selectedCharacter={{ id: "alias", name: "Guide", greeting: "Alias opening" } as Character} />)
+    expect(screen.getByRole("button", { name: "Start with this greeting" })).toBeDisabled()
+    expect(screen.getByText(/cannot be saved with the server/)).toBeInTheDocument()
+    expect(input.onStartGreeting).not.toHaveBeenCalled()
   })
-
-  it("resolves legacy index-based selection ids to the matching option", () => {
-    const updateSettings = vi.fn(
-      async (_patch: Partial<ChatSettingsRecord>) => null
-    )
-    renderPicker(
-      {
-        useCharacterDefault: false,
-        greetingSelectionId: "greeting:1:selected",
-        greetingsChecksum: checksum
-      },
-      updateSettings
-    )
-
-    const select = screen.getByTestId("greeting-select") as HTMLSelectElement
-    expect(select.value).toBe(alternateGreetingId)
+  it.each([{ serverChatId: "saved" }, { historyId: "local-saved" }, { selectedCharacterMode: "overlay" as const }])("does not expose startup for existing/incompatible state %j", patch => {
+    render(<ChatGreetingPicker {...props()} {...patch} />)
+    expect(screen.queryByRole("button", { name: "Start with this greeting" })).not.toBeInTheDocument()
   })
-
-  it("selects the current greeting as the first character message", async () => {
-    const updateSettings = vi.fn(
-      async (_patch: Partial<ChatSettingsRecord>) => null
-    )
-    vi.mocked(tldwClient.initialize).mockResolvedValue(null)
-    vi.mocked(tldwClient.addChatMessage).mockResolvedValue({
-      id: "server-message-1",
-      version: 3
-    } as any)
-    let messageState: Message[] = []
-    let historyState: ChatHistory = []
-    const setMessages = vi.fn(
-      (next: Message[] | ((prev: Message[]) => Message[])) => {
-        messageState =
-          typeof next === "function" ? next(messageState) : next
-      }
-    )
-    const setHistory = vi.fn(
-      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
-        historyState =
-          typeof next === "function" ? next(historyState) : next
-      }
-    )
-
-    renderPicker(
-      {
-        useCharacterDefault: false,
-        greetingSelectionId: alternateGreetingId,
-        greetingsChecksum: checksum,
-        greetingEnabled: true
-      },
-      updateSettings,
-      {
-        serverChatId: "server-chat-1",
-        setMessages,
-        setHistory
-      }
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: /select greeting/i }))
-
-    await waitFor(() => {
-      expect(messageState[0]).toEqual(
-        expect.objectContaining({
-          isBot: true,
-          role: "assistant",
-          name: "Guide",
-          message: "Good to see you",
-          messageType: "character:greeting",
-          serverMessageId: "server-message-1",
-          serverMessageVersion: 3
-        })
-      )
-    })
-    expect(historyState).toEqual([
-      expect.objectContaining({
-        role: "assistant",
-        content: "Good to see you",
-        messageType: "character:greeting"
-      })
-    ])
-    expect(tldwClient.addChatMessage).toHaveBeenCalledWith("server-chat-1", {
-      role: "assistant",
-      content: "Good to see you"
-    })
+  it.each(["loading", "unavailable"] as const)("keeps own-message choice while %s prevents an unverified opening", key => {
+    state[key] = true; render(<ChatGreetingPicker {...props()} />)
+    expect(screen.getByRole("button", { name: "Start with this greeting" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Start with your message" })).toBeEnabled()
+    expect(screen.getByRole("status")).toBeInTheDocument()
   })
-
-  it("does not persist the same greeting twice during a rapid double select", async () => {
-    const updateSettings = vi.fn(
-      async (_patch: Partial<ChatSettingsRecord>) => null
-    )
-    vi.mocked(tldwClient.initialize).mockResolvedValue(null)
-    let resolveAdd: (value: unknown) => void = () => {}
-    vi.mocked(tldwClient.addChatMessage).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveAdd = resolve
-        }) as any
-    )
-    let messageState: Message[] = []
-    let historyState: ChatHistory = []
-    const setMessages = vi.fn(
-      (next: Message[] | ((prev: Message[]) => Message[])) => {
-        messageState =
-          typeof next === "function" ? next(messageState) : next
-      }
-    )
-    const setHistory = vi.fn(
-      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
-        historyState =
-          typeof next === "function" ? next(historyState) : next
-      }
-    )
-
-    renderPicker(
-      {
-        useCharacterDefault: false,
-        greetingSelectionId: alternateGreetingId,
-        greetingsChecksum: checksum,
-        greetingEnabled: true
-      },
-      updateSettings,
-      {
-        serverChatId: "server-chat-1",
-        setMessages,
-        setHistory
-      }
-    )
-
-    const button = screen.getByRole("button", { name: /select greeting/i })
-    fireEvent.click(button)
-    fireEvent.click(button)
-
-    await waitFor(() => {
-      expect(tldwClient.addChatMessage).toHaveBeenCalledTimes(1)
-    })
-
-    resolveAdd({ id: "server-message-1", version: 3 })
-    await waitFor(() => {
-      expect(messageState).toHaveLength(1)
-    })
-    expect(historyState).toHaveLength(1)
+  it("bounds long preview after the primary choices", () => {
+    render(<ChatGreetingPicker {...props()} selectedCharacter={{ ...card, first_message: "Long opening ".repeat(500) }} />)
+    const preview = screen.getByText(/^Long opening/, { selector: "div" })
+    expect(preview.className).toContain("max-h-48")
+    expect(screen.getByRole("button", { name: "Start with this greeting" }).compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
-
-  it("notifies when a selected greeting cannot be synced to the server chat", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
-    vi.mocked(tldwClient.addChatMessage).mockRejectedValueOnce(
-      new Error("server unavailable")
-    )
-    const updateSettings = vi.fn(
-      async (patch: Partial<ChatSettingsRecord>) =>
-        normalizeChatSettingsRecord({
-          greetingSelectionId: patch.greetingSelectionId,
-          greetingsChecksum: patch.greetingsChecksum,
-          greetingEnabled: true
-        })
-    )
-    let messageState: Message[] = []
-    let historyState: ChatHistory = []
-    const setMessages = vi.fn((next: Message[] | ((prev: Message[]) => Message[])) => {
-      messageState = typeof next === "function" ? next(messageState) : next
-    })
-    const setHistory = vi.fn((next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
-      historyState = typeof next === "function" ? next(historyState) : next
-    })
-
-    try {
-      renderPicker(
-        {
-          greetingSelectionId: alternateGreetingId,
-          greetingsChecksum: checksum,
-          greetingEnabled: true
-        },
-        updateSettings,
-        {
-          serverChatId: "server-chat-1",
-          setMessages,
-          setHistory
-        }
-      )
-
-      fireEvent.click(screen.getByRole("button", { name: /select greeting/i }))
-
-      await waitFor(() => {
-        expect(notificationErrorMock).toHaveBeenCalledWith(
-          expect.objectContaining({
-            message: "Greeting sync failed",
-            description:
-              "The greeting was added locally but could not be saved to the server chat."
-          })
-        )
-      })
-      expect(messageState[0]).toEqual(
-        expect.objectContaining({
-          message: "Good to see you",
-          messageType: "character:greeting"
-        })
-      )
-      expect(historyState[0]).toEqual(
-        expect.objectContaining({
-          content: "Good to see you",
-          messageType: "character:greeting"
-        })
-      )
-    } finally {
-      warnSpy.mockRestore()
-    }
+  it("blocks rapid repeat and the competing own-message action during startup", async () => {
+    let finish!: () => void
+    const input = props(); input.onStartGreeting.mockReturnValue(new Promise<void>(done => { finish = done }))
+    render(<ChatGreetingPicker {...input} />)
+    fireEvent.click(screen.getByRole("button", { name: "Start with this greeting" }))
+    fireEvent.click(screen.getByRole("button", { name: "Saving opening…" }))
+    expect(input.onStartGreeting).toHaveBeenCalledOnce()
+    expect(screen.getByRole("button", { name: "Start with your message" })).toBeDisabled()
+    await act(async () => finish())
   })
 })
 
+it("offers a working Retry without losing the own-message action", () => {
+  state.unavailable = true
+  render(<ChatGreetingPicker {...props()} />)
+  fireEvent.click(screen.getByRole("button", { name: "Retry loading opening" }))
+  expect(state.retry).toHaveBeenCalledOnce()
+  expect(screen.getByRole("button", { name: "Start with your message" })).toBeEnabled()
+})
+it("explains unresolved creation and leaves own-message focus available", () => {
+  render(<ChatGreetingPicker {...props()} blockedReason="Review the unconfirmed chat first." />)
+  expect(screen.getByRole("button", { name: "Start with this greeting" })).toBeDisabled()
+  expect(screen.getByText("Review the unconfirmed chat first.")).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Start with your message" })).toBeEnabled()
+})
+it("retires old busy state on New and an old completion cannot clear the newer operation", async () => {
+  const releases: (() => void)[] = []
+  const input = props()
+  input.onStartGreeting.mockImplementation(() => new Promise<void>(done => releases.push(done)))
+  const view = render(<ChatGreetingPicker {...input} />)
+  fireEvent.click(screen.getByRole("button", { name: "Start with this greeting" }))
+  view.rerender(<ChatGreetingPicker {...input} viewKey="fresh-2" />)
+  expect(screen.getByRole("button", { name: "Start with this greeting" })).toBeEnabled()
+  fireEvent.click(screen.getByRole("button", { name: "Start with this greeting" }))
+  await act(async () => releases[0]())
+  expect(screen.getByRole("button", { name: "Saving opening…" })).toBeDisabled()
+  expect(input.onStartGreeting).toHaveBeenCalledTimes(2)
+  await act(async () => releases[1]())
+})
 
-it.each(["Guide", ""])("renders the actual picker preview with distinct user and character names (name=%s)", name => {
-  displayName.value = "Viewer"
-  renderPicker({}, vi.fn().mockResolvedValue(null), { selectedCharacter: { id: "identity", name, greeting: "{{user}} meets {{char}}" } })
-  expect(screen.getByText(`Viewer meets ${name || "{{char}}"}`)).toBeInTheDocument()
+it("retires picker activity on an input revision without changing the preview or sending input", async () => {
+  let finish!: () => void
+  const input = props(); input.onStartGreeting.mockReturnValue(new Promise<void>(done => { finish = done }))
+  const view = render(<ChatGreetingPicker {...input} inputRevision={0} />)
+  fireEvent.click(screen.getByRole("button", { name: "Start with this greeting" }))
+  view.rerender(<ChatGreetingPicker {...input} inputRevision={1} />)
+  expect(screen.getByRole("button", { name: "Start with this greeting" })).toBeEnabled()
+  expect(screen.getByRole("button", { name: "Start with your message" })).toBeEnabled()
+  expect(screen.getByText("Viewer meets Guide")).toBeInTheDocument()
+  await act(async () => finish())
 })

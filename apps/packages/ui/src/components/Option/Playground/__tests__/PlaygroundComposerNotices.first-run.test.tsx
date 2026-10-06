@@ -257,6 +257,16 @@ describe("PlaygroundComposerNotices first-run banner", () => {
     )
   })
 
+  it("defers expression setup while the character opening is pending", () => {
+    mockNoFirstRunBanner()
+    renderNotices({
+      selectedCharacter: { id: 42, name: "Ada", extensions: {} },
+      selectedCharacterName: "Ada",
+      deferCharacterAppearanceSetup: true
+    })
+    expect(screen.queryByRole("link", { name: "Edit expressions" })).not.toBeInTheDocument()
+  })
+
   it("does not show the expression nudge when mood images are configured", () => {
     mockNoFirstRunBanner()
 

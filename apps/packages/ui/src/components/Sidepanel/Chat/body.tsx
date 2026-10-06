@@ -1,3 +1,4 @@
+import { resolveCharacterMessageType } from "@/utils/character-greetings"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { PlaygroundMessage } from "~/components/Common/Playground/Message"
@@ -12,7 +13,7 @@ import { generateID } from "@/db/dexie/helpers"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useStoreMessageOption } from "@/store/option"
 import type { Character } from "@/types/character"
-import { ChatGreetingPicker } from "@/components/Common/ChatGreetingPicker"
+import { characterToAssistantSelection, getAssistantSelectionMode } from "@/types/assistant-selection"
 import {
   EDIT_MESSAGE_EVENT,
   type TimelineActionDetail
@@ -37,7 +38,6 @@ export const SidePanelBody = ({
   const {
     messages,
     setMessages,
-    setHistory,
     streaming,
     isProcessing,
     regenerateLastMessage,
@@ -262,16 +262,7 @@ export const SidePanelBody = ({
         aria-live="polite"
         className={`relative flex w-full flex-col items-center ${topPaddingClass} pb-4`}
       >
-        {messages.length === 0 && <EmptySidePanel inputRef={inputRef} />}
-        <ChatGreetingPicker
-          selectedCharacter={selectedCharacter}
-          messages={messages}
-          historyId={historyId}
-          serverChatId={serverChatId}
-          setMessages={setMessages}
-          setHistory={setHistory}
-          className="mb-4"
-        />
+        {messages.length === 0 && !(selectedCharacter && getAssistantSelectionMode(characterToAssistantSelection(selectedCharacter)) === "tracked" && !historyId && !serverChatId) && <EmptySidePanel inputRef={inputRef} />}
         <div style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
           {rowVirtualizer.getVirtualItems().map((vr) => {
             const index = vr.index
@@ -288,7 +279,7 @@ export const SidePanelBody = ({
                   currentMessageIndex={index}
                   totalMessages={messages.length}
                   onRegenerate={regenerateLastMessage}
-                  message_type={message.messageType}
+                  message_type={resolveCharacterMessageType(message, index, Boolean(serverChatId && characterIdentityEnabled))}
                   isProcessing={isProcessing}
                   isSearchingInternet={isSearchingInternet}
                   sources={message.sources}

@@ -2544,3 +2544,161 @@ it.each(["scope", "actor"].flatMap(stage => ["model", "settings", "tools", "new"
     hook.unmount()
   }
 )
+
+
+const startGreetingOnMountedNative = async (mounted: Awaited<ReturnType<typeof mountedNativeOpening>>, seed: import("@/utils/character-greetings").GreetingSeed, surface: "playground" | "sidepanel" = "playground", greetingIsCurrent?: () => boolean) => {
+  const { sendNativeHistoryCharacter } = await import("../native-history-character-send")
+  const controller = mounted.selection.result.current
+  const args = { controller, surface, originIsCurrent: controller.fence(), signal: new AbortController().signal,
+    temporary: false, historyId: null, serverChatId: null, characterId: "12", model: "deepseek:deepseek-chat", currentModel: "deepseek:deepseek-chat",
+    settings: { apiProvider: "deepseek", temperature: 0, topP: 0 }, message: "", image: "", greetingSeed: seed, greetingIsCurrent,
+    t: mounted.options.t, setServerChatId: mounted.options.setServerChatId, setMessages: mounted.options.setMessages, releaseActivity: vi.fn() }
+  return sendNativeHistoryCharacter(args)
+}
+
+it.each(["playground", "sidepanel"] as const)("explicit greeting startup on %s binds one owned assistant opening without a user turn or provider", async surface => {
+  const mounted = await mountedNativeOpening()
+  await act(async () => { await startGreetingOnMountedNative(mounted, { greetingStrategy: "default", rawText: "Saved opening" }, surface) })
+  expect(createChatMock).toHaveBeenCalledWith(expect.objectContaining({ character_id: "12", provider: "deepseek", model: "deepseek-chat", temperature: 0, top_p: 0 }), expect.objectContaining({ seedFirstMessage: true, greetingStrategy: "default", requestScope: expect.any(Object) }))
+  expect(mounted.onCapture).toHaveBeenCalledOnce()
+  expect(mounted.selection.result.current.capture).toMatchObject({ status: "captured", rows: [{ id: "opening-tracked-chat-1", role: "assistant", settled: true }] })
+  expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+  expect(addChatMessageMock).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
+  const { readChatCreationRecovery } = await import("@/services/pending-chat-promotion")
+  const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
+  const attempt = await readChatCreationRecovery({ address: mounted.sourceDraft!, ownerHash: chatDraftOwnerKey({ config: { serverUrl: "https://server.test", authMode: "multi-user" }, userId: "alice" }) })
+  expect(attempt).toMatchObject({ state: "settled", inputText: "" })
+  mounted.selection.unmount(); mounted.hook.unmount()
+})
+
+it("explicit greeting startup preserves raw alternate index zero", async () => {
+  const mounted = await mountedNativeOpening()
+  await act(async () => { await startGreetingOnMountedNative(mounted, { greetingStrategy: "alternate_index", alternateIndex: 0, rawText: "Saved opening" }) })
+  expect(createChatMock.mock.calls[0][1]).toMatchObject({ seedFirstMessage: true, greetingStrategy: "alternate_index", alternateIndex: 0 })
+  expect(h1.wire).not.toHaveBeenCalled()
+  mounted.selection.unmount(); mounted.hook.unmount()
+})
+
+it("explicit greeting startup rejects a missing stored seed before capture publication and keeps known-ID recovery", async () => {
+  const mounted = await mountedNativeOpening()
+  h1.capture.mockImplementation(async (id, request) => { const value = openingCapture(id, request); return { ...value, rows: [], selected_content: [], snapshot: { ...value.snapshot, nodes: [] } } })
+  await act(async () => { await expect(startGreetingOnMountedNative(mounted, { greetingStrategy: "default", rawText: "Saved opening" })).rejects.toThrow() })
+  expect(createChatMock).toHaveBeenCalledOnce()
+  expect(mounted.onCapture).not.toHaveBeenCalled()
+  expect(mounted.options.setServerChatId).not.toHaveBeenCalled()
+  expect(mounted.draftStore.getState().chatDraftAddress).toBe(mounted.sourceDraft)
+  expect(h1.wire).not.toHaveBeenCalled()
+  const { readChatCreationRecovery } = await import("@/services/pending-chat-promotion")
+  const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
+  expect(await readChatCreationRecovery({ address: mounted.sourceDraft!, ownerHash: chatDraftOwnerKey({ config: { serverUrl: "https://server.test", authMode: "multi-user" }, userId: "alice" }) })).toMatchObject({ state: "acknowledged", chatId: "tracked-chat-1", inputText: "" })
+  mounted.selection.unmount(); mounted.hook.unmount()
+})
+
+
+it.each(["capture", "bookmark"])("greeting startup rejects changed UI intent during %s before publication", async stage => {
+  const mounted = await mountedNativeOpening()
+  let current = true, enter!: () => void, release!: () => void
+  const entered = new Promise<void>(resolve => { enter = resolve })
+  const held = new Promise<void>(resolve => { release = resolve })
+  let spy: ReturnType<typeof vi.spyOn> | undefined
+  if (stage === "capture") {
+    h1.capture.mockImplementation(async (id, request) => { enter(); await held; return openingCapture(id, request) })
+  } else {
+    const original = mounted.memory.historySelections.put
+    spy = vi.spyOn(mounted.memory.historySelections, "put").mockImplementation(async (...args: unknown[]) => { enter(); await held; return original(...args) })
+  }
+  let pending!: Promise<unknown>
+  act(() => { pending = startGreetingOnMountedNative(mounted, { greetingStrategy: "default", rawText: "Saved opening" }, "playground", () => current) })
+  await entered
+  current = false
+  await act(async () => { release(); await expect(pending).rejects.toThrow() })
+  spy?.mockRestore()
+  expect(createChatMock).toHaveBeenCalledOnce()
+  expect(mounted.onCapture).not.toHaveBeenCalled()
+  expect(mounted.options.setServerChatId).not.toHaveBeenCalled()
+  expect(mounted.draftStore.getState().chatDraftAddress).toBe(mounted.sourceDraft)
+  expect(h1.wire).not.toHaveBeenCalled()
+  mounted.selection.unmount(); mounted.hook.unmount()
+})
+
+it("the actual chat submit action honors assistant-only greeting intent", async () => {
+  const mounted = await mountedNativeOpening()
+  let result: unknown
+  await act(async () => { result = await mounted.hook.result.current.onSubmit({ message: "", image: "", greetingSeed: { greetingStrategy: "default", rawText: "Saved opening" }, greetingIsCurrent: () => true }) })
+  expect(result).toEqual({ status: "submitted" })
+  expect(createChatMock.mock.calls[0][1]).toMatchObject({ seedFirstMessage: true, greetingStrategy: "default" })
+  expect(mounted.onCapture).toHaveBeenCalledOnce()
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(addChatMessageMock).not.toHaveBeenCalled()
+  mounted.selection.unmount(); mounted.hook.unmount()
+})
+
+it.each(["newer-H1", "source-intent", "reconnect"])("explicit greeting captures %s before a held durable composer ACK", async boundary => {
+  const mounted = await mountedNativeOpening()
+  const { useComposerText } = await import("@/components/Chat/composer/hooks/useComposerText")
+  const { useCharacterGreetingStart } = await import("@/hooks/useCharacterGreetingStart")
+  const { usePlaygroundSessionStore: sessions } = await import("@/store/playground-session")
+  sessions.setState({ serverChatSelectionIntent: null })
+  const composer = renderHook(() => useComposerText({ draftKey: "greeting-retain", draftAddress: mounted.sourceDraft!, textareaRef: React.createRef<HTMLTextAreaElement>() }))
+  await waitFor(() => expect(composer.result.current.draftReady).toBe(true))
+  act(() => composer.result.current.setMessageValue("UNSENT GREETING REVIEW\n  exact  "))
+  const { Storage } = await import("@plasmohq/storage")
+  const original = Storage.prototype.set
+  let release!: () => void, enter!: () => void
+  const ready = new Promise<void>(resolve => { enter = resolve })
+  const held = new Promise<void>(resolve => { release = resolve })
+  const write = vi.spyOn(Storage.prototype, "set").mockImplementation(async function (this: Storage, key, value) {
+    if (key.startsWith("registry:draft:greeting-retain:") && value.value?.content === "UNSENT GREETING REVIEW\n  exact  ") { enter(); await held }
+    return original.call(this, key, value)
+  })
+  const submit = vi.fn(mounted.hook.result.current.onSubmit)
+  const starter = renderHook(({ connected }) => useCharacterGreetingStart({ form: composer.result.current.form,
+    retainCurrentDraft: composer.result.current.retainCurrentDraft, submit, ready: true, isConnectionReady: connected, busy: false,
+    controller: mounted.selection.result.current, readContext: () => [], preflight: () => {}, focusComposer: vi.fn() }), { initialProps: { connected: true } })
+  let pending!: Promise<void>
+  act(() => { pending = starter.result.current.start({ id: "default", text: "Saved opening", index: 0, seed: { greetingStrategy: "default", rawText: "Saved opening" } }, () => true) })
+  await ready
+  if (boundary === "reconnect") { starter.rerender({ connected: false }); starter.rerender({ connected: true }) }
+  await act(async () => {
+    if (boundary === "newer-H1") expect(await mounted.selection.result.current.loadConversation({ serverChatId: "newer-chat" })).toBe(true)
+    else if (boundary === "source-intent") sessions.getState().markSourceSelectionIntent()
+
+    release(); await expect(pending).rejects.toThrow()
+  })
+  expect(submit).not.toHaveBeenCalled()
+  expect(createChatMock).not.toHaveBeenCalled()
+  expect(mounted.draftStore.getState().chatDraftAddress).toBe(mounted.sourceDraft)
+  expect(composer.result.current.form.getValues().message).toBe("UNSENT GREETING REVIEW\n  exact  ")
+  expect(h1.wire).not.toHaveBeenCalled()
+  write.mockRestore(); starter.unmount(); composer.unmount(); mounted.hook.unmount(); mounted.selection.unmount()
+})
+
+it.each(["owned", "outside"])("assistant-only bind respects %s keyboard focus", async focus => {
+  const mounted = await mountedNativeOpening()
+  const { useCharacterGreetingStart } = await import("@/hooks/useCharacterGreetingStart")
+  const { useSimpleForm } = await import("@/hooks/useSimpleForm")
+  const { usePlaygroundSessionStore: sessions } = await import("@/store/playground-session")
+  sessions.setState({ serverChatSelectionIntent: null })
+  const button = document.createElement("button"), textarea = document.createElement("textarea"), other = document.createElement("button")
+  document.body.append(button, textarea, other); button.focus()
+  const focusComposer = vi.fn(() => textarea.focus())
+  const starter = renderHook(() => {
+    const form = useSimpleForm({ initialValues: { message: "UNSENT", image: "" } })
+    return useCharacterGreetingStart({ form, retainCurrentDraft: async () => true,
+      submit: async input => {
+        if (focus === "outside") other.focus()
+        const result = await mounted.hook.result.current.onSubmit(input)
+        button.remove()
+        return result
+      }, ready: true, isConnectionReady: true, busy: false, controller: mounted.selection.result.current,
+      readContext: () => [], preflight: () => {}, focusComposer })
+  })
+  await act(async () => { await starter.result.current.start({ id: "default", text: "Saved opening", index: 0, seed: { greetingStrategy: "default", rawText: "Saved opening" } }, () => true) })
+  expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+  expect(focusComposer).toHaveBeenCalledTimes(focus === "owned" ? 1 : 0)
+  expect(document.activeElement).toBe(focus === "owned" ? textarea : other)
+  expect(h1.wire).not.toHaveBeenCalled()
+  starter.unmount(); mounted.hook.unmount(); mounted.selection.unmount(); button.remove(); textarea.remove(); other.remove()
+})

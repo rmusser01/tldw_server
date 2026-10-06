@@ -1,3 +1,4 @@
+import type { GreetingSeed } from "@/utils/character-greetings"
 import { createChatWithRecovery, markChatCreationBound, readChatCreationRecovery, markChatCreationSettled } from "@/services/pending-chat-promotion"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import { chatDraftAddressKey, type ChatDraftHandle } from "@/utils/chat-draft-address"
@@ -57,6 +58,9 @@ export type NativeHistoryCharacterSendParams = {
   settings: ChatModelSettings
   message: string
   image: string
+  /** Explicit assistant-only startup; never submitted as a user turn. */
+  greetingSeed?: GreetingSeed
+  greetingIsCurrent?: () => boolean
   t: TFunction
   unsupportedContext?: boolean
   setServerChatId: (id: string) => void
@@ -68,13 +72,21 @@ export type NativeHistoryCharacterSendParams = {
 /** One native dispatch owns admission and settlement. Browser cancellation is never a rollback receipt. */
 export const sendNativeHistoryCharacter = async (
   params: NativeHistoryCharacterSendParams
-): Promise<void> => {
+): Promise<{ content: string; matchesPreview: boolean } | void> => {
   const { controller, signal } = params
+  const greetingSeed = params.greetingSeed ? structuredClone(params.greetingSeed) : undefined
   const sourceAddress = useStoreMessageOption.getState().chatDraftAddress
   const sourceDraft = sourceAddress ? structuredClone(sourceAddress) : null
-  const creationScope = params.scope ? structuredClone(params.scope) : undefined
+  const creationScope = params.scope ? structuredClone(params.scope) : greetingSeed && sourceDraft?.kind === "fresh" ? structuredClone(sourceDraft.scope) : undefined
   const acceptDraftBind = !params.historyId && !params.serverChatId && useStoreMessageOption.getState().chatDraftAddress?.kind === "fresh" ? captureChatDraftLoad("bind") : null
-  if (!params.message.trim()) throw new Error("native_history_input_required")
+  if (!greetingSeed && !params.message.trim()) throw new Error("native_history_input_required")
+  if (greetingSeed && (params.message || !greetingSeed.rawText?.trim() ||
+      params.historyId || params.serverChatId || sourceDraft?.kind !== "fresh" ||
+      controller.getCurrent().status !== "idle" || controller.getCurrent().owner))
+    throw new Error("native_history_greeting_requires_fresh")
+  if (!params.originIsCurrent()) throw new Error("stale_selection")
+  const greetingCurrent = () => !greetingSeed || params.greetingIsCurrent?.() !== false
+  if (!greetingCurrent()) throw new Error("stale_selection")
   const settingsState = useStoreChatModelSettings.getState()
   const toolsState = useMcpToolsStore.getState()
   const capturedSettings = { ...params.settings }
@@ -106,15 +118,16 @@ export const sendNativeHistoryCharacter = async (
     !signal.aborted &&
     useStoreChatModelSettings.getState() === settingsState &&
     useMcpToolsStore.getState() === toolsState
+  let greetingResult: { content: string; matchesPreview: boolean } | undefined
   try {
-    if (!params.originIsCurrent() || !leaseValid())
+    if (!params.originIsCurrent() || !greetingCurrent() || !leaseValid())
       throw new Error("stale_selection")
     let creationHandle: ChatDraftHandle | undefined
     let current = controller.getCurrent()
     let selectionCurrent = params.originIsCurrent
     let targetChatId = params.serverChatId
     if (!current.owner && current.status === "idle") {
-      if (!params.originIsCurrent() || !leaseValid())
+      if (!params.originIsCurrent() || !greetingCurrent() || !leaseValid())
         throw new Error("stale_selection")
       let chatId = params.serverChatId
       let createdCharacterId: string | number | undefined
@@ -127,28 +140,36 @@ export const sendNativeHistoryCharacter = async (
           snapshot, handle: creationHandle, scope: creationScope, surface: params.surface,
           inputText: params.message, setup: { characterId: params.characterId, provider, model,
             temperature: settings.temperature, topP: settings.topP },
-          isCurrent: () => params.originIsCurrent() && leaseValid(),
+          isCurrent: () => params.originIsCurrent() && greetingCurrent() && leaseValid(),
           create: () => tldwClient.createChat(
           {
             character_id: params.characterId,
             provider,
             model,
             ...(settings.temperature != null ? { temperature: settings.temperature } : {}),
-            ...(settings.topP != null ? { top_p: settings.topP } : {})
+            ...(settings.topP != null ? { top_p: settings.topP } : {}),
           },
           {
             scope: creationScope,
             signal: snapshot.scopeSignal,
-            requestScope: snapshot.requestScope
+            requestScope: snapshot.requestScope,
+            ...(greetingSeed ? { seedFirstMessage: true, greetingStrategy: greetingSeed.greetingStrategy,
+              ...(greetingSeed.greetingStrategy === "alternate_index" ? { alternateIndex: greetingSeed.alternateIndex } : {}) } : {})
           }
           )
         })
         // A late creation ACK must never bind the newly opened view or account.
-        if (!params.originIsCurrent() || !leaseValid())
+        if (!params.originIsCurrent() || !greetingCurrent() || !leaseValid())
           throw new Error("stale_selection")
         chatId = created.id
         createdCharacterId = params.characterId
         if (!chatId) throw new Error("native_history_creation_unacknowledged")
+      }
+      if (greetingSeed) {
+        const chat = await tldwClient.getChat(chatId!, { scope: creationScope, requestScope: snapshot.requestScope, signal: snapshot.scopeSignal })
+        if (!params.originIsCurrent() || !greetingCurrent() || !leaseValid()) throw new Error("stale_selection")
+        if (chat.id !== chatId || String(chat.character_id) !== String(params.characterId))
+          throw new Error("owner_conversation_mismatch")
       }
       let receipt: HistoryLoadReceipt | undefined
       let loadPhase: "preparing" | "accepted" | "rejected" = "preparing"
@@ -156,17 +177,32 @@ export const sendNativeHistoryCharacter = async (
         {
           historyId: params.historyId,
           serverChatId: chatId,
-          scope: params.scope,
+          scope: creationScope,
+          ...(greetingSeed ? { qualifyCapture: (capture, owner) => {
+            if (!greetingCurrent() || !leaseValid()) throw new Error("stale_selection")
+            if (owner.kind !== "native" || owner.conversation_id !== chatId || !owner.validate_lease() ||
+                chatDraftOwnerKey(owner.request_scope) !== chatDraftOwnerKey(snapshot.requestScope))
+              throw new Error("owner_conversation_mismatch")
+            if (capture.status !== "captured") throw new Error(capture.code)
+            const row = capture.rows[0]
+            const content = capture.selected_content[0]
+            if (capture.snapshot.nodes.length !== 1 || capture.rows.length !== 1 || capture.selected_content.length !== 1 ||
+                row.role !== "assistant" || !row.settled || row.parent_id !== null ||
+                (row.conversation_id != null && row.conversation_id !== chatId) || content.id !== row.id ||
+                content.revision !== row.revision || !content.message.trim() || content.images.length)
+              throw new Error("native_history_greeting_not_stored")
+            greetingResult = { content: content.message, matchesPreview: content.message === greetingSeed.rawText }
+          } } : {}),
           // Preparation ends at the qualified bind; later settings or Stop
           // must not revoke the saved owner's independent account lease.
           isCurrent: () => acceptDraftBind?.isCurrent() !== false &&
-            (loadPhase === "accepted" || (loadPhase === "preparing" && leaseValid()))
+            (loadPhase === "accepted" || (loadPhase === "preparing" && greetingCurrent() && leaseValid()))
         },
         null,
         (value) => {
           loadPhase = "rejected"
           const now = controller.getCurrent()
-          if (!leaseValid() || now.owner !== value.owner || now.view !== value.view ||
+          if (!greetingCurrent() || !leaseValid() || now.owner !== value.owner || now.view !== value.view ||
             (chatId && (value.owner.kind !== "native" || value.owner.conversation_id !== chatId))) return
           // The binding receipt validates the owner through this same guard.
           loadPhase = "preparing"
@@ -188,7 +224,7 @@ export const sendNativeHistoryCharacter = async (
         current.view !== receipt.view ||
         !leaseValid()
       )
-        throw new Error("stale_selection")
+        throw new Error(greetingSeed ? current.error || "stale_selection" : "stale_selection")
       if (
         chatId &&
         (receipt.owner.kind !== "native" ||
@@ -214,6 +250,13 @@ export const sendNativeHistoryCharacter = async (
     await assertHistoryConversationTarget(current.owner, { historyId: params.historyId, serverChatId: targetChatId })
     if (!selectionCurrent() || !leaseValid() || controller.getCurrent().owner !== current.owner || controller.getCurrent().view !== current.view)
       throw new Error("stale_selection")
+    if (greetingSeed) {
+      if (!creationHandle || !greetingResult) throw new Error("native_history_greeting_not_stored")
+      await markChatCreationSettled(creationHandle, current.owner.conversation_id)
+      if (!selectionCurrent() || !leaseValid() || controller.getCurrent().owner !== current.owner || controller.getCurrent().view !== current.view)
+        throw new Error("stale_selection")
+      return greetingResult
+    }
     const view = structuredClone(current.view)
     const scope = { ...current.bookmarkScope }
     const owner = {

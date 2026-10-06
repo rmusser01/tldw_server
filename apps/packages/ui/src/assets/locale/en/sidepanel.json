@@ -835,5 +835,26 @@
   },
   "folderPicker": {
     "createError": "Unable to create the folder. Try again."
+  },
+  "greetingPicker": {
+    "opening": "{{name}} opening",
+    "character": "AI character",
+    "previewHelp": "Choose who begins. Previewing an opening does not add a message.",
+    "start": "Start with this greeting",
+    "starting": "Saving opening…",
+    "ownMessage": "Start with your message",
+    "firstMessage": "Write the first message",
+    "loading": "Loading character opening…",
+    "retry": "Retry loading opening",
+    "unavailable": "Could not refresh this card. Review the connection before saving an opening.",
+    "unsupported": "This opening cannot be saved with the server’s greeting options. Write your message or review the character card.",
+    "alternates": "Alternate greetings",
+    "choose": "Choose greeting",
+    "reroll": "Reroll",
+    "startingHelp": "Saving the character’s opening. Your message has not been sent.",
+    "startFailed": "Could not save the opening. Your draft is still here. Review the connection and retained drafts before starting again.",
+    "changed": "The character opening changed",
+    "changedHelp": "The saved opening differs from the preview. Review the opening shown in this chat before sending your message.",
+    "reviewCreation": "Review the previous save in Recover drafts before saving another opening."
   }
 }

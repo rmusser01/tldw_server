@@ -289,4 +289,30 @@ describe("useComposerText", () => {
     expect(typeof props.onChange).toBe("function")
     expect(props.value).toBe("")
   })
+  it("acknowledges exact text and collapse metadata without resetting input", async () => {
+    const draftKey = "tldw:test:greeting-retain"
+    const { result } = renderHook(() => useComposerText({ draftKey, textareaRef: createRef(),
+      getDraftMetadata: () => ({ collapsedRange: { start: 2, end: 7 }, wasExpanded: true }) }))
+    await waitFor(() => expect(result.current.draftReady).toBe(true))
+    act(() => result.current.form.setValues({ message: "  UNSENT\nexact  ", image: "" }))
+    let retained = false
+    await act(async () => { retained = await result.current.retainCurrentDraft() })
+    expect(retained).toBe(true)
+    expect(result.current.form.getValues()).toEqual({ message: "  UNSENT\nexact  ", image: "" })
+    const stored = JSON.parse(window.localStorage.getItem(`registry:draft:${draftKey}:owner:unit-owner`)!)
+    expect(stored).toMatchObject({ value: { content: "  UNSENT\nexact  ", metadata: { collapsedRange: { start: 2, end: 7 }, wasExpanded: true } } })
+  })
+  it("cannot acknowledge draft retention before hydration", async () => {
+    const { result } = renderHook(() => useComposerText({ draftKey: "tldw:test:retain-cold", textareaRef: createRef() }))
+    expect(await result.current.retainCurrentDraft()).toBe(false)
+  })
+
+  it("does not promise durable retention for an attached image", async () => {
+    const { result } = renderHook(() => useComposerText({ draftKey: "tldw:test:retain-image-limit", textareaRef: createRef() }))
+    await waitFor(() => expect(result.current.draftReady).toBe(true))
+    act(() => result.current.form.setValues({ message: "Keep this", image: "data:image/png;base64,abc" }))
+    expect(await result.current.retainCurrentDraft()).toBe(false)
+    expect(result.current.form.getValues()).toEqual({ message: "Keep this", image: "data:image/png;base64,abc" })
+  })
+
 })

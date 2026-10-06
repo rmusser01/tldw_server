@@ -87,6 +87,7 @@ export type ComposerPromptAssistMutation =
 
 export interface UseComposerTextResult {
   creationRecovery: { active: ChatCreationRecovery | null; unavailable: boolean }
+  retainCurrentDraft: () => Promise<boolean>
   reviewCreatedChat: () => Promise<boolean>
   copyCreationText: () => Promise<boolean>
   listRetainedDrafts: () => Promise<ChatDraftRecoveryListing>
@@ -295,6 +296,23 @@ export function useComposerText(
     setValueWithMetadata: restoreMessage,
     enabled: draftEnabled && ownerKey !== null && !initialSetupPending
   })
+  const retainCurrentDraft = React.useCallback(async () => {
+    if (!draftReady || !ownerKey || !mounted.current || !isCurrent()) return false
+    const source = useStoreMessageOption.getState()
+    const revision = getRevision()
+    const values = { ...getValues() }
+    if (values.image) return false
+    const current = () => mounted.current && isCurrent() && getRevision() === revision &&
+      (!draftAddress || (useStoreMessageOption.getState().chatDraftAddress === draftAddress &&
+        useStoreMessageOption.getState().chatDraftRevision === source.chatDraftRevision))
+    if (!current()) return false
+    if (!values.message && !values.image) return true
+    let savedMetadata: DraftMetadataObject
+    try { savedMetadata = structuredClone(metadata()) }
+    catch { return false }
+    const acknowledged = await retainDraft(`${draftKey}:owner:${ownerKey}`, { content: values.message, metadata: savedMetadata })
+    return acknowledged && current()
+  }, [draftReady, ownerKey, isCurrent, getRevision, getValues, draftAddress, metadata, retainDraft, draftKey])
   const historySelection = useHistorySelectionContext()
   const setupComposer = React.useRef({ draftAddress, getDraftMetadata, restoreWithMetadata, historySelection })
   React.useLayoutEffect(() => { setupComposer.current = { draftAddress, getDraftMetadata, restoreWithMetadata, historySelection } },
@@ -691,6 +709,7 @@ export function useComposerText(
   }, [textareaRef])
 
   return {
+    retainCurrentDraft,
     creationRecovery,
     reviewCreatedChat,
     copyCreationText,

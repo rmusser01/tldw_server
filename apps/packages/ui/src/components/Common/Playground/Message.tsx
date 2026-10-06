@@ -1,3 +1,4 @@
+import { replaceUserDisplayNamePlaceholders } from "@/utils/chat-display-name"
 import React, { useEffect, useState, useRef } from "react"
 import { App, Tag, Image, Tooltip, Collapse, Avatar, Modal } from "antd"
 import { LoadingStatus } from "./ActionInfo"
@@ -2653,7 +2654,7 @@ export const PlaygroundMessage = (props: Props) => {
                       </p>
                     }>
                     <Markdown
-                      message={props.message}
+                      message={replaceUserDisplayNamePlaceholders(props.message, userDisplayName, shouldUseCharacterIdentity ? props.characterIdentity?.name ?? "" : "")}
                       className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                       searchQuery={props.searchQuery}
                       codeBlockVariant="compact"

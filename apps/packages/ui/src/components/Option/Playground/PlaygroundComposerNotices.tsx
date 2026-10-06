@@ -183,6 +183,7 @@ export type PlaygroundComposerNoticesProps = {
   selectedModel: string | null | undefined
   systemPrompt: string | null | undefined
   selectedCharacter: unknown
+  deferCharacterAppearanceSetup?: boolean
   serverScope?: unknown
   userScope?: unknown
   ragPinnedResultsLength: number
@@ -419,13 +420,13 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
   return (
     <>
       <ChatFirstRunNudge />
-      <CharacterExpressionSetupNudge
+      {!props.deferCharacterAppearanceSetup && <CharacterExpressionSetupNudge
         selectedCharacter={selectedCharacter}
         selectedCharacterName={selectedCharacterName}
         serverScope={serverScope}
         userScope={userScope}
         t={t}
-      />
+      />}
       {modeAnnouncement && (
         <div
           role="status"

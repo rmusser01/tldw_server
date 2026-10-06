@@ -392,6 +392,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     initialize: vi.fn(async () => undefined),
     getCharacter: h1.live,
     createChat: (...args: any[]) => h1.create(...args),
+    getChat: vi.fn(async (id: string) => ({ id, title: "Owned opening", character_id: "12" })),
     captureHistorySelection: (...args: any[]) => h1.capture(...args),
     addChatMessage: (...args: any[]) => h1.append(...args),
     streamChatCompletion: (...args: any[]) => h1.wire(...args),
@@ -1968,4 +1969,46 @@ describe("compact submission outcomes", () => {
     })
     expect(h1.wire).not.toHaveBeenCalled()
   })
+})
+
+it.each(["default", "alternate_index"] as const)("actual compact submit binds the %s opening without adding or generating a turn", async strategy => {
+  const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+  actual.useStoreMessageOption.getState().startNewChatDraft()
+  mocks.draftFields = () => {
+    const state = actual.useStoreMessageOption.getState()
+    return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision, setChatDraftAddress: state.setChatDraftAddress }
+  }
+  const { useHistorySelection } = await import("@/hooks/chat/useHistorySelection")
+  const { memory } = await import("@/hooks/chat/__tests__/local-history-fixture")
+  memory.forkOperations.rows.clear(); memory.historySelections.rows.clear()
+  const onCapture = vi.fn()
+  const selection = renderHook(() => useHistorySelection({ onCapture }))
+  h1.controller = selection.result.current
+  h1.native = true
+  mocks.chatBaseState.historyId = null
+  mocks.storeState.serverChatId = null
+  h1.create.mockResolvedValue({ id: "tracked-chat-1" })
+  h1.capture.mockImplementation(async (id, request) => {
+    const result = captureFor({ ...request.view, owner_key: "native-key" })
+    const node = { id: "saved-root", revision: "root-revision", role: "assistant", parent_id: null, settled: true }
+    const rows = request.view.cursor.kind === "empty" ? [] : [node]
+    return { ...result, purpose: request.purpose, rows,
+      selected_content: rows.map(row => ({ id: row.id, revision: row.revision, message: "Raw {{user}} meets {{char}}", images: [] })),
+      snapshot: { ...result.snapshot, conversation_id: id, nodes: [node] } }
+  })
+  const hook = renderHook(() => useMessage())
+  const seed = strategy === "default" ? { greetingStrategy: strategy, rawText: "Raw {{user}} meets {{char}}" } :
+    { greetingStrategy: strategy, alternateIndex: 0, rawText: "Raw {{user}} meets {{char}}" }
+  let result: unknown
+  await act(async () => { result = await hook.result.current.onSubmit({ message: "", image: "", greetingSeed: seed, greetingIsCurrent: () => true }) })
+  expect(result).toEqual({ status: "submitted" })
+  expect(h1.create).toHaveBeenCalledOnce()
+  expect(h1.create.mock.calls[0][1]).toMatchObject({ seedFirstMessage: true, greetingStrategy: strategy, ...(strategy === "alternate_index" ? { alternateIndex: 0 } : {}) })
+  expect(onCapture).toHaveBeenCalledOnce()
+  expect(actual.useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(h1.append).not.toHaveBeenCalled()
+  expect(h1.live).not.toHaveBeenCalled()
+  expect(mocks.finalModel.stream).not.toHaveBeenCalled()
+  hook.unmount(); selection.unmount()
 })

@@ -1,3 +1,5 @@
+import { resolveCharacterMessageType } from "@/utils/character-greetings"
+import { getAssistantSelectionMode } from "@/types/assistant-selection"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { VirtualChatTimeline, type ChatTimelineNavigation } from "./VirtualChatTimeline"
@@ -86,11 +88,7 @@ const LazyResearchRunStatusStack = React.lazy(() =>
     default: module.ResearchRunStatusStack
   }))
 )
-const LazyChatGreetingPicker = React.lazy(() =>
-  import("@/components/Common/ChatGreetingPicker").then((module) => ({
-    default: module.ChatGreetingPicker
-  }))
-)
+
 
 type PlaygroundChatProps = {
   scrollParentRef?: React.RefObject<HTMLDivElement>
@@ -171,7 +169,6 @@ export const PlaygroundChat = ({
   const {
     messages,
     setMessages,
-    setHistory,
     streaming,
     isProcessing,
     regenerateLastMessage,
@@ -964,34 +961,6 @@ export const PlaygroundChat = ({
     },
     [normalizeImageVariantState, setMessages, stableHistoryId]
   )
-  const selectedGreeting = React.useMemo(() => {
-    if (!selectedCharacter || typeof selectedCharacter.greeting !== "string") {
-      return ""
-    }
-    return selectedCharacter.greeting.trim()
-  }, [selectedCharacter])
-  const normalizeGreetingText = React.useCallback(
-    (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase(),
-    []
-  )
-  const greetingNeedle = React.useMemo(() => {
-    if (!selectedGreeting) return ""
-    const normalized = normalizeGreetingText(selectedGreeting)
-    if (!normalized) return ""
-    return normalized.slice(0, 180)
-  }, [normalizeGreetingText, selectedGreeting])
-  const firstAssistantIndex = React.useMemo(
-    () => messages.findIndex((msg) => msg?.role === "assistant" || msg?.isBot),
-    [messages]
-  )
-  const firstUserIndex = React.useMemo(
-    () =>
-      messages.findIndex(
-        (msg) => msg?.role === "user" || msg?.isBot === false
-      ),
-    [messages]
-  )
-  const hasSelectedCharacter = Boolean(selectedCharacter?.id)
   const characterIdentityEnabled = React.useMemo(() => {
     if (!selectedCharacter?.id) return false
     if (compareModeActive) return false
@@ -1079,37 +1048,12 @@ export const PlaygroundChat = ({
     visualIdentityResolution.resolution?.expression_key
   ])
   const shouldShowVisualIdentityControls = Boolean(
-    visualStageActor && visualIdentityResolution.resolution?.asset_url
+    visualStageActor && visualIdentityResolution.resolution?.asset_url &&
+    (messages.length > 0 || historyId || serverChatId || getAssistantSelectionMode(selectedAssistant) !== "tracked")
   )
   const resolveMessageType = React.useCallback(
-    (message: any, index: number) => {
-      const explicit = message?.messageType ?? message?.message_type
-      if (explicit) return explicit
-      if (!serverChatId && hasSelectedCharacter) {
-        const isFirstAssistant = index === firstAssistantIndex
-        const hasNoUserBefore = firstUserIndex === -1 || firstUserIndex > index
-        if (
-          isFirstAssistant &&
-          hasNoUserBefore &&
-          message?.isBot &&
-          typeof message?.message === "string"
-        ) {
-          const normalizedMessage = normalizeGreetingText(message.message)
-          if (greetingNeedle && normalizedMessage.includes(greetingNeedle)) {
-            return "character:greeting"
-          }
-        }
-      }
-      return undefined
-    },
-    [
-      firstAssistantIndex,
-      firstUserIndex,
-      hasSelectedCharacter,
-      greetingNeedle,
-      normalizeGreetingText,
-      serverChatId
-    ]
+    (message: any, index: number) => resolveCharacterMessageType(message, index, Boolean(serverChatId && characterIdentityEnabled)),
+    [serverChatId, characterIdentityEnabled]
   )
   const getPreviousUserMessage = React.useCallback(
     (index: number) => {
@@ -1254,20 +1198,9 @@ export const PlaygroundChat = ({
                 </p>
               </div>
             )}
-            {showStarterDeck && !showSetupRecoveryNotice && <PlaygroundEmpty />}
+            {showStarterDeck && !showSetupRecoveryNotice && !(selectedCharacter && getAssistantSelectionMode(selectedAssistant) === "tracked" && !historyId && !serverChatId) && <PlaygroundEmpty />}
           </div>
         )}
-        <React.Suspense fallback={null}>
-          <LazyChatGreetingPicker
-            selectedCharacter={selectedCharacter}
-            messages={messages}
-            historyId={historyId}
-            serverChatId={serverChatId}
-            setMessages={setMessages}
-            setHistory={setHistory}
-            className="mb-6 mt-4"
-          />
-        </React.Suspense>
         {shouldShowVisualIdentityControls && visualStageActor ? (
           <div className="mb-4 w-full max-w-5xl px-4">
             <VisualIdentityStage

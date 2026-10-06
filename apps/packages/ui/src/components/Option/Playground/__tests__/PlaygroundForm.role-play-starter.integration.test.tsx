@@ -216,9 +216,10 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@/hooks/useChatDraftOwner", () => ({
-  useChatDraftOwner: () => ({ ownerKey: "account-a", isCurrent: () => true })
-}))
+vi.mock("@/hooks/useChatDraftOwner", () => {
+  const owner = { ownerKey: "account-a", isCurrent: () => true }
+  return { useChatDraftOwner: () => owner }
+})
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({ data: queryKey[0] === "playground:chatModels" && nativeSetupFixture.settings
@@ -975,41 +976,6 @@ vi.mock("@/components/Common/Button", () => ({
       {children}
     </button>
   )
-}))
-
-vi.mock("@/hooks/useSimpleForm", () => ({
-  useSimpleForm: ({ initialValues }: { initialValues: Record<string, string> }) => {
-    const [values, setValues] = React.useState(initialValues)
-    const [errors, setErrors] = React.useState<Record<string, string>>({})
-    const setFieldValue = (field: string, value: string) =>
-      setValues((prev) => ({ ...prev, [field]: value }))
-    const reset = () => setValues(initialValues)
-    return {
-      values,
-      errors,
-      setFieldValue,
-      setFieldError: (field: string, value: string) =>
-        setErrors((prev) => ({ ...prev, [field]: value })),
-      clearFieldError: (field: string) =>
-        setErrors((prev) => {
-          const next = { ...prev }
-          delete next[field]
-          return next
-        }),
-      reset,
-      onSubmit:
-        (handler: (values: Record<string, string>) => void | Promise<void>) =>
-        async (event?: React.FormEvent) => {
-          event?.preventDefault?.()
-          await handler(values)
-        },
-      getInputProps: (field: string) => ({
-        value: values[field] ?? "",
-        onChange: (event: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
-          setFieldValue(field, event.target.value)
-      })
-    }
-  }
 }))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
@@ -1806,9 +1772,10 @@ it("UAT355: a plain composer ignores an untracked cross-tab Character mirror", a
     view.unmount()
   }
 })
-it.each(["tracked_character", "overlay"])(
+it.each(["tracked_character", "overlay", "fresh_character"])(
   "UAT355: preserves owned composer %s context",
   async (mode) => {
+    const hasOwner = mode === "tracked_character"
     const selection = {
       kind: "character",
       id: "owned",
@@ -1819,15 +1786,15 @@ it.each(["tracked_character", "overlay"])(
     selectedAssistantMock.initialSelection = selection
     Object.assign(playgroundFormMessageOptionState.value, {
       historyId: null,
-      serverChatId: mode === "overlay" ? null : "owned-chat",
-      serverChatAssistantKind: mode === "overlay" ? null : "character",
-      serverChatAssistantId: mode === "overlay" ? null : "owned",
-      serverChatCharacterId: mode === "overlay" ? null : "owned",
+      serverChatId: hasOwner ? "owned-chat" : null,
+      serverChatAssistantKind: hasOwner ? "character" : null,
+      serverChatAssistantId: hasOwner ? "owned" : null,
+      serverChatCharacterId: hasOwner ? "owned" : null,
       serverChatMetaLoaded: true,
       selectedAssistant: selection,
       selectedCharacter: selection,
       effectiveAssistantState: {
-        mode,
+        mode: mode === "overlay" ? "overlay" : "tracked_character",
         kind: "character",
         id: "owned",
         displayName: "Owned Character",
@@ -1844,6 +1811,9 @@ it.each(["tracked_character", "overlay"])(
       expect(screen.getByTestId("composer-context-items")).toHaveTextContent(
         "Character context"
       )
+      if (mode === "fresh_character") {
+        expect(screen.queryByRole("link", { name: "Edit expressions" })).not.toBeInTheDocument()
+      }
     } finally {
       view.unmount()
     }

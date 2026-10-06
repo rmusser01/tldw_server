@@ -1,3 +1,4 @@
+import type { GreetingSeed } from "@/utils/character-greetings"
 import {
   captureLocalMutationOwner,
   createSelectedForkAction,
@@ -3268,7 +3269,9 @@ export const useChatActions = ({
     continueOutputTarget = "chat",
     serverChatIdOverride,
     historyIdOverride,
-    researchContext
+    researchContext,
+    greetingSeed: requestedGreetingSeed,
+    greetingIsCurrent
   }: {
     message: string
     image: string
@@ -3295,7 +3298,10 @@ export const useChatActions = ({
     serverChatIdOverride?: string | null
     historyIdOverride?: string | null
     researchContext?: ChatResearchContext
+    greetingSeed?: GreetingSeed
+    greetingIsCurrent?: () => boolean
   }): Promise<ChatSubmitResult> => {
+    const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined
     const historyOriginIsCurrent = historySelection?.fence()
     const lastVisibleMessage = messages.at(-1)
     if (isContinue && lastVisibleMessage && getLocalRagDiagnosticUser(messages, lastVisibleMessage)) {
@@ -3470,6 +3476,11 @@ export const useChatActions = ({
         : historySelection
 
     try {
+      if (greetingSeed && (!historySelection || turnResolvedSendMode !== "tracked_character" ||
+          !greetingIsCurrent || !greetingIsCurrent() || message || isRegenerate || isContinue ||
+          compareModeActive || turnUsesImageMode || turnContextFiles.length || docs?.length ||
+          documentContext?.length || turnShouldUseRag))
+        throw new Error("native_history_greeting_requires_fresh")
       if (
         selectedHistoryTurn &&
         !compareModeActive &&
@@ -3889,7 +3900,7 @@ export const useChatActions = ({
               return chatSubmitSkipped("No model selected for character chat")
             }
             if (historySelection) {
-              await sendNativeHistoryCharacter({
+              const greeting = await sendNativeHistoryCharacter({
                   surface: "playground",
                 t,
                 controller: historySelection,
@@ -3906,6 +3917,8 @@ export const useChatActions = ({
                 settings: servicePromptChatModeParams.currentChatModelSettings,
                 message,
                 image,
+                greetingSeed,
+                greetingIsCurrent,
                 setServerChatId,
                 setMessages,
                 unsupportedContext: Boolean(
@@ -3933,6 +3946,10 @@ export const useChatActions = ({
                     setStreaming(false)
                   }
                 }
+              })
+              if (greeting && !greeting.matchesPreview) notification.info({
+                message: t("sidepanel:greetingPicker.changed", "The character opening changed"),
+                description: t("sidepanel:greetingPicker.changedHelp", "The saved opening differs from the preview. Review the opening shown in this chat before sending your message.")
               })
               return { status: "submitted" }
             }
@@ -3969,6 +3986,7 @@ export const useChatActions = ({
           }
         }
 
+        if (greetingSeed) throw new Error("native_history_greeting_requires_fresh")
         if (!compareModeActive) {
           markSteeringApplied()
           const normalModeParams =
@@ -4399,7 +4417,7 @@ export const useChatActions = ({
         signal.aborted &&
         isAbortLikeError(e) &&
         !isRequestConfigScopeChangedError(e)
-      if (!requestCancelled && !isChatPromotionIncompleteError(e)) {
+      if (!greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
         notification.error({
           message: t("error"),
           description: errorMessage

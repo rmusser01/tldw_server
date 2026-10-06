@@ -114,7 +114,6 @@ import {
   type OpenHistoryDetail,
   type TimelineActionDetail,
 } from "@/utils/timeline-actions";
-import { useCharacterGreeting } from "@/hooks/useCharacterGreeting";
 import {
   applyChatSettingsPatch,
   syncChatSettingsForServerChat,
@@ -2008,16 +2007,7 @@ const PlaygroundContent = () => {
     };
   }, [sessionScopeReady]);
 
-  useCharacterGreeting({
-    playgroundReady,
-    selectedCharacter: activeCharacterSelection,
-    selectedCharacterMode: selectedAssistantMode,
-    serverChatId,
-    historyId,
-    messagesLength: messages.length,
-    setMessages,
-    setHistory,
-  });
+
 
   const setLocalHistoryId = React.useCallback(
     (id: string) => setHistoryId(id, { preserveServerChatId: false }),

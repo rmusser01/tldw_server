@@ -6,7 +6,8 @@ import {
   collectGreetings,
   normalizeGreetingValue,
   parseGreetingSelectionIndex,
-  resolveGreetingSelection
+  resolveGreetingSelection,
+  resolveCharacterMessageType
 } from "../character-greetings"
 
 describe("character greetings utils", () => {
@@ -148,4 +149,12 @@ describe("native creation seed provenance is independent of display positions", 
     expect(options.length).toBeGreaterThan(0)
     expect(options.every(option => !Object.hasOwn(option, "seed"))).toBe(true)
   })
+})
+
+it("projects an owned native root greeting on either surface and preserves explicit message types", () => {
+  const root = { isBot: true, role: "assistant", parentMessageId: null, serverMessageId: "saved-root" }
+  expect(resolveCharacterMessageType(root, 0, true)).toBe("character:greeting")
+  for (const [message, index, owned] of [[root, 1, true], [root, 0, false], [{ ...root, parentMessageId: "user" }, 0, true], [{ ...root, isBot: false, role: "user" }, 0, true]] as const)
+    expect(resolveCharacterMessageType(message, index, owned)).toBeUndefined()
+  expect(resolveCharacterMessageType({ ...root, messageType: "compare:reply" }, 0, true)).toBe("compare:reply")
 })

@@ -621,6 +621,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     onComposerRenderProfile,
     wrapComposerProfile,
     // Draft persistence
+    retainCurrentDraft: composerText.retainCurrentDraft,
     creationRecovery: composerText.creationRecovery,
     reviewCreatedChat: composerText.reviewCreatedChat,
     copyCreationText: composerText.copyCreationText,

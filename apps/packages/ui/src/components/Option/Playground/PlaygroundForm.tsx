@@ -1,3 +1,5 @@
+import { ChatGreetingPicker } from "@/components/Common/ChatGreetingPicker";
+import { useCharacterGreetingStart } from "@/hooks/useCharacterGreetingStart";
 import { ChatDraftRecovery, type RestoreChatDraft } from "@/components/Chat/composer/ChatDraftRecovery";
 import { watchChatAccountChanges } from "@/services/chat-account-boundary";
 import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection";
@@ -556,7 +558,7 @@ export const PlaygroundForm = ({
     [attachedResearchContext],
   );
   const {
-    onSubmit,
+    onSubmit: submitMessageAction,
     regenerateLastMessage,
     messages,
     setMessages,
@@ -632,6 +634,10 @@ export const PlaygroundForm = ({
       inflightToolCallIds: [],
     },
   } = useMessageOption();
+  const greetingSubmitGateRef = React.useRef<() => boolean>(() => false);
+  const onSubmit = React.useCallback((input: Parameters<typeof submitMessageAction>[0]) =>
+    greetingSubmitGateRef.current() ? Promise.resolve({ status: "skipped" as const,
+      reason: t("sidepanel:greetingPicker.startingHelp", "Saving the character’s opening. Your message has not been sent.") }) : submitMessageAction(input), [submitMessageAction, t]);
   const setUploadedFiles = useStoreMessageOption((s) => s.setUploadedFiles);
   const setRagMediaIds = useStoreMessageOption((s) => s.setRagMediaIds);
   const setRagPinnedResults = useStoreMessageOption(
@@ -2125,6 +2131,7 @@ export const PlaygroundForm = ({
     wrapComposerProfile,
     draftSaved,
     draftReady,
+    retainCurrentDraft,
     creationRecovery,
     reviewCreatedChat,
     copyCreationText,
@@ -3379,10 +3386,18 @@ export const PlaygroundForm = ({
     queuedRequestActions,
     queueSubmission,
     cancelCurrentAndRunDisabledReason,
-    handleRunQueuedRequest,
-    handleRunNextQueuedRequest,
+    handleRunQueuedRequest: runQueuedRequest,
+    handleRunNextQueuedRequest: runNextQueuedRequest,
     validateSelectedChatModelsAvailability,
   } = queueMgmt;
+  const handleRunQueuedRequest = (...args: Parameters<typeof runQueuedRequest>) => {
+    if (greetingSubmitGateRef.current()) return;
+    return runQueuedRequest(...args);
+  };
+  const handleRunNextQueuedRequest = () => {
+    if (greetingSubmitGateRef.current()) return;
+    return runNextQueuedRequest();
+  };
 
   const handleToggleWebSearch = React.useCallback(() => {
     setWebSearch(!webSearch);
@@ -3517,13 +3532,32 @@ export const PlaygroundForm = ({
       characterChatSendBlocker.onAction();
     }
   }, [characterChatSendBlocker, stopListening]);
+  const greetingDraftAddress = useStoreMessageOption(state => state.chatDraftAddress);
+  const greetingDraftRevision = useStoreMessageOption(state => state.chatDraftRevision);
+  const { starting: greetingStarting, isPreparing: isGreetingPreparing, start: startCharacterGreeting } = useCharacterGreetingStart({
+    form, retainCurrentDraft, submit: submitMessageAction, controller: historySelection, focusComposer: () => textareaRef.current?.focus(),
+    ready: draftReady, isConnectionReady, busy: isSending || isPreparingDocuments,
+    readContext: () => [isConnectionReady, composerModels, composerModelsLoading, JSON.stringify(activeAssistantSelection),
+      chatMode, compareModeActive, selectedDocuments, importedSidepanelContext, researchContext, openUIRequestMode, appendFormattingGuidePrompt],
+    preflight: () => {
+      if (!isConnectionReady) throw new Error("native_history_server_unavailable");
+      if (!buildChatModelUsability({ selectedModel, availableModels: composerModels,
+        modelsLoading: composerModelsLoading, isServerConnected: isConnectionReady }).canSend)
+        throw new Error("native_history_model_unavailable");
+      if (chatMode !== "normal" || compareModeActive || selectedDocuments.length || importedSidepanelContext ||
+          researchContext || openUIRequestMode || resolveOutputFormattingGuideSuffix(Boolean(appendFormattingGuidePrompt)))
+        throw new Error("native_history_explicit_context_unsupported");
+    },
+  });
+  greetingSubmitGateRef.current = isGreetingPreparing;
   const handleComposerSend = React.useCallback(() => {
+    if (greetingStarting) return;
     if (characterChatSendBlocker?.active) {
       runCharacterChatSendBlocker();
       return;
     }
     submitForm();
-  }, [characterChatSendBlocker, runCharacterChatSendBlocker, submitForm]);
+  }, [greetingStarting, characterChatSendBlocker, runCharacterChatSendBlocker, submitForm]);
   React.useEffect(() => {
     voiceChatSubmitFormRef.current = () => {
       handleComposerSend();
@@ -5311,6 +5345,15 @@ export const PlaygroundForm = ({
     >
       <div className="flex w-full flex-col items-center px-2 pb-0 sm:px-4 sm:pb-0">
         <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={() => window.dispatchEvent(new Event("tldw:open-chat-sidebar"))} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={restoreRetainedDraft} disabled={!draftReady} /></div>
+        <ChatGreetingPicker selectedCharacter={selectedCharacter} selectedCharacterMode={getAssistantSelectionMode(activeAssistantSelection)}
+          messages={messages} historyId={historyId} serverChatId={serverChatId}
+          ready={draftReady && !assistantMeta?.isLoading && !temporaryChat && historySelection?.getCurrent().status === "idle" && !historySelection.getCurrent().owner}
+          scope={greetingDraftAddress?.kind === "fresh" ? greetingDraftAddress.scope : undefined}
+          viewKey={String(greetingDraftRevision)}
+          disabled={isSending || isPreparingDocuments || greetingStarting}
+          blockedReason={creationRecovery.unavailable || (creationRecovery.active && !["prepared", "settled"].includes(creationRecovery.active.state)) ? t("sidepanel:greetingPicker.reviewCreation", "Review the previous save in Recover drafts before saving another opening.") : null}
+          inputRevision={form.getRevision()} onStartGreeting={startCharacterGreeting} onStartWithMessage={() => textareaRef.current?.focus()}
+          className="mb-3 max-w-[64rem]" />
         <div
           data-checkwidemode={effectiveWideMode}
           data-ui-mode={uiMode}
@@ -6218,6 +6261,7 @@ export const PlaygroundForm = ({
                             selectedModel={selectedModel}
                             systemPrompt={systemPrompt}
                             selectedCharacter={selectedCharacter}
+                            deferCharacterAppearanceSetup={Boolean(selectedCharacter && getAssistantSelectionMode(activeAssistantSelection) === "tracked" && !historyId && !serverChatId && messages.length === 0)}
                             serverScope={canonicalConnectionConfig?.serverUrl}
                             userScope={
                               canonicalConnectionConfig
@@ -6557,9 +6601,10 @@ export const PlaygroundForm = ({
                         );
                       })()}
                       <ChatQueuePanel
+                        dispatchDisabledReason={greetingStarting ? t("sidepanel:greetingPicker.startingHelp", "Saving the character’s opening. Your message has not been sent.") : null}
                         queue={queuedMessages}
                         isConnectionReady={isConnectionReady}
-                        isStreaming={isSending}
+                        isStreaming={isSending || greetingStarting}
                         onRunNext={handleRunNextQueuedRequest}
                         onRunNow={handleRunQueuedRequest}
                         onDelete={queuedRequestActions.remove}

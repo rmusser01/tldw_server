@@ -1,595 +1,99 @@
-import React from "react"
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Character } from "@/types/character"
-import type { ChatHistory, Message } from "@/store/option/types"
-import {
-  buildGreetingOptionsFromEntries,
-  buildGreetingsChecksumFromOptions,
-  collectGreetingEntries
-} from "@/utils/character-greetings"
 import { useCharacterGreeting } from "../useCharacterGreeting"
 
-const mocks = vi.hoisted(() => ({
-  userDisplayName: "",
-  settings: null as Record<string, unknown> | null,
-  updateSettings: vi.fn(),
-  initialize: vi.fn(),
-  getCharacter: vi.fn()
-}))
-
-vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: () => [mocks.userDisplayName]
-}))
-
-vi.mock("@/db/dexie/helpers", () => ({
-  generateID: () => "generated-id"
-}))
-
-vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
-  useChatSettingsRecord: () => ({
-    settings: mocks.settings,
-    updateSettings: mocks.updateSettings,
-    chatKey: "chat:test"
-  })
-}))
-
-vi.mock("@/services/tldw/TldwApiClient", () => ({
-  tldwClient: {
-    initialize: mocks.initialize,
-    getCharacter: mocks.getCharacter
-  }
-}))
-
-const applyMessageUpdate = (
-  current: Message[],
-  next: Message[] | ((prev: Message[]) => Message[])
-) => (typeof next === "function" ? next(current) : next)
-
-const applyHistoryUpdate = (
-  current: ChatHistory,
-  next: ChatHistory | ((prev: ChatHistory) => ChatHistory)
-) => (typeof next === "function" ? next(current) : next)
-
-const createDeferred = <T,>() => {
-  let resolve!: (value: T) => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-  return { promise, resolve, reject }
-}
-
-describe("useCharacterGreeting", () => {
-  beforeEach(() => {
-    mocks.userDisplayName = ""
-    mocks.settings = {
-      greetingEnabled: true,
-      greetingSelectionId: null,
-      greetingsChecksum: null,
-      useCharacterDefault: false
-    }
-    mocks.updateSettings.mockReset()
-    mocks.updateSettings.mockResolvedValue(null)
-    mocks.initialize.mockReset()
-    mocks.initialize.mockResolvedValue(null)
-    mocks.getCharacter.mockReset()
-  })
-
-  it("schedules greeting updates with React.startTransition", async () => {
-    const transitionSpy = vi.spyOn(React, "startTransition")
-    const selectedCharacter = {
-      id: "char-1",
-      name: "Guide",
-      greeting: "Welcome",
-      alternateGreetings: ["Good to see you"]
-    } as Character
-    let messageState: Message[] = []
-    let historyState: ChatHistory = []
-
-    const setMessages = vi.fn(
-      (next: Message[] | ((prev: Message[]) => Message[])) => {
-        messageState = applyMessageUpdate(messageState, next)
-      }
-    )
-    const setHistory = vi.fn(
-      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
-        historyState = applyHistoryUpdate(historyState, next)
-      }
-    )
-
-    renderHook(() =>
-      useCharacterGreeting({
-        playgroundReady: true,
-        selectedCharacter,
-        selectedCharacterMode: null,
-        serverChatId: null,
-        historyId: "history-1",
-        messagesLength: messageState.length,
-        setMessages,
-        setHistory
-      })
-    )
-
-    await waitFor(() => {
-      expect(messageState).toHaveLength(1)
-      expect(historyState).toHaveLength(1)
-    })
-
-    expect(transitionSpy).toHaveBeenCalled()
-    transitionSpy.mockRestore()
-  })
-
-  it("applies the latest selection when fetched greetings resolve", async () => {
-    const initialCharacter = {
-      id: "char-42",
-      name: "Narrator",
-      greeting: "Initial greeting"
-    } as Character
-    const fetchedCharacter = {
-      ...initialCharacter,
-      alternateGreetings: ["Selected alternative"]
-    } as Character
-    const fetchedOptions = buildGreetingOptionsFromEntries(
-      collectGreetingEntries(fetchedCharacter)
-    )
-    const fetchedChecksum = buildGreetingsChecksumFromOptions(fetchedOptions)
-    const selectedAlternativeId = fetchedOptions[1]?.id
-    if (!selectedAlternativeId) {
-      throw new Error("Test setup failed: missing alternate greeting option")
-    }
-
-    mocks.settings = {
-      greetingEnabled: true,
-      greetingSelectionId: null,
-      greetingsChecksum: null,
-      useCharacterDefault: true
-    }
-
-    const deferred = createDeferred<Character>()
-    mocks.getCharacter.mockReturnValue(deferred.promise)
-
-    let messageState: Message[] = []
-    let historyState: ChatHistory = []
-    const setMessages = vi.fn(
-      (next: Message[] | ((prev: Message[]) => Message[])) => {
-        messageState = applyMessageUpdate(messageState, next)
-      }
-    )
-    const setHistory = vi.fn(
-      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
-        historyState = applyHistoryUpdate(historyState, next)
-      }
-    )
-
-    const { rerender } = renderHook(() =>
-      useCharacterGreeting({
-        playgroundReady: true,
-        selectedCharacter: initialCharacter,
-        selectedCharacterMode: null,
-        serverChatId: null,
-        historyId: "history-1",
-        messagesLength: messageState.length,
-        setMessages,
-        setHistory
-      })
-    )
-
-    await waitFor(() => {
-      expect(messageState[0]?.message).toBe("Initial greeting")
-    })
-
-    mocks.settings = {
-      greetingEnabled: true,
-      greetingSelectionId: selectedAlternativeId,
-      greetingsChecksum: fetchedChecksum,
-      useCharacterDefault: false
-    }
-    rerender()
-
-    deferred.resolve(fetchedCharacter)
-
-    await waitFor(() => {
-      expect(messageState[0]?.message).toBe("Selected alternative")
-      expect(historyState[0]?.content).toBe("Selected alternative")
-    })
-  })
-
-  it("honors legacy index-based greeting selection ids", async () => {
-    const selectedCharacter = {
-      id: "char-7",
-      name: "Guide",
-      greeting: "Primary",
-      alternateGreetings: ["Alternate greeting"]
-    } as Character
-
-    mocks.settings = {
-      greetingEnabled: true,
-      greetingSelectionId: "greeting:1:selected",
-      greetingsChecksum: buildGreetingsChecksumFromOptions(
-        buildGreetingOptionsFromEntries(collectGreetingEntries(selectedCharacter))
-      ),
-      useCharacterDefault: false
-    }
-
-    let messageState: Message[] = []
-    const setMessages = vi.fn(
-      (next: Message[] | ((prev: Message[]) => Message[])) => {
-        messageState = applyMessageUpdate(messageState, next)
-      }
-    )
-    const setHistory = vi.fn()
-
-    renderHook(() =>
-      useCharacterGreeting({
-        playgroundReady: true,
-        selectedCharacter,
-        selectedCharacterMode: null,
-        serverChatId: null,
-        historyId: "history-legacy-selection",
-        messagesLength: messageState.length,
-        setMessages,
-        setHistory
-      })
-    )
-
-    await waitFor(() => {
-      expect(messageState[0]?.message).toBe("Alternate greeting")
-    })
-  })
-
-  it("does not inject greeting messages for server chats", async () => {
-    const selectedCharacter = {
-      id: "char-server",
-      name: "Server Guide",
-      greeting: "Server hello"
-    } as Character
-    let messageState: Message[] = []
-    let historyState: ChatHistory = []
-    const setMessages = vi.fn(
-      (next: Message[] | ((prev: Message[]) => Message[])) => {
-        messageState = applyMessageUpdate(messageState, next)
-      }
-    )
-    const setHistory = vi.fn(
-      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
-        historyState = applyHistoryUpdate(historyState, next)
-      }
-    )
-
-    renderHook(() =>
-      useCharacterGreeting({
-        playgroundReady: true,
-        selectedCharacter,
-        selectedCharacterMode: null,
-        serverChatId: "srv-chat-1",
-        historyId: "history-server",
-        messagesLength: messageState.length,
-        setMessages,
-        setHistory
-      })
-    )
-
-    await waitFor(() => {
-      expect(setMessages).not.toHaveBeenCalled()
-    })
-    expect(messageState).toHaveLength(0)
-    expect(historyState).toHaveLength(0)
-  })
-
-  it("does not inject tracked greetings for overlay character selections", async () => {
-    const selectedCharacter = {
-      id: "char-overlay",
-      name: "Overlay Guide",
-      greeting: "Overlay greeting"
-    } as Character
-    let messageState: Message[] = []
-    let historyState: ChatHistory = []
-    const setMessages = vi.fn(
-      (next: Message[] | ((prev: Message[]) => Message[])) => {
-        messageState = applyMessageUpdate(messageState, next)
-      }
-    )
-    const setHistory = vi.fn(
-      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
-        historyState = applyHistoryUpdate(historyState, next)
-      }
-    )
-
-    renderHook(() =>
-      useCharacterGreeting({
-        playgroundReady: true,
-        selectedCharacter,
-        selectedCharacterMode: "overlay",
-        serverChatId: null,
-        historyId: "history-overlay",
-        messagesLength: messageState.length,
-        setMessages,
-        setHistory
-      })
-    )
-
-    await waitFor(() => {
-      expect(setMessages).not.toHaveBeenCalled()
-      expect(setHistory).not.toHaveBeenCalled()
-    })
-    expect(messageState).toHaveLength(0)
-    expect(historyState).toHaveLength(0)
-    expect(mocks.getCharacter).not.toHaveBeenCalled()
-  })
-
-  it("does not fetch a greeting while overlay mode is active", async () => {
-    const selectedCharacter = {
-      id: "char-overlay",
-      name: "Overlay Guide",
-      greeting: "Overlay greeting"
-    } as Character
-    const setMessages = vi.fn()
-    const setHistory = vi.fn()
-
-    renderHook(() =>
-      useCharacterGreeting({
-        playgroundReady: true,
-        selectedCharacter,
-        selectedCharacterMode: "overlay",
-        serverChatId: null,
-        historyId: "history-overlay-storage",
-        messagesLength: 0,
-        setMessages,
-        setHistory
-      })
-    )
-
-    await waitFor(() => {
-      expect(mocks.getCharacter).not.toHaveBeenCalled()
-    })
-    expect(setMessages).not.toHaveBeenCalled()
-  })
-
-  it("does not fetch a greeting during server chat load", async () => {
-    const setMessages = vi.fn()
-    const setHistory = vi.fn()
-
-    renderHook(() =>
-      useCharacterGreeting({
-        playgroundReady: true,
-        selectedCharacter: null,
-        selectedCharacterMode: null,
-        serverChatId: "srv-chat-2",
-        historyId: "history-server",
-        messagesLength: 0,
-        setMessages,
-        setHistory
-      })
-    )
-
-    await waitFor(() => {
-      expect(mocks.getCharacter).not.toHaveBeenCalled()
-    })
-    expect(setMessages).not.toHaveBeenCalled()
-  })
-
-  it("hydrates the greeting avatar without refetching the same character", async () => {
-    const initialCharacter = {
-      id: "char-loop",
-      name: "Loop Guide",
-      greeting: "Hello"
-    } as Character
-    const fetchedCharacter = {
-      ...initialCharacter,
-      avatar_url: "https://example.com/avatar.png",
-      alternateGreetings: ["Hydrated greeting"]
-    } as Character
-
-    const selectedCharacter = initialCharacter
-    let messageState: Message[] = []
-    let historyState: ChatHistory = []
-    const setMessages = vi.fn(
-      (next: Message[] | ((prev: Message[]) => Message[])) => {
-        messageState = applyMessageUpdate(messageState, next)
-      }
-    )
-    const setHistory = vi.fn(
-      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
-        historyState = applyHistoryUpdate(historyState, next)
-      }
-    )
-
-    mocks.getCharacter.mockResolvedValue(fetchedCharacter)
-
-    const { rerender } = renderHook(
-      ({ currentCharacter }: { currentCharacter: Character | null }) =>
-        useCharacterGreeting({
-          playgroundReady: true,
-          selectedCharacter: currentCharacter,
-          selectedCharacterMode: null,
-          serverChatId: null,
-          historyId: "history-loop",
-          messagesLength: messageState.length,
-          setMessages,
-          setHistory
-        }),
-      {
-        initialProps: {
-          currentCharacter: selectedCharacter
-        }
-      }
-    )
-
-    await waitFor(() => {
-      expect(messageState[0]?.modelImage).toBe("https://example.com/avatar.png")
-    })
-    expect(mocks.getCharacter).toHaveBeenCalledTimes(1)
-
-    rerender({ currentCharacter: selectedCharacter })
-
-    await Promise.resolve()
-    await Promise.resolve()
-
-    rerender({ currentCharacter: { ...selectedCharacter } })
-    await Promise.resolve()
-    await Promise.resolve()
-
-    expect(mocks.getCharacter).toHaveBeenCalledTimes(1)
-    expect(messageState[0]?.message).toBeTruthy()
-    expect(historyState[0]?.content).toBeTruthy()
-  })
-
-  it("does not rewrite an already injected greeting when the same character is rehydrated", async () => {
-    const selectedCharacter = {
-      id: "char-stable",
-      name: "Stable Guide",
-      greeting: "Hello again",
-      alternateGreetings: ["Welcome back"]
-    } as Character
-    const greetingOptions = buildGreetingOptionsFromEntries(
-      collectGreetingEntries(selectedCharacter)
-    )
-    const selectedGreeting = greetingOptions[0]
-    if (!selectedGreeting) {
-      throw new Error("Test setup failed: missing greeting option")
-    }
-    mocks.settings = {
-      greetingEnabled: true,
-      greetingSelectionId: selectedGreeting.id,
-      greetingsChecksum: buildGreetingsChecksumFromOptions(greetingOptions),
-      useCharacterDefault: false
-    }
-
-    let messageState: Message[] = []
-    let historyState: ChatHistory = []
-    const setMessages = vi.fn(
-      (next: Message[] | ((prev: Message[]) => Message[])) => {
-        messageState = applyMessageUpdate(messageState, next)
-      }
-    )
-    const setHistory = vi.fn(
-      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
-        historyState = applyHistoryUpdate(historyState, next)
-      }
-    )
-
-    const { rerender } = renderHook(
-      ({ currentCharacter }: { currentCharacter: Character | null }) =>
-        useCharacterGreeting({
-          playgroundReady: true,
-          selectedCharacter: currentCharacter,
-          selectedCharacterMode: null,
-          serverChatId: null,
-          historyId: "history-stable",
-          messagesLength: messageState.length,
-          setMessages,
-          setHistory
-        }),
-      {
-        initialProps: {
-          currentCharacter: selectedCharacter
-        }
-      }
-    )
-
-    await waitFor(() => {
-      expect(messageState[0]?.message).toBe(selectedGreeting.text)
-    })
-    const messageWrites = setMessages.mock.calls.length
-    const historyWrites = setHistory.mock.calls.length
-
-    rerender({ currentCharacter: { ...selectedCharacter } })
-    await Promise.resolve()
-    await Promise.resolve()
-
-    expect(setMessages).toHaveBeenCalledTimes(messageWrites)
-    expect(setHistory).toHaveBeenCalledTimes(historyWrites)
-  })
-
-  it("refreshes an injected greeting when the same character gains a new name or avatar", async () => {
-    const selectedCharacter = {
-      id: "char-hydrated-greeting",
-      name: "Draft Guide",
-      greeting: "Hello there"
-    } as Character
-    const hydratedCharacter = {
-      ...selectedCharacter,
-      name: "Hydrated Guide",
-      avatar_url: "https://example.com/hydrated.png"
-    } as Character
-
-    mocks.settings = {
-      greetingEnabled: true,
-      greetingSelectionId: null,
-      greetingsChecksum: null,
-      useCharacterDefault: true
-    }
-
-    let messageState: Message[] = []
-    let historyState: ChatHistory = []
-    const setMessages = vi.fn(
-      (next: Message[] | ((prev: Message[]) => Message[])) => {
-        messageState = applyMessageUpdate(messageState, next)
-      }
-    )
-    const setHistory = vi.fn(
-      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
-        historyState = applyHistoryUpdate(historyState, next)
-      }
-    )
-
-    const { rerender } = renderHook(
-      ({
-        character,
-        messagesLength
-      }: {
-        character: Character
-        messagesLength: number
-      }) =>
-        useCharacterGreeting({
-          playgroundReady: true,
-          selectedCharacter: character,
-          selectedCharacterMode: null,
-          serverChatId: null,
-          historyId: "history-hydrated-greeting",
-          messagesLength,
-          setMessages,
-          setHistory
-        }),
-      {
-        initialProps: {
-          character: selectedCharacter,
-          messagesLength: 0
-        }
-      }
-    )
-
-    await waitFor(() => {
-      expect(messageState[0]?.name).toBe("Draft Guide")
-      expect(messageState[0]?.message).toBe("Hello there")
-    })
-
-    rerender({
-      character: hydratedCharacter,
-      messagesLength: messageState.length
-    })
-
-    await waitFor(() => {
-      expect(messageState[0]?.name).toBe("Hydrated Guide")
-      expect(messageState[0]?.modelName).toBe("Hydrated Guide")
-      expect(messageState[0]?.modelImage).toBe(
-        "https://example.com/hydrated.png"
-      )
-    })
-    expect(historyState[0]?.content).toBe("Hello there")
-  })
+const mocks = vi.hoisted(() => ({ getCharacter: vi.fn(), snapshot: vi.fn(), authority: new AbortController(), release: vi.fn() }))
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { getCharacter: mocks.getCharacter } }))
+vi.mock("@/services/service-prompts", () => ({ loadServicePromptSnapshot: mocks.snapshot }))
+const card = { id: "card-1", name: "Guide", first_message: "{{user}} meets {{char}}", alternate_greetings: ["Alternate"] } as Character
+const options = () => ({ playgroundReady: true, selectedCharacter: card, selectedCharacterMode: "tracked" as const, serverChatId: null, historyId: null, messagesLength: 0, viewKey: "fresh-1" })
+const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
+beforeEach(() => {
+  mocks.authority = new AbortController()
+  mocks.release.mockReset()
+  mocks.getCharacter.mockReset().mockResolvedValue(card)
+  mocks.snapshot.mockReset().mockImplementation(async (_ids, { signal }: { signal: AbortSignal }) => ({
+    scopeSignal: signal, scopeInvalidatedSignal: mocks.authority.signal, requestScope: { config: { serverUrl: "http://localhost:8000", authMode: "single-user" } }, release: mocks.release
+  }))
 })
 
+describe("read-only character greeting preview", () => {
+  it("keeps preview out of transcript and request history before explicit startup", async () => {
+    const setMessages = vi.fn()
+    const setHistory = vi.fn()
+    const params = { ...options(), setMessages, setHistory }
+    const view = renderHook(() => useCharacterGreeting(params))
+    await waitFor(() => expect(view.result.current.loading).toBe(false))
+    expect(view.result.current.character).toBe(card)
+    expect(setMessages).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+  })
+  it("captures the exact card owner scope and keeps canonical raw fields", async () => {
+    const scope = { type: "workspace" as const, workspaceId: "workspace-a" }
+    const view = renderHook(() => useCharacterGreeting({ ...options(), scope }))
+    await waitFor(() => expect(view.result.current.loading).toBe(false))
+    expect(mocks.getCharacter).toHaveBeenCalledWith("card-1", expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) }))
+    expect(view.result.current.character?.first_message).toBe("{{user}} meets {{char}}")
+  })
+  it.each([
+    { selectedCharacterMode: "overlay" as const }, { serverChatId: "saved" },
+    { historyId: "local-saved" }, { messagesLength: 1 }, { playgroundReady: false }
+  ])("does not read a fresh greeting for incompatible state %j", patch => {
+    const view = renderHook(() => useCharacterGreeting({ ...options(), ...patch }))
+    expect(view.result.current.fresh).toBe(false)
+    expect(mocks.snapshot).not.toHaveBeenCalled()
+    expect(mocks.getCharacter).not.toHaveBeenCalled()
+  })
+  it("hydrates current name and avatar without rewriting raw greeting text", async () => {
+    const hydrated = { ...card, name: "Renamed Guide", avatar_url: "https://example.com/card.png" }
+    mocks.getCharacter.mockResolvedValue(hydrated)
+    const view = renderHook(() => useCharacterGreeting(options()))
+    await waitFor(() => expect(view.result.current.character).toBe(hydrated))
+    view.rerender()
+    expect(mocks.getCharacter).toHaveBeenCalledOnce()
+  })
+  it.each(["card", "view", "account", "unmount"])("rejects a held card read after %s retirement", async boundary => {
+    const pending = deferred<Character>()
+    mocks.getCharacter.mockReturnValueOnce(pending.promise)
+    const initial = options()
+    const view = renderHook(({ params }) => useCharacterGreeting(params), { initialProps: { params: initial } })
+    await waitFor(() => expect(mocks.getCharacter).toHaveBeenCalledOnce())
+    if (boundary === "card") view.rerender({ params: { ...initial, selectedCharacter: { ...card, id: "card-2" } } })
+    else if (boundary === "view") view.rerender({ params: { ...initial, viewKey: "fresh-2" } })
+    else if (boundary === "account") mocks.authority.abort()
+    else view.unmount()
+    await act(async () => pending.resolve({ ...card, name: "Stale name" }))
+    expect(view.result.current.character?.name).not.toBe("Stale name")
+  })
+  it("rejects another card returned by the server without a ready opening", async () => {
+    mocks.getCharacter.mockResolvedValue({ ...card, id: "foreign-card" })
+    const view = renderHook(() => useCharacterGreeting(options()))
+    await waitFor(() => expect(view.result.current.unavailable).toBe(true))
+    expect(view.result.current.character).toBe(card)
+  })
+  it("keeps readable preview on a failed card refresh and forbids a saved-opening claim", async () => {
+    mocks.getCharacter.mockRejectedValue(new Error("offline"))
+    const view = renderHook(() => useCharacterGreeting(options()))
+    await waitFor(() => expect(view.result.current.unavailable).toBe(true))
+    expect(view.result.current.character).toBe(card)
+    expect(mocks.release).toHaveBeenCalled()
+  })
+  it("does not refetch when a parent supplies the same card as a new object", async () => {
+    const initial = options()
+    const view = renderHook(({ params }) => useCharacterGreeting(params), { initialProps: { params: initial } })
+    await waitFor(() => expect(view.result.current.loading).toBe(false))
+    view.rerender({ params: { ...initial, selectedCharacter: { ...card } } })
+    expect(mocks.getCharacter).toHaveBeenCalledOnce()
+  })
+  it("a deliberate retry recovers a failed preview without writing chat rows", async () => {
+    mocks.getCharacter.mockRejectedValueOnce(new Error("offline"))
+    const view = renderHook(() => useCharacterGreeting(options()))
+    await waitFor(() => expect(view.result.current.unavailable).toBe(true))
+    act(() => view.result.current.retry())
+    await waitFor(() => expect(view.result.current.unavailable).toBe(false))
+    await waitFor(() => expect(view.result.current.loading).toBe(false))
+    expect(mocks.getCharacter).toHaveBeenCalledTimes(2)
+  })
 
-it.each(["Guide", ""])("renders the actual injected greeting with distinct user and card identities (name=%s)", async name => {
-  mocks.userDisplayName = "Viewer"
-  mocks.settings = { greetingEnabled: true, useCharacterDefault: true }
-  mocks.getCharacter.mockResolvedValue(null)
-  let messages: Message[] = []
-  renderHook(() => useCharacterGreeting({ playgroundReady: true, selectedCharacter: { id: "identity", name, greeting: "{{user}} meets {{char}}" },
-    selectedCharacterMode: "tracked", serverChatId: null, historyId: null, messagesLength: 0,
-    setMessages: next => { messages = applyMessageUpdate(messages, next) }, setHistory: vi.fn() }))
-  await waitFor(() => expect(messages[0]?.message).toBe(`Viewer meets ${name || "{{char}}"}`))
 })

@@ -97,7 +97,8 @@ const compiled = ts.transpileModule(
     const ${catalogQuery.getText(ast)};
     const availableChatModelIds = ${initializer("availableChatModelIds")};
     const contextFiles = [], selectedDocuments = [];
-    const streaming = false, sendWhenEnter = true;
+    const streaming = false, sendWhenEnter = true, greetingStarting = false;
+    const connectionReadyRef = { current: isConnectionReady }, connectionGenerationRef = { current: 0 };
     const resolveSubmissionIntent = (combinedMessage) => ({ combinedMessage, isImageCommand: false });
     const notification = { error: () => {}, info: mocks.loading };
     const queueSubmission = mocks.queue;
@@ -322,7 +323,7 @@ describe("sidebar model validation", () => {
     expect(screen.queryByTestId("chat-model-select")).not.toBeInTheDocument()
   })
 
-  it.each([{ busy: true }, { connected: false }])(
+  it.each([{ busy: true }])(
     "preserves queued dispatch for %j",
     async (props) => {
       renderHarness(<Harness model="ready-model" {...props} />)
@@ -335,4 +336,40 @@ describe("sidebar model validation", () => {
       expect(mocks.send).not.toHaveBeenCalled()
     }
   )
+  it("keeps disconnected input without placing it on the queue", async () => {
+    renderHarness(<Harness model="ready-model" connected={false} />)
+    fireEvent.click(screen.getByText("Send"))
+    expect(mocks.queue).not.toHaveBeenCalled()
+    expect(mocks.send).not.toHaveBeenCalled()
+    expect(screen.getByLabelText("Message")).toHaveValue("keep my draft")
+  })
+
+})
+
+it.each(["compact", "full"])("greeting preparation gates ordinary, Run now, and Run next entry points on %s", async surface => {
+  const formSource = surface === "compact" ? source : readFileSync(path.resolve(__dirname, "../../../Option/Playground/PlaygroundForm.tsx"), "utf8")
+  const tree = ts.createSourceFile("form.tsx", formSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const initializers = new Map<string, string>()
+  const walk = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && node.initializer) initializers.set(node.name.getText(tree), node.initializer.getText(tree))
+    ts.forEachChild(node, walk)
+  }
+  walk(tree)
+  const code = ["onSubmit", "handleRunQueuedRequest", "handleRunNextQueuedRequest"].map(name => {
+    const value = initializers.get(name)
+    if (!value) throw new Error(`Missing actual dispatch entry: ${name}`)
+    return `const ${name} = ${value};`
+  }).join("\n") + "\nreturn { onSubmit, handleRunQueuedRequest, handleRunNextQueuedRequest };"
+  const transpiled = ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  let preparing = true
+  const submitMessageAction = vi.fn(async () => ({ status: "submitted" })), run = vi.fn(), next = vi.fn()
+  const actions = new Function("React", "greetingSubmitGateRef", "submitMessageAction", "runQueuedRequest", "runNextQueuedRequest", "queue", "t", transpiled)(
+    { useCallback: (callback: unknown) => callback }, { current: () => preparing }, submitMessageAction, run, next,
+    { handleRunQueuedRequest: run, handleRunNextQueuedRequest: next }, t)
+  expect(await actions.onSubmit({ message: "UNSENT", image: "" })).toMatchObject({ status: "skipped" })
+  actions.handleRunQueuedRequest("queued"); actions.handleRunNextQueuedRequest()
+  expect(submitMessageAction).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled(); expect(next).not.toHaveBeenCalled()
+  preparing = false
+  await actions.onSubmit({ message: "UNSENT", image: "" }); actions.handleRunQueuedRequest("queued"); actions.handleRunNextQueuedRequest()
+  expect(submitMessageAction).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledWith("queued"); expect(next).toHaveBeenCalledOnce()
 })

@@ -1,3 +1,4 @@
+import type { GreetingSeed } from "@/utils/character-greetings";
 import { createEditMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
 import {
   captureLocalMutationOwner,
@@ -2397,6 +2398,8 @@ export const useMessage = () => {
     serverChatIdOverride,
     historyIdOverride,
     assertQueuedDispatchCurrent,
+    greetingSeed: requestedGreetingSeed,
+    greetingIsCurrent,
   }: {
     message: string;
     image: string;
@@ -2422,7 +2425,10 @@ export const useMessage = () => {
     serverChatIdOverride?: string | null;
     historyIdOverride?: string | null;
     assertQueuedDispatchCurrent?: QueuedDispatchGuard;
+    greetingSeed?: GreetingSeed;
+    greetingIsCurrent?: () => boolean;
   }) => {
+    const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined;
     const historyOriginIsCurrent = historySelection?.fence();
     assertQueuedDispatchCurrent?.();
     const setTurnHistoryId = historySetterForQueuedTurn(assertQueuedDispatchCurrent);
@@ -2488,6 +2494,12 @@ export const useMessage = () => {
     ) {
       throw new Error("unsupported_history_action_context");
     }
+    if (greetingSeed && (!historySelection || !greetingIsCurrent || !greetingIsCurrent() || message || isRegenerate ||
+        hasExplicitImageBackend || imageBackendCandidates.length || uploadedFiles?.length || docs?.length || messageType ||
+        resolvedChatMode !== "normal" || resolveUseMessageSendMode({ effectiveMode: effectiveAssistantState.mode,
+          hasEffectiveAssistant: Boolean(effectiveSelectedAssistant), draftAssistantKind: selectedAssistant?.kind ?? null,
+          draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant) }) !== "tracked_character"))
+      return chatSubmitFailed("native_history_greeting_requires_fresh");
     const activeController = controller ?? new AbortController();
     const signal = activeController.signal;
     const releaseActiveController = () =>
@@ -2794,7 +2806,7 @@ export const useMessage = () => {
           if (sendMode === "tracked_character" && trackedCharacterForSend?.id) {
             if (historySelection) {
               try {
-                await sendNativeHistoryCharacter({
+                const greeting = await sendNativeHistoryCharacter({
                   surface: "sidepanel",
                   t,
                   controller: historySelection,
@@ -2810,6 +2822,8 @@ export const useMessage = () => {
                   settings: currentChatModelSettings,
                   message,
                   image,
+                  greetingSeed,
+                  greetingIsCurrent,
                   setServerChatId,
                   setMessages,
                   unsupportedContext: Boolean(
@@ -2832,8 +2846,12 @@ export const useMessage = () => {
                     }
                   }
                 });
+                if (greeting && !greeting.matchesPreview) notification.info({
+                  message: t("sidepanel:greetingPicker.changed", "The character opening changed"),
+                  description: t("sidepanel:greetingPicker.changedHelp", "The saved opening differs from the preview. Review the opening shown in this chat before sending your message.")
+                });
               } catch (error) {
-                notification.error({
+                if (!greetingSeed) notification.error({
                   message: t("error"),
                   description: error instanceof Error ? error.message : "Native history completion failed"
                 });

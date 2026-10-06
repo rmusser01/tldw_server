@@ -1,7 +1,7 @@
 ---
 id: TASK-13456
 title: 'Chat UX stage 3: clear character openings and scoped roleplay setup'
-status: To Do
+status: In Progress
 labels:
 - chat
 - ux
@@ -38,6 +38,7 @@ Resolve findings 4, 6, and 7 and approved roleplay enhancements: prominent greet
 Program: TASK-13453. Design: Docs/Design/2026-10-04-chat-conversation-ux-remediation-design.md. Base: origin/dev 75ab224081bf140ef52017c1a9b0a04f6878d488, verified 2026-10-04. User approved equal audience priority and all ten findings plus enhancements in five stages. Written-design approval and the requested critical review are recorded on 2026-10-04; application implementation has not begun. ADR required: no for the client remediation; ADR-049 and ADR-050 govern owner-bound history and native fork boundaries, ADR-059 governs canonical task editing. Reassess if implementation changes public APIs or persistence authority. Reuse existing shared UI, loaders, presets, and test harnesses; preserve temporary-chat privacy and account/workspace fences. Findings 4, 6, 7. Reuse RolePlaySetupDrawer/Preview, ChatGreetingPicker, useChatSettingsRecord, saved-role-play-setups and compatibility helpers. TASK-13160 is the existing conditional prerequisite for snapshot-based native resume; this task consumes it instead of inventing a competing prompt protocol. Existing native character path rejects client scene/actor/custom context; expose that honestly until authoritative support is delivered.
 ADR detail: backlog/decisions/002-character-conversation-behavior-snapshot-and-fenced-completion.md governs snapshot-authoritative native resume and supported versioned settings mutations. TASK-13160 is a prerequisite, not a promise that arbitrary client scene/prompt overlays become supported. Never inject client overrides or fall back to less guarded completion; assess any missing durable API before extension and retain its consuming enhancement as open.
 Pre-implementation review gate: greeting preview/reroll changes neither transcript nor request history; own-message startup inserts no assistant greeting. Reuse Stage 1 greeting persistence. Label new-chat setup Use setup for new chat and existing supported edits Apply to this conversation. Preserve explicit live sections rather than removing every autosave; Cancel controls unapplied fields only. Map fields to actual storage/completion support before changing labels. Conversation generation overrides currently support temperature/top_p/repetition_penalty/stop; model-default fields do not become conversation fields by renaming. Extend ordinary settings helpers with captured request scope and explicit local/server failed/unknown outcomes; retry only unresolved operations, and reject stale Apply publishing. Two-chat model isolation, held PUT across scope changes, partial retry call counts and nested-focus checks are required. TASK-13160 still gates exact advertised native behavior mutation, not arbitrary client overlays.
+Starting the approved explicit character-opening unit under TASK-13454.11, linked to the existing Stage1 native greeting prerequisites. Independent source reviews precede implementation. Scoped roleplay setup and full Stage3 acceptance remain open.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
