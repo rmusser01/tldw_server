@@ -55,7 +55,7 @@ export const resolveSkippedResultReason = (item: WizardResultItem): SkippedResul
 export const getSavedMediaIds = (results: WizardResultItem[]): Array<string | number> => {
   const ids = new Map<string, string | number>()
   for (const item of results) {
-    if (item.status !== "ok" || !canOpenMedia(item) || item.persisted === false || item.outcome === "submit_failed") continue
+    if (item.status !== "ok" || !canOpenMedia(item) || item.outcome === "submit_failed") continue
     const id = item.mediaId
     if (typeof id === "number" ? !Number.isFinite(id) || id <= 0 : typeof id !== "string" || !id.trim()) continue
     const key = String(id).trim()

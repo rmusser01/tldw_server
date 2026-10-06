@@ -1194,6 +1194,7 @@ const runDirectQuickIngestBatch = async (
               type: mediaType,
               data: pollResult.data,
               message: isDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined,
+              mediaId: extractCompletedIngestJobMediaId(pollResult.data),
               persisted: shouldStoreRemote && shouldKeepOriginalFile(mediaType),
             });
           } catch (error) {
@@ -1214,6 +1215,7 @@ const runDirectQuickIngestBatch = async (
               type: mediaType,
               data,
               message: fallbackDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined,
+              mediaId: extractCompletedIngestJobMediaId(data),
               persisted: shouldStoreRemote && shouldKeepOriginalFile(mediaType),
             });
           }
@@ -1238,6 +1240,7 @@ const runDirectQuickIngestBatch = async (
           type: mediaType,
           data,
           message: directDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined,
+          mediaId: null,
           persisted: false,
         });
       } catch (error) {

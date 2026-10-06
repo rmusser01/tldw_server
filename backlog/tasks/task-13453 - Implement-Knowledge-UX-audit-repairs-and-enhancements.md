@@ -1,10 +1,11 @@
 ---
 id: TASK-13453
 title: Implement Knowledge UX audit repairs and enhancements
-status: In Progress
+status: Done
 labels:
 - knowledge
 - ux
+updated_date: 2026-10-06 03:31
 ---
 
 ## Description
@@ -37,14 +38,14 @@ Final complete affected-suite refresh on rebased product: 127 suites / 1910 test
 Post-rebase backend-required reached and failed the OpenAPI drift gate at head e3a2e03d695020a7baa6f85294e185b8ba95ca58 (run 37400352572). Investigating the generated fingerprint for the intentional web-clipper expected-user dependency; refresh with the existing canonical exporter and verify the schema delta before committing. All backend test and startup smoke steps passed; the container retry and its rollup passed.
 OpenAPI follow-up repaired through existing generate:api-types. CI-matching Python3.12/FastAPI0.142.2/Pydantic2.13.5/Starlette1.7.0 exports cfd0a1892138803a9b2f25ff3420420671bb6e61cec3a2b6ea21d8bb525e4734 with unchanged 2107 paths/3248 schemas. Removing only the optional expected-user header on POST web-clipper/save restores the prior hash exactly; no hidden API delta. Canonical drift check and official WebUI typecheck pass, with generated frontend types refreshed. Only fingerprint and tracking/verification evidence changed. PR #3196 remains pending remote required checks on the follow-up head; merge without Qodo remains explicitly authorized.
 Dev advanced to 587cd8e9fe3b42eba451b83c1ba690607035eace via Media UX PR #3194 while frontend-required was pending on 0ee9dcc3a1e063ce96fd10e48100e18ee01f43db; the other six required gates and critical journeys/UX smoke passed. Upstream changes overlap shared QuickIngest, review, API-client scope, and locales. Reopening to reconcile the latest-dev integration, verify preserved Knowledge and Media behaviors, and rerun current-head required gates before the authorized merge. Plan: Docs/Design/IMPLEMENTATION_PLAN_knowledge_media_dev_integration_20261005.md.
+Latest-dev integration: rebased onto dev 587cd8e9 (Media UX PR #3194). Reused shared queue eligibility/live-file and reading-context logic; independent reviewers reproduced exact Ask scope, cross-page Research metadata, partial retry lineage, and original-file-retention/storage-evidence regressions. Regression checks fail before fixes; combined client/runtime verification underway. Integration plan: Docs/Design/IMPLEMENTATION_PLAN_knowledge_media_dev_integration_20261005.md.
+Latest-dev Media integration completed locally on dev 587cd8e9. RED/GREEN checks cover retained/skipped Ask scope, fourty-source cross-page Research metadata with zero body fetches, durable partial-response lineage, stored audio/PDF and true process-only results. Full affected WebUI158 suites/2480 tests PASS318.96s; focused7 suites/347 tests PASS under both WebUI and extension configs; final Results27 PASS after unused dependency cleanup. Official client types, API44, canonical OpenAPI drift check, Bandit169LOC0findings, scoped lint0errors/baseline35warnings, independent reviews and hooks pass. Verification record updated; owned integration plan and dependency symlinks removed before delivery. PR https://github.com/rmusser01/tldw_server/pull/3196 retains the requester Change summary; required current-head remote gates remain mandatory before the authorized merge without unavailable Qodo.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed K01-K15 and all five approved enhancement themes on latestdev025627, including actual captured-note continuation, canonical evidence/draft/save persistence, eligible retries, accessible compact interaction and honest citation qualification. Final product03f4e0627b passed123 suites/1741 tests,44 canonical API tests, officialtypes/devbuilds, touchedPython Bandit169LOC0findings and independent scoped reviews. Real workflows, scanner/browser limits and all17decisions are retained in the final review guide. Owned services/build artifacts cleaned; local branch/worktree retained for review. Final explicit-file hooks and documentation commit complete the tracking record.
+Implemented all Knowledge K01-K15 repairs and five approved enhancements, then integrated latest dev 587cd8e9 Media UX without losing queue eligibility, live-file recovery, reading windows or account fences. Final local validation: 158 affected suites/2480 tests; 347 focused tests under each client runtime; 44 API tests; official client type checks; canonical OpenAPI fingerprint; Bandit169LOC0findings; scoped lint0errors/no added warnings; two independent integration reviews. Review guide and verification evidence retained. Implementation complete; PR #3196 delivery awaits current-head required remote gates before the requester-authorized merge without Qodo.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

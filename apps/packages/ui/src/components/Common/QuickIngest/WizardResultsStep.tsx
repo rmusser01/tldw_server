@@ -376,7 +376,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const { results, processingState } = state
   const queueItems = state.queueItems ?? []
   const eligibleIds = new Set(getEligibleQueueItems(queueItems).map(item => item.id))
-  const savedIds = getSavedMediaIds(results.filter(item => !queueItems.length || eligibleIds.has(item.id) || queueItems.some(source => source.id === item.id && source.kind === "file" && !source.file)))
+  const savedIds = getSavedMediaIds(results.filter(item => !queueItems.some(source => source.id === item.id) || eligibleIds.has(item.id) || queueItems.some(source => source.id === item.id && source.kind === "file" && !source.file)))
   const excludedItems = queueItems.filter(item => getQueueItemExclusionReason(item, queueItems) && !results.some(result => result.id === item.id))
   const missingFileIds = new Set(queueItems.filter(item => !item.url && !item.file).map(item => item.id))
   const tracking = useQuickIngestSessionStore((store) => store.session?.tracking)
@@ -411,10 +411,11 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const collectionId = tracking?.collectionId
   const hasDurableCollection =
     Boolean(collectionId) && tracking?.durableMode === "durable_collection"
-  const savedMediaIds = savedIds
+  const savedMediaIds = getSavedMediaIds(savedItems)
+    .filter(id => savedIds.includes(id))
     .map((id) => Number(id))
     .filter((id) => Number.isSafeInteger(id) && id > 0)
-  const collectionMediaIds = [...savedIds, ...skippedExisting.filter(item => canOpenMedia(item) && item.persisted !== false && (!queueItems.length || eligibleIds.has(item.id))).map(item => item.mediaId)]
+  const collectionMediaIds = savedIds
     .map((id) => Number(id))
     .filter((id) => Number.isSafeInteger(id) && id > 0)
   const canAskCollection = hasDurableCollection && collectionMediaIds.length > 0 && Boolean(onSearchKnowledge) && Boolean(capabilities?.hasKnowledgeQaMediaScope)
@@ -467,7 +468,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
         : failures
             .filter((e) => canRetryWizardResult(e, queueItems))
             .map((e) => e.id),
-    [conferenceRetryRequests, errorCategories, failures, hasDurableCollection, queueItems]
+    [conferenceRetryRequests, failures, hasDurableCollection, queueItems]
   )
 
   // -- Callbacks ------------------------------------------------------------

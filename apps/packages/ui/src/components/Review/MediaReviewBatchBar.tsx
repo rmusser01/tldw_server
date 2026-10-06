@@ -46,6 +46,7 @@ export const MediaReviewBatchBar: React.FC<MediaReviewBatchBarProps> = ({ state,
         items={selectedIds.map(
           (id) =>
             state.details[String(id)] ??
+            state.selectedMetadata[String(id)] ??
             state.allResults.find((item) => String(item.id) === String(id)) ?? {
               id,
             },

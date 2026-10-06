@@ -359,7 +359,7 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
       )
     }
   }
-)
+})
 
 vi.mock("@/components/Common/QuickIngest/ReviewStep", () => ({
   ReviewStep: () => <div data-testid="wizard-review" />,
@@ -875,7 +875,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   it.each([
     ["Review these 1 saved items", "/media-multi"],
     ["Open saved.pdf in Media", "/media?id=7"],
-    ["Search your ingested content in Knowledge QA", "/knowledge"],
+    ["Ask added items", "/knowledge?media_ids=7"],
   ])("opens sidebar result action %s in the full-page workspace", async (label, route) => {
     window.history.replaceState({}, "", "/sidepanel.html")
     mocks.createTab.mockClear()
@@ -936,7 +936,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.useActualResultsStep = true
     useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed", results: [
       { id: "saved", status: "ok", type: "pdf", mediaId: 7 }, { id: "same", status: "ok", type: "pdf", mediaId: "7" },
-      { id: "unsaved", status: "ok", type: "pdf", persisted: false, mediaId: 9 }, { id: "failed", status: "error", type: "pdf", mediaId: 10 },
+      { id: "unsaved", status: "ok", type: "pdf", persisted: false, mediaId: null }, { id: "failed", status: "error", type: "pdf", mediaId: 10 },
     ] })
     const view = render(<QuickIngestWizardModal open onClose={vi.fn()} />)
     fireEvent.click(await screen.findByRole("button", { name: /Review.*saved items/ }))
@@ -1272,6 +1272,8 @@ describe("QuickIngestWizardModal session runtime", () => {
         .getState()
         .session?.results.map((item) => item.mediaId)
     ).toEqual([1, 3])
+    fireEvent.click(screen.getByRole("button", { name: "Ask added items" }))
+    expect(mocks.navigate.mock.calls.at(-1)?.[0]).toBe("/knowledge?media_ids=1%2C3")
   })
 
   it.each(["all", "item"])(
@@ -1472,13 +1474,10 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(
       screen.queryByRole("button", { name: "Retry source.txt" })
     ).toBeNull()
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Reattach source.txt" })
-    )
     const file = new NodeFile(["text"], "source.txt", {
       type: "text/plain"
     }) as unknown as File
-    fireEvent.change(screen.getByLabelText("Reattach queued file"), {
+    fireEvent.change(await screen.findByLabelText("Reattach source.txt"), {
       target: { files: [file] }
     })
     fireEvent.click(
@@ -1664,6 +1663,55 @@ describe("QuickIngestWizardModal session runtime", () => {
     }
       fireEvent.click(screen.getByRole("button", { name: /open .* media/i }))
       expect(mocks.navigate).toHaveBeenCalledWith(expect.stringContaining("media"))
+    }
+  )
+
+  it("retains durable attempt identities when a partial retry response omits an item", async () => {
+    mocks.useActualResultsStep = true
+    useQuickIngestSessionStore.getState().createDraftSession({
+      ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "partial_failure",
+      queueItems: ["first", "second"].map(id => ({ id, kind: "url", url: `https://source.test/${id}.pdf`, detectedType: "pdf", icon: "File", fileSize: 0, validation: { valid: true } })),
+      results: ["first", "second"].map((id, index) => ({ id, title: id, type: "pdf", status: "error", outcome: "failed", error: "Network error", collectionItemId: 11 + index, retryAttempt: 0 })),
+      tracking: { mode: "webui-direct", collectionId: "7", durableMode: "durable_collection" }
+    })
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-direct-partial" })
+    mocks.submitQuickIngestBatch.mockResolvedValue({ ok: true, results: [{ id: "first", type: "pdf", status: "ok", mediaId: 8, collectionItemId: 11, retryAttempt: 1 }] })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Retry all 2 retryable errors" }))
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "second", status: "error", collectionItemId: "12", retryAttempt: 1, idempotencyKey: "conference-retry-12-1" })
+    ])))
+  })
+
+  it.each(["audio URL", "audio file", "PDF URL", "process-only audio URL", "process-only audio file"])(
+    "offers scoped Ask for stored media without requiring original-file retention (%s)", async (mode) => {
+      mocks.useActualResultsStep = true
+      mocks.useActualAddContentStep = mode.includes("file")
+      const batch = await vi.importActual<typeof import("@/services/tldw/quick-ingest-batch")>("@/services/tldw/quick-ingest-batch")
+      mocks.startQuickIngestSession.mockImplementation(batch.startQuickIngestSession)
+      mocks.submitQuickIngestBatch.mockImplementation(batch.submitQuickIngestBatch)
+      const processOnly = mode.startsWith("process-only")
+      const file = mode.includes("file")
+      const type = mode.includes("PDF") ? "pdf" : "audio"
+      const attached = new NodeFile(["audio"], "source.mp3", { type: "audio/mpeg" }) as unknown as File
+      mocks.bgUpload.mockResolvedValue(processOnly ? { status: "Success", media_id: 7 } : { batch_id: "stored-source", jobs: [{ id: 77 }] })
+      mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result: { status: "Success", media_id: 7 } } })
+      useQuickIngestSessionStore.getState().createDraftSession({
+        presetConfig: { ...resolvePresetMap().quick, storeRemote: !processOnly },
+        queueItems: file ? [] : [{ id: "source", kind: file ? "file" : "url", ...(file ? { file: attached, fileName: attached.name } : { url: `https://source.test/source.${type === "pdf" ? "pdf" : "mp3"}` }), detectedType: type, icon: "File", fileSize: file ? attached.size : 0, validation: { valid: true } }]
+      })
+      render(<QuickIngestWizardModal open autoProcessQueued={!file} onClose={vi.fn()} />)
+      if (file) {
+        fireEvent.change(screen.getByTestId("qi-file-input"), { target: { files: [attached] } })
+        fireEvent.click(await screen.findByRole("button", { name: "Use defaults & process" }))
+      }
+      await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.currentStep).toBe(5))
+      if (processOnly) {
+        expect(screen.queryByRole("button", { name: "Ask added items" })).toBeNull()
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Ask added items" }))
+        expect(mocks.navigate.mock.calls.at(-1)?.[0]).toBe("/knowledge?media_ids=7")
+      }
     }
   )
 

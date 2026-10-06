@@ -522,7 +522,7 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
 
   it("continues the exact reviewed set into Knowledge instead of the whole library", async () => {
     render(<MediaReviewPage />)
-    await screen.findByText("0 / 30 selected")
+    await screen.findByTestId("media-review-selection-count")
     selectItemByCheckbox("Alpha paper")
     selectItemByCheckbox("Beta notes")
     const toolbar = await screen.findByTestId("media-multi-batch-toolbar")

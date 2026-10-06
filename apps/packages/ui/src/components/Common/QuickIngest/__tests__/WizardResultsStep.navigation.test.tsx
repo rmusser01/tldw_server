@@ -287,6 +287,7 @@ describe("WizardResultsStep navigation buttons", () => {
           data: { extraction_failures: [{ code }] }
         }
       ]
+      wizardHarness.queueItems = [{ id: "article", kind: "url", url: "https://example.com/article", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }]
       render(
         <WizardResultsStep onClose={vi.fn()} onRetryItems={onRetryItems} />
       )
@@ -634,6 +635,9 @@ describe("WizardResultsStep navigation buttons", () => {
         error: "timed out",
       } as any,
     ]
+    wizardHarness.queueItems = ["submit-1", "failed-1", "cancel-1", "legacy-failed"].map(id => ({
+      id, kind: "url", url: `https://example.com/${id}`, detectedType: "video", icon: "Film", fileSize: 0, validation: { valid: true }
+    }))
     sessionHarness.tracking = {
       mode: "webui-direct",
       collectionId: "7",

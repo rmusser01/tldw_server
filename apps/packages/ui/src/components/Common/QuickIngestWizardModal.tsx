@@ -43,7 +43,6 @@ import { useNavigate } from "react-router-dom"
 import { browser } from "wxt/browser"
 import { useShallow } from "zustand/react/shallow"
 import { AddContentStep } from "./QuickIngest/AddContentStep"
-import { classifyError } from "./QuickIngest/ErrorClassification"
 import { FloatingProgressWidget } from "./QuickIngest/FloatingProgressWidget"
 import {
   IngestWizardProvider,
@@ -255,8 +254,9 @@ const normalizeWizardResult = (
     title: item.title,
     durationMs: item.durationMs,
     mediaId:
-      item.mediaId ??
-      extractCompletedIngestJobMediaId(item.data),
+      item.mediaId !== undefined
+        ? item.mediaId
+        : extractCompletedIngestJobMediaId(item.data),
     persisted: item.persisted,
     collectionItemId: item.collectionItemId ?? null,
     retryAttempt: item.retryAttempt ?? null,
@@ -1271,7 +1271,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     ) => {
       syncElapsed()
       const resolvedIds = new Set([...resultsRef.current, ...incomingResults].map(item => item.id))
-      applyResults([...incomingResults, ...buildFailureResults(validQueueItems.filter(item => !resolvedIds.has(item.id)), "The server returned no result for this input. Review the source and try again.", "failed")])
+      applyResults([...incomingResults, ...buildFailureResults(validQueueItems.filter(item => !resolvedIds.has(item.id)), "The server returned no result for this input. Review the source and try again.", "failed", retryRequestsRef.current.length ? retryRequestsRef.current : persistedTrackingRef.current?.retryItems)])
       updateProcessingState({
         status: nextStatus,
         estimatedRemaining: 0,
