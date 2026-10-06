@@ -6,7 +6,7 @@ Status: Approved by the user on 2026-10-04, with the pre-implementation review c
 
 Program: TASK-13453; delivery stages TASK-13454–TASK-13458.
 
-Initial baseline: `origin/dev` at `75ab224081bf140ef52017c1a9b0a04f6878d488`. Current baseline: latest `origin/dev` at `5775d3fbbe3ed4b38a57f9a4b72775e434d06685`, integrated in `c0e14c9b44` on 2026-10-05. The verified setup/recovery checkpoint is `2a2d029d04`; post-integration WebUI types, extension entrypoint compile and84 focused regressions pass. Remaining staged acceptance is still open.
+Initial baseline: `origin/dev` at `75ab224081bf140ef52017c1a9b0a04f6878d488`. Current baseline: latest fetched `origin/dev` at `587cd8e9fe3b42eba451b83c1ba690607035eace`, integrated in `f460db867c` on 2026-10-05. Post-integration model/character and captured request-scope checks pass (16 suites, 421 regressions), as do WebUI types and extension compilation. Remaining staged acceptance is still open.
 
 ## Outcome and evidence
 
@@ -291,3 +291,9 @@ Correct only new factory-generated seed messages to sender assistant and explici
 The actual preview/alternate choices do not mutate history. Own-message focus preserves exact input and trailing spaces. Opening actions fit390px and320px without horizontal overflow; screenshots are in /private/tmp/chat-ux-fresh-opening-390.jpg and /private/tmp/chat-ux-fresh-opening-320.jpg. Complete keyboard/zoom/screen-reader/package and other all-entry-point journeys remain required parent checks.
 
 Verified correction: relevant Python suites292 passed, actual module reopening passed, Bandit0 and no new Ruff diagnostics; both independent source reviews found no blockers. One explicit live save produced one owned settled assistant root with exact raw text and zero provider/user-turn requests. Cold reload returned the same chat and exact focused draft (/private/tmp/chat-greeting-canonical-owned-proof.json; /private/tmp/chat-ux-saved-greeting-reloaded.jpg). TASK-13454.11 also qualifies the canonical H1 message id for display-only greeting projection; no synthetic server ID/version or raw-content mutation is introduced. Its real formatter-to-renderer regression failed before that correction and now passes with the related checks (3suites32); both type gates pass and no new frontend lint diagnostics are introduced. User placeholders remain visible when no user display name is configured.
+
+## Explicit model selection checkpoint — TASK-13454.14
+
+Checkpoint `61da94ba19` makes actual provider/model selection and settings ownership truthful across full, Research and compact chat. Catalog matches cannot qualify a providerless choice; canonical menu actions retain the selected provider; owned aliases and overrides preserve their settings. Deliberate settings-dialog A→B changes activate B before edits and Save. Native readiness follows the unchanged strict preflight route. Latest dev is integrated in `f460db867c`, preserving both chat Restore/Notes organization and upstream bounded Media routes with their negative method/path tests.
+
+Post-merge verification: 421 relevant regressions pass, both client type gates pass, no new touched ESLint diagnostics, diff checks pass, and both independent source reviews are clear. Pre-merge live fixture evidence shows Choose provider without Current, then an explicit Custom OpenAI choice with exact draft and focus retained. The post-merge browser check preserves explicit provider identity and exact multiline/trailing-space text (`/private/tmp/chat-model-latest-dev-choice-draft-retained.jpg`); its fixture shows No chat models configured, so positive readiness and focus return are not claimed for that check. Packaged extension, assistive-technology and real-provider generation proof remain separate stage gates.
