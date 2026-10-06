@@ -27,6 +27,8 @@ const formatBlockedReason = (
   t: TFunction
 ) => {
   switch (blockedReason) {
+    case "chat_setup_changed":
+      return t("playground:composer.queueChatChanged", "This chat or setup changed. Review the queued request before running it again.")
     case "connection_unavailable":
       return t("playground:composer.queueConnectionUnavailable", "Connection was interrupted. Review this request and run it after reconnecting.")
     case "restored_request":

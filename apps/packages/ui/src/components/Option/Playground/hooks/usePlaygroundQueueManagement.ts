@@ -50,6 +50,8 @@ export interface UsePlaygroundQueueManagementDeps {
   composerModels: unknown[] | undefined
   isConnectionReady: boolean
   isSending: boolean
+  getDispatchDisabledReason?: () => string | null
+  captureDispatchFence?: () => () => boolean
   selectedModel: string | null
   chatMode: string
   webSearch: boolean
@@ -158,6 +160,8 @@ export function usePlaygroundQueueManagement(
     composerModels,
     isConnectionReady,
     isSending,
+    getDispatchDisabledReason,
+    captureDispatchFence,
     selectedModel,
     chatMode,
     webSearch,
@@ -340,7 +344,15 @@ export function usePlaygroundQueueManagement(
 
   const sendQueuedRequest = React.useCallback(
     async (item: QueuedRequest, assertDispatchReady: () => void) => {
-      assertDispatchReady()
+      const sourceIsCurrent = captureDispatchFence?.()
+      const assertReady = () => {
+        assertDispatchReady()
+        const reason = getDispatchDisabledReason?.()
+        if (reason || sourceIsCurrent?.() === false) throw new Error(reason || t(
+          "playground:composer.queueChatChanged", "This chat or setup changed. Review the queued request before running it again."
+        ))
+      }
+      assertReady()
       const validationError = validateQueuedRequest(item)
       if (validationError) {
         form.setFieldError("message", validationError)
@@ -391,7 +403,7 @@ export function usePlaygroundQueueManagement(
         )
       }
 
-      assertDispatchReady()
+      assertReady()
       setSelectedModel(item.snapshot.selectedModel)
       setChatMode(item.snapshot.chatMode)
       setWebSearch(item.snapshot.webSearch)
@@ -468,6 +480,8 @@ export function usePlaygroundQueueManagement(
       throwIfChatSubmitUnsuccessful(submitResult)
     },
     [
+      captureDispatchFence,
+      getDispatchDisabledReason,
       conversationTokenCount,
       currentContextSnapshot,
       estimateTokensForText,
@@ -561,7 +575,7 @@ export function usePlaygroundQueueManagement(
     resolveConversationId,
     buildQueuedDocuments,
     buildQueuedRequestSnapshot,
-    isQueuedDispatchBlocked: isQueuedDispatchBlockedByComposerState,
+    isQueuedDispatchBlocked: isQueuedDispatchBlockedByComposerState || Boolean(getDispatchDisabledReason?.()),
     onEnqueueBlocked: handleEnqueueBlocked,
     onEnqueueSuccess: handleEnqueueSuccess,
     cancelCurrentAndRunDisabledReasonText

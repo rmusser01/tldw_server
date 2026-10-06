@@ -7,22 +7,35 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { PlaygroundEmpty } from "../PlaygroundEmpty"
-import { PlaygroundForm } from "../PlaygroundForm"
+import { PlaygroundForm, type ApplyCharacterRoute } from "../PlaygroundForm"
 import type { Character } from "@/types/character"
 import type { AssistantSelection } from "@/types/assistant-selection"
 import { resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLoader"
 import { createStartupTemplateBundle } from "../startup-template-bundles"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useBuddyManagementStore } from "@/store/buddy-management"
+import { buildQueuedRequest } from "@/utils/chat-request-queue"
+
+const queuedDocumentPreparation = vi.hoisted(() => vi.fn())
+vi.mock("@/services/chat-document-processing", async original => ({
+  ...await original<typeof import("@/services/chat-document-processing")>(),
+  prepareChatDocumentAttachmentsForSend: queuedDocumentPreparation
+}))
 
 const saveActorSettingsMock = vi.hoisted(() => vi.fn(async (_args: unknown) => true))
 const ownerGuardFixture = vi.hoisted(() => ({ capture: null as null | (() => () => boolean) }))
 type ModelSettingsStore = ReturnType<typeof import("@/store/model").useStoreChatModelSettings.getState>
 const nativeSetupFixture = vi.hoisted(() => ({
   realSettings: false,
+  realDrafts: false,
+  ownerCurrent: true,
+  destinationCurrent: null as null | (() => boolean),
   actualSettingsStore: null as typeof import("@/store/model").useStoreChatModelSettings | null,
   formattingGuide: false,
   identityGuard: null as null | (() => boolean),
+  assistantRevision: 0,
+  retain: vi.fn(async (_key: string, _draft: unknown) => true),
+  getCharacter: vi.fn(async (_id: string, _options?: unknown): Promise<unknown> => ({ id: "route-card", name: "Route Card" })),
   error: vi.fn(),
   models: [{ model: "deepseek-chat", provider: "openai", is_configured: true }, { model: "gpt-4.1", provider: "openai", is_configured: true }],
   controller: null as null | { getCurrent: () => { status: string; owner: { kind: string } | null; view: Record<string, unknown> | null }; reset: () => void; fence: () => () => boolean },
@@ -36,6 +49,7 @@ const nativeSetupFixture = vi.hoisted(() => ({
     release: vi.fn()
   }))
 }))
+const assistantOwnerIsCurrent = vi.hoisted(() => () => nativeSetupFixture.ownerCurrent)
 vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => ({
   ...await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>(),
   useHistorySelectionContext: () => nativeSetupFixture.controller
@@ -217,7 +231,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/hooks/useChatDraftOwner", () => {
-  const owner = { ownerKey: "account-a", isCurrent: () => true }
+  const owner = { ownerKey: "account-a", isCurrent: () => nativeSetupFixture.ownerCurrent }
   return { useChatDraftOwner: () => owner }
 })
 
@@ -683,9 +697,25 @@ vi.mock("@/hooks/useKeyboardShortcuts", () => ({
   isMac: false
 }))
 
-vi.mock("@/hooks/useDraftPersistence", () => ({
-  useDraftPersistence: () => ({ draftSaved: false })
+// Real persistence/hydration can be mounted over acknowledged in-memory bucket IO;
+// this is not native browser durability or account verification evidence.
+const draftBucket = vi.hoisted(() => ({ records: new Map<string, { value: unknown; updatedAt: number }>() }))
+vi.mock("@/services/settings/local-bucket", () => ({
+  createLocalRegistryBucket: ({ prefix }: { prefix: string }) => ({
+    buildKey: (key: string) => prefix + key,
+    get: async (key: string) => draftBucket.records.get(prefix + key) ?? null,
+    set: async (key: string, value: unknown) => { draftBucket.records.set(prefix + key, { value, updatedAt: Date.now() }); return true },
+    list: async () => ({ records: Object.fromEntries([...draftBucket.records].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => [key.slice(prefix.length), value])), unavailable: false }),
+    remove: async (key: string) => { draftBucket.records.delete(prefix + key) },
+    cleanup: async () => 0
+  })
 }))
+vi.mock("@/hooks/useDraftPersistence", async original => {
+  const actual = await original<typeof import("@/hooks/useDraftPersistence")>()
+  return { ...actual, useDraftPersistence: (...args: Parameters<typeof actual.useDraftPersistence>) => nativeSetupFixture.realDrafts
+    ? actual.useDraftPersistence(...args)
+    : { draftSaved: false, draftReady: true, retainDraft: nativeSetupFixture.retain } }
+})
 
 vi.mock("@/hooks/useSelectedCharacter", () => ({
   useSelectedCharacter: () => [
@@ -695,6 +725,7 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
 }))
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
+  getSelectedAssistantOperationRevision: () => nativeSetupFixture.assistantRevision,
   useSelectedAssistant: (initialValue: any = null) => {
     const [selectedAssistant, setSelectedAssistant] = React.useState(selectedAssistantMock.initialSelection ?? initialValue)
     const publishSelection = (next: AssistantSelection | null) => {
@@ -703,6 +734,9 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
     }
     selectedAssistantMock.externalMirror = publishSelection
     const setSelectedAssistantWithBroadcast = async (next: any, options: { isCurrent?: () => boolean } = {}) => {
+      // Match the real owned writer: check caller at entry, then allocate its own revision.
+      if (options.isCurrent?.() === false) return false
+      nativeSetupFixture.assistantRevision++
       nativeSetupFixture.identityGuard = options.isCurrent ?? null
       const acknowledged = await selectedAssistantMock.setSelectedAssistant(next)
       if (acknowledged === false) return false
@@ -713,7 +747,7 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
     return [
       selectedAssistant,
       setSelectedAssistantWithBroadcast,
-      { isLoading: selectedAssistantMock.isLoading, setRenderValue: publishSelection }
+      { isLoading: selectedAssistantMock.isLoading, isCurrent: assistantOwnerIsCurrent, setRenderValue: publishSelection }
     ] as const
   }
 }))
@@ -834,13 +868,13 @@ vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => n
 vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({ PromptAssistComposerAction: () => null }))
 
 vi.mock("../RolePlaySetupDrawer", () => ({
-  RolePlaySetupDrawer: ({ characterId, onApply, onClose, returnFocusRef, savedRolePlaySetups, onPreviewSavedSetup, captureApplyGuard }: { captureApplyGuard?: () => () => boolean; savedRolePlaySetups?: Array<{ id: string }>; onPreviewSavedSetup?: (id: string) => void; characterId?: string | null; onApply: (payload: unknown, context?: { isCurrent: () => boolean }) => Promise<boolean | void>; onClose: () => void; returnFocusRef?: React.RefObject<HTMLElement> }) => {
+  RolePlaySetupDrawer: ({ characterId, onApply, onClose, returnFocusRef, savedRolePlaySetups, onPreviewSavedSetup, captureApplyGuard }: { captureApplyGuard?: () => () => boolean; savedRolePlaySetups?: Array<{ id: string }>; onPreviewSavedSetup?: (id: string) => void; characterId?: string | null; onApply: (payload: unknown, context?: { isCurrent: () => boolean; onDestination: (next: { isCurrent: () => boolean }) => void }) => Promise<boolean | void>; onClose: () => void; returnFocusRef?: React.RefObject<HTMLElement> }) => {
     ownerGuardFixture.capture = captureApplyGuard ?? null
     const [result, setResult] = React.useState("")
     const mounted = React.useRef(true)
     React.useEffect(() => () => { mounted.current = false }, [])
     const apply = (payload: unknown) => {
-      void onApply(payload, { isCurrent: () => mounted.current }).then(accepted => setResult(accepted === false ? "Apply failed" : "Applied"), () => setResult("Apply failed"))
+      void onApply(payload, { isCurrent: () => mounted.current, onDestination: next => { nativeSetupFixture.destinationCurrent = next.isCurrent } }).then(accepted => setResult(accepted === false ? "Apply failed" : "Applied"), () => setResult("Apply failed"))
     }
     return <section aria-label="Role-play setup">
       <span data-testid="setup-character">{characterId ?? "None"}</span>
@@ -891,6 +925,7 @@ vi.mock("@/services/search", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    getCharacter: nativeSetupFixture.getCharacter,
     initialize: vi.fn(async () => undefined),
     createChatCompletion: createChatCompletionMock,
     listAllCharacters: vi.fn(async () => [
@@ -1111,8 +1146,16 @@ vi.mock("@/hooks/playground", () => ({
 beforeEach(() => {
   localStorage.clear()
   nativeSetupFixture.realSettings = false
+  queuedDocumentPreparation.mockReset()
+  nativeSetupFixture.realDrafts = false
+  nativeSetupFixture.ownerCurrent = true
+  nativeSetupFixture.destinationCurrent = null
+  draftBucket.records.clear()
   nativeSetupFixture.formattingGuide = false
   nativeSetupFixture.identityGuard = null
+  nativeSetupFixture.assistantRevision = 0
+  nativeSetupFixture.retain.mockReset().mockResolvedValue(true)
+  nativeSetupFixture.getCharacter.mockReset().mockResolvedValue({ id: "route-card", name: "Route Card" })
   nativeSetupFixture.error.mockClear()
   nativeSetupFixture.actualSettingsStore!.getState().reset()
   nativeSetupFixture.controller = null
@@ -1174,6 +1217,7 @@ const prepareNativeSource = () => {
     source.setHistoryId.mockImplementation((id: string | null) => { source.historyId = id })
     source.setServerChatId.mockImplementation((id: string | null) => { source.serverChatId = id })
     source.setSelectedModel.mockImplementation((model: string) => { source.selectedModel = model })
+    source.setQueuedMessages.mockImplementation((next: import("@/utils/chat-request-queue").QueuedRequest[] | ((previous: import("@/utils/chat-request-queue").QueuedRequest[]) => import("@/utils/chat-request-queue").QueuedRequest[])) => { source.queuedMessages = typeof next === "function" ? next(source.queuedMessages) : next })
     return { reset, source, owner: () => current.owner }
 }
 
@@ -1232,6 +1276,262 @@ describe("PlaygroundForm role-play starter", () => {
     expect(trigger).toHaveFocus()
     expect(selectedAssistantMock.setSelectedAssistant).not.toHaveBeenCalled()
     expect(playgroundFormMessageOptionState.value.setMessages).not.toHaveBeenCalled()
+  })
+
+  it("allows acknowledged destination hydration while a saved setup scene finishes", async () => {
+    const { source } = prepareNativeSource()
+    source.serverChatId = "source-chat"
+    nativeSetupFixture.realDrafts = true
+    savedSetupFixture.raw = JSON.stringify([createStartupTemplateBundle({ name: "Hydrated scene", selectedModel: null, systemPrompt: "", rolePlay: { source: "role-play-setup", identity: { kind: "persona", id: "guide", name: "Guide" }, behavior: null, scene: null, generation: null, context: null } })])
+    let finish!: () => void
+    const pending = new Promise<boolean>(resolve => { finish = () => resolve(true) })
+    saveActorSettingsMock.mockReturnValueOnce(pending)
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.type(screen.getByTestId("composer-textarea"), "Source draft for scene")
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(await screen.findByRole("button", { name: "Preview saved setup" }))
+    await user.click(await screen.findByRole("button", { name: "Apply saved template" }))
+    await waitFor(() => expect(saveActorSettingsMock).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue(""))
+    await act(async () => { finish(); await pending })
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Apply saved template" })).not.toBeInTheDocument())
+  })
+
+  it.each(["accepted", "declined"])("retires an obsolete route only after an %s fresh picker identity", async outcome => {
+    const { source, reset } = prepareNativeSource()
+    source.historyId = null
+    nativeSetupFixture.controller!.reset()
+    reset.mockClear()
+    selectedAssistantMock.setSelectedAssistant.mockResolvedValueOnce(outcome === "accepted")
+    const events: unknown[] = []
+    const listener = (event: Event) => events.push((event as CustomEvent).detail)
+    window.addEventListener("tldw:chat-route-replacement", listener)
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(await screen.findByRole("button", { name: "Apply Character setup" }))
+    await screen.findByText(outcome === "accepted" ? "Applied" : "Apply failed")
+    window.removeEventListener("tldw:chat-route-replacement", listener)
+    expect(events).toEqual(outcome === "accepted" ? [expect.objectContaining({ characterId: "char-new", historyId: null, serverChatId: null })] : [])
+    expect(reset).not.toHaveBeenCalled()
+  })
+
+  it("retires a saved source URL after identity ACK and before releasing its owner", async () => {
+    const { source, reset } = prepareNativeSource()
+    source.serverChatId = "saved-source"
+    source.historyId = "saved-history"
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=old&chatId=saved-source")
+    const events: unknown[] = []
+    const listener = (event: Event) => events.push({ detail: (event as CustomEvent).detail,
+      serverChatId: source.serverChatId, historyId: source.historyId, resetCalls: reset.mock.calls.length,
+      selected: selectedAssistantMock.currentSelection?.id })
+    window.addEventListener("tldw:chat-route-replacement", listener)
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+      await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+      await user.click(await screen.findByRole("button", { name: "Apply Character setup" }))
+      await screen.findByText("Applied")
+      expect(events).toEqual([{ detail: expect.objectContaining({ href: window.location.href,
+        characterId: "char-new", serverChatId: "saved-source", historyId: "saved-history" }),
+        serverChatId: "saved-source", historyId: "saved-history", resetCalls: 0, selected: "char-new" }])
+      expect(reset).toHaveBeenCalledOnce()
+    } finally { window.removeEventListener("tldw:chat-route-replacement", listener); view.unmount() }
+  })
+
+  it("keeps queued work and source draft while character entry blocks dispatch", async () => {
+    const { source } = prepareNativeSource()
+    source.serverChatId = "saved-source"
+    const item = { ...buildQueuedRequest({ promptText: "Keep queued request", snapshot: { selectedModel: "openai:gpt-4.1" } }), status: "blocked", blockedReason: "restored_request" }
+    source.queuedMessages = [item]
+    const blocker = { active: true, title: "Finish character setup before sending.", actionLabel: "Choose character", onAction: vi.fn() }
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} characterChatSendBlocker={blocker} />)
+    await user.type(screen.getByTestId("composer-textarea"), "Source draft  ")
+    const next = screen.getByRole("button", { name: "Retry next" })
+    await user.click(screen.getByRole("button", { name: "View queue" }))
+    const now = screen.getByRole("button", { name: "Retry now" })
+    await user.click(next); await user.click(now)
+    expect(next).toBeDisabled()
+    expect(now).toBeDisabled()
+    expect(next).toHaveAttribute("title", blocker.title)
+    expect(source.queuedMessages).toEqual([item])
+    expect(source.setSelectedModel).not.toHaveBeenCalled()
+    expect(onSubmitMock).not.toHaveBeenCalled()
+    expect(source.serverChatId).toBe("saved-source")
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("Source draft  ")
+  })
+
+  it("retains automatically queued work for review after character setup is cancelled", async () => {
+    const { source } = prepareNativeSource()
+    const item = buildQueuedRequest({ promptText: "Keep automatic queue", snapshot: { selectedModel: "openai:gpt-4.1" } })
+    source.queuedMessages = [item]
+    const view = render(<PlaygroundForm droppedFiles={[]} characterChatSendBlocker={{ active: true, title: "Finish character setup before sending.", actionLabel: "Choose character", onAction: vi.fn() }} />)
+    expect(onSubmitMock).not.toHaveBeenCalled()
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => { await Promise.resolve() })
+    expect(source.queuedMessages).toEqual([expect.objectContaining({ id: item.id, promptText: item.promptText, status: "blocked" })])
+    expect(source.setSelectedModel).not.toHaveBeenCalled()
+    expect(onSubmitMock).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])("retires held queue preparation when a character setup blocker appears (then clears: %s)", async clears => {
+    const { source } = prepareNativeSource()
+    source.serverChatId = "saved-source"
+    const item = { ...buildQueuedRequest({ promptText: "Keep queued upload", sourceContext: { uploadedFiles: [{ id: "queued-file", filename: "scene.txt", content: "data:text/plain;base64,c2NlbmU=", processingMode: "add_to_chat" }] }, snapshot: { selectedModel: "openai:gpt-4.1" } }), status: "blocked", blockedReason: "restored_request" }
+    source.queuedMessages = [item]
+    let release!: (value: unknown) => void
+    queuedDocumentPreparation.mockReturnValueOnce(new Promise(resolve => { release = resolve }))
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await user.type(screen.getByTestId("composer-textarea"), "Source draft  ")
+    await user.click(screen.getByRole("button", { name: "Retry next" }))
+    await waitFor(() => expect(queuedDocumentPreparation).toHaveBeenCalledOnce())
+    view.rerender(<PlaygroundForm droppedFiles={[]} characterChatSendBlocker={{ active: true, title: "Finish character setup before sending.", actionLabel: "Choose character", onAction: vi.fn() }} />)
+    if (clears) view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => { release({ blockedFiles: [], failedFiles: [], requestOverrides: {}, contextFiles: [], turnMetadata: {} }) })
+    expect(source.setSelectedModel).not.toHaveBeenCalled()
+    expect(onSubmitMock).not.toHaveBeenCalled()
+    expect(source.queuedMessages).toEqual([expect.objectContaining({ id: item.id, promptText: item.promptText, status: "blocked" })])
+    expect(source.serverChatId).toBe("saved-source")
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("Source draft  ")
+  })
+
+  it("refuses a fresh route while the current response is still running", async () => {
+    const { source, reset } = prepareNativeSource()
+    source.isProcessing = true
+    let apply!: ApplyCharacterRoute
+    const register = (next: ApplyCharacterRoute | null) => { if (next) apply = next }
+    render(<PlaygroundForm droppedFiles={[]} onCharacterRouteApplyReady={register} />)
+    await waitFor(() => expect(apply).toBeTypeOf("function"))
+    await act(async () => expect(await apply("route-card", () => true)).toBe("failed"))
+    expect(selectedAssistantMock.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(reset).not.toHaveBeenCalled()
+  })
+
+  it.each(["card:source", "card:history", "card:account", "card:choice", "card:tools", "retention:text ABA", "identity:settings", "identity:account"])("retires held fresh entry at %s", async boundary => {
+    const { source, reset } = prepareNativeSource()
+    const address = source.chatDraftAddress
+    let finish!: () => void
+    if (boundary.startsWith("card")) nativeSetupFixture.getCharacter.mockReturnValueOnce(new Promise(resolve => {
+      finish = () => resolve({ id: "route-card", name: "Route Card" })
+    }))
+    else {
+      const pending = new Promise<boolean>(resolve => { finish = () => resolve(true) })
+      if (boundary.startsWith("retention")) nativeSetupFixture.retain.mockReturnValueOnce(pending)
+      else selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(pending)
+    }
+    let apply!: ApplyCharacterRoute
+    const register = (next: ApplyCharacterRoute | null) => { if (next) apply = next }
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} onCharacterRouteApplyReady={register} />)
+    await user.type(screen.getByTestId("composer-textarea"), "Held source  ")
+    await waitFor(() => expect(apply).toBeTypeOf("function"))
+    let result!: Promise<unknown>
+    act(() => { result = apply("route-card", () => true) })
+    const barrier = boundary.startsWith("card") ? nativeSetupFixture.getCharacter : boundary.startsWith("retention") ? nativeSetupFixture.retain : selectedAssistantMock.setSelectedAssistant
+    await waitFor(() => expect(barrier).toHaveBeenCalledOnce())
+    if (boundary === "card:source") { source.chatDraftAddress = { ...address, id: "newer-draft" }; source.chatDraftRevision++ }
+    if (boundary === "card:history") { nativeSetupFixture.controller!.reset(); reset.mockClear() }
+    if (boundary.endsWith("account")) nativeSetupFixture.ownerCurrent = false
+    if (boundary === "card:choice") { nativeSetupFixture.assistantRevision++; act(() => selectedAssistantMock.externalMirror?.({ kind: "character", id: "newer", name: "Newer", metadata: { selectionMode: "tracked" } })) }
+    if (boundary === "card:tools") nativeSetupFixture.tools = { tools: [{}] }
+    if (boundary === "identity:settings") nativeSetupFixture.settings = { ...nativeSetupFixture.settings!, topK: 20 }
+    if (boundary === "retention:text ABA") { await user.clear(screen.getByTestId("composer-textarea")); await user.type(screen.getByTestId("composer-textarea"), "Held source  ") }
+    const destination = source.chatDraftAddress
+    await act(async () => { finish(); expect(await result).toBe("retired") })
+    expect(source.chatDraftAddress).toBe(destination)
+    expect(reset).not.toHaveBeenCalled()
+    expect(source.setHistoryId).not.toHaveBeenCalled()
+    expect(source.setMessages).not.toHaveBeenCalled()
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("Held source  ")
+    expect(onSubmitMock).not.toHaveBeenCalled()
+    view.unmount()
+  })
+
+  it("retains exact source via real draft persistence before accepting a fresh route", async () => {
+    const { source, reset } = prepareNativeSource()
+    nativeSetupFixture.realDrafts = true
+    const address = source.chatDraftAddress
+    let apply!: ApplyCharacterRoute
+    const register = (next: ApplyCharacterRoute | null) => { if (next) apply = next }
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} onCharacterRouteApplyReady={register} />)
+    await waitFor(() => expect(apply).toBeTypeOf("function"))
+    await user.type(screen.getByTestId("composer-textarea"), "Real retention\nExact spaces  ")
+    let outcome: unknown
+    await act(async () => { outcome = await apply("route-card", () => true) })
+    expect(outcome).toBe("applied")
+    expect([...draftBucket.records.values()].map(record => record.value)).toContainEqual(expect.objectContaining({ content: "Real retention\nExact spaces  " }))
+    expect(source.chatDraftAddress).not.toBe(address)
+    expect(reset).toHaveBeenCalledOnce()
+    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue(""))
+    expect(onSubmitMock).not.toHaveBeenCalled()
+  })
+
+  it.each(["saved same card", "fresh source"])("accepts Library entry as a new draft after retaining %s", async sourceKind => {
+    const { reset, source } = prepareNativeSource()
+    if (sourceKind === "saved same card") {
+      source.serverChatAssistantKind = "character"
+      source.serverChatCharacterId = "route-card"
+      source.serverChatAssistantId = "route-card"
+    } else {
+      source.historyId = null
+      source.serverChatId = null
+      nativeSetupFixture.controller!.reset()
+      reset.mockClear()
+    }
+    const address = source.chatDraftAddress
+    const user = userEvent.setup()
+    let apply!: ApplyCharacterRoute
+    const register = (next: ApplyCharacterRoute | null) => { if (next) apply = next }
+    render(<PlaygroundForm droppedFiles={[]} onCharacterRouteApplyReady={register} />)
+    await user.type(screen.getByTestId("composer-textarea"), "Exact source\nTrailing spaces  ")
+    await waitFor(() => expect(apply).toBeTypeOf("function"))
+    await act(async () => expect(await apply("route-card", () => true)).toBe("applied"))
+    expect(nativeSetupFixture.retain).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ content: "Exact source\nTrailing spaces  " }))
+    expect(nativeSetupFixture.retain.mock.invocationCallOrder[0]).toBeLessThan(selectedAssistantMock.setSelectedAssistant.mock.invocationCallOrder[0])
+    expect(source.chatDraftAddress).not.toBe(address)
+    expect(reset).toHaveBeenCalledOnce()
+    expect(source.setHistoryId).toHaveBeenCalledWith(null, { preserveServerChatId: false })
+    expect(source.setSelectedModel).not.toHaveBeenCalled()
+    expect(onSubmitMock).not.toHaveBeenCalled()
+    expect(createChatCompletionMock).not.toHaveBeenCalled()
+  })
+
+  it.each(["missing", "retention failure", "identity declined", "navigation declined", "input while loading"])("preserves the actual composer and source on Library %s", async outcome => {
+    const { reset, source } = prepareNativeSource()
+    const address = source.chatDraftAddress
+    const user = userEvent.setup()
+    let apply!: ApplyCharacterRoute
+    const register = (next: ApplyCharacterRoute | null) => { if (next) apply = next }
+    if (outcome === "missing") nativeSetupFixture.getCharacter.mockResolvedValueOnce(null)
+    if (outcome === "retention failure") nativeSetupFixture.retain.mockResolvedValueOnce(false)
+    if (outcome === "identity declined") selectedAssistantMock.setSelectedAssistant.mockResolvedValueOnce(false)
+    const block = (event: Event) => event.preventDefault()
+    if (outcome === "navigation declined") window.addEventListener("tldw:settings-navigation-request", block)
+    let finish!: (value: unknown) => void
+    if (outcome === "input while loading") nativeSetupFixture.getCharacter.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    render(<PlaygroundForm droppedFiles={[]} onCharacterRouteApplyReady={register} />)
+    await user.type(screen.getByTestId("composer-textarea"), "Keep source draft  ")
+    await waitFor(() => expect(apply).toBeTypeOf("function"))
+    let result: unknown
+    if (outcome === "input while loading") {
+      let pending!: Promise<unknown>
+      act(() => { pending = apply("route-card", () => true) })
+      await waitFor(() => expect(nativeSetupFixture.getCharacter).toHaveBeenCalledOnce())
+      await user.type(screen.getByTestId("composer-textarea"), "newer")
+      await act(async () => { finish({ id: "route-card", name: "Route Card" }); result = await pending })
+    } else await act(async () => { result = await apply("route-card", () => true) })
+    window.removeEventListener("tldw:settings-navigation-request", block)
+    expect(result).toBe(outcome === "missing" ? "missing" : outcome === "input while loading" ? "retired" : "failed")
+    expect(source.chatDraftAddress).toBe(address)
+    expect(reset).not.toHaveBeenCalled()
+    expect(source.setHistoryId).not.toHaveBeenCalled()
+    expect(source.setMessages).not.toHaveBeenCalled()
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(outcome === "input while loading" ? "Keep source draft  newer" : "Keep source draft  ")
+    expect(onSubmitMock).not.toHaveBeenCalled()
   })
 
   it.each(["accepted", "topK", "formatting guide"])("preflights a fresh character before leaving a local source (%s)", async blocker => {

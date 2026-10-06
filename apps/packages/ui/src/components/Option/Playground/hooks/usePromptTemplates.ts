@@ -73,6 +73,7 @@ export type AssistantSetupApplyOptions = RolePlayApplyContext & {
   sceneSettings?: ActorSettings;
   hasExplicitContext?: boolean;
   applyIdentity?: boolean;
+  freshCharacterRoute?: boolean;
 };
 
 export type SaveRolePlaySetupInput = {

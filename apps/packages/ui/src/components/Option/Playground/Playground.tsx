@@ -3,9 +3,9 @@ import { HistorySelectionProvider, useHistorySelectionContext, parseHistorySelec
 import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition";
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview";
 import { formatSelectedHistory } from "@/db/dexie/helpers";
-import { resolveServicePromptScope, loadServicePromptSnapshot } from "@/services/service-prompts";
+import { loadServicePromptSnapshot } from "@/services/service-prompts";
 import React from "react";
-import { PlaygroundForm } from "./PlaygroundForm";
+import { PlaygroundForm, type ApplyCharacterRoute } from "./PlaygroundForm";
 import { PlaygroundChat } from "./PlaygroundChat";
 import type { ChatTimelineNavigation } from "./VirtualChatTimeline";
 import {
@@ -259,21 +259,7 @@ const updateCharacterChatRouteHash = (
   )}`;
 };
 
-const withTrackedCharacterSelectionMode = (character: Character): Character => {
-  const metadata = character.metadata;
-  const normalizedMetadata =
-    metadata && typeof metadata === "object" && !Array.isArray(metadata)
-      ? metadata
-      : {};
 
-  return {
-    ...character,
-    metadata: {
-      ...normalizedMetadata,
-      selectionMode: "tracked",
-    },
-  };
-};
 
 type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
 
@@ -438,6 +424,10 @@ const PlaygroundContent = () => {
     React.useState<MissingCharacterRecovery | null>(null);
   const [routeCharacterRetryToken, setRouteCharacterRetryToken] =
     React.useState(0);
+  const [applyCharacterRoute, setApplyCharacterRoute] = React.useState<ApplyCharacterRoute | null>(null);
+  const onCharacterRouteApplyReady = React.useCallback((apply: ApplyCharacterRoute | null) => {
+    setApplyCharacterRoute(() => apply);
+  }, []);
   const [characterChatAvailableModels, setCharacterChatAvailableModels] =
     React.useState<ChatModelCatalog | null>(null);
   const [chatProviderStatus, setChatProviderStatus] =
@@ -746,6 +736,9 @@ const PlaygroundContent = () => {
   const [retiredRouteLocation, setRetiredRouteLocation] = React.useState<string | null>(null);
   const retiredRouteLocationRef = React.useRef<string | null>(null);
   const routeLocationKey = [location.pathname, location.search, location.hash, location.key].join("|");
+  const routeLocationKeyRef = React.useRef(routeLocationKey);
+  routeLocationKeyRef.current = routeLocationKey;
+  React.useEffect(() => () => { routeCharacterIntentRequestRef.current++; }, []);
   const rawRouteCharacterIntent = React.useMemo(
     () =>
       getCharacterChatRouteIntentFromLocation(
@@ -1009,7 +1002,7 @@ const PlaygroundContent = () => {
       const replaceSearch = (search: string) => {
         const next = updateCharacterChatRouteSearch(
           search,
-          detail.characterId ?? null,
+          detail.nextChatId ? detail.characterId ?? null : null,
           detail.nextChatId ?? null,
         );
         if (detail.characterId != null) return next;
@@ -1067,102 +1060,56 @@ const PlaygroundContent = () => {
   }, [assistantSelectionMeta?.assistantKey]);
 
   React.useEffect(() => {
-    if (retiredRouteLocationRef.current === routeLocationKey) return;
-    if (assistantSelectionMeta?.isLoading || !routeCharacterIntentId) return;
-    if (routeCharacterIntentChatId) return;
-    if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId) {
-      return;
-    }
-    if (routeCharacterIntentInFlightRef.current === routeCharacterIntentId) {
-      return;
-    }
-
-    usePlaygroundSessionStore.getState().cancelPendingRestore();
-    setHistoryId(null, { preserveServerChatId: false });
-    setHistory([]);
-    setMessages([]);
-    setServerChatCharacterId(null);
-    setServerChatAssistantKind(null);
-    setServerChatAssistantId(null);
-    setServerChatPersonaMemoryMode(null);
-    setServerChatMetaLoaded(false);
-    setServerChatId(null);
-    void Promise.resolve(clearPersistedSession()).catch(() => undefined);
-
-    const requestId = routeCharacterIntentRequestRef.current + 1;
-    routeCharacterIntentRequestRef.current = requestId;
+    if (retiredRouteLocationRef.current === routeLocationKey || !applyCharacterRoute) return;
+    if (assistantSelectionMeta?.isLoading || !routeCharacterIntentId || routeCharacterIntentChatId) return;
+    if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId ||
+      routeCharacterIntentInFlightRef.current === routeCharacterIntentId || routeCharacterRecovery) return;
+    const requestId = ++routeCharacterIntentRequestRef.current;
     routeCharacterIntentInFlightRef.current = routeCharacterIntentId;
-    const fallbackCharacterName = toText(
-      translationRef.current(
-        "playground:characterChat.characterFallback",
-        "Character {{id}}",
-        {
-          id: routeCharacterIntentId,
-        },
-      ),
-    ).replace("{{id}}", routeCharacterIntentId);
-    const fallbackCharacter: Character = {
-      id: routeCharacterIntentId,
-      name: fallbackCharacterName,
+    const ownerIsCurrent = assistantSelectionMeta?.isCurrent ?? (() => true);
+    const sourceHref = window.location.href;
+    const isCurrent = () => ownerIsCurrent() && routeCharacterIntentRequestRef.current === requestId &&
+      window.location.href === sourceHref && routeLocationKeyRef.current === routeLocationKey && retiredRouteLocationRef.current !== routeLocationKey;
+    const consumeIntent = (retired = false) => {
+      const search = location.search || window.location.search;
+      const hash = location.hash || window.location.hash;
+      const hasSearchIntent = Boolean(getCharacterChatRouteIntent(search));
+      const consumeSearch = (query: string) => {
+        const next = updateCharacterChatRouteSearch(query, null);
+        if (!retired) return next;
+        const params = new URLSearchParams(next);
+        params.delete("mode");
+        return params.size ? "?" + params.toString() : "";
+      };
+      const hashQuery = hash.indexOf("?");
+      navigate({ pathname: location.pathname,
+        search: hasSearchIntent ? consumeSearch(search) : search,
+        hash: hasSearchIntent ? hash : hash.slice(0, hashQuery < 0 ? hash.length : hashQuery) + consumeSearch(extractHashSearch(hash)),
+      }, { replace: true });
     };
-    const isCurrentSelection = assistantSelectionMeta?.isCurrent ?? (() => true);
-    const loadCharacter = async () => {
-      const scope = await resolveServicePromptScope();
-      if (!isCurrentSelection()) return null;
-      return tldwClient.getCharacter(routeCharacterIntentId, { requestScope: { config: scope.config, userId: scope.userId } });
-    };
-    void loadCharacter()
-      .then(async (character) => {
-        if (!isCurrentSelection() || routeCharacterIntentRequestRef.current !== requestId) return;
+    void applyCharacterRoute(routeCharacterIntentId, isCurrent).then(outcome => {
+      if (!isCurrent()) return;
+      if (outcome === "applied" || outcome === "retired") {
         routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
-        if (character) {
-          setRouteCharacterRecovery(null);
-          await setSelectedCharacter(withTrackedCharacterSelectionMode(character));
-          return;
+        if (outcome === "retired") {
+          retiredRouteLocationRef.current = routeLocationKey;
+          setRetiredRouteLocation(routeLocationKey);
+          setCharacterModeIntentActive(false);
+          void setChatWorkflowMode(activeCharacterSelection ? "character" : "standard");
         }
-        setRouteCharacterRecovery({
-          id: routeCharacterIntentId,
-          reason: "missing",
-        });
-        await setSelectedCharacter(
-          withTrackedCharacterSelectionMode(fallbackCharacter),
-        );
-      })
-      .catch(async () => {
-        if (!isCurrentSelection() || routeCharacterIntentRequestRef.current !== requestId) return;
-        routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
-        setRouteCharacterRecovery({
-          id: routeCharacterIntentId,
-          reason: "load-error",
-        });
-        await setSelectedCharacter(
-          withTrackedCharacterSelectionMode(fallbackCharacter),
-        );
-      })
-      .finally(() => {
-        if (!isCurrentSelection() || routeCharacterIntentRequestRef.current !== requestId) return;
-        routeCharacterIntentInFlightRef.current = null;
-      });
-  }, [
-    assistantSelectionMeta?.isLoading,
-    assistantSelectionMeta?.isCurrent,
-    clearPersistedSession,
-    routeLocationKey,
-    routeCharacterIntentChatId,
-    routeCharacterIntentId,
-    routeCharacterIntentSignature,
-    routeCharacterRetryToken,
-    setHistory,
-    setHistoryId,
-    setMessages,
-    setSelectedCharacter,
-    setServerChatAssistantId,
-    setServerChatAssistantKind,
-    setServerChatCharacterId,
-    setServerChatId,
-    setServerChatMetaLoaded,
-    setServerChatPersonaMemoryMode,
-  ]);
+        setRouteCharacterRecovery(null);
+        // A fresh URL is a command; consume it so reload restores the accepted draft.
+        consumeIntent(outcome === "retired");
+      } else setRouteCharacterRecovery({ id: routeCharacterIntentId,
+        reason: outcome === "failed" ? "setup-failed" : outcome });
+    }).catch(() => {
+      if (isCurrent()) setRouteCharacterRecovery({ id: routeCharacterIntentId, reason: "load-error" });
+    }).finally(() => {
+      if (routeCharacterIntentRequestRef.current === requestId) routeCharacterIntentInFlightRef.current = null;
+    });
+  }, [activeCharacterSelection, applyCharacterRoute, assistantSelectionMeta?.isCurrent, assistantSelectionMeta?.isLoading, location.hash,
+    location.pathname, location.search, navigate, routeCharacterIntentChatId, routeCharacterIntentId,
+    routeCharacterIntentSignature, routeCharacterRecovery, routeCharacterRetryToken, routeLocationKey, setChatWorkflowMode]);
 
   React.useEffect(() => {
     if (!routeCharacterIntentId) {
@@ -1172,15 +1119,6 @@ const PlaygroundContent = () => {
     }
   }, [routeCharacterIntentId]);
 
-  React.useEffect(() => {
-    if (!routeCharacterRecovery || !activeCharacterSelection?.id) return;
-    if (routeCharacterIntentInFlightRef.current === routeCharacterRecovery.id) {
-      return;
-    }
-    if (String(activeCharacterSelection.id) !== routeCharacterRecovery.id) {
-      setRouteCharacterRecovery(null);
-    }
-  }, [activeCharacterSelection?.id, routeCharacterRecovery]);
 
   React.useEffect(() => {
     if (retiredRouteLocationRef.current === routeLocationKey) return;
@@ -1196,6 +1134,8 @@ const PlaygroundContent = () => {
       String(serverChatCharacterId ?? "") === nextCharacterId
         ? String(serverChatId)
         : null;
+    // A consumed unsaved entry stays consumed; only a qualified saved target can add an ID again.
+    if (!routeCharacterIntentId && !routeCharacterIntentChatId && !savedRouteChatId) return;
     const routeCharacterApplied =
       routeCharacterIntentId != null &&
       routeCharacterIntentAppliedRef.current === routeCharacterIntentId;
@@ -1785,6 +1725,8 @@ const PlaygroundContent = () => {
 
   const initializePlayground = React.useCallback(async (signal: AbortSignal) => {
     if (signal.aborted) return;
+    // Explicit character entry prepares a fresh target; old automatic bookmarks have no authority here.
+    if (routeCharacterIntentId && !routeCharacterIntentChatId) return;
     let handoff;
     let handoffInHash = false;
     let storedHistoryReference;
@@ -3702,7 +3644,10 @@ const PlaygroundContent = () => {
   );
   const characterChatSendBlocker = React.useMemo<PlaygroundSendBlocker | null>(
     () =>
-      characterWorkflowActive &&
+      routeCharacterIntentId && !routeCharacterIntentChatId && routeCharacterIntentAppliedRef.current !== routeCharacterIntentId
+        ? { active: true, title: t("playground:characterChatReadiness.routeSetupPending", "Finish character setup before sending."),
+          actionLabel: t("playground:characterChatReadiness.character.action", "Choose character"), onAction: openCharacterSelectorFromReadiness }
+        : characterWorkflowActive &&
       characterChatReadiness.status === "blocked" &&
       characterChatReadiness.missingRequirement === "chat-model" &&
       characterChatReadinessCopy
@@ -3722,6 +3667,7 @@ const PlaygroundContent = () => {
       characterChatReadinessCopy,
       characterWorkflowActive,
       handleCharacterChatReadinessAction,
+      openCharacterSelectorFromReadiness, routeCharacterIntentChatId, routeCharacterIntentId, t,
     ],
   );
   const openMcpSettingsFromCockpit = React.useCallback(() => {
@@ -4482,6 +4428,7 @@ const PlaygroundContent = () => {
                 </div>
               )}
               <PlaygroundForm
+                onCharacterRouteApplyReady={onCharacterRouteApplyReady}
                 droppedFiles={droppedFiles}
                 stickyDockEnabled={stickyChatInput}
                 mobileCockpitModeActive={mobileCockpitComposerConstrained}

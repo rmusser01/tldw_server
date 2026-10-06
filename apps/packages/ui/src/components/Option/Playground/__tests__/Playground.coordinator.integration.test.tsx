@@ -8,6 +8,8 @@ import { CharacterSelect } from "@/components/Common/CharacterSelect"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { Playground } from "../Playground"
+import type { ApplyCharacterRoute } from "../PlaygroundForm"
+import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import { useStoreMessageOption } from "@/store/option"
 import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
 import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader"
@@ -135,6 +137,7 @@ const messageOptionState = vi.hoisted(() => ({
     streaming: false,
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
+    setSelectedAssistant: vi.fn(async () => true),
     compareMode: false,
     compareFeatureEnabled: false
   }
@@ -169,7 +172,7 @@ const tldwClientState = vi.hoisted(() => ({
   listAllCharacters: vi.fn(async () => [{ id: 5, name: "Robot" }, { id: 7, name: "New choice" }]),
   listPersonaProfiles: vi.fn(async () => []),
   listChatMessages: vi.fn(),
-  getCharacter: vi.fn(async (id: string | number) => ({
+  getCharacter: vi.fn(async (id: string | number, _options?: unknown): Promise<{ id: string | number; name: string } | null> => ({
     id,
     name: "Route Character"
   })),
@@ -207,7 +210,41 @@ const stableTranslation = vi.hoisted(() => (key: string, fallback?: string | { d
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: stableTranslation }) }))
 
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
-  PlaygroundForm: ({ characterWorkflowActive, characterChatSendBlocker }: { characterWorkflowActive?: boolean; characterChatSendBlocker?: unknown }) => <div data-testid="playground-form" data-character-workflow={String(characterWorkflowActive)} data-character-blocked={String(Boolean(characterChatSendBlocker))}>{realLoader.selectionProbe ? <HistoryOwnerProbe /> : null}{realLoader.additionalLoader ? Array.from({ length: realLoader.webStorage ? 5 : 1 }, (_, index) => <AdditionalServerLoader key={index} />) : null}</div>
+  PlaygroundForm: ({ characterWorkflowActive, characterChatSendBlocker, onCharacterRouteApplyReady }: { characterWorkflowActive?: boolean; characterChatSendBlocker?: unknown; onCharacterRouteApplyReady?: (apply: ApplyCharacterRoute | null) => void }) => {
+    const history = useHistorySelectionContext()
+    const historyRef = React.useRef(history)
+    historyRef.current = history
+    React.useEffect(() => {
+      // This is a destination acceptance stub for the real root/H1/Core coordinator.
+      // Native Form preflight and exact composer retention are tested in the Form suite.
+      onCharacterRouteApplyReady?.(async (id, isCurrent) => {
+        const source = realLoader.enabled ? useStoreMessageOption.getState() : messageOptionState.value
+        const sourceFence = historyRef.current?.fence() ?? (() => true)
+        const snapshot = await loadServicePromptSnapshot([])
+        try {
+          const current = () => isCurrent() && sourceFence() && !snapshot.scopeInvalidatedSignal.aborted
+          if (!current()) return "retired"
+          const card = await tldwClientState.getCharacter(id, { requestScope: snapshot.requestScope })
+          if (!current()) return "retired"
+          if (!card) return "missing"
+          const selection: AssistantSelection = { kind: "character", id: String(card.id), name: card.name, metadata: { selectionMode: "tracked" } }
+          const accepted = realLoader.enabled ? await realLoader.setSelection?.(selection, { isCurrent: current }) : await messageOptionState.value.setSelectedAssistant(selection)
+          if (!current()) return "retired"
+          if (!accepted) return "failed"
+          if (realLoader.enabled) useStoreMessageOption.getState().startNewChatDraft(false)
+          historyRef.current?.reset()
+          usePlaygroundSessionStore.getState().clearSession()
+          source.setHistoryId(null, { preserveServerChatId: false })
+          source.setHistory([]); source.setMessages([])
+          source.setServerChatCharacterId(null); source.setServerChatAssistantKind(null); source.setServerChatAssistantId(null)
+          source.setServerChatPersonaMemoryMode(null); source.setServerChatMetaLoaded(false); source.setServerChatId(null)
+          return "applied"
+        } finally { snapshot.release() }
+      })
+      return () => onCharacterRouteApplyReady?.(null)
+    }, [onCharacterRouteApplyReady])
+    return <div data-testid="playground-form" data-character-workflow={String(characterWorkflowActive)} data-character-blocked={String(Boolean(characterChatSendBlocker))}>{realLoader.selectionProbe ? <HistoryOwnerProbe /> : null}{realLoader.additionalLoader ? Array.from({ length: realLoader.webStorage ? 5 : 1 }, (_, index) => <AdditionalServerLoader key={index} />) : null}</div>
+  }
 }))
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
@@ -587,6 +624,7 @@ describe("Playground coordinator integration", () => {
     messageOptionState.value.setServerChatPersonaMemoryMode.mockClear()
     messageOptionState.value.setServerChatMetaLoaded.mockClear()
     messageOptionState.value.setSelectedCharacter.mockClear()
+    messageOptionState.value.setSelectedAssistant.mockReset().mockResolvedValue(true)
     tldwClientState.getChat.mockReset()
     tldwClientState.listChatMessages.mockReset()
     tldwClientState.initialize.mockClear()
@@ -671,7 +709,7 @@ describe("Playground coordinator integration", () => {
   })
 
   it.each(["/chat?mode=character&characterId=4&keep=1", "/options.html#/chat?mode=character&characterId=4&keep=1"])("promotes accepted entry to saved route and restores its transcript on remount: %s", async url => {
-    realLoader.enabled = realLoader.webStorage = realLoader.session = realLoader.route = true
+    realLoader.enabled = realLoader.webStorage = realLoader.session = realLoader.route = realLoader.selectionProbe = true
     restoreDecisionState.value = null
     localStorage.clear()
     usePlaygroundSessionStore.getState().clearSession()
@@ -682,9 +720,15 @@ describe("Playground coordinator integration", () => {
     window.history.replaceState({}, "", url)
     const view = render(<Playground />)
     await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalledWith("4", expect.objectContaining({ requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "A" } })))
-    await waitFor(() => expect(screen.queryByTestId("playground-chat")).toBeInTheDocument())
-    // The inference transport is outside this fixture; deliver its acknowledged owned target.
-    await act(async () => { useStoreMessageOption.setState({ serverChatId: "saved-cedar", serverChatCharacterId: 4, serverChatAssistantKind: "character", serverChatAssistantId: "4", serverChatMetaLoaded: true }) })
+    await waitFor(() => expect(window.location.href).not.toContain("characterId="))
+    await waitFor(async () => expect(await getOwnedAssistant()).toMatchObject({ id: "4" }))
+    // The inference transport is outside this fixture; deliver an actual H1-qualified target.
+    await act(async () => {
+      const bindDraft = captureChatDraftLoad("bind")
+      const loaded = await observedSelection!.loadConversation({ serverChatId: "saved-cedar", isCurrent: bindDraft.isCurrent }, undefined, receipt => { bindDraft(receipt) })
+      expect(loaded).toBe(true)
+      useStoreMessageOption.setState({ serverChatId: "saved-cedar", serverChatCharacterId: 4, serverChatAssistantKind: "character", serverChatAssistantId: "4", serverChatMetaLoaded: true })
+    })
     await waitFor(() => expect(window.location.href).toContain("chatId=saved-cedar"), { timeout: 2500 })
     expect(window.location.href).toContain("keep=1")
     expect(usePlaygroundSessionStore.getState().serverChatId).toBe("saved-cedar")
@@ -704,6 +748,50 @@ describe("Playground coordinator integration", () => {
       expect(window.location.href).not.toContain("chatId=")
     }
     reloaded.unmount()
+  })
+
+  it.each(["accepted", "missing"])("preserves real saved H1/Core while fresh entry is held, then %s", async outcome => {
+    realLoader.enabled = realLoader.webStorage = realLoader.session = realLoader.route = realLoader.selectionProbe = true
+    localStorage.clear()
+    useMessageOptionMock.mockImplementation(useRealServerConversation)
+    await setOwnedAssistant({ kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } })
+    tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat", scope_type: "global", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat" })
+    tldwClientState.listChatMessages.mockResolvedValue([{ id: "answer", role: "assistant", content: "Keep saved source", version: 1 }])
+    tldwClientState.getCharacter.mockImplementation(async id => ({ id, name: String(id) === "5" ? "Robot" : "New card" }))
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=5&chatId=robot")
+    const view = render(<Playground />)
+    let release!: (card: { id: number; name: string } | null) => void
+    const pending = new Promise<{ id: number; name: string } | null>(resolve => { release = resolve })
+    try {
+      await waitFor(() => expect(observedSelection?.getCurrent().status).toBe("ready"))
+      const before = useStoreMessageOption.getState()
+      const savedFence = observedSelection!.fence()
+      // A malformed automatic bookmark must not gain authority over this explicit fresh command.
+      sessionStorage.setItem("tldw-h1-playground-reference", "{malformed")
+      tldwClientState.getCharacter.mockImplementationOnce(() => pending)
+      act(() => navigateRoute("/chat?mode=character&characterId=7&keep=1"))
+      await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalledWith("7", expect.objectContaining({ requestScope: { userId: "A", config: { serverUrl: "http://chat.test", authMode: "multi-user" } } })))
+      expect(observedSelection?.getCurrent().owner).toMatchObject({ kind: "native", conversation_id: "robot" })
+      expect(savedFence()).toBe(true)
+      expect(useStoreMessageOption.getState().chatDraftAddress).toBe(before.chatDraftAddress)
+      expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual(["Keep saved source"])
+      await act(async () => { release(outcome === "accepted" ? { id: 7, name: "New card" } : null); await pending })
+      if (outcome === "accepted") {
+        await waitFor(() => expect(useStoreMessageOption.getState().serverChatId).toBeNull())
+        expect(savedFence()).toBe(false)
+        expect(observedSelection?.getCurrent().owner).toBeNull()
+        expect(useStoreMessageOption.getState().chatDraftAddress).not.toBe(before.chatDraftAddress)
+        expect(await getOwnedAssistant()).toMatchObject({ id: "7", name: "New card" })
+        expect(window.location.href).not.toContain("characterId=")
+      } else {
+        await screen.findByText(/Character .*could not be loaded/)
+        expect(savedFence()).toBe(true)
+        expect(useStoreMessageOption.getState().serverChatId).toBe("robot")
+        expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual(["Keep saved source"])
+        expect(await getOwnedAssistant()).toMatchObject({ id: "5", name: "Robot" })
+      }
+      expect(tldwClientState.getChat.mock.calls.every(([id]) => id === "robot")).toBe(true)
+    } finally { release(null); view.unmount(); localStorage.clear() }
   })
 
   it("retires a saved Character route before its accepted retry branch can be reasserted", async () => {
@@ -945,7 +1033,7 @@ describe("Playground coordinator integration", () => {
     })
     expect(restoreSession).not.toHaveBeenCalled()
     expect(usePlaygroundSessionStore.getState().restoreRevision).toBeGreaterThan(0)
-    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+    expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "route-character",
         name: "Route Character"
@@ -1045,7 +1133,7 @@ describe("Playground coordinator integration", () => {
     expect(messageOptionState.value.setHistory).toHaveBeenCalledWith([])
     expect(messageOptionState.value.setMessages).toHaveBeenCalledWith([])
     expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null)
-    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+    expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "route-character",
         name: "Route Character"
@@ -1473,7 +1561,7 @@ describe("Playground coordinator integration", () => {
       expect(useStoreMessageOption.getState().serverChatId).toBeNull()
       expect(useStoreMessageOption.getState().messages).toEqual([])
       expect(window.location.search + window.location.hash).not.toContain("chatId=robot")
-      expect(window.location.search + window.location.hash).toContain(routeKind === "roundtrip" ? "characterId=5" : "characterId=7")
+      expect(window.location.search + window.location.hash).not.toContain("characterId=")
       expect(window.location.search).toContain("keep=1")
       expect(await getOwnedAssistant()).toMatchObject({ id: routeKind === "roundtrip" ? "5" : "7", name: routeKind === "roundtrip" ? "Robot" : choice })
       // A later deliberate revisit must still restore the untouched old saved chat.

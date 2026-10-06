@@ -102,6 +102,8 @@ export const nativeCharacterPreflightMessage = (
       'Start a new saved character chat before choosing an opening. Your current chat and draft are still here.',
     native_history_greeting_not_stored:
       'The server did not save an opening. Your message has not been sent. Review the saved chat in retained drafts before starting again.',
+    native_history_response_pending:
+      'Wait for the current response to finish before starting a character chat. Your chat and draft are still here.',
     native_history_draft_not_retained:
       'Your draft could not be retained. Keep or copy your message before starting the character opening.',
     stale_selection:

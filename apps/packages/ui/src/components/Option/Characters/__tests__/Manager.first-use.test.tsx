@@ -3337,7 +3337,7 @@ describe("CharactersManager first-use onboarding", () => {
 
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === "selectedModel") {
-        return ["mock-chat-model", vi.fn(), { isLoading: false }]
+        return ["openai:mock-chat-model", vi.fn(), { isLoading: false }]
       }
       return [defaultValue ?? null, vi.fn(), { isLoading: false }]
     })
@@ -3349,7 +3349,7 @@ describe("CharactersManager first-use onboarding", () => {
       }
       if (key === "getModelsForFieldGeneration") {
         return makeUseQueryResult({
-          data: [{ model: "mock-chat-model", provider: "openai" }]
+          data: [{ model: "mock-chat-model", provider: "openai", is_configured: true }]
         })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3444,22 +3444,14 @@ describe("CharactersManager first-use onboarding", () => {
     })
     await user.click(chatButton)
 
-    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "char-1",
-        name: "Writer Coach",
-        system_prompt: expect.any(String),
-        greeting: expect.any(String),
-        metadata: { selectionMode: "tracked" }
-      })
-    )
-    expect(storeSetters.setHistory).toHaveBeenCalledWith([])
-    expect(storeSetters.setMessages).toHaveBeenCalledWith([])
-    expect(storeSetters.setServerChatId).toHaveBeenCalledWith(null)
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
+    expect(storeSetters.setHistory).not.toHaveBeenCalled()
+    expect(storeSetters.setMessages).not.toHaveBeenCalled()
+    expect(storeSetters.setServerChatId).not.toHaveBeenCalled()
     expect(navigateMock).toHaveBeenCalledWith(
       "/chat?mode=character&characterId=char-1"
     )
-    expect(focusComposerMock).toHaveBeenCalled()
+    expect(focusComposerMock).not.toHaveBeenCalled()
   }, 30000)
 
   it("submits edit flow through the shared form component", async () => {
@@ -4120,12 +4112,7 @@ describe("CharactersManager first-use onboarding", () => {
       await screen.findByRole("button", { name: "Chat as Intent Character" })
     )
 
-    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "intent-no-model",
-        name: "Intent Character"
-      })
-    )
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
     expect(
       await screen.findByText(
         "Choose a chat model before chatting as Intent Character"
@@ -4157,7 +4144,7 @@ describe("CharactersManager first-use onboarding", () => {
         )
       ).not.toBeInTheDocument()
     })
-    expect(setSelectedCharacterMock).toHaveBeenLastCalledWith(null)
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
   }, 30000)
 
   it("does not treat the first catalog model as an implicit row chat selection", async () => {
@@ -4203,12 +4190,7 @@ describe("CharactersManager first-use onboarding", () => {
       await screen.findByRole("button", { name: "Chat as Implicit Catalog Character" })
     )
 
-    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "intent-implicit-catalog-model",
-        name: "Implicit Catalog Character"
-      })
-    )
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
     expect(
       await screen.findByText(
         "Choose a chat model before chatting as Implicit Catalog Character"
@@ -4264,12 +4246,7 @@ describe("CharactersManager first-use onboarding", () => {
       await screen.findByRole("button", { name: "Chat as Stale Model Character" })
     )
 
-    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "intent-stale-model",
-        name: "Stale Model Character"
-      })
-    )
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
     expect(
       await screen.findByText(
         "Configure a chat model before chatting as Stale Model Character"
@@ -4630,6 +4607,30 @@ describe("CharactersManager first-use onboarding", () => {
     expect(tldwClientMock.deleteChat).not.toHaveBeenCalled()
   }, 30000)
 
+  it("passes ready row Chat as route intent without clearing the source", async () => {
+    const user = userEvent.setup()
+    const record = { id: "ready-card", name: "Ready Card", version: 1 }
+    useStorageMock.mockImplementation((key: unknown, fallback: unknown) => [
+      resolveStorageKey(key) === "selectedModel" ? "openai:gpt-4.1" : fallback,
+      vi.fn(), { isLoading: false }
+    ])
+    useQueryMock.mockImplementation((opts: { queryKey?: readonly unknown[] }) => {
+      const key = opts?.queryKey?.[0]
+      if (key === "tldw:listCharacters") return makeUseQueryResult({ data: [record] })
+      if (key === "getModelsForFieldGeneration") return makeUseQueryResult({ data: [{ model: "gpt-4.1", provider: "openai", is_configured: true }] })
+      return makeUseQueryResult({ data: [] })
+    })
+    render(<CharactersManager />)
+    await user.click(await screen.findByRole("button", { name: "Chat as Ready Card" }))
+    expect(navigateMock).toHaveBeenCalledWith("/chat?mode=character&characterId=ready-card")
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
+    for (const action of [storeSetters.setHistory, storeSetters.setMessages, storeSetters.setHistoryId, storeSetters.setServerChatId]) {
+      expect(action).not.toHaveBeenCalled()
+    }
+    expect(focusComposerMock).not.toHaveBeenCalled()
+    expect(tldwClientMock.createChat).not.toHaveBeenCalled()
+  }, 30000)
+
   it("opens chat in a new tab from row actions without replacing current-tab navigation", async () => {
     const user = userEvent.setup()
     const characterRecord = {
@@ -4667,12 +4668,7 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Chat in new tab" }))
 
     await waitFor(() => {
-      expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "char-new-tab",
-          name: "New Tab Character"
-        })
-      )
+      expect(setSelectedCharacterMock).not.toHaveBeenCalled()
       expect(openSpy).toHaveBeenCalledWith(
         expect.stringContaining("/chat?mode=character&characterId=char-new-tab"),
         "_blank",
@@ -4721,12 +4717,7 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Chat in new tab" }))
 
     await waitFor(() => {
-      expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "char-new-tab-gallery",
-          name: "Gallery New Tab Character"
-        })
-      )
+      expect(setSelectedCharacterMock).not.toHaveBeenCalled()
       expect(openSpy).toHaveBeenCalledWith(
         expect.stringContaining(
           "/chat?mode=character&characterId=char-new-tab-gallery"
@@ -4781,6 +4772,11 @@ describe("CharactersManager first-use onboarding", () => {
         })
       )
     })
+
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
+    expect(navigateMock).not.toHaveBeenCalled()
+    expect(storeSetters.setHistory).not.toHaveBeenCalled()
+    expect(storeSetters.setServerChatId).not.toHaveBeenCalled()
 
     openSpy.mockRestore()
   }, 30000)

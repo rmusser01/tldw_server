@@ -301,8 +301,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     React.useState<CharacterChatIntentBlocker | null>(null)
   const clearChatIntentBlocker = React.useCallback(async () => {
     setChatIntentBlocker(null)
-    await setSelectedCharacter(null)
-  }, [setSelectedCharacter])
+  }, [])
 
   const versionHistory = useCharacterVersionHistory({ t, notification, qc, confirmDanger })
   const {

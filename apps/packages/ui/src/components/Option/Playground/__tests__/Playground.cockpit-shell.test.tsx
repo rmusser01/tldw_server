@@ -178,22 +178,30 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+// The root fixture stubs the Form acceptance boundary; actual preflight/retention
+// behavior is exercised in PlaygroundForm.role-play-starter.integration.test.tsx.
+const routeApplyOutcome = vi.hoisted(() => ({ value: null as string | null }))
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
-  PlaygroundForm: ({
-    onDraftPresenceChange,
-  }: {
-    onDraftPresenceChange?: (hasDraft: boolean) => void;
-  }) => (
-    <div data-testid="playground-form">
-      <textarea
-        aria-label="Composer draft"
-        data-testid="composer-textarea"
-        onChange={(event) =>
-          onDraftPresenceChange?.(event.currentTarget.value.trim().length > 0)
-        }
-      />
-    </div>
-  ),
+  PlaygroundForm: ({ onDraftPresenceChange, onCharacterRouteApplyReady }: React.ComponentProps<typeof import("../PlaygroundForm").PlaygroundForm>) => {
+    React.useEffect(() => {
+      onCharacterRouteApplyReady?.(async (id: string, isCurrent: () => boolean) => {
+        const character = await tldwClientState.getCharacter(id, { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } })
+        if (!isCurrent()) return "retired"
+        if (routeApplyOutcome.value) return routeApplyOutcome.value
+        if (!character) return "missing"
+        await messageOptionState.value.setSelectedCharacter(character)
+        if (!isCurrent()) return "retired"
+        messageOptionState.value.setHistoryId(null, { preserveServerChatId: false })
+        messageOptionState.value.setHistory([])
+        messageOptionState.value.setMessages([])
+        messageOptionState.value.setServerChatId(null)
+        return "applied"
+      })
+      return () => onCharacterRouteApplyReady?.(null)
+    }, [onCharacterRouteApplyReady])
+    return <div data-testid="playground-form"><textarea aria-label="Composer draft" data-testid="composer-textarea"
+      onChange={event => onDraftPresenceChange?.(event.currentTarget.value.trim().length > 0)} /></div>
+  },
 }));
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
@@ -405,6 +413,7 @@ vi.mock("react-router-dom", async () => {
 
 describe("Playground cockpit shell", () => {
   beforeEach(() => {
+    routeApplyOutcome.value = null
     vi.clearAllMocks();
     recentChatState.enabled = false;
     recentChatState.recent.mockReset().mockResolvedValue(null);
@@ -737,6 +746,53 @@ describe("Playground cockpit shell", () => {
       screen.queryByRole("status", { name: "Chat status" }),
     ).not.toBeInTheDocument();
   });
+
+  it("removes character mode when a retired proposal leaves an ordinary source", async () => {
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=char-route&keep=1")
+    routeApplyOutcome.value = "retired"
+    render(<Playground />)
+    await waitFor(() => expect(routerNavigateState.navigate).toHaveBeenCalledWith(expect.objectContaining({ search: "?keep=1" }), { replace: true }))
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setMessages).not.toHaveBeenCalled()
+  })
+
+  it("keeps an accepted fresh command consumed after the router commits", async () => {
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=char-route")
+    messageOptionState.value.setSelectedCharacter.mockImplementation((next: { id: string | number; name: string }) => {
+      messageOptionState.value.selectedCharacter = next
+      messageOptionState.value.selectedAssistant = { kind: "character", id: String(next.id), name: next.name, metadata: { selectionMode: "tracked" } }
+    })
+    const { rerender } = render(<Playground />)
+    await waitFor(() => expect(routerNavigateState.navigate).toHaveBeenCalledWith(expect.objectContaining({ search: "?mode=character" }), { replace: true }))
+    routerNavigateState.navigate.mockClear()
+    window.history.replaceState({}, "", "/chat?mode=character")
+    routerLocationState.value = { pathname: "/chat", search: "?mode=character", hash: "", key: "consumed-entry" }
+    rerender(<Playground />)
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(routerNavigateState.navigate).not.toHaveBeenCalled()
+    expect(tldwClientState.getCharacter).toHaveBeenCalledOnce()
+  })
+
+  it.each(["held", "missing"])("preserves the source before a %s fresh route card resolves", async outcome => {
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=char-route")
+    messageOptionState.value.serverChatId = "source-chat"
+    messageOptionState.value.historyId = "source-history"
+    messageOptionState.value.messages = [{ message: "Source transcript", isBot: true }]
+    let finish!: (value: unknown) => void
+    const pending = new Promise(resolve => { finish = resolve })
+    tldwClientState.getCharacter.mockReturnValueOnce(outcome === "held" ? pending : Promise.resolve(null))
+    render(<Playground />)
+    await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalledOnce())
+    await act(async () => { await Promise.resolve() })
+    expect(messageOptionState.value.setHistoryId).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setHistory).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setMessages).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
+    if (outcome === "held") await act(async () => finish(null))
+    await screen.findByText("Character char-route could not be loaded")
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
+  })
 
 	  it("honors first-class character route intent in the chat shell", async () => {
     window.history.replaceState(
@@ -1091,48 +1147,21 @@ describe("Playground cockpit shell", () => {
     });
   });
 
-  it("adds the selected character id to a mode-only character route", async () => {
+  it("keeps a consumed mode-only route without recreating an unsaved entry command", async () => {
     window.history.replaceState({}, "", "/chat?mode=character");
-    messageOptionState.value.selectedCharacter = {
-      id: "manual-character",
-      name: "Manual Character",
-    };
-
+    messageOptionState.value.selectedCharacter = { id: "manual-character", name: "Manual Character" };
     render(<Playground />);
-
-    await waitFor(() => {
-      expect(routerNavigateState.navigate).toHaveBeenCalledWith(
-        {
-          pathname: "/chat",
-          search: "?mode=character&characterId=manual-character",
-          hash: "",
-        },
-        { replace: true },
-      );
-    });
+    await act(async () => { await Promise.resolve(); });
+    expect(routerNavigateState.navigate).not.toHaveBeenCalled();
+    expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
   });
 
-  it("uses a typed fallback when route character hydration returns no character", async () => {
-    window.history.replaceState(
-      {},
-      "",
-      "/chat?mode=character&characterId=missing-character",
-    );
+  it("offers recovery without inventing a character when route loading returns none", async () => {
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=missing-character");
     tldwClientState.getCharacter.mockResolvedValueOnce(null);
-
     render(<Playground />);
-
-    await waitFor(() => {
-      expect(
-        messageOptionState.value.setSelectedCharacter,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "missing-character",
-          name: "Character missing-character",
-          metadata: expect.objectContaining({ selectionMode: "tracked" }),
-        }),
-      );
-    });
+    await screen.findByText("Character missing-character could not be loaded");
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
   });
 
   it("shows recovery when a restored route character can no longer be loaded", async () => {
@@ -1323,7 +1352,7 @@ describe("Playground cockpit shell", () => {
       id: "char-1",
       name: "Ariadne",
     };
-    messageOptionState.value.selectedModel = "missing-model";
+    messageOptionState.value.selectedModel = "openai:missing-model";
     tldwServerState.fetchChatModels.mockResolvedValueOnce([
       {
         model: "openai:gpt-4.1-mini",
@@ -1395,7 +1424,7 @@ describe("Playground cockpit shell", () => {
     expect(
       within(
         await screen.findByTestId("character-chat-readiness-panel"),
-      ).getByText("Configure the selected model provider before chatting as Ariadne"),
+      ).getByText("Choose a model and provider before starting character chat"),
     ).toBeInTheDocument();
   });
 

@@ -470,6 +470,7 @@
     "workspacePlayground": "Multi-model compare"
   },
   "composer": {
+    "native_history_response_pending": "Wait for the current response to finish before starting a character chat. Your chat and draft are still here.",
     "chooseProvider": "Choose provider",
     "chooseModelAndProvider": "Choose model and provider",
     "toolsButton": "+Tools",
@@ -524,6 +525,7 @@
     "keepEditingSettings": "Keep editing",
     "connectionRequired": "Connect to your tldw server before sending. Your draft has not been queued.",
     "queueRestoredRequest": "This request was restored. Review the conversation for an existing response before running it.",
+    "queueChatChanged": "This chat or setup changed. Review the queued request before running it again.",
     "queueConnectionUnavailable": "Connection was interrupted. Review this request and run it after reconnecting.",
     "submitAriaEnter": "Send message (Enter)",
     "submitAriaModEnter": "Send message ({{modifier}})",
@@ -1490,6 +1492,11 @@
     "sessionReference": "Session {{id}}"
   },
   "characterChatReadiness": {
+    "routeSetupPending": "Finish character setup before sending.",
+    "routeSetupFailed": {
+      "title": "Character setup was not applied",
+      "description": "Your current chat and draft are still here. Review the setup error, then retry."
+    },
     "model": {
       "explicitSelectionTitle": "Choose a model and provider before starting character chat",
       "explicitSelectionDescription": "Your character and draft are kept. Open the model selector and choose a model from the provider you want to use.",
