@@ -4063,5 +4063,11 @@
   },
   "characterChatReadiness_routeSetupFailed_description": {
     "message": "Your current chat and draft are still here. Review the setup error, then retry."
+  },
+  "draftRecovery_copyAndReviewCreated": {
+    "message": "Copy draft and review saved chat"
+  },
+  "draftRecovery_savedChatDraft": {
+    "message": "Retained message for a saved chat"
   }
 }

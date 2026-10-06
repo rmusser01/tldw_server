@@ -1,7 +1,7 @@
 import type { GreetingSeed } from "@/utils/character-greetings"
 import { createChatWithRecovery, markChatCreationBound, readChatCreationRecovery, markChatCreationSettled } from "@/services/pending-chat-promotion"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
-import { chatDraftAddressKey, type ChatDraftHandle } from "@/utils/chat-draft-address"
+import { chatDraftAddressKey, isChatDraftHandle, type ChatDraftHandle } from "@/utils/chat-draft-address"
 import type { Dispatch, SetStateAction } from "react"
 import { captureChatDraftLoad } from "./chat-draft-transition"
 import { useStoreMessageOption } from "@/store/option"
@@ -44,6 +44,8 @@ import { extractStreamTransportInterruption } from "@/utils/extract-token-from-c
 
 export type NativeHistoryCharacterSendParams = {
   controller: HistorySelectionController
+  /** An independent popup owns its draft and never binds the full composer. */
+  privateDraft?: { handle: ChatDraftHandle; isCurrent: () => boolean }
   surface: "playground" | "sidepanel"
   originIsCurrent: () => boolean
   signal: AbortSignal
@@ -75,10 +77,16 @@ export const sendNativeHistoryCharacter = async (
 ): Promise<{ content: string; matchesPreview: boolean } | void> => {
   const { controller, signal } = params
   const greetingSeed = params.greetingSeed ? structuredClone(params.greetingSeed) : undefined
-  const sourceAddress = useStoreMessageOption.getState().chatDraftAddress
+  const privateHandle = params.privateDraft ? structuredClone(params.privateDraft.handle) : undefined
+  if (privateHandle && (!isChatDraftHandle(privateHandle) || privateHandle.address.kind !== "fresh" || privateHandle.address.temporary))
+    throw new Error("chat_creation_source_invalid")
+  const privateCurrent = () => params.privateDraft?.isCurrent() !== false
+  const sourceAddress = privateHandle ? privateHandle.address : useStoreMessageOption.getState().chatDraftAddress
   const sourceDraft = sourceAddress ? structuredClone(sourceAddress) : null
-  const creationScope = params.scope ? structuredClone(params.scope) : greetingSeed && sourceDraft?.kind === "fresh" ? structuredClone(sourceDraft.scope) : undefined
-  const acceptDraftBind = !params.historyId && !params.serverChatId && useStoreMessageOption.getState().chatDraftAddress?.kind === "fresh" ? captureChatDraftLoad("bind") : null
+  const creationScope = params.scope ? structuredClone(params.scope) : (privateHandle || greetingSeed) && sourceDraft?.kind === "fresh" ? structuredClone(sourceDraft.scope) : undefined
+  if (privateHandle && params.scope && chatDraftAddressKey({ ...privateHandle.address, scope: params.scope } as ChatDraftHandle["address"]) !== chatDraftAddressKey(privateHandle.address))
+    throw new Error("chat_creation_source_invalid")
+  const acceptDraftBind = !privateHandle && !params.historyId && !params.serverChatId && sourceDraft?.kind === "fresh" ? captureChatDraftLoad("bind") : null
   if (!greetingSeed && !params.message.trim()) throw new Error("native_history_input_required")
   if (greetingSeed && (params.message || !greetingSeed.rawText?.trim() ||
       params.historyId || params.serverChatId || sourceDraft?.kind !== "fresh" ||
@@ -90,7 +98,7 @@ export const sendNativeHistoryCharacter = async (
   const settingsState = useStoreChatModelSettings.getState()
   const toolsState = useMcpToolsStore.getState()
   const capturedSettings = { ...params.settings }
-  const actor = await getActorSettingsForChat({
+  const actor = privateHandle ? null : await getActorSettingsForChat({
     historyId: params.historyId ?? null,
     serverChatId: params.serverChatId ?? null
   })
@@ -112,8 +120,13 @@ export const sendNativeHistoryCharacter = async (
       initialOwner?.kind === "native" ? initialOwner.request_scope : undefined
   })
   const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
+  if (privateHandle && privateHandle.ownerHash !== chatDraftOwnerKey(snapshot.requestScope)) {
+    snapshot.release()
+    throw new Error("request_config_scope_changed")
+  }
   const leaseValid = () =>
-    acceptDraftBind?.isCurrent() !== false &&
+    acceptDraftBind?.isCurrent() !== false && privateCurrent() &&
+    (!privateHandle || params.originIsCurrent()) &&
     authValid() &&
     !signal.aborted &&
     useStoreChatModelSettings.getState() === settingsState &&
@@ -135,7 +148,7 @@ export const sendNativeHistoryCharacter = async (
         if (!params.characterId)
           throw new Error("native_history_character_required")
         if (!sourceDraft || sourceDraft.kind !== "fresh") throw new Error("chat_creation_source_invalid")
-        creationHandle = { address: sourceDraft, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
+        creationHandle = privateHandle ?? { address: sourceDraft, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
         const created = await createChatWithRecovery({
           snapshot, handle: creationHandle, scope: creationScope, surface: params.surface,
           inputText: params.message, setup: { characterId: params.characterId, provider, model,
@@ -195,14 +208,17 @@ export const sendNativeHistoryCharacter = async (
           } } : {}),
           // Preparation ends at the qualified bind; later settings or Stop
           // must not revoke the saved owner's independent account lease.
-          isCurrent: () => acceptDraftBind?.isCurrent() !== false &&
-            (loadPhase === "accepted" || (loadPhase === "preparing" && greetingCurrent() && leaseValid()))
+          isCurrent: () => acceptDraftBind?.isCurrent() !== false && privateCurrent() &&
+            (loadPhase === "accepted" || (loadPhase === "preparing" && greetingCurrent() && leaseValid() &&
+              (!privateHandle || params.originIsCurrent())))
         },
         null,
         (value) => {
           loadPhase = "rejected"
           const now = controller.getCurrent()
-          if (!greetingCurrent() || !leaseValid() || now.owner !== value.owner || now.view !== value.view ||
+          if (!greetingCurrent() || !leaseValid() || (privateHandle && (!params.originIsCurrent() ||
+              value.owner.kind !== "native" || chatDraftOwnerKey(value.owner.request_scope) !== privateHandle.ownerHash)) ||
+            now.owner !== value.owner || now.view !== value.view ||
             (chatId && (value.owner.kind !== "native" || value.owner.conversation_id !== chatId))) return
           // The binding receipt validates the owner through this same guard.
           loadPhase = "preparing"
@@ -224,7 +240,15 @@ export const sendNativeHistoryCharacter = async (
         current.view !== receipt.view ||
         !leaseValid()
       )
-        throw new Error(greetingSeed ? current.error || "stale_selection" : "stale_selection")
+        throw new Error(
+          !receipt && current.status !== "ready" && current.error &&
+          params.originIsCurrent() && greetingCurrent() && leaseValid() &&
+          current.owner?.kind === "native" && current.owner.validate_lease() &&
+          (!chatId || current.owner.conversation_id === chatId) &&
+          chatDraftOwnerKey(current.owner.request_scope) === chatDraftOwnerKey(snapshot.requestScope)
+            ? current.error
+            : "stale_selection"
+        )
       if (
         chatId &&
         (receipt.owner.kind !== "native" ||
@@ -268,6 +292,11 @@ export const sendNativeHistoryCharacter = async (
     }
     if (params.serverChatId && params.serverChatId !== owner.conversation_id)
       throw new Error("owner_conversation_mismatch")
+    if (privateHandle && !creationHandle) {
+      const attempt = await readChatCreationRecovery(privateHandle)
+      if (attempt?.state === "bound" && attempt.chatId === owner.conversation_id && attempt.inputText === params.message)
+        creationHandle = privateHandle
+    }
     const sameView = () => {
       const now = controller.getCurrent().view
       return (
@@ -481,6 +510,8 @@ export const reviewNativeChatCreation = async (params: {
   isCurrent: () => boolean
   onAccepted: (chat: Awaited<ReturnType<typeof tldwClient.getChat>>) => void
   retainInput?: () => Promise<boolean>
+  copyInput?: () => Promise<boolean>
+  inputText?: string
 }) => {
   const source = useStoreMessageOption.getState()
   const address = source.chatDraftAddress
@@ -492,7 +523,7 @@ export const reviewNativeChatCreation = async (params: {
     usePlaygroundSessionStore.getState().serverChatSelectionIntent === session.serverChatSelectionIntent &&
     usePlaygroundSessionStore.getState().restoreRevision === session.restoreRevision &&
     usePlaygroundSessionStore.getState().sourceSelectionRevision === session.sourceSelectionRevision
-  const bind = captureChatDraftLoad("bind")
+  let bind = captureChatDraftLoad("bind")
   if (params.retainInput && !(await params.retainInput())) return false
   if (!bind.isCurrent() || !params.isCurrent() || !sourceFence() || !navigationCurrent()) return false
   const snapshot = await loadServicePromptSnapshot([])
@@ -503,6 +534,11 @@ export const reviewNativeChatCreation = async (params: {
     if (!preparing() || chatDraftOwnerKey(snapshot.requestScope) !== params.handle.ownerHash || params.handle.address.kind !== "fresh") return false
     const attempt = await readChatCreationRecovery(params.handle)
     if (!attempt?.chatId || attempt.state === "unconfirmed" || !preparing()) return false
+    if (attempt.state === "settled" || (params.inputText !== undefined && params.inputText !== attempt.inputText)) {
+      // Different retained input is a separate draft, not this chat's original first-ID bind.
+      if (!params.copyInput || !(await params.copyInput()) || !preparing()) return false
+      bind = captureChatDraftLoad("switch")
+    }
     const scope = structuredClone(params.handle.address.scope)
     const chat = await tldwClient.getChat(attempt.chatId, { scope, requestScope: snapshot.requestScope, signal: snapshot.scopeSignal })
     if (!preparing() || chat.id !== attempt.chatId) return false

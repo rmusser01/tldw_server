@@ -36,7 +36,7 @@ export function ChatDraftRecovery({
     destination?: Extract<ChatDraftAddress, { kind: "fresh" }>
   ) => Promise<boolean>
   onRestore?: RestoreChatDraft
-  creationRecovery?: { active: ChatCreationRecovery | null; unavailable: boolean }
+  creationRecovery?: { active: ChatCreationRecovery | null; unavailable: boolean; copyInputRequired?: boolean }
   onReviewCreatedChat?: () => Promise<boolean>
   onCopyCreationText?: () => Promise<boolean>
   onFindConversations?: () => void
@@ -149,8 +149,8 @@ export function ChatDraftRecovery({
   return (
     <div className="w-full">
       {!disabled && creationRecovery?.active && <div role="status" className="mb-2 rounded border border-border p-3 text-sm">
-        <p className="font-medium">{["bound", "settled"].includes(creationRecovery.active.state) ? text("creationBound", "Chat already created") : creationRecovery.active.state === "prepared" ? text("creationPrepared", "Chat creation not started") : text("creationUnconfirmed", "Server save unconfirmed")}</p>
-        <p>{creationRecovery.active.state === "prepared" ? text("creationPreparedHelp", "No chat creation was dispatched. Review your setup and send when ready; your attempted text is retained.") : ["bound", "settled"].includes(creationRecovery.active.state) ? text("creationBoundHelp", "This chat was already created. Review it before sending retained text again; starting another chat may create a duplicate.") : text("creationHelp", "The server may have created this chat. Review conversations before starting again; another chat may create a duplicate. Your original attempted text is retained.")}</p>
+        <p className="font-medium">{["acknowledged", "bound", "settled"].includes(creationRecovery.active.state) ? text("creationBound", "Chat already created") : creationRecovery.active.state === "prepared" ? text("creationPrepared", "Chat creation not started") : text("creationUnconfirmed", "Server save unconfirmed")}</p>
+        <p>{creationRecovery.active.state === "prepared" ? text("creationPreparedHelp", "No chat creation was dispatched. Review your setup and send when ready; your attempted text is retained.") : ["acknowledged", "bound", "settled"].includes(creationRecovery.active.state) ? text("creationBoundHelp", "This chat was already created. Review it before sending retained text again; starting another chat may create a duplicate.") : text("creationHelp", "The server may have created this chat. Review conversations before starting again; another chat may create a duplicate. Your original attempted text is retained.")}</p>
         {creationRecovery.active.state !== "settled" && <details className="mt-2">
           <summary>{text("creationOriginalText", "Original attempted text")}</summary>
           <p className="max-h-40 overflow-auto whitespace-pre-wrap break-words">{creationRecovery.active.inputText || text("creationEmptyText", "No user message was submitted with this creation.")}</p>
@@ -164,7 +164,7 @@ export function ChatDraftRecovery({
         </details>}
         <div className="mt-2 flex flex-wrap gap-2">
           {onFindConversations && <Button size="sm" onClick={onFindConversations}>{text("findConversations", "Find conversations")}</Button>}
-          {creationRecovery.active.chatId && onReviewCreatedChat && <Button size="sm" disabled={busy} onClick={() => void review()}>{text("reviewCreated", "Review created chat")}</Button>}
+          {creationRecovery.active.chatId && onReviewCreatedChat && <Button size="sm" disabled={busy} onClick={() => void review()}>{(creationRecovery.copyInputRequired || creationRecovery.active.state === "settled") ? text("copyAndReviewCreated", "Copy draft and review saved chat") : text("reviewCreated", "Review created chat")}</Button>}
         </div>
         {error && <p role="alert" className="mt-2 text-danger">{error}</p>}
       </div>}
@@ -225,11 +225,13 @@ export function ChatDraftRecovery({
                   onClick={() => void recover(draft)}
                   className="w-full rounded border border-border p-3 text-left text-text hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50">
                   <span className="block text-sm font-medium">
-                    {draft.handle.address.temporary
+                    {draft.creationAttempt?.state === "settled"
+                      ? text("savedChatDraft", "Retained message for a saved chat")
+                      : draft.handle.address.temporary
                       ? text("temporary", "Temporary draft")
                       : text("saved", "New chat draft")}
                   </span>
-                  {draft.creationAttempt && <span className="block text-sm text-text-muted">{draft.creationAttempt.state === "bound" ? text("creationBound", "Chat already created") : draft.creationAttempt.state === "prepared" ? text("creationPrepared", "Chat creation not started") : text("creationUnconfirmed", "Server save unconfirmed")}. {text("creationDraftHelp", "Open this draft to review its creation before sending. Starting another chat may create a duplicate.")}</span>}
+                  {draft.creationAttempt && <span className="block text-sm text-text-muted">{["acknowledged", "bound", "settled"].includes(draft.creationAttempt.state) ? text("creationBound", "Chat already created") : draft.creationAttempt.state === "prepared" ? text("creationPrepared", "Chat creation not started") : text("creationUnconfirmed", "Server save unconfirmed")}. {text("creationDraftHelp", "Open this draft to review its creation before sending. Starting another chat may create a duplicate.")}</span>}
                   <span className="block break-words text-sm">
                     {draft.content.slice(0, 160)}
                     {draft.content.length > 160 ? "…" : ""}

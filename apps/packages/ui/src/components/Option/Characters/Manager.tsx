@@ -7,6 +7,7 @@ import {
 } from "antd"
 import type { InputRef, FormInstance } from "antd"
 import React from "react"
+import { getCanonicalModelKey, getModelId, getModelProvider } from "@/hooks/playground/modelSelectorUtils"
 import { fetchChatModels } from "@/services/tldw-server"
 import {
   useCharacterFiltering,
@@ -258,12 +259,9 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
       (generationModels || [])
         .filter((model) => typeof model.model === "string" && model.model.trim())
         .map((model) => {
-          const modelName = model.model.trim()
           return {
-            value: modelName,
-            label: model.provider
-              ? `${modelName} (${model.provider})`
-              : modelName
+            value: getCanonicalModelKey(model),
+            label: `${getModelId(model)} (${getModelProvider(model)})`
           }
         }),
     [generationModels]
@@ -275,7 +273,6 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
   const activeQuickChatModel =
     quickChatModelOverride ||
     selectedChatModel ||
-    quickChatModelOptions[0]?.value ||
     null
 
   const quickChat = useCharacterQuickChat({
@@ -285,12 +282,15 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     availableModels: generationModels ?? []
   })
   const {
-    quickChatCharacter, setQuickChatCharacter,
-    quickChatMessages, setQuickChatMessages,
+    quickChatCharacter,
+    quickChatMessages,
     quickChatDraft, setQuickChatDraft,
-    quickChatSessionId, setQuickChatSessionId,
+    quickChatSessionId,
     quickChatSending,
-    quickChatError, setQuickChatError,
+    quickChatNeedsReview,
+    quickChatReadiness, quickChatOwnerReady, quickChatCardReady, quickChatCanRetry, quickChatLoading, quickChatCopied,
+    retryQuickChat, copyQuickChatDraft,
+    quickChatError,
     openQuickChat,
     closeQuickChat,
     sendQuickChatMessage,
@@ -1303,6 +1303,16 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
         quickChatDraft={quickChatDraft}
         setQuickChatDraft={setQuickChatDraft}
         quickChatSending={quickChatSending}
+        quickChatSessionId={quickChatSessionId}
+        quickChatNeedsReview={quickChatNeedsReview}
+        quickChatReadiness={quickChatReadiness}
+        quickChatOwnerReady={quickChatOwnerReady}
+        quickChatCardReady={quickChatCardReady}
+        quickChatCanRetry={quickChatCanRetry}
+        quickChatLoading={quickChatLoading}
+        quickChatCopied={quickChatCopied}
+        retryQuickChat={retryQuickChat}
+        copyQuickChatDraft={copyQuickChatDraft}
         sendQuickChatMessage={sendQuickChatMessage}
         handlePromoteQuickChat={handlePromoteQuickChat}
         // full-chat intent blocker

@@ -13,7 +13,7 @@ import { CharactersManager, withCharacterNameInLabel } from "../Manager"
 import { DEFAULT_CHARACTER_STORAGE_KEY } from "@/utils/default-character-preference"
 import { ensureLocalStorageApi } from "./testUtils"
 
-const OWNED_DEFAULT_KEY = `${DEFAULT_CHARACTER_STORAGE_KEY}:owner:account-a`
+const OWNED_DEFAULT_KEY = `${DEFAULT_CHARACTER_STORAGE_KEY}:owner:${"a".repeat(64)}`
 const TEMPLATE_CHOOSER_SEEN_KEY = "characters-template-chooser-seen"
 
 const {
@@ -183,8 +183,24 @@ const {
   ]
 }))
 
-vi.mock("@/hooks/useChatDraftOwner", () => ({
-  useChatDraftOwner: () => ({ ownerKey: "account-a", isCurrent: () => true })
+const quickPopupFixture = vi.hoisted(() => ({ send: vi.fn(), id: "quick-chat-session-default", reply: "Quick chat response", sessionId: null as string | null, characterId: null as string | number | null }))
+const quickOwnerCurrent = () => true
+const quickOwnerScope = { config: { serverUrl: "http://chat.test", authMode: "multi-user" as const }, userId: "account-a" }
+vi.mock("@/hooks/useChatDraftOwner", async original => ({
+  ...await original<typeof import("@/hooks/useChatDraftOwner")>(),
+  useChatDraftOwner: () => ({ ownerKey: "a".repeat(64), serverScopeKey: "account-a", requestScope: quickOwnerScope, isCurrent: quickOwnerCurrent, verificationState: "ready", retryVerification: vi.fn() })
+}))
+// Renderer-level IO adapters; actual native admission, settlement and durability have separate integration regressions.
+vi.mock("@/hooks/chat/native-history-character-send", async original => ({
+  ...await original<typeof import("@/hooks/chat/native-history-character-send")>(), sendNativeHistoryCharacter: quickPopupFixture.send
+}))
+vi.mock("@/hooks/chat/useHistorySelection", async original => ({
+  ...await original<typeof import("@/hooks/chat/useHistorySelection")>(),
+  useHistorySelection: () => ({ reset: () => { quickPopupFixture.sessionId = null },
+    getCurrent: () => ({ owner: quickPopupFixture.sessionId ? { kind: "native", conversation_id: quickPopupFixture.sessionId, request_scope: quickOwnerScope, scope: { type: "global" }, validate_lease: () => true } : null }),
+    fence: () => () => true,
+    prepareExpansionPath: async () => `/chat?chatId=${quickPopupFixture.sessionId}&client_session_id=popup-ui-fixture`
+  })
 }))
 vi.mock("@/services/service-prompts", async importOriginal => ({
   ...await importOriginal<typeof import("@/services/service-prompts")>(),
@@ -355,6 +371,16 @@ const findEditSubmitButton = async (timeout = 15000) =>
 describe("CharactersManager first-use onboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    quickPopupFixture.id = "quick-chat-session-default"
+    quickPopupFixture.reply = "Quick chat response"
+    quickPopupFixture.sessionId = null
+    quickPopupFixture.characterId = null
+    quickPopupFixture.send.mockImplementation(async params => {
+      quickPopupFixture.sessionId = quickPopupFixture.id
+      quickPopupFixture.characterId = params.characterId
+      params.setServerChatId(quickPopupFixture.id)
+      params.setMessages([{ id: "popup-result", isBot: true, message: quickPopupFixture.reply, name: "Assistant", createdAt: 1, sources: [] }])
+    })
     editorLoad.pending = null
     editorLoad.attempted = false
     ensureLocalStorageApi().clear()
@@ -3771,7 +3797,7 @@ describe("CharactersManager first-use onboarding", () => {
 
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === OWNED_DEFAULT_KEY) {
-        return [{ ownerKey: "account-a", selection: null }, setDefaultCharacterMock, { isLoading: false }]
+        return [{ ownerKey: "a".repeat(64), selection: null }, setDefaultCharacterMock, { isLoading: false }]
       }
       return [defaultValue ?? null, vi.fn(), { isLoading: false }]
     })
@@ -3800,7 +3826,7 @@ describe("CharactersManager first-use onboarding", () => {
 
     await waitFor(() => {
       expect(setDefaultCharacterMock).toHaveBeenCalledWith(
-        { ownerKey: "account-a", localOnly: false, selection: expect.objectContaining({
+        { ownerKey: "a".repeat(64), localOnly: false, selection: expect.objectContaining({
           id: "char-default",
           name: "Default Candidate",
           system_prompt: "Default system prompt",
@@ -3827,7 +3853,7 @@ describe("CharactersManager first-use onboarding", () => {
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === OWNED_DEFAULT_KEY) {
         return [
-          { ownerKey: "account-a", selection: {
+          { ownerKey: "a".repeat(64), selection: {
             id: "char-default-clear",
             name: "Default Clear Candidate",
             system_prompt: "Default system prompt",
@@ -3863,7 +3889,7 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Clear default" }))
 
     await waitFor(() => {
-      expect(setDefaultCharacterMock).toHaveBeenCalledWith({ ownerKey: "account-a", localOnly: false, selection: null })
+      expect(setDefaultCharacterMock).toHaveBeenCalledWith({ ownerKey: "a".repeat(64), localOnly: false, selection: null })
     })
     expect(tldwClientMock.setDefaultCharacterPreference).toHaveBeenCalledWith(
       null, { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } }
@@ -3946,19 +3972,17 @@ describe("CharactersManager first-use onboarding", () => {
       version: 1
     }
 
+    tldwClientMock.getCharacter.mockResolvedValue(characterRecord)
+
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === "selectedModel") {
-        return ["mock-chat-model", vi.fn(), { isLoading: false }]
+        return ["openai:mock-chat-model", vi.fn(), { isLoading: false }]
       }
       return [defaultValue ?? null, vi.fn(), { isLoading: false }]
     })
 
-    tldwClientMock.createChat.mockResolvedValueOnce({
-      id: "quick-chat-session-1"
-    })
-    tldwClientMock.completeCharacterChatTurn.mockResolvedValueOnce({
-      assistant_content: "Character quick reply"
-    })
+    quickPopupFixture.id = "quick-chat-session-1"
+    quickPopupFixture.reply = "Character quick reply"
 
     useQueryMock.mockImplementation((opts: any) => {
       const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
@@ -3967,7 +3991,7 @@ describe("CharactersManager first-use onboarding", () => {
       }
       if (key === "getModelsForFieldGeneration") {
         return makeUseQueryResult({
-          data: [{ model: "mock-chat-model", provider: "openai" }]
+          data: [{ model: "mock-chat-model", provider: "openai", is_configured: true }]
         })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3991,20 +4015,11 @@ describe("CharactersManager first-use onboarding", () => {
     await user.type(input, "How do you help?")
     await user.click(screen.getByRole("button", { name: "Send" }))
 
-    await waitFor(() => {
-      expect(tldwClientMock.createChat).toHaveBeenCalledWith(
-        expect.objectContaining({
-          character_id: 101
-        })
-      )
-      expect(tldwClientMock.completeCharacterChatTurn).toHaveBeenCalledWith(
-        "quick-chat-session-1",
-        expect.objectContaining({
-          model: "mock-chat-model",
-          append_user_message: "How do you help?"
-        })
-      )
-    })
+    await waitFor(() => expect(quickPopupFixture.send).toHaveBeenCalledWith(expect.objectContaining({
+      characterId: 101, model: "openai:mock-chat-model", message: "How do you help?", toolChoice: "none",
+      privateDraft: expect.objectContaining({ handle: expect.objectContaining({ address: expect.objectContaining({ kind: "fresh" }) }) })
+    })))
+    expect(tldwClientMock.completeCharacterChatTurn).not.toHaveBeenCalled()
     expect(navigateMock).not.toHaveBeenCalled()
     expect(await screen.findByText("Character quick reply")).toBeInTheDocument()
   }, 30000)
@@ -4019,6 +4034,8 @@ describe("CharactersManager first-use onboarding", () => {
       description: "Quick chat blocker test",
       version: 1
     }
+
+    tldwClientMock.getCharacter.mockResolvedValue(characterRecord)
 
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === "selectedModel") {
@@ -4062,7 +4079,7 @@ describe("CharactersManager first-use onboarding", () => {
     expectDesignSystemAlertForText(
       "Choose a chat model before chatting as No Model Character"
     )
-    expect(screen.getByRole("link", { name: "Open model settings" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Open model settings/ })).toHaveAttribute(
       "href",
       "/settings/model"
     )
@@ -4275,9 +4292,11 @@ describe("CharactersManager first-use onboarding", () => {
       version: 1
     }
 
+    tldwClientMock.getCharacter.mockResolvedValue(characterRecord)
+
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === "selectedModel") {
-        return ["mock-chat-model", vi.fn(), { isLoading: false }]
+        return ["openai:mock-chat-model", vi.fn(), { isLoading: false }]
       }
       return [defaultValue ?? null, vi.fn(), { isLoading: false }]
     })
@@ -4291,7 +4310,7 @@ describe("CharactersManager first-use onboarding", () => {
       }
       if (key === "getModelsForFieldGeneration") {
         return makeUseQueryResult({
-          data: [{ model: "mock-chat-model", provider: "openai" }]
+          data: [{ model: "mock-chat-model", provider: "openai", is_configured: true }]
         })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4538,19 +4557,18 @@ describe("CharactersManager first-use onboarding", () => {
       version: 1
     }
 
+    tldwClientMock.getCharacter.mockResolvedValue(characterRecord)
+
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === "selectedModel") {
-        return ["mock-chat-model", vi.fn(), { isLoading: false }]
+        return ["openai:mock-chat-model", vi.fn(), { isLoading: false }]
       }
       return [defaultValue ?? null, vi.fn(), { isLoading: false }]
     })
 
-    tldwClientMock.createChat.mockResolvedValueOnce({
-      id: "quick-chat-session-promote"
-    })
-    tldwClientMock.completeCharacterChatTurn.mockResolvedValueOnce({
-      assistant_content: "Promotion reply"
-    })
+    quickPopupFixture.id = "quick-chat-session-promote"
+    quickPopupFixture.reply = "Promotion reply"
+    tldwClientMock.getChat.mockResolvedValueOnce({ id: "quick-chat-session-promote", character_id: 303 })
 
     useQueryMock.mockImplementation((opts: any) => {
       const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
@@ -4559,7 +4577,7 @@ describe("CharactersManager first-use onboarding", () => {
       }
       if (key === "getModelsForFieldGeneration") {
         return makeUseQueryResult({
-          data: [{ model: "mock-chat-model", provider: "openai" }]
+          data: [{ model: "mock-chat-model", provider: "openai", is_configured: true }]
         })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4585,25 +4603,12 @@ describe("CharactersManager first-use onboarding", () => {
     await screen.findByText("Promotion reply")
     expect(navigateMock).not.toHaveBeenCalled()
 
-    await user.click(screen.getByRole("button", { name: "Open full chat" }))
+    await user.click(screen.getByRole("button", { name: "Continue in full chat" }))
 
-    await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith(
-        "/chat?mode=character&characterId=303"
-      )
-    })
-    expect(setSelectedCharacterMock).toHaveBeenCalled()
-    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "Promote Quick Chat Character",
-        alternate_greetings: expect.any(Array),
-        extensions: expect.anything()
-      })
-    )
-    expect(storeSetters.setServerChatCharacterId).toHaveBeenCalledWith("303")
-    expect(storeSetters.setServerChatAssistantKind).toHaveBeenCalledWith("character")
-    expect(storeSetters.setServerChatAssistantId).toHaveBeenCalledWith("303")
-    expect(storeSetters.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/chat?chatId=quick-chat-session-promote&client_session_id=popup-ui-fixture"))
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
+    expect(storeSetters.setServerChatCharacterId).not.toHaveBeenCalled()
+    expect(tldwClientMock.completeCharacterChatTurn).not.toHaveBeenCalled()
     expect(tldwClientMock.deleteChat).not.toHaveBeenCalled()
   }, 30000)
 
@@ -4950,7 +4955,7 @@ describe("CharactersManager first-use onboarding", () => {
     const okButton = await screen.findByRole("button", { name: /ok/i })
     expect(okButton).toBeEnabled()
     expect(screen.queryByRole("button", { name: "Confirm import" })).not.toBeInTheDocument()
-  })
+  }, 30000)
 
   it("creates a persona from a character and opens Persona Garden on the new profile", async () => {
     const user = userEvent.setup()

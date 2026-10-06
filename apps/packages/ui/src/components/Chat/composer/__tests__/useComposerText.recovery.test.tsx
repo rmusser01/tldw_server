@@ -255,6 +255,29 @@ describe("retained fresh composer recovery", () => {
     vi.useRealTimers()
   })
 
+  it("cold lists a next message with its existing settled chat association", async () => {
+    vi.stubGlobal("navigator", Object.assign(Object.create(navigator), { locks: { request: (_key: string, work: () => Promise<unknown>) => work() } }))
+    const { createChatWithRecovery, markChatCreationBound, markChatCreationSettled } = await import("@/services/pending-chat-promotion")
+    const source = fresh("quick-private")
+    const handle = { address: source, ownerHash: chatDraftOwnerKey(scope()) }
+    const snapshot = { requestScope: scope(), scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: new AbortController().signal } as unknown as import("@/services/service-prompts").ServicePromptSnapshot
+    await createChatWithRecovery({ snapshot, handle, surface: "playground", inputText: "FIRST SENT", setup: { characterId: 4 },
+      isCurrent: () => true, create: async () => ({ id: "saved-quick" }) })
+    await markChatCreationBound(handle, "saved-quick")
+    await markChatCreationSettled(handle, "saved-quick")
+    const bucket = createLocalRegistryBucket<{ content: string; metadata: Record<string, unknown> }>({ prefix: "registry:draft:" })
+    const key = `${conversationDraftKey(root, source)}:owner:${handle.ownerHash}`
+    await bucket.set(key, { content: "  NEXT UNSENT\nExact spaces  ", metadata: { chatDraftHandle: handle } })
+    sessionStorage.clear()
+    const view = mount()
+    await settle()
+    const retained = (await view.result.current.listRetainedDrafts()).drafts
+    expect(retained).toHaveLength(1)
+    expect(retained[0]).toMatchObject({ content: "  NEXT UNSENT\nExact spaces  ", creationAttempt: { state: "settled", chatId: "saved-quick", inputText: "" } })
+    expect((await bucket.get(key))?.value.content).toBe("  NEXT UNSENT\nExact spaces  ")
+  })
+
   it.each([false, true])(
     "makes departed nonempty fresh text reachable with its actual mode before debounce (Temporary %s)",
     async (temporary) => {
@@ -266,6 +289,7 @@ describe("retained fresh composer recovery", () => {
       act(() => useStoreMessageOption.getState().startNewChatDraft(false))
       await settle()
       const listing = await view.result.current.listRetainedDrafts()
+      expect(listing.unavailable).toBe(false)
       expect(listing.drafts).toHaveLength(1)
       expect(listing.drafts[0]).toMatchObject({
         content: "UNSENT SOURCE",

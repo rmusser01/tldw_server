@@ -1437,7 +1437,9 @@
     "findConversations": "Find conversations",
     "reviewCreated": "Review created chat",
     "creationStorageUnavailable": "Creation recovery could not be read. Keep your draft and check retained drafts before starting again.",
-    "creationDraftHelp": "Open this draft to review its creation before sending. Starting another chat may create a duplicate."
+    "creationDraftHelp": "Open this draft to review its creation before sending. Starting another chat may create a duplicate.",
+    "copyAndReviewCreated": "Copy draft and review saved chat",
+    "savedChatDraft": "Retained message for a saved chat"
   },
   "characterChatSessions": {
     "regionLabel": "Character chat sessions",

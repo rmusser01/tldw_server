@@ -199,7 +199,7 @@ it("shows active unknown creation without requiring a nonempty draft and offers 
   expect(screen.queryByRole("button", { name: "Review created chat" })).not.toBeInTheDocument()
 })
 
-it("offers known-ID review only as an explicit action and retains uncertainty when review fails", async () => {
+it("keeps acknowledged creation distinct from uncertainty after history review fails", async () => {
   const review = vi.fn().mockResolvedValue(false)
   render(<ChatDraftRecovery listDrafts={vi.fn()} copyDraft={vi.fn()} onRestore={vi.fn()}
     onReviewCreatedChat={review} creationRecovery={{ unavailable: false, active: {
@@ -210,7 +210,8 @@ it("offers known-ID review only as an explicit action and retains uncertainty wh
   fireEvent.click(screen.getByRole("button", { name: "Review created chat" }))
   await waitFor(() => expect(review).toHaveBeenCalledOnce())
   expect(await screen.findByText(/Could not verify the created chat/)).toBeInTheDocument()
-  expect(screen.getByText("Server save unconfirmed")).toBeInTheDocument()
+  expect(screen.getByText("Chat already created")).toBeInTheDocument()
+  expect(screen.queryByText("Server save unconfirmed")).not.toBeInTheDocument()
 })
 
 
@@ -227,4 +228,30 @@ it("uses the owned Copy action and ignores its late failure after New", async ()
   expect(copy).toHaveBeenCalledOnce()
   await act(async () => { useStoreMessageOption.getState().startNewChatDraft(); reject(new Error("Clipboard unavailable")) })
   expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+})
+
+
+it("discloses Copy before reviewing a bound chat with different retained input", async () => {
+  const review = vi.fn().mockResolvedValue(true)
+  render(<ChatDraftRecovery listDrafts={vi.fn()} copyDraft={vi.fn()} onReviewCreatedChat={review}
+    creationRecovery={{ unavailable: false, copyInputRequired: true, active: {
+      version: 1, operationId: "bound", surface: "playground", createdAt: 1, state: "bound", chatId: "saved",
+      inputText: "ORIGINAL INPUT", handle: { ...draft.handle, address: { ...draft.handle.address, kind: "fresh", temporary: false } }
+    } }} />)
+  fireEvent.click(screen.getByRole("button", { name: "Copy draft and review saved chat" }))
+  await waitFor(() => expect(review).toHaveBeenCalledOnce())
+})
+
+
+it("shows acknowledged creation in retained discovery before history qualification", async () => {
+  const handle = { ...draft.handle, address: { ...draft.handle.address, temporary: false } }
+  const retained = { ...draft, handle, creationAttempt: {
+    version: 1 as const, operationId: "created", handle, surface: "playground" as const,
+    createdAt: 1, inputText: draft.content, state: "acknowledged" as const, chatId: "saved-id"
+  } }
+  render(<ChatDraftRecovery listDrafts={vi.fn().mockResolvedValue({ drafts: [retained], unavailable: false })}
+    copyDraft={vi.fn()} onRestore={vi.fn()} />)
+  fireEvent.click(screen.getByRole("button", { name: "Recover drafts" }))
+  expect(await screen.findByText(/Chat already created/)).toBeInTheDocument()
+  expect(screen.queryByText("Server save unconfirmed")).not.toBeInTheDocument()
 })

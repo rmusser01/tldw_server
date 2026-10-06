@@ -6,7 +6,7 @@ Status: Approved by the user on 2026-10-04, with the pre-implementation review c
 
 Program: TASK-13453; delivery stages TASK-13454–TASK-13458.
 
-Initial baseline: `origin/dev` at `75ab224081bf140ef52017c1a9b0a04f6878d488`. Current baseline: latest fetched `origin/dev` at `f225562fc26182c7931b4048f689d8622da4c8e5`, integrated in `153bc4e00d` on 2026-10-05. Post-integration model/character, API/cache/PDF/diff and captured request-scope checks pass (27 suites, 563 regressions), as do WebUI types and extension compilation. Remaining staged acceptance is still open.
+Initial baseline: `origin/dev` at `75ab224081bf140ef52017c1a9b0a04f6878d488`. Current baseline: latest fetched `origin/dev` at `94854ca3db6ec3eaa0c27b4e9537bdd47d222611`, integrated in `292ea526d1` on 2026-10-06. This latest change is CI-only; its153 contract checks pass. Reviewed implementation checkpoints below record the frontend evidence. Remaining staged acceptance is still open.
 
 ## Outcome and evidence
 
@@ -319,3 +319,14 @@ Pending entry blocks central submission, direct queue Run and automatic drain. T
 Final merged evidence: 29 suites and 902 tests pass; both client type gates pass; official English locale sync, no-new precheckpoint touched lint and diff checks pass. Remote dev `7226596cca5b875ad6e121a15133f69600152258` was verified unchanged after the checks. Both independent source reviewers cleared this bounded change and did not run checks. Bandit is not applicable to this TS/TSX/JSON/documentation scope.
 
 Actual Form/composer tests include the real draft hook over acknowledged Map IO. Actual root/H1/Core coordinator tests explicitly stub destination Form acceptance. These separate proofs do not establish whole root plus Form native composition, private cold-tab durability, native popup/focus, packaged-extension or assistive-technology behavior, or positive provider generation. Quick Chat creation/promotion, full setup/history improvements, narrow/native continuity and complete staged acceptance remain open; this checkpoint does not close the all-ten program.
+
+
+## Character Quick Chat recovery checkpoint — TASK-13505
+
+The popup now uses an independent verified account/controller and the existing native creation, admission, settlement and recovery protocol. Its unique private draft remains separate from the full-chat destination. Current model/provider choices are explicit. Popup/account/connection replacement retires delayed preparation, while a qualified saved owner keeps its independent lifetime. Unknown creation or turn outcomes require Review rather than replaying a POST. Closing does not implicitly delete a saved chat.
+
+Saved continuation qualifies H1 and accepts navigation before closing. Nonempty text requires acknowledged exact retention and an explicit Copy action; destination text and metadata remain intact. Cold discovery attaches known creation records, and original unresolved text is distinct from a settled retained next message. A create ACK is shown as Chat already created even if history qualification fails. Preparation changes and foreign ownership stay fenced; current owned qualification errors identify the actual failed read.
+
+The opt-in owned HTTP fixture passes with two turns, four canonical roles, one root, two selected members on turn two and exact cold NEXT input. The verified principal, HTTP/SSE bridge and profile/bookmark IO use declared adapters; it does not prove the real account watcher, progressive SSE timing, physical IndexedDB durability or packaged extension behavior. The runtime's chat/H1/character source matches current dev; two unrelated runtime files differ. Existing shared send sanitizers trim outer whitespace, so successful saved messages are not claimed byte-for-byte identical.
+
+The actual browser created a chat and then failed history qualification before sending a provider turn. Its original full-chat draft survived Library navigation, and its exact Quick Chat opening remained reachable through Recover drafts after popup retirement. Explicit saved-chat Review failed without clearing either text or recovery. Native successful browser generation is still unverified. The same walkthrough exposed an empty Library after failed reads and a Saved mode badge beside pending recovery. Their UI causes can be reviewed independently; the browser transport cause is not yet established. Both source reviewers clear the bounded recovery corrections. The39-file relevant matrix plus five-suite final reruns verifies1180 passes and one opt-in skip; the owned opt-in HTTP check passes separately. Final WebUI types, extension entrypoint/config compile, no-new touched lint, English locale agreement and diff checks pass. The bounded task is complete; no whole-program completion is implied.

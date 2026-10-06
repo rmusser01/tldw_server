@@ -86,7 +86,7 @@ export type ComposerPromptAssistMutation =
     }
 
 export interface UseComposerTextResult {
-  creationRecovery: { active: ChatCreationRecovery | null; unavailable: boolean }
+  creationRecovery: { active: ChatCreationRecovery | null; unavailable: boolean; copyInputRequired: boolean }
   retainCurrentDraft: () => Promise<boolean>
   reviewCreatedChat: () => Promise<boolean>
   copyCreationText: () => Promise<boolean>
@@ -488,12 +488,19 @@ export function useComposerText(
     } catch (error) { if (current()) throw error; return false }
   }, [ownerKey, draftAddress, creationOperationId, creationRevision, isCurrent])
   const reviewCreatedChat = React.useCallback(async () => {
-    if (!ownerKey || !draftAddress || draftAddress.kind !== "fresh" || !historySelection || !isCurrent() || !requestSettingsNavigation("/chat")) return false
+    if (getValues().image || !ownerKey || !draftAddress || draftAddress.kind !== "fresh" || !historySelection || !isCurrent() || !requestSettingsNavigation("/chat")) return false
+    const inputRevision = getRevision()
+    const raw = getValues().message
     const current = () => isCurrent() && useStoreMessageOption.getState().chatDraftAddress === draftAddress &&
-      useStoreMessageOption.getState().chatDraftRevision === creationRevision
+      useStoreMessageOption.getState().chatDraftRevision === creationRevision && getRevision() === inputRevision
     if (!current()) return false
-    return reviewNativeChatCreation({ controller: historySelection, handle: { address: draftAddress, ownerHash: ownerKey }, isCurrent: current,
-      retainInput: async () => !form.values.message || retainDraft(`${draftKey}:owner:${ownerKey}`, { content: form.values.message, metadata: metadata() }),
+    return reviewNativeChatCreation({ controller: historySelection, handle: { address: draftAddress, ownerHash: ownerKey }, isCurrent: current, inputText: raw,
+      retainInput: async () => !raw || retainDraft(`${draftKey}:owner:${ownerKey}`, { content: raw, metadata: metadata() }),
+      copyInput: async () => {
+        if (!current()) return false
+        if (raw) await navigator.clipboard.writeText(raw)
+        return current()
+      },
       onAccepted: chat => {
         const state = useStoreMessageOption.getState()
         state.setServerChatId(chat.id)
@@ -506,7 +513,7 @@ export function useComposerText(
         state.setServerChatVersion(chat.version ?? null)
       }
     })
-  }, [ownerKey, draftAddress, creationRevision, historySelection, isCurrent, form.values.message, retainDraft, draftKey, metadata])
+  }, [ownerKey, draftAddress, creationRevision, historySelection, isCurrent, getValues, getRevision, retainDraft, draftKey, metadata])
   const beginPromptAssistReset = React.useCallback(() => {
     flushDraft()
     const attemptId = ++nextPromptAssistAttemptIdRef.current
@@ -663,6 +670,11 @@ export function useComposerText(
       drafts.push({ key: record.storageKey, surfaceKey, handle: { ...handle, address: handle.address },
         content: record.content, metadata: record.metadata, updatedAt: record.updatedAt })
     }
+    const associations = await Promise.allSettled(drafts.map(draft => draft.handle.address.temporary ? Promise.resolve(null) : readChatCreationRecovery(draft.handle)))
+    if (!current()) return { drafts: [], unavailable: false }
+    associations.forEach((result, index) => {
+      if (result.status === "fulfilled" && result.value) drafts[index].creationAttempt = result.value
+    })
     for (const attempt of creations.attempts) {
       if (attempt.handle.address.kind !== "fresh" || (attempt.surface === "playground") !== (recoverySurface === "tldw:playgroundChatDraft") ||
         chatDraftAddressKey(attempt.handle.address) === chatDraftAddressKey(draftAddress)) continue
@@ -671,7 +683,7 @@ export function useComposerText(
       else drafts.push({ key: `${conversationDraftKey(recoverySurface, attempt.handle.address)}${suffix}`, surfaceKey: recoverySurface,
         handle: { ...attempt.handle, address: attempt.handle.address }, content: attempt.inputText, updatedAt: attempt.createdAt, creationAttempt: attempt })
     }
-    return { drafts: drafts.sort((a, b) => b.updatedAt - a.updatedAt), unavailable: result.unavailable || creations.unavailable }
+    return { drafts: drafts.sort((a, b) => b.updatedAt - a.updatedAt), unavailable: result.unavailable || creations.unavailable || associations.some(result => result.status === "rejected") }
   }, [draftReady, isCurrent, ownerKey, draftAddress, recoverySurface, draftKey, validRecoverySurface, listDrafts])
   const copyRetainedDraft = React.useCallback(async (draft: RecoveredChatDraft, surfaceKey: string, destination?: Extract<ChatDraftAddress, { kind: "fresh" }>) => {
     if (!ownerKey || !validRecoverySurface(surfaceKey)) return false
@@ -710,7 +722,8 @@ export function useComposerText(
 
   return {
     retainCurrentDraft,
-    creationRecovery,
+    creationRecovery: { ...creationRecovery, copyInputRequired: Boolean(creationRecovery.active &&
+      (creationRecovery.active.state === "settled" || form.values.message !== creationRecovery.active.inputText)) },
     reviewCreatedChat,
     copyCreationText,
     listRetainedDrafts,

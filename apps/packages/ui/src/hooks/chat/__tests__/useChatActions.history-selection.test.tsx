@@ -2702,3 +2702,194 @@ it.each(["owned", "outside"])("assistant-only bind respects %s keyboard focus", 
   expect(h1.wire).not.toHaveBeenCalled()
   starter.unmount(); mounted.hook.unmount(); mounted.selection.unmount(); button.remove(); textarea.remove(); other.remove()
 })
+
+
+it.each(["bound-record", "send-capture"])("private native popup %s retires changed preparation while retaining its accepted owner", async stage => {
+  const mounted = await mountedNativeOpening()
+  const { sendNativeHistoryCharacter } = await import("../native-history-character-send")
+  const { freshChatDraftAddress } = await import("@/utils/chat-draft-address")
+  const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
+  const { loadServicePromptSnapshot } = await import("@/services/service-prompts")
+  const { Storage } = await import("@plasmohq/storage")
+  const snapshot = await loadServicePromptSnapshot([])
+  const handle = { address: freshChatDraftAddress(false), ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
+  const before = mounted.draftStore.getState()
+  let preparationCurrent = true
+  let enter!: () => void, release!: () => void
+  const ready = new Promise<void>(resolve => { enter = resolve })
+  const held = new Promise<void>(resolve => { release = resolve })
+  let write: ReturnType<typeof vi.spyOn> | undefined
+  if (stage === "bound-record") {
+    const original = Storage.prototype.set
+    write = vi.spyOn(Storage.prototype, "set").mockImplementation(async function (this: Storage, key, value) {
+      await original.call(this, key, value)
+      if (key.startsWith("registry:chat-creation:") && value.value?.state === "bound") { enter(); await held }
+      return null
+    })
+  } else h1.capture.mockImplementation(async (id, request) => {
+    // Opening qualifies its initial leaf with two captures; the third is send preparation.
+    if (h1.capture.mock.calls.length === 3) { enter(); await held }
+    return openingCapture(id, request)
+  })
+  let pending!: Promise<unknown>
+  await act(async () => {
+    pending = sendNativeHistoryCharacter({ controller: mounted.selection.result.current,
+      privateDraft: { handle, isCurrent: () => true }, surface: "playground",
+      originIsCurrent: () => preparationCurrent, signal: new AbortController().signal,
+      temporary: false, scope: { type: "global" }, characterId: "12", model: "deepseek:deepseek-chat",
+      settings: {}, toolChoice: "none", message: "private popup input", image: "", t: ((key: string) => key) as import("i18next").TFunction,
+      setServerChatId: vi.fn(), setMessages: vi.fn(), releaseActivity: vi.fn()
+    }).catch(error => error)
+    await ready
+  })
+  preparationCurrent = false
+  await act(async () => { release(); await pending })
+  const owner = mounted.selection.result.current.getCurrent().owner
+  const acceptedOwnerValid = owner?.kind === "native" && owner.validate_lease()
+  write?.mockRestore()
+  snapshot.release(); mounted.hook.unmount(); mounted.selection.unmount()
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(acceptedOwnerValid).toBe(true)
+  expect(mounted.draftStore.getState().chatDraftAddress).toBe(before.chatDraftAddress)
+  expect(mounted.draftStore.getState().chatDraftRevision).toBe(before.chatDraftRevision)
+})
+
+
+it.each(["accepted", "bound-next", "image", "clipboard-denied", "newer-input", "address-ABA"])("settled private draft Review preserves destination text and private retention: %s", async boundary => {
+  const mounted = await mountedNativeOpening()
+  const { createChatWithRecovery, markChatCreationBound, markChatCreationSettled } = await import("@/services/pending-chat-promotion")
+  const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
+  const { loadServicePromptSnapshot } = await import("@/services/service-prompts")
+  const { usePlaygroundSessionStore: sessions } = await import("@/store/playground-session")
+  const { useComposerText } = await import("@/components/Chat/composer/hooks/useComposerText")
+  const { conversationDraftKey } = await import("@/utils/chat-draft-address")
+  const { createLocalRegistryBucket } = await import("@/services/settings/local-bucket")
+  sessions.setState({ serverChatSelectionIntent: null })
+  const snapshot = await loadServicePromptSnapshot([])
+  const handle = { address: mounted.sourceDraft!, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
+  await createChatWithRecovery({ snapshot, handle, surface: "playground", inputText: "FIRST SENT", setup: {}, isCurrent: () => true, create: async () => ({ id: "tracked-chat-1" }) })
+  await markChatCreationBound(handle, "tracked-chat-1")
+  if (boundary !== "bound-next") await markChatCreationSettled(handle, "tracked-chat-1")
+  const root = "tldw:playgroundChatDraft"
+  const sourceKey = `${conversationDraftKey(root, handle.address)}:owner:${handle.ownerHash}`
+  const destination = { kind: "native" as const, id: "tracked-chat-1", ownerKey: "native-key", scope: { type: "global" as const } }
+  const destinationKey = `${conversationDraftKey(root, destination)}:owner:${handle.ownerHash}`
+  const bucket = createLocalRegistryBucket<{ content: string; metadata: Record<string, unknown> }>({ prefix: "registry:draft:" })
+  await bucket.set(sourceKey, { content: "  NEXT UNSENT\nExact spacing  ", metadata: { chatDraftHandle: handle } })
+  const destinationPayload = { content: "DESTINATION DRAFT", metadata: { wasExpanded: true, collapsedRange: null } }
+  await bucket.set(destinationKey, destinationPayload)
+  sessionStorage.clear()
+  const restored = vi.fn()
+  const mountComposer = () => renderHook(() => {
+    const address = mounted.draftStore(state => state.chatDraftAddress)
+    const transition = mounted.draftStore(state => state.chatDraftTransition)
+    return useComposerText({ draftKey: address ? conversationDraftKey(root, address) : root,
+      draftAddress: address ?? undefined, tabScopedDraft: true,
+      bindFromDraftKey: transition?.kind === "bind" && transition.sourceAddress ? conversationDraftKey(root, transition.sourceAddress) : undefined,
+      textareaRef: React.createRef<HTMLTextAreaElement>(), restoreWithMetadata: restored,
+      getDraftMetadata: () => destinationPayload.metadata })
+  })
+  const composer = mountComposer()
+  await waitFor(() => expect(composer.result.current.creationRecovery.active?.state).toBe(boundary === "bound-next" ? "bound" : "settled"))
+  await waitFor(() => expect(composer.result.current.form.values.message).toBe("  NEXT UNSENT\nExact spacing  "))
+  expect(composer.result.current.creationRecovery.copyInputRequired).toBe(true)
+  let release!: () => void, enter!: () => void
+  const ready = new Promise<void>(resolve => { enter = resolve })
+  const held = new Promise<void>(resolve => { release = resolve })
+  const copy = vi.fn(async () => { enter(); await held; if (boundary === "clipboard-denied") throw new Error("denied") })
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: copy } })
+  if (boundary === "image") act(() => composer.result.current.form.setValues({ image: "data:image/png;base64,SOURCE" }))
+  h1.capture.mockClear()
+  let reviewing!: Promise<boolean>
+  await act(async () => { reviewing = composer.result.current.reviewCreatedChat().catch(() => false); if (boundary !== "image" && boundary !== "bound-next") await ready })
+  if (boundary === "newer-input") act(() => composer.result.current.setMessageValue("NEWER EXACT INPUT  "))
+  if (boundary === "address-ABA") act(() => {
+    mounted.draftStore.getState().startNewChatDraft()
+    mounted.draftStore.getState().setChatDraftAddress(handle.address)
+  })
+  let reviewed = false
+  await act(async () => { release(); reviewed = await reviewing })
+  const accepted = boundary === "accepted" || boundary === "bound-next"
+  if (accepted) {
+    await waitFor(() => expect(composer.result.current.form.values.message).toBe("DESTINATION DRAFT"))
+    expect(mounted.draftStore.getState().chatDraftTransition?.kind).toBe("switch")
+    expect(restored).toHaveBeenCalledWith("DESTINATION DRAFT", destinationPayload.metadata)
+    composer.unmount(); sessionStorage.clear()
+    const cold = mountComposer()
+    await waitFor(() => expect(cold.result.current.form.values.message).toBe("DESTINATION DRAFT"))
+    cold.unmount()
+  } else {
+    expect(mounted.draftStore.getState().chatDraftAddress).toBe(handle.address)
+    if (boundary === "newer-input") expect(composer.result.current.form.values.message).toBe("NEWER EXACT INPUT  ")
+    if (boundary === "image") {
+      expect(composer.result.current.form.values).toMatchObject({ message: "  NEXT UNSENT\nExact spacing  ", image: "data:image/png;base64,SOURCE" })
+      expect(h1.capture).not.toHaveBeenCalled()
+    }
+    composer.unmount()
+  }
+  expect(reviewed).toBe(accepted)
+  if (boundary === "image") expect(copy).not.toHaveBeenCalled()
+  else expect(copy).toHaveBeenCalledWith("  NEXT UNSENT\nExact spacing  ")
+  expect((await bucket.get(destinationKey))?.value).toEqual(destinationPayload)
+  if (boundary !== "newer-input") expect((await bucket.get(sourceKey))?.value.content).toBe("  NEXT UNSENT\nExact spacing  ")
+  expect(createChatMock).not.toHaveBeenCalled(); expect(h1.wire).not.toHaveBeenCalled()
+  snapshot.release(); mounted.hook.unmount(); mounted.selection.unmount()
+})
+
+
+it.each([false, true])("private bound retry settles only the exact original input (changed %s)", async changed => {
+  const mounted = await mountedNativeOpening()
+  const { sendNativeHistoryCharacter } = await import("../native-history-character-send")
+  const { freshChatDraftAddress } = await import("@/utils/chat-draft-address")
+  const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
+  const { loadServicePromptSnapshot } = await import("@/services/service-prompts")
+  const { readChatCreationRecovery } = await import("@/services/pending-chat-promotion")
+  const snapshot = await loadServicePromptSnapshot([])
+  const handle = { address: freshChatDraftAddress(false), ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
+  let preparationCurrent = true
+  h1.capture.mockImplementation(async (id, request) => {
+    if (h1.capture.mock.calls.length === 3) preparationCurrent = false
+    return openingCapture(id, request)
+  })
+  const send = (message: string, serverChatId?: string) => sendNativeHistoryCharacter({
+    controller: mounted.selection.result.current, privateDraft: { handle, isCurrent: () => true }, surface: "playground",
+    originIsCurrent: () => preparationCurrent, signal: new AbortController().signal, temporary: false,
+    scope: { type: "global" }, characterId: "12", model: "deepseek:deepseek-chat", settings: {}, toolChoice: "none",
+    message, image: "", serverChatId, t: ((key: string) => key) as import("i18next").TFunction,
+    setServerChatId: vi.fn(), setMessages: vi.fn(), releaseActivity: vi.fn()
+  })
+  await act(async () => { await send("  ORIGINAL INPUT  ").catch(() => {}) })
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(await readChatCreationRecovery(handle)).toMatchObject({ state: "bound", inputText: "  ORIGINAL INPUT  ", chatId: "tracked-chat-1" })
+  preparationCurrent = true
+  h1.capture.mockImplementation(async (id, request) => openingCapture(id, request))
+  await act(async () => { await send(changed ? "DIFFERENT INPUT" : "  ORIGINAL INPUT  ", "tracked-chat-1") })
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(createChatMock).toHaveBeenCalledOnce()
+  expect(await readChatCreationRecovery(handle)).toMatchObject({ state: changed ? "bound" : "settled", inputText: changed ? "  ORIGINAL INPUT  " : "" })
+  snapshot.release(); mounted.hook.unmount(); mounted.selection.unmount()
+})
+
+
+it("private first-create reports the actual qualification read failure and keeps the known receipt", async () => {
+  const mounted = await mountedNativeOpening()
+  const { sendNativeHistoryCharacter } = await import("../native-history-character-send")
+  const { freshChatDraftAddress } = await import("@/utils/chat-draft-address")
+  const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
+  const { loadServicePromptSnapshot } = await import("@/services/service-prompts")
+  const { readChatCreationRecovery } = await import("@/services/pending-chat-promotion")
+  const snapshot = await loadServicePromptSnapshot([])
+  const handle = { address: freshChatDraftAddress(false), ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
+  h1.capture.mockRejectedValue(new Error("owned_read_unavailable"))
+  let error: unknown
+  await act(async () => { error = await sendNativeHistoryCharacter({ controller: mounted.selection.result.current,
+    privateDraft: { handle, isCurrent: () => true }, surface: "playground", originIsCurrent: () => true,
+    signal: new AbortController().signal, temporary: false, scope: { type: "global" }, characterId: "12",
+    model: "deepseek:deepseek-chat", settings: {}, toolChoice: "none", message: "  KEPT EXACT INPUT  ", image: "",
+    t: ((key: string) => key) as import("i18next").TFunction, setServerChatId: vi.fn(), setMessages: vi.fn(), releaseActivity: vi.fn()
+  }).catch(cause => cause) })
+  expect((error as Error).message).toBe("owned_read_unavailable")
+  expect(await readChatCreationRecovery(handle)).toMatchObject({ state: "acknowledged", chatId: "tracked-chat-1", inputText: "  KEPT EXACT INPUT  " })
+  expect(h1.wire).not.toHaveBeenCalled()
+  snapshot.release(); mounted.hook.unmount(); mounted.selection.unmount()
+})
