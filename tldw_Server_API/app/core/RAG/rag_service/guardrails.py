@@ -435,12 +435,9 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[\.!?])\s+")
 
 
 def _find_offsets(doc_text: str, target: str) -> tuple[int, int]:
-    """Best-effort offsets of target within doc_text.
+    """Return exact source offsets, or an empty span when text does not match.
 
-    Strategy:
-    1) exact match
-    2) longest 64-char window inside target
-    3) fallback (0, min(len(doc_text), len(target)))
+    A partial or arbitrary source span cannot establish support for the target.
     """
     full = doc_text or ""
     tgt = (target or "").strip()
@@ -449,14 +446,7 @@ def _find_offsets(doc_text: str, target: str) -> tuple[int, int]:
     i = full.find(tgt)
     if i >= 0:
         return (i, i + len(tgt))
-    if len(tgt) >= 48:
-        k = min(64, len(tgt))
-        mid = max(0, (len(tgt) - k) // 2)
-        window = tgt[mid : mid + k]
-        j = full.find(window)
-        if j >= 0:
-            return (j, j + len(window))
-    return (0, min(len(full), len(tgt)))
+    return (0, 0)
 
 
 def build_hard_citations(
@@ -466,8 +456,8 @@ def build_hard_citations(
 ) -> dict[str, Any]:
     """Return a mapping suitable for response metadata under 'hard_citations'.
 
-    If claims_payload is provided (from ClaimsEngine), use its citations (doc_id, start, end).
-    Otherwise, heuristically map sentences to best matching spans by substring search.
+    ClaimsEngine support requires a verified verdict and an exact returned-source anchor.
+    Legacy claims and sentence fallback require exact claim text in a returned source.
     """
     out: dict[str, Any] = {"sentences": [], "coverage": 0.0, "total": 0, "supported": 0}
     if not isinstance(answer, str) or not answer.strip():
@@ -478,22 +468,47 @@ def build_hard_citations(
     if isinstance(claims_payload, list) and claims_payload:
         total = 0
         supported = 0
+        source_texts = {str(d.id): d.content for d in (docs or []) if isinstance(d.content, str)}
         for c in claims_payload:
-            text = (c or {}).get("text")
+            if not isinstance(c, dict):
+                continue
+            text = c.get("text")
             cits = (c or {}).get("citations") or []
             if isinstance(text, str) and len(text.strip()) >= 6:
                 total += 1
                 entry_claim: dict[str, Any] = {"text": text, "citations": []}
-                for cit in cits:
+                verdict_allows_support = c.get("status") in (None, "verified") and c.get("label") in (None, "supported")
+                for cit in cits if isinstance(cits, list) and verdict_allows_support else []:
+                    if not isinstance(cit, dict):
+                        continue
                     try:
-                        entry_claim["citations"].append({
-                            "doc_id": str(cit.get("doc_id")),
-                            "start": int(cit.get("start", 0)),
-                            "end": int(cit.get("end", 0)),
-                        })
+                        doc_id = str(cit.get("doc_id"))
+                        start, end = int(cit.get("start", 0)), int(cit.get("end", 0))
                     except (TypeError, ValueError):
                         logger.debug("Guardrail citation mapping failed for claim")
                         continue
+                    full = source_texts.get(doc_id, "")
+                    if not 0 <= start < end <= len(full):
+                        continue
+                    anchors = [text]
+                    if c.get("status") == "verified":
+                        evidence = c.get("evidence")
+                        anchors += (
+                            [
+                                item["snippet"].strip().removesuffix("...").removesuffix("…")
+                                for item in evidence
+                                if isinstance(item, dict)
+                                and str(item.get("doc_id")) == doc_id
+                                and isinstance(item.get("snippet"), str)
+                            ]
+                            if isinstance(evidence, list)
+                            else []
+                        )
+                    for anchor in anchors:
+                        exact_start, exact_end = _find_offsets(full, anchor)
+                        if exact_end > exact_start:
+                            entry_claim["citations"].append({"doc_id": doc_id, "start": exact_start, "end": exact_end})
+                            break
                 if entry_claim["citations"]:
                     supported += 1
                 out["sentences"].append(entry_claim)

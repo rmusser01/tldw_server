@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.backends.fts_translator import MAX_FTS_QUERY_LENGTH
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     _CHACHA_NONCRITICAL_EXCEPTIONS,
     _SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES,
@@ -2499,8 +2501,14 @@ class NoteStore:
     # Note search
     # ------------------------------------------------------------------
 
-    def search_notes(self, search_term: str, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]:
-        """Searches notes_fts (title and content) with optional pagination."""
+    def search_notes(
+        self, search_term: str, limit: int = 10, offset: int = 0, *, match_any: bool = False
+    ) -> list[dict[str, Any]]:
+        """Search note text, retaining literal phrases unless RAG requests term matching."""
+        # ponytail: bound questions to 64 lexical terms; semantic expansion stays in RAG.
+        terms = list(dict.fromkeys(re.findall(r"\w+", search_term[:MAX_FTS_QUERY_LENGTH])))[:64] if match_any else []
+        if match_any and not terms:
+            return []
         # Debug: Log FTS table state to help diagnose E2E test failures
         # Only run for SQLite; PostgreSQL uses tsvector columns, not a notes_fts table.
         if self._db.backend_type == BackendType.SQLITE:
@@ -2519,18 +2527,27 @@ class NoteStore:
                 logger.debug("Empty notes search term; returning no results.")
                 return []
             owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
-            tsquery = FTSQueryTranslator.normalize_query(search_term, 'postgresql')
+            tsquery = (
+                " | ".join(f"'{term}'" for term in terms)
+                if match_any
+                else FTSQueryTranslator.normalize_query(search_term, "postgresql")
+            )
+            fallback_match = "n.title ILIKE ? OR n.content ILIKE ?"
+            fallback_values = (f"%{search_term}%", f"%{search_term}%")
+            if match_any:
+                fallback_match = " OR ".join([fallback_match] * len(terms))
+                fallback_values = tuple(value for term in terms for value in ["%" + term.replace("_", "\\_") + "%"] * 2)
             fallback_query = """
                 SELECT n.*
                 FROM notes n
                 WHERE n.deleted = FALSE{owner_clause}
-                  AND (n.title ILIKE ? OR n.content ILIKE ?)
+                  AND ({fallback_match})
                 ORDER BY n.last_modified DESC
                 LIMIT ? OFFSET ?
             """.format_map(
                 locals()
             )  # nosec B608
-            fallback_params = (*owner_params, f"%{search_term}%", f"%{search_term}%", limit, offset)
+            fallback_params = (*owner_params, *fallback_values, limit, offset)
             if not tsquery:
                 logger.debug("Notes search term normalized to empty tsquery for input '{}'", search_term)
                 cursor = self._db.execute_query(fallback_query, fallback_params)
@@ -2559,7 +2576,7 @@ class NoteStore:
                 raise
 
         safe_literal = search_term.replace('"', '""')
-        safe_search_term = f'"{safe_literal}"'
+        safe_search_term = " OR ".join(f'"{term}"' for term in terms) if match_any else f'"{safe_literal}"'
 
         query = """
                 SELECT main.*, bm25(notes_fts) AS bm25_score

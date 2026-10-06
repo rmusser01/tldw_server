@@ -59,3 +59,12 @@ def test_numeric_fidelity_normalization_handles_units_and_currency():
     # Ensure present contains both tokens in normalized form
     assert any(tok.endswith("m") for tok in nf.present), "Expected million mapping to 'm' suffix"
     assert any(tok.endswith("%") for tok in nf.present), "Expected percent mapping to '%' suffix"
+
+
+def test_unmatched_quote_does_not_count_as_supported():
+    doc = Document(id="vega", content="Baseline calibration took three days.", metadata={})
+
+    result = build_quote_citations('The report states "calibration took ten days".', [doc])
+
+    assert result["quotes"] == [{"text": "calibration took ten days", "citations": []}]
+    assert result["coverage"] == 0
