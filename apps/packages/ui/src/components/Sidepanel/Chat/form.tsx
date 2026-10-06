@@ -178,9 +178,8 @@ import type { QueuedRequest } from "@/utils/chat-request-queue"
 import { AudioSourcePicker } from "@/components/Common/AudioSourcePicker"
 import { CharacterControlsSheet } from "@/components/Sidepanel/Chat/CharacterControlsSheet"
 import { getSidepanelOverlayResumeMarkerKey } from "@/utils/sidepanel-overlay-resume"
-import type { SidepanelChatHandoffPageContext } from "@/services/sidepanel-chat-handoff"
 import type { SidepanelChatWebUiHandoffOverrides } from "@/services/tldw/sidepanel-chat-webui-handoff"
-import { buildVisibleDocumentHandoffSnippetText } from "./sidepanel-chat-handoff-context"
+import { readVisiblePageContextForHandoff } from "./sidepanel-chat-handoff-context"
 import {
   DEFAULT_DOCUMENT_PROCESSING_MODE,
   documentProcessingSelectionKey,
@@ -1193,55 +1192,14 @@ export const SidepanelForm = ({
       t
     ]
   )
-  const getVisiblePageContextForHandoff = React.useCallback(async (): Promise<
-    SidepanelChatHandoffPageContext | undefined
-  > => {
-    const snippets = selectedDocuments.map((doc) => ({
-      kind: "visible-context" as const,
-      label: doc.title,
-      text: buildVisibleDocumentHandoffSnippetText(doc)
-    }))
-
-    let activePage:
-      | {
-          title?: string
-          url?: string
-        }
-      | undefined
-
-    if (pageContextActive) {
-      try {
-        const tabs = await browser.tabs.query({
-          active: true,
-          currentWindow: true
-        })
-        const activeTab = tabs.find((tab) => tab.title || tab.url)
-        activePage = {
-          title:
-            typeof activeTab?.title === "string" &&
-            activeTab.title.trim().length > 0
-              ? activeTab.title
-              : undefined,
-          url:
-            typeof activeTab?.url === "string" && activeTab.url.trim().length > 0
-              ? activeTab.url
-              : undefined
-        }
-      } catch {
-        activePage = undefined
-      }
-    }
-
-    if (!activePage?.title && !activePage?.url && snippets.length === 0) {
-      return undefined
-    }
-
-    return {
-      ...(activePage?.title ? { title: activePage.title } : {}),
-      ...(activePage?.url ? { url: activePage.url } : {}),
-      snippets
-    }
-  }, [pageContextActive, selectedDocuments])
+  const getVisiblePageContextForHandoff = React.useCallback(
+    () => readVisiblePageContextForHandoff(
+      selectedDocuments,
+      pageContextActive,
+      () => browser.tabs.query({ active: true, currentWindow: true })
+    ),
+    [pageContextActive, selectedDocuments]
+  )
   const contextChips = [
     ...(replyTarget && isProMode
       ? [

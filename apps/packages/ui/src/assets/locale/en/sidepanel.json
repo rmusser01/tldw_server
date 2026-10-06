@@ -42,7 +42,10 @@
     "modeKnowledge": "Knowledge",
     "modeNotes": "Notes",
     "modePrompts": "Prompts",
-    "modeFlashcards": "Flashcards"
+    "modeFlashcards": "Flashcards",
+    "openFullChatExtension": "Open full extension chat",
+    "openFullChatExtensionDescription": "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy.",
+    "openFullChatWebuiHandoffDescription": "Opens the configured WebUI with a draft and selected chat options. Device-local history may be unavailable there."
   },
   "flashcards": {
     "opening": "Opening Flashcards",
@@ -81,7 +84,17 @@
     "modeFlashcards": "Flashcards",
     "knowledgeSearch": "Open knowledge search",
     "knowledge": "Knowledge search",
-    "moreTools": "More tools"
+    "moreTools": "More tools",
+    "openCharacterChatInFullExtension": "Open Character Chat in full extension",
+    "openCharacterChatExtensionDescription": "Opens the character route in the extension full page. Use Copy draft & page references to carry a bounded copy; history and chat settings are not included.",
+    "copyDraftContext": "Copy draft & page references",
+    "copyDraftContextExtensionDescription": "Opens the extension full page with a short-lived copy of your draft and page titles and URLs. Page content, history, and chat settings are not included. Review the copy in the destination.",
+    "copyDraftContextWebuiDescription": "Opens /chat in this WebUI with a short-lived copy of your draft and page titles and URLs. Page content, history, and chat settings are not included. Review the copy in the destination.",
+    "copyDraftNothingToSend": "No draft or page references to copy",
+    "copyDraftFailed": "Could not open the full chat page. Your source draft remains here.",
+    "copyDraftOpened": "Full chat page opened. Review the copy there. Your source draft remains here.",
+    "copyDraftOpenedPartial": "Opened with a partial copy: some draft or page references were shortened or unavailable. Review the copy there. Your source draft remains here.",
+    "copyDraftPageReferencesUnavailable": "Page references could not be read. Try again. Your source draft remains here."
   },
   "toolbar": {
     "knowledgeSearch": "Knowledge Search"

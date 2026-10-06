@@ -1,4 +1,6 @@
 import React from "react"
+import { ConfigProvider, type PopoverProps } from "antd"
+import { readVisiblePageContextForHandoff } from "../sidepanel-chat-handoff-context"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ControlRow } from "../ControlRow"
@@ -14,9 +16,7 @@ type MockChildrenProps = {
   children?: React.ReactNode
 }
 
-type MockPopoverProps = MockChildrenProps & {
-  content?: React.ReactNode
-}
+type MockPopoverProps = PopoverProps
 
 type MockSwitchProps = {
   checked?: boolean
@@ -40,6 +40,8 @@ const createDeferred = <T,>() => {
 }
 
 const mocks = vi.hoisted(() => ({
+  useNativePopover: false,
+  runtimeId: "handoff-extension" as string | undefined,
   selectedAssistant: null as null | {
     kind: "character"
     id: string
@@ -71,7 +73,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("wxt/browser", () => ({
   browser: {
     runtime: {
-      id: "handoff-extension",
+      get id() { return mocks.runtimeId },
       getURL: mocks.runtimeGetURL
     },
     tabs: {
@@ -86,7 +88,8 @@ vi.mock("@/services/sidepanel-chat-handoff", () => ({
   buildSidepanelChatHandoffRoute: mocks.buildSidepanelChatHandoffRoute
 }))
 
-vi.mock("antd", () => {
+vi.mock("antd", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("antd")>()
   const Select = ({ children, ...props }: MockSelectProps) => (
     <select
       aria-label={props["aria-label"]}
@@ -116,18 +119,16 @@ vi.mock("antd", () => {
   }
 
   return {
+    ConfigProvider: actual.ConfigProvider,
     Input: ({ onPressEnter: _onPressEnter, ...props }: MockInputProps) => (
       <input {...props} />
     ),
     InputNumber: (props: React.InputHTMLAttributes<HTMLInputElement>) => (
       <input type="number" {...props} />
     ),
-    Popover: ({ children, content }: MockPopoverProps) => (
-      <>
-        {children}
-        <div data-testid="mock-popover-content">{content}</div>
-      </>
-    ),
+    Popover: (props: MockPopoverProps) => mocks.useNativePopover
+      ? <actual.Popover {...props} />
+      : <>{props.children}<div data-testid="mock-popover-content">{props.content as React.ReactNode}</div></>,
     Radio,
     Select,
     Switch: ({
@@ -262,6 +263,8 @@ const defaultProps = () => ({
 describe("ControlRow sidepanel chat handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.useNativePopover = false
+    mocks.runtimeId = "handoff-extension"
     mocks.selectedAssistant = null
     mocks.createSidepanelChatHandoff.mockResolvedValue({
       id: "handoff-123",
@@ -271,6 +274,80 @@ describe("ControlRow sidepanel chat handoff", () => {
       draft: { text: "Summarize this" }
     })
     vi.spyOn(window, "open").mockImplementation(() => null)
+  })
+
+  it("names the bounded copy destination and its carried-state limits", () => {
+    render(<ControlRow {...defaultProps()} draftMessage="draft text" />)
+    const copy = screen.getByRole("button", { name: "Copy draft & page references" })
+    expect(copy).toHaveAccessibleDescription("Opens the extension full page with a short-lived copy of your draft and page titles and URLs. Page content, history, and chat settings are not included. Review the copy in the destination.")
+  })
+
+  it.each([false, true])("keeps an opened copy outcome outside More, shortened=%s", async shortened => {
+    if (shortened) mocks.createSidepanelChatHandoff.mockResolvedValueOnce({ id: "handoff-123", draft: { text: "Short copy", truncated: true } })
+    render(<ControlRow {...defaultProps()} draftMessage="Original source draft  " />)
+    fireEvent.click(screen.getByTestId("chat-continue-in-webui"))
+    const feedback = await screen.findByTestId("chat-handoff-feedback")
+    expect(feedback).toHaveTextContent(shortened ? "partial copy" : "Full chat page opened")
+    expect(feedback).toHaveTextContent("Your source draft remains here")
+    expect(feedback).not.toHaveTextContent(/Imported/i)
+    expect(feedback.closest('[data-testid="mock-popover-content"]')).toBeNull()
+    expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledWith(expect.objectContaining({ draftText: "Original source draft  " }))
+  })
+
+  it("copies within the current WebUI origin independently of its configured callback", async () => {
+    mocks.runtimeId = undefined
+    const callback = vi.fn()
+    vi.mocked(window.open).mockImplementationOnce(() => ({ closed: false }) as Window)
+    render(<ControlRow {...defaultProps()} draftMessage="Source draft" onOpenChatInWebUi={callback} />)
+    const copy = screen.getByRole("button", { name: "Copy draft & page references" })
+    expect(copy).toHaveAccessibleDescription("Opens /chat in this WebUI with a short-lived copy of your draft and page titles and URLs. Page content, history, and chat settings are not included. Review the copy in the destination.")
+    fireEvent.click(copy)
+    await waitFor(() => expect(window.open).toHaveBeenCalledWith("/chat?handoff=handoff-123", "_blank"))
+    expect(callback).not.toHaveBeenCalled()
+    expect(mocks.tabsCreate).not.toHaveBeenCalled()
+  })
+
+  it("reports a partial copy when requested page context cannot be read", async () => {
+    render(<ControlRow {...defaultProps()} draftMessage="Source text" hasVisiblePageContextForHandoff getVisiblePageContextForHandoff={async () => { throw new Error("page unavailable") }} />)
+    fireEvent.click(screen.getByTestId("chat-continue-in-webui"))
+    const feedback = await screen.findByTestId("chat-handoff-feedback")
+    expect(feedback).toHaveTextContent("partial copy")
+    expect(feedback).toHaveTextContent("unavailable")
+    expect(mocks.tabsCreate).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports the actual producer's failed active-page read even when document references survive", async () => {
+    const readTabs = vi.fn().mockRejectedValue(new Error("tab unavailable"))
+    mocks.createSidepanelChatHandoff.mockImplementationOnce(async input => ({ id: "handoff-123", draft: { text: input.draftText }, pageContext: input.pageContext }))
+    render(<ControlRow {...defaultProps()} draftMessage="Source draft" hasVisiblePageContextForHandoff
+      getVisiblePageContextForHandoff={() => readVisiblePageContextForHandoff([{ title: "Research note" }], true, readTabs)} />)
+    fireEvent.click(screen.getByTestId("chat-continue-in-webui"))
+    expect(await screen.findByTestId("chat-handoff-feedback")).toHaveTextContent("partial copy")
+    expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledWith(expect.objectContaining({ pageContext: expect.objectContaining({ truncated: true }) }))
+    expect(readTabs).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers retry for the actual producer's failed context-only read without opening an empty destination", async () => {
+    render(<ControlRow {...defaultProps()} hasVisiblePageContextForHandoff
+      getVisiblePageContextForHandoff={() => readVisiblePageContextForHandoff([], true, async () => { throw new Error("tab unavailable") })} />)
+    fireEvent.click(screen.getByTestId("chat-continue-in-webui"))
+    expect(await screen.findByTestId("chat-handoff-feedback")).toHaveTextContent("Page references could not be read. Try again.")
+    expect(mocks.createSidepanelChatHandoff).not.toHaveBeenCalled()
+    expect(mocks.tabsCreate).not.toHaveBeenCalled()
+  })
+
+  it("keeps the copy outcome visible after the installed Popover closes", async () => {
+    mocks.useNativePopover = true
+    render(<ConfigProvider theme={{ token: { motion: false } }}><ControlRow {...defaultProps()} draftMessage="Source draft" /></ConfigProvider>)
+    const more = screen.getByRole("button", { name: "More tools" })
+    fireEvent.click(more)
+    expect(more).toHaveAttribute("aria-expanded", "true")
+    fireEvent.click(await screen.findByRole("button", { name: "Copy draft & page references" }))
+    const feedback = await screen.findByTestId("chat-handoff-feedback")
+    expect(feedback).toBeVisible()
+    expect(feedback).toHaveTextContent("Full chat page opened")
+    await waitFor(() => expect(more).toHaveAttribute("aria-expanded", "false"))
+    expect(feedback.closest(".ant-popover")).toBeNull()
   })
 
   it("keeps Open full app route-only with no handoff parameter", () => {
@@ -448,7 +525,7 @@ describe("ControlRow sidepanel chat handoff", () => {
     fireEvent.click(screen.getByTestId("chat-continue-in-webui"))
 
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Nothing to continue in WebUI"
+      "Page references could not be read. Try again. Your source draft remains here."
     )
     expect(mocks.createSidepanelChatHandoff).not.toHaveBeenCalled()
     expect(mocks.tabsCreate).not.toHaveBeenCalled()
@@ -461,7 +538,7 @@ describe("ControlRow sidepanel chat handoff", () => {
     fireEvent.click(screen.getByTestId("chat-continue-in-webui"))
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Could not continue in WebUI"
+      "Could not open the full chat page. Your source draft remains here."
     )
     expect(mocks.tabsCreate).not.toHaveBeenCalled()
     expect(window.open).not.toHaveBeenCalled()
@@ -491,7 +568,7 @@ describe("ControlRow sidepanel chat handoff", () => {
     fireEvent.click(screen.getByTestId("chat-continue-in-webui"))
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Could not continue in WebUI"
+      "Could not open the full chat page. Your source draft remains here."
     )
     expect(mocks.consumeSidepanelChatHandoff).toHaveBeenCalledWith("handoff-123")
   })

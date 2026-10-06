@@ -185,6 +185,18 @@ describe("sidepanel chat handoff storage service", () => {
     await expect(readSidepanelChatHandoff(pkg.id)).resolves.toEqual(pkg)
   })
 
+  it("preserves producer-reported partial references through storage read-back", async () => {
+    const pkg = await createSidepanelChatHandoff({
+      draftText: "Source draft",
+      pageContext: {
+        snippets: [{ kind: "visible-context", text: "Title: Research note" }],
+        truncated: true
+      }
+    })
+    expect(pkg.pageContext?.truncated).toBe(true)
+    await expect(readSidepanelChatHandoff(pkg.id)).resolves.toEqual(pkg)
+  })
+
   it("throws and does not return a handoff id when storage set fails", async () => {
     storageState.set.mockRejectedValueOnce(new Error("storage quota exceeded"))
 

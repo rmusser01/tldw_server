@@ -47,6 +47,7 @@ export type CreateSidepanelChatHandoffInput = {
     title?: string
     url?: string
     snippets?: SidepanelChatHandoffSnippet[]
+    truncated?: boolean
   }
   routeIntent?: SidepanelChatHandoffPackage["routeIntent"]
 }
@@ -187,7 +188,7 @@ const buildPageContext = (
       ? undefined
       : truncateText(pageContext.url, SIDEPANEL_CHAT_HANDOFF_MAX_URL_CHARS)
   const truncated =
-    snippetsTruncated || Boolean(title?.truncated) || Boolean(url?.truncated)
+    pageContext.truncated === true || snippetsTruncated || Boolean(title?.truncated) || Boolean(url?.truncated)
 
   return {
     ...(title ? { title: title.text } : {}),

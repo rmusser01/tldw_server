@@ -310,7 +310,7 @@ describe("ControlRow role-play handoff behavior", () => {
     const openFullApp = screen.getByTestId("chat-open-full-app")
 
     expect(openFullApp).toHaveAccessibleDescription(
-      "Opens /chat in a new tab with the active role-play route. Use Continue in WebUI to carry a draft or page context."
+      "Opens the character route in the extension full page. Use Copy draft & page references to carry a bounded copy; history and chat settings are not included."
     )
 
     fireEvent.click(openFullApp)

@@ -63,14 +63,20 @@ export const SidepanelHeaderSimple = ({
     ? t("common:chatSidebar.collapse", "Collapse sidebar")
     : t("common:chatSidebar.expand", "Expand sidebar")
   const usesExtensionExpansion = Boolean(historySelection && (browser.runtime.id || !onOpenChatInWebUi))
-  const openFullChatLabel = usesExtensionExpansion ? t("playground:historySelection.expand", "Expand in full page") : t(
-    "sidepanel:header.openFullChatWebui",
-    "Open full chat in WebUI"
-  )
-  const openFullChatDescription = !chatReady ? t("sidepanel:header.restoreBeforeExpand", "Restore or start a conversation before opening it in a full page.") : usesExtensionExpansion ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.") : t(
-    "sidepanel:header.openFullChatWebuiDescription",
-    "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
-  )
+  const usesWebUiHandoff = Boolean(onOpenChatInWebUi && !usesExtensionExpansion)
+  const openFullChatLabel = usesExtensionExpansion
+    ? t("playground:historySelection.expand", "Expand in full page")
+    : usesWebUiHandoff
+      ? t("sidepanel:header.openFullChatWebui", "Open full chat in WebUI")
+      : t("sidepanel:header.openFullChatExtension", "Open full extension chat")
+  const openFullChatDescription = !chatReady
+    ? t("sidepanel:header.restoreBeforeExpand", "Restore or start a conversation before opening it in a full page.")
+    : usesExtensionExpansion
+      ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.")
+      : usesWebUiHandoff
+        ? t("sidepanel:header.openFullChatWebuiHandoffDescription", "Opens the configured WebUI with a draft and selected chat options. Device-local history may be unavailable there.")
+        : t("sidepanel:header.openFullChatExtensionDescription", "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy.")
+
 
   const handleSidebarToggle = React.useCallback(() => {
     const next = !sidebarOpen

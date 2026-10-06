@@ -138,11 +138,11 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const [moreOpen, setMoreOpen] = React.useState(false)
   const [handoffFeedback, setHandoffFeedback] = React.useState<{
-    tone: "warning" | "error"
+    tone: "info" | "warning" | "error"
     message: string
   } | null>(null)
-  const continueInWebUIPendingRef = React.useRef(false)
-  const [continueInWebUIPending, setContinueInWebUIPending] =
+  const copyDraftPendingRef = React.useRef(false)
+  const [copyDraftPending, setCopyDraftPending] =
     React.useState(false)
   const updateScopedChatModelSetting = useStoreChatModelSettings(
     (state) => state.updateScopedSetting
@@ -155,6 +155,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const knowledgeBtnRef = React.useRef<HTMLButtonElement>(null)
   const modelSelectRef = React.useRef<ModelSelectHandle | null>(null)
   const fullAppHandoffDescriptionId = React.useId()
+  const copyHandoffDescriptionId = React.useId()
   const { capabilities } = useServerCapabilities()
   const [activePlaylistDetail, setActivePlaylistDetail] =
     React.useState<QuickIngestOpenDetail | null>(null)
@@ -440,35 +441,30 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   )
   const historySelection = useHistorySelectionContext()
   const usesExtensionExpansion = Boolean(historySelection && (browser.runtime.id || !onOpenChatInWebUi))
-  const fullAppButtonLabel = usesExtensionExpansion ? t("playground:historySelection.expand", "Expand in full page") : rolePlayActive
-    ? t(
-        "sidepanel:controlRow.openCharacterChatInFullUI",
-        "Open Character Chat in full app"
-      )
-    : t("sidepanel:controlRow.openInFullUI", "Open full app")
-  const fullAppHandoffDescription = usesExtensionExpansion ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.") : rolePlayActive
-    ? t(
-        "sidepanel:controlRow.openRolePlayFullAppDescription",
-        "Opens /chat in a new tab with the active role-play route. Use Continue in WebUI to carry a draft or page context."
-      )
-    : t(
-        "sidepanel:controlRow.openFullAppDescription",
-        "Opens /chat in a new tab. Use Continue in WebUI to carry a draft or page context."
-      )
-  const continueInWebUIButtonLabel = t(
-    "sidepanel:controlRow.continueInWebUI",
-    "Continue in WebUI"
-  )
-  const continueInWebUIDescription = t(
-    "sidepanel:controlRow.continueInWebUIDescription",
-    "Creates a short-lived handoff with the sidepanel draft and visible page context, then opens /chat in the WebUI."
-  )
+  const fullAppButtonLabel = usesExtensionExpansion
+    ? t("playground:historySelection.expand", "Expand in full page")
+    : onOpenChatInWebUi
+      ? t("sidepanel:header.openFullChatWebui", "Open full chat in WebUI")
+      : rolePlayActive
+        ? t("sidepanel:controlRow.openCharacterChatInFullExtension", "Open Character Chat in full extension")
+        : t("sidepanel:header.openFullChatExtension", "Open full extension chat")
+  const fullAppHandoffDescription = usesExtensionExpansion
+    ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.")
+    : onOpenChatInWebUi
+      ? t("sidepanel:header.openFullChatWebuiHandoffDescription", "Opens the configured WebUI with a draft and selected chat options. Device-local history may be unavailable there.")
+      : rolePlayActive
+        ? t("sidepanel:controlRow.openCharacterChatExtensionDescription", "Opens the character route in the extension full page. Use Copy draft & page references to carry a bounded copy; history and chat settings are not included.")
+        : t("sidepanel:header.openFullChatExtensionDescription", "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy.")
+  const copyDraftButtonLabel = t("sidepanel:controlRow.copyDraftContext", "Copy draft & page references")
+  const copyDraftDescription = browser.runtime.id
+    ? t("sidepanel:controlRow.copyDraftContextExtensionDescription", "Opens the extension full page with a short-lived copy of your draft and page titles and URLs. Page content, history, and chat settings are not included. Review the copy in the destination.")
+    : t("sidepanel:controlRow.copyDraftContextWebuiDescription", "Opens /chat in this WebUI with a short-lived copy of your draft and page titles and URLs. Page content, history, and chat settings are not included. Review the copy in the destination.")
   const draftText = draftMessage ?? ""
   const hasDraftForHandoff = draftText.trim().length > 0
-  const continueInWebUIEnabled =
+  const copyDraftEnabled =
     hasDraftForHandoff || hasVisiblePageContextForHandoff
-  const continueInWebUIButtonDisabled =
-    !continueInWebUIEnabled || continueInWebUIPending
+  const copyDraftButtonDisabled =
+    !copyDraftEnabled || copyDraftPending
   const activeCharacterIdForRouteIntent =
     selectedAssistant?.kind === "character"
       ? String(selectedAssistant.id ?? "").trim()
@@ -574,10 +570,10 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           pageContext.snippets.some((snippet) => snippet.text.trim().length > 0))
     )
 
-  const continueInWebUI = async () => {
-    if (!continueInWebUIEnabled || continueInWebUIPendingRef.current) return
-    continueInWebUIPendingRef.current = true
-    setContinueInWebUIPending(true)
+  const copyDraftToFullPage = async () => {
+    if (!copyDraftEnabled || copyDraftPendingRef.current) return
+    copyDraftPendingRef.current = true
+    setCopyDraftPending(true)
     setHandoffFeedback(null)
 
     try {
@@ -591,10 +587,15 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
       if (!hasDraftForHandoff && !pageContextHasVisibleContent(pageContext)) {
         setHandoffFeedback({
           tone: "warning",
-          message: t(
-            "sidepanel:controlRow.continueInWebUINothingToSend",
-            "Nothing to continue in WebUI"
-          )
+          message: hasVisiblePageContextForHandoff || pageContext?.truncated
+            ? t(
+                "sidepanel:controlRow.copyDraftPageReferencesUnavailable",
+                "Page references could not be read. Try again. Your source draft remains here."
+              )
+            : t(
+                "sidepanel:controlRow.copyDraftNothingToSend",
+                "No draft or page references to copy"
+              )
         })
         return
       }
@@ -612,23 +613,33 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           setHandoffFeedback({
             tone: "error",
             message: t(
-              "sidepanel:controlRow.continueInWebUIFailed",
-              "Could not continue in WebUI"
+              "sidepanel:controlRow.copyDraftFailed",
+              "Could not open the full chat page. Your source draft remains here."
             )
+          })
+        } else {
+          const partial = Boolean(pkg.draft.truncated || pkg.pageContext?.truncated ||
+            pkg.pageContext?.snippets.some(snippet => snippet.truncated) ||
+            (hasVisiblePageContextForHandoff && !pageContextHasVisibleContent(pageContext)))
+          setHandoffFeedback({
+            tone: partial ? "warning" : "info",
+            message: partial
+              ? t("sidepanel:controlRow.copyDraftOpenedPartial", "Opened with a partial copy: some draft or page references were shortened or unavailable. Review the copy there. Your source draft remains here.")
+              : t("sidepanel:controlRow.copyDraftOpened", "Full chat page opened. Review the copy there. Your source draft remains here.")
           })
         }
       } catch {
         setHandoffFeedback({
           tone: "error",
           message: t(
-            "sidepanel:controlRow.continueInWebUIFailed",
-            "Could not continue in WebUI"
+            "sidepanel:controlRow.copyDraftFailed",
+            "Could not open the full chat page. Your source draft remains here."
           )
         })
       }
     } finally {
-      continueInWebUIPendingRef.current = false
-      setContinueInWebUIPending(false)
+      copyDraftPendingRef.current = false
+      setCopyDraftPending(false)
     }
   }
 
@@ -1023,44 +1034,48 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         <ExternalLink className="size-4 text-text-subtle" />
         {fullAppButtonLabel}
       </button>
+      <p id={fullAppHandoffDescriptionId} className="px-3 text-xs text-text-muted">
+        {fullAppHandoffDescription}
+      </p>
       <button
         type="button"
         onClick={() => {
-          void continueInWebUI()
+          void copyDraftToFullPage()
         }}
-        disabled={continueInWebUIButtonDisabled}
-        aria-disabled={continueInWebUIButtonDisabled}
-        aria-busy={continueInWebUIPending || undefined}
+        disabled={copyDraftButtonDisabled}
+        aria-disabled={copyDraftButtonDisabled}
+        aria-busy={copyDraftPending || undefined}
         data-testid="chat-continue-in-webui"
+        aria-label={copyDraftButtonLabel}
+        aria-describedby={copyHandoffDescriptionId}
         className={`w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 ${
-          !continueInWebUIButtonDisabled
+          !copyDraftButtonDisabled
             ? "hover:bg-surface2"
             : "cursor-not-allowed opacity-50"
         }`}
-        title={continueInWebUIDescription}
+        title={copyDraftDescription}
       >
         <ExternalLink className="size-4 text-text-subtle" />
-        {continueInWebUIButtonLabel}
+        {copyDraftButtonLabel}
       </button>
-      {handoffFeedback && (
-        <div
-          role={handoffFeedback.tone === "error" ? "alert" : "status"}
-          className={`px-3 text-xs ${
-            handoffFeedback.tone === "error" ? "text-danger" : "text-warning"
-          }`}
-        >
-          {handoffFeedback.message}
-        </div>
-      )}
-      <span id={fullAppHandoffDescriptionId} className="sr-only">
-        {fullAppHandoffDescription}
-      </span>
+      <p id={copyHandoffDescriptionId} className="px-3 text-xs text-text-muted">
+        {copyDraftDescription}
+      </p>
 
     </div>
   )
 
   return (
     <div data-testid="control-row" className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        {handoffFeedback && (
+          <div
+            data-testid="chat-handoff-feedback"
+            role={handoffFeedback.tone === "error" ? "alert" : "status"}
+            className={`basis-full text-xs ${handoffFeedback.tone === "error" ? "text-danger" : handoffFeedback.tone === "warning" ? "text-warning" : "text-text-muted"}`}
+          >
+            {handoffFeedback.message}
+          </div>
+        )}
         {activeHint && (
           <FeatureHint
             key={activeHint}

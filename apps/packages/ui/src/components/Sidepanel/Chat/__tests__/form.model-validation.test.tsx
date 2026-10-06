@@ -355,7 +355,9 @@ it.each(["compact", "full"])("greeting preparation gates ordinary, Run now, and 
     ts.forEachChild(node, walk)
   }
   walk(tree)
-  const code = ["onSubmit", "handleRunQueuedRequest", "handleRunNextQueuedRequest"].map(name => {
+  const dispatchNames = ["onSubmit", "handleRunQueuedRequest", "handleRunNextQueuedRequest"]
+  if (surface === "full") dispatchNames.unshift("getSubmitDisabledReason")
+  const code = dispatchNames.map(name => {
     const value = initializers.get(name)
     if (!value) throw new Error(`Missing actual dispatch entry: ${name}`)
     return `const ${name} = ${value};`
@@ -363,8 +365,8 @@ it.each(["compact", "full"])("greeting preparation gates ordinary, Run now, and 
   const transpiled = ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   let preparing = true
   const submitMessageAction = vi.fn(async () => ({ status: "submitted" })), run = vi.fn(), next = vi.fn()
-  const actions = new Function("React", "greetingSubmitGateRef", "submitMessageAction", "runQueuedRequest", "runNextQueuedRequest", "queue", "t", transpiled)(
-    { useCallback: (callback: unknown) => callback }, { current: () => preparing }, submitMessageAction, run, next,
+  const actions = new Function("React", "greetingSubmitGateRef", "characterSubmitBlockerRef", "submitMessageAction", "runQueuedRequest", "runNextQueuedRequest", "queue", "t", transpiled)(
+    { useCallback: (callback: unknown) => callback }, { current: () => preparing }, { current: null }, submitMessageAction, run, next,
     { handleRunQueuedRequest: run, handleRunNextQueuedRequest: next }, t)
   expect(await actions.onSubmit({ message: "UNSENT", image: "" })).toMatchObject({ status: "skipped" })
   actions.handleRunQueuedRequest("queued"); actions.handleRunNextQueuedRequest()

@@ -91,6 +91,7 @@ describe("SidepanelHeaderSimple WebUI chat handoff", () => {
       <SidepanelHeaderSimple onOpenChatInWebUi={onOpenChatInWebUi} />
     )
 
+    expect(screen.getByRole("button", { name: "Open full chat in WebUI" })).toHaveAccessibleDescription("Opens the configured WebUI with a draft and selected chat options. Device-local history may be unavailable there.")
     fireEvent.click(screen.getByTestId("chat-open-full-screen"))
 
     await waitFor(() =>
