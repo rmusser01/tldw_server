@@ -50,6 +50,9 @@ const {
   getElevenLabsModelsMock,
   addRenderMock,
   generateSegmentsMock,
+  streamStartMock,
+  streamAppendMock,
+  streamFinishMock,
   setTTSSettingsMock,
   inferTldwProviderFromModelMock,
   isTimeoutLikeErrorMock,
@@ -71,6 +74,9 @@ const {
     getElevenLabsModelsMock: vi.fn(),
     addRenderMock: vi.fn(),
     generateSegmentsMock: vi.fn(async () => []),
+    streamStartMock: vi.fn(),
+    streamAppendMock: vi.fn(),
+    streamFinishMock: vi.fn(),
     setTTSSettingsMock: vi.fn(async () => undefined),
     inferTldwProviderFromModelMock: vi.fn(() => null),
     isTimeoutLikeErrorMock: vi.fn(() => false),
@@ -386,9 +392,9 @@ vi.mock("@/hooks/useTtsPlayground", () => ({
 
 vi.mock("@/hooks/useStreamingAudioPlayer", () => ({
   useStreamingAudioPlayer: () => ({
-    start: vi.fn(),
-    append: vi.fn(),
-    finish: vi.fn(),
+    start: streamStartMock,
+    append: streamAppendMock,
+    finish: streamFinishMock,
     stop: vi.fn(),
     state: "idle",
     getBufferedBlob: vi.fn(() => null),
@@ -519,6 +525,40 @@ vi.mock("@/services/tldw/tts-provider-keys", () => ({
 import SpeechPlaygroundPage from "../SpeechPlaygroundPage"
 
 describe("SpeechPlaygroundPage", () => {
+  it("retires a streaming socket and ignores its queued callbacks after navigation away", async () => {
+    const sockets: TestSocket[] = []
+    class TestSocket {
+      binaryType = "arraybuffer"
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: ArrayBuffer }) => void) | null = null
+      onclose: (() => void) | null = null
+      onerror: (() => void) | null = null
+      close = vi.fn()
+      send = vi.fn()
+      constructor() { sockets.push(this) }
+    }
+    vi.stubGlobal("WebSocket", TestSocket)
+    ttsSettingsRef.current = { ...ttsSettingsRef.current, ttsProvider: "tldw", tldwTtsStreaming: true }
+    inferTldwProviderFromModelMock.mockReturnValue("kokoro")
+    ttsProviderDataRef.current.providersInfo = { providers: { kokoro: { supports_streaming: true, formats: ["mp3"] } }, voices: { kokoro: [{ id: "Bella", name: "Bella" }] } }
+    try {
+      const view = render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+      fireEvent.change(screen.getByLabelText("Enter some text to hear it spoken."), { target: { value: "Speech that is still streaming." } })
+      await waitFor(() => expect(screen.getByTestId("tts-play-button")).toBeEnabled())
+      fireEvent.click(screen.getByTestId("tts-play-button"))
+      await waitFor(() => expect(sockets).toHaveLength(1))
+      await act(async () => { sockets[0].onopen?.(); await Promise.resolve() })
+      const lateMessage = sockets[0].onmessage
+      const lateClose = sockets[0].onclose
+      view.unmount()
+      expect(sockets[0].close).toHaveBeenCalledOnce()
+      expect(sockets[0].onmessage).toBeNull()
+      act(() => { lateMessage?.({ data: new ArrayBuffer(100) }); lateClose?.() })
+      expect(streamAppendMock).not.toHaveBeenCalled()
+      expect(streamFinishMock).not.toHaveBeenCalled()
+    } finally { vi.unstubAllGlobals() }
+  })
+
   beforeEach((): void => {
     vi.clearAllMocks()
     invalidateQueriesMock.mockReset()

@@ -83,6 +83,19 @@ describe("background proxy fallback safety", () => {
     mocks.storageRemove.mockResolvedValue(undefined)
   })
 
+  it("keeps a size-limited preview failure from marking the backend unreachable", async () => {
+    mocks.tldwRequest.mockResolvedValue({ ok: false, status: 0, code: "RESPONSE_TOO_LARGE", error: "Response exceeds the size limit." })
+    const offline = vi.fn()
+    window.addEventListener("tldw:backend-unreachable", offline)
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(bgRequest({ path: "/api/v1/media/1/file", responseType: "arrayBuffer", maxResponseBytes: 64 * 1024 * 1024 })).rejects.toMatchObject({ code: "RESPONSE_TOO_LARGE" })
+      expect(offline).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener("tldw:backend-unreachable", offline)
+    }
+  })
+
   it("preserves native projection non-commit details through the real domain and proxy", async () => {
     mocks.sendMessage.mockResolvedValue({
       ok: false,

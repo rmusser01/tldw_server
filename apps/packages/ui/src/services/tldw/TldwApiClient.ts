@@ -1,4 +1,5 @@
 import type { InitialChatSetupAttempt } from "@/utils/settings-return"
+import { BoundedTtlCache } from "./bounded-ttl-cache"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import type { ChatScope } from "@/types/chat-scope"
 import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
@@ -1680,12 +1681,9 @@ export class TldwApiClientBase {
   private config: TldwConfig | null = null
   private baseUrl: string = ''
   private headers: HeadersInit = {}
-  characterCache = new Map<string, { value: any; expiresAt: number }>()
+  characterCache = new BoundedTtlCache<any>()
   characterInFlight = new Map<string, Promise<any>>()
-  chatMessagesCache = new Map<
-    string,
-    { value: ServerChatMessage[]; expiresAt: number }
-  >()
+  chatMessagesCache = new BoundedTtlCache<ServerChatMessage[]>()
   chatMessagesInFlight = new Map<string, Promise<ServerChatMessage[]>>()
   private openApiPathSet: Set<string> | null = null
   private openApiPathSetPromise: Promise<Set<string> | null> | null = null
