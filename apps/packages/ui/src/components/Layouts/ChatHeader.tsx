@@ -20,6 +20,7 @@ import {
 import { HeaderShortcuts } from "./HeaderShortcuts"
 import logoImage from "~/assets/icon.png"
 import type { NotificationLifecycleState } from "@/services/notification-lifecycle"
+import { getPersistenceModeLabel, getPersistenceModePillLabel } from "@/hooks/playground/usePersistenceMode"
 
 type HeaderNotificationState = NotificationLifecycleState
 
@@ -325,25 +326,9 @@ export function ChatHeader({
                     ? "border-warn/50 bg-warn/10 text-warn"
                     : "border-success/40 bg-success/10 text-success"
                 }`}
-                title={
-                  temporaryChat
-                    ? toText(
-                        t(
-                          "playground:header.modeTemporaryHelp",
-                          "Temporary chat. Messages are not saved."
-                        )
-                      )
-                    : toText(
-                        t(
-                          "playground:header.modeSavedHelp",
-                          "Saved chat. History is persisted."
-                        )
-                      )
-                }
+                title={toText(getPersistenceModeLabel(t, temporaryChat))}
               >
-                {temporaryChat
-                  ? toText(t("playground:header.modeTemporary", "Temporary"))
-                  : toText(t("playground:header.modeSaved", "Saved"))}
+                {toText(getPersistenceModePillLabel(t, temporaryChat))}
               </span>
               {activeCharacterName ? (
                 <span

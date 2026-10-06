@@ -342,14 +342,6 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
         }
         return await loadLegacyCharacterList()
       }
-      const buildEmptyCharacterQueryResponse = () => ({
-        items: [],
-        total: 0,
-        page: currentPage,
-        page_size: pageSize,
-        has_more: false
-      })
-
       try {
         await tldwClient.initialize()
         if (useServerQuery) {
@@ -382,7 +374,7 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
               defaultValue: "Something went wrong. Please try again later"
             })
         })
-        return buildEmptyCharacterQueryResponse()
+        throw e
       }
     },
     staleTime: 5 * 60 * 1000,

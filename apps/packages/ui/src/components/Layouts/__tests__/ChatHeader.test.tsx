@@ -316,3 +316,15 @@ describe("ChatHeader shortcut toggle", () => {
     )
   })
 })
+
+
+it("labels history eligibility without claiming an acknowledged save", () => {
+  render(<ChatHeader {...createProps({ historyId: null, temporaryChat: false })} />)
+  expect(screen.getByText("History on")).toHaveAttribute("title", "New messages can be stored in chat history.")
+  expect(screen.queryByText("Saved")).not.toBeInTheDocument()
+})
+
+it("explains Temporary history without promising removal of retained local drafts", () => {
+  render(<ChatHeader {...createProps({ temporaryChat: true })} />)
+  expect(screen.getByText("Temporary")).toHaveAttribute("title", "New messages are not added to saved chat history. Draft text may remain on this device.")
+})

@@ -784,7 +784,7 @@ describe("CharactersManager first-use onboarding", () => {
     expect(notificationMock.error).not.toHaveBeenCalled()
   })
 
-  it("degrades to an empty list with notification when query and legacy fallbacks both fail", async () => {
+  it("rejects with notification when query and legacy fallbacks both fail", async () => {
     const routeConflictError = Object.assign(
       new Error(
         "Input should be a valid integer, unable to parse string as an integer (path.character_id)"
@@ -802,13 +802,7 @@ describe("CharactersManager first-use onboarding", () => {
     render(<CharactersManager />)
 
     const listQuery = getListCharactersQueryOptions()
-    await expect(listQuery.queryFn()).resolves.toMatchObject({
-      items: [],
-      total: 0,
-      page: 1,
-      page_size: 10,
-      has_more: false
-    })
+    await expect(listQuery.queryFn()).rejects.toThrow("Legacy all-characters listing unavailable")
     expect(notificationMock.error).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Error"
