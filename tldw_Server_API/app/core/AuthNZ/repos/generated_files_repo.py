@@ -107,6 +107,16 @@ class _TransactionBoundPool:
             row = await cursor.fetchone()
             return dict(zip((col[0] for col in cursor.description), row)) if row else None
 
+    async def fetchall(self, query: str, *args: Any) -> list[Any]:
+        """Read override rows on the owning connection, preserving native row shapes."""
+        params = _flatten_params(args)
+        if self.pool is not None:
+            rows = await self._conn.fetch(_convert_question_mark_to_dollar(query, params), *params)
+            return [dict(row) for row in rows]
+        cursor = await self._conn.execute(query, params)
+        async with cursor:
+            return list(await cursor.fetchall())
+
 
 @dataclass
 class AuthnzGeneratedFilesRepo:

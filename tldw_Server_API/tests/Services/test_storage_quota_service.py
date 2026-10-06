@@ -109,6 +109,10 @@ async def test_combined_quota_denial_reports_or_raises_storage_error(
     from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError
 
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.storage_quota_service.resolved_storage_quota_mb",
+        AsyncMock(return_value=100),
+    )
     svc = StorageQuotaService(
         db_pool=FakePool(quota_mb=100, used_mb=90.0 if blocking_level == "user" else 10.0),
         settings=DummySettings(str(tmp_path)),
@@ -136,7 +140,7 @@ async def test_combined_quota_denial_reports_or_raises_storage_error(
             await svc.check_combined_quota(
                 42, 20 * 1024 * 1024, team_id=7, org_id=9, raise_on_exceed=True,
             )
-        assert (exc.value.used_mb, exc.value.quota_mb) == (20.0, 100)
+        assert (exc.value.used_mb, exc.value.quota_mb) == (110.0, 100)
     else:
         allowed, info = await svc.check_combined_quota(
             42, 20 * 1024 * 1024, team_id=7, org_id=9,

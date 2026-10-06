@@ -87,10 +87,15 @@ from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, StorageError, TransactionError
 from tldw_Server_API.app.core.AuthNZ.initialize import setup_database, bootstrap_single_user_profile
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
+from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import AuthnzStorageQuotasRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.Storage import generated_file_helpers as helpers
+from tldw_Server_API.app.core.Usage import quota_resolver
+from tldw_Server_API.app.core.UserProfiles.overrides_repo import (
+    OrgProfileOverridesRepo, TeamProfileOverridesRepo, reset_schema_verification_cache,
+)
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
 async def main() -> None:
@@ -102,6 +107,8 @@ async def main() -> None:
         owner = get_settings().SINGLE_USER_FIXED_ID
         service = StorageQuotaService(pool)
         await service.initialize()
+        quota_mb = get_settings().DEFAULT_STORAGE_QUOTA_MB
+        await service.set_user_quota(owner, quota_mb)
         repo = AuthnzGeneratedFilesRepo(pool)
         await pool.execute('INSERT INTO organizations (id, name) VALUES (?, ?)', 51, 'vn-storage-org')
         await pool.execute('INSERT INTO teams (id, org_id, name) VALUES (?, ?, ?)', 52, 51, 'vn-storage-team')
@@ -162,7 +169,7 @@ async def main() -> None:
         elif case == 'capacity':
             record = await save()
             # Charge through the normal profile gateway, and fill the shared pools.
-            await service.update_usage(owner, int(get_settings().DEFAULT_STORAGE_QUOTA_MB * 1048576))
+            await service.update_usage(owner, int(quota_mb * 1048576))
             await quotas.update_org_used_mb(51, 100)
             await quotas.update_team_used_mb(52, 100)
             before = await snapshot()
@@ -179,7 +186,6 @@ async def main() -> None:
             result['unchanged'] = await snapshot() == before
             result['files'] = len(list(outputs.rglob('*.png')))
         elif case == 'capacity_race':
-            quota_mb = await pool.fetchval('SELECT storage_quota_mb FROM users WHERE id = ?', owner)
             await service.update_usage(owner, int(quota_mb * 1048576) - 5)
             await quotas.update_org_used_mb(51, 100 - 5 / 1048576)
             await quotas.update_team_used_mb(52, 100 - 5 / 1048576)
@@ -313,7 +319,6 @@ async def main() -> None:
         elif case.startswith('quota_policy_'):
             level = case.removeprefix('quota_policy_')
             if level == 'user':
-                quota_mb = await pool.fetchval('SELECT storage_quota_mb FROM users WHERE id = ?', owner)
                 await service.update_usage(owner, int(quota_mb * 1048576) - 5)
             elif level == 'org':
                 await quotas.update_org_used_mb(51, 100 - 5 / 1048576)
@@ -359,7 +364,6 @@ async def main() -> None:
         elif case.startswith('distinct_'):
             level = case.removeprefix('distinct_')
             if level == 'user':
-                quota_mb = await pool.fetchval('SELECT storage_quota_mb FROM users WHERE id = ?', owner)
                 await service.update_usage(owner, int(quota_mb * 1048576) - 5)
             elif level == 'org':
                 await quotas.update_org_used_mb(51, 100 - 5 / 1048576)
@@ -372,6 +376,202 @@ async def main() -> None:
                 'accepted': sum(isinstance(outcome, dict) for outcome in outcomes),
                 'live': final['live'], 'files': len(list(outputs.rglob('*.png'))),
                 'charged_once': [after - before for after, before in zip(final['usage'], before['usage'])]
+                                == [5 / 1048576] * 3,
+            }
+        elif case.startswith('resolver_'):
+            kind = case.removeprefix('resolver_')
+            limit = {'none': None, 'zero': 0, 'limited': 2, 'org': 2, 'team': 3, 'user': 4}[kind]
+            if kind in {'org', 'team', 'user'}:
+                memberships = AuthnzOrgsTeamsRepo(pool)
+                await memberships.add_org_member(org_id=51, user_id=owner)
+                await memberships.add_team_member(team_id=52, user_id=owner)
+                await OrgProfileOverridesRepo(pool).upsert_override(
+                    org_id=51, key='limits.storage_quota_mb', value=2, updated_by=owner,
+                )
+                if kind in {'team', 'user'}:
+                    await TeamProfileOverridesRepo(pool).upsert_override(
+                        team_id=52, key='limits.storage_quota_mb', value=3, updated_by=owner,
+                    )
+                quota_resolver.invalidate_all()
+            await service.set_user_quota(owner, limit if kind not in {'org', 'team'} else None)
+            loads = []
+            quota_denied = False
+            load_limits = quota_resolver._load_limits
+            async def observe_load(user_id: int, **kwargs: Any) -> dict[str, int | float]:
+                """Count successful real resolver reads, including schema readiness."""
+                limits = await load_limits(user_id, **kwargs)
+                loads.append(limits)
+                return limits
+            register = StorageQuotaService._register_and_account_generated_file
+            async def cold_registration(self: StorageQuotaService, *args: Any, **kwargs: Any) -> Any:
+                """Resolve cold and warm only after entering the real owning transaction."""
+                nonlocal quota_denied
+                assert self.db_pool is not pool
+                quota_resolver.invalidate_user(owner)
+                reset_schema_verification_cache(pool)
+                reset_schema_verification_cache(self.db_pool)
+                for _ in range(2):
+                    actual = await asyncio.wait_for(
+                        quota_resolver.user_quota(owner, 'limits.storage_quota_mb', db_pool=self.db_pool), timeout=5,
+                    )
+                    assert actual == limit
+                assert len(loads) == 1, 'Cold lookup must succeed; warm lookup must use the cache'
+                try:
+                    return await register(self, *args, **kwargs)
+                except QuotaExceededError:
+                    quota_denied = True
+                    raise
+            with patch.object(quota_resolver, '_load_limits', observe_load), patch.object(
+                StorageQuotaService, '_register_and_account_generated_file', cold_registration,
+            ):
+                if limit == 0:
+                    try:
+                        await service.register_generated_file(
+                            user_id=owner, filename='blocked.png', storage_path='vn_assets/blocked.png',
+                            file_category='image', source_feature='vn_assets', source_ref='vn_asset_item:42',
+                            file_size_bytes=5, org_id=51, team_id=52,
+                        )
+                    except (QuotaExceededError, TransactionError):
+                        result['denied'] = True
+                    else:
+                        result['denied'] = False
+                    result['unchanged'] = await snapshot() == baseline
+                    result['files'] = len(list(outputs.rglob('*.png')))
+                else:
+                    record = await save()
+                    before = await snapshot()
+                    replay = await save()
+                    result = {
+                        'denied': False, 'charged_once': before['usage'] == [5 / 1048576] * 3,
+                        'replay_unchanged': await snapshot() == before,
+                        'identity_preserved': replay['id'] == record['id'],
+                        'bytes_preserved': (outputs / record['storage_path']).read_bytes() == b'image',
+                        'live': before['live'], 'files': len(list(outputs.rglob('*.png'))),
+                    }
+            result['successful_cold_loads'] = len(loads)
+            result['quota_denial_observed'] = quota_denied
+        elif case.startswith('lookup_error_'):
+            from asyncpg.exceptions import InFailedSQLTransactionError, QueryCanceledError
+            from tldw_Server_API.app.core.DB_Management._vn_quota_error_test_support import (
+                cancel_postgres_quota_read, postgres_connection_usable,
+            )
+            from tldw_Server_API.app.core.UserProfiles import overrides_repo
+            await service.set_user_quota(owner, 0)
+            quota_resolver.invalidate_all()
+            failures = 0
+            fallbacks = []
+            usable = []
+            register = StorageQuotaService._register_and_account_generated_file
+            async def register_with_failed_reads(self: StorageQuotaService, *args: Any, **kwargs: Any) -> Any:
+                """Keep actual admission/accounting after failed reads on its owning connection."""
+                async with self.db_pool.acquire() as conn:
+                    async def canceled_read(*_args: Any, **_kwargs: Any) -> Any:
+                        """Inject a real server cancellation at the selected read boundary."""
+                        nonlocal failures
+                        try:
+                            await cancel_postgres_quota_read(conn)
+                        except QueryCanceledError:
+                            failures += 1
+                            raise
+                    target = overrides_repo if case == 'lookup_error_readiness' else self.db_pool
+                    method = 'validate_postgres_profile_candidate_schema' if target is overrides_repo else 'fetchall'
+                    with patch.object(target, method, canceled_read):
+                        for _ in range(2):
+                            fallbacks.append(await quota_resolver.user_quota(
+                                owner, 'limits.storage_quota_mb', db_pool=self.db_pool,
+                            ))
+                        try:
+                            usable.append(await postgres_connection_usable(conn))
+                        except InFailedSQLTransactionError:
+                            usable.append(False)
+                        record = await register(self, *args, **kwargs)
+                        usable.append(await postgres_connection_usable(conn))
+                    return record
+            admitted = False
+            with patch.object(StorageQuotaService, '_register_and_account_generated_file', register_with_failed_reads):
+                try:
+                    await service.register_generated_file(
+                        user_id=owner, filename='lookup-error.png', storage_path='vn_assets/lookup-error.png',
+                        file_category='image', source_feature='vn_assets', source_ref='vn_asset_item:42',
+                        file_size_bytes=5, org_id=51, team_id=52,
+                    )
+                    admitted = True
+                except TransactionError:
+                    pass
+            final = await snapshot()
+            result = {
+                'actual_cancellations': failures, 'fallbacks': fallbacks,
+                'owning_connection_usable': usable, 'admitted': admitted,
+                'healthy_limit_after_failures': await quota_resolver.user_quota(owner, 'limits.storage_quota_mb'),
+                'live': final['live'], 'charged_once': final['usage'] == [5 / 1048576] * 3,
+                'version_advanced': final['version'] > baseline['version'],
+            }
+        elif case == 'pool_saturation':
+            await service.update_usage(owner, int(quota_mb * 1048576) - 5)
+            before = await snapshot()
+            quota_resolver.invalidate_all()
+            reset_schema_verification_cache(pool)
+            ready = asyncio.Event()
+            arrivals = 0
+            exhausted = False
+            denials = 0
+            loads = 0
+            lock = AuthnzGeneratedFilesRepo.lock_quota_scopes
+            register = StorageQuotaService._register_and_account_generated_file
+            load_limits = quota_resolver._load_limits
+            async def synchronize(self: AuthnzGeneratedFilesRepo, **kwargs: Any) -> None:
+                """Let all real transactions lease connections before taking the user lock."""
+                nonlocal arrivals, exhausted
+                arrivals += 1
+                if arrivals == 5:
+                    exhausted = pool.pool.get_idle_size() == 0 and pool.pool.get_max_size() == 5
+                    ready.set()
+                await ready.wait()
+                await lock(self, **kwargs)
+            async def observe_load(*args: Any, **kwargs: Any) -> Any:
+                """Count successful real override reads, never substitute a quota."""
+                nonlocal loads
+                result = await load_limits(*args, **kwargs)
+                loads += 1
+                return result
+            async def observe_denial(self: StorageQuotaService, *args: Any, **kwargs: Any) -> Any:
+                """Require a real quota exception, not a generic transaction failure."""
+                nonlocal denials
+                try:
+                    return await register(self, *args, **kwargs)
+                except QuotaExceededError:
+                    denials += 1
+                    raise
+            async def candidate(index: int) -> bool:
+                """Run real independent VN registrations against the same owner."""
+                try:
+                    await service.register_generated_file(
+                        user_id=owner, filename=f'saturated-{index}.png',
+                        storage_path=f'vn_assets/saturated-{index}.png', file_category='image',
+                        source_feature='vn_assets', source_ref=f'vn_asset_item:{100 + index}',
+                        file_size_bytes=5, org_id=51, team_id=52,
+                    )
+                    return True
+                except (QuotaExceededError, TransactionError):
+                    return False
+            completed = False
+            outcomes = []
+            with patch.object(AuthnzGeneratedFilesRepo, 'lock_quota_scopes', synchronize), patch.object(
+                StorageQuotaService, '_register_and_account_generated_file', observe_denial,
+            ), patch.object(quota_resolver, '_load_limits', observe_load):
+                try:
+                    outcomes = await asyncio.wait_for(
+                        asyncio.gather(*(candidate(index) for index in range(5))), timeout=10,
+                    )
+                    completed = True
+                except TimeoutError:
+                    pass
+            after = await snapshot()
+            result = {
+                'completed': completed, 'arrivals': arrivals, 'exhausted': exhausted,
+                'successful_loads': loads, 'admitted': sum(outcomes), 'denied': denials,
+                'live': after['live'],
+                'charged_once': [a - b for a, b in zip(after['usage'], before['usage'])]
                                 == [5 / 1048576] * 3,
             }
         elif case == 'concurrent':
@@ -522,4 +722,47 @@ def test_vn_quota_policy_preserves_publication_replay_and_accounting(
         "distinct_admitted": not enabled, "final_accounting": True,
         "quota_denial_observed": enabled,
         "live": 1 if enabled else 2, "files": 1 if enabled else 2,
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+@pytest.mark.parametrize("limit", ["none", "zero", "limited", "org", "team", "user"])
+def test_vn_outer_transaction_resolves_cold_and_warm_storage_limits(
+    tmp_path: Path, request: pytest.FixtureRequest, backend: str, limit: str,
+) -> None:
+    """Real override reads must not deadlock or fail open inside VN registration."""
+    expected = {"denied": True, "unchanged": True, "files": 0} if limit == "zero" else {
+        "denied": False, "charged_once": True, "replay_unchanged": True,
+        "identity_preserved": True, "bytes_preserved": True, "live": 1, "files": 1,
+    }
+    assert _storage_result(tmp_path, request, backend, f"resolver_{limit}") == {
+        **expected, "successful_cold_loads": 1, "quota_denial_observed": limit == "zero",
+    }
+
+
+@pytest.mark.integration
+def test_vn_cold_quota_registration_completes_with_a_saturated_postgres_pool(
+    tmp_path: Path, request: pytest.FixtureRequest,
+) -> None:
+    """Five real VN transactions must admit one candidate without a second pool lease."""
+    result = _storage_result(tmp_path, request, "postgres", "pool_saturation")
+    assert result["arrivals"] == 5 and result["exhausted"] is True
+    assert result == {
+        "completed": True, "arrivals": 5, "exhausted": True, "successful_loads": 1,
+        "admitted": 1, "denied": 4, "live": 1, "charged_once": True,
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("phase", ["readiness", "overrides"])
+def test_vn_postgres_quota_read_error_preserves_outer_transaction_and_is_not_cached(
+    tmp_path: Path, request: pytest.FixtureRequest, phase: str,
+) -> None:
+    """Failed reads must fail open without aborting or committing owning accounting."""
+    assert _storage_result(tmp_path, request, "postgres", f"lookup_error_{phase}") == {
+        "actual_cancellations": 4, "fallbacks": [None, None],
+        "owning_connection_usable": [True, True], "admitted": True,
+        "healthy_limit_after_failures": 0, "live": 1, "charged_once": True,
+        "version_advanced": True,
     }

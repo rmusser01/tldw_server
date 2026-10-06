@@ -508,3 +508,88 @@ exact new-head external gates and independently verified MERGED.
 **Tests**: Fresh actualdev/rules and complete paginated arrays/all replies.
 **Status**: In Progress
 Billing block is not waived; old-head results do not transfer; child read-only.
+
+## Task79: Fresh Dev Reconciliation
+
+Original TASK13369. Direct requester now explicitly requires rebasing on latest
+dev, addressing all PR issues/comments and normal merge. This supersedes the
+inventory-only publication hold, not any exact-head external gate. Existing
+durability and shared quota specifications remain binding; sole implementer
+controller, Tasks1-78 are not replayed.
+
+### Stage 1: Preserve And Rebase
+**Goal**: Merge-preserving rebase onto freshly verified actual dev.
+**Success Criteria**: Preserve both quota contracts, baseline adjustments,
+backups and unrelated work; child read-only.
+**Tests**: Exact precomputed-union comparison and source preservation.
+**Status**: Complete
+Local7c63e6f1062909bf687510ab8335264061048b56 onto94854ca; all non-storage
+tree bytes match union91dd1ace, both imports/dev blocking-level figures retained.
+Published269 unchanged; this is tree proof, not runtime integration.
+
+### Stage 2: Bounded Integration And Verified Repairs
+**Goal**: Prove actual enforced quotas and shared current-dev contracts.
+**Success Criteria**: Native cold/warm resolver inside outer VN transactions,
+None/zero/precedence, unchanged denial/replay/rollback/counters and shared API,
+frontend scope/resource and CI gate behavior. Only verified defects repaired.
+**Tests**: Strict SQLite/official PostgreSQL, adjacent quota/migration/nullability,
+router, frontend and all-six license/admission contracts; RED/GREEN/Bandit,
+fresh independent SPEC/QUALITY and configured hooks.
+**Status**: Complete
+
+### Stage 3: Publish And Normally Merge
+**Goal**: Publish reviewed combined head and satisfy all fresh external gates.
+**Success Criteria**: Full exact-head Qodo without actionable findings, all seven
+app15368 passes/trusted-license provenance, fresh strict dev/rules/mode,
+verbatim human summary and independent GitHub MERGED verification.
+**Tests**: Complete paginated comments/all replies and exact publication proof.
+**Status**: In Progress
+Qodo credit block is not waived. Never duplicate an accepted review, admin merge,
+autoqueue, merge BEHIND/DIRTY or mutate stacked child3067.
+
+Task79 verification checkpoint: initial shared1603 passed/0skip/43warnings;
+strict62 and frontend369+209 passed with their recorded qualifications.
+Mencius independent SPEC/QUALITY identified a cold-resolver pool-saturation
+cycle. Native official-fixture PostgreSQL RED timed out with no admission;
+transaction-bound resolver injection plus bound fetchall preserves override
+precedence/cache/fail-open and atomic counters. Saturation plus team SQLite/PG
+GREEN3 verifies five leases occupied, one admitted/four actual quota denials,
+one charge. Final affected strict/shared matrices and fresh Ptolemy review are
+running on frozen86 source files; initial1603 is not post-fix certification.
+No publication or merge yet; original TASK13369/AC5/AC6/DoD pending.
+
+Task79 fresh review checkpoint: Ptolemy SPEC/QUALITY FAIL/P2. Healthy native
+saturation and omission control independently confirm the P1 repair. A real
+server-canceled quota read now aborts the owning PostgreSQL transaction despite
+the fail-open catch. Preserve six pre-P2 originals; add native error isolation
+and failure-not-cached coverage, then use the same guarded connection's native
+savepoint around bound quota/readiness reads. No extra pool lease, outer commit
+or quota-policy change. Strict63 healthy-path PASS remains qualified; the1378
+shared matrix must finish before source edits. Fresh narrow review required.
+
+Task79 P2 repair locally verified: native error RED2; same-connection read
+savepoint plus exact asyncpg SAVEPOINT/RELEASE SQL recognition. First native
+savepoint attempt9fail/6pass exposed existing SQLGlot command incompatibility,
+retained/not GREEN. Guard exact-driver RED8/negative28 controls; guard177GREEN.
+Native15GREEN verifies both real server-cancellation phases, failure-not-cached,
+owning usability/accounting and original saturation/precedence. PostP1 shared
+1376PASS/2documented PG-specific skips is pre-P2 evidence; all86 hashes exact.
+Ruff7paths clean; expanded Bandit8B105/3B608 inherited unchanged/B10156->57,
+0newnonassert/errors[], not blanket clean. Four compatibility originals retained;
+final89source freeze/65strict+adjacent checks and fresh Chandrasekhar review
+active. No source changes until those sessions finish. Publication still pending.
+
+Task79 final integration: strict65 PASS/0failure0error0skip/198warnings437.53s;
+all89 source hashes verified. Adjacent286 retains282PASS4FAIL; only its stale
+Services fixture was aligned with the enforced resolver100 and projected110,
+full Services8PASS0skip/4warnings2.82s. Fresh Chandrasekhar P1/P2/guard SPEC and
+QUALITY PASS with independent native2GREEN/savepoint-only2RED; separate exact
+Services diff SPEC/QUALITY PASS. Both reports preserved, reviewer CLOSED and all
+sessions reaped. Final89 freeze supersedes only the Services test entry. Ruff8
+clean/AST8 plus2scripts parse/scope29baseline exact; Bandit62->63B101, inherited
+8B105/3B608 equal/errors[]/0newnonassert, not blanket clean. FullPR95 configured
+hooks10PASS4nofileSKIP with no source changes or bypass. Installed precommit hook
+absent. Prior shared1603/postP1 shared1376PASS2PG-specific skips/frontend578
+remain their bounded, version-qualified proofs, not whole-repository or final
+native CI certification. Normal10filecommit and exact-lease publication next;
+Qodo credit block and fresh-head external gates remain mandatory. Child read-only.

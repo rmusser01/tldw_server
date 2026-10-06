@@ -52,12 +52,17 @@ def quota_view(used_mb: float, quota_mb: Optional[int]) -> dict[str, Any]:
     }
 
 
-async def resolved_storage_quota_mb(user_id: Any) -> Optional[int]:
+async def resolved_storage_quota_mb(
+    user_id: Any, *, db_pool: Optional[DatabasePool] = None,
+) -> Optional[int]:
     """The user's enforced limits.storage_quota_mb (user > team > org); None is unlimited."""
     uid = quota_checks.as_quota_user_id(user_id)
     if uid is None:
         return None
-    value = await quota_resolver.user_quota(uid, STORAGE_QUOTA_KEY)
+    value = (
+        await quota_resolver.user_quota(uid, STORAGE_QUOTA_KEY) if db_pool is None
+        else await quota_resolver.user_quota(uid, STORAGE_QUOTA_KEY, db_pool=db_pool)
+    )
     return None if value is None else int(value)
 
 
@@ -83,6 +88,7 @@ class StorageQuotaService:
         """Initialize storage quota service"""
         self.settings = settings or get_settings()
         self.db_pool = db_pool
+        self._quota_db_pool: Optional[DatabasePool] = None
 
         # TTL cache for quota checks (5 minutes)
         self.quota_cache = TTLCache(maxsize=1000, ttl=300)
@@ -244,7 +250,7 @@ class StorageQuotaService:
                 raise UserNotFoundError(f"User {user_id}")
             current_mb = float(user_info["storage_used_mb"])
             self.quota_cache[cache_key] = current_mb
-        quota_mb = await resolved_storage_quota_mb(user_id)
+        quota_mb = await resolved_storage_quota_mb(user_id, db_pool=self._quota_db_pool)
 
         # Emit gauges for current values
         try:
@@ -355,9 +361,9 @@ class StorageQuotaService:
 
                     new_usage = float(result[0])
 
-            # Resolve the quota outside the transaction: no override query runs
-            # while the write transaction above holds the SQLite lock.
-            quota = await resolved_storage_quota_mb(user_id)
+            # Normal writes resolve after commit; a VN view reads on its owning
+            # connection while the outer accounting transaction is still open.
+            quota = await resolved_storage_quota_mb(user_id, db_pool=self._quota_db_pool)
 
             # Invalidate cache
             cache_key = f"quota:{user_id}"
@@ -870,6 +876,7 @@ class StorageQuotaService:
             # from sharing the transaction connection or uncommitted quota cache.
             bound_service = copy.copy(self)
             bound_service.db_pool = bound_repo.db_pool
+            bound_service._quota_db_pool = bound_repo.db_pool
             bound_service.quota_cache = TTLCache(maxsize=1000, ttl=300)
             bound_service.storage_cache = TTLCache(maxsize=1000, ttl=600)
             existing = await bound_service.get_vn_generated_file(
