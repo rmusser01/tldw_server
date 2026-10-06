@@ -780,7 +780,7 @@
     "message": "Inte behörig att spara"
   },
   "mediaPage_spreadMode": {
-    "message": "Jämför"
+    "message": "Sida vid sida"
   },
   "mediaPage_listMode": {
     "message": "Fokus"
@@ -789,13 +789,13 @@
     "message": "Stapla"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "Visa markerade objekt sida vid sida för jämförelse"
+    "message": "Placera valda objekt sida vid sida"
   },
   "mediaPage_listModeTooltip": {
     "message": "Visa ett objekt i taget med navigering"
   },
   "mediaPage_allModeTooltip": {
-    "message": "Visa alla markerade objekt i en rullbar lista"
+    "message": "Visa det aktuella läsfönstret i en rullbar stapel"
   },
   "mediaPage_copyContentLabel": {
     "message": "Kopiera innehåll"
@@ -834,19 +834,19 @@
     "message": "Välj objekt"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "Klicka på objekt i vänsterpanelen för att lägga till dem i din visare."
+    "message": "Välj med kryssrutor och tryck Läs valda. Klick eller Enter förhandsvisar."
   },
   "mediaPage_firstUseStep2": {
     "message": "Välj vy"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "Använd \"Jämför\" för sida vid sida, \"Fokus\" för ett i taget eller \"Stapla\" för att se alla."
+    "message": "Sida vid sida är layout; Fokus visar ett objekt; Stapel visar läsfönstret. Jämför innehåll jämför text."
   },
   "mediaPage_firstUseStep3": {
     "message": "Navigera"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "Använd knapparna Föregående/Nästa eller tangentbordet (Tab + Enter) för att flytta mellan objekt."
+    "message": "Föregående/Nästa eller j/k navigerar i aktivt sammanhang. Tab och mellanslag väljer en ruta."
   },
   "mediaPage_gotIt": {
     "message": "Jag förstår"
@@ -1327,5 +1327,11 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "Välj en analysleverantör och försök analysera igen."
+  },
+  "mediaPage_resultsHint": {
+    "message": "Klicka eller Enter för förhandsvisning. Mellanslag i kryssruta väljer. Shift+klick väljer ett intervall."
+  },
+  "mediaPage_viewerAll": {
+    "message": "Läsfönster (stapel)"
   }
 }

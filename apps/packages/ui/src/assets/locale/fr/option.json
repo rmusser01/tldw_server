@@ -514,7 +514,7 @@
     "emptyDescription": "Aucun brouillon pour le moment. Utilisez Quick Ingest avec Relecture avant enregistrement pour créer des brouillons.",
     "openQuickIngest": "Ouvrir Quick Ingest",
     "storeAfterReview": "Enregistrer après révision",
-    "reviewBeforeStorage": "Réviser avant d’enregistrer",
+    "reviewBeforeStorage": "Vérifier le contenu extrait avant l’enregistrement",
     "reviewBeforeStorageHint": "Traitez maintenant, puis modifiez les brouillons localement avant de les valider sur votre serveur.",
     "reviewEnabled": "Mode de révision",
     "reviewStorageCap": "Les brouillons locaux sont limités à {{cap}}.",

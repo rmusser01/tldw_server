@@ -40,7 +40,12 @@ export function createKnowledgeQaClient(snapshot: ServicePromptSnapshot | null, 
     createChat: (payload: Record<string, unknown>) => run(() => tldwClient.createChat(payload, options())),
     getChat: (id: string) => run(() => tldwClient.getChat(id, options())),
     deleteChat: (id: string) => run(() => tldwClient.deleteChat(id, options())),
-    addChatMessage: (id: string, payload: Record<string, unknown>) => run(() => tldwClient.addChatMessage(id, payload, options())),
+    addChatMessage: (id: string, payload: Record<string, unknown>) =>
+      run(() => tldwClient.addChatMessage(id, payload, options())),
+    listMedia: (params: Record<string, unknown>) =>
+      run(() => tldwClient.listMedia(params, options())),
+    listNotes: (params: Record<string, unknown>) =>
+      run(() => tldwClient.listNotes(params, options())),
     ragSourceHealth: () => run(() => tldwClient.ragSourceHealth(options())),
     ragSearch: (query: string, settings?: Record<string, unknown> & { signal?: AbortSignal }) => run(() => tldwClient.ragSearch(query, { ...settings, ...options(settings?.signal) })),
     ragSearchStream: typeof tldwClient.ragSearchStream === "function" ? async function* (query: string, settings?: Record<string, unknown> & { signal?: AbortSignal }) {

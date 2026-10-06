@@ -1,3 +1,4 @@
+import { BoundedTtlCache } from "./bounded-ttl-cache"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import type { ChatScope } from "@/types/chat-scope"
 import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
@@ -335,9 +336,9 @@ export interface ChatbookAccountScopeResponse {
 export interface CurrentUserStorageQuotaResponse {
   user_id: number
   storage_used_mb: number
-  storage_quota_mb: number
-  available_mb: number
-  usage_percentage: number
+  storage_quota_mb: number | null
+  available_mb: number | null
+  usage_percentage: number | null
 }
 
 export interface OpenAIOAuthAuthorizeRequest {
@@ -1480,7 +1481,7 @@ export interface AdminUserSummary {
   is_verified: boolean
   created_at: string
   last_login?: string | null
-  storage_quota_mb: number
+  storage_quota_mb: number | null
   storage_used_mb: number
 }
 
@@ -1498,7 +1499,7 @@ export interface AdminUserUpdateRequest {
   is_active?: boolean
   is_verified?: boolean
   is_locked?: boolean
-  storage_quota_mb?: number
+  storage_quota_mb?: number | null
 }
 
 export interface AdminUserCreateRequest {
@@ -1684,12 +1685,9 @@ export class TldwApiClientBase {
   private config: TldwConfig | null = null
   private baseUrl: string = ''
   private headers: HeadersInit = {}
-  characterCache = new Map<string, { value: any; expiresAt: number }>()
+  characterCache = new BoundedTtlCache<any>()
   characterInFlight = new Map<string, Promise<any>>()
-  chatMessagesCache = new Map<
-    string,
-    { value: ServerChatMessage[]; expiresAt: number }
-  >()
+  chatMessagesCache = new BoundedTtlCache<ServerChatMessage[]>()
   chatMessagesInFlight = new Map<string, Promise<ServerChatMessage[]>>()
   private openApiPathSet: Set<string> | null = null
   private openApiPathSetPromise: Promise<Set<string> | null> | null = null
@@ -3601,13 +3599,20 @@ export class TldwApiClientBase {
     params: {
       batch_id: string
       limit?: number
+      offset?: number
     },
-    options?: { timeoutMs?: number }
+    options?: {
+      timeoutMs?: number
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
   ): Promise<any> {
     const query = this.buildQuery(params as Record<string, any>)
     return await bgRequest<any>({
       path: `/api/v1/media/ingest/jobs${query}`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
       timeoutMs: options?.timeoutMs
     })
   }
@@ -3705,14 +3710,16 @@ export class TldwApiClientBase {
   async updateMediaKeywords(
     mediaId: string | number,
     payload: { keywords: string[]; mode?: "add" | "remove" | "set" },
-    options?: { suppressBackendUnavailableEvent?: boolean }
+    options?: { suppressBackendUnavailableEvent?: boolean; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{ media_id: number; keywords: string[] }> {
     const id = encodeURIComponent(String(mediaId))
     return await bgRequest<{ media_id: number; keywords: string[] }>({
       path: `/api/v1/media/${id}/keywords`,
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
       body: payload,
+      ...requestScopeFields(options?.requestScope),
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
+      abortSignal: options?.signal,
       suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })
   }
@@ -3721,7 +3728,7 @@ export class TldwApiClientBase {
     media_ids: number[]
     keywords: string[]
     mode?: "add" | "remove" | "set"
-  }): Promise<{
+  }, options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }): Promise<{
     endpoint: "bulk" | "fallback"
     updated: number
     failed: number
@@ -3762,8 +3769,10 @@ export class TldwApiClientBase {
       const response = await bgRequest<any>({
         path: "/api/v1/media/bulk/keyword-update",
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: requestPayload
+        body: requestPayload,
+        ...requestScopeFields(options?.requestScope),
+        headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
+        abortSignal: options?.signal
       })
       const results = Array.isArray(response?.results)
         ? response.results.map((entry: any) => ({
@@ -3815,7 +3824,7 @@ export class TldwApiClientBase {
         const updated = await this.updateMediaKeywords(mediaId, {
           keywords,
           mode
-        })
+        }, options)
         return {
           media_id: mediaId,
           success: true,
@@ -3854,11 +3863,13 @@ export class TldwApiClientBase {
     }
   }
 
-  async deleteMedia(mediaId: string | number): Promise<void> {
+  async deleteMedia(mediaId: string | number, options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }): Promise<void> {
     const id = encodeURIComponent(String(mediaId))
     await bgRequest<void>({
       path: `/api/v1/media/${id}`,
-      method: "DELETE"
+      method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   }
 
@@ -3880,14 +3891,17 @@ export class TldwApiClientBase {
 
   async reprocessMedia(
     mediaId: string | number,
-    options?: Record<string, unknown>
+    options?: Record<string, unknown>,
+    requestOptions?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
     const id = encodeURIComponent(String(mediaId))
     return await bgRequest<any>({
       path: `/api/v1/media/${id}/reprocess`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: options || {}
+      body: options || {},
+      ...requestScopeFields(requestOptions?.requestScope),
+      headers: { ...requestScopeFields(requestOptions?.requestScope).headers, "Content-Type": "application/json" },
+      abortSignal: requestOptions?.signal
     })
   }
 
@@ -4506,18 +4520,12 @@ export class TldwApiClientBase {
     })
   }
 
-  async searchNotes(query: string): Promise<any> {
-    const normalized = query.trim()
-    if (!normalized) {
-      return await this.listNotes()
-    }
-    const queryString = this.buildQuery({
-      query: normalized
-    })
-    return await bgRequest<any>({
-      path: `/api/v1/notes/search/${queryString}`,
-      method: "GET"
-    })
+  async searchNotes(
+    query: string,
+    params?: { limit?: number; offset?: number },
+    options?: ScopedRequestOptions,
+  ): Promise<any> {
+    return collectionsMethods.searchNotes.call(this, query, params, options)
   }
   // Prompts Methods
   async getPrompts(): Promise<any> {

@@ -1,3 +1,8 @@
+import {
+  readKnowledgeNoteProvenance,
+  retainKnowledgeNoteProvenance,
+  stripKnowledgeNoteProvenance
+} from '@/utils/knowledge-note-provenance'
 import React from 'react'
 import type { InputRef } from 'antd'
 import { Button, Modal } from 'antd'
@@ -287,10 +292,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [title, setTitle] = React.useState('')
   const [content, setContent] = React.useState('')
   const setEditorTitle = React.useCallback((value: React.SetStateAction<string>) => {
-    if (pendingSelectionEpochRef.current == null) setTitle(value)
+    if (pendingSelectionEpochRef.current == null || selectedIdRef.current == null) {
+      setTitle(value)
+    }
   }, [])
   const setEditorContent = React.useCallback((value: React.SetStateAction<string>) => {
-    if (pendingSelectionEpochRef.current == null) setContent(value)
+    if (pendingSelectionEpochRef.current == null || selectedIdRef.current == null) {
+      setContent(value)
+    }
   }, [])
   const [loadingDetail, setLoadingDetail] = useNotesAuthorityState(authorityScope, false)
   const [saving, setSaving] = React.useState(false)
@@ -512,7 +521,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             ? overrides.baseVersion
             : selectedVersionRef.current,
         title: snapshot.title,
-        content: snapshot.content,
+        content: retainKnowledgeNoteProvenance(snapshot.content, snapshot.originalMetadata),
         keywords: [...snapshot.editorKeywords],
         metadata: snapshot.originalMetadata ? { ...snapshot.originalMetadata } : null,
         backlinkConversationId: snapshot.backlinkConversationId,
@@ -527,12 +536,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   const applyOfflineDraftToEditor = React.useCallback((draft: OfflineDraftEntry) => {
     setTitle(String(draft.title || ''))
-    setContent(String(draft.content || ''))
+    setContent(stripKnowledgeNoteProvenance(String(draft.content || '')))
     setEditorKeywords(Array.isArray(draft.keywords) ? [...draft.keywords] : [])
-    setOriginalMetadata(
-      draft.metadata && typeof draft.metadata === 'object'
-        ? { ...(draft.metadata as Record<string, any>) }
-        : null
+    const provenance = readKnowledgeNoteProvenance(String(draft.content || ''))
+    setOriginalMetadata(provenance
+      ? { ...(draft.metadata || {}), ...provenance, knowledge_provenance: provenance }
+      : draft.metadata && typeof draft.metadata === 'object' ? { ...draft.metadata } : null
     )
     setBacklinkConversationId(draft.backlinkConversationId)
     setBacklinkMessageId(draft.backlinkMessageId)
@@ -653,7 +662,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         provenance?: 'manual' | NotesAssistAction
       }
     ) => {
-      if (pendingSelectionEpochRef.current != null) return
+      // Freeze an existing note during a switch; preserve edits to a new draft.
+      if (pendingSelectionEpochRef.current != null && selectedIdRef.current != null) {
+        return
+      }
       contentRef.current = nextContent
       setContent(nextContent)
       setIsDirty(true)
@@ -794,13 +806,16 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       selectedIdRef.current = id
       setSelectedId(id)
       setTitle(String(d?.title || ''))
-      setContent(String(d?.content || ''))
+      setContent(stripKnowledgeNoteProvenance(String(d?.content || '')))
       setEditorKeywords(extractKeywords(d))
       assignSelectedVersion(toNoteVersion(d))
       setSelectedLastSavedAt(toNoteLastModified(d))
       const rawMeta = d && typeof d === "object" ? (d as any).metadata : null
+      const provenance = readKnowledgeNoteProvenance(String(d?.content || ''))
       setOriginalMetadata(
-        rawMeta && typeof rawMeta === "object" ? { ...(rawMeta as Record<string, any>) } : null
+        provenance
+          ? { ...(rawMeta && typeof rawMeta === 'object' ? rawMeta : {}), ...provenance, knowledge_provenance: provenance }
+          : rawMeta && typeof rawMeta === "object" ? { ...(rawMeta as Record<string, any>) } : null
       )
       const rawStudio = d && typeof d === 'object' ? (d as any).studio : null
       setSelectedStudioSummary(
@@ -949,7 +964,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       queued &&
         queued.syncState !== 'conflict' &&
         queued.title === snapshot.title &&
-        queued.content === snapshot.content
+        // A queued draft carries the note's knowledge provenance marker; the editor does not.
+        stripKnowledgeNoteProvenance(queued.content) === snapshot.content
     )
   }, [])
 
@@ -1651,7 +1667,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         if (snapshot.backlinkMessageId) metadata.message_id = snapshot.backlinkMessageId
         const payload: Record<string, any> = {
           title: snapshot.title || undefined,
-          content: snapshot.content,
+          content: retainKnowledgeNoteProvenance(snapshot.content, snapshot.originalMetadata),
           metadata,
           keywords: snapshot.editorKeywords
         }
@@ -1858,7 +1874,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (draft.backlinkMessageId) metadata.message_id = draft.backlinkMessageId
       const payload: Record<string, any> = {
         title: draft.title || undefined,
-        content: draft.content,
+        content: retainKnowledgeNoteProvenance(draft.content, draft.metadata),
         metadata,
         keywords: draft.keywords
       }
@@ -2993,6 +3009,20 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   }, [revisionSummaryText, serverHost, t])
 
   const provenanceSummaryText = React.useMemo(() => {
+    if (originalMetadata?.origin === 'knowledge_qa') {
+      return [
+        t('option:notesSearch.provenanceKnowledgeQa', {
+          defaultValue: 'Origin: Knowledge QA',
+        }),
+        originalMetadata.trust_state,
+        originalMetadata.evidence_origin,
+        originalMetadata.thread_id
+          ? `Session: ${originalMetadata.thread_id}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    }
     if (editProvenance.mode === 'manual') {
       if (backlinkConversationId) {
         return t('option:notesSearch.provenanceChat', { defaultValue: 'Origin: Saved from Chat' })
@@ -3012,7 +3042,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       defaultValue: 'Origin: AI-generated'
     })
     return `${generatedPrefix} (${actionLabel} at ${generatedAt})`
-  }, [backlinkConversationId, editProvenance, t])
+  }, [backlinkConversationId, editProvenance, originalMetadata, t])
 
   const monitoringNoticeClasses = React.useMemo(() => {
     if (!monitoringNotice) return ''

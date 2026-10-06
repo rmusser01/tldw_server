@@ -4149,6 +4149,11 @@ def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch
         "tldw_Server_API.app.api.v1.endpoints.rag_unified",
         path="/api/v1/rag/search",
     )
+    # Resolve content routers before faking llm_providers: real content modules
+    # (prompts, chat, character sessions) import names from it.
+    content_specs = list(iter_content_router_specs())
+    by_content_path = {_first_router_path(spec.router): spec for spec in content_specs}
+
     _install_fake_router_module(
         monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.llm_providers",
@@ -4159,10 +4164,7 @@ def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch
         "tldw_Server_API.app.api.v1.endpoints.vlm",
         path="/vlm/backends",
     )
-
-    content_specs = list(iter_content_router_specs())
     core_specs = list(iter_core_router_specs())
-    by_content_path = {_first_router_path(spec.router): spec for spec in content_specs}
     by_core_path = {
         _first_router_path(spec.router): spec
         for spec in core_specs
@@ -9984,6 +9986,13 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
         "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol",
         path="/acp/run",
     )
+    # The real prompt_studio_websocket imports _authenticate_ws from the faked
+    # agent_client_protocol.
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket",
+        path="/prompt-studio/ws",
+    )
     _install_fake_router_module(
         monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.acp_schedules",
@@ -10864,6 +10873,12 @@ def test_iter_minimal_optional_router_specs_skips_audio_during_pytest_without_op
         "tldw_Server_API.app.api.v1.endpoints.media",
         path="/media/list",
     )
+    # endpoints.media is faked as a plain module, so its submodule needs a fake too.
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs",
+        path="/ingest/jobs",
+    )
     _install_fake_router_module(
         monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.audio.audio",
@@ -10949,6 +10964,12 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
         monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.media",
         path="/media/list",
+    )
+    # endpoints.media is faked as a plain module, so its submodule needs a fake too.
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs",
+        path="/ingest/jobs",
     )
     _install_fake_router_module(
         monkeypatch,
@@ -11160,6 +11181,13 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
         monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.web_scraping",
         path="/web-scraping/status",
+    )
+    # The real module imports from notes_graph, which this test fakes, so
+    # fake it too or the test only passes after another test imported it.
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.notes_graph_suggestions",
+        path="/{note_id}/graph/suggestions/capabilities",
     )
     _install_fake_router_module(
         monkeypatch,

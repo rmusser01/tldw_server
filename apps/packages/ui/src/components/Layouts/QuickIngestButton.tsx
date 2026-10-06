@@ -107,6 +107,7 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
       if (
         currentSession?.lifecycle === "draft" &&
         currentSession.selectedPreset !== "custom" &&
+        currentSession.queueItems.length === 0 &&
         !currentSession.firstSourceAddMode
       ) {
         upsertSession(
@@ -139,8 +140,9 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
       const shouldRebaseCurrent = Boolean(
         currentSession?.lifecycle === "draft" &&
         currentSession.selectedPreset !== "custom" &&
+        currentSession.queueItems.length === 0 &&
         !currentSession.firstSourceAddMode &&
-        !seed?.firstSourceAddMode
+        !seed
       )
       const shouldSeedNamedDraft = !currentSession && !seed?.firstSourceAddMode
       const shouldRemountSeededDraft = Boolean(
@@ -159,6 +161,9 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
               ? buildNamedPresetSeed(presetMap, currentSession.selectedPreset)
               : {}),
             ...seed,
+            ...(seed.queueItems
+              ? { queueItems: [...currentSession.queueItems, ...seed.queueItems] }
+              : {}),
           })
         } else {
           // Processing and terminal sessions keep their active snapshot; a new
@@ -252,8 +257,8 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
     (options?: { focusTrigger?: boolean }) => {
       hideSession()
       setQuickIngestAutoProcessQueued(false)
-      preparedSessionIdRef.current = null
-      setPreparedSessionId(null)
+      // Hiding preserves this prepared session and its live executor. A resume
+      // must not unmount it while a readiness effect prepares the same ID again.
       if ((options?.focusTrigger ?? true) && focusTriggerRef?.current) {
         requestAnimationFrame(() => {
           focusTriggerRef.current?.focus()
@@ -334,6 +339,7 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
     const shouldRebase =
       session.lifecycle === "draft" &&
       session.selectedPreset !== "custom" &&
+      session.queueItems.length === 0 &&
       !session.firstSourceAddMode
     const presetMap = capturePresetSnapshot(shouldRebase)
     prepareExistingSession(presetMap)

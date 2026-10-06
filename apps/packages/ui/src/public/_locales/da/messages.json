@@ -1467,7 +1467,7 @@
     "message": "Gem efter gennemgang"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Gennemgå før gem"
+    "message": "Gennemse udtrukket indhold før lagring"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Behandl nu, og redigér derefter kladder lokalt, før du gemmer på din server."

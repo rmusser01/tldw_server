@@ -95,4 +95,29 @@ describe("usePdfSearch", () => {
 
     expect(highlightedTexts).toEqual(["Cat"])
   })
+
+  it("scrolls back to the same search result when Next is repeated without a state change", async () => {
+    const pdfDocumentRef = { current: createPdfDocument([["Cat"]]) } as React.RefObject<PdfDocumentProxy | null>
+    const { result } = renderHook(() => usePdfSearch(pdfDocumentRef))
+    await act(async () => { result.current.openSearch(); await Promise.resolve() })
+    act(() => result.current.setSearchQuery("Cat"))
+    await waitFor(() => expect(result.current.searchResults).toHaveLength(1))
+    vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear()
+    act(() => result.current.navigateToResult(0))
+    act(() => result.current.navigateToResult(0))
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(2)
+  })
+
+  it("highlights remounted text layers without pulling the reader back to an old result", async () => {
+    const pdfDocumentRef = { current: createPdfDocument([["Cat"]]) } as React.RefObject<PdfDocumentProxy | null>
+    const { result } = renderHook(() => usePdfSearch(pdfDocumentRef))
+    await act(async () => { result.current.openSearch(); await Promise.resolve() })
+    act(() => result.current.setSearchQuery("Cat"))
+    await waitFor(() => expect(result.current.searchResults).toHaveLength(1))
+    document.body.innerHTML = '<div data-page-number="1"><div class="react-pdf__Page__textContent"><span>Cat</span></div></div>'
+    vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear()
+    act(() => document.querySelector('[data-page-number]')!.dispatchEvent(new Event('pdf-text-layer-rendered', { bubbles: true })))
+    expect(document.querySelector('span')).toHaveClass('pdf-search-match')
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+  })
 })

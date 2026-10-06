@@ -24,7 +24,7 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, fallbackOrOptions?: string | { defaultValue?: string }) => {
       if (typeof fallbackOrOptions === 'string') return fallbackOrOptions
-      return fallbackOrOptions?.defaultValue || key
+      return (fallbackOrOptions?.defaultValue || key).replace('{{version}}', String((fallbackOrOptions as any)?.version ?? ''))
     }
   })
 }))
@@ -46,7 +46,15 @@ vi.mock('antd', async (importOriginal) => {
     )
   }
 
-  const Button = ({ children, onClick, disabled, loading, danger: _danger, ...rest }: any) => (
+  const Button = ({
+    children,
+    onClick,
+    disabled,
+    loading,
+    danger: _danger,
+    type: _type,
+    ...rest
+  }: any) => (
     <button
       type="button"
       onClick={(event) => {
@@ -154,6 +162,40 @@ describe('AnalysisModal stage 3 regression coverage', () => {
 
     mocks.getChatModels.mockResolvedValue([{ id: 'test-model', name: 'Test model' }])
     mocks.resolveApiProviderForModel.mockResolvedValue(undefined)
+  })
+
+  it('leads with outcomes, keeps prompts in Advanced, and reveals saved analysis', async () => {
+    mocks.bgStream.mockImplementation(async function* () {
+      yield streamChunk('Reviewed key claims')
+    })
+    mocks.bgRequest.mockResolvedValue({
+      processing: { analysis: 'Reviewed key claims' },
+      versions: [
+        { version_number: 3, analysis_content: 'Reviewed key claims' },
+      ],
+    })
+    render(
+      <AnalysisModal
+        open
+        onClose={vi.fn()}
+        mediaId={42}
+        mediaContent="Source text"
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Summary' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Key claims' }))
+    expect(screen.queryByLabelText('System Prompt')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Save prompt defaults' }),
+    ).toBeVisible()
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Generate Analysis' }),
+      ).toBeEnabled(),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Analysis' }))
+    expect(await screen.findByText('Saved analysis · version 3')).toBeVisible()
+    expect(screen.getByDisplayValue('Reviewed key claims')).toBeVisible()
   })
 
   it('uses the persisted selected model while the catalog is still loading', async () => {
@@ -329,6 +371,7 @@ describe('AnalysisModal stage 3 regression coverage', () => {
       expect(screen.getByRole('button', { name: 'Generate Analysis' })).not.toBeDisabled()
     })
 
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced' }))
     fireEvent.click(screen.getByRole('button', { name: 'Show Presets' }))
     fireEvent.click(screen.getByRole('button', { name: 'Critical Review' }))
 
@@ -382,7 +425,8 @@ describe('AnalysisModal stage 3 regression coverage', () => {
     })
 
     expect(mocks.messageSuccess).toHaveBeenCalledWith('Analysis generated and saved')
-    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(screen.getByDisplayValue('Generated analysis output')).toBeVisible()
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('notifies consumers only after the generated analysis is persisted', async () => {
@@ -637,5 +681,51 @@ describe('AnalysisModal stage 3 regression coverage', () => {
       )
     })
     consoleError.mockRestore()
+  })
+  it('does not reveal a late saved version after generation was cancelled', async () => {
+    let finish!: (value: unknown) => void
+    mocks.bgStream.mockImplementation(async function* () {
+      yield streamChunk('Late saved analysis')
+    })
+    mocks.bgRequest.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    const generated = vi.fn()
+    render(
+      <AnalysisModal
+        open
+        onClose={vi.fn()}
+        mediaId={42}
+        mediaContent="Body"
+        onAnalysisGenerated={generated}
+      />,
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Generate Analysis' }),
+      ).toBeEnabled(),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Analysis' }))
+    await waitFor(() => expect(mocks.bgRequest).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel generation' }))
+    finish({
+      processing: { analysis: 'Late saved analysis' },
+      versions: [
+        { version_number: 4, analysis_content: 'Late saved analysis' },
+      ],
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Generate Analysis' }),
+      ).toBeEnabled(),
+    )
+    await Promise.all(mocks.handledPromises)
+    expect(generated).not.toHaveBeenCalled()
+    expect(
+      screen.queryByText('Saved analysis · version 4'),
+    ).not.toBeInTheDocument()
   })
 })

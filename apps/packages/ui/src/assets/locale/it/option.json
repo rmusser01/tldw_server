@@ -514,7 +514,7 @@
     "emptyDescription": "Non ci sono ancora bozze. Usa Quick Ingest con Revisiona prima di salvare per creare bozze.",
     "openQuickIngest": "Apri Quick Ingest",
     "storeAfterReview": "Salva dopo la revisione",
-    "reviewBeforeStorage": "Rivedi prima di salvare",
+    "reviewBeforeStorage": "Rivedi il contenuto estratto prima di salvare",
     "reviewBeforeStorageHint": "Elabora ora e poi modifica le bozze localmente prima di salvarle sul server.",
     "reviewEnabled": "Modalità revisione",
     "reviewStorageCap": "Le bozze locali sono limitate a {{cap}}.",

@@ -1,4 +1,5 @@
 import React from "react"
+import { MemoryRouter } from "react-router-dom"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { KnowledgeQAProvider, useKnowledgeQA } from "../KnowledgeQAProvider"
@@ -130,6 +131,36 @@ describe("Knowledge QA verified account boundary", () => {
       yield { schema_version: 1, type: "complete", code: "complete", upstream_dispatched: true, output_emitted: false, allow_non_stream_fallback: false, message: "Search completed." }
     })
   })
+
+  it.each(["media_ids=3%2C7", "note_ids=12345678-1234-4234-8234-123456789abc"])(
+    "does not replay transferred %s after the verified owner changes",
+    async (scope) => {
+      const routedView = () => (
+        <MemoryRouter initialEntries={[`/knowledge?${scope}`]}>
+          {view()}
+        </MemoryRouter>
+      )
+      const rendered = render(routedView())
+      await waitFor(() =>
+        expect(
+          scope.startsWith("media")
+            ? current.settings.include_media_ids
+            : current.settings.include_note_ids
+        ).toEqual(
+          scope.startsWith("media")
+            ? [3, 7]
+            : ["12345678-1234-4234-8234-123456789abc"]
+        )
+      )
+      account("bob")
+      rendered.rerender(routedView())
+      await waitFor(() => expect(current.historyHydrated).toBe(true))
+      await waitFor(() => expect(current.error).toMatch(/source selection/i))
+      expect(current.settings.include_media_ids).toEqual([])
+      expect(current.settings.sources).toEqual([])
+      expect(current.answer).toBeNull()
+    }
+  )
 
   it("does not start private QA from the SearchBar before authority is verified and can recover", async () => {
     harness.loading = true

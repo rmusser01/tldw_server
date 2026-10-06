@@ -136,7 +136,7 @@ describe('Notes editor authority races', () => {
   it('keeps an offline edit dirty when scoped draft persistence throws', async () => {
     const view = renderEditor()
     await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    const setItem = vi.spyOn(Object.getPrototypeOf(window.localStorage), 'setItem').mockImplementation(() => {
       throw new Error('storage unavailable')
     })
     try {
@@ -161,7 +161,7 @@ describe('Notes editor authority races', () => {
   it('does not acknowledge an offline draft unless scoped storage retains it', async () => {
     const view = renderEditor()
     await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined)
+    const setItem = vi.spyOn(Object.getPrototypeOf(window.localStorage), 'setItem').mockImplementation(() => undefined)
     try {
       act(() => {
         view.result.current.setTitle('Draft without a retained write')

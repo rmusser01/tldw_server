@@ -1,3 +1,4 @@
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => "owner-a" }))
 import { act, fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react"
 import { createInstance } from "i18next"
 import { I18nextProvider } from "react-i18next"

@@ -54,6 +54,7 @@ function TestHarness() {
     <div>
       <span data-testid="currentStep">{state.currentStep}</span>
       <span data-testid="highestStep">{state.highestStep}</span>
+      <span data-testid="overwrite">{String(state.presetConfig.common.overwrite_existing)}</span>
       <span data-testid="preset">{state.selectedPreset}</span>
       <span data-testid="queueLen">{state.queueItems.length}</span>
       <span data-testid="status">{state.processingState.status}</span>
@@ -744,8 +745,15 @@ describe("IngestWizardContext", () => {
 
   describe("useIngestWizard outside provider", () => {
     it("throws an error when used outside IngestWizardProvider", () => {
-      // Suppress React error boundary console output
-      const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+      const expected = "useIngestWizard must be used within an IngestWizardProvider"
+      const originalError = console.error
+      const spy = vi.spyOn(console, "error").mockImplementation((...args) => {
+        if (!args.some(value => String(value).includes(expected) || String(value).includes("<BadConsumer>"))) originalError(...args)
+      })
+      const handleExpectedError = (event: ErrorEvent) => {
+        if (event.error?.message === expected) event.preventDefault()
+      }
+      window.addEventListener("error", handleExpectedError)
 
       function BadConsumer() {
         useIngestWizard()
@@ -756,7 +764,20 @@ describe("IngestWizardContext", () => {
         "useIngestWizard must be used within an IngestWizardProvider"
       )
 
+      window.removeEventListener("error", handleExpectedError)
       spy.mockRestore()
     })
+  })
+})
+
+
+describe("replacement permission", () => {
+  it.each([false, true])("preserves explicit overwrite %s across presets", async (overwrite) => {
+    renderWithInitialState({ presetConfig: { ...resolvePresetMap().standard, common: { ...resolvePresetMap().standard.common, overwrite_existing: overwrite } } })
+    await userEvent.click(screen.getByText("setDeep"))
+    expect(screen.getByTestId("overwrite").textContent).toBe(String(overwrite))
+  })
+  it("Deep does not grant replacement permission", () => {
+    expect(resolvePresetMap().deep.common.overwrite_existing).toBe(false)
   })
 })

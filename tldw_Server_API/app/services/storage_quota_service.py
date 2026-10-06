@@ -30,6 +30,39 @@ from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
 from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
+from tldw_Server_API.app.core.Usage import quota_checks, quota_resolver
+from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
+
+STORAGE_QUOTA_KEY = "limits.storage_quota_mb"
+
+
+def quota_view(used_mb: float, quota_mb: Optional[int]) -> dict[str, Any]:
+    """Quota-derived fields for a usage figure; a None quota means unlimited (spec 2 §5)."""
+    if quota_mb is None:
+        return {"quota_mb": None, "available_mb": None, "usage_percentage": None}
+    return {
+        "quota_mb": quota_mb,
+        "available_mb": round(max(0.0, quota_mb - used_mb), 2),
+        # A zero quota is fully used by definition.
+        "usage_percentage": round(used_mb / quota_mb * 100, 1) if quota_mb > 0 else 100.0,
+    }
+
+
+async def resolved_storage_quota_mb(user_id: Any) -> Optional[int]:
+    """The user's enforced limits.storage_quota_mb (user > team > org); None is unlimited."""
+    uid = quota_checks.as_quota_user_id(user_id)
+    if uid is None:
+        return None
+    value = await quota_resolver.user_quota(uid, STORAGE_QUOTA_KEY)
+    return None if value is None else int(value)
+
+
+async def with_resolved_storage_quota(user: dict[str, Any]) -> dict[str, Any]:
+    """A copy of a users row whose storage_quota_mb is the enforced value, not the legacy column."""
+    row = dict(user)
+    row["storage_quota_mb"] = await resolved_storage_quota_mb(row.get("id"))
+    return row
+
 
 #######################################################################################################################
 #
@@ -102,7 +135,8 @@ class StorageQuotaService:
         # Check cache first
         cache_key = f"storage_calc:{user_id}"
         if cache_key in self.storage_cache and not update_database:
-            return self.storage_cache[cache_key]
+            cached = self.storage_cache[cache_key]
+            return {**cached, **quota_view(cached["total_mb"], await resolved_storage_quota_mb(user_id))}
 
         # Calculate storage in thread pool
         user_dir = Path(self.settings.USER_DATA_BASE_PATH) / str(user_id)
@@ -123,11 +157,10 @@ class StorageQuotaService:
         total_bytes = size_bytes + chroma_bytes
         total_mb = total_bytes / (1024 * 1024)
 
-        # Get quota from database
+        # Existence check only; the quota itself comes from the resolver, not this column.
         user_info = await self._get_user_storage_info(user_id)
         if not user_info:
             raise UserNotFoundError(f"User {user_id}")
-        quota_mb = user_info['storage_quota_mb']
 
         # Update database if requested
         if update_database:
@@ -154,8 +187,10 @@ class StorageQuotaService:
 
             # Invalidate quota cache
             self.quota_cache.pop(f"quota:{user_id}", None)
+            quota_mb = await resolved_storage_quota_mb(user_id)
             logger.info(
-                f"Recalculated storage for user {user_id}: {total_mb:.2f}MB / {quota_mb}MB"
+                f"Recalculated storage for user {user_id}: {total_mb:.2f}MB / "
+                f"{'unlimited' if quota_mb is None else f'{quota_mb}MB'}"
             )
 
         result = {
@@ -166,15 +201,12 @@ class StorageQuotaService:
             "chromadb_mb": round(chroma_bytes / (1024 * 1024), 2),
             "total_bytes": total_bytes,
             "total_mb": round(total_mb, 2),
-            "quota_mb": quota_mb,
-            "available_mb": round(max(0, quota_mb - total_mb), 2),
-            "usage_percentage": round((total_mb / quota_mb * 100) if quota_mb > 0 else 0, 1),
             "calculated_at": datetime.utcnow().isoformat()
         }
 
-        # Update cache
+        # Update cache (usage figures only; quota is resolved fresh on every read)
         self.storage_cache[cache_key] = result
-        return result
+        return {**result, **quota_view(total_mb, await resolved_storage_quota_mb(user_id))}
 
     async def check_quota(
         self,
@@ -199,27 +231,23 @@ class StorageQuotaService:
         if not self._initialized:
             await self.initialize()
 
-        # Check cache first
+        # Check cache first (usage only; the quota is resolved fresh on every call)
         cache_key = f"quota:{user_id}"
-        if cache_key in self.quota_cache:
-            current_mb, quota_mb = self.quota_cache[cache_key]
-        else:
-            # Fetch from database
+        current_mb = self.quota_cache.get(cache_key)
+        if current_mb is None:
             user_info = await self._get_user_storage_info(user_id)
             if not user_info:
                 raise UserNotFoundError(f"User {user_id}")
-
-            current_mb = float(user_info['storage_used_mb'])
-            quota_mb = user_info['storage_quota_mb']
-
-            # Update cache
-            self.quota_cache[cache_key] = (current_mb, quota_mb)
+            current_mb = float(user_info["storage_used_mb"])
+            self.quota_cache[cache_key] = current_mb
+        quota_mb = await resolved_storage_quota_mb(user_id)
 
         # Emit gauges for current values
         try:
             reg = get_metrics_registry()
             reg.set_gauge("user_storage_used_mb", float(current_mb), labels={"user_id": str(user_id)})
-            reg.set_gauge("user_storage_quota_mb", float(quota_mb), labels={"user_id": str(user_id)})
+            if quota_mb is not None:
+                reg.set_gauge("user_storage_quota_mb", float(quota_mb), labels={"user_id": str(user_id)})
         except Exception as e:
             logger.debug(f"storage_quota: failed to record gauges for user {user_id}: {e}")
             try:
@@ -233,18 +261,16 @@ class StorageQuotaService:
         # Calculate new usage
         new_mb = new_bytes / (1024 * 1024)
         projected_mb = current_mb + new_mb
-        # Usage quotas off (spec 2): report usage, never block.
-        has_quota = projected_mb <= quota_mb or not usage_quotas_enabled()
+        # The resolver already returns None when usage quotas are off (spec 2).
+        has_quota = quota_mb is None or projected_mb <= quota_mb
 
         quota_info = {
             "user_id": user_id,
             "current_usage_mb": round(current_mb, 2),
-            "quota_mb": quota_mb,
             "new_size_mb": round(new_mb, 2),
             "projected_usage_mb": round(projected_mb, 2),
-            "available_mb": round(max(0, quota_mb - current_mb), 2),
-            "usage_percentage": round((current_mb / quota_mb * 100) if quota_mb > 0 else 0, 1),
-            "has_quota": has_quota
+            "has_quota": has_quota,
+            **quota_view(current_mb, quota_mb),
         }
 
         if not has_quota and raise_on_exceed:
@@ -295,11 +321,10 @@ class StorageQuotaService:
                         parameters=(mb_delta, user_id),
                     )
                     result = await conn.fetchrow(
-                        "SELECT storage_used_mb, storage_quota_mb FROM users WHERE id = $1",
+                        "SELECT storage_used_mb FROM users WHERE id = $1",
                         user_id,
                     )
                     new_usage = float(result['storage_used_mb'])
-                    quota = result['storage_quota_mb']
 
                 else:
                     await gateway.execute_update(
@@ -316,7 +341,7 @@ class StorageQuotaService:
                     )
 
                     cursor = await conn.execute(
-                        "SELECT storage_used_mb, storage_quota_mb FROM users WHERE id = ?",
+                        "SELECT storage_used_mb FROM users WHERE id = ?",
                         (user_id,)
                     )
                     result = await cursor.fetchone()
@@ -325,49 +350,54 @@ class StorageQuotaService:
                         raise UserNotFoundError(f"User {user_id}")
 
                     new_usage = float(result[0])
-                    quota = result[1]
 
+            # Resolve the quota outside the transaction: no override query runs
+            # while the write transaction above holds the SQLite lock.
+            quota = await resolved_storage_quota_mb(user_id)
 
-                # Check if over quota
-                if new_usage > quota:
-                    logger.warning(
-                        f"User {user_id} exceeded quota: {new_usage:.2f}MB / {quota}MB"
-                    )
+            # Invalidate cache
+            cache_key = f"quota:{user_id}"
+            self.quota_cache.pop(cache_key, None)
 
-                # Invalidate cache
-                cache_key = f"quota:{user_id}"
-                self.quota_cache.pop(cache_key, None)
+            # Check if over quota
+            if quota is not None and new_usage > quota:
+                logger.warning(
+                    f"User {user_id} exceeded quota: {new_usage:.2f}MB / {quota}MB"
+                )
 
-                # Log significant changes
-                if abs(mb_delta) > 10:  # Log changes over 10MB
-                    logger.info(
-                        f"Updated storage for user {user_id}: "
-                        f"{operation} {abs(mb_delta):.2f}MB "
-                        f"(new total: {new_usage:.2f}MB / {quota}MB)"
-                    )
+            # Log significant changes
+            if abs(mb_delta) > 10:  # Log changes over 10MB
+                logger.info(
+                    f"Updated storage for user {user_id}: "
+                    f"{operation} {abs(mb_delta):.2f}MB "
+                    f"(new total: {new_usage:.2f}MB / "
+                    f"{'unlimited' if quota is None else f'{quota}MB'})"
+                )
 
-                # Update gauges
-                try:
-                    reg = get_metrics_registry()
-                    reg.set_gauge("user_storage_used_mb", float(new_usage), labels={"user_id": str(user_id)})
+            # Update gauges
+            try:
+                reg = get_metrics_registry()
+                reg.set_gauge("user_storage_used_mb", float(new_usage), labels={"user_id": str(user_id)})
+                if quota is not None:
                     reg.set_gauge("user_storage_quota_mb", float(quota), labels={"user_id": str(user_id)})
-                except Exception as e:
-                    logger.debug(f"storage_quota: failed to record updated gauges for user {user_id}: {e}")
-                    try:
-                        get_metrics_registry().increment(
-                            "app_warning_events_total",
-                            labels={"component": "storage_quota", "event": "metrics_record_failed"},
-                        )
-                    except Exception:
-                        logger.debug("metrics increment failed for storage_quota metrics_record_failed")
+            except Exception as e:
+                logger.debug(f"storage_quota: failed to record updated gauges for user {user_id}: {e}")
+                try:
+                    get_metrics_registry().increment(
+                        "app_warning_events_total",
+                        labels={"component": "storage_quota", "event": "metrics_record_failed"},
+                    )
+                except Exception:
+                    logger.debug("metrics increment failed for storage_quota metrics_record_failed")
 
-                return {
-                    "user_id": user_id,
-                    "storage_used_mb": round(new_usage, 2),
-                    "storage_quota_mb": quota,
-                    "available_mb": round(max(0, quota - new_usage), 2),
-                    "usage_percentage": round((new_usage / quota * 100) if quota > 0 else 0, 1)
-                }
+            view = quota_view(new_usage, quota)
+            return {
+                "user_id": user_id,
+                "storage_used_mb": round(new_usage, 2),
+                "storage_quota_mb": quota,
+                "available_mb": view["available_mb"],
+                "usage_percentage": view["usage_percentage"],
+            }
 
         except Exception as e:
             logger.error(f"Failed to update storage usage: {e}")
@@ -392,6 +422,24 @@ class StorageQuotaService:
             logger.error(f"Error calculating size for {path}: {e}")
         return total
 
+    async def user_quota_status(self, user_id: int) -> dict[str, Any]:
+        """The user's quota as a QuotaStatus-shaped dict; has_quota means "a quota is set" (read-only)."""
+        if not self._initialized:
+            await self.initialize()
+        user_info = await self._get_user_storage_info(user_id)
+        if not user_info:
+            raise UserNotFoundError(f"User {user_id}")
+        used = float(user_info["storage_used_mb"])
+        quota = await resolved_storage_quota_mb(user_id)
+        view = quota_view(used, quota)
+        return {
+            "quota_mb": quota,
+            "used_mb": round(used, 2),
+            "remaining_mb": view["available_mb"],
+            "usage_pct": view["usage_percentage"] if view["usage_percentage"] is not None else 0.0,
+            "has_quota": quota is not None,
+        }
+
     async def get_storage_breakdown(self, user_id: int) -> dict[str, Any]:
         """Get detailed storage breakdown by file type for a user."""
         if not self._initialized:
@@ -406,7 +454,7 @@ class StorageQuotaService:
             raise UserNotFoundError(f"User {user_id}")
         breakdown.update({
             "user_id": user_id,
-            "quota_mb": user_info['storage_quota_mb'],
+            "quota_mb": await resolved_storage_quota_mb(user_id),
             "current_usage_mb": float(user_info['storage_used_mb'])
         })
         return breakdown
@@ -442,63 +490,41 @@ class StorageQuotaService:
             breakdown[category]["mb"] = round(breakdown[category]["bytes"] / (1024 * 1024), 2)
         return breakdown
 
-    async def set_user_quota(self, user_id: int, quota_mb: int) -> dict[str, Any]:
-        """Set storage quota for a user (min 100MB)."""
+    async def set_user_quota(
+        self, user_id: int, quota_mb: Optional[int], *, updated_by: Optional[int] = None
+    ) -> dict[str, Any]:
+        """Set (or, with None, remove) the user's own limits.storage_quota_mb override (spec 2 §5)."""
         if not self._initialized:
             await self.initialize()
-        if quota_mb < 100:
-            quota_mb = 100
+        if quota_mb is not None and int(quota_mb) < 0:
+            raise ValueError("quota_mb must be >= 0, or None to remove the user's value")
+        user_info = await self._get_user_storage_info(user_id)
+        if not user_info:
+            raise UserNotFoundError(f"User {user_id}")
+        repo = UserProfileOverridesRepo(self.db_pool)
         try:
-            async with self.db_pool.transaction() as conn:
-                gateway = VersionedUserWriteGateway(
-                    "postgres" if self._is_postgres_backend() else "sqlite"
+            await repo.ensure_tables()
+            if quota_mb is None:
+                await repo.delete_override(user_id=int(user_id), key=STORAGE_QUOTA_KEY)
+            else:
+                await repo.upsert_override(
+                    user_id=int(user_id), key=STORAGE_QUOTA_KEY, value=int(quota_mb), updated_by=updated_by
                 )
-                if self._is_postgres_backend():
-                    await gateway.execute_update(
-                        conn,
-                        user_id=user_id,
-                        profile_visible_fields=("storage_quota_mb",),
-                        statement=
-                        """
-                        UPDATE users
-                        SET storage_quota_mb = $1
-                        WHERE id = $2
-                        """,
-                        parameters=(quota_mb, user_id),
-                    )
-                    result = await conn.fetchrow(
-                        "SELECT storage_used_mb FROM users WHERE id = $1",
-                        user_id,
-                    )
-                    current_usage = float(result['storage_used_mb'])
-                else:
-                    await gateway.execute_update(
-                        conn,
-                        user_id=user_id,
-                        profile_visible_fields=("storage_quota_mb",),
-                        statement="UPDATE users SET storage_quota_mb = ? WHERE id = ?",
-                        parameters=(quota_mb, user_id),
-                    )
-                    cursor = await conn.execute(
-                        "SELECT storage_used_mb FROM users WHERE id = ?",
-                        (user_id,)
-                    )
-                    row = await cursor.fetchone()
-                    if not row:
-                        raise UserNotFoundError(f"User {user_id}")
-                    current_usage = float(row[0])
-            self.quota_cache.pop(f"quota:{user_id}", None)
-            logger.info(f"Set quota for user {user_id}: {quota_mb}MB")
-            return {
-                "user_id": user_id,
-                "storage_quota_mb": quota_mb,
-                "storage_used_mb": round(current_usage, 2),
-                "available_mb": round(max(0, quota_mb - current_usage), 2),
-                "usage_percentage": round((current_usage / quota_mb * 100) if quota_mb > 0 else 0, 1)
-            }
         except Exception as e:
             logger.error(f"Failed to set user quota: {e}")
             raise StorageError(f"Failed to set quota: {e}") from e
+        quota_resolver.invalidate_user(int(user_id))
+        effective = await resolved_storage_quota_mb(user_id)
+        used = float(user_info["storage_used_mb"])
+        logger.info(f"Set storage quota for user {user_id}: {quota_mb}MB (effective {effective})")
+        view = quota_view(used, effective)
+        return {
+            "user_id": user_id,
+            "storage_quota_mb": effective,
+            "storage_used_mb": round(used, 2),
+            "available_mb": view["available_mb"],
+            "usage_percentage": view["usage_percentage"],
+        }
 
     async def get_all_users_storage(self) -> list[dict[str, Any]]:
         """List storage usage for all active users, sorted by usage desc."""
@@ -510,7 +536,7 @@ class StorageQuotaService:
                 # PostgreSQL
                 users = await conn.fetch(
                     """
-                    SELECT id, username, storage_used_mb, storage_quota_mb
+                    SELECT id, username, storage_used_mb
                     FROM users
                     WHERE is_active = TRUE
                     ORDER BY storage_used_mb DESC
@@ -520,7 +546,7 @@ class StorageQuotaService:
                 # SQLite
                 cursor = await conn.execute(
                     """
-                    SELECT id, username, storage_used_mb, storage_quota_mb
+                    SELECT id, username, storage_used_mb
                     FROM users
                     WHERE is_active = 1
                     ORDER BY storage_used_mb DESC
@@ -533,14 +559,13 @@ class StorageQuotaService:
         result = []
         for user in users:
             used = float(user.get('storage_used_mb', 0) or 0)
-            quota = user.get('storage_quota_mb', 0) or 0
+            quota = await resolved_storage_quota_mb(user.get('id'))
             result.append({
                 "user_id": user.get('id'),
                 "username": user.get('username'),
                 "storage_used_mb": round(used, 2),
                 "storage_quota_mb": quota,
-                "available_mb": round(max(0, quota - used), 2),
-                "usage_percentage": round((used / quota * 100) if quota > 0 else 0, 1)
+                **{k: v for k, v in quota_view(used, quota).items() if k != "quota_mb"},
             })
         return result
 
@@ -594,7 +619,7 @@ class StorageQuotaService:
     async def _get_user_storage_info(self, user_id: int) -> Optional[dict[str, Any]]:
         """Get user storage info from the database."""
         return await self.db_pool.fetchone(
-            "SELECT storage_used_mb, storage_quota_mb FROM users WHERE id = ?",
+            "SELECT storage_used_mb FROM users WHERE id = ?",
             user_id
         )
 
@@ -757,12 +782,15 @@ class StorageQuotaService:
                 combined_info["blocking_level"] = "org"
 
             if raise_on_exceed:
-                blocking = combined_info["blocking_level"]
-                raise QuotaExceededError(
-                    new_bytes / (1024 * 1024),
-                    user_info.get("quota_mb", 0),
-                    f"Quota exceeded at {blocking} level"
-                )
+                level = combined_info["blocking_level"]
+                if level == "user":
+                    used_mb = user_info.get("projected_usage_mb") or 0
+                    quota_mb = user_info.get("quota_mb") or 0
+                else:
+                    pool = team_info if level == "team" else org_info
+                    used_mb = (pool.get("used_mb") or 0) + new_bytes / (1024 * 1024)
+                    quota_mb = pool.get("quota_mb") or 0
+                raise QuotaExceededError(used_mb, quota_mb)
 
         return has_quota, combined_info
 
@@ -1072,7 +1100,7 @@ class StorageQuotaService:
         # Get user quota info
         user_info = await self._get_user_storage_info(user_id)
         if user_info:
-            usage["quota_mb"] = user_info.get("storage_quota_mb", 0)
+            usage["quota_mb"] = await resolved_storage_quota_mb(user_id)
             usage["quota_used_mb"] = user_info.get("storage_used_mb", 0)
 
         return usage
@@ -1210,17 +1238,6 @@ async def get_storage_service() -> StorageQuotaService:
         _storage_service = StorageQuotaService()
         await _storage_service.initialize()
     return _storage_service
-
-
-def invalidate_storage_cache_for_user(user_id: int) -> None:
-    """Best-effort invalidation for module-level storage service singletons."""
-    candidates: list[StorageQuotaService] = []
-    if _storage_service is not None:
-        candidates.append(_storage_service)
-    if _quota_service is not None and _quota_service is not _storage_service:
-        candidates.append(_quota_service)
-    for service in candidates:
-        service.invalidate_user_cache(int(user_id))
 
 
 async def reset_storage_service() -> None:

@@ -41,6 +41,11 @@ const mocks = vi.hoisted(() => ({
   }))
 }))
 
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({
+  useQuickIngestAuthority: () => 'verified-alice',
+  quickIngestAuthority: { capture: () => ({ authorityKey: 'verified-alice', isCurrent: () => true, signal: new AbortController().signal }) }
+}))
+
 const interpolate = (template: string, values?: Record<string, unknown>) =>
   template.replace(/\{\{(\w+)\}\}/g, (_, key) => String(values?.[key] ?? ''))
 
@@ -63,7 +68,8 @@ vi.mock('react-i18next', () => ({
 }))
 
 vi.mock('react-router-dom', () => ({
-  useNavigate: () => mocks.navigate
+  useNavigate: () => mocks.navigate,
+  useLocation: () => ({ key: 'initial' })
 }))
 
 vi.mock('@/hooks/useMessageOption', () => ({
@@ -144,6 +150,7 @@ vi.mock('@/services/settings/ui-settings', () => ({
   MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING: { key: 'mediaReviewFiltersCollapsed', defaultValue: false },
   MEDIA_REVIEW_FOCUSED_ID_SETTING: { key: 'mediaReviewFocusedId', defaultValue: null },
   MEDIA_REVIEW_ORIENTATION_SETTING: { key: 'mediaReviewOrientation', defaultValue: 'vertical' },
+  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING: { key: 'media-review-selection-snapshot', defaultValue: null },
   MEDIA_REVIEW_SELECTION_SETTING: { key: 'mediaReviewSelection', defaultValue: [] },
   MEDIA_REVIEW_VIEW_MODE_SETTING: { key: 'mediaReviewViewMode', defaultValue: 'spread' }
 }))
@@ -485,7 +492,7 @@ describe('MediaReviewPage stage7 three-panel layout', () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     // Click the row (not checkbox) - should preview, not select
@@ -493,7 +500,7 @@ describe('MediaReviewPage stage7 three-panel layout', () => {
 
     await waitFor(() => {
       // Selection count should remain 0
-      expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     // The row should be marked as previewed (aria-current)
@@ -505,14 +512,14 @@ describe('MediaReviewPage stage7 three-panel layout', () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     // Select via checkbox
     selectItemByCheckbox('Item 1')
 
     await waitFor(() => {
-      expect(screen.getByText('1 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('1 selected')
     })
 
     // The row's checkbox should be checked
@@ -524,7 +531,7 @@ describe('MediaReviewPage stage7 three-panel layout', () => {
     selectItemByCheckbox('Item 1')
 
     await waitFor(() => {
-      expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
   })
 
@@ -532,7 +539,7 @@ describe('MediaReviewPage stage7 three-panel layout', () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     // Preview Item 1 (click row)
@@ -543,68 +550,68 @@ describe('MediaReviewPage stage7 three-panel layout', () => {
 
     await waitFor(() => {
       // Only 1 item selected (Item 2), but Item 1 is previewed
-      expect(screen.getByText('1 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('1 selected')
     })
 
     // Item 1 is previewed (aria-current)
     expect(getResultRowByTitle('Item 1')).toHaveAttribute('aria-current', 'true')
     // Item 2 is selected (aria-selected)
-    expect(getResultRowByTitle('Item 2')).toHaveAttribute('aria-selected', 'true')
+    expect(within(getResultRowByTitle('Item 2')).getByRole('checkbox')).toBeChecked()
     // Item 1 is NOT selected
-    expect(getResultRowByTitle('Item 1')).toHaveAttribute('aria-selected', 'false')
+    expect(within(getResultRowByTitle('Item 1')).getByRole('checkbox')).not.toBeChecked()
   })
 
   it('restores persisted string ids as selected result rows', async () => {
     mocks.getSetting.mockImplementation(async (setting: { key?: string } | null) => {
-      if (setting?.key === 'mediaReviewSelection') return ['2']
+      if (setting?.key === 'media-review-selection-snapshot') return {version:1, authorityKey:'verified-alice', selectedIds:['2']}
       return null
     })
 
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('1 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('1 selected')
     })
 
-    expect(getResultRowByTitle('Item 2')).toHaveAttribute('aria-selected', 'true')
-    expect(getResultRowByTitle('Item 1')).toHaveAttribute('aria-selected', 'false')
+    expect(within(getResultRowByTitle('Item 2')).getByRole('checkbox')).toBeChecked()
+    expect(within(getResultRowByTitle('Item 1')).getByRole('checkbox')).not.toBeChecked()
   })
 
   it('shift+click on checkbox performs range selection', async () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     selectItemByCheckbox('Item 1')
     selectItemByCheckbox('Item 5', { shiftKey: true })
 
     await waitFor(() => {
-      expect(screen.getByText('5 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('5 selected')
     })
   })
 
   it('treats restored string ids as the same selection as numeric result ids', async () => {
     mocks.getSetting.mockImplementation(async (setting: { key?: string }) => {
-      if (setting?.key === 'mediaReviewSelection') return ['1']
+      if (setting?.key === 'media-review-selection-snapshot') return {version:1, authorityKey:'verified-alice', selectedIds:['1']}
       return null
     })
 
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('1 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('1 selected')
     })
 
     const row = getResultRowByTitle('Item 1')
-    expect(row).toHaveAttribute('aria-selected', 'true')
+    expect(within(row).getByRole('checkbox')).toBeChecked()
     expect(within(row).getByRole('checkbox')).toBeChecked()
 
     selectItemByCheckbox('Item 1')
 
     await waitFor(() => {
-      expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
   })
 
@@ -612,7 +619,7 @@ describe('MediaReviewPage stage7 three-panel layout', () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     // First click to preview Item 1 so we have a starting position
@@ -639,14 +646,14 @@ describe('MediaReviewPage stage7 three-panel layout', () => {
     })
 
     // Selection should still be empty throughout
-    expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+    expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
   })
 
   it('x key toggles selection on previewed/focused item', async () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     // Preview Item 1
@@ -656,14 +663,14 @@ describe('MediaReviewPage stage7 three-panel layout', () => {
     fireEvent.keyDown(document, { key: 'x' })
 
     await waitFor(() => {
-      expect(screen.getByText('1 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('1 selected')
     })
 
     // Press x again to deselect
     fireEvent.keyDown(document, { key: 'x' })
 
     await waitFor(() => {
-      expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
   })
 
@@ -671,7 +678,7 @@ describe('MediaReviewPage stage7 three-panel layout', () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     // No batch bar initially
@@ -730,18 +737,19 @@ describe('MediaReviewPage stage7 three-panel layout', () => {
     expect(screen.queryAllByRole('separator')).toHaveLength(0)
   })
 
-  it('Enter/Space on result row toggles selection for keyboard a11y', async () => {
+  it('Enter on result row previews without selecting for keyboard a11y', async () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('0 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     const row = getResultRowByTitle('Item 1')
     fireEvent.keyDown(row, { key: 'Enter' })
 
     await waitFor(() => {
-      expect(screen.getByText('1 / 30 selected')).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
+      expect(row).toHaveAttribute('aria-current', 'true')
     })
   })
 })

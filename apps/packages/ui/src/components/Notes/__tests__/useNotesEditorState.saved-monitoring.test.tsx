@@ -228,12 +228,16 @@ describe('Notes saved-state hydration and optional monitoring', () => {
     act(() => {
       loading = view.result.current.loadDetail('one')
     })
-    act(() => view.result.current.setContentDirty('Typed during load'))
+    act(() => {
+      view.result.current.setContentDirty('Typed during load')
+      view.result.current.setTitle('Title typed during load')
+    })
     await act(async () => {
       pending.resolve(note())
       await loading
     })
     expect(view.result.current.content).toBe('Typed during load')
+    expect(view.result.current.title).toBe('Title typed during load')
     expect(view.result.current.saveIndicator).toBe('dirty')
   })
 
@@ -781,5 +785,131 @@ describe('Notes saved-state hydration and optional monitoring', () => {
     expect(view.result.current.selectedId).toBe('created')
     expect(view.result.current.selectedVersion).toBe(3)
     expect(view.result.current.saveIndicator).toBe('dirty')
+  })
+  it.each([true, false])(
+    'retains canonical content provenance without API metadata through body edits (online=%s)',
+    async (online) => {
+      const provenance = {
+        origin: 'knowledge_qa',
+        trust_state: 'uncited_degraded_answer',
+        evidence_origin: 'local_library',
+        thread_id: 'owned-thread',
+      }
+      const marker = `<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(provenance))} -->`
+      let saved = {
+        ...note('canonical-uuid', {
+          content: `Original cited excerpt\n\n${marker}`,
+        }),
+        conversation_id: 'owned-thread',
+      }
+      mocks.request.mockImplementation(async (request) => {
+        if (request.method === 'PUT')
+          saved = {
+            ...saved,
+            title: request.body.title,
+            content: request.body.content,
+            version: saved.version + 1,
+          }
+        return saved // Canonical NoteResponse has no metadata field.
+      })
+      const view = renderEditor()
+      await act(async () => {
+        await view.result.current.loadDetail('canonical-uuid')
+      })
+      expect(view.result.current.provenanceSummaryText).toContain(
+        'Knowledge QA',
+      )
+      expect(view.result.current.content).toBe('Original cited excerpt')
+      expect(view.result.current.metricSummaryText).toContain('3 words')
+      view.rerender({ scope: authority(), online })
+      act(() => {
+        view.result.current.setTitle('Edited title')
+        // Rich-text conversion and body replacement can omit HTML comments.
+        view.result.current.setContentDirty(
+          'Edited body retaining the source quotation',
+        )
+      })
+      await act(async () => {
+        await view.result.current.saveNote()
+      })
+      if (!online) {
+        const draft =
+          view.result.current.offlineDraftQueue['note:canonical-uuid']
+        expect(draft.content).toContain(marker)
+        expect(draft.content).toContain('Edited body')
+        view.unmount()
+        return
+      }
+      expect(saved).not.toHaveProperty('metadata')
+      expect(saved.content).toContain(marker)
+      expect(saved.title).toBe('Edited title')
+      view.unmount()
+      const reopened = renderEditor()
+      await act(async () => {
+        await reopened.result.current.loadDetail('canonical-uuid')
+      })
+      expect(reopened.result.current.content).toContain('Edited body')
+      expect(reopened.result.current.provenanceSummaryText).toContain(
+        'Knowledge QA',
+      )
+      expect(reopened.result.current.provenanceSummaryText).toContain(
+        'uncited_degraded_answer',
+      )
+      expect(reopened.result.current.provenanceSummaryText).toContain(
+        'owned-thread',
+      )
+      reopened.unmount()
+    },
+  )
+  it('retains Knowledge QA origin and qualifications after reopening and editing the exported title', async () => {
+    const metadata = {
+      origin: 'knowledge_qa',
+      thread_id: 'thread-export',
+      trust_state: 'uncited_degraded_answer',
+      evidence_origin: 'local_library',
+    }
+    let saved: ReturnType<typeof note> & { metadata: typeof metadata } = {
+      ...note('exported-uuid', {
+        content: 'Exact exported draft with source excerpt',
+        metadata,
+      }),
+      metadata,
+    }
+    mocks.request.mockImplementation(async (request) => {
+      if (request.method === 'PUT') saved = { ...saved, ...request.body }
+      return saved
+    })
+    const view = renderEditor()
+    await act(async () => {
+      await view.result.current.loadDetail('exported-uuid')
+    })
+    expect(view.result.current.content).toBe(
+      'Exact exported draft with source excerpt',
+    )
+    expect(view.result.current.provenanceSummaryText).toContain('Knowledge QA')
+    act(() => view.result.current.setTitle('Edited title'))
+    expect(view.result.current.provenanceSummaryText).toContain(
+      'uncited_degraded_answer',
+    )
+    expect(view.result.current.provenanceSummaryText).toContain('thread-export')
+    await act(async () => {
+      await view.result.current.saveNote()
+    })
+    expect(saved.metadata).toMatchObject(metadata)
+    expect(saved.title).toBe('Edited title')
+    view.unmount()
+    const reopened = renderEditor()
+    await act(async () => {
+      await reopened.result.current.loadDetail('exported-uuid')
+    })
+    expect(reopened.result.current.content).toBe(
+      'Exact exported draft with source excerpt',
+    )
+    expect(reopened.result.current.provenanceSummaryText).toContain(
+      'Knowledge QA',
+    )
+    expect(reopened.result.current.provenanceSummaryText).toContain(
+      'thread-export',
+    )
   })
 })

@@ -1,57 +1,79 @@
-import React from "react"
-import { useTranslation } from "react-i18next"
-import { useNavigate } from "react-router-dom"
-import { useQuery, keepPreviousData } from "@tanstack/react-query"
-import { useVirtualizer } from "@tanstack/react-virtual"
-import { useAntdMessage } from "@/hooks/useAntdMessage"
-import { useStorage } from "@plasmohq/storage/hook"
-import { useSetting } from "@/hooks/useSetting"
-import { useMessageOption } from "@/hooks/useMessageOption"
-import { useServerOnline } from "@/hooks/useServerOnline"
-import { getSetting, setSetting, clearSetting } from "@/services/settings/registry"
-import {
-  LAST_MEDIA_ID_SETTING,
-  MEDIA_HIDE_TRANSCRIPT_TIMINGS_SETTING,
-  MEDIA_REVIEW_ORIENTATION_SETTING,
-  MEDIA_REVIEW_VIEW_MODE_SETTING,
-  MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING,
-  MEDIA_REVIEW_AUTO_VIEW_MODE_SETTING,
-  MEDIA_REVIEW_SELECTION_SETTING,
-  MEDIA_REVIEW_FOCUSED_ID_SETTING
-} from "@/services/settings/ui-settings"
-import {
-  hasLeadingTranscriptTimings
-} from "@/utils/media-transcript-display"
-import type { MediaDateRange, MediaSortBy } from "@/components/Review/mediaSearchRequest"
-import {
+import { type ContentFilterProgress,
   IDLE_CONTENT_FILTER_PROGRESS,
-  toProgressLabel,
-  type ContentFilterProgress
+  toProgressLabel
 } from "@/components/Review/content-filtering-progress"
+import type { MediaMultiBatchExportFormat } from "@/components/Review/media-multi-batch-actions"
+import { DEFAULT_SORT_BY,
+  MOBILE_REVIEW_MEDIA_QUERY,
+  type MediaDetail,
+  type MediaItem,
+  type MediaReviewState,
+  RESULTS_ROW_ESTIMATE_SIZE,
+  SELECTION_WARNING_THRESHOLD,
+  getContent,
+  getIsMobileReviewViewport
+} from "@/components/Review/media-review-types"
+import type { MediaDateRange, MediaSortBy } from "@/components/Review/mediaSearchRequest"
 import {
   STACK_VIRTUAL_ESTIMATE_SIZE,
   STACK_VIRTUAL_OVERSCAN,
   shouldVirtualizeStackMode
 } from "@/components/Review/stack-virtualization"
-import type { MediaMultiBatchExportFormat } from "@/components/Review/media-multi-batch-actions"
+import { useAntdMessage } from "@/hooks/useAntdMessage"
+import { useMessageOption } from "@/hooks/useMessageOption"
+import { useServerOnline } from "@/hooks/useServerOnline"
+import { useSetting } from "@/hooks/useSetting"
+import { getSetting, setSetting } from "@/services/settings/registry"
 import {
-  type MediaItem,
-  type MediaDetail,
-  getContent,
-  DEFAULT_SORT_BY,
-  SELECTION_WARNING_THRESHOLD,
-  RESULTS_ROW_ESTIMATE_SIZE,
-  MOBILE_REVIEW_MEDIA_QUERY,
-  getIsMobileReviewViewport,
-  type MediaReviewState
-} from "@/components/Review/media-review-types"
+  MEDIA_HIDE_TRANSCRIPT_TIMINGS_SETTING,
+  MEDIA_REVIEW_AUTO_VIEW_MODE_SETTING,
+  MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING,
+  MEDIA_REVIEW_ORIENTATION_SETTING,
+  MEDIA_REVIEW_SELECTION_SETTING,
+  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING,
+  MEDIA_REVIEW_VIEW_MODE_SETTING
+} from "@/services/settings/ui-settings"
+import { useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
+import {
+  hasLeadingTranscriptTimings
+} from "@/utils/media-transcript-display"
+import { useQuery } from "@tanstack/react-query"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import React from "react"
+import { useTranslation } from "react-i18next"
+import { useLocation, useNavigate } from "react-router-dom"
+
+import { useStorage } from "@plasmohq/storage/hook"
 
 export function useMediaReviewState(
   fetchListFn: React.MutableRefObject<(() => Promise<MediaItem[]>) | null>
 ): MediaReviewState {
   const { t } = useTranslation(['review'])
   const navigate = useNavigate()
+  const location = useLocation()
+  const authorityKey = useQuickIngestAuthority()
+  const [queryAuthorityKey, setQueryAuthorityKey] = React.useState<
+    string | null
+  >(null)
+  // Start only after this owner's action lifetime has committed. Query startup
+  // can otherwise capture the previous lifetime during an authority transition.
+  React.useEffect(() => {
+    setQueryAuthorityKey(authorityKey)
+  }, [authorityKey])
+  const selectionRevision = React.useRef(0)
+  const [readingActive, setReadingActiveState] = React.useState(false)
+  const setReadingActive: React.Dispatch<React.SetStateAction<boolean>> = React.useCallback(next => {
+    selectionRevision.current += 1
+    setReadingActiveState(next)
+  }, [])
+  const [readingWindowStart, setReadingWindowStart] = React.useState(0)
+  const [mobileTab, setMobileTab] = React.useState<0 | 1 | 2>(1)
+  const [selectedMetadata, setSelectedMetadata] = React.useState<Record<string, MediaItem>>({})
+  const restoreReady = React.useRef(false)
+  const restoredOwner = React.useRef<string | null>(null)
   const message = useAntdMessage()
+  const selectionError = React.useRef({message, t})
+  selectionError.current = {message, t}
   const { setChatMode, setSelectedKnowledge, setRagMediaIds } = useMessageOption()
   const [helpDismissed, setHelpDismissed, { isLoading: helpDismissedLoading }] = useStorage<boolean>('mediaReviewHelpDismissed', false)
   const [query, setQuery] = React.useState("")
@@ -61,7 +83,11 @@ export function useMediaReviewState(
   const [total, setTotal] = React.useState(0)
   const [orientation, setOrientation] = useSetting(MEDIA_REVIEW_ORIENTATION_SETTING)
   const [hideTranscriptTimings, setHideTranscriptTimings] = useSetting(MEDIA_HIDE_TRANSCRIPT_TIMINGS_SETTING)
-  const [selectedIds, setSelectedIds] = React.useState<Array<string | number>>([])
+  const [selectedIds, setSelectedIdsState] = React.useState<Array<string | number>>([])
+  const setSelectedIds: React.Dispatch<React.SetStateAction<Array<string | number>>> = React.useCallback(next => {
+    selectionRevision.current += 1
+    setSelectedIdsState(next)
+  }, [])
   const [batchKeywordsDraft, setBatchKeywordsDraft] = React.useState("")
   const [batchExportFormat, setBatchExportFormat] = React.useState<MediaMultiBatchExportFormat>("json")
   const [batchActionLoading, setBatchActionLoading] = React.useState<
@@ -101,7 +127,7 @@ export function useMediaReviewState(
   const [viewModeState, setViewModeState] = React.useState<"spread" | "list" | "all">("spread")
   const shouldHideTranscriptTimings = hideTranscriptTimings ?? true
   const viewMode = isMobileViewport
-    ? (viewModeState === "all" && selectedIds.length > 1 ? "all" : "list")
+    ? viewModeState === "all" && selectedIds.length > 1 ? "all" : "list"
     : viewModeState
   const setViewMode = React.useCallback((mode: "spread" | "list" | "all") => {
     if (isMobileViewport) {
@@ -138,6 +164,7 @@ export function useMediaReviewState(
   }, [isMobileViewport])
 
   const [focusedId, setFocusedId] = React.useState<string | number | null>(null)
+  const [previewNavigationIds, setPreviewNavigationIds] = React.useState<Array<string | number>>([])
   const [previewedId, setPreviewedId] = React.useState<string | number | null>(null)
   const [collapseOthers, setCollapseOthers] = React.useState<boolean>(false)
   const [pendingInitialMediaId, setPendingInitialMediaId] = React.useState<string | null>(null)
@@ -164,44 +191,74 @@ export function useMediaReviewState(
   const isOnline = useServerOnline()
   const [selectionRestored, setSelectionRestored] = React.useState(false)
 
-  // Restore selection state on mount
+  // The owned snapshot is authoritative; raw legacy IDs cannot establish ownership.
+  React.useLayoutEffect(() => {
+    restoreReady.current = false
+    if (restoredOwner.current !== authorityKey) {
+      contentFilterRunRef.current += 1
+      setSelectedIds([])
+      setFocusedId(null)
+      setPreviewedId(null)
+      setPreviewNavigationIds([])
+      setDetails({})
+      setDetailLoading({})
+      setFailedIds(new Set())
+      setSelectedMetadata({})
+      setReadingActive(false)
+      setReadingWindowStart(0)
+      setCompareDiffOpen(false)
+      setCompareLeftText("")
+      setCompareRightText("")
+      setCompareLeftLabel("")
+      setCompareRightLabel("")
+      setContentExpandedIds(new Set())
+      setAnalysisExpandedIds(new Set())
+      setCopiedIds(new Set())
+      lastClickedRef.current = null
+      setBatchActionLoading(null)
+      setBatchTrashHandoffIds([])
+      setPendingInitialMediaId(null)
+      setMobileTab(1)
+    }
+    restoredOwner.current = authorityKey
+    setSelectionRestored(false)
+  }, [authorityKey, location.key, setReadingActive, setSelectedIds])
+
   React.useEffect(() => {
+    if (!authorityKey) return
     let cancelled = false
+    const restoreRevision = selectionRevision.current
     void (async () => {
-      const lastMediaId = await getSetting(LAST_MEDIA_ID_SETTING)
-      if (!cancelled && lastMediaId) {
-        setPendingInitialMediaId(lastMediaId)
+      const snapshot = await getSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, {throwOnError: true})
+      if (cancelled) return
+      if (restoreRevision === selectionRevision.current && snapshot?.version === 1 && snapshot.authorityKey === authorityKey) {
+        const ids = snapshot.selectedIds.filter((id, index, all) => all.findIndex(candidate => String(candidate) === String(id)) === index)
+        setSelectedIds(ids)
+        setFocusedId(ids[0] ?? null)
+        setReadingWindowStart(0)
+        setReadingActive(ids.length > 0)
+        if (ids.length > 0) setMobileTab(2)
       }
-      const savedSelection = await getSetting(MEDIA_REVIEW_SELECTION_SETTING)
-      const savedFocusedId = await getSetting(MEDIA_REVIEW_FOCUSED_ID_SETTING)
-      if (!cancelled) {
-        if (savedSelection && savedSelection.length > 0) {
-          setSelectedIds((current) => (current.length > 0 ? current : savedSelection))
-        }
-        if (savedFocusedId != null) {
-          setFocusedId((current) => (current != null ? current : savedFocusedId))
-        }
-        setSelectionRestored(true)
-      }
-    })()
+      restoreReady.current = true
+      setSelectionRestored(true)
+    })().catch(() => {
+      if (!cancelled) selectionError.current.message.error(selectionError.current.t("mediaPage.selectionLoadFailed", "Could not load the saved selection. Reopen Review to try again."))
+    })
     return () => { cancelled = true }
-  }, [])
-
-  // Persist selection state
-  React.useEffect(() => {
-    if (!selectionRestored) return
-    void setSetting(MEDIA_REVIEW_SELECTION_SETTING, selectedIds)
-  }, [selectedIds, selectionRestored])
+  }, [authorityKey, location.key, setReadingActive, setSelectedIds])
 
   React.useEffect(() => {
-    if (!selectionRestored) return
-    void setSetting(MEDIA_REVIEW_FOCUSED_ID_SETTING, focusedId)
-  }, [focusedId, selectionRestored])
+    if (!selectionRestored || !restoreReady.current || !authorityKey) return
+    void setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, {version: 1, authorityKey, selectedIds})
+      .then(() => setSetting(MEDIA_REVIEW_SELECTION_SETTING, selectedIds))
+      .catch(() => selectionError.current.message.error(selectionError.current.t("mediaPage.selectionSaveFailed", "Could not save the review selection. Try again.")))
+  }, [selectedIds, selectionRestored, authorityKey])
 
   // Query integration
   const { data, isFetching, refetch } = useQuery({
     queryKey: [
       "media-review",
+      authorityKey,
       query,
       page,
       pageSize,
@@ -216,20 +273,25 @@ export function useMediaReviewState(
       if (fetchListFn.current) return fetchListFn.current()
       return Promise.resolve([] as MediaItem[])
     },
-    placeholderData: keepPreviousData,
-    enabled: isOnline
+    placeholderData: (previousData, previousQuery) => previousQuery?.queryKey[1] === authorityKey ? previousData : undefined,
+    enabled: isOnline && Boolean(authorityKey)
+  && queryAuthorityKey === authorityKey
   })
-
-  React.useEffect(() => { refetch() }, [])
 
   // Derived values
   const cardCls = orientation === 'vertical'
     ? 'border border-border rounded p-3 bg-surface w-full'
     : 'border border-border rounded p-3 bg-surface w-full md:w-[48%]'
 
-  const allResults: MediaItem[] = Array.isArray(data) ? data : []
+  const allResults: MediaItem[] = React.useMemo(() => (authorityKey && Array.isArray(data) ? data : []), [authorityKey, data])
   const hasResults = allResults.length > 0
-  const viewerItems = selectedIds.map((id) => details[id]).filter(Boolean)
+  React.useEffect(() => {
+    if (!authorityKey || !allResults.length) return
+    setSelectedMetadata(prev => ({ ...prev, ...Object.fromEntries(allResults.map(item => [String(item.id), item])) }))
+  }, [allResults, authorityKey])
+  const boundedWindowStart = Math.min(readingWindowStart, Math.max(0, Math.floor((selectedIds.length - 1) / openAllLimit) * openAllLimit))
+  const readingIds = React.useMemo(() => readingActive ? selectedIds.slice(boundedWindowStart, boundedWindowStart + openAllLimit) : [], [readingActive, selectedIds, boundedWindowStart, openAllLimit])
+  const viewerItems = readingIds.map((id) => details[id]).filter(Boolean)
   const hasTranscriptTimingContentInViewer = React.useMemo(
     () =>
       viewerItems.some((detail) =>
@@ -238,14 +300,14 @@ export function useMediaReviewState(
     [viewerItems]
   )
   const visibleIds = viewMode === "spread"
-    ? selectedIds
+    ? readingIds
     : viewMode === "list"
-      ? (focusedId != null ? [focusedId] : [])
-      : selectedIds
-  const focusedDetail = focusedId != null ? details[focusedId] : null
-  const focusIndex = focusedId != null ? allResults.findIndex((r) => r.id === focusedId) : -1
+      ? focusedId != null ? [focusedId] : []: readingIds
+  const focusedDetail = readingActive && focusedId != null ? details[focusedId] : null
+  const focusIndex = focusedId != null ? selectedIds.findIndex((id) => String(id) === String(focusedId)) : -1
   const previewedDetail = previewedId != null ? details[previewedId] : null
-  const previewIndex = previewedId != null ? allResults.findIndex((r) => r.id === previewedId) : -1
+  const previewIndex = previewedId != null ? previewNavigationIds.findIndex((id) => String(id) === String(previewedId)) : -1
+  const navigationTotal = readingActive ? selectedIds.length : previewNavigationIds.length
   const listParentRef = React.useRef<HTMLDivElement | null>(null)
   const viewerParentRef = React.useRef<HTMLDivElement | null>(null)
   const stackParentRef = React.useRef<HTMLDivElement | null>(null)
@@ -262,7 +324,7 @@ export function useMediaReviewState(
   })
 
   const viewerVirtualizer = useVirtualizer({
-    count: viewMode === "spread" ? viewerItems.length : viewMode === "list" ? (focusedDetail ? 1 : 0) : 0,
+    count: viewMode === "spread" ? viewerItems.length : viewMode === "list" ? focusedDetail ? 1 : 0: 0,
     getScrollElement: () => viewerParentRef.current,
     estimateSize: () => 520,
     overscan: 6,
@@ -287,16 +349,19 @@ export function useMediaReviewState(
   const hasDateRangeFilter = Boolean(dateRange.startDate || dateRange.endDate)
   const selectionStatusLevel =
     selectedIds.length >= openAllLimit
-      ? "limit" as const
-      : selectedIds.length >= SELECTION_WARNING_THRESHOLD
-        ? "warning" as const
-        : "safe" as const
+      ? ("limit" as const
+      )
+      : readingIds.length >= SELECTION_WARNING_THRESHOLD
+        ? ("warning" as const
+        )
+        : ("safe" as const
+  )
   const selectionStatusText =
     selectionStatusLevel === "limit"
-      ? t("mediaPage.selectionStatusLimit", "Limit reached")
+      ? t("mediaPage.selectionStatusWindowed", "Windowed reading")
       : selectionStatusLevel === "warning"
-        ? t("mediaPage.selectionStatusWarning", "Warning")
-        : t("mediaPage.selectionStatusSafe", "Safe")
+        ? t("mediaPage.selectionStatusReady", "Ready to review")
+        : t("mediaPage.selectionStatusReady", "Ready to review")
   const activeFilterCount =
     types.length +
     keywordTokens.length +
@@ -331,12 +396,12 @@ export function useMediaReviewState(
   )
 
   return {
-    t, navigate, message,
+    t, navigate, message, authorityKey, readingActive, setReadingActive, readingWindowStart: boundedWindowStart, setReadingWindowStart, readingIds, selectedMetadata, mobileTab, setMobileTab, navigationTotal,
     query, setQuery, page, setPage, pageSize, setPageSize, total, setTotal,
     types, setTypes, keywordTokens, setKeywordTokens, keywordOptions, setKeywordOptions,
     includeContent, setIncludeContent, sortBy, setSortBy, dateRange, setDateRange,
     availableTypes, setAvailableTypes,
-    selectedIds, setSelectedIds, focusedId, setFocusedId, previewedId, setPreviewedId, selectionRestored, setSelectionRestored,
+    selectedIds, setSelectedIds, focusedId, setFocusedId, previewedId, setPreviewedId, previewNavigationIds, setPreviewNavigationIds, selectionRestored, setSelectionRestored,
     details, setDetails, contentLoading, setContentLoading,
     contentFilterProgress, setContentFilterProgress,
     contentExpandedIds, setContentExpandedIds, analysisExpandedIds, setAnalysisExpandedIds,

@@ -85,7 +85,10 @@ export function CompactToolbar({
   className,
 }: CompactToolbarProps) {
   const sourceSummary = summarizeSources(sources)
-  const specificSourceSummary = summarizeSpecificSources(includeMediaIds, includeNoteIds)
+  const specificSourceSummary = summarizeSpecificSources(
+    includeMediaIds,
+    includeNoteIds,
+  )
   const sourceControlLabel = `Open source scope and saved profiles. Sources: ${sourceSummary}${
     specificSourceSummary ? `. Specific: ${specificSourceSummary}` : ""
   }`
@@ -96,7 +99,7 @@ export function CompactToolbar({
         <button
           type="button"
           onClick={onAddSources ?? onOpenSourceSelector}
-          className="inline-flex h-7 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2.5 text-[11px] font-medium text-primaryStrong hover:bg-primary/15 transition-colors"
+          className="inline-flex min-h-9 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2.5 text-[11px] font-medium text-primaryStrong hover:bg-primary/15 transition-colors"
         >
           <FolderPlus className="h-3.5 w-3.5" />
           Add sources
@@ -109,12 +112,12 @@ export function CompactToolbar({
         onClick={onOpenSourceSelector}
         aria-label={sourceControlLabel}
         title="Open source scope and saved profiles"
-        className="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+        className="inline-flex min-h-9 items-center gap-1 rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text transition-colors"
       >
         <Layers className="h-3.5 w-3.5" />
         Sources: {sourceSummary}
         {specificSourceSummary ? (
-          <span className="hidden sm:inline"> • Specific: {specificSourceSummary}</span>
+          <span className="inline"> • Specific: {specificSourceSummary}</span>
         ) : null}
         <ChevronDown className="h-3 w-3" />
       </button>
@@ -123,7 +126,7 @@ export function CompactToolbar({
       <button
         type="button"
         onClick={onOpenSettings}
-        className="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+        className="inline-flex min-h-9 items-center gap-1 rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text transition-colors"
         title={`Search preset: ${PRESET_LABELS[preset] ?? preset}`}
       >
         {PRESET_LABELS[preset] ?? preset}
@@ -136,11 +139,11 @@ export function CompactToolbar({
         onClick={onToggleWeb}
         disabled={!webFallbackAvailable}
         className={cn(
-          "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors",
+          "inline-flex min-h-9 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors",
           webEnabled && webFallbackAvailable
             ? "border-primary/40 bg-primary/10 text-primary"
             : "border-border bg-surface text-text-muted hover:bg-surface2 hover:text-text",
-          !webFallbackAvailable && "opacity-60 cursor-not-allowed hover:bg-surface hover:text-text-muted"
+          !webFallbackAvailable && "opacity-60 cursor-not-allowed hover:bg-surface hover:text-text-muted",
         )}
         aria-pressed={webEnabled && webFallbackAvailable}
         aria-label={
@@ -154,7 +157,12 @@ export function CompactToolbar({
             : "Web fallback is not available on this server."
         }
       >
-        <Globe className={cn("h-3.5 w-3.5", webEnabled && webFallbackAvailable ? "fill-current" : "")} />
+        <Globe
+          className={cn(
+            "h-3.5 w-3.5",
+            webEnabled && webFallbackAvailable ? "fill-current" : "",
+          )}
+        />
         Web
       </button>
 
@@ -169,14 +177,14 @@ export function CompactToolbar({
         <button
           type="button"
           onClick={onRefreshSourceHealth}
-          className="inline-flex h-7 items-center rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+          className="inline-flex min-h-9 items-center rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text transition-colors"
           aria-label="Refresh source health"
           title="Refresh source health"
         >
           {buildSourceHealthSummary(sourceHealth)}
         </button>
       ) : sourceHealth ? (
-        <span className="inline-flex h-7 items-center rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted">
+        <span className="inline-flex min-h-9 items-center rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted">
           {buildSourceHealthSummary(sourceHealth)}
         </span>
       ) : null}

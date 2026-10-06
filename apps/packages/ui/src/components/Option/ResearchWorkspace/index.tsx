@@ -50,10 +50,7 @@ import type {
   WorkspaceSourceStatus,
   WorkspaceSourceStatusDetails
 } from "@/types/workspace"
-import {
-  buildKnowledgeQaSeedNote,
-  consumeResearchWorkspacePrefill
-} from "@/utils/research-workspace-prefill"
+import { useResearchWorkspacePrefill } from "@/utils/use-research-workspace-prefill"
 import { FEATURE_FLAGS, useFeatureFlag } from "@/hooks/useFeatureFlags"
 import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -367,7 +364,7 @@ type WorkspaceNoteKeywordLike =
     }
 
 type WorkspaceNoteSearchItem = {
-  id?: number
+  id?: string | number
   title?: string
   content?: string
   version?: number
@@ -502,8 +499,8 @@ const buildWorkspaceNotesSearchPath = (workspaceTag: string): AllowedPath => {
   return `/api/v1/notes/search/?${params.toString()}` as AllowedPath
 }
 
-const buildWorkspaceNotePath = (noteId: number): AllowedPath =>
-  `/api/v1/notes/${noteId}` as AllowedPath
+const buildWorkspaceNotePath = (noteId: string | number): AllowedPath =>
+  `/api/v1/notes/${encodeURIComponent(String(noteId))}` as AllowedPath
 
 const isDesktopLayout = (): boolean => {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -2287,9 +2284,12 @@ const ResearchWorkspaceBody: React.FC = () => {
         })
         if (cancelled) return
 
-        const noteById = new Map<number, WorkspaceGlobalSearchNoteDocument>()
+        const noteById = new Map<string | number, WorkspaceGlobalSearchNoteDocument>()
         for (const note of pickNotesArray(response)) {
-          if (typeof note.id !== "number" || !Number.isFinite(note.id)) {
+          if (
+            !(typeof note.id === "string" && note.id.trim()) &&
+            !(typeof note.id === "number" && Number.isFinite(note.id))
+          ) {
             continue
           }
           noteById.set(note.id, {
@@ -2320,7 +2320,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     async (result: WorkspaceGlobalSearchResult) => {
       if (
         result.noteId != null &&
-        Number.isFinite(result.noteId) &&
+        (typeof result.noteId === "string" || Number.isFinite(result.noteId)) &&
         currentNote?.id !== result.noteId
       ) {
         try {
@@ -2849,60 +2849,10 @@ const ResearchWorkspaceBody: React.FC = () => {
     workspaceId
   ])
 
-  useEffect(() => {
-    if (!workspaceId) return
-
-    let isActive = true
-
-    const applyPrefill = async () => {
-      const payload = await consumeResearchWorkspacePrefill()
-      if (!payload || !isActive) return
-      if (payload.kind !== "knowledge_qa_thread") return
-
-      const sourceCandidates = payload.sources
-        .filter((source) => typeof source.mediaId === "number")
-        .map((source) => ({
-          mediaId: source.mediaId as number,
-          title: source.title,
-          type: source.type
-        }))
-
-      if (sourceCandidates.length > 0) {
-        addSources(sourceCandidates)
-
-        const stateAfterAdd = useWorkspaceStore.getState()
-        const prefillSourceIds = stateAfterAdd.sources
-          .filter((source) =>
-            sourceCandidates.some((candidate) => candidate.mediaId === source.mediaId)
-          )
-          .map((source) => source.id)
-        const mergedSelectedIds = new Set([
-          ...stateAfterAdd.selectedSourceIds,
-          ...prefillSourceIds
-        ])
-        if (mergedSelectedIds.size > 0) {
-          setSelectedSourceIds(Array.from(mergedSelectedIds))
-        }
-      }
-
-      const noteContent = buildKnowledgeQaSeedNote(payload)
-      if (noteContent.trim().length > 0) {
-        const titleBase =
-          payload.query.trim().length > 0 ? payload.query.trim() : "Knowledge QA import"
-        captureToCurrentNote({
-          title: `Knowledge QA: ${titleBase.slice(0, 80)}`,
-          content: noteContent,
-          mode: "append"
-        })
-      }
-    }
-
-    void applyPrefill()
-
-    return () => {
-      isActive = false
-    }
-  }, [addSources, captureToCurrentNote, setSelectedSourceIds, workspaceId])
+  const knowledgeImport = useResearchWorkspacePrefill(
+    workspaceId,
+    isStoreHydrated,
+  )
 
   useEffect(() => {
     if (!isStoreHydrated) return
@@ -3671,6 +3621,42 @@ const ResearchWorkspaceBody: React.FC = () => {
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,var(--surface-2),var(--bg)_45%)] text-text">
       {messageContextHolder}
+      {(knowledgeImport.attached > 0 ||
+        knowledgeImport.failed > 0 ||
+        knowledgeImport.importing ||
+        knowledgeImport.error) && (
+        <div
+          role="status"
+          className="border-b border-border bg-surface px-3 py-2 text-sm"
+        >
+          <p>
+            {t("playground:workspace.knowledgeImportCounts", {
+              defaultValue:
+                "Knowledge evidence: {{attached}} attached · {{pending}} pending · {{failed}} failed",
+              attached: knowledgeImport.attached,
+              pending: knowledgeImport.pending,
+              failed: knowledgeImport.failed,
+            })}
+          </p>
+          <p>
+            {t("playground:workspace.excerptSnapshotNotice", {
+              defaultValue:
+                "Note and web sources are retrieved-excerpt snapshots, not live or complete copies. Original references, excerpts, and answer qualifications are in the imported draft.",
+            })}
+          </p>
+          {knowledgeImport.error && <p role="alert">{knowledgeImport.error}</p>}
+          {(knowledgeImport.failed > 0 || knowledgeImport.error) && (
+            <Button
+              disabled={knowledgeImport.importing}
+              onClick={() => void knowledgeImport.retry()}
+            >
+              {t("playground:workspace.retryKnowledgeImports", {
+                defaultValue: "Retry unfinished imports",
+              })}
+            </Button>
+          )}
+        </div>
+      )}
       <a
         href="#workspace-main-content"
         onClick={(event) => focusSkipTarget(event, "chat")}
