@@ -112,6 +112,39 @@ describe("Evaluation component product-state alerts", () => {
     expectDesignSystemAlert("Evaluation limits")
   })
 
+  it("shows Unlimited and no progress bar for null daily limits", () => {
+    const { container } = render(
+      <RateLimitsWidget
+        rateLimits={{
+          tier: "free",
+          limits: {
+            evaluations_per_minute: 10,
+            evaluations_per_day: null,
+            tokens_per_day: null,
+            cost_per_day: 0,
+            cost_per_month: 0
+          },
+          usage: {
+            evaluations_today: 4,
+            tokens_today: 1200,
+            cost_today: 0,
+            cost_month: 0
+          },
+          remaining: {
+            daily_evaluations: null,
+            daily_tokens: null,
+            daily_cost: 0,
+            monthly_cost: 0
+          },
+          reset_at: "2026-05-29T23:00:00Z"
+        }}
+      />
+    )
+
+    expect(screen.getByText("4/Unlimited")).toBeInTheDocument()
+    expect(container.querySelector(".ant-progress")).toBeNull()
+  })
+
   it("renders visual spec builder guidance and parse warnings with the design-system Alert", () => {
     const { rerender } = render(
       <VisualSpecBuilder

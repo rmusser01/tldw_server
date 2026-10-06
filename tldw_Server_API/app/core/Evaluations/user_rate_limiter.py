@@ -1115,6 +1115,18 @@ class UserRateLimiter:
 
         total_evaluations, total_tokens, total_cost, monthly_cost = await self._run_db(_summary)
 
+        from tldw_Server_API.app.core.Usage.quota_checks import as_quota_user_id
+        from tldw_Server_API.app.core.Usage.quota_resolver import user_quota
+
+        quota_uid = as_quota_user_id(user_id)
+        if quota_uid is None:
+            evals_cap = tokens_cap = None
+        else:
+            evals_cap = await user_quota(quota_uid, "limits.evaluations_per_day")
+            tokens_cap = await user_quota(quota_uid, "limits.evaluation_tokens_per_day")
+        evals_cap = None if evals_cap is None else int(evals_cap)
+        tokens_cap = None if tokens_cap is None else int(tokens_cap)
+
         return {
             "user_id": user_id,
             "tier": config.tier.value,
@@ -1125,8 +1137,8 @@ class UserRateLimiter:
                     "burst_size": config.burst_size
                 },
                 "daily": {
-                    "evaluations": config.evaluations_per_day,
-                    "tokens": config.total_tokens_per_day,
+                    "evaluations": evals_cap,
+                    "tokens": tokens_cap,
                     "cost": config.max_cost_per_day
                 },
                 "monthly": {
@@ -1144,8 +1156,8 @@ class UserRateLimiter:
                 }
             },
             "remaining": {
-                "daily_evaluations": config.evaluations_per_day - total_evaluations,
-                "daily_tokens": config.total_tokens_per_day - total_tokens,
+                "daily_evaluations": None if evals_cap is None else max(0, evals_cap - total_evaluations),
+                "daily_tokens": None if tokens_cap is None else max(0, tokens_cap - total_tokens),
                 "daily_cost": config.max_cost_per_day - total_cost,
                 "monthly_cost": config.max_cost_per_month - monthly_cost
             }
