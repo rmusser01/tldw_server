@@ -1,7 +1,7 @@
 ---
 id: TASK-13506
 title: Show the actual failed-only processing set during resumed import correction
-status: In Progress
+status: Done
 labels:
 - media
 - ux
@@ -20,7 +20,7 @@ A real mixed import saved one URL and two Markdown files, excluded a duplicate U
 <!-- AC:BEGIN -->
 - [x] #1 Configure and Review display the same actual target set used by failed-only processing, while keeping prior outcomes visible with accurate states.
 - [x] #2 Previously saved files do not appear Invalid merely because browser File handles are unavailable for a retry that does not target them.
-- [ ] #3 Verify the displayed count and real submitted source set on a mixed import resumed after reload.
+- [x] #3 Verify the displayed count and real submitted source set on a mixed import resumed after reload.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -31,19 +31,21 @@ Real submission checked: review claimed 2 items but POST /media/ingest/jobs acce
 Plan: IMPLEMENTATION_PLAN_media_live_ux_fixes_20261006.md. Reuse the existing actual retry target selection for display, preserving prior outcomes and duplicate exclusions. ADR required: no; no change to worker/session ownership.
 Configure and Review now receive validQueueItems from the modal, matching the unchanged worker target filter. Review shows prior ok outcomes as Saved before considering missing File handles, and keeps duplicate/unselected exclusions. Regression uses actual Configure/Review after original-file reattachment, checks count/status, submits only failed-file and preserves saved ids 3/4. Initial test setup assumed persisted File handles and incorrect button casing; aligned it with the existing reattach pattern before the red count assertion. Green: full session suite 107/107; supporting Configure/Review/history/result/localization suites 64/64. WebUI typecheck and Chrome production build passed. Real mixed-session check pending.
 Independent review found status ok does not imply a saved identity for process-only/skipped results. Reproduced Saved count 4 vs confirmed 2. Review now uses existing getSavedMediaIds and distinct Completed/Skipped exclusions; expanded the mixed reattach/correction regression. Green: session/read-along/localization 128/128.
+Final verification: Docs/Reviews/2026-10-06-media-live-ux-fixes.md and output/playwright/media-live-fixes-20261006/receipts.json. Latest remote dev 1fc353c3; tested source 9a277cf162. 411/411 tests (17 files), WebUI typecheck, lint (0 errors, 180 baseline warnings), WebUI production/token/budget checks and Chrome production build pass. Independent final delta review has no material findings. Bandit invoked on all 23 touched TS files: 0 findings, 23 unsupported-language parse errors; no Python application change and no TypeScript security pass claimed. Raw-source and account ownership protections reviewed/tested. Task-owned services/browser/dependency links/build caches cleaned; original tracked changes and prior untracked entries preserved. Native VoiceOver speech/human participant study remain unverified; full backend/all-pages/packaged-extension matrix not repeated. ADR required: no; existing boundaries retained. Draft PR preparation complete; merge awaits a fresh human-owned Change summary under repository policy.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Configure and Review use actual failed-only targets and preserve accurate Saved/Completed/Skipped/duplicate context. Real reload and original-PDF reattachment show one eligible item and one review target; exactly one POST accepted PDF job 16. Saved IDs 9/10 and their markers survive, and the skipped URL is not mislabeled Saved. Invalid test PDF intentionally fails again; recovery scope is verified.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

@@ -1,0 +1,254 @@
+{
+  "created_at": "2026-10-06T15:54:41.668491+00:00",
+  "scope": {
+    "base_dev": "1fc353c3f67c93ba05102e7b0136ac4acac8f510",
+    "source_head": "9a277cf162321753321ffa0448a51e73464d7150",
+    "branch": "codex/media-live-ux-fixes-20261006",
+    "backend": "Real isolated API, MINIMAL_TEST_APP=1, TEST_MODE=false, TESTING=false",
+    "ports": [
+      18881,
+      18882,
+      18883
+    ],
+    "browser": "Task-owned headless Chrome through playwright-cli; no API interception"
+  },
+  "single_import": {
+    "accepted": {
+      "status": 200,
+      "accepted": {
+        "batch_id": "f97063ab-bbfe-4e4f-b9f7-6902aa5f15f8",
+        "jobs": [
+          {
+            "id": 12,
+            "uuid": "86fe443b-d255-42bb-af00-423ebef076ac",
+            "source": "fix-single.md",
+            "source_kind": "file",
+            "status": "queued",
+            "collection_id": null,
+            "planned_item_id": null,
+            "idempotency_key": null
+          }
+        ],
+        "errors": []
+      },
+      "dialog": "- dialog \"Quick Ingest\":\n  - button \"Close\":\n    - img \"close\"\n  - text: Quick Ingest\n  - navigation \"Ingest wizard progress\":\n    - list:\n      - listitem:\n        - 'button \"Step 1: Add (completed)\"': Add 1 item\n      - listitem:\n        - 'button \"Step 2: Configure (completed)\"': Configure Quick\n      - listitem:\n        - 'button \"Step 3: Review (completed)\"': Review Reviewed\n      - listitem:\n        - 'button \"Step 4: Processing (current)\" [disabled]': Processing 0/1 finished\n      - listitem:\n        - 'button \"Step 5: Results\" [disabled]': Results\n  - heading \"Processing\" [level=3]\n  - text: 0/1 finished\n  - progressbar \"Finished items\"\n  - status: Job tracking 1 job\n  - status:\n    - paragraph: Waiting for server results\n    - paragraph: Elapsed time is shown below. Completion time depends on the content and server.\n  - list:\n    - listitem:\n      - text: fix-single.md Processing\n      - progressbar \"Processing fix-single.md\"\n      - button \"Cancel fix-single.md\": Cancel\n  - text: \"Completed: 0 | Processing: 1 | Queued: 0 Elapsed: 0:00\"\n  - button \"Cancel All\"\n  - button \"Minimize to Background\""
+    },
+    "results": "- dialog \"Quick Ingest\":\n  - button \"Close\":\n    - img \"close\"\n  - text: Quick Ingest\n  - navigation \"Ingest wizard progress\":\n    - list:\n      - listitem:\n        - 'button \"Step 1: Add (completed)\"': Add 1 item\n      - listitem:\n        - 'button \"Step 2: Configure (completed)\"': Configure Quick\n      - listitem:\n        - 'button \"Step 3: Review (completed)\"': Review Reviewed\n      - listitem:\n        - 'button \"Step 4: Processing (completed)\"': Processing\n      - listitem:\n        - 'button \"Step 5: Results (current)\" [disabled]': Results\n  - status: 1 added \u00b7 0 excluded/skipped \u00b7 1 succeeded (1 saved) \u00b7 0 failed \u00b7 0 cancelled\n  - region \"Completed items\":\n    - heading \"Succeeded (1)\" [level=3]\n    - text: fix-single.md\n    - paragraph: Saved\n    - paragraph: Knowledge readiness unconfirmed\n    - button \"Open fix-single.md in Media\": Open in Media\n  - paragraph: What's next?\n  - button \"Review this 1 saved item\"\n  - button \"Ask added items\"\n  - button \"Open in Document Workspace\"\n  - paragraph: 1s elapsed\n  - button \"Start a new ingest\": Ingest More\n  - button \"Close the ingest wizard\": Done",
+    "history": "- list:\n  - listitem:\n    - paragraph: fix-single.md\n    - paragraph: 1 sources \u00b7 Completed \u00b7 1m ago\n    - status: 1 processing outcomes received\n    - button \"Resume import\"\n    - button \"Refresh import\"\n    - button \"Review 1 saved item\"\n- group: Optional diagnostics"
+  },
+  "mixed_import": {
+    "add": "- dialog \"Quick Ingest (5)\":\n  - button \"Close\":\n    - img \"close\"\n  - text: Quick Ingest (5)\n  - navigation \"Ingest wizard progress\":\n    - list:\n      - listitem:\n        - 'button \"Step 1: Add (current)\" [disabled]': Add\n      - listitem:\n        - 'button \"Step 2: Configure\" [disabled]': Configure\n      - listitem:\n        - 'button \"Step 3: Review\" [disabled]': Review\n      - listitem:\n        - 'button \"Step 4: Processing\" [disabled]': Processing\n      - listitem:\n        - 'button \"Step 5: Results\" [disabled]': Results\n  - button \"File upload zone. Drag and drop files or press Enter to browse.\":\n    - paragraph: Drag and drop files\n    - paragraph: Docs, PDFs, HTML/XML/JSON, audio, and video are all welcome.\n    - button \"Browse files\"\n  - text: \"Supported: PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: 50 MB. Add URLs or files. Stored items appear in Media. Knowledge search availability depends on source readiness; analysis and vector indexing are separate. Paste URLs\"\n  - textbox \"Paste URLs input\":\n    - /placeholder: \"https://example.com/article\\nhttps://youtube.com/watch?v=...\"\n  - button \"Add URLs to queue\" [disabled]: Add URLs\n  - text: Queue(5 items)\n  - button \"Clear all queued items\": Clear all\n  - text: fix-batch-a.md 133 B Document (auto)\n  - button \"Remove this item from queue\"\n  - text: fix-batch-b.md 131 B Document (auto)\n  - button \"Remove this item from queue\"\n  - text: recoverable.pdf 56 B Pdf (auto)\n  - button \"Remove this item from queue\"\n  - text: https://example.com/?media-ux-fix=20261006 Web page (auto)\n  - button \"Remove this item from queue\"\n  - text: https://example.com/?media-ux-fix=20261006 Web page (auto) Already queued \u2014 excluded\n  - button \"Process again\"\n  - button \"Remove this item from queue\"\n  - button \"Use defaults & process\"\n  - button \"Configure 4 items\"",
+    "review": "- dialog \"Quick Ingest (5)\":\n  - button \"Close\":\n    - img \"close\"\n  - text: Quick Ingest (5)\n  - navigation \"Ingest wizard progress\":\n    - list:\n      - listitem:\n        - 'button \"Step 1: Add (completed)\"': Add 5 items\n      - listitem:\n        - 'button \"Step 2: Configure (completed)\"': Configure Quick\n      - listitem:\n        - 'button \"Step 3: Review (current)\" [disabled]': Review\n      - listitem:\n        - 'button \"Step 4: Processing\" [disabled]': Processing\n      - listitem:\n        - 'button \"Step 5: Results\" [disabled]': Results\n  - heading \"Ready to Process\" [level=2]\n  - paragraph: 4 items | Quick preset\n  - paragraph: Processing time depends on the content, selected options, and server.\n  - list \"Items to process\":\n    - listitem: fix-batch-a.md Quick \u00b7 Extract\n    - listitem: fix-batch-b.md Quick \u00b7 Extract\n    - listitem: recoverable.pdf Quick \u00b7 Extract\n    - listitem: https://example.com/?media-ux-fix=202610... Quick \u00b7 Scrape\n    - listitem: https://example.com/?media-ux-fix=202610... Quick \u00b7 Already queued \u2014 excluded\n  - paragraph: \"Replacement disabled: existing saved sources are preserved.\"\n  - paragraph: \"Storage: Server\"\n  - button \"Back to Settings\"\n  - button \"Start processing\": Start Processing",
+    "first_file_accepted": {
+      "status": 200,
+      "accepted": {
+        "batch_id": "6ca15fb1-c4d4-4f12-93e2-d2ddcf8a0ee5",
+        "jobs": [
+          {
+            "id": 13,
+            "uuid": "57e63244-bcec-4b72-aafb-a9939cc069bf",
+            "source": "fix-batch-a.md",
+            "source_kind": "file",
+            "status": "queued",
+            "collection_id": null,
+            "planned_item_id": null,
+            "idempotency_key": null
+          }
+        ],
+        "errors": []
+      }
+    },
+    "results": "- dialog \"Quick Ingest\":\n  - button \"Close\":\n    - img \"close\"\n  - text: Quick Ingest\n  - navigation \"Ingest wizard progress\":\n    - list:\n      - listitem:\n        - 'button \"Step 1: Add (completed)\"': Add 5 items\n      - listitem:\n        - 'button \"Step 2: Configure (completed)\"': Configure Quick\n      - listitem:\n        - 'button \"Step 3: Review (completed)\"': Review Reviewed\n      - listitem:\n        - 'button \"Step 4: Processing (completed)\"': Processing\n      - listitem:\n        - 'button \"Step 5: Results (current)\" [disabled]': Results\n  - status: 5 added \u00b7 2 excluded/skipped \u00b7 2 succeeded (2 saved) \u00b7 1 failed \u00b7 0 cancelled\n  - region \"Excluded inputs\":\n    - paragraph: https://example.com/?media-ux-fix=20261006\n    - paragraph: Already queued. Use Process again to include this duplicate, or remove it from the queue.\n  - region \"Completed items\":\n    - heading \"Succeeded (2)\" [level=3]\n    - text: fix-batch-a.md\n    - paragraph: Saved\n    - paragraph: Knowledge readiness unconfirmed\n    - button \"Open fix-batch-a.md in Media\": Open in Media\n    - text: fix-batch-b.md\n    - paragraph: Saved\n    - paragraph: Knowledge readiness unconfirmed\n    - button \"Open fix-batch-b.md in Media\": Open in Media\n  - paragraph: What's next?\n  - button \"Review these 2 saved items\"\n  - button \"Ask added items\"\n  - button \"Open in Document Workspace\"\n  - region \"Skipped items\":\n    - heading \"Skipped existing (1)\" [level=3]\n    - text: https://example.com/?media-ux-fix=20261006\n    - paragraph: Already in library. Enable Overwrite existing in Configure to replace it.\n  - text: Review failed items\n  - button \"Export failed items list\": Export failed list\n  - region \"Error items\":\n    - heading \"Failed during processing (1)\" [level=3]\n    - text: recoverable.pdf\n    - paragraph: An unexpected error occurred. Check the error details or server logs before trying again.\n    - text: Error \u00b7 Review Details\n    - button \"Correct settings for recoverable.pdf\": Correct settings\n  - paragraph: 7s elapsed\n  - button \"Start a new ingest\": Ingest More\n  - button \"Close the ingest wizard\": Done",
+    "history_after_reload": "- list:\n  - listitem:\n    - paragraph: fix-batch-a.md\n    - paragraph: 5 sources \u00b7 Some items failed \u00b7 Just now\n    - status: 4 processing outcomes received\n    - button \"Resume import\"\n    - button \"Refresh import\"\n    - button \"Review 2 saved items\"\n  - listitem:\n    - paragraph: fix-single.md\n    - paragraph: 1 sources \u00b7 Completed \u00b7 3m ago\n    - button \"Refresh import\"\n    - button \"Review 1 saved item\"\n- group: Optional diagnostics"
+  },
+  "resumed_correction": {
+    "results_after_reattachment_required": "- dialog \"Quick Ingest\":\n  - button \"Close\":\n    - img \"close\"\n  - text: Quick Ingest\n  - navigation \"Ingest wizard progress\":\n    - list:\n      - listitem:\n        - 'button \"Step 1: Add (completed)\"': Add 5 items\n      - listitem:\n        - 'button \"Step 2: Configure (completed)\"': Configure Quick\n      - listitem:\n        - 'button \"Step 3: Review (completed)\"': Review Reviewed\n      - listitem:\n        - 'button \"Step 4: Processing (completed)\"': Processing\n      - listitem:\n        - 'button \"Step 5: Results (current)\" [disabled]': Results\n  - status: 5 added \u00b7 2 excluded/skipped \u00b7 2 succeeded (2 saved) \u00b7 1 failed \u00b7 0 cancelled\n  - region \"Excluded inputs\":\n    - paragraph: https://example.com/?media-ux-fix=20261006\n    - paragraph: Already queued. Use Process again to include this duplicate, or remove it from the queue.\n  - region \"Completed items\":\n    - heading \"Succeeded (2)\" [level=3]\n    - text: fix-batch-a.md\n    - paragraph: Saved\n    - paragraph: Knowledge readiness unconfirmed\n    - button \"Open fix-batch-a.md in Media\": Open in Media\n    - text: fix-batch-b.md\n    - paragraph: Saved\n    - paragraph: Knowledge readiness unconfirmed\n    - button \"Open fix-batch-b.md in Media\": Open in Media\n  - paragraph: What's next?\n  - button \"Review these 2 saved items\"\n  - button \"Ask added items\"\n  - button \"Open in Document Workspace\"\n  - region \"Skipped items\":\n    - heading \"Skipped existing (1)\" [level=3]\n    - text: https://example.com/?media-ux-fix=20261006\n    - paragraph: Already in library. Enable Overwrite existing in Configure to replace it.\n  - text: Review failed items\n  - button \"Export failed items list\": Export failed list\n  - region \"Error items\":\n    - heading \"Failed during processing (1)\" [level=3]\n    - text: recoverable.pdf\n    - paragraph: An unexpected error occurred. Check the error details or server logs before trying again.\n    - text: Error \u00b7 Review Details Reattach recoverable.pdf\n    - button \"Reattach recoverable.pdf\"\n  - paragraph: 7s elapsed\n  - button \"Start a new ingest\": Ingest More\n  - button \"Close the ingest wizard\": Done",
+    "configure": "- dialog \"Quick Ingest (5)\":\n  - button \"Close\":\n    - img \"close\"\n  - text: Quick Ingest (5)\n  - navigation \"Ingest wizard progress\":\n    - list:\n      - listitem:\n        - 'button \"Step 1: Add (completed)\"': Add 5 items\n      - listitem:\n        - 'button \"Step 2: Configure (current)\" [disabled]': Configure\n      - listitem:\n        - 'button \"Step 3: Review\" [disabled]': Review\n      - listitem:\n        - 'button \"Step 4: Processing\" [disabled]': Processing\n      - listitem:\n        - 'button \"Step 5: Results\" [disabled]': Results\n  - paragraph: 1 eligible item in this run\n  - button \"Quick preset\" [pressed]: Quick Process fast, skip analysis\n  - button \"Standard preset (Recommended)\": Standard (Recommended) Analyze + chunk for RAG search\n  - button \"Deep preset\": Deep All options, review before save\n  - text: Presets are starting points. Adjust any settings below or in Advanced options to fit this run.\n  - heading \"Ingestion options\" [level=5]\n  - text: Settings apply to all eligible items in this run. Saved preset defaults are managed in Quick Ingest settings for future runs. Analysis\n  - switch \"Ingestion options \u2013 analysis\"\n  - paragraph: Generate AI summary and key findings\n  - text: Chunking\n  - switch \"Ingestion options \u2013 chunking\"\n  - paragraph: Split into searchable sections for Knowledge QA\n  - text: Overwrite existing\n  - switch \"Ingestion options \u2013 overwrite existing\"\n  - paragraph: Replace content if previously ingested\n  - button \"Advanced options\"\n  - button \"Back\"\n  - button \"Next\"",
+    "review": "- dialog \"Quick Ingest (5)\":\n  - button \"Close\":\n    - img \"close\"\n  - text: Quick Ingest (5)\n  - navigation \"Ingest wizard progress\":\n    - list:\n      - listitem:\n        - 'button \"Step 1: Add (completed)\"': Add 5 items\n      - listitem:\n        - 'button \"Step 2: Configure (completed)\"': Configure Quick\n      - listitem:\n        - 'button \"Step 3: Review (current)\" [disabled]': Review\n      - listitem:\n        - 'button \"Step 4: Processing\" [disabled]': Processing\n      - listitem:\n        - 'button \"Step 5: Results\" [disabled]': Results\n  - heading \"Ready to Process\" [level=2]\n  - paragraph: 1 item | Quick preset\n  - paragraph: Processing time depends on the content, selected options, and server.\n  - list \"Items to process\":\n    - listitem: fix-batch-a.md Quick \u00b7 Saved \u2014 excluded from this run\n    - listitem: fix-batch-b.md Quick \u00b7 Saved \u2014 excluded from this run\n    - listitem: recoverable.pdf Quick \u00b7 Extract\n    - listitem: https://example.com/?media-ux-fix=202610... Quick \u00b7 Skipped \u2014 excluded from this run\n    - listitem: https://example.com/?media-ux-fix=202610... Quick \u00b7 Already queued \u2014 excluded\n  - paragraph: \"Replacement disabled: existing saved sources are preserved.\"\n  - paragraph: \"Storage: Server\"\n  - button \"Back to Settings\"\n  - button \"Start processing\": Start Processing",
+    "actual_retry": {
+      "status": 200,
+      "accepted": {
+        "batch_id": "a6947be6-1746-41e1-ac9a-1432b672a0f4",
+        "jobs": [
+          {
+            "id": 16,
+            "uuid": "f480cef3-c2ad-4e10-b748-98fde2423463",
+            "source": "recoverable.pdf",
+            "source_kind": "file",
+            "status": "queued",
+            "collection_id": null,
+            "planned_item_id": null,
+            "idempotency_key": null
+          }
+        ],
+        "errors": []
+      },
+      "submissions": 1,
+      "results": "- dialog \"Quick Ingest\":\n  - button \"Close\":\n    - img \"close\"\n  - text: Quick Ingest\n  - navigation \"Ingest wizard progress\":\n    - list:\n      - listitem:\n        - 'button \"Step 1: Add (completed)\"': Add 5 items\n      - listitem:\n        - 'button \"Step 2: Configure (completed)\"': Configure Quick\n      - listitem:\n        - 'button \"Step 3: Review (completed)\"': Review Reviewed\n      - listitem:\n        - 'button \"Step 4: Processing (completed)\"': Processing\n      - listitem:\n        - 'button \"Step 5: Results (current)\" [disabled]': Results\n  - status: 5 added \u00b7 2 excluded/skipped \u00b7 2 succeeded (2 saved) \u00b7 1 failed \u00b7 0 cancelled\n  - region \"Excluded inputs\":\n    - paragraph: https://example.com/?media-ux-fix=20261006\n    - paragraph: Already queued. Use Process again to include this duplicate, or remove it from the queue.\n  - region \"Completed items\":\n    - heading \"Succeeded (2)\" [level=3]\n    - text: fix-batch-a.md\n    - paragraph: Saved\n    - paragraph: Knowledge readiness unconfirmed\n    - button \"Open fix-batch-a.md in Media\": Open in Media\n    - text: fix-batch-b.md\n    - paragraph: Saved\n    - paragraph: Knowledge readiness unconfirmed\n    - button \"Open fix-batch-b.md in Media\": Open in Media\n  - paragraph: What's next?\n  - button \"Review these 2 saved items\"\n  - button \"Ask added items\"\n  - button \"Open in Document Workspace\"\n  - region \"Skipped items\":\n    - heading \"Skipped existing (1)\" [level=3]\n    - text: https://example.com/?media-ux-fix=20261006\n    - paragraph: Already in library. Enable Overwrite existing in Configure to replace it.\n  - text: Review failed items\n  - button \"Export failed items list\": Export failed list\n  - region \"Error items\":\n    - heading \"Failed during processing (1)\" [level=3]\n    - text: recoverable.pdf\n    - paragraph: An unexpected error occurred. Check the error details or server logs before trying again.\n    - text: Error \u00b7 Review Details\n    - button \"Correct settings for recoverable.pdf\": Correct settings\n  - paragraph: 1s elapsed\n  - button \"Start a new ingest\": Ingest More\n  - button \"Close the ingest wizard\": Done"
+    }
+  },
+  "reading": {
+    "original_saved_set": {
+      "body": "This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.",
+      "labels": "Open items\nSearch/filter in sidebar, inspect in viewer, jump using Open items.\n1. Example Domain (web_document)\n2. batch-a (document)\n3. batch-b (document)",
+      "context": "Selected reading: Example Domain",
+      "mobileOverflow": 0
+    },
+    "exact_new_saved_set": {
+      "url": "http://127.0.0.1:18881/media-multi",
+      "openItems": "Open items\nSearch/filter in sidebar, inspect in viewer, jump using Open items.\n1. fix-batch-a (document)\n2. fix-batch-b (document)",
+      "context": "Selected reading: fix-batch-a"
+    },
+    "saved_ids_and_markers": {
+      "ids": [
+        "media-review-content-body-9",
+        "media-review-content-body-10"
+      ],
+      "openItems": "Open items\nSearch/filter in sidebar, inspect in viewer, jump using Open items.\n1. fix-batch-a (document)\n2. fix-batch-b (document)",
+      "markerA": "# Retry verification alpha\n\nMarker copper-fox-621 confirms the first saved batch document remains excluded from a failed-only retry.",
+      "markerB": "# Retry verification beta\n\nMarker blue-jay-622 confirms the second saved batch document remains excluded from a failed-only retry."
+    },
+    "single_mobile": {
+      "content": "25 Words\n1 min read\n0% read\nChunking: Skipped\nVector: Pending\nMetadata details\nShow\ndefault\nno_keyword_set\nContent\nAuto\nS\nM\nL\n\nThis domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.\n\nAnalysis\nGenerate\nNo analysis yet\nStatistics\nWords\n25\nCharacters\n156\nParagraphs\n1\nMetadata\nDocument Intelligence\nVersion History\nDelete item",
+      "navigation": "Chapters/Sections\nThis domain is for use in documentation examples without needing permission. This is not a servi...\n2\nThis domain is for use in documentation examples without needing permission. This is not a servi...",
+      "mobileViewport": {
+        "width": 390,
+        "height": 844
+      },
+      "overflow": 0
+    },
+    "actual_saved_records": [
+      {
+        "media_id": 3,
+        "source": {
+          "url": "https://example.com/",
+          "title": "Example Domain",
+          "duration": null,
+          "type": "web_document"
+        },
+        "content": {
+          "metadata": {},
+          "text": "[METADATA]\n        {\n  \"url\": \"https://example.com\",\n  \"ingestion_date\": \"2026-10-05 22:18:29\",\n  \"content_hash\": \"0a080719be9fbb82a86a45b80dc8c2a430fbe17dc93d23758debac092864d00f\",\n  \"scraping_pipeline\": \"trafilatura\",\n  \"date\": \"N/A\",\n  \"author\": \"N/A\",\n  \"crawl_depth\": null,\n  \"crawl_parent_url\": null,\n  \"crawl_score\": null\n}\n        [/METADATA]\n\n        This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.",
+          "word_count": 48
+        }
+      },
+      {
+        "media_id": 8,
+        "source": {
+          "url": "fix-single.md",
+          "title": "fix-single",
+          "duration": null,
+          "type": "document"
+        },
+        "content": {
+          "metadata": {},
+          "text": "# One-item verification\n\nMarker silver-panda-620 verifies singular saved-item navigation.\n",
+          "word_count": 9
+        }
+      },
+      {
+        "media_id": 9,
+        "source": {
+          "url": "fix-batch-a.md",
+          "title": "fix-batch-a",
+          "duration": null,
+          "type": "document"
+        },
+        "content": {
+          "metadata": {},
+          "text": "# Retry verification alpha\n\nMarker copper-fox-621 confirms the first saved batch document remains excluded from a failed-only retry.\n",
+          "word_count": 18
+        }
+      },
+      {
+        "media_id": 10,
+        "source": {
+          "url": "fix-batch-b.md",
+          "title": "fix-batch-b",
+          "duration": null,
+          "type": "document"
+        },
+        "content": {
+          "metadata": {},
+          "text": "# Retry verification beta\n\nMarker blue-jay-622 confirms the second saved batch document remains excluded from a failed-only retry.\n",
+          "word_count": 18
+        }
+      }
+    ]
+  },
+  "verification": {
+    "scoped_tests": {
+      "files": 17,
+      "passed": 411,
+      "duration_seconds": 54.93,
+      "timeout_ms": 15000,
+      "node": "26.0.0",
+      "log": "/private/tmp/media-scoped-final-with-navigation-20261006.log"
+    },
+    "webui_typecheck": {
+      "passed": true,
+      "command": "bun run typecheck --incremental false"
+    },
+    "webui_lint": {
+      "exit_code": 0,
+      "errors": 0,
+      "baseline_warnings": 180
+    },
+    "webui_production_build": {
+      "passed": true,
+      "command": "TLDW_INTERNAL_API_ORIGIN=http://127.0.0.1:18882 bun run compile:prod",
+      "shared_token_sync": "passed",
+      "shared_app_gzip_kb": 589.6,
+      "budget_gzip_kb": 600
+    },
+    "chrome_extension_production_build": {
+      "passed": true,
+      "command": "bun run build:chrome:prod",
+      "duration_seconds": 46.0,
+      "output_mb": 49.26
+    },
+    "bandit": {
+      "findings": 0,
+      "typescript_parse_errors": 23,
+      "limitation": "No Python source changed. Bandit cannot parse TypeScript; this is not a TypeScript security pass."
+    },
+    "independent_review": "No remaining material findings after two bounded delta reviews; parser, navigation, ownership and raw-source preservation checked.",
+    "backlog_canonical_gate": {
+      "normalize_check": "passed",
+      "ratchet_tests_passed": 4,
+      "warnings": 4,
+      "log": "/private/tmp/media-backlog-ratchet-20261006.log"
+    }
+  },
+  "limits": [
+    "VoiceOver spoken announcements remain unverified; previous native AX/keyboard observations are separate evidence.",
+    "No novice or experienced human participant study.",
+    "Packaged extension capture gestures and all-browser extension matrix not repeated; current Chrome production build and shared component tests passed.",
+    "Full backend/all-pages E2E suites not rerun for these shared UI changes.",
+    "Preview initially served stale reading controls after the final edit; restarting the task-owned preview loaded the current source, and the final mobile reading assertion passed."
+  ],
+  "cleanup": {
+    "checked_at": "2026-10-06T15:52:01.862693+00:00",
+    "original_checkout_porcelain_bytes_equal": false,
+    "original_checkout_tracked_status_equal": true,
+    "untracked_added_count": 157,
+    "untracked_removed_count": 0,
+    "untracked_added_sample": [
+      "?? .venv-uat-py312-20261006/bin/Activate.ps1",
+      "?? .venv-uat-py312-20261006/bin/accelerate",
+      "?? .venv-uat-py312-20261006/bin/accelerate-config",
+      "?? .venv-uat-py312-20261006/bin/accelerate-estimate-memory"
+    ],
+    "untracked_removed_sample": [],
+    "task_ports_have_no_listeners": true,
+    "task_browser_closed": true,
+    "removed_dependency_links": 4,
+    "removed_generated_build_caches": [
+      "Documents",
+      "apps/tldw-frontend/.next",
+      "apps/extension/.output",
+      "apps/extension/.wxt"
+    ],
+    "temporary_models_preserved": true
+  }
+}

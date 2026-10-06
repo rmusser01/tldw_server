@@ -2,6 +2,8 @@
 
 Real ingestion, speech transcription, local analysis, vector storage/retrieval, failed-only execution and native Notes recovery passed. The UX is **not fully cleared**: three presentation gaps and one minor copy issue remain tracked below. VoiceOver speech and novice participant comprehension remain unverified.
 
+Follow-up: all four tracked findings are fixed and verified in [the 2026-10-06 report](2026-10-06-media-live-ux-fixes.md). The observations below remain the historical validation of their stated source.
+
 ## Source and scope
 
 - Validated dev: `7226596cca5b875ad6e121a15133f69600152258`, verified against remote dev before execution and again during final validation. Media PR [3194](https://github.com/rmusser01/tldw_server/pull/3194) was already merged at `587cd8e9fe3b42eba451b83c1ba690607035eace`; subsequent dev changes include Knowledge actions and shared ingestion/review integration.
