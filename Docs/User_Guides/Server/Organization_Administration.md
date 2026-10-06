@@ -21,7 +21,7 @@ Organization (e.g., "Acme Corp")
 ### Role-Based Access Control
 
 Organizations use a hierarchical role system:
-- **Owner**: Full control, including billing and deletion
+- **Owner**: Full control, including deletion
 - **Admin**: Can manage members, teams, and invites
 - **Lead**: Team leadership with limited org-level permissions
 - **Member**: Basic access to view org and shared content
@@ -295,8 +295,6 @@ Revoked invites cannot be redeemed even if they haven't expired.
 | Create/delete teams | Y | Y | - | - |
 | Manage org members | Y | Y | - | - |
 | Create invite codes | Y | Y | - | - |
-| View billing | Y | Y | - | - |
-| Manage billing | Y | - | - | - |
 | Transfer ownership | Y | - | - | - |
 
 ### Team Roles
@@ -308,155 +306,36 @@ Revoked invites cannot be redeemed even if they haven't expired.
 | Delete team | Y | Y | - | - |
 | Manage team members | Y | Y | Y | - |
 
-## Billing and Subscriptions
+## Billing, Quotas and Limits
 
-Billing features are available when `BILLING_ENABLED=true`.
+### What the open-source server ships
 
-### Viewing Your Current Plan
+The open-source server has no billing or payment runtime:
 
-**API Request:**
-```bash
-curl "http://localhost:8000/api/v1/billing/subscription?org_id=1" \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
+- `is_billing_enabled()` returns `False` (`core/Billing/runtime_flags.py`), and no setting named `BILLING_ENABLED` is read anywhere.
+- There are no checkout, billing portal, usage or cancel routes. The only billing route is the admin-only `GET /api/v1/billing/subscriptions`, which lists subscriptions with lifecycle and at-risk fields.
+- Organization roles carry no billing permissions.
 
-**Response:**
-```json
-{
-  "org_id": 1,
-  "plan_name": "pro",
-  "status": "active",
-  "billing_cycle": "monthly",
-  "current_period_start": "2024-01-01T00:00:00Z",
-  "current_period_end": "2024-02-01T00:00:00Z",
-  "limits": {
-    "storage_mb": 10240,
-    "api_calls_day": 5000,
-    "llm_tokens_month": 15000000,
-    "team_members": 5,
-    "advanced_analytics": true
-  }
-}
-```
+### Billing plan limits (hosted product only)
 
-### Subscription Plans
+Plan limits (`storage_mb`, `api_calls_day`, `llm_tokens_month`, `team_members`, `transcription_minutes_month`, `rag_queries_day`, `concurrent_jobs`) are checked only when both of these are true:
 
-| Plan | Price/mo | Storage | API/day | LLM tokens/mo | Team members |
-|------|----------|---------|---------|---------------|--------------|
-| Free | $0 | 1 GB | 100 | 300K | 1 |
-| Pro | $29 | 10 GB | 5,000 | 15M | 5 |
-| Enterprise | $199 | 100 GB | 50,000 | 150M | Unlimited |
+1. a billing repository is wired into the subscription service. Nothing in this repository wires one; a hosted deployment adds it;
+2. usage quotas are on (`USAGE_QUOTAS_ENABLED`).
 
-### Upgrading Your Plan
+With no billing repository, billing checks never run: org resolution and usage aggregation are skipped and an account with no active org is not refused. If a repository is wired while usage quotas are off, startup logs a warning once that plan limits are not enforced.
 
-**API Request:**
-```bash
-curl -X POST http://localhost:8000/api/v1/billing/checkout \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "org_id": 1,
-    "plan_name": "pro",
-    "billing_cycle": "monthly"
-  }'
-```
+When plan limits do run:
 
-**Response:**
-```json
-{
-  "checkout_url": "https://checkout.stripe.com/c/pay/..."
-}
-```
+- A request that reaches the soft limit (80%) is allowed and the response carries an `X-Billing-Warning` header.
+- A request that would exceed a limit is refused with HTTP 402, or 429 for a hard block, with a `limit_exceeded` body and a `Retry-After` header.
+- `team_members` and `concurrent_jobs` are defined, but no endpoint checks them today.
 
-Redirect users to this URL to complete payment.
+### Per-user, team and org quotas
 
-### Accessing the Billing Portal
+On every install, quotas are per-user `limits.*` values, resolved from the user's own value, then the most generous team value, then the most generous org value. A team or org value is each member's allowance, not a shared pool. Nothing is set by default, so nothing is limited until a platform admin assigns a value and turns `USAGE_QUOTAS_ENABLED` on. Org admins cannot change these values; only platform admins can.
 
-For managing payment methods, viewing invoices, and canceling:
-
-**API Request:**
-```bash
-curl -X POST http://localhost:8000/api/v1/billing/portal \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"org_id": 1}'
-```
-
-**Response:**
-```json
-{
-  "portal_url": "https://billing.stripe.com/p/session/..."
-}
-```
-
-### Viewing Usage
-
-**API Request:**
-```bash
-curl "http://localhost:8000/api/v1/billing/usage?org_id=1" \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-**Response:**
-```json
-{
-  "api_calls_today": 45,
-  "api_calls_limit": 100,
-  "storage_used_gb": 0.5,
-  "storage_limit_gb": 1,
-  "llm_tokens_month": 150000,
-  "llm_tokens_limit": 300000,
-  "team_members_count": 3,
-  "team_members_limit": 5
-}
-```
-
-### Canceling a Subscription
-
-**API Request:**
-```bash
-curl -X POST http://localhost:8000/api/v1/billing/subscription/cancel \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "org_id": 1,
-    "at_period_end": true
-  }'
-```
-
-With `at_period_end: true`, access continues until the current billing period ends.
-
-## Limit Enforcement
-
-### Soft Limits (80%)
-
-When usage reaches 80% of a limit:
-- API responses include `X-Billing-Warning` header
-- Usage dashboard shows warnings
-- No functionality is restricted
-
-### Hard Limits (100%)
-
-When limits are exceeded:
-
-| Resource | Behavior |
-|----------|----------|
-| API calls/day | HTTP 429 with `Retry-After` header |
-| LLM tokens/month | HTTP 402 Payment Required |
-| Storage | HTTP 413 (uploads blocked) |
-| Team members | Invite creation blocked |
-
-### Grace Periods
-
-- **Payment failure**: 3-day grace period before downgrade to Free
-- **Subscription canceled**: Access until period end, then Free
-
-### What Happens When Limits Are Exceeded
-
-1. **API calls**: Requests are blocked with 429 status until the daily limit resets
-2. **LLM tokens**: Token-consuming operations fail with 402 status
-3. **Storage**: New uploads are blocked; existing content remains accessible
-4. **Team members**: Cannot add new members or create invites until under limit
+See `Docs/Operations/Usage_Quotas.md` for the keys, the routes that set them, and what each refusal looks like.
 
 ## Platform Admin Features
 
@@ -468,7 +347,7 @@ Platform admin endpoints at `/admin/organizations/*`:
 - List all organizations
 - View any organization's details
 - Modify any organization's settings
-- Override subscription limits
+- Set `limits.*` allowances for an org or team (see Usage Quotas)
 
 ### Managing All Organizations
 
@@ -478,22 +357,18 @@ curl http://localhost:8000/admin/organizations \
   -H "Authorization: Bearer ADMIN_TOKEN"
 ```
 
-### Overriding Plan Limits
+### Setting Usage Limits
 
-Platform admins can set custom limits that override the plan defaults:
+Platform admins set a team's or org's allowance with `limits.*` overrides:
 
-**API Request:**
 ```bash
-curl -X PATCH http://localhost:8000/admin/organizations/1/limits \
+curl -X PUT http://localhost:8000/api/v1/admin/orgs/1/profile/overrides/limits.rag_queries_per_day \
   -H "Authorization: Bearer ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "custom_limits_json": {
-      "api_calls_day": 10000,
-      "storage_mb": 51200
-    }
-  }'
+  -d '{"value": 500}'
 ```
+
+`DELETE` the same path to remove the value. Teams use `/api/v1/admin/teams/{team_id}/profile/overrides/{key}`. See `Docs/Operations/Usage_Quotas.md`.
 
 ## Best Practices
 
@@ -510,14 +385,15 @@ curl -X PATCH http://localhost:8000/admin/organizations/1/limits \
 2. **Appropriate roles**: Grant minimum necessary permissions
 3. **Regular audits**: Review memberships periodically
 
-### Billing Management
+### Usage Limits
 
-1. **Monitor usage**: Check usage regularly to avoid surprises
-2. **Upgrade proactively**: Upgrade before hitting limits
-3. **Use soft limit warnings**: Act on warning headers
+1. **Leave limits unset unless you need them**: a quota applies only where a value was assigned
+2. **Check what users see**: `GET /api/v1/users/storage`, `GET /api/v1/audio/stream/limits` and the profile `quotas` section report the limit in force; `null` means unlimited
+3. **Prefer a team or org value for groups**: it is each member's allowance, so adding a member never needs a new value
 
 ## Related Documentation
 
 - [Organizations and Sharing Guide](../Server/Organizations_and_Sharing.md) - For end users
-- [Orgs and Billing API Reference](../../API-related/Admin_Orgs_Teams.md) - Full API documentation
+- `Docs/Operations/Usage_Quotas.md` - Operator guide to per-user, team and org limits
+- [Admin Orgs and Teams API Reference](../../API-related/Admin_Orgs_Teams.md) - Full API documentation
 - [Production Hardening Checklist](../Server/Production_Hardening_Checklist.md) - Security best practices

@@ -15,7 +15,7 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Implements Docs/Design/2026-10-02-usage-quota-posture-design.md in four PRs: A relief (switch + gates), B per-user values and group routes, C storage cut-over and migration, D reporting, docs and ADR-058. Plan for A: Docs/superpowers/plans/2026-10-02-usage-quotas-pr-a-relief.md.
+Implements Docs/Design/2026-10-02-usage-quota-posture-design.md in four PRs: A relief (switch + gates), B per-user values and group routes, C storage cut-over and migration, D reporting, docs and ADR-064. Plan for A: Docs/superpowers/plans/2026-10-02-usage-quotas-pr-a-relief.md.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -23,7 +23,7 @@ Implements Docs/Design/2026-10-02-usage-quota-posture-design.md in four PRs: A r
 - [x] #1 PR A merged: every usage-quota check gated on USAGE_QUOTAS_ENABLED (off by default); billing checks need a wired billing repo
 - [x] #2 PR B merged: quota_resolver, limits.* write path with null-as-delete, team/org override routes, non-storage sites read the resolver
 - [x] #3 PR C merged: storage writers/readers cut over to limits.storage_quota_mb, migration
-- [ ] #4 PR D merged: reporting endpoints, ADR-058, docs
+- [ ] #4 PR D merged: reporting endpoints, ADR-064, docs
 <!-- AC:END -->
 
 ## Implementation Notes
