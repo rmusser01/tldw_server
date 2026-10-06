@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import asyncpg
@@ -17,7 +17,7 @@ pytestmark = pytest.mark.integration
 async def audio_postgres(isolated_test_environment, monkeypatch):
     """Use the standard isolated database and a stable UTC quota day."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-    from tldw_Server_API.app.core.Usage import audio_quota, quota_resolver
+    from tldw_Server_API.app.core.Usage import audio_quota, quota_checks, quota_resolver
 
     client, _db_name = isolated_test_environment
     pool = await get_db_pool()
@@ -28,12 +28,15 @@ async def audio_postgres(isolated_test_environment, monkeypatch):
         SimpleNamespace(now=lambda _tz: datetime(2026, 9, 10, 12, tzinfo=timezone.utc)),
     )
     monkeypatch.setattr(audio_quota, "_audio_minutes_legacy_backfill_done", False)
+    monkeypatch.setattr(audio_quota, "_daily_ledger", None)
+    quota_checks.reset_ledger_cache()
     # Per-test databases reuse user IDs, but the resolver cache is process-local.
     quota_resolver.invalidate_all()
     try:
         yield client, pool
     finally:
         quota_resolver.invalidate_all()
+        quota_checks.reset_ledger_cache()
 
 
 @pytest.mark.asyncio
@@ -53,7 +56,8 @@ async def test_postgres_full_profile_reports_current_day_audio_usage(
     """Report DATE-backed usage with unlimited or explicitly configured quotas."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
-    from tldw_Server_API.app.core.Usage import quota_resolver
+    from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import LedgerEntry, ResourceDailyLedger
+    from tldw_Server_API.app.core.Usage import quota_checks, quota_resolver
     from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 
     client, pool = audio_postgres
@@ -80,21 +84,24 @@ async def test_postgres_full_profile_reports_current_day_audio_usage(
             value=daily_limit,
             updated_by=user_id,
         )
-    await pool.execute(
-        """
-        INSERT INTO audio_usage_daily (user_id, day, minutes_used)
-        VALUES ($1, DATE '2026-09-09', 9.0)
-        """,
-        user_id,
-    )
+    # Reported minutes come from the resource ledger, not audio_usage_daily.
+    quota_checks.reset_ledger_cache()
+    ledger = ResourceDailyLedger(db_pool=pool)
+    await ledger.initialize()
+    now = datetime.now(timezone.utc)
+    seed = [(now - timedelta(days=1), 9.0, "yesterday")]
     if minutes_used is not None:
-        await pool.execute(
-            """
-            INSERT INTO audio_usage_daily (user_id, day, minutes_used)
-            VALUES ($1, DATE '2026-09-10', $2)
-            """,
-            user_id,
-            minutes_used,
+        seed.append((now, minutes_used, "today"))
+    for occurred_at, minutes, tag in seed:
+        await ledger.add(
+            LedgerEntry(
+                entity_scope="user",
+                entity_value=str(user_id),
+                category="minutes",
+                units=int(minutes * 60),
+                op_id=f"audio-profile-test:{user_id}:{tag}",
+                occurred_at=occurred_at,
+            )
         )
 
     quota_resolver.invalidate_user(user_id)
@@ -127,6 +134,7 @@ async def test_postgres_full_profile_reports_current_day_audio_usage(
                 )
         finally:
             quota_resolver.invalidate_user(user_id)
+            quota_checks.reset_ledger_cache()
 
 
 @pytest.mark.asyncio
@@ -183,3 +191,25 @@ async def test_postgres_legacy_audio_backfill_preserves_current_day_usage_once(a
             "op_id": "audio-minutes-legacy:7:2026-09-10",
         }
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reader", ["daily", "monthly", "monthly-admission"])
+async def test_postgres_audio_reads_backfill_legacy_usage_before_new_writes(
+    audio_postgres, monkeypatch, reader: str
+) -> None:
+    from tldw_Server_API.app.core.Usage import audio_quota
+
+    _client, pool = audio_postgres
+    monkeypatch.setattr(audio_quota, "datetime", datetime)
+    today = datetime.now(timezone.utc).date()
+    await pool.execute(
+        "INSERT INTO audio_usage_daily (user_id, day, minutes_used) VALUES ($1, $2, $3)",
+        7, today, 2.5,
+    )
+    for _ in range(2):
+        if reader == "monthly-admission":
+            assert await audio_quota._monthly_minutes_exhausted(7, 3.0, 1.0) is True
+        else:
+            read = audio_quota.get_daily_minutes_used if reader == "daily" else audio_quota.get_monthly_minutes_used
+            assert await read(7) == 2.5

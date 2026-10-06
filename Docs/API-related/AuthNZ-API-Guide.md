@@ -189,6 +189,8 @@ Authorization: Bearer your-jwt-token
 }
 ```
 
+`storage_quota_mb` is `null` when no storage quota is set for the user, which means unlimited. The `5120` above is an example of a quota that was set (via `limits.storage_quota_mb`), not a default. `DEFAULT_STORAGE_QUOTA_MB` is deprecated and sets no quota.
+
 #### Update Password
 ```http
 POST /api/v1/users/change-password

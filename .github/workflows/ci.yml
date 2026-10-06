@@ -1539,6 +1539,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -3192,6 +3193,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -4682,6 +4684,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -6083,6 +6086,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -7475,6 +7479,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py

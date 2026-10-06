@@ -136,16 +136,6 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     except Exception:
         _ = None
 
-    # Reset cached audio RG governor/handles so RG_POLICY_PATH changes take effect.
-    try:
-        import tldw_Server_API.app.core.Usage.audio_quota as _aq
-
-        _aq._rg_audio_governor = None  # type: ignore[attr-defined]
-        _aq._rg_audio_loader = None  # type: ignore[attr-defined]
-        _aq._reset_in_process_counters_for_tests()
-    except Exception:
-        _ = None
-
 
 async def _create_user_and_key(*, username: str, email: str, role: str = "user") -> tuple[int, str]:
     from uuid import uuid4

@@ -165,7 +165,7 @@ Secrets and auth
 
 Registration controls (multi-user)
 - Toggle with `ENABLE_REGISTRATION=true|false` and `REQUIRE_REGISTRATION_CODE=true|false`.
-- Default storage quota per user: `DEFAULT_STORAGE_QUOTA_MB`.
+- Storage quotas: `DEFAULT_STORAGE_QUOTA_MB` is deprecated and sets no one's quota. Set `limits.storage_quota_mb` per user, team or org instead (nothing is set by default, so storage is unlimited); see `Docs/Operations/Usage_Quotas.md`.
 
 Network
 - Enforce TLS at the proxy and restrict `ALLOWED_ORIGINS`.

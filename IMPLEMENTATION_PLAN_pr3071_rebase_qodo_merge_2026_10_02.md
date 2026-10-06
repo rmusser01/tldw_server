@@ -1342,3 +1342,105 @@ their exact source bindings; counts overlap, not a repo-wide unique total. Fresh
 warnings/0new is not raw-clean lint. Normal commit and exact-leased publication
 are next; all new-head hosted/review/applicable acceptance and merge/cleanup gates
 remain pending, Stage23 InProgress/fullUatPassedfalse.
+
+Requested rebase publication is now verified: head3ac1a052d9bce0343df11ea49a499280081e95d8,
+treec384190c5da5c8c6f3a0d3d2213f375fde7bbe6d, parentedc0c1246188151a0f08d4a441e2b202ef9766b0,
+actualdev94854ca3db6ec3eaa0c27b4e9537bdd47d222611 integrated. Explicit GitHub push
+used the fresh exactcff lease and normal existing LFS hook;36-file staged checks
+passed. Readback binds16650 source entries exactly to the committed tree and the
+entire prepared body, SHA188a7682ac33b831732abf0f4baa26194d2e06a01bbc6aec90d1a06b4ca2872d.
+Canonical740-byte human suffix000648a4 and content3ad24a remain byte-exact. A fresh
+canonical-tooling run passes149 at the committed head; its prior broad snapshot
+predated unrelated source corrections and is only scope-equivalent, not globally
+current. Symlink, outer-syntax, content-offset and source-collector errors remain
+separate failed collectors, never hosted/test failures or relabeled qualification.
+
+Actual10:16 new-head readback: OPEN/base948,46success/28skipped/38running/1queued/
+1neutral/no failures;15historical threads all resolved, no new Qodo review or credit
+restoration. Actual CI37448498847 at10:16:52 has11 initial jobs(allhead3ac),7success/
+3running/1skipped and no owning jobs yet; this is not Full Suite qualification.
+All seven actual required names and owning PostgreSQL/auth/admin/media/database/
+E2E Critical/Full Suite must qualify on3ac. Unset queue/no auto-merge unchanged.
+No fresh Qodo request while billing-blocked, native allowance consumed/fullUatPassed
+false, protected data/profile/services untouched. Stage23 remains InProgress;
+no merge or cleanup. This post-publication plan/task receipt stays intentionally
+uncommitted and unpublished to preserve healthy hosted executions.
+
+## Stage 24: Directly Authorized Latest-Dev Blocker Correction
+**Goal**: Integrate actual dev1fc after the human's direct blocker-fix and continue
+requests, without changing protected sources, services, data, or native inputs.
+**Success Criteria**: Normal history-preserving integration retains existing
+PostgreSQL quota-off/no-override/configured-limit coverage and incoming ledger
+reporting; official OpenAPI generation is source-bound; owning tests, types,
+production build with unchanged budgets, security delta, independent review and
+normal hook preflight qualify before exact-head-leased publication. New-head
+hosted checks, fresh Qodo and applicable acceptance remain required for PR merge.
+**Tests**: PostgreSQL audio profile/backfill tests through official isolated owned
+fixtures; quota/audio/evaluation/chatbooks/workflow/media/profile owning backend;
+Workspace/Evaluations owning UI and frontend contracts; types; OpenAPI --check;
+immutable production build/token/budget checks; Bandit and normal pre-commit.
+**Status**: In Progress
+
+1. Complete: Verify live PR/dev/queue, record authorization, fence the heartbeat read-only,
+   and retain recovery state before source edits.
+2. Complete locally: Semantically resolve the two actual conflicts and regenerate the fingerprint
+   officially. Do not choose either complete test side or weaken assertions.
+3. Complete locally: Review and qualify integrated owning source; preserve each failed attempt and
+   source binding separately. Do not substitute old3ac results for successor.
+4. In progress: Publish normally using explicit GitHub URL and a fresh exact3ac lease, preserve
+   the human Change summary byte-for-byte, then await real new-head gates.
+
+Current3ac hosted all-seven/owning checks are already complete, all15 historical
+threads resolved. Actual dev1fc is merged in the owned working tree, with no
+integration commit or publication yet. The independent audio backfill finding was
+reproduced RED (8 pass/3 fail), then corrected through the existing initializer
+with 42 owning tests passing. Six quota-mode cases and every assertion remain.
+The official fingerprint is regenerated; full qualification is still running.
+Qodo credit restoration and
+original-profile/native acceptance remain external constraints, not waived by the
+generic fix request. No credit purchase, browser probe, new Send/inference/resend,
+native fixture, fourth Character-root attempt, shared-service change, PR merge or cleanup
+is authorized by this stage alone. ADR assessment: no new ADR; existing tracking,
+human-summary, security, backlog-py and merge-queue decisions govern this union.
+
+Final local qualification: owning UI5222PASS/262files, frontend59PASS/4files,
+backend3236PASS/27SKIP/0FAIL/0ERROR and auth/admin213PASS/0SKIP. Backend skips are
+23 opt-in evaluation cases, three existing platform/coordination cases and one
+unchanged Usage PostgreSQL aggregation case without DATABASE_URL. The two actual
+opted-in evaluation limit-view files separately pass6 without provider inference.
+Canonical task tooling149PASS, types8GB exit0 and official OpenAPI --check exit0.
+All app/guide input bytes remain exact after the two backend-only test fixture
+corrections; the UI snapshot is not global backend-source equivalence.
+
+The additional mock-only isolation regression first failed2 cases, then the
+corrected owning corpus passed44 with no failures/skips. Only existing AsyncMock
+fixtures are reused to avoid real DB initialization in mock-only tests; real PG
+backfill coverage remains real. Independent final source review has no actionable
+P1/P2, all agents closed. Authoritative verbatim review receipt is
+quota-blockers-independent-review-qualified-v2-20261006.json; its earlier shell-
+quoting collector failure is retained separately, not relabeled.
+
+Immutable production build/tokens/UNCHANGED budgets pass0/0/0, all7264 unique app
+entries exact. Shared555280<614400 bytes and heaviest865115<921600; artifact is NOT
+SERVED. Matched182-file lint retains8 inherited errors/1817 inherited warnings/
+0NEW findings, not raw-clean. Fresh32 production Python Bandit files have0 findings/
+0errors, a distinct scope from prior inherited scans. Explicit normal hooks and
+exact-leased normal publication are next; no automatic pre-commit hook is installed,
+and the existing LFS pre-push hook must remain enabled.
+
+The overbroad initial Audio attempt remains INVALID: exit2/KeyboardInterrupt,
+2941PASS/27SKIP before interruption. It opened an installed local-model artifact;
+inference absence is UNVERIFIED. Only its exact verified owned pytest PID75634 was
+interrupted; no shared process was signalled. The distinct final backend selection
+uses the safe prior corpus and explicit quota-owning Audio files, without disabling
+assertions, health checks or increasing deadlines. Original seed/backfill/mock REDs,
+collector errors and the incomplete Audio attempt remain separately attributed.
+
+Fresh read-only protection confirms original10/eight rows,13 canonical rows/seven
+accepted bindings,70 stashes and separate modela7 unchanged. The sandbox EPERM
+collector failed; distinct host-access read-only GET verification succeeded. No
+browser probe occurred and fullUatPassed remains false. Published3ac hosted checks
+remain historical for the successor. Fresh exact-head Qodo is still credit-blocked;
+native/original-profile acceptance, new-head hosted gates and normal merge/cleanup
+remain pending. No credit purchase, duplicate Qodo command, shared-service mutation,
+new application Send/resend, native fixture or fourth Character-root probe occurred.

@@ -82,7 +82,7 @@ PRIVATE_COERCER_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/Chat/chat_service.py": 2,
     "tldw_Server_API/app/core/Chat_Macros/parser.py": 1,
     "tldw_Server_API/app/core/Chatbooks/jobs_adapter.py": 1,
-    "tldw_Server_API/app/core/Chatbooks/quota_manager.py": 2,
+    "tldw_Server_API/app/core/Chatbooks/quota_manager.py": 1,
     "tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py": 1,
     "tldw_Server_API/app/core/Claims_Extraction/budget_guard.py": 1,
     "tldw_Server_API/app/core/Claims_Extraction/claims_jobs.py": 1,
