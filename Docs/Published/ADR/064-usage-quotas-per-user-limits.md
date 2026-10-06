@@ -39,4 +39,4 @@ The owner's commercial offering needs the opposite: no limit unless one is assig
 
 ## Follow-up
 
-- Audit events on the storage quota admin endpoints that do not emit one yet: TASK-13502, under TASK-13434.
+- Audit events on the storage quota admin endpoints that do not emit one yet: TASK-13510, under TASK-13434.

@@ -81,7 +81,6 @@ curl -X DELETE http://localhost:8000/api/v1/orgs/1 \
 
 **Prerequisites:**
 - Must be the owner
-- Must cancel any active Stripe subscription first
 - All invites will be automatically revoked
 
 ## Managing Members
@@ -343,17 +342,16 @@ Platform administrators (separate from org admins) have additional capabilities.
 
 ### Admin Endpoints
 
-Platform admin endpoints at `/admin/organizations/*`:
-- List all organizations
-- View any organization's details
-- Modify any organization's settings
+Platform admin endpoints at `/api/v1/admin/orgs/*`:
+- Create and list organizations
+- Create and list an organization's teams, and add, list, update and remove its members
 - Set `limits.*` allowances for an org or team (see Usage Quotas)
 
 ### Managing All Organizations
 
 **API Request:**
 ```bash
-curl http://localhost:8000/admin/organizations \
+curl http://localhost:8000/api/v1/admin/orgs \
   -H "Authorization: Bearer ADMIN_TOKEN"
 ```
 
