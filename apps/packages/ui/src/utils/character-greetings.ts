@@ -267,10 +267,10 @@ export const pickGreeting = (greetings: string[]): string => {
 /** Display classification only: canonical H1 rows and provider requests stay raw. */
 export const resolveCharacterMessageType = (
   message: { messageType?: string; message_type?: string; isBot?: boolean; role?: string;
-    parentMessageId?: string | null; serverMessageId?: string },
+    parentMessageId?: string | null; id?: string; serverMessageId?: string },
   index: number,
   nativeCharacter: boolean
 ): string | undefined => message.messageType ?? message.message_type ?? (
   nativeCharacter && index === 0 && (message.role === "assistant" || message.isBot) &&
-    message.parentMessageId == null && message.serverMessageId ? "character:greeting" : undefined
+    message.parentMessageId == null && (message.serverMessageId?.trim() || message.id?.trim()) ? "character:greeting" : undefined
 )

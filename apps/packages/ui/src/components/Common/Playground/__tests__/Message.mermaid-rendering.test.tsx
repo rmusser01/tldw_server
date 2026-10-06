@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
 import { CompactMessage } from "../CompactMessage"
 import { ReasoningBlock } from "../ReasoningBlock"
+import { formatSelectedHistory } from "@/db/dexie/helpers"
+import { resolveCharacterMessageType } from "@/utils/character-greetings"
 
 const markdownCalls = vi.hoisted(() => [] as Array<Record<string, unknown>>)
 const storageState = vi.hoisted(() => ({
@@ -264,7 +266,9 @@ vi.mock("@/utils/character-mood", () => ({
   resolveCharacterMoodImageUrl: () => ""
 }))
 
-vi.mock("@/db/dexie/helpers", () => ({
+vi.mock("@/db/dexie/chat", () => ({ PageAssistDatabase: class {} }))
+vi.mock("@/db/dexie/helpers", async importOriginal => ({
+  ...await importOriginal<typeof import("@/db/dexie/helpers")>(),
   updateMessageDiscoSkillComment: vi.fn(async () => undefined)
 }))
 
@@ -308,15 +312,27 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
   it("projects saved raw greetings with distinct names and keeps canonical content unchanged on reload", async () => {
     const raw = "{{user}} meets {{char}}\n  exact  "
     storageState.values.set("chatUserDisplayName", "Viewer $&")
-    const props = { ...baseProps, message: raw, message_type: "character:greeting", serverChatId: "saved-chat",
-      serverMessageId: "saved-root", characterIdentityEnabled: true,
-      characterIdentity: { id: "12", name: "Guide $'" } }
+    const capture = {
+      status: "captured", view: { conversation_id: "saved-chat" },
+      snapshot: { nodes: [{ id: "saved-root", role: "assistant", parent_id: null }] },
+      rows: [{ id: "saved-root", role: "assistant", parent_id: null }],
+      selected_content: [{ id: "saved-root", message: raw, images: [] }]
+    } as unknown as import("@/types/history-selection").HistorySelectionCaptureV1
+    const display = formatSelectedHistory(capture)
+    const root = display.messages[0]
+    const props = { ...baseProps, message: root.message,
+      message_type: resolveCharacterMessageType(root, 0, true), serverChatId: "saved-chat",
+      characterIdentityEnabled: true, characterIdentity: { id: "12", name: "Guide $'" } }
     const view = render(<PlaygroundMessage {...props} />)
     await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe("Viewer $& meets Guide $'\n  exact  "))
     storageState.values.set("chatUserDisplayName", "")
     view.rerender(<PlaygroundMessage {...props} characterIdentity={{ id: "12", name: "Updated Guide" }} />)
     await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe("{{user}} meets Updated Guide\n  exact  "))
     expect(props.message).toBe(raw)
+    expect(capture.selected_content[0].message).toBe(raw)
+    expect(display.history[0].content).toBe(raw)
+    expect(root.serverMessageId).toBeUndefined()
+    expect(root.serverMessageVersion).toBeUndefined()
   })
 
   it("enables Mermaid for a completed assistant markdown message by default", async () => {

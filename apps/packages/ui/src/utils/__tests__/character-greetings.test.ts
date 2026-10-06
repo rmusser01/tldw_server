@@ -151,10 +151,12 @@ describe("native creation seed provenance is independent of display positions", 
   })
 })
 
-it("projects an owned native root greeting on either surface and preserves explicit message types", () => {
-  const root = { isBot: true, role: "assistant", parentMessageId: null, serverMessageId: "saved-root" }
+it.each(["id", "serverMessageId"] as const)("projects an owned native root greeting using %s and preserves explicit message types", idField => {
+  const root = { isBot: true, role: "assistant", parentMessageId: null,
+    id: idField === "id" ? "saved-root" : undefined,
+    serverMessageId: idField === "serverMessageId" ? "saved-root" : undefined }
   expect(resolveCharacterMessageType(root, 0, true)).toBe("character:greeting")
-  for (const [message, index, owned] of [[root, 1, true], [root, 0, false], [{ ...root, parentMessageId: "user" }, 0, true], [{ ...root, isBot: false, role: "user" }, 0, true]] as const)
+  for (const [message, index, owned] of [[root, 1, true], [root, 0, false], [{ ...root, id: undefined, serverMessageId: undefined }, 0, true], [{ ...root, id: "  ", serverMessageId: "" }, 0, true], [{ ...root, parentMessageId: "user" }, 0, true], [{ ...root, isBot: false, role: "user" }, 0, true]] as const)
     expect(resolveCharacterMessageType(message, index, owned)).toBeUndefined()
   expect(resolveCharacterMessageType({ ...root, messageType: "compare:reply" }, 0, true)).toBe("compare:reply")
 })
