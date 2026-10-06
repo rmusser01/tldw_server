@@ -26,11 +26,9 @@ import {
   buildActorSettingsFromForm,
   estimateActorTokens
 } from "@/utils/actor"
-import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import {
   getCanonicalModelKey,
-  getModelId,
-  getModelProvider
+  resolveModelSelectorSelection
 } from "@/hooks/playground/modelSelectorUtils"
 import type { Character } from "@/types/character"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
@@ -351,60 +349,12 @@ export const CurrentChatModelSettings = ({
     retry: 2
   })
 
-  const selectedModelSettingsScope = useMemo(() => {
-    if (!selectedModel) return null
-
-    const selected = selectedModel.trim()
-    if (!selected) return null
-
-    const selectedLower = selected.toLowerCase()
-    const models = Array.isArray(composerModels) ? composerModels : []
-    const providerSelection = parseProviderQualifiedModelSelection(selected)
-
-    const canonicalMatch = models.find(
-      (model) => getCanonicalModelKey(model).toLowerCase() === selectedLower
-    )
-    if (canonicalMatch) {
-      return getCanonicalModelKey(canonicalMatch)
-    }
-
-    const selectedModelId = getModelId({ model: providerSelection.modelId })
-    const selectedProvider =
-      providerSelection.provider ||
-      (typeof apiProvider === "string" && apiProvider.trim()
-        ? apiProvider.trim()
-        : null)
-    const selectedProviderHint = selectedProvider
-      ? getModelProvider({ provider: selectedProvider })
-      : null
-
-    const providerMatch = selectedProviderHint
-      ? models.find(
-          (model) =>
-            getModelId(model) === selectedModelId &&
-            getModelProvider(model) === selectedProviderHint
-        )
-      : null
-    if (providerMatch) {
-      return getCanonicalModelKey(providerMatch)
-    }
-
-    const modelIdMatch = models.find((model) => {
-      const modelId = getModelId(model)
-      return (
-        modelId === selectedModelId ||
-        String(model.model || "") === selectedModelId
-      )
-    })
-    if (modelIdMatch) {
-      return getCanonicalModelKey(modelIdMatch)
-    }
-
-    return getCanonicalModelKey({
-      provider: selectedProviderHint || "custom",
-      model: selectedModelId
-    })
-  }, [apiProvider, composerModels, selectedModel])
+  const activeSettingsScope = useStoreChatModelSettings(state => state.activeSettingsScope)
+  const scopedApiProvider = useStoreChatModelSettings(state => state.activeSettingsScope ? state.scopedSettingsByModelKey?.[state.activeSettingsScope]?.apiProvider : undefined)
+  const selectedSelection = useMemo(
+    () => resolveModelSelectorSelection(composerModels, selectedModel, apiProvider, { scope: activeSettingsScope, providerOverride: scopedApiProvider }),
+    [apiProvider, composerModels, selectedModel, activeSettingsScope, scopedApiProvider]
+  )
 
   const saveSettings = useCallback(
     (values: CurrentChatModelFormValues) => {
@@ -413,36 +363,11 @@ export const CurrentChatModelSettings = ({
         typeof settingsScope === "string" && settingsScope.trim()
           ? settingsScope.trim()
           : null
-      const activeScope = latestSettingsState.activeSettingsScope || ""
-      const scopeSeparator = activeScope.indexOf(":")
-      const activeSelection = parseProviderQualifiedModelSelection(activeScope)
-      const activeModelKey = getCanonicalModelKey({
-        provider:
-          activeSelection.provider ||
-          (scopeSeparator > 0
-            ? activeScope.slice(0, scopeSeparator)
-            : latestSettingsState.apiProvider),
-        model: activeSelection.isProviderQualified
-          ? activeSelection.modelId
-          : scopeSeparator > 0
-            ? activeScope.slice(scopeSeparator + 1)
-            : activeScope
-      })
-      // The cockpit may use a provider alias/internal model prefix. Keep its
-      // live scope for the same model so Save and Reset share one prompt record.
-      const activeScopeIsRawSelectedModel =
-        !latestSettingsState.apiProvider?.trim() &&
-        !activeSelection.isProviderQualified &&
-        activeScope === selectedModel?.trim()
-      const selectedSettingsScope =
-        activeScopeIsRawSelectedModel ||
-        activeModelKey === selectedModelSettingsScope
-          ? latestSettingsState.activeSettingsScope
-          : selectedModelSettingsScope
-      const targetSettingsScope =
-        explicitSettingsScope ||
-        selectedSettingsScope ||
-        latestSettingsState.activeSettingsScope
+      const preferredScope = explicitSettingsScope || latestSettingsState.activeSettingsScope
+      const targetSettingsScope = resolveModelSelectorSelection(composerModels, selectedModel, latestSettingsState.apiProvider, {
+        scope: preferredScope,
+        providerOverride: preferredScope ? latestSettingsState.scopedSettingsByModelKey[preferredScope]?.apiProvider : undefined
+      }).settingsScope
 
       if (targetSettingsScope) {
         setActiveSettingsScope(targetSettingsScope)
@@ -481,7 +406,7 @@ export const CurrentChatModelSettings = ({
       personaChatActive,
       serverChatId,
       settingsScope,
-      selectedModelSettingsScope,
+      composerModels,
       selectedModel,
       setActiveSettingsScope,
       setActorSettings,
@@ -489,6 +414,21 @@ export const CurrentChatModelSettings = ({
       updateSetting
     ]
   )
+
+  const handleModelChange = useCallback((value: string) => {
+    const state = useStoreChatModelSettings.getState()
+    const nextScope = resolveModelSelectorSelection(composerModels, value, state.apiProvider, {
+      scope: state.activeSettingsScope,
+      providerOverride: state.activeSettingsScope ? state.scopedSettingsByModelKey[state.activeSettingsScope]?.apiProvider : undefined
+    }).settingsScope
+    if (nextScope !== state.activeSettingsScope) {
+      state.setActiveSettingsScope(nextScope)
+      const nextSettings = useStoreChatModelSettings.getState().getEffectiveSettings(nextScope)
+      const nextValues: Partial<ChatModelSettings> = Object.fromEntries([...CHAT_MODEL_SETTING_KEYS].map(key => [key, nextSettings[key]]))
+      form.setFieldsValue(nextValues)
+    }
+    setSelectedModel(value)
+  }, [composerModels, form, setSelectedModel])
 
   const handleLlamaControlChange = useCallback(
     (key: keyof ChatModelSettings, value: number | string | undefined) => {
@@ -642,27 +582,10 @@ export const CurrentChatModelSettings = ({
         label: React.ReactNode
         value: string
         searchLabel: string
+        disabled?: boolean
       }>
     }
     const models = composerModels
-    if (!models.length) {
-      if (selectedModel) {
-        const displayText = `Custom - ${selectedModel}`
-        const fallbackGroup: GroupOption = {
-          label: <span className="truncate">Custom</span>,
-          options: [
-            {
-              label: <span className="truncate">{displayText}</span>,
-              value: selectedModel,
-              searchLabel: displayText.toLowerCase()
-            }
-          ]
-        }
-        return [fallbackGroup]
-      }
-      return []
-    }
-
     const groups = new Map<string, GroupOption>()
 
     for (const m of models) {
@@ -722,7 +645,7 @@ export const CurrentChatModelSettings = ({
       const group = groups.get(providerKey)!
       group.options.push({
         label: optionLabel,
-        value: m.model,
+        value: getCanonicalModelKey(m),
         searchLabel: optionDisplay.toLowerCase()
       })
     }
@@ -731,18 +654,22 @@ export const CurrentChatModelSettings = ({
 
     if (selectedModel) {
       const hasSelected = groupedOptions.some((group) =>
-        group.options.some((option) => option.value === selectedModel)
+        group.options.some((option) => option.value === selectedSelection.key)
       )
 
       if (!hasSelected) {
-        const displayText = `Custom - ${selectedModel}`
+        const providerLabel = selectedSelection.provider
+          ? getProviderDisplayName(selectedSelection.provider)
+          : t("playground:composer.chooseProvider", "Choose provider")
+        const displayText = `${providerLabel} - ${selectedSelection.modelId}`
         groupedOptions.push({
-          label: <span className="truncate">Custom</span>,
+          label: <span className="truncate">{providerLabel}</span>,
           options: [
             {
               label: <span className="truncate">{displayText}</span>,
-              value: selectedModel,
-              searchLabel: displayText.toLowerCase()
+              value: selectedSelection.key || selectedModel,
+              searchLabel: displayText.toLowerCase(),
+              disabled: !selectedSelection.provider
             }
           ]
         })
@@ -750,7 +677,7 @@ export const CurrentChatModelSettings = ({
     }
 
     return groupedOptions
-  }, [composerModels, selectedModel])
+  }, [composerModels, selectedModel, selectedSelection.key, selectedSelection.modelId, selectedSelection.provider, t])
 
   const providerOptions = useMemo(() => {
     const models = composerModels
@@ -778,8 +705,8 @@ export const CurrentChatModelSettings = ({
           children: (
             <ModelBasicsTab
               form={form}
-              selectedModel={selectedModel}
-              onModelChange={setSelectedModel}
+              selectedModel={selectedSelection.key}
+              onModelChange={handleModelChange}
               modelOptions={modelOptions}
               modelsLoading={modelsLoading}
               isOCREnabled={isOCREnabled}
@@ -849,7 +776,8 @@ export const CurrentChatModelSettings = ({
       t,
       form,
       selectedModel,
-      setSelectedModel,
+      selectedSelection.key,
+      handleModelChange,
       modelOptions,
       modelsLoading,
       isOCREnabled,

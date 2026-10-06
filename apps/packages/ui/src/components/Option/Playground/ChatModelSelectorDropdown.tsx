@@ -52,13 +52,16 @@ export const ChatModelSelectorDropdown = React.memo(
     // When no model is selected, the provider connection may well be "Healthy",
     // but showing that green badge next to "Select a model" is contradictory —
     // you cannot chat yet. Surface a truthful "No model selected" state instead.
-    const noModelSelected = !selectedModel
-    const statusLabel =
-      modelUsabilityLabel ??
+    const noModelSelected = !selectedModel?.trim()
+    const providerSelectionNeeded = !noModelSelected && modelSelectorWarning && !modelUsabilityWarning && !connectionStatusWarning
+    const statusLabel = connectionStatusWarning ? connectionStatusLabel :
+      (providerSelectionNeeded
+        ? t("playground:composer.chooseProvider", "Choose provider")
+        : modelUsabilityLabel) ??
       (noModelSelected
         ? t("playground:composer.providerStatusNoModel", "No model selected")
         : connectionStatusLabel)
-    const statusTitle = modelUsabilityTitle ?? apiModelLabel
+    const statusTitle = connectionStatusWarning ? connectionStatusLabel : providerSelectionNeeded ? apiModelLabel : modelUsabilityTitle ?? apiModelLabel
     const statusWarning =
       noModelSelected ||
       modelUsabilityWarning ||

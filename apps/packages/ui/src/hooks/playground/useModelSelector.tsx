@@ -4,10 +4,8 @@ import { useStorage } from "@plasmohq/storage/hook"
 import { Tooltip } from "antd"
 import { Star } from "lucide-react"
 import { getProviderDisplayName } from "@/utils/provider-registry"
-import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
 import { tldwModels } from "@/services/tldw"
-import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability"
 import { useStoreChatModelSettings } from "@/store/model"
 import {
   LOCAL_PROVIDERS,
@@ -16,6 +14,7 @@ import {
   getCanonicalModelKey,
   getModelId,
   getModelProvider,
+  resolveModelSelectorSelection,
   hasFavoriteModelKey,
   modelMatchesSearch,
   sortModelsForSelector,
@@ -44,6 +43,8 @@ export function useModelSelector({
 }: UseModelSelectorParams) {
   const { t } = useTranslation(["playground", "common"])
   const apiProvider = useStoreChatModelSettings((state) => state.apiProvider)
+  const activeSettingsScope = useStoreChatModelSettings(state => state.activeSettingsScope)
+  const scopedApiProvider = useStoreChatModelSettings(state => state.activeSettingsScope ? state.scopedSettingsByModelKey?.[state.activeSettingsScope]?.apiProvider : undefined)
 
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false)
   const [modelSearchQuery, setModelSearchQuery] = React.useState("")
@@ -66,13 +67,9 @@ export function useModelSelector({
 
   const modelListScope: ModelListScope =
     storedModelListScope === "catalog" ? "catalog" : "configured"
-  const selectedProviderHint =
-    typeof apiProvider === "string" && apiProvider.trim()
-      ? apiProvider.trim().toLowerCase()
-      : null
-  const selectedIdentity = React.useMemo(
-    () => parseProviderQualifiedModelSelection(selectedModel),
-    [selectedModel]
+  const selectedSelection = React.useMemo(
+    () => resolveModelSelectorSelection(composerModels, selectedModel, apiProvider, { scope: activeSettingsScope, providerOverride: scopedApiProvider }),
+    [composerModels, selectedModel, apiProvider, activeSettingsScope, scopedApiProvider]
   )
 
   const normalizedModelUsageByKey = React.useMemo<Record<string, ModelUsageStats>>(() => {
@@ -89,49 +86,9 @@ export function useModelSelector({
     return normalized
   }, [modelUsageByKey])
 
-  const selectedModelMeta = React.useMemo(() => {
-    if (!selectedModel) return null
-    const models = (composerModels as any[]) || []
-    if (selectedIdentity.provider) {
-      const provider = normalizeProviderAvailabilityKey(
-        getModelProvider({ provider: selectedIdentity.provider })
-      )
-      return models.find(
-        (model) => normalizeProviderAvailabilityKey(getModelProvider(model)) === provider &&
-          getModelId(model) === selectedIdentity.modelId
-      ) || null
-    }
-    const selected = selectedModel.trim()
-    const selectedLower = selected.toLowerCase()
-    const canonicalMatch = models.find(
-      (model) => getCanonicalModelKey(model).toLowerCase() === selectedLower
-    )
-    if (canonicalMatch) return canonicalMatch
-
-    const providerMatch = selectedProviderHint
-      ? models.find((model) => {
-          const modelId = getModelId(model)
-          return modelId === selected && getModelProvider(model) === selectedProviderHint
-        })
-      : null
-    if (providerMatch) return providerMatch
-
-    return (
-      models.find((model) => {
-        const modelId = getModelId(model)
-        return modelId === selected || String(model.model || "") === selected
-      }) || null
-    )
-  }, [composerModels, selectedModel, selectedProviderHint, selectedIdentity])
-
-  const selectedModelKey = React.useMemo(() => {
-    if (selectedModelMeta) return getCanonicalModelKey(selectedModelMeta)
-    if (!selectedModel) return null
-    return getCanonicalModelKey(
-      selectedIdentity.provider || selectedProviderHint || "custom",
-      selectedIdentity.modelId
-    )
-  }, [selectedModel, selectedModelMeta, selectedProviderHint, selectedIdentity])
+  const selectedModelMeta = selectedSelection.model
+  const selectedModelKey = selectedSelection.key
+  const selectedModelSettingsScope = selectedSelection.settingsScope
 
   const modelContextLength = React.useMemo(() => {
     const candidates = [
@@ -182,18 +139,10 @@ export function useModelSelector({
     return null
   }, [modelContextLength, requestedNumCtx])
 
-  const resolvedProviderKey = React.useMemo(() => {
-    if (selectedModelMeta) return getModelProvider(selectedModelMeta)
-    if (selectedIdentity.provider) {
-      return getModelProvider({ provider: selectedIdentity.provider })
-    }
-    return selectedProviderHint || "custom"
-  }, [selectedModelMeta, selectedProviderHint, selectedIdentity])
-
-  const providerLabel = React.useMemo(
-    () => tldwModels.getProviderDisplayName(resolvedProviderKey || "custom"),
-    [resolvedProviderKey]
-  )
+  const resolvedProviderKey = selectedSelection.provider || "custom"
+  const providerLabel = selectedSelection.provider
+    ? tldwModels.getProviderDisplayName(selectedSelection.provider)
+    : t("playground:composer.chooseProvider", "Choose provider")
 
   const modelSummaryLabel = React.useMemo(() => {
     if (!selectedModel) {
@@ -205,9 +154,9 @@ export function useModelSelector({
     return (
       selectedModelMeta?.nickname ||
       getModelId(selectedModelMeta as ModelSelectorDescriptor) ||
-      selectedIdentity.modelId
+      selectedSelection.modelId
     )
-  }, [selectedModel, selectedModelMeta, selectedIdentity, t])
+  }, [selectedModel, selectedModelMeta, selectedSelection.modelId, t])
 
   const apiModelLabel = React.useMemo(() => {
     if (!selectedModel) {
@@ -219,7 +168,7 @@ export function useModelSelector({
     return `${providerLabel} / ${modelSummaryLabel}`
   }, [modelSummaryLabel, providerLabel, selectedModel, t])
 
-  const modelSelectorWarning = !selectedModel
+  const modelSelectorWarning = !selectedSelection.key || !selectedSelection.provider
 
   const favoriteModelSet = React.useMemo(
     () => new Set((favoriteModels || []).map((value) => String(value))),
@@ -718,6 +667,7 @@ export function useModelSelector({
     setModelListScope,
     selectedModelMeta,
     selectedModelKey,
+    selectedModelSettingsScope,
     modelContextLength,
     modelCapabilities,
     resolvedMaxContext,

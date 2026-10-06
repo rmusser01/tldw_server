@@ -1,3 +1,4 @@
+import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils";
 import { HistorySelectionProvider, useHistorySelectionContext, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection";
 import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition";
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview";
@@ -39,6 +40,7 @@ import {
   openAssistantSelector,
   openMcpSettings,
   openModelSettings,
+  openModelSelector,
   openPromptSelector,
   openSearchAndContext,
   setTemporaryChatFromCockpit,
@@ -3118,14 +3120,16 @@ const PlaygroundContent = () => {
     () =>
       buildChatModelUsability({
         isServerConnected: serverReadinessState !== "blocked",
-        selectedModel: providerRouteSummary.selectedModel,
+        selectedModel,
+        explicitProvider: apiProvider,
         availableModels: readinessChatModels,
         modelsLoading: !Array.isArray(readinessChatModels),
         serverDegraded: serverReadinessState === "degraded",
         allowDegradedSend: true,
       }),
     [
-      providerRouteSummary.selectedModel,
+      selectedModel,
+      apiProvider,
       readinessChatModels,
       serverReadinessState,
     ],
@@ -3135,7 +3139,9 @@ const PlaygroundContent = () => {
       buildCharacterChatReadiness({
         isServerConnected: serverReadinessState !== "blocked",
         selectedCharacter: activeCharacterSelection,
-        selectedModel: providerRouteSummary.selectedModel,
+        requireExplicitProvider: true,
+        selectedModel,
+        explicitProvider: apiProvider,
         availableModels: readinessChatModels,
         modelsLoading: !Array.isArray(readinessChatModels),
         serverDegraded: serverReadinessState === "degraded",
@@ -3145,7 +3151,8 @@ const PlaygroundContent = () => {
     [
       isLoading,
       isProcessing,
-      providerRouteSummary.selectedModel,
+      selectedModel,
+      apiProvider,
       readinessChatModels,
       activeCharacterSelection,
       serverReadinessState,
@@ -3177,6 +3184,9 @@ const PlaygroundContent = () => {
       readinessTitle: characterChatReadinessCopy?.title ?? null,
     });
   const activeChatModelSelectorLabel = React.useMemo(() => {
+    if (characterWorkflowActive && characterChatReadiness.reason === "explicit-model-provider-required") {
+      return toText(t("playground:composer.chooseModelAndProvider", "Choose model and provider"));
+    }
     if (
       !activeChatModelUsability ||
       activeChatModelUsability.status === "ready" ||
@@ -3234,7 +3244,7 @@ const PlaygroundContent = () => {
       default:
         return null;
     }
-  }, [activeChatModelUsability, t]);
+  }, [activeChatModelUsability, characterWorkflowActive, characterChatReadiness.reason, t]);
   const activeChatModelUsabilityMessage =
     characterChatModelUsabilityMessage ?? activeChatModelSelectorLabel;
   const activeChatModelSelectorTitle = activeChatModelSelectorLabel
@@ -3254,11 +3264,15 @@ const PlaygroundContent = () => {
     activeChatModelUsabilityBlocks &&
     (activeChatModelUsability?.status === "no_models" ||
       activeChatModelUsability?.status === "provider_unconfigured");
+  const selectedModelSettingsScope = React.useMemo(
+    () => resolveModelSelectorSelection(readinessChatModels, selectedModel, apiProvider, { scope: activeSettingsScope, providerOverride: activeSettingsScope ? scopedSettingsByModelKey?.[activeSettingsScope]?.apiProvider : undefined }).settingsScope,
+    [readinessChatModels, selectedModel, apiProvider, activeSettingsScope, scopedSettingsByModelKey],
+  );
   React.useEffect(() => {
     if (typeof setActiveSettingsScope === "function") {
-      setActiveSettingsScope(providerRouteSummary.providerRouteLabel ?? null);
+      setActiveSettingsScope(selectedModelSettingsScope);
     }
-  }, [providerRouteSummary.providerRouteLabel, setActiveSettingsScope]);
+  }, [selectedModelSettingsScope, setActiveSettingsScope]);
   const contextFileItems = Array.isArray(contextFiles) ? contextFiles : [];
   const selectedKnowledgeItems = Array.isArray(selectedKnowledge)
     ? selectedKnowledge
@@ -3626,13 +3640,13 @@ const PlaygroundContent = () => {
   });
   const openModelSettingsFromCockpit = React.useCallback(() => {
     if (typeof setActiveSettingsScope === "function") {
-      setActiveSettingsScope(providerRouteSummary.providerRouteLabel ?? null);
+      setActiveSettingsScope(selectedModelSettingsScope);
     }
     openModelSettings({
       returnFocusSelector: COCKPIT_MODEL_SETTINGS_TRIGGER_SELECTOR,
-      settingsScope: providerRouteSummary.providerRouteLabel ?? null,
+      settingsScope: selectedModelSettingsScope,
     });
-  }, [providerRouteSummary.providerRouteLabel, setActiveSettingsScope]);
+  }, [selectedModelSettingsScope, setActiveSettingsScope]);
   const openServerSettingsFromCockpit = React.useCallback(() => {
     if (typeof setActiveSettingsScope === "function") {
       setActiveSettingsScope(null);
@@ -3663,6 +3677,10 @@ const PlaygroundContent = () => {
         return;
       }
       if (action === "open-model-settings") {
+        if (characterChatReadiness.reason === "explicit-model-provider-required") {
+          openModelSelector({ returnFocusSelector: "[data-testid='model-selector']" });
+          return;
+        }
         openModelSettingsFromCockpit();
         return;
       }
@@ -3676,6 +3694,7 @@ const PlaygroundContent = () => {
     },
     [
       openCharacterSelectorFromReadiness,
+      characterChatReadiness.reason,
       openModelSettingsFromCockpit,
       refreshCharacterChatModels,
       openServerSettingsFromCockpit,

@@ -1410,7 +1410,7 @@ export const PlaygroundForm = ({
     modelListScope = "configured",
     setModelListScope = () => undefined,
     selectedModelMeta,
-    selectedModelKey,
+    selectedModelSettingsScope,
     modelContextLength,
     modelCapabilities,
     resolvedMaxContext,
@@ -1450,8 +1450,8 @@ export const PlaygroundForm = ({
     [restoreModelSelectorFocus, setModelDropdownOpen],
   );
   React.useEffect(() => {
-    setActiveChatModelSettingsScope(selectedModelKey ?? null);
-  }, [selectedModelKey, setActiveChatModelSettingsScope]);
+    setActiveChatModelSettingsScope(selectedModelSettingsScope ?? null);
+  }, [selectedModelSettingsScope, setActiveChatModelSettingsScope]);
 
   const closeComposerPopoversExcept = React.useCallback(
     (activePopover: ComposerPopoverKey) => {

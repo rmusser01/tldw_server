@@ -1,6 +1,8 @@
+import { getCanonicalModelKey } from "@/hooks/playground/modelSelectorUtils"
 import {
   isAutoModelId,
-  parseProviderQualifiedModelSelection
+  parseProviderQualifiedModelSelection,
+  resolveExplicitProviderForSelectedModel
 } from "./resolve-api-provider"
 
 export type ModelDescriptor = {
@@ -101,6 +103,7 @@ export type CharacterChatReadinessReason =
   | "no-models-available"
   | "selected-model-missing"
   | "provider-unconfigured"
+  | "explicit-model-provider-required"
   | "model-unavailable"
   | "selected-model-unavailable"
   | "send-disabled"
@@ -136,6 +139,7 @@ export type ChatModelUsability = {
 export type ChatModelUsabilityInput = {
   isServerConnected?: boolean
   selectedModel?: string | null
+  explicitProvider?: string | null
   availableModels?: ModelDescriptor[] | null
   modelsLoading?: boolean
   allowDegradedSend?: boolean
@@ -162,11 +166,13 @@ type CharacterChatReadinessInput = {
   isServerConnected?: boolean
   selectedCharacter?: unknown
   selectedModel?: string | null
+  explicitProvider?: string | null
   availableModels?: ModelDescriptor[] | null
   modelsLoading?: boolean
   allowDegradedSend?: boolean
   serverDegraded?: boolean
   isSendBlocked?: boolean
+  requireExplicitProvider?: boolean
 }
 
 type BuildAvailableChatModelIdsOptions = {
@@ -700,15 +706,22 @@ const buildChatModelUsabilityResult = (
 export function buildChatModelUsability({
   isServerConnected = true,
   selectedModel,
+  explicitProvider,
   availableModels,
   modelsLoading = false,
   allowDegradedSend = false,
   serverDegraded = false
 }: ChatModelUsabilityInput): ChatModelUsability {
-  const normalizedSelectedModel = normalizeChatModelId(selectedModel)
+  const selection = parseProviderQualifiedModelSelection(selectedModel)
+  const provider = resolveExplicitProviderForSelectedModel({ currentSelectedModel: selectedModel, requestedSelectedModel: selectedModel, explicitProvider })
+  const exactCatalogChoice = (availableModels ?? []).some(model => getCanonicalModelKey(model) === normalizeChatModelId(selection.raw))
+  const qualifiedSelection = !exactCatalogChoice && provider && normalizeChatModelId(selection.modelId)
+    ? `${provider}:${normalizeChatModelId(selection.modelId)}`
+    : selectedModel
+  const normalizedSelectedModel = normalizeChatModelId(qualifiedSelection)
   const selectedModelId = normalizedSelectedModel || null
   const providerQualifiedModelId =
-    normalizeProviderQualifiedChatModelId(selectedModel) ?? null
+    normalizeProviderQualifiedChatModelId(qualifiedSelection) ?? null
 
   if (!isServerConnected) {
     return buildChatModelUsabilityResult("no_server", {
@@ -913,11 +926,13 @@ export function buildCharacterChatReadiness({
   isServerConnected = true,
   selectedCharacter,
   selectedModel,
+  explicitProvider,
   availableModels,
   modelsLoading = false,
   allowDegradedSend = false,
   serverDegraded = false,
-  isSendBlocked = false
+  isSendBlocked = false,
+  requireExplicitProvider = false
 }: CharacterChatReadinessInput): CharacterChatReadiness {
   if (!isServerConnected) {
     return blockedCharacterChatReadiness(
@@ -935,9 +950,19 @@ export function buildCharacterChatReadiness({
     )
   }
 
+  const selection = parseProviderQualifiedModelSelection(selectedModel)
+  const nativeProvider = requireExplicitProvider ? resolveExplicitProviderForSelectedModel({ currentSelectedModel: selectedModel, requestedSelectedModel: selectedModel, explicitProvider }) : undefined
+  if (requireExplicitProvider && normalizeChatModelId(selection.modelId) && (
+    isAutoModelId(selection.modelId) || !nativeProvider
+  )) {
+    return blockedCharacterChatReadiness("chat-model", "explicit-model-provider-required", "open-model-settings")
+  }
+
   const modelUsability = buildChatModelUsability({
     isServerConnected: true,
-    selectedModel,
+    // Native readiness checks the exact route used by strict preflight.
+    selectedModel: requireExplicitProvider && nativeProvider ? `${nativeProvider}:${selection.modelId.replace(/^tldw:/, "").trim()}` : selectedModel,
+    explicitProvider,
     availableModels,
     modelsLoading,
     allowDegradedSend,
@@ -1026,6 +1051,8 @@ export function getMatchingCharacterChatModelUsabilityCopy({
   readiness: CharacterChatReadiness
   readinessTitle?: string | null
 }): string | null {
+  if (readiness.reason === "explicit-model-provider-required" && readinessTitle) return readinessTitle
+
   if (!modelUsability || modelUsability.status === "ready" || !readinessTitle) {
     return null
   }
@@ -1122,6 +1149,14 @@ export function getCharacterChatReadinessCopy(
       "characterChatReadiness.model.action",
       "Open model settings"
     )
+
+    if (readiness.reason === "explicit-model-provider-required") {
+      return {
+        title: translateReadinessCopy(t, "characterChatReadiness.model.explicitSelectionTitle", "Choose a model and provider before starting character chat"),
+        description: translateReadinessCopy(t, "characterChatReadiness.model.explicitSelectionDescription", "Your character and draft are kept. Open the model selector and choose a model from the provider you want to use."),
+        actionLabel: translateReadinessCopy(t, "characterChatReadiness.model.explicitSelectionAction", "Choose model and provider")
+      }
+    }
 
     if (readiness.reason === "models-loading") {
       return {

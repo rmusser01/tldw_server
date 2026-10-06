@@ -1,9 +1,15 @@
 import React from "react"
+import { ConfigProvider } from "antd"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { normalChatMode } from "@/hooks/chat-modes/normalChatMode"
 import type { BaseMessage } from "@/types/messages"
+import { readFileSync } from "node:fs"
+import path from "node:path"
+import ts from "typescript"
+import { useStoreMessageOption } from "@/store/option"
+import { validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
 import { CurrentChatModelSettings } from "../CurrentChatModelSettings"
 import { getAllModelSettings } from "@/services/model-settings"
 import { useStoreChatModelSettings } from "@/store/model"
@@ -16,6 +22,7 @@ const inputs = vi.hoisted(() => ({
   provider: "llama.cpp",
   selectedModel: "tldw:/models/gemma.gguf",
   otherProviderFirst: false,
+  realModelSelection: false,
 }))
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -24,19 +31,21 @@ vi.mock("react-i18next", () => ({
   }),
 }))
 vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => ({
+  useMessageOption: () => {
+    const core = useStoreMessageOption()
+    return ({
     historyId: null,
     serverChatId: null,
     selectedSystemPrompt: inputs.selectedSystemPrompt,
-    selectedModel: inputs.selectedModel,
+    selectedModel: inputs.realModelSelection ? core.selectedModel : inputs.selectedModel,
     uploadedFiles: [],
     removeUploadedFile: vi.fn(),
-    setSelectedModel: vi.fn(),
+    setSelectedModel: inputs.realModelSelection ? core.setSelectedModel : vi.fn(),
     setServerChatState: vi.fn(),
     setServerChatTopic: vi.fn(),
     setServerChatVersion: vi.fn(),
     setServerChatPersonaMemoryMode: vi.fn(),
-  }),
+  })},
 }))
 vi.mock("@/hooks/useSelectedCharacter", () => ({
   useSelectedCharacter: () => [inputs.character, vi.fn(), { isLoading: false }],
@@ -133,11 +142,14 @@ const mountSettings = async (
   const close = vi.fn()
   const view = render(
     <QueryClientProvider client={client}>
+      {/* jsdom does not complete AntD's CSS appear animation. */}
+      <ConfigProvider theme={{ token: { motion: false } }}>
       <CurrentChatModelSettings
         open
         setOpen={close}
         settingsScope={settingsScope}
       />
+      </ConfigProvider>
     </QueryClientProvider>,
   )
   fireEvent.click(await screen.findByRole("tab", { name: "Conversation" }))
@@ -152,6 +164,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     inputs.provider = "llama.cpp"
     inputs.selectedModel = "tldw:/models/gemma.gguf"
     inputs.otherProviderFirst = false
+    inputs.realModelSelection = false
     useStoreChatModelSettings.getState().reset()
     useStoreChatModelSettings
       .getState()
@@ -185,6 +198,94 @@ describe("Conversation prompt editor through real model settings Save", () => {
       )
     },
   )
+
+  it("keeps a raw model prompt through catalog arrival, reordering and real Save", async () => {
+    useStoreChatModelSettings.getState().reset()
+    useStoreChatModelSettings.getState().setActiveSettingsScope(inputs.selectedModel)
+    useStoreChatModelSettings.getState().setSystemPrompt(instruction)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { editor, close } = await mountSettings(undefined, client)
+    for (const models of [[], [{ model: inputs.selectedModel, provider: "openai" }, { model: inputs.selectedModel, provider: "llama.cpp" }], [{ model: inputs.selectedModel, provider: "llama.cpp" }]]) {
+      act(() => client.setQueryData(["playground:chatModels"], models))
+      expect(editor).toHaveValue(instruction)
+      expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe(inputs.selectedModel)
+      expect(useStoreChatModelSettings.getState().systemPrompt).toBe(instruction)
+    }
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(close).toHaveBeenCalledWith(false))
+    expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe(inputs.selectedModel)
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe(instruction)
+  })
+
+  it("does not label a providerless current model as Custom when the catalog is empty", async () => {
+    inputs.realModelSelection = true
+    useStoreMessageOption.getState().setSelectedModel(inputs.selectedModel)
+    useStoreChatModelSettings.getState().reset()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    await mountSettings(undefined, client)
+    act(() => client.setQueryData(["playground:chatModels"], []))
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    await waitFor(() => expect(screen.getByText("Choose provider - /models/gemma.gguf")).toBeVisible())
+    expect(screen.queryByText("Custom - tldw:/models/gemma.gguf")).toBeNull()
+    fireEvent.mouseDown(screen.getByRole("combobox"))
+    const labels = await screen.findAllByText("Choose provider - /models/gemma.gguf")
+    fireEvent.click(labels.at(-1)!)
+    expect(useStoreMessageOption.getState().selectedModel).toBe(inputs.selectedModel)
+  }, 10000)
+
+  it.each([undefined, "llamacpp:/models/gemma.gguf"])("commits the provider chosen in the Model tab and retires the previous dialog scope (%s)", async explicitScope => {
+    inputs.realModelSelection = true
+    inputs.otherProviderFirst = true
+    useStoreMessageOption.getState().setSelectedModel("llamacpp:/models/gemma.gguf")
+    useStoreChatModelSettings.getState().reset()
+    const state = useStoreChatModelSettings.getState()
+    state.setActiveSettingsScope("llamacpp:/models/gemma.gguf")
+    state.updateSettings({ systemPrompt: "KEEP A", temperature: 0.2 })
+    state.updateScopedSetting("openai:/models/gemma.gguf", "temperature", 0.6)
+    const { close } = await mountSettings(explicitScope)
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    fireEvent.mouseDown(screen.getByRole("combobox"))
+    fireEvent.click(await screen.findByText("OpenAI - tldw:/models/gemma.gguf"))
+    expect(useStoreMessageOption.getState().selectedModel).toBe("openai:/models/gemma.gguf")
+    expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe("openai:/models/gemma.gguf")
+    expect(useStoreChatModelSettings.getState().getEffectiveSettings("llamacpp:/models/gemma.gguf")).toMatchObject({ systemPrompt: "KEEP A", temperature: 0.2 })
+    expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.6")
+    expect(validateNativeCharacterConfiguration({ temporary: false, clientToolCount: 0, settings: {}, model: useStoreMessageOption.getState().selectedModel! })).toMatchObject({ provider: "openai", model: "/models/gemma.gguf" })
+    fireEvent.click(screen.getByRole("tab", { name: "Conversation" }))
+    fireEvent.change(await screen.findByPlaceholderText("Enter System Prompt"), { target: { value: instruction } })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(close).toHaveBeenCalledWith(false))
+    expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe("openai:/models/gemma.gguf")
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe(instruction)
+    expect(useStoreChatModelSettings.getState().getEffectiveSettings("llamacpp:/models/gemma.gguf")).toMatchObject({ systemPrompt: "KEEP A", temperature: 0.2 })
+    expect(useStoreChatModelSettings.getState().temperature).toBe(0.6)
+  }, 10000)
+
+  it("opens the cockpit's owned alias scope and keeps its prompt through real Save", async () => {
+    inputs.selectedModel = "llama_cpp:/models/gemma.gguf"
+    inputs.provider = "llama"
+    useStoreChatModelSettings.getState().reset()
+    const state = useStoreChatModelSettings.getState()
+    const ownedScope = "llamacpp:/models/gemma.gguf"
+    state.setActiveSettingsScope(ownedScope)
+    state.setSystemPrompt(instruction)
+    const file = path.resolve(__dirname, "../../../Option/Playground/Playground.tsx")
+    const ast = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    let callback: ts.Expression | undefined
+    const visit = (node: ts.Node) => { if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "openModelSettingsFromCockpit" && ts.isCallExpression(node.initializer!)) callback = node.initializer.arguments[0]; ts.forEachChild(node, visit) }
+    visit(ast)
+    if (!callback) throw new Error("Missing production cockpit settings opener")
+    const open = vi.fn()
+    const invoke = new Function("setActiveSettingsScope", "selectedModelSettingsScope", "providerRouteSummary", "openModelSettings", "COCKPIT_MODEL_SETTINGS_TRIGGER_SELECTOR", `return (${callback.getText(ast)})();`)
+    act(() => invoke(state.setActiveSettingsScope, ownedScope, buildCockpitProviderRouteSummary({ selectedModel: inputs.selectedModel, selectedProvider: null }), open, "model-settings-trigger"))
+    expect(open).toHaveBeenCalledWith({ returnFocusSelector: "model-settings-trigger", settingsScope: ownedScope })
+    const { editor, close } = await mountSettings(open.mock.lastCall![0].settingsScope)
+    expect(editor).toHaveValue(instruction)
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(close).toHaveBeenCalledWith(false))
+    expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe(ownedScope)
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe(instruction)
+  })
 
   it("shows an existing conversation override when reopening the editor", async () => {
     useStoreChatModelSettings.getState().setSystemPrompt(instruction)
@@ -409,7 +510,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     useStoreChatModelSettings
       .getState()
       .updateScopedSetting(
-        "llamacpp:/models/gemma.gguf",
+        inputs.selectedModel,
         "systemPrompt",
         "Selected model instructions",
       )
@@ -417,7 +518,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
     await waitFor(() => expect(close).toHaveBeenCalledWith(false))
     expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe(
-      "llamacpp:/models/gemma.gguf",
+      inputs.selectedModel,
     )
     expect(useStoreChatModelSettings.getState().systemPrompt).toBe(
       "Selected model instructions",

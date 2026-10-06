@@ -44,12 +44,9 @@ import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { buildSidepanelFullAppChatPath } from "@/utils/sidepanel-full-app-route"
 import type { ToolChoice } from "@/store/option"
 import { useStoreChatModelSettings } from "@/store/model"
-import { normalizeModelSettingsScope } from "@/store/model-settings-scope"
 import {
-  getModelId,
-  getModelProvider
+  resolveModelSelectorSelection
 } from "@/hooks/playground/modelSelectorUtils"
-import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import type { ConversationContextComposition } from "@/types/conversation-context"
 import type { ConversationContextCompositionStatus } from "@/hooks/chat/useConversationContextComposition"
@@ -269,46 +266,16 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     queryKey: ["mcp-small-models"],
     queryFn: () => fetchChatModels({ returnEmpty: true })
   })
-  const selectedModelSelection = React.useMemo(
-    () => parseProviderQualifiedModelSelection(selectedModel),
-    [selectedModel]
+  const activeSettingsScope = useStoreChatModelSettings(state => state.activeSettingsScope)
+  const scopedApiProvider = useStoreChatModelSettings(state => state.activeSettingsScope ? state.scopedSettingsByModelKey?.[state.activeSettingsScope]?.apiProvider : undefined)
+  const selectedSelection = React.useMemo(
+    () => resolveModelSelectorSelection(chatModels, selectedModel, currentProvider, { scope: activeSettingsScope, providerOverride: scopedApiProvider }),
+    [chatModels, selectedModel, currentProvider, activeSettingsScope, scopedApiProvider]
   )
-  const selectedModelId = React.useMemo(
-    () => getModelId({ model: selectedModelSelection.modelId }),
-    [selectedModelSelection.modelId]
-  )
-  const explicitProvider = React.useMemo(() => {
-    const provider = getModelProvider({ provider: currentProvider })
-    return provider === "other" || provider === "unknown" ? null : provider
-  }, [currentProvider])
-  const qualifiedProvider = selectedModelSelection.provider ?? null
-  const matchingModelMetadata = React.useMemo(() => {
-    if (!selectedModelId || !Array.isArray(chatModels)) return []
-    return chatModels.filter((model) => getModelId(model) === selectedModelId)
-  }, [chatModels, selectedModelId])
-  const catalogProvider = React.useMemo(() => {
-    const providers = new Set(
-      matchingModelMetadata
-        .map((model) => getModelProvider(model))
-        .filter((provider) => provider !== "other" && provider !== "unknown")
-    )
-    return providers.size === 1 ? Array.from(providers)[0] : null
-  }, [matchingModelMetadata])
-  const resolvedProvider =
-    qualifiedProvider ?? explicitProvider ?? catalogProvider
-  const selectedModelSettingsScope = React.useMemo(
-    () => normalizeModelSettingsScope(resolvedProvider, selectedModelId),
-    [resolvedProvider, selectedModelId]
-  )
-  const selectedModelMeta = React.useMemo(() => {
-    if (matchingModelMetadata.length === 0) return null
-    if (!resolvedProvider) return matchingModelMetadata[0] ?? null
-    return (
-      matchingModelMetadata.find(
-        (model) => getModelProvider(model) === resolvedProvider
-      ) ?? null
-    )
-  }, [matchingModelMetadata, resolvedProvider])
+  const resolvedProvider = selectedSelection.provider
+  const selectedModelSettingsScope = selectedSelection.settingsScope
+  const selectedModelMeta = selectedSelection.model
+
   const systemPromptOverride = useStoreChatModelSettings((state) =>
     selectedModelSettingsScope
       ? state.getEffectiveSettings(selectedModelSettingsScope).systemPrompt

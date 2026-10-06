@@ -9,6 +9,8 @@ import { useMessage } from "@/hooks/useMessage"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { ProviderIcons } from "./ProviderIcon"
 import { IconButton } from "./IconButton"
+import { useStoreChatModelSettings } from "@/store/model"
+import { getCanonicalModelKey, resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils"
 
 export type Props = {
   iconClassName?: string
@@ -51,6 +53,7 @@ const ModelSelectBase = (
 ) => {
   const { t } = useTranslation("common")
   const { setSelectedModel, selectedModel } = useMessage()
+  const apiProvider = useStoreChatModelSettings(state => state.apiProvider)
   const selectedModelValue =
     typeof selectedModel === "string" ? selectedModel : null
   const [menuDensity] = useStorage("menuDensity", "comfortable")
@@ -79,6 +82,11 @@ const ModelSelectBase = (
     queryKey: ["getAllModelsForSelect"],
     queryFn: () => fetchChatModels({ returnEmpty: true })
   })
+
+  const selectedSelection = React.useMemo(
+    () => resolveModelSelectorSelection(data, selectedModelValue, apiProvider),
+    [data, selectedModelValue, apiProvider]
+  )
 
   const favoriteSet = React.useMemo(
     () => new Set((favoriteModels || []).map((value) => String(value))),
@@ -162,7 +170,7 @@ const ModelSelectBase = (
         : t("modelSelect.favoriteAdd", "Add to favorites")
 
       return {
-        key: model.model,
+        key: getCanonicalModelKey(model),
         label: (
           <div className="w-56 gap-2 text-sm inline-flex items-start leading-5">
             <div>
@@ -223,11 +231,7 @@ const ModelSelectBase = (
           </div>
         ),
         onClick: () => {
-          if (selectedModelValue === model.model) {
-            setSelectedModel(null)
-          } else {
-            setSelectedModel(model.model)
-          }
+          setSelectedModel(getCanonicalModelKey(model))
         }
       }
     }
@@ -313,7 +317,6 @@ const ModelSelectBase = (
   }, [
     favoriteSet,
     filteredData,
-    selectedModelValue,
     setSelectedModel,
     sortMode,
     t,
@@ -323,13 +326,13 @@ const ModelSelectBase = (
   // Get display name for selected model
   const selectedModelDisplay = React.useMemo(() => {
     if (!selectedModelValue || !data) return null
-    const model = data.find(m => m.model === selectedModelValue)
+    const model = selectedSelection.model
     if (!model) return selectedModelValue.split('/').pop() || selectedModelValue
     // Use nickname if available, otherwise extract short name from model ID
     const shortName = model.nickname || model.model.split('/').pop() || model.model
     // Truncate if too long
     return shortName.length > 20 ? shortName.substring(0, 18) + '…' : shortName
-  }, [selectedModelValue, data])
+  }, [selectedModelValue, data, selectedSelection.model])
 
   if (isLoading && !data) {
     return (
@@ -363,7 +366,7 @@ const ModelSelectBase = (
           menu={{
             items: menuItems,
             className: `no-scrollbar ${menuDensity === 'compact' ? 'menu-density-compact' : 'menu-density-comfortable'}`,
-            selectedKeys: selectedModelValue ? [selectedModelValue] : [],
+            selectedKeys: selectedSelection.model ? [getCanonicalModelKey(selectedSelection.model)] : [],
             selectable: true
           }}
           popupRender={(menu) => (

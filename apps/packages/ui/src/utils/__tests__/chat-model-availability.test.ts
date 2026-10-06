@@ -13,6 +13,31 @@ import {
 } from "../chat-model-availability"
 
 describe("chat model availability utilities", () => {
+  it.each(["tldw:gpt-4o-mini", "auto", "openai:auto"])("requires an explicit concrete native selection for %s", selectedModel => {
+    const readiness = buildCharacterChatReadiness({ selectedCharacter: { id: 1 }, selectedModel, requireExplicitProvider: true, availableModels: [{ model: "gpt-4o-mini", provider: "openai", is_configured: true }] })
+    expect(readiness).toMatchObject({ status: "blocked", missingRequirement: "chat-model", reason: "explicit-model-provider-required", recommendedAction: "open-model-settings" })
+    const copy = getCharacterChatReadinessCopy(readiness, (_key, fallback) => typeof fallback === "string" ? fallback : fallback.defaultValue)
+    expect(copy.title).toBe("Choose a model and provider before starting character chat")
+    expect(getMatchingCharacterChatModelUsabilityCopy({ modelUsability: buildChatModelUsability({ selectedModel: "gpt-4o-mini", availableModels: [{ model: "gpt-4o-mini", provider: "openai" }] }), readiness, readinessTitle: copy.title })).toBe(copy.title)
+  })
+
+  it("checks a genuine explicit provider rather than the first duplicate catalog model", () => {
+    const models = [
+      { model: "gpt-4o-mini", provider: "openai", is_configured: true },
+      { model: "gpt-4o-mini", provider: "custom-openai-api", is_configured: false }
+    ]
+    const input = { selectedCharacter: { id: 1 }, selectedModel: "tldw:gpt-4o-mini", explicitProvider: "custom-openai-api", requireExplicitProvider: true, availableModels: models }
+    expect(buildCharacterChatReadiness(input)).toMatchObject({ reason: "provider-unconfigured" })
+    expect(buildCharacterChatReadiness({ ...input, availableModels: [...models].reverse() })).toMatchObject({ reason: "provider-unconfigured" })
+    expect(buildChatModelUsability({ selectedModel: input.selectedModel, availableModels: models })).toMatchObject({ status: "ready" })
+  })
+
+  it("keeps exact opaque catalog identity in ordinary availability despite a stale provider hint", () => {
+    const availableModels = [{ model: "Model:Q4", provider: "chrome", is_configured: true }]
+    expect(buildChatModelUsability({ selectedModel: "chrome:Model:Q4", explicitProvider: "openai", availableModels })).toMatchObject({ status: "ready", matchedProvider: "chrome" })
+    expect(buildCharacterChatReadiness({ selectedCharacter: { id: 1 }, selectedModel: "chrome:Model:Q4", requireExplicitProvider: true, availableModels })).toMatchObject({ reason: "explicit-model-provider-required" })
+  })
+
   const llamaId = "../../../models/Gemma:Q4.gguf"
   const llamaModels = normalizeTldwModels([{ id: llamaId, provider: "llama", type: "chat", is_configured: true }])
 

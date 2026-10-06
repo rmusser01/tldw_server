@@ -3,6 +3,7 @@ import { act, render, renderHook, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useModelSelector } from "../useModelSelector"
+import { validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
 import { normalizeTldwModels } from "@/services/tldw/model-normalization"
 
 const chatModelSettingsState = vi.hoisted(() => ({
@@ -100,6 +101,55 @@ describe("useModelSelector capability rendering", () => {
     storageSeed.values.clear()
     chatModelSettingsState.apiProvider = null
     chatModelSettingsState.numCtx = null
+  })
+
+  it("keeps an unqualified model and its raw scope through catalog arrival and reordering", () => {
+    const setSelectedModel = vi.fn()
+    const openai = { model: "tldw:gpt-4o-mini", id: "gpt-4o-mini", provider: "openai", details: { capabilities: ["vision"] }, context_length: 128000 }
+    const custom = { ...openai, provider: "custom-openai-api", details: { capabilities: ["tools"] } }
+    const { result, rerender } = renderHook(({ models }) => useModelSelector({
+      composerModels: models, selectedModel: "tldw:gpt-4o-mini", setSelectedModel, navigate: vi.fn()
+    }), { initialProps: { models: [] as Array<typeof openai> } })
+    for (const models of [[], [openai, custom], [custom, openai], [openai]]) {
+      rerender({ models })
+      expect(result.current.selectedModelMeta).toBeNull()
+      expect(result.current.selectedModelKey).toBe("tldw:gpt-4o-mini")
+      expect(result.current.modelCapabilities).toEqual([])
+      expect(result.current.modelContextLength).toBeNull()
+      expect(result.current.modelSelectorWarning).toBe(true)
+      expect(result.current.apiModelLabel).toBe("Choose provider / gpt-4o-mini")
+      expect(result.current.modelDropdownMenuItems.some(item => item?.key === "current-model")).toBe(false)
+    }
+    expect(setSelectedModel).not.toHaveBeenCalled()
+    const customItem = result.current.modelDropdownMenuItems.flatMap(item => item?.type === "group" ? item.children : [item]).find(item => item?.key === "openai:gpt-4o-mini")
+    act(() => customItem?.onClick?.())
+    expect(setSelectedModel).toHaveBeenCalledWith("openai:gpt-4o-mini")
+    expect(validateNativeCharacterConfiguration({ temporary: false, clientToolCount: 0, settings: {}, model: "openai:gpt-4o-mini" })).toMatchObject({ provider: "openai", model: "gpt-4o-mini" })
+  })
+
+  it("uses a genuine provider preference with internal model prefixes and catalog aliases", () => {
+    chatModelSettingsState.apiProvider = "llama_cpp"
+    const selected = { model: "tldw:Gemma:Q4", provider: "llama", details: { capabilities: ["vision"] } }
+    const { result, rerender } = renderHook(({ models }) => useModelSelector({
+      composerModels: models, selectedModel: "tldw:Gemma:Q4", setSelectedModel: vi.fn(), navigate: vi.fn()
+    }), { initialProps: { models: [{ ...selected, provider: "openai" }, selected] } })
+    expect(result.current.selectedModelMeta).toBe(selected)
+    expect(result.current.selectedModelKey).toBe("llama:Gemma:Q4")
+    expect(result.current.modelSelectorWarning).toBe(false)
+    rerender({ models: [selected, { ...selected, provider: "openai" }] })
+    expect(result.current.selectedModelMeta).toBe(selected)
+  })
+
+  it.each([null, "openai"])("keeps an exact opaque catalog choice ahead of a stale %s provider", provider => {
+    chatModelSettingsState.apiProvider = provider
+    const model = { model: "Model:Q4", provider: "chrome" }
+    const { result, rerender } = renderHook(({ selectedModel }) => useModelSelector({
+      composerModels: [model], selectedModel, setSelectedModel: vi.fn(), navigate: vi.fn()
+    }), { initialProps: { selectedModel: "chrome:Model:Q4" } })
+    expect(result.current.selectedModelMeta).toBe(model)
+    expect(result.current.selectedModelKey).toBe("chrome:Model:Q4")
+    rerender({ selectedModel: "chrome:model:Q4" })
+    expect(result.current.selectedModelMeta).toBeNull()
   })
 
   it("includes vision/tools/streaming/context and price badges in dropdown items", () => {

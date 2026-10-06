@@ -86,6 +86,24 @@ const baseProps = {
 }
 
 describe("ChatModelSelectorDropdown character model usability", () => {
+  it.each([undefined, "Ready"])("asks for an explicit provider instead of displaying %s/Healthy", modelUsabilityLabel => {
+    render(<ChatModelSelectorDropdown {...baseProps} apiModelLabel="Choose provider / gpt-4o-mini" selectedModel="tldw:gpt-4o-mini" modelSelectorWarning connectionStatusLabel="Healthy" modelUsabilityLabel={modelUsabilityLabel} modelUsabilityTitle="Ready" />)
+    const selector = screen.getByRole("button", { name: /choose provider/i })
+    expect(selector).toHaveTextContent("Choose provider")
+    expect(selector).not.toHaveTextContent("Healthy")
+    expect(selector).not.toHaveTextContent("Ready")
+  })
+
+  it("keeps an offline connection visible before provider selection", () => {
+    render(<ChatModelSelectorDropdown {...baseProps} apiModelLabel="Choose provider / gpt-4o-mini" selectedModel="tldw:gpt-4o-mini" modelSelectorWarning connectionStatusLabel="Offline" connectionStatusWarning />)
+    expect(screen.getByRole("button", { name: "Offline" })).toHaveTextContent("Offline")
+  })
+
+  it("keeps loading readiness visible before provider selection", () => {
+    render(<ChatModelSelectorDropdown {...baseProps} apiModelLabel="Choose provider / gpt-4o-mini" selectedModel="tldw:gpt-4o-mini" modelSelectorWarning modelUsabilityLabel="Checking model readiness" modelUsabilityTitle="Checking chat model readiness" modelUsabilityWarning />)
+    expect(screen.getByRole("button", { name: "Checking chat model readiness" })).toHaveTextContent("Checking model readiness")
+  })
+
   it("keeps provider and model visible while naming provider setup blockers", () => {
     render(
       <ChatModelSelectorDropdown

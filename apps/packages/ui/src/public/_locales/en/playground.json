@@ -4000,5 +4000,44 @@
   },
   "draftRecovery_creationDraftHelp": {
     "message": "Open this draft to review its creation before sending. Starting another chat may create a duplicate."
+  },
+  "composer_chooseProvider": {
+    "message": "Choose provider"
+  },
+  "composer_chooseModelAndProvider": {
+    "message": "Choose model and provider"
+  },
+  "characterChatReadiness_model_explicitSelectionTitle": {
+    "message": "Choose a model and provider before starting character chat"
+  },
+  "characterChatReadiness_model_explicitSelectionDescription": {
+    "message": "Your character and draft are kept. Open the model selector and choose a model from the provider you want to use."
+  },
+  "characterChatReadiness_model_explicitSelectionAction": {
+    "message": "Choose model and provider"
+  },
+  "composer_returnToChat": {
+    "message": "Return to chat"
+  },
+  "composer_serverSetupTitle": {
+    "message": "Server settings"
+  },
+  "composer_discardSettingsTitle": {
+    "message": "Discard connection changes?"
+  },
+  "composer_discardSettingsAction": {
+    "message": "Discard changes"
+  },
+  "composer_keepEditingSettings": {
+    "message": "Keep editing"
+  },
+  "composer_connectionRequired": {
+    "message": "Connect to your tldw server before sending. Your draft has not been queued."
+  },
+  "composer_queueRestoredRequest": {
+    "message": "This request was restored. Review the conversation for an existing response before running it."
+  },
+  "composer_queueConnectionUnavailable": {
+    "message": "Connection was interrupted. Review this request and run it after reconnecting."
   }
 }

@@ -1,3 +1,6 @@
+import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability"
+import { parseProviderQualifiedModelSelection, resolveExplicitProviderForSelectedModel } from "@/utils/resolve-api-provider"
+
 export type ModelSortMode = "favorites" | "az" | "provider" | "localFirst"
 
 export type ModelListScope = "configured" | "catalog"
@@ -120,6 +123,50 @@ export function getCanonicalModelKey(
   const id = getModelId(model)
   const provider = getModelProvider(model)
   return id ? `${provider}:${id}` : provider
+}
+
+/** Catalog metadata describes a choice; its aliases cannot move owned settings. */
+export const resolveModelSelectorSelection = (
+  models: ModelSelectorDescriptor[] | null | undefined,
+  selectedModel: string | null | undefined,
+  explicitProvider?: string | null,
+  currentSettings?: { scope?: string | null; providerOverride?: string | null }
+) => {
+  const selection = parseProviderQualifiedModelSelection(selectedModel)
+  const modelId = getModelId({ model: selection.modelId })
+  const provider = resolveExplicitProviderForSelectedModel({
+    currentSelectedModel: selectedModel,
+    requestedSelectedModel: selectedModel,
+    explicitProvider
+  })
+  const providerKey = (value: string | null | undefined) =>
+    normalizeProviderAvailabilityKey(getModelProvider({ provider: value }))
+  const canonicalMatch = (models ?? []).find(candidate =>
+    getCanonicalModelKey(candidate) === getModelId({ model: selection.raw })
+  )
+  const model = canonicalMatch ?? (provider ? (models ?? []).find(candidate =>
+    providerKey(getModelProvider(candidate)) === providerKey(provider) && getModelId(candidate) === modelId
+  ) : null) ?? null
+  const settingsProvider = selection.provider || (canonicalMatch ? getModelProvider(canonicalMatch) : provider)
+  const settingsModelId = canonicalMatch ? getModelId(canonicalMatch) : modelId
+  const activeScope = currentSettings?.scope?.trim()
+  const activeSelection = parseProviderQualifiedModelSelection(activeScope)
+  const scopeSeparator = activeScope?.indexOf(":") ?? -1
+  const activeProvider = activeSelection.provider || (scopeSeparator > 0 ? activeScope!.slice(0, scopeSeparator) : null)
+  const sameProvider = activeProvider && settingsProvider && providerKey(activeProvider) === providerKey(settingsProvider)
+  const activeModelId = !activeSelection.provider && sameProvider ? activeScope!.slice(scopeSeparator + 1) : activeSelection.modelId
+  const sameModel = getModelId({ model: activeModelId }) === settingsModelId
+  const ownsProviderOverride = !selection.isProviderQualified && !canonicalMatch && currentSettings?.providerOverride && providerKey(currentSettings.providerOverride) === providerKey(explicitProvider)
+  const settingsScope = activeScope && ((activeScope === selection.raw && (!settingsProvider || selection.isProviderQualified || canonicalMatch || ownsProviderOverride)) || (sameModel && (sameProvider || ownsProviderOverride)))
+    ? activeScope
+    : settingsProvider && settingsModelId ? getCanonicalModelKey(settingsProvider, settingsModelId) : selection.raw || null
+  return {
+    model,
+    modelId: model ? getModelId(model) : modelId,
+    provider: model ? getModelProvider(model) : provider ? getModelProvider({ provider }) : null,
+    key: model ? getCanonicalModelKey(model) : provider && modelId ? getCanonicalModelKey(provider, modelId) : selection.raw || null,
+    settingsScope
+  }
 }
 
 export const getFavoriteModelKeyCandidates = (

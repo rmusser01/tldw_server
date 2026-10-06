@@ -470,6 +470,8 @@
     "workspacePlayground": "Multi-model compare"
   },
   "composer": {
+    "chooseProvider": "Choose provider",
+    "chooseModelAndProvider": "Choose model and provider",
     "toolsButton": "+Tools",
     "modelSearchPlaceholder": "Search models",
     "noModelsMatch": "No models match your search.",
@@ -1485,5 +1487,12 @@
     "retryVerification": "Retry account verification",
     "titleReference": "{{title}}, session {{id}}",
     "sessionReference": "Session {{id}}"
+  },
+  "characterChatReadiness": {
+    "model": {
+      "explicitSelectionTitle": "Choose a model and provider before starting character chat",
+      "explicitSelectionDescription": "Your character and draft are kept. Open the model selector and choose a model from the provider you want to use.",
+      "explicitSelectionAction": "Choose model and provider"
+    }
   }
 }

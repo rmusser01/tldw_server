@@ -122,6 +122,11 @@ describe("resolveApiProviderForModel", () => {
 })
 
 describe("parseProviderQualifiedModelSelection", () => {
+  it("recognizes the local key committed by the existing catalog selector", () => {
+    expect(parseProviderQualifiedModelSelection("local:Gemma:Q4")).toMatchObject({ modelId: "Gemma:Q4", provider: "local-llm", isProviderQualified: true })
+    expect(resolveExplicitProviderForSelectedModel({ currentSelectedModel: "local:Gemma:Q4", requestedSelectedModel: "local:Gemma:Q4" })).toBe("local-llm")
+  })
+
   it.each(["llama", "llama.cpp", "llama-cpp", "llama_cpp", "llamacpp"])("preserves the full model suffix for known %s aliases", provider => {
     const modelId = "../../../models/Gemma:Q4.gguf"
     for (const prefix of ["", "tldw:"]) {
