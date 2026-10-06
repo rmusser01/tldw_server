@@ -1,7 +1,7 @@
 ---
 id: TASK-13503
 title: Keep compact character selection reversible until accepted
-status: In Progress
+status: Done
 labels:
 - chat
 - ux
@@ -33,19 +33,21 @@ Review found live tool choice omitted, synchronous image/text ABA unguarded, voi
 Additional independent reviews reproduced last-accepted rollback being overwritten by optimistic hook render and then by backend watch-before-ACK. Ref-only update still failed; direct owned Storage removed optimism but watch-before-ACK remained. Reassessed the existing acknowledged composer/store patterns and serialized selection writer. Correction must insulate the existing accepted baseline during the pending owner write queue, including installed Plasmo and WebUI watch events. Clear overlay held patch is now fenced by Sheet intent/unmount and live source; source-change test uses immutable replacement to mirror real Zustand. Remote dev advanced to f225562fc26182c7931b4048f689d8622da4c8e5; fetched. Upstream changes concern bounded memory/PDF diff behavior; integrate after the clean local checkpoint and repeat relevant gates.
 Reproduced and repaired two further queue edges with actual Storage shim and both installed hooks: newer queued write rejection after an unaccepted predecessor, and same-owner logout/login ABA (warm/cold reopen, with/without a newer accepted choice). Restoration is private-key compensation only while that owned key has no newer writer; it cannot establish a history/server owner. Failed restoration rejects explicitly, preserves the accepted RAM baseline for retry, and does not claim cold restoration. Negative test confirms cold snapshot can remain unaccepted on IO failure; successful retry then cold reopen proves recovery. Six focused suites: 179 passes before localized recovery-error assertion; both actual storage hooks still use the test Storage shim, not native physical tabs.
 Final pre-integration verification: 457 tests in 16 relevant suites pass (/private/tmp/chat-compact-checkpoint-regressions.log), WebUI typecheck and extension compile pass, no new touched ESLint diagnostics against HEAD, official English locale sync and git diff --check pass. Both independent reviewers clear current source with no remaining substantiated Important/Critical finding. Bandit N/A: touched repository source is TS/TSX/JSON/docs only; no Python code changed. Code checkpoint will precede integration of newly fetched f225562fc26; Stage 3 remains In Progress until post-merge gates. Packaged extension/native physical tabs/focus/actual whole-form hydration and real-provider generation remain parent-program gates. Failed preference rollback proves accepted RAM preservation and explicit failure/retry, not durable restoration while IO fails.
+Checkpoint 220ca10129 committed; latest dev f225562fc26182c7931b4048f689d8622da4c8e5 integrated in 153bc4e00d. Sole TldwApiClient import conflict keeps InitialChatSetupAttempt and BoundedTtlCache. Post-integration 495 combined chat/API-cache/PDF/diff tests in 21 suites and 68 request-scope/security tests in 6 suites pass; both types pass; baseline integration lint has no new diagnostics; diff checks pass. Updated master design with baseline, completed compact behavior and exact evidence/limitations. Own three-stage plan is complete and will be removed per repo convention. No PR, push, remote merge or native-tab/provider proof claimed; parent all-ten program remains open.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Compact character selection remains reversible until supported preparation, exact draft retention, navigation and owned identity ACK succeed. Opening/cancel/late work preserve the source; newer Sheet intents and Clear actions fence old work. The existing private preference queue preserves accepted rollback baselines across optimistic/watch publication, separate hooks, write failure and account ABA; newer same-key writes win. Failed rollback reports explicit failure and permits retry without a cold-restoration claim. Shared full native acceptance requires identity ACK; verified account Retry gates private catalog loading. Code checkpoint 220ca10129; latest dev f225562fc26 integrated in 153bc4e00d with both API imports retained. Verified 563 tests/27 suites, both client type gates, official locale sync, no-new touched/integration lint, diff checks and both independent source/integration reviews. Bandit N/A for TS/TSX/JSON/docs. Master design records outcomes and limits. Native tabs/packaged focus/whole-form hydration/provider proof and remaining Library/Quick Chat/full setup/history/narrow/continuity work remain parent-program gates.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
