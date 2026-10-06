@@ -1,11 +1,10 @@
+import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import React, { useRef, useEffect, useCallback } from "react"
 import { Modal, Button, Tooltip, Select, Segmented } from "antd"
 import { ExternalLink, AlertCircle } from "lucide-react"
-import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useQuickChat } from "@/hooks/useQuickChat"
 import { useQuickChatStore } from "@/store/quick-chat"
-import { fetchChatModels } from "@/services/tldw-server"
 import { QuickChatMessage } from "./QuickChatMessage"
 import { QuickChatInput } from "./QuickChatInput"
 import { browser } from "wxt/browser"
@@ -47,13 +46,7 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose }) => {
   const phase = useConnectionPhase()
   const isConnected = useIsConnected()
   const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED
-  const { data: models = [], isLoading: modelsLoading } = useQuery({
-    queryKey: ["quickChatModels"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
-    staleTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    select: (data) => data.filter((model) => model?.model)
-  })
+  const { data: models = EMPTY_CHAT_MODELS, isLoading: modelsLoading, isError: modelsDiscoveryFailed, refetch: retryModels } = useChatModelCatalog()
 
   const { allowClear, modelOptions, modelPlaceholder, handleModelChange } =
     useChatModelsSelect({
@@ -212,6 +205,14 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose }) => {
       aria-labelledby="quick-chat-title"
       aria-describedby={descriptionId}>
       <div className="flex flex-col h-[50vh] max-h-[400px]">
+        {modelsDiscoveryFailed && (
+          <div role="alert" className="px-1 pb-2 text-xs text-text">
+            {t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")}
+            <Button size="small" onClick={() => { void retryModels() }}>
+              {t("playground:characterChatReadiness.model.retryAction", "Try again")}
+            </Button>
+          </div>
+        )}
         <div className="flex items-center gap-2 px-1 pb-2">
           <Select
             className="flex-1"

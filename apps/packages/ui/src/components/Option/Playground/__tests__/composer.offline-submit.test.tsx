@@ -43,7 +43,7 @@ const visit = (node: ts.Node) => {
 visit(ast)
 if (!callback) throw new Error("Missing actual compact submit callback")
 const source = ts.transpileModule(`const {
-  isConnectionReady, connectionReadyRef, connectionGenerationRef, isSending, draftReady, form, notification, resolveSubmissionIntent, selectedDocuments,
+  isConnectionReady, connectionReadyRef, connectionGenerationRef, isSending, draftReady, greetingStarting, form, notification, resolveSubmissionIntent, selectedDocuments,
   contextFiles, selectedModel, availableChatModelIds, queueSubmission, stopListening, stopServerDictation, sendCurrentFormMessageRef, t
 } = scope;
 return ${callback.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
@@ -51,7 +51,7 @@ const compactSubmit = new Function("React", "normalizeChatModelId", "findUnavail
 const makeCompact = (ready: boolean, busy: boolean, imageCommand: boolean) => {
   const web = makeWebDeps(ready, busy, imageCommand)
   const scope = {
-    ...web.deps, connectionReadyRef: { current: ready }, connectionGenerationRef: { current: 0 }, notification: web.deps.notificationApi, contextFiles: [],
+    ...web.deps, greetingStarting: false, connectionReadyRef: { current: ready }, connectionGenerationRef: { current: 0 }, notification: web.deps.notificationApi, contextFiles: [],
     availableChatModelIds: new Set(["gpt-test"]), stopListening: vi.fn(async () => {}), stopServerDictation: vi.fn(), sendCurrentFormMessageRef: { current: web.deps.sendMessage }
   }
   return { ...web, scope, submit: compactSubmit({ useCallback: (fn: unknown) => fn }, normalizeChatModelId, findUnavailableChatModel, scope) as (message: string, image: string) => Promise<void> }

@@ -1,5 +1,5 @@
+import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import React from "react"
-import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { Select, Tooltip, Switch } from "antd"
 import {
@@ -14,7 +14,6 @@ import { useMessageOption } from "@/hooks/useMessageOption"
 import { PlaygroundMessage } from "@/components/Common/Playground/Message"
 import { PlaygroundEmpty } from "@/components/Option/Playground/PlaygroundEmpty"
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
-import { fetchChatModels } from "@/services/tldw-server"
 import { MAX_COMPARE_MODELS } from "@/hooks/chat/compare-constants"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import useDynamicTextareaSize from "@/hooks/useDynamicTextareaSize"
@@ -95,11 +94,7 @@ export const ModelPlaygroundChat: React.FC = () => {
     historyId
   } = useMessageOption({ forceCompareEnabled: true })
 
-  const { data: chatModels = [] } = useQuery({
-    queryKey: ["workspace:chatModels"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
-    enabled: true
-  })
+  const { data: chatModels = EMPTY_CHAT_MODELS } = useChatModelCatalog(true)
 
   useDynamicTextareaSize(textareaRef, message, 200)
 

@@ -1,5 +1,6 @@
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Button,
   Form,
@@ -8,7 +9,6 @@ import {
 import type { InputRef, FormInstance } from "antd"
 import React from "react"
 import { getCanonicalModelKey, getModelId, getModelProvider } from "@/hooks/playground/modelSelectorUtils"
-import { fetchChatModels } from "@/services/tldw-server"
 import {
   useCharacterFiltering,
   useCharacterInlineEdit,
@@ -241,11 +241,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
   // serverQueryRolloutFlag moved to useCharacterData
 
   // Fetch models to get provider for selected model
-  const { data: generationModels } = useQuery<Array<{ model: string; provider?: string }>>({
-    queryKey: ["getModelsForFieldGeneration"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
-    staleTime: 5 * 60 * 1000 // 5 minutes
-  })
+  const { data: generationModels } = useChatModelCatalog()
 
   // Get the provider for the selected generation model
   const selectedGenModelProvider = React.useMemo(() => {

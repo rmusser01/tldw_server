@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-query"
 import { X } from "lucide-react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { ModelSelect } from "@/components/Common/ModelSelect"
 import {
@@ -80,7 +81,7 @@ const catalogQuery = nodes.find(
     Boolean(
       node.initializer
         ?.getText(ast)
-        .includes("fetchChatModels({ returnEmpty: true })")
+        .includes("useChatModelCatalog(isConnectionReady)")
     )
 )
 if (!catalogQuery) throw new Error("Missing sidebar model catalog query")
@@ -119,6 +120,7 @@ const useSidebarValidation = new Function(
   "X",
   "t",
   "useQuery",
+  "useChatModelCatalog",
   "mocks",
   "buildAvailableChatModelIds",
   "findUnavailableChatModel",
@@ -130,6 +132,7 @@ const useSidebarValidation = new Function(
   X,
   t,
   useQuery,
+  useChatModelCatalog,
   mocks,
   buildAvailableChatModelIds,
   findUnavailableChatModel,
@@ -316,6 +319,7 @@ describe("sidebar model validation", () => {
 
   it("sends with an available model and keeps the Casual picker out of the way", async () => {
     renderHarness(<Harness model="ready-model" />)
+    await waitForCatalog()
     fireEvent.click(screen.getByText("Send"))
     await waitFor(() =>
       expect(mocks.send).toHaveBeenCalledWith("keep my draft", "", undefined)
@@ -327,6 +331,7 @@ describe("sidebar model validation", () => {
     "preserves queued dispatch for %j",
     async (props) => {
       renderHarness(<Harness model="ready-model" {...props} />)
+      await waitForCatalog()
       fireEvent.click(screen.getByText("Send"))
       await waitFor(() =>
         expect(mocks.queue).toHaveBeenCalledWith(
@@ -344,6 +349,27 @@ describe("sidebar model validation", () => {
     expect(screen.getByLabelText("Message")).toHaveValue("keep my draft")
   })
 
+  it.each(["failed", "empty", "failed-refetch"])("preserves input and never dispatches from an unverified %s catalog", async mode => {
+    if (mode === "failed") mocks.fetchChatModels.mockRejectedValueOnce(new Error("Unavailable"))
+    if (mode === "empty") mocks.fetchChatModels.mockResolvedValueOnce([])
+    renderHarness(<Harness model="ready-model" />)
+    if (mode === "failed") {
+      await waitFor(() => expect(queryClient.getQueryCache().find({ queryKey: ["playground:chatModels"], exact: false })?.state.status).toBe("error"))
+    } else {
+      await waitForCatalog()
+      if (mode === "failed-refetch") {
+        mocks.fetchChatModels.mockRejectedValueOnce(new Error("Unavailable"))
+        await act(async () => { await queryClient.invalidateQueries({ queryKey: ["playground:chatModels"] }) })
+        await waitFor(() => expect(queryClient.getQueryCache().find({ queryKey: ["playground:chatModels"], exact: false })?.state.status).toBe("error"))
+        await waitFor(() => expect(screen.getByTestId("model-catalog")).toHaveTextContent("pending"))
+      }
+    }
+    fireEvent.click(screen.getByText("Send"))
+    await waitFor(() => expect(screen.getByText(/Selected model is not available/)).toBeInTheDocument())
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("keep my draft")
+    expect(mocks.send).not.toHaveBeenCalled()
+    expect(mocks.queue).not.toHaveBeenCalled()
+  })
 })
 
 it.each(["compact", "full"])("greeting preparation gates ordinary, Run now, and Run next entry points on %s", async surface => {
@@ -374,4 +400,6 @@ it.each(["compact", "full"])("greeting preparation gates ordinary, Run now, and 
   preparing = false
   await actions.onSubmit({ message: "UNSENT", image: "" }); actions.handleRunQueuedRequest("queued"); actions.handleRunNextQueuedRequest()
   expect(submitMessageAction).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledWith("queued"); expect(next).toHaveBeenCalledOnce()
+
+
 })

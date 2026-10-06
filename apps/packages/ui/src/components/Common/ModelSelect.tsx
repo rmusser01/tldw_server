@@ -1,10 +1,9 @@
-import { useQuery } from "@tanstack/react-query"
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { Avatar, Dropdown, Input, Select, Tooltip, type MenuProps } from "antd"
 import { LucideBrain, Star } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
-import { fetchChatModels } from "@/services/tldw-server"
 import { useMessage } from "@/hooks/useMessage"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { ProviderIcons } from "./ProviderIcon"
@@ -78,10 +77,7 @@ const ModelSelectBase = (
     }),
     []
   )
-  const { data, isLoading } = useQuery<ChatModel[]>({
-    queryKey: ["getAllModelsForSelect"],
-    queryFn: () => fetchChatModels({ returnEmpty: true })
-  })
+  const { data, isLoading, isError, refetch } = useChatModelCatalog()
 
   const selectedSelection = React.useMemo(
     () => resolveModelSelectorSelection(data, selectedModelValue, apiProvider),
@@ -333,6 +329,20 @@ const ModelSelectBase = (
     // Truncate if too long
     return shortName.length > 20 ? shortName.substring(0, 18) + '…' : shortName
   }, [selectedModelValue, data, selectedSelection.model])
+
+  if (isError) {
+    return (
+      <IconButton
+        ariaLabel={`${t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")}. ${t("playground:characterChatReadiness.model.retryAction", "Try again")}`}
+        onClick={() => { void refetch() }}
+        dataTestId="chat-model-retry"
+        className="h-11 min-w-11 px-2 text-text-muted"
+      >
+        <LucideBrain className={iconClassName} />
+        <span className="ml-1 text-xs">{t("playground:characterChatReadiness.model.retryAction", "Try again")}</span>
+      </IconButton>
+    )
+  }
 
   if (isLoading && !data) {
     return (

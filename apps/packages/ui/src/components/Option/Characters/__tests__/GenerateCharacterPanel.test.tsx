@@ -38,8 +38,20 @@ describe("GenerateCharacterPanel", () => {
     useStorageMock.mockReturnValue([null, vi.fn(), { isLoading: false }] as any)
     useQueryMock.mockReturnValue({
       data: [],
-      isLoading: false
+      isLoading: false,
+      isSuccess: true,
+      isFetching: false
     } as any)
+  })
+
+  it("offers discovery Retry instead of claiming no generation models exist", async () => {
+    const retry = vi.fn();
+    useQueryMock.mockReturnValue({ data: undefined, isLoading: false, isSuccess: false, isFetching: false, isError: true, refetch: retry } as ReturnType<typeof useQuery>);
+    render(<MemoryRouter><GenerateCharacterPanel isGenerating={false} error={null} onGenerate={vi.fn()} onCancel={vi.fn()} onClearError={vi.fn()} /></MemoryRouter>);
+    expect(screen.queryByText("No AI generation model available")).not.toBeInTheDocument();
+    expect(screen.getByText("Could not check chat models")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
+    expect(retry).toHaveBeenCalledOnce();
   })
 
   it("treats missing AI generation models separately from saved character chat", () => {
@@ -81,7 +93,9 @@ describe("GenerateCharacterPanel", () => {
     useStorageMock.mockReturnValue(["gpt-4o", vi.fn(), { isLoading: false }] as any)
     useQueryMock.mockReturnValue({
       data: [{ model: "gpt-4o", provider: "openai" }],
-      isLoading: false
+      isLoading: false,
+      isSuccess: true,
+      isFetching: false
     } as any)
 
     render(

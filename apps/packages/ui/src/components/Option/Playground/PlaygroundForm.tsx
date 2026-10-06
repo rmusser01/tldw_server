@@ -1,3 +1,4 @@
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { ChatGreetingPicker } from "@/components/Common/ChatGreetingPicker";
 import { useCharacterGreetingStart } from "@/hooks/useCharacterGreetingStart";
 import { ChatDraftRecovery, type RestoreChatDraft } from "@/components/Chat/composer/ChatDraftRecovery";
@@ -89,7 +90,7 @@ import {
   isChatSubmitSuccess,
   normalizeChatSubmitResult,
 } from "@/hooks/chat/chat-action-utils";
-import { fetchChatModels, fetchImageModels } from "@/services/tldw-server";
+import { fetchImageModels } from "@/services/tldw-server";
 import {
   type ResearchRunCreateRequest,
   type ResearchRunFollowUpBackground,
@@ -1400,11 +1401,7 @@ export const PlaygroundForm = ({
     handleMentionsOpen,
   } = useTabMentions(textareaRef);
 
-  const { data: composerModels, isFetching: composerModelsFetching } = useQuery({
-    queryKey: ["playground:chatModels"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
-    enabled: modelCatalogEnabled,
-  });
+  const { data: composerModels, isFetching: composerModelsFetching, isError: composerModelsFailed, refetch: retryComposerModels } = useChatModelCatalog(modelCatalogEnabled);
   // True while the catalog is actively being fetched and none have arrived yet.
   // Used to show a loading affordance instead of a "connect your server" error.
   const composerModelsLoading =
@@ -1449,6 +1446,8 @@ export const PlaygroundForm = ({
     setSelectedModel,
     navigate,
     modelsLoading: composerModelsLoading,
+    modelsError: composerModelsFailed,
+    onRetryModels: () => { void retryComposerModels() },
   });
   const cancelModelSelectorFocus = React.useCallback(() => {
     if (modelSelectorFocusFrameRef.current == null) return;

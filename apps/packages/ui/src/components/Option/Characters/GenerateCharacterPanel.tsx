@@ -1,3 +1,4 @@
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 /**
  * Panel for generating a complete character from a concept
  */
@@ -7,9 +8,7 @@ import { Button, Input, Dropdown, Spin, Modal, Progress } from "antd"
 import type { MenuProps } from "antd"
 import { Sparkles, ChevronDown, X, Check, RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
-import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
-import { fetchChatModels } from "@/services/tldw-server"
 import { useStorage } from "@plasmohq/storage/hook"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { resolveStartupSelectedModel } from "@/utils/model-startup-selection"
@@ -192,10 +191,7 @@ export const GenerateCharacterPanel: React.FC<GenerateCharacterPanelProps> = ({
   }, [isGenerating])
 
   // Fetch available models
-  const { data: models, isLoading: modelsLoading } = useQuery<ChatModel[]>({
-    queryKey: ["getAllModelsForGeneration"],
-    queryFn: () => fetchChatModels({ returnEmpty: true })
-  })
+  const { data: models, isLoading: modelsLoading, isError: modelsError, refetch: retryModels } = useChatModelCatalog()
 
   const hasModels = Array.isArray(models) && models.length > 0
   const selectedModelData = React.useMemo(() => {
@@ -315,6 +311,16 @@ export const GenerateCharacterPanel: React.FC<GenerateCharacterPanelProps> = ({
           })}
         </span>
       </div>
+    )
+  }
+
+  if (modelsError) {
+    return (
+      <Alert variant="error" title={t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")} className="mb-4">
+        <Button onClick={() => { void retryModels() }}>
+          {t("playground:characterChatReadiness.model.retryAction", "Try again")}
+        </Button>
+      </Alert>
     )
   }
 

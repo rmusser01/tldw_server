@@ -32,6 +32,8 @@ export type UseModelSelectorParams = {
   setSelectedModel: (model: string) => void
   navigate: (path: string) => void
   modelsLoading?: boolean
+  modelsError?: boolean
+  onRetryModels?: () => void
 }
 
 export function useModelSelector({
@@ -39,7 +41,9 @@ export function useModelSelector({
   selectedModel,
   setSelectedModel,
   navigate,
-  modelsLoading = false
+  modelsLoading = false,
+  modelsError = false,
+  onRetryModels
 }: UseModelSelectorParams) {
   const { t } = useTranslation(["playground", "common"])
   const apiProvider = useStoreChatModelSettings((state) => state.apiProvider)
@@ -258,6 +262,14 @@ export function useModelSelector({
     const allModels = (composerModels as any[]) || []
 
     if (allModels.length === 0) {
+      if (modelsError) {
+        return [{
+          key: "models-retry",
+          label: <span>{t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")} — {t("playground:characterChatReadiness.model.retryAction", "Try again")}</span>,
+          onClick: onRetryModels
+        }]
+      }
+
       // While the catalog is still being fetched, show a loading affordance
       // rather than the terminal "connect your server" error — the server may
       // be perfectly reachable and models simply haven't arrived yet.
@@ -662,6 +674,8 @@ export function useModelSelector({
     filteredModels,
     isFavoriteModel,
     modelsLoading,
+    modelsError,
+    onRetryModels,
     modelSortMode,
     modelDropdownOpen,
     navigate,

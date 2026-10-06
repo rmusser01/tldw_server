@@ -288,7 +288,8 @@ export function usePlaygroundQueueManagement(
           }
           const unavailableModel = findUnavailableChatModel(
             [normalizedSelectedModel],
-            availableChatModelIds
+            availableChatModelIds,
+          true
           )
           if (unavailableModel) {
             return t(
@@ -307,7 +308,8 @@ export function usePlaygroundQueueManagement(
         } else {
           const unavailableModel = findUnavailableChatModel(
             item.snapshot.compareSelectedModels,
-            availableChatModelIds
+            availableChatModelIds,
+          true
           )
           if (unavailableModel) {
             return t(
@@ -626,7 +628,8 @@ export function usePlaygroundQueueManagement(
     (modelsToCheck: string[]) => {
       const unavailableModel = findUnavailableChatModel(
         modelsToCheck,
-        availableChatModelIds
+        availableChatModelIds,
+          true
       )
       if (!unavailableModel) return true
       form.setFieldError(

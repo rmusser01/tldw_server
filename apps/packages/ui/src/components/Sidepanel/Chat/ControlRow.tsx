@@ -1,6 +1,6 @@
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { Input, InputNumber, Popover, Radio, Select, Switch, Tooltip, Upload } from "antd"
-import { useQuery } from "@tanstack/react-query"
 import {
   Search,
   MoreHorizontal,
@@ -28,7 +28,6 @@ import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useMcpTools } from "@/hooks/useMcpTools"
 import { browser } from "wxt/browser"
 import { useStorage } from "@plasmohq/storage/hook"
-import { fetchChatModels } from "@/services/tldw-server"
 import {
   buildSidepanelChatHandoffRoute,
   consumeSidepanelChatHandoff,
@@ -263,10 +262,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     [setToolModules]
   )
 
-  const { data: chatModels } = useQuery({
-    queryKey: ["mcp-small-models"],
-    queryFn: () => fetchChatModels({ returnEmpty: true })
-  })
+  const { data: chatModels } = useChatModelCatalog()
   const activeSettingsScope = useStoreChatModelSettings(state => state.activeSettingsScope)
   const scopedApiProvider = useStoreChatModelSettings(state => state.activeSettingsScope ? state.scopedSettingsByModelKey?.[state.activeSettingsScope]?.apiProvider : undefined)
   const selectedSelection = React.useMemo(

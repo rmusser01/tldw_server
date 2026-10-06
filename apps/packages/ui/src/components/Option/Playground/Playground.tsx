@@ -120,7 +120,7 @@ import {
   applyChatSettingsPatch,
   syncChatSettingsForServerChat,
 } from "@/services/chat-settings";
-import { fetchChatModels } from "@/services/tldw-server";
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog";
 import {
   buildResearchFollowUpPrompt,
   clearAttachedResearchContext,
@@ -167,8 +167,6 @@ import {
   buildCharacterChatReadiness,
   getCharacterChatReadinessCopy,
   getMatchingCharacterChatModelUsabilityCopy,
-  mergeChatProviderStatusIntoModels,
-  type ChatProviderConfigurationStatus,
   type CharacterChatReadinessAction,
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
@@ -261,7 +259,6 @@ const updateCharacterChatRouteHash = (
 
 
 
-type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
 
 const getAssistantMessageRouteLabel = (
   message: Message | null,
@@ -428,10 +425,7 @@ const PlaygroundContent = () => {
   const onCharacterRouteApplyReady = React.useCallback((apply: ApplyCharacterRoute | null) => {
     setApplyCharacterRoute(() => apply);
   }, []);
-  const [characterChatAvailableModels, setCharacterChatAvailableModels] =
-    React.useState<ChatModelCatalog | null>(null);
-  const [chatProviderStatus, setChatProviderStatus] =
-    React.useState<ChatProviderConfigurationStatus | null>(null);
+  const { data: readinessChatModels, isFetching: chatModelsFetching, isError: chatModelsError, refetch: refreshCharacterChatModels } = useChatModelCatalog();
   const [composerDockMetrics, setComposerDockMetrics] =
     React.useState<ComposerDockLayoutMetrics | null>(null);
   const [composerHasDraft, setComposerHasDraft] = React.useState(false);
@@ -472,44 +466,6 @@ const PlaygroundContent = () => {
       "standard",
     );
 
-  const refreshCharacterChatModels = React.useCallback(
-    async (isCancelled?: () => boolean) => {
-      setCharacterChatAvailableModels(null);
-      setChatProviderStatus(null);
-      try {
-        const [models, providerStatus] = await Promise.all([
-          fetchChatModels({
-            returnEmpty: true,
-            forceRefresh: true,
-          }),
-          tldwClient
-            .initialize()
-            .then(() => tldwClient.getProvidersStatus())
-            .catch((error) => {
-              console.warn("[Playground] Failed to load provider status", error);
-              return null;
-            }),
-        ]);
-        if (isCancelled?.()) return;
-        setCharacterChatAvailableModels(Array.isArray(models) ? models : []);
-        setChatProviderStatus(providerStatus);
-      } catch (error) {
-        if (isCancelled?.()) return;
-        console.warn("[Playground] Failed to refresh chat models", error);
-        setCharacterChatAvailableModels([]);
-        setChatProviderStatus(null);
-      }
-    },
-    [],
-  );
-
-  React.useEffect(() => {
-    let cancelled = false;
-    void refreshCharacterChatModels(() => cancelled);
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshCharacterChatModels]);
   const [characterModeIntentActive, setCharacterModeIntentActive] =
     React.useState(false);
   const [chatLayoutMode, setChatLayoutMode] = useStorage<PlaygroundCockpitMode>(
@@ -3050,14 +3006,6 @@ const PlaygroundContent = () => {
     selectedProvider: apiProvider,
     selectedModel,
   });
-  const readinessChatModels = React.useMemo(
-    () =>
-      mergeChatProviderStatusIntoModels(
-        characterChatAvailableModels,
-        chatProviderStatus,
-      ),
-    [characterChatAvailableModels, chatProviderStatus],
-  );
   const standardChatModelUsability = React.useMemo(
     () =>
       buildChatModelUsability({
@@ -3065,7 +3013,8 @@ const PlaygroundContent = () => {
         selectedModel,
         explicitProvider: apiProvider,
         availableModels: readinessChatModels,
-        modelsLoading: !Array.isArray(readinessChatModels),
+        modelsLoading: chatModelsFetching,
+        modelsError: chatModelsError,
         serverDegraded: serverReadinessState === "degraded",
         allowDegradedSend: true,
       }),
@@ -3073,6 +3022,8 @@ const PlaygroundContent = () => {
       selectedModel,
       apiProvider,
       readinessChatModels,
+      chatModelsFetching,
+      chatModelsError,
       serverReadinessState,
     ],
   );
@@ -3085,7 +3036,8 @@ const PlaygroundContent = () => {
         selectedModel,
         explicitProvider: apiProvider,
         availableModels: readinessChatModels,
-        modelsLoading: !Array.isArray(readinessChatModels),
+        modelsLoading: chatModelsFetching,
+        modelsError: chatModelsError,
         serverDegraded: serverReadinessState === "degraded",
         allowDegradedSend: true,
         isSendBlocked: Boolean(streaming || isProcessing || isLoading),
@@ -3096,6 +3048,8 @@ const PlaygroundContent = () => {
       selectedModel,
       apiProvider,
       readinessChatModels,
+      chatModelsFetching,
+      chatModelsError,
       activeCharacterSelection,
       serverReadinessState,
       streaming,
@@ -3139,6 +3093,8 @@ const PlaygroundContent = () => {
     }
 
     switch (activeChatModelUsability.status) {
+      case "discovery_failed":
+        return toText(t("playground:composer.modelsDiscoveryFailed", "Could not check chat models"));
       case "loading":
         return toText(
           t(

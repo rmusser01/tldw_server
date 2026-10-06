@@ -13,6 +13,16 @@ import {
 } from "../chat-model-availability"
 
 describe("chat model availability utilities", () => {
+  it("blocks discovery failure with Retry instead of treating retained models as ready", () => {
+    const input = { selectedModel: "openai:gpt-4o-mini", availableModels: [{ model: "gpt-4o-mini", provider: "openai", is_configured: true }], modelsError: true };
+    expect(buildChatModelUsability(input)).toMatchObject({ status: "discovery_failed", canSend: false, recommendedAction: "retry" });
+    const readiness = buildCharacterChatReadiness({ ...input, selectedCharacter: { id: 1 } });
+    expect(readiness).toMatchObject({ status: "blocked", reason: "models-discovery-failed", recommendedAction: "retry" });
+    const copy = getCharacterChatReadinessCopy(readiness, (_key, fallback) => typeof fallback === "string" ? fallback : fallback.defaultValue);
+    expect(copy).toMatchObject({ title: "Could not check chat models", actionLabel: "Try again" });
+    expect(copy.description).toContain("Your character selection and draft are kept");
+  })
+
   it.each(["tldw:gpt-4o-mini", "auto", "openai:auto"])("requires an explicit concrete native selection for %s", selectedModel => {
     const readiness = buildCharacterChatReadiness({ selectedCharacter: { id: 1 }, selectedModel, requireExplicitProvider: true, availableModels: [{ model: "gpt-4o-mini", provider: "openai", is_configured: true }] })
     expect(readiness).toMatchObject({ status: "blocked", missingRequirement: "chat-model", reason: "explicit-model-provider-required", recommendedAction: "open-model-settings" })
@@ -1286,4 +1296,9 @@ describe("character chat readiness", () => {
       actionLabel: "Open model settings"
     })
   })
+})
+
+it("keeps an unavailable offline catalog unknown while strict dispatch rejects the same empty set", () => {
+  expect(findUnavailableChatModel(["openai:gpt-4o-mini"], new Set())).toBeNull()
+  expect(findUnavailableChatModel(["openai:gpt-4o-mini"], new Set(), true)).toBe("openai:gpt-4o-mini")
 })

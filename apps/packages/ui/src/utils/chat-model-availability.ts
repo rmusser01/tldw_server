@@ -99,6 +99,7 @@ export type CharacterChatReadinessReason =
   | "server-unavailable"
   | "missing-character"
   | "models-loading"
+  | "models-discovery-failed"
   | "no-selected-model"
   | "no-models-available"
   | "selected-model-missing"
@@ -116,6 +117,7 @@ export type CharacterChatReadinessAction =
 
 export type ChatModelUsabilityStatus =
   | "loading"
+  | "discovery_failed"
   | "no_server"
   | "no_selection"
   | "no_models"
@@ -142,6 +144,7 @@ export type ChatModelUsabilityInput = {
   explicitProvider?: string | null
   availableModels?: ModelDescriptor[] | null
   modelsLoading?: boolean
+  modelsError?: boolean
   allowDegradedSend?: boolean
   serverDegraded?: boolean
 }
@@ -169,6 +172,7 @@ type CharacterChatReadinessInput = {
   explicitProvider?: string | null
   availableModels?: ModelDescriptor[] | null
   modelsLoading?: boolean
+  modelsError?: boolean
   allowDegradedSend?: boolean
   serverDegraded?: boolean
   isSendBlocked?: boolean
@@ -709,6 +713,7 @@ export function buildChatModelUsability({
   explicitProvider,
   availableModels,
   modelsLoading = false,
+  modelsError = false,
   allowDegradedSend = false,
   serverDegraded = false
 }: ChatModelUsabilityInput): ChatModelUsability {
@@ -736,6 +741,13 @@ export function buildChatModelUsability({
     return buildChatModelUsabilityResult("no_selection", {
       canSend: false,
       recommendedAction: "open-model-settings"
+    })
+  }
+
+  if (modelsError) {
+    return buildChatModelUsabilityResult("discovery_failed", {
+      canSend: false, selectedModelId, providerQualifiedModelId,
+      recommendedAction: "retry", detailReason: "models-discovery-failed"
     })
   }
 
@@ -879,10 +891,11 @@ export function buildAvailableChatModelIds(
 
 export function findUnavailableChatModel(
   selectedModelIds: string[],
-  availableModelIds: Set<string>
+  availableModelIds: Set<string>,
+  requireCatalog = false
 ): string | null {
   if (availableModelIds.size === 0) {
-    return null
+    return requireCatalog ? normalizeChatModelId(selectedModelIds[0] || "") || null : null
   }
 
   for (const selectedModelId of selectedModelIds) {
@@ -929,6 +942,7 @@ export function buildCharacterChatReadiness({
   explicitProvider,
   availableModels,
   modelsLoading = false,
+  modelsError = false,
   allowDegradedSend = false,
   serverDegraded = false,
   isSendBlocked = false,
@@ -965,11 +979,14 @@ export function buildCharacterChatReadiness({
     explicitProvider,
     availableModels,
     modelsLoading,
+    modelsError,
     allowDegradedSend,
     serverDegraded
   })
 
   switch (modelUsability.status) {
+    case "discovery_failed":
+      return blockedCharacterChatReadiness("chat-model", "models-discovery-failed", "retry")
     case "loading":
       return blockedCharacterChatReadiness(
         "chat-model",
@@ -1067,6 +1084,7 @@ export function getMatchingCharacterChatModelUsabilityCopy({
   if (
     (
       modelUsability.status === "loading" ||
+      modelUsability.status === "discovery_failed" ||
       modelUsability.status === "no_selection" ||
       modelUsability.status === "no_models" ||
       modelUsability.status === "selected_missing" ||
@@ -1155,6 +1173,14 @@ export function getCharacterChatReadinessCopy(
         title: translateReadinessCopy(t, "characterChatReadiness.model.explicitSelectionTitle", "Choose a model and provider before starting character chat"),
         description: translateReadinessCopy(t, "characterChatReadiness.model.explicitSelectionDescription", "Your character and draft are kept. Open the model selector and choose a model from the provider you want to use."),
         actionLabel: translateReadinessCopy(t, "characterChatReadiness.model.explicitSelectionAction", "Choose model and provider")
+      }
+    }
+
+    if (readiness.reason === "models-discovery-failed") {
+      return {
+        title: translateReadinessCopy(t, "composer.modelsDiscoveryFailed", "Could not check chat models"),
+        description: translateReadinessCopy(t, "composer.modelsDiscoveryFailedDetail", "Your character selection and draft are kept. Retry checking models before sending."),
+        actionLabel: translateReadinessCopy(t, "characterChatReadiness.model.retryAction", "Try again")
       }
     }
 

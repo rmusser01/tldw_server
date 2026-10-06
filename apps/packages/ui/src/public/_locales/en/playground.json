@@ -4087,5 +4087,11 @@
   },
   "sidepanelHandoff_unavailableCopyDescription": {
     "message": "The copy expired or could not be read. Your destination draft remains here. Copy again from the sidepanel to try again."
+  },
+  "composer_modelsDiscoveryFailed": {
+    "message": "Could not check chat models"
+  },
+  "composer_modelsDiscoveryFailedDetail": {
+    "message": "Your character selection and draft are kept. Retry checking models before sending."
   }
 }

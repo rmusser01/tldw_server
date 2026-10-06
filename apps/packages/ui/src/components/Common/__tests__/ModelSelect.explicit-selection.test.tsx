@@ -14,6 +14,7 @@ type MenuItem = {
 }
 
 const selection = vi.hoisted(() => vi.fn())
+const discovery = vi.hoisted(() => ({ failed: false, retry: vi.fn() }))
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string) => fallback ?? key
@@ -35,11 +36,15 @@ vi.mock("@/hooks/useMessage", () => ({
 }))
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
-    data: [
+    data: discovery.failed ? undefined : [
       { model: "tldw:Gemma:Q4", provider: "openai", nickname: "Hosted Gemma" },
       { model: "tldw:Gemma:Q4", provider: "local-llm", nickname: "Local Gemma" }
     ],
-    isLoading: false
+    isLoading: false,
+    isSuccess: !discovery.failed,
+    isError: discovery.failed,
+    isFetching: false,
+    refetch: discovery.retry
   })
 }))
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -80,8 +85,19 @@ vi.mock("antd", () => ({
 describe("compact explicit model selection", () => {
   beforeEach(() => {
     selection.mockClear()
+    discovery.failed = false
+    discovery.retry.mockClear()
     useStoreChatModelSettings.getState().reset()
   })
+  it("offers a keyboard accessible Retry when discovery fails", () => {
+    discovery.failed = true
+    render(<ModelSelect />)
+    const retry = screen.getByRole("button", { name: "Could not check chat models. Try again" })
+    fireEvent.click(retry)
+    expect(discovery.retry).toHaveBeenCalledOnce()
+    expect(selection).not.toHaveBeenCalled()
+  })
+
   it("commits the chosen provider with duplicate model IDs and retains a repeated choice", () => {
     render(<ModelSelect showSelectedName />)
     expect(screen.getByTestId("selected-menu-key")).toHaveTextContent(/^$/)

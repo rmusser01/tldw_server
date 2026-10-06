@@ -1,3 +1,4 @@
+import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { getAllModelSettings } from "@/services/model-settings"
 import { useStoreChatModelSettings, type ChatModelSettings } from "@/store/model"
@@ -16,7 +17,6 @@ import { shallow } from "zustand/shallow"
 import { SaveButton } from "../SaveButton"
 import { getOCRLanguage } from "@/services/ocr"
 import { ocrLanguages } from "@/data/ocr-language"
-import { fetchChatModels } from "@/services/tldw-server"
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import type { ActorSettings, ActorTarget } from "@/types/actor"
@@ -72,18 +72,6 @@ type ModelConfigData = {
   llamaGrammarId?: string
   llamaGrammarInline?: string
   llamaGrammarOverride?: string
-}
-
-type ModelDetails = {
-  provider?: string
-  capabilities?: string[]
-}
-
-type ChatModel = {
-  model: string
-  nickname?: string
-  provider?: string
-  details?: ModelDetails
 }
 
 type ActorFormValues = {
@@ -333,21 +321,7 @@ export const CurrentChatModelSettings = ({
     recomputeActorPreview()
   }, [actorSettings, open, recomputeActorPreview])
 
-  const { data: composerModels = [], isLoading: modelsLoading } = useQuery<
-    ChatModel[]
-  >({
-    queryKey: ["playground:chatModels"],
-    queryFn: async () => {
-      try {
-        return await fetchChatModels({ returnEmpty: true })
-      } catch (error) {
-        console.error("Failed to fetch chat models:", error)
-        throw error
-      }
-    },
-    enabled: open,
-    retry: 2
-  })
+  const { data: composerModels = EMPTY_CHAT_MODELS, isLoading: modelsLoading } = useChatModelCatalog(open)
 
   const activeSettingsScope = useStoreChatModelSettings(state => state.activeSettingsScope)
   const scopedApiProvider = useStoreChatModelSettings(state => state.activeSettingsScope ? state.scopedSettingsByModelKey?.[state.activeSettingsScope]?.apiProvider : undefined)

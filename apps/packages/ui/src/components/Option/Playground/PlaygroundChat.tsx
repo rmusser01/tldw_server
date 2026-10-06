@@ -1,3 +1,4 @@
+import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { resolveCharacterMessageType } from "@/utils/character-greetings"
 import { getAssistantSelectionMode } from "@/types/assistant-selection"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
@@ -16,7 +17,7 @@ import {
 import { useStorage } from "@plasmohq/storage/hook"
 import { useTranslation } from "react-i18next"
 import { generateID, updateMessageMedia } from "@/db/dexie/helpers"
-import { fetchChatModels, clearChatModelsCache } from "@/services/tldw-server"
+import { clearChatModelsCache } from "@/services/tldw-server";
 import { useIsConnected } from "@/hooks/useConnectionState"
 import { tldwClient, type ChatLinkedResearchRun } from "@/services/tldw/TldwApiClient"
 import { NoProviderBanner } from "@/components/Common/NoProviderBanner"
@@ -244,17 +245,12 @@ export const PlaygroundChat = ({
     [selectedAssistant]
   )
   const isConnected = useIsConnected()
-  const { data: chatModels = [], isFetched: chatModelsFetched, refetch: refetchChatModels } = useQuery({
-    queryKey: ["playground:chatModels"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
-    enabled: isConnected,
-    staleTime: 30_000,
-  })
+  const { data: chatModels = EMPTY_CHAT_MODELS, isSuccess: chatModelsFetched, isError: chatModelsFailed, catalogGeneration, refetch: refetchChatModels } = useChatModelCatalog(isConnected)
   const {
     data: providersStatus,
     refetch: refetchProvidersStatus,
   } = useQuery({
-    queryKey: ["playground:providersStatus"],
+    queryKey: ["playground:providersStatus", catalogGeneration],
     queryFn: async () => {
       await tldwClient.initialize().catch(() => null)
       return await tldwClient.getProvidersStatus()
@@ -1156,6 +1152,14 @@ export const PlaygroundChat = ({
           </div>
         ) : showEmptyStarterRegion && (
           <div className="mt-4 w-full">
+            {chatModelsFailed && (
+              <div role="alert" className="mx-auto mb-4 max-w-xl rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 text-center text-sm text-text">
+                <p>{t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")}</p>
+                <button type="button" className="underline" onClick={() => { void refetchChatModels() }}>
+                  {t("playground:characterChatReadiness.model.retryAction", "Try again")}
+                </button>
+              </div>
+            )}
             {showNoProvidersNotice && (
               <NoProviderBanner
                 className="mb-4"

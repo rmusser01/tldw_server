@@ -1,3 +1,4 @@
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { getSelectedAssistantOperationRevision } from "@/hooks/useSelectedAssistant"
 import type { AssistantSelection } from "@/types/assistant-selection"
 import { validateNativeCharacterConfiguration, nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight"
@@ -14,7 +15,7 @@ import { characterToAssistantSelection, getAssistantSelectionMode } from "@/type
 import { usePersistenceMode } from "@/hooks/playground/usePersistenceMode"
 import { ChatDraftRecovery, type RestoreChatDraft } from "@/components/Chat/composer/ChatDraftRecovery"
 import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection"
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query";
 import React from "react"
 import useDynamicTextareaSize from "~/hooks/useDynamicTextareaSize"
 import { useMessage } from "~/hooks/useMessage"
@@ -123,7 +124,6 @@ import {
   resolveVoiceConversationTtsConfig,
   shouldProbeVoiceConversationAudioHealth
 } from "@/services/tldw/voice-conversation"
-import { fetchChatModels } from "@/services/tldw-server"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useSetting } from "@/hooks/useSetting"
@@ -273,11 +273,7 @@ export const SidepanelForm = ({
     if (connectionReadyRef.current && !isConnectionReady) connectionGenerationRef.current += 1
     connectionReadyRef.current = isConnectionReady
   }, [isConnectionReady])
-  const { data: chatModels } = useQuery({
-    queryKey: ["getAllModelsForSelect"],
-    queryFn: async () => fetchChatModels({ returnEmpty: true }),
-    enabled: isConnectionReady
-  })
+  const { data: chatModels } = useChatModelCatalog(isConnectionReady)
   const voiceChatModelOptions = React.useMemo(() => {
     const options = [
       {
@@ -2053,7 +2049,8 @@ export const SidepanelForm = ({
         }
         const unavailableModel = findUnavailableChatModel(
           [normalizedSelectedModel],
-          availableChatModelIds
+          availableChatModelIds,
+          true
         )
         if (unavailableModel) {
           form.setFieldError(
@@ -2807,7 +2804,8 @@ export const SidepanelForm = ({
         }
         const unavailableModel = findUnavailableChatModel(
           [normalizedSelectedModel],
-          availableChatModelIds
+          availableChatModelIds,
+          true
         )
         if (unavailableModel) {
           return t(
@@ -3090,7 +3088,8 @@ export const SidepanelForm = ({
         }
         const unavailableModel = findUnavailableChatModel(
           [normalizedSelectedModel],
-          availableChatModelIds
+          availableChatModelIds,
+          true
         )
         if (unavailableModel) {
           form.setFieldError(
