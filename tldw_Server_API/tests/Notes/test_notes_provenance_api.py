@@ -744,3 +744,222 @@ def test_inactive_owner_receipts_and_created_ids_are_independent(client, chacha_
         assert client.post(BASE + "/", json={**body, "title": "Other"}, headers=headers).json() == other.json()
     finally:
         foreign.close_all_connections()
+
+
+@pytest.mark.parametrize("failure", ["product", "checkpoint"])
+@pytest.mark.parametrize(
+    "method,suffix",
+    [
+        ("get", "/{note_id}"),
+        ("get", "/"),
+        ("get", "/search?query=Evidence"),
+        ("get", "/export"),
+        ("post", "/export"),
+        ("get", "/export.csv"),
+        ("post", "/export.csv"),
+    ],
+)
+def test_reads_wait_for_replacement_pair_projection(
+    client, sync_service, chacha_db, monkeypatch, failure, method, suffix
+):
+    """Accepted history must never replace the committed body's evidence."""
+    sync_service.adapters = default_sync_v2_registry()
+    saved = create((client, True), content=retain_notes_provenance("Original answer", PAYLOAD))
+    note_id = saved["id"]
+    path = BASE + "/" + note_id
+    replacement = {**PAYLOAD, "question": "Replacement question"}
+    target = chacha_db.note_provenance_store if failure == "product" else sync_service.store.db
+    operation = "apply_sync" if failure == "product" else "upsert_object_state"
+    original = getattr(target, operation)
+
+    def fail_second(*args, **kwargs):
+        if failure == "product" or args[0].domain == "notes.provenance":
+            raise RuntimeError("injected second product write or checkpoint failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(target, operation, fail_second)
+    body = {
+        "content": "Replacement answer",
+        "knowledge_provenance": replacement,
+        "expected_provenance_version": 1,
+    }
+    headers = {"expected-version": "1", "Idempotency-Key": "replacement"}
+    failed = client.put(path, headers=headers, json=body)
+    assert failed.status_code >= 400, failed.text
+    committed = chacha_db.get_note_by_id(note_id)
+    assert committed["version"] == (1 if failure == "product" else 2)
+    assert committed["content"] == (saved["content"] if failure == "product" else "Replacement answer")
+    if failure == "product":
+        dataset_id = sync_service.store.list_datasets_for_user("user-1")[0].dataset_id
+        accepted = sync_service.store.get_current_head(dataset_id, "notes.provenance", note_id)
+        assert (accepted.object_revision, accepted.apply_status, accepted.payload) == (2, "failed", replacement)
+    assert chacha_db.note_provenance_store.get(note_id)["payload"] == (PAYLOAD if failure == "product" else replacement)
+    route = BASE + suffix.format(note_id=note_id)
+    kwargs = {"json": {"note_ids": [note_id]}} if method == "post" else {}
+    blocked = getattr(client, method)(route, **kwargs)
+    assert blocked.status_code == 409, blocked.text
+    assert "notes_provenance_projection_incomplete" in blocked.text
+    assert "Saved evidence" not in blocked.text
+    assert "Replacement question" not in blocked.text
+    monkeypatch.setattr(target, operation, original)
+    replay = client.put(path, headers=headers, json=body)
+    assert replay.status_code == 200, replay.text
+    recovered = getattr(client, method)(route, **kwargs)
+    assert recovered.status_code == 200, recovered.text
+    row = next(csv.DictReader(io.StringIO(recovered.text))) if suffix.endswith("csv") else recovered.json()
+    if "notes" in row:
+        row = row["notes"][0]
+    if "/export" in suffix:
+        assert read_notes_provenance(row["content"]) == replacement
+        assert row["content"].startswith("Replacement answer")
+    else:
+        assert row["content"] == "Replacement answer"
+        assert row["knowledge_provenance"] == replacement
+    assert int(row["version"]) == 2
+
+
+@pytest.mark.parametrize("change", ["parent", "child", "tombstone"])
+def test_reads_fence_pending_independent_heads_then_recover(client, sync_service, chacha_db, monkeypatch, change):
+    from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance import NotesProvenanceMaterializer
+    from tldw_Server_API.app.core.Sync.v2.server_origin import capture_server_origin_mutation
+
+    sync_service.adapters = default_sync_v2_registry()
+    sync_service.materializers["notes.provenance"] = NotesProvenanceMaterializer(chacha_db)
+    saved = create((client, True), content=retain_notes_provenance("Body", PAYLOAD))
+    note_id = saved["id"]
+    target = chacha_db if change == "parent" else chacha_db.note_provenance_store
+    method = "upsert_note_from_sync" if change == "parent" else "apply_sync"
+    original = getattr(target, method)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected independent projection failure")
+
+    mutation = {
+        "service": sync_service,
+        "user_id": "user-1",
+        "domain": "notes.note" if change == "parent" else "notes.provenance",
+        "operation": "tombstone" if change == "tombstone" else "upsert",
+        "object_id": note_id,
+        "parent_id": None if change == "parent" else note_id,
+        "payload": (
+            {"title": "Evidence", "content": "Old-client edit", "conversation_id": None, "message_id": None}
+            if change == "parent"
+            else PAYLOAD if change == "tombstone" else {**PAYLOAD, "question": "Child-only edit"}
+        ),
+        "source": "read-regression",
+        "stable_key": change,
+    }
+    monkeypatch.setattr(target, method, fail)
+    with pytest.raises(SyncStoreError):
+        capture_server_origin_mutation(**mutation)
+    for suffix in ["/" + note_id, "/", "/export", "/export.csv"]:
+        blocked = client.get(BASE + suffix)
+        assert blocked.status_code == 409, blocked.text
+        assert "Saved evidence" not in blocked.text
+    monkeypatch.setattr(target, method, original)
+    capture_server_origin_mutation(**mutation)
+    current = client.get(BASE + "/" + note_id)
+    assert current.status_code == 200, current.text
+    row = current.json()
+    if change == "parent":
+        assert row["content"] == "Old-client edit"
+        assert row["knowledge_provenance"] == PAYLOAD
+        assert (row["version"], row["knowledge_provenance_version"]) == (2, 1)
+    elif change == "child":
+        assert row["content"] == saved["content"]
+        assert row["knowledge_provenance"]["question"] == "Child-only edit"
+        assert (row["version"], row["knowledge_provenance_version"]) == (1, 2)
+    else:
+        assert row["knowledge_provenance_state"] == "deleted"
+        assert row["knowledge_provenance"] is None
+        exported = client.get(BASE + "/export").json()["notes"][0]
+        assert read_notes_provenance(exported["content"]) is None
+
+
+def test_reads_fence_committed_child_ahead_of_rolled_back_applied_head(client, sync_service, chacha_db, monkeypatch):
+    from dataclasses import replace
+
+    from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+    from tldw_Server_API.app.core.Sync.v2.models import SyncDeviceUpsert, SyncEnvelopeCreate
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance import NotesProvenanceMaterializer
+
+    sync_service.adapters = default_sync_v2_registry()
+    sync_service.materializers["notes.provenance"] = NotesProvenanceMaterializer(chacha_db)
+    saved = create((client, True))
+    note_id = saved["id"]
+    dataset_id = sync_service.store.list_datasets_for_user("user-1")[0].dataset_id
+    base = sync_service.store.get_current_head(dataset_id, "notes.provenance", note_id)
+    later = client.put(
+        BASE + "/" + note_id,
+        headers={"expected-version": "1"},
+        json={"content": "Later body", "knowledge_provenance": PAYLOAD, "expected_provenance_version": 1},
+    )
+    assert later.status_code == 200, later.text
+    sync_service.store.upsert_device(
+        SyncDeviceUpsert(
+            device_id="review-device",
+            user_id="user-1",
+            display_name="Review device",
+            client_type="test",
+            capabilities={
+                "supported_domains": ["notes.note", "notes.provenance"],
+                "supported_adapter_versions": {"notes.note": [1], "notes.provenance": [1]},
+            },
+        )
+    )
+    payload = {**PAYLOAD, "question": "Resolved question"}
+    request = SyncEnvelopeCreate(
+        dataset_id=dataset_id,
+        device_id="review-device",
+        client_envelope_id="conflict",
+        domain="notes.provenance",
+        operation="upsert",
+        object_id=note_id,
+        parent_id=note_id,
+        payload=payload,
+        payload_hash=notes_provenance_object_hash(payload),
+        base_server_cursor=base.server_cursor,
+        base_object_revision=base.object_revision,
+        base_object_hash=base.payload_hash,
+        object_revision=2,
+    )
+    pushed = sync_service.push(user_id="user-1", dataset_id=dataset_id, device_id="review-device", envelopes=[request])
+    conflict_id = pushed.conflicts[0].conflict_id
+    before = sync_service.store.get_current_head(dataset_id, "notes.provenance", note_id)
+    original = sync_service.store.db.upsert_object_state
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected post-product checkpoint failure")
+
+    resolution = {
+        "user_id": "user-1",
+        "dataset_id": dataset_id,
+        "conflict_id": conflict_id,
+        "action": "overwrite",
+        "resolved_by_device_id": "review-device",
+        "resolution_envelope": replace(
+            request,
+            client_envelope_id="resolution",
+            base_server_cursor=before.server_cursor,
+            base_object_revision=before.object_revision,
+            base_object_hash=before.payload_hash,
+            object_revision=3,
+        ),
+    }
+    monkeypatch.setattr(sync_service.store.db, "upsert_object_state", fail)
+    with pytest.raises(SyncStoreError, match="notes_provenance_checkpoint_failed"):
+        sync_service.resolve_conflict(**resolution)
+    assert chacha_db.note_provenance_store.get(note_id)["version"] == 3
+    assert sync_service.store.get_current_head(dataset_id, "notes.provenance", note_id) == before
+    assert before.apply_status == "applied"
+    for suffix in ["/" + note_id, "/", "/export", "/export.csv"]:
+        blocked = client.get(BASE + suffix)
+        assert blocked.status_code == 409, blocked.text
+        assert "Saved evidence" not in blocked.text
+    monkeypatch.setattr(sync_service.store.db, "upsert_object_state", original)
+    assert sync_service.resolve_conflict(**resolution).status == "resolved"
+    current = client.get(BASE + "/" + note_id).json()
+    assert current["content"] == "Later body"
+    assert current["knowledge_provenance"] == payload
+    assert (current["version"], current["knowledge_provenance_version"]) == (2, 3)

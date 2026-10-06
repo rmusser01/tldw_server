@@ -1156,12 +1156,21 @@ def _attach_note_provenance(db: CharactersRAGDB, note: dict[str, Any], *, portab
             service.store.get_current_head(dataset.dataset_id, "notes.provenance", str(note["id"])) if dataset else None
         )
         if head is not None:
-            record = {
-                "payload": head.payload,
-                "version": head.object_revision,
-                "object_hash": head.payload_hash,
-                "deleted": head.operation == "tombstone",
-            }
+            parent = service.store.get_current_head(dataset.dataset_id, "notes.note", str(note["id"]))
+            # Acceptance precedes product projection; checkpoint failures can also
+            # leave products ahead of both applied heads. Never mix these snapshots.
+            if (
+                head.apply_status != "applied"
+                or parent is None
+                or parent.apply_status != "applied"
+                or parent.object_revision != note["version"]
+                or (parent.operation == "tombstone") != bool(note.get("deleted"))
+                or record is None
+                or record["version"] != head.object_revision
+                or record["object_hash"] != head.payload_hash
+                or record["deleted"] != (head.operation == "tombstone")
+            ):
+                raise _note_sync_http_error(SyncStoreError("notes_provenance_projection_incomplete"))
     return provenance_response(note, record, supported=store is not None, portable=portable)
 
 
