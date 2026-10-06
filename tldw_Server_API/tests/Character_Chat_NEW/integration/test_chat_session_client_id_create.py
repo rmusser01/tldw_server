@@ -30,7 +30,6 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as chats
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
-from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.integration
@@ -238,10 +237,14 @@ def test_another_owner_reusing_an_id_in_a_shared_store_gets_409_without_a_leak(
 
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
 def owners(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[SimpleNamespace]:
-    """Two real owners: PostgreSQL shares one database; SQLite uses per-user files."""
-    backend = None
-    if request.param == "postgres":
-        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+    """Two real owners: PostgreSQL shares one database; SQLite uses per-user files.
+
+    PostgreSQL connects as a role that cannot bypass row-level security. The
+    admin DSN is a superuser, which RLS never restricts, so a cross-owner
+    assertion through it fails whatever the policies say; the deployed
+    server's role does not bypass RLS.
+    """
+    backend = request.getfixturevalue("pg_restricted_backend") if request.param == "postgres" else None
     first = CharactersRAGDB(tmp_path / "1" / "ChaChaNotes.db", client_id="1", backend=backend)
     second = CharactersRAGDB(tmp_path / "2" / "ChaChaNotes.db", client_id="2", backend=backend)
     try:
@@ -249,8 +252,6 @@ def owners(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[SimpleNam
     finally:
         first.close_all_connections()
         second.close_all_connections()
-        if backend is not None:
-            backend.get_pool().close_all()
 
 
 def test_another_owner_reusing_an_id_never_sees_the_first_owners_chat(
