@@ -70,13 +70,13 @@ def test_get_rate_limits_shape():
 
 def test_rate_limits_daily_caps_are_null_when_unlimited(monkeypatch):
     """With no limits.* daily caps resolved, the view reports null, not the tier's numbers."""
-    from tldw_Server_API.app.core.Usage import quota_resolver
+    from tldw_Server_API.app.core.Evaluations import user_rate_limiter
 
     async def _no_cap(user_id, key):
         """No cap for any key."""
         return None
 
-    monkeypatch.setattr(quota_resolver, "user_quota", _no_cap)
+    monkeypatch.setattr(user_rate_limiter, "user_quota", _no_cap)
     r = TestClient(app).get("/api/v1/evaluations/rate-limits")
     assert r.status_code == 200
     j = r.json()
