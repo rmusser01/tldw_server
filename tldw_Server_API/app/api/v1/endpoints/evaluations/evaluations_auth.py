@@ -360,9 +360,14 @@ async def _apply_rate_limit_headers(limiter, user_id: str, response: Response, m
         except Exception:
             response.headers["X-RateLimit-PerMinute-Remaining"] = "0"
         daily = limits.get("daily", {})
-        response.headers["X-RateLimit-Daily-Limit"] = str(daily.get("evaluations", 0))
-        response.headers["X-RateLimit-Daily-Remaining"] = str(remaining.get("daily_evaluations", 0))
-        response.headers["X-RateLimit-Tokens-Remaining"] = str(remaining.get("daily_tokens", 0))
+        # An unlimited daily cap is None: leave the header out rather than invent a number.
+        for header, value in (
+            ("X-RateLimit-Daily-Limit", daily.get("evaluations")),
+            ("X-RateLimit-Daily-Remaining", remaining.get("daily_evaluations")),
+            ("X-RateLimit-Tokens-Remaining", remaining.get("daily_tokens")),
+        ):
+            if value is not None:
+                response.headers[header] = str(value)
         response.headers["X-RateLimit-Daily-Cost-Remaining"] = f"{remaining.get('daily_cost', 0):.2f}"
         response.headers["X-RateLimit-Monthly-Cost-Remaining"] = f"{remaining.get('monthly_cost', 0):.2f}"
         response.headers["RateLimit-Limit"] = str(per_min_limit)

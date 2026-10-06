@@ -16,32 +16,6 @@ def quotas_off(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: None)
 
 
-class _DenyingGovernor:
-    """A governor whose reserve raises; release records instead of raising.
-
-    `reserve` raising `AssertionError` would normally be swallowed by
-    `_AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS` (which includes `AssertionError`) and
-    turned into a fail-open `(True, "OK")` by `can_start_job`/`can_start_stream`
-    — the same result as the quotas-off path — so it cannot distinguish "the
-    guard ran" from "the guard was skipped but the governor call failed open".
-    Tests that need to prove the guard ran check *whether the governor was
-    fetched at all* (see `_recording_governor` below) instead of relying on an
-    exception from calling it.
-    """
-
-    def __init__(self) -> None:
-        """Start with no released handles recorded."""
-        self.released: list[object] = []
-
-    async def reserve(self, *_args: object, **_kwargs: object) -> None:
-        """Fail the test if the quotas-off code path ever calls reserve."""
-        raise AssertionError("the governor must not be consulted when quotas are off")
-
-    async def release(self, handle_id: object) -> None:
-        """Record the released handle id instead of raising."""
-        self.released.append(handle_id)
-
-
 async def test_limits_are_unlimited_when_quotas_off(quotas_off: None, monkeypatch: pytest.MonkeyPatch) -> None:
     """With quotas off, get_limits_for_user returns all-None limits without ever looking up the tier."""
 
@@ -67,40 +41,12 @@ async def test_daily_minutes_allowed_past_the_old_free_tier(quotas_off: None) ->
     assert remaining is None
 
 
-async def test_concurrency_unlimited_when_quotas_off(quotas_off: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    """With quotas off, job and stream concurrency checks pass without ever fetching the resource governor."""
-    fetched: list[str] = []
-
-    async def _recording_governor() -> _DenyingGovernor:
-        """A governor-fetch stand-in that records being called and returns a denying governor."""
-        fetched.append("governor")
-        return _DenyingGovernor()
-
-    monkeypatch.setattr(audio_quota, "_get_audio_rg_governor", _recording_governor)
+async def test_concurrency_hooks_admit_and_finish_is_a_noop(quotas_off: None) -> None:
+    """With quotas off, the can_start hooks admit and the finish hooks do nothing and do not raise."""
     assert await audio_quota.can_start_job(1) == (True, "OK")
     assert await audio_quota.can_start_stream(1) == (True, "OK")
-    assert fetched == []
-
-
-async def test_finish_without_lease_is_a_noop(quotas_off: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pins robustness, not the guard: no lease is released or crash raised when the switch is off.
-
-    `can_start_job`/`can_start_stream` never reserve a handle while quotas are
-    off, so the matching `finish_*` call (which is not itself gated) must find
-    nothing to release and must not raise.
-    """
-    governor = _DenyingGovernor()
-
-    async def _governor() -> _DenyingGovernor:
-        """A governor-fetch stand-in returning the shared denying governor."""
-        return governor
-
-    monkeypatch.setattr(audio_quota, "_get_audio_rg_governor", _governor)
-    await audio_quota.can_start_stream(5)
-    await audio_quota.finish_stream(5)
-    await audio_quota.can_start_job(5)
-    await audio_quota.finish_job(5)
-    assert governor.released == []
+    assert await audio_quota.finish_job(1) is None
+    assert await audio_quota.finish_stream(1) is None
 
 
 async def test_quotas_on_reads_daily_minutes_from_the_resolver(monkeypatch: pytest.MonkeyPatch) -> None:

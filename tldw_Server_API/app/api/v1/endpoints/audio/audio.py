@@ -321,9 +321,6 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
 # Optional helpers for status/limits and TTL heartbeat
 try:
     from tldw_Server_API.app.core.Usage.audio_quota import (
-        active_streams_count as active_streams_count,
-    )
-    from tldw_Server_API.app.core.Usage.audio_quota import (
         get_daily_minutes_used as get_daily_minutes_used,
     )
     from tldw_Server_API.app.core.Usage.audio_quota import (

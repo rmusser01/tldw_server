@@ -1,7 +1,7 @@
 # Usage quotas: off by default, set per user, team or org
 
 - **Date:** 2026-10-02
-- **Status:** Draft, revised after code review; awaiting owner review
+- **Status:** Implemented (PRs #3098, #3144, #3199 and PR D, TASK-13434)
 - **Backlog:** implementation tasks are filed after this spec is approved. Pre-existing bugs found during review are filed now (see [Known defects](#known-defects-outside-this-spec)).
 - **Scope:** Spec 2 of 2. Spec 1, the ingress safety net (`Docs/Design/2026-09-29-rg-ingress-safety-net-design.md`, ADR-056), is implemented. Spec 1 handles request rates; this spec handles usage budgets.
 
@@ -279,3 +279,11 @@ Four PRs against `dev`:
   - **Updated:** the chatbooks code guide, and the storage API doc's endpoint citations.
   - **New:** a quotas page in Operations.
   - The `Docs/Published` mirror is refreshed for each mirrored doc.
+
+## Errata
+
+Corrections found while implementing:
+
+- The ADR is `Docs/ADR/064-usage-quotas-per-user-limits.md`, not ADR-058 (058 is taken by the Jobs completion ADR).
+- The registration-code writer described in §5 and Testing 9 was dead code, and PR C deleted it. Registration writes no storage quota.
+- There is no chatbooks usage summary endpoint (§9). A user's chatbooks limits show in the profile config as `limits.chatbooks_*` values.
