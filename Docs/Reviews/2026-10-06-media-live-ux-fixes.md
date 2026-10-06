@@ -2,6 +2,8 @@
 
 All four findings from [the live validation](2026-10-05-media-live-validation.md) are fixed and verified. This closes TASK-13504–13507. Native screen-reader speech and human participant comprehension remain unverified; this report does not claim a full usability study.
 
+Draft PR: [#3204](https://github.com/rmusser01/tldw_server/pull/3204).
+
 ## Source and implementation
 
 Latest remote dev: `1fc353c3f67c93ba05102e7b0136ac4acac8f510`, refetched unchanged after final source verification. Tested source: `9a277cf162321753321ffa0448a51e73464d7150`, on `codex/media-live-ux-fixes-20261006`. The original Media implementation was already merged through PR 3194; this branch carries the subsequent validation evidence and bounded follow-up fixes.
@@ -56,4 +58,4 @@ The task browser and servers are stopped; ports 18881/18882/18883 have no listen
 
 Original tracked status matches its before snapshot, and every earlier untracked entry remains present. Exact full porcelain bytes differ because another workstream added 157 files under its own `.venv-uat-py312-20261006`; those files and the unrelated open browser were left untouched. No checkout/reset/clean/staging operation targeted the original workspace. Git's existing loose-object warning was left alone.
 
-The completed task-specific implementation plan will be removed during PR finalization per repository guidance. No implementation item remains open in TASK-13504–13507. Merge still requires the requester’s own `Change summary` under [the repository policy](../superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md): “Every AI-generated pull request must include a human-written `Change summary`.” The PR is prepared as a draft; the human summary for earlier PR 3194 is not reused as ownership of this follow-up.
+The completed task-specific implementation plan is removed per repository guidance. No implementation item remains open in TASK-13504–13507. Merge still requires the requester’s own `Change summary` under [the repository policy](../superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md): “Every AI-generated pull request must include a human-written `Change summary`.” The PR is prepared as a draft; the human summary for earlier PR 3194 is not reused as ownership of this follow-up.

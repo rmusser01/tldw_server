@@ -217,7 +217,7 @@
       "normalize_check": "passed",
       "ratchet_tests_passed": 4,
       "warnings": 4,
-      "log": "/private/tmp/media-backlog-ratchet-20261006.log"
+      "log": "/private/tmp/media-backlog-ratchet-final-20261006.log"
     }
   },
   "limits": [
@@ -249,6 +249,14 @@
       "apps/extension/.output",
       "apps/extension/.wxt"
     ],
-    "temporary_models_preserved": true
+    "temporary_models_preserved": true,
+    "completed_own_plan_removed": true
+  },
+  "pull_request": {
+    "url": "https://github.com/rmusser01/tldw_server/pull/3204",
+    "draft": true,
+    "base": "dev",
+    "human_change_summary": "pending",
+    "merged": false
   }
 }
