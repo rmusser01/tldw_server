@@ -593,3 +593,34 @@ absent. Prior shared1603/postP1 shared1376PASS2PG-specific skips/frontend578
 remain their bounded, version-qualified proofs, not whole-repository or final
 native CI certification. Normal10filecommit and exact-lease publication next;
 Qodo credit block and fresh-head external gates remain mandatory. Child read-only.
+
+## Task80: Latest Dev Audio Ledger Reconciliation
+
+Original TASK13369. The human renewed the latest-dev rebase/repair mandate on
+2026-10-06. Sole implementer controller; Tasks1-79 remain historical and complete.
+Target: actual dev1fc353c3f67c93ba05102e7b0136ac4acac8f510.
+
+### Stage 1: Preserve And Rebase
+**Goal**: Preserve tracking WIP and merge-preserving rebase onto actual dev.
+**Success Criteria**: Parent outcomes and incoming ledger seeds both survive;
+every other tree path equals the precomputed union. Child stays read-only.
+**Tests**: Clean status, backup ref, tree comparison and original assertions.
+**Status**: In Progress
+
+### Stage 2: Verify Shared Contracts
+**Goal**: Execute affected audio/profile/cache/override/nullability/reporting,
+Media/Workflows headers/settings/CI and native VN ownership/quota contracts.
+**Success Criteria**: Retain all original outcomes; repair only verified defects
+with bounded RED/GREEN, Ruff/Bandit and fresh independent SPEC/QUALITY.
+**Tests**: Official PostgreSQL and selected SQLite/API/CI regressions. Evidence
+stays scoped and runtime-qualified, never a whole-repository certificate.
+**Status**: Not Started
+
+### Stage 3: Publish And Gate Merge
+**Goal**: Publish verified combined head with an exact fresh force-with-lease.
+**Success Criteria**: Independent remote/head/base verification, then fresh
+external CI and full exact-head Qodo before normal merge. Human summary retained.
+**Tests**: Complete comments/replies, all seven app15368 integration contexts
+with audited license provenance, current dev/rules/mode and GitHub MERGED proof.
+Billing is not a review waiver. No bypass, queue or PR3067 mutation.
+**Status**: Not Started
