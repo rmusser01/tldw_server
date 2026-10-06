@@ -69,6 +69,7 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     get_limits_for_user,
     heartbeat_jobs,
     increment_jobs_started,
+    monthly_minutes_exhausted,
 )
 
 router = APIRouter(
@@ -206,6 +207,7 @@ def _audio_shim_attr(name: str):
         "can_start_job": can_start_job,
         "increment_jobs_started": increment_jobs_started,
         "finish_job": finish_job,
+        "monthly_minutes_exhausted": monthly_minutes_exhausted,
         "sf": sf,
     }
     default_value = defaults.get(name)
@@ -920,12 +922,13 @@ async def create_transcription(
                 job_heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await job_heartbeat_task
+            period = "monthly" if await _audio_shim_attr("monthly_minutes_exhausted")(current_user.id) else "daily"
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail=_dictation_error_detail(
                     http_status=status.HTTP_402_PAYMENT_REQUIRED,
                     detail_status="quota_exceeded",
-                    message="Transcription quota exceeded (daily minutes)",
+                    message=f"Transcription quota exceeded ({period} minutes)",
                 ),
             )
         # Secondary billing check with the real minute estimate (the dependency

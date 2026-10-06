@@ -159,7 +159,6 @@ from tldw_Server_API.app.core.TTS.tts_request_resolution import (
 )
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 from tldw_Server_API.app.core.Usage.audio_quota import (
-    active_streams_count,
     add_daily_minutes,
     bytes_to_seconds,
     can_start_stream,
@@ -170,9 +169,11 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     finish_stream,
     get_daily_minutes_used,
     get_limits_for_user,
+    get_monthly_minutes_used,
     get_user_tier,
     heartbeat_stream,
     increment_jobs_started,
+    monthly_minutes_exhausted,
 )
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
 
@@ -331,8 +332,9 @@ def _audio_shim_attr(name: str):
         "consume_daily_minutes": consume_daily_minutes,
         "bytes_to_seconds": bytes_to_seconds,
         "heartbeat_stream": heartbeat_stream,
-        "active_streams_count": active_streams_count,
         "get_daily_minutes_used": get_daily_minutes_used,
+        "get_monthly_minutes_used": get_monthly_minutes_used,
+        "monthly_minutes_exhausted": monthly_minutes_exhausted,
         "get_user_tier": get_user_tier,
         "get_limits_for_user": get_limits_for_user,
         "increment_jobs_started": increment_jobs_started,
@@ -1125,12 +1127,12 @@ async def _heartbeat_stream(user_id: int):
     return await _audio_shim_attr("heartbeat_stream")(user_id)
 
 
-async def _active_streams_count(user_id: int):
-    return await _audio_shim_attr("active_streams_count")(user_id)
-
-
 async def _get_daily_minutes_used(user_id: int):
     return await _audio_shim_attr("get_daily_minutes_used")(user_id)
+
+
+async def _get_monthly_minutes_used(user_id: int):
+    return await _audio_shim_attr("get_monthly_minutes_used")(user_id)
 
 
 async def _get_user_tier(user_id: int):
@@ -1803,10 +1805,13 @@ async def websocket_transcribe(
             )
             try:
                 if _outer_stream:
+                    _period = (
+                        "monthly" if await _audio_shim_attr("monthly_minutes_exhausted")(user_id_for_usage) else "daily"
+                    )
                     await _outer_stream.send_json(
                         _audio_ws_quota_error_payload(
                             quota=qe.quota,
-                            message="Streaming transcription quota exceeded (daily minutes)",
+                            message=f"Streaming transcription quota exceeded ({_period} minutes)",
                             request_id=request_id,
                         )
                     )
@@ -4521,9 +4526,10 @@ async def streaming_limits(
             - tier (str): The user's tier name (e.g., "free").
             - limits (dict): The resolved limit values (e.g., daily_minutes, concurrent_streams, concurrent_jobs, max_file_size_mb).
             - used_today_minutes (float): Minutes already used today (0.0 if unavailable).
-            - remaining_minutes (float|None): Minutes remaining today (0.0 if none left, `None` if unknown/unbounded).
-            - active_streams (int): Number of currently active streams (0 if unavailable).
-            - _can_start_stream (bool): Whether the user may start another stream given current active streams and concurrent_streams limit.
+            - remaining_minutes (float|None): Minutes remaining today (0.0 if none left, `None` when there is no daily limit).
+            - used_month_minutes / remaining_month_minutes (float|None): Monthly usage and remainder (`None` remainder when no monthly limit).
+            - active_streams (None): Per-user stream concurrency is not tracked.
+            - _can_start_stream (bool): Always True; stream concurrency is not limited per user.
     """
     # Correlate logs with request_id if available
     rid = ensure_request_id(request) if request is not None else None
@@ -4533,12 +4539,13 @@ async def streaming_limits(
         get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="audio").warning(
             "Failed to get limits for user %s, falling back to defaults: %s", current_user.id, e
         )
-        # Fallback to default free limits
+        # Lookups fail open: report every limit as unlimited.
         limits = {
-            "daily_minutes": 30.0,
-            "concurrent_streams": 1,
-            "concurrent_jobs": 1,
-            "max_file_size_mb": 25,
+            "daily_minutes": None,
+            "monthly_minutes": None,
+            "concurrent_streams": None,
+            "concurrent_jobs": None,
+            "max_file_size_mb": None,
         }
     try:
         used_minutes = await _get_daily_minutes_used(current_user.id)
@@ -4559,12 +4566,14 @@ async def streaming_limits(
             )
             remaining_minutes = None
     try:
-        active_streams = await _active_streams_count(current_user.id)
-    except EXPECTED_REDIS_EXC as e:
+        used_month = await _get_monthly_minutes_used(current_user.id)
+    except EXPECTED_DB_EXC as e:
         get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="audio").warning(
-            "Failed to get active streams for user %s, falling back to 0: %s", current_user.id, e
+            "Failed to get monthly minutes for user %s, falling back to 0: %s", current_user.id, e
         )
-        active_streams = 0
+        used_month = 0.0
+    monthly_limit = limits.get("monthly_minutes")
+    remaining_month = None if monthly_limit is None else max(0.0, float(monthly_limit) - float(used_month))
     try:
         tier = await _get_user_tier(current_user.id)
     except EXPECTED_DB_EXC as e:
@@ -4572,21 +4581,17 @@ async def streaming_limits(
             "Failed to get tier for user %s, falling back to 'free': %s", current_user.id, e
         )
         tier = "free"
-    try:
-        max_streams = int(limits.get("concurrent_streams") or 0)
-    except (ValueError, TypeError) as e:
-        get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="audio").warning(
-            "Could not parse concurrent_streams limit for user %s: %s", current_user.id, e
-        )
-        max_streams = 0
-    can_start = (max_streams == 0) or (active_streams < max_streams)
+    # Stream concurrency isn't limited per user.
+    can_start = True
     return {
         "user_id": current_user.id,
         "tier": tier,
         "limits": limits,
         "used_today_minutes": used_minutes,
         "remaining_minutes": remaining_minutes,
-        "active_streams": active_streams,
+        "used_month_minutes": used_month,
+        "remaining_month_minutes": remaining_month,
+        "active_streams": None,
         "can_start_stream": can_start,
         "_can_start_stream": can_start,
     }

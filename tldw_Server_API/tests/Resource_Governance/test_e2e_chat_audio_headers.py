@@ -136,12 +136,10 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     except Exception:
         _ = None
 
-    # Reset cached audio RG governor/handles so RG_POLICY_PATH changes take effect.
+    # Reset in-process audio quota state between tests.
     try:
         import tldw_Server_API.app.core.Usage.audio_quota as _aq
 
-        _aq._rg_audio_governor = None  # type: ignore[attr-defined]
-        _aq._rg_audio_loader = None  # type: ignore[attr-defined]
         _aq._reset_in_process_counters_for_tests()
     except Exception:
         _ = None
