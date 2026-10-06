@@ -131,9 +131,15 @@ vi.mock("@/services/background-proxy", () => ({
   bgRequest: vi.fn().mockResolvedValue([]),
 }))
 
-vi.mock("@/utils/research-workspace-prefill", () => ({
-  consumeResearchWorkspacePrefill: vi.fn().mockResolvedValue(null),
-  buildKnowledgeQaSeedNote: vi.fn().mockReturnValue(""),
+vi.mock("@/utils/use-research-workspace-prefill", () => ({
+  useResearchWorkspacePrefill: () => ({
+    attached: 0,
+    pending: 0,
+    failed: 0,
+    importing: false,
+    error: null,
+    retry: vi.fn(),
+  }),
 }))
 
 vi.mock("../WorkspaceHeader", () => ({

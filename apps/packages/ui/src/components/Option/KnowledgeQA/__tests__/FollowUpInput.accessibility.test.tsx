@@ -1,3 +1,4 @@
+import React, { useState } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { FollowUpInput } from "../FollowUpInput"
@@ -10,6 +11,7 @@ const state = {
   results: [{ id: "r1" }] as Array<{ id: string }>,
   answer: null as string | null,
   isMobile: false,
+  setEvidenceRailOpen: (_open: boolean) => {},
 }
 
 vi.mock("../KnowledgeQAProvider", () => ({
@@ -20,6 +22,7 @@ vi.mock("../KnowledgeQAProvider", () => ({
     createNewThread: state.createNewThread,
     results: state.results,
     answer: state.answer,
+    setEvidenceRailOpen: state.setEvidenceRailOpen,
   })
 }))
 
@@ -137,6 +140,22 @@ describe("FollowUpInput accessibility", () => {
     expect(state.askFollowUp).toHaveBeenCalledWith("Compare the findings")
     expect(submitButton).toBeDisabled()
     expect(input).toBeDisabled()
+  })
+
+  it("offers distinct Evidence, Send and New Topic actions in the mobile composer", () => {
+    state.isMobile = true
+    function Composer() {
+      const [open, setOpen] = useState(false)
+      state.setEvidenceRailOpen = setOpen
+      return <><FollowUpInput /><output aria-label="Evidence state">{open ? "Open" : "Closed"}</output></>
+    }
+    render(<Composer />)
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask a follow-up question" }), { target: { value: "My follow-up" } })
+    expect(screen.getByRole("button", { name: "Submit follow-up question" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Start new topic" })).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: "Open evidence panel" }))
+    expect(screen.getByLabelText("Evidence state")).toHaveTextContent("Open")
+    expect(screen.getByRole("textbox", { name: "Ask a follow-up question" })).toHaveValue("My follow-up")
   })
 
   it("uses a sticky mobile layout with safe-area padding while keeping actions visible", () => {

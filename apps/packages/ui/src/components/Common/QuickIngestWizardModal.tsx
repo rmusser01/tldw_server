@@ -4,6 +4,7 @@ import {
 } from "@/routes/route-paths"
 import { setSetting } from "@/services/settings/registry"
 import { MEDIA_REVIEW_SELECTION_SETTING, MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING } from "@/services/settings/ui-settings"
+import { buildKnowledgeMediaScopePath } from "@/utils/knowledge-scope-handoff"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { type ConferenceRetryRequestItem,
   buildConferenceRetryRequestItems
@@ -26,6 +27,7 @@ import { reattachQuickIngestSession } from "@/services/tldw/quick-ingest-session
 import { useConnectionStore } from "@/store/connection"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import {
+  type PersistedQuickIngestTracking,
   type PersistedWizardQueueItem,
   type QuickIngestSessionLifecycle,
   type QuickIngestSessionRecord,
@@ -41,7 +43,6 @@ import { useNavigate } from "react-router-dom"
 import { browser } from "wxt/browser"
 import { useShallow } from "zustand/react/shallow"
 import { AddContentStep } from "./QuickIngest/AddContentStep"
-import { classifyError } from "./QuickIngest/ErrorClassification"
 import { FloatingProgressWidget } from "./QuickIngest/FloatingProgressWidget"
 import {
   IngestWizardProvider,
@@ -63,7 +64,7 @@ import {
   type PresetMap,
 } from "./QuickIngest/presets"
 import { getEligibleQueueItems, validateQueueItem } from "./QuickIngest/queue-items"
-import { getSavedMediaIds } from "./QuickIngest/result-actions"
+import { canRetryWizardResult, getSavedMediaIds } from "./QuickIngest/result-actions"
 import type {
   CommonOptions,
   ConferenceBatchMetadata,
@@ -71,7 +72,6 @@ import type {
   DetectedMediaType,
   ItemProgress,
   ItemProgressStatus,
-  PersistedQuickIngestTracking,
   PlaylistQueueMetadata,
   ReattachedQuickIngestJob,
   TypeDefaults,
@@ -254,8 +254,9 @@ const normalizeWizardResult = (
     title: item.title,
     durationMs: item.durationMs,
     mediaId:
-      item.mediaId ??
-      extractCompletedIngestJobMediaId(item.data),
+      item.mediaId !== undefined
+        ? item.mediaId
+        : extractCompletedIngestJobMediaId(item.data),
     persisted: item.persisted,
     collectionItemId: item.collectionItemId ?? null,
     retryAttempt: item.retryAttempt ?? null,
@@ -306,17 +307,28 @@ const buildTerminalProgress = (
 const buildFailureResults = (
   items: WizardQueueItem[],
   message: string,
-  outcome: "failed" | "cancelled"
+  outcome: "failed" | "cancelled",
+  retryItems?: ConferenceRetryRequestItem[]
 ): WizardResultItem[] =>
-  items.map((item) => ({
-    id: item.id,
-    status: "error",
-    outcome,
-    url: item.url,
-    fileName: item.fileName,
-    type: mapDetectedTypeToEntryType(item.detectedType),
-    error: message,
-  }))
+  items.map((item) => {
+    const retry = retryItems?.find((entry) => entry.resultId === item.id)
+    return {
+      id: item.id,
+      status: "error",
+      outcome,
+      url: item.url,
+      fileName: item.fileName,
+      type: mapDetectedTypeToEntryType(item.detectedType),
+      error: message,
+      ...(retry
+        ? {
+            collectionItemId: retry.collectionItemId,
+            retryAttempt: retry.retryAttempt,
+            idempotencyKey: retry.idempotencyKey
+          }
+        : {})
+    }
+  })
 
 const buildQueueFileKey = (item: WizardQueueItem): string | undefined => {
   if (item.fileStub?.key) return item.fileStub.key
@@ -753,6 +765,9 @@ const buildResultsFromReattachedJobs = (
       job.jobId,
       index
     )
+    const retry = tracking?.retryItems?.find(
+      (entry) => entry.resultId === item?.id
+    )
     const jobStatus = String(job.status || "").trim().toLowerCase()
     const logicalFailure =
       jobStatus === "completed" && completedIngestJobIndicatesFailure(job.result)
@@ -780,9 +795,12 @@ const buildResultsFromReattachedJobs = (
             `Quick ingest ${jobStatus || "failed"}.`,
       mediaId: extractCompletedIngestJobMediaId(job.result),
       warning: resultStatus === "ok" ? extractCompletedIngestJobWarning(job.result) : undefined,
-      collectionItemId: tracking?.jobIdToCollectionItemId?.[String(job.jobId)] ?? null,
-      retryAttempt: null,
-      idempotencyKey: null,
+      collectionItemId:
+        tracking?.jobIdToCollectionItemId?.[String(job.jobId)] ??
+        retry?.collectionItemId ??
+        null,
+      retryAttempt: retry?.retryAttempt ?? null,
+      idempotencyKey: retry?.idempotencyKey ?? null,
       title: job.result?.title ?? null,
       data: job.result,
       message: isDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined
@@ -934,12 +952,16 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
   const cancelRequestedRef = useRef(false)
-  const [retryIds, setRetryIds] = useState<string[] | null>(null)
-  const retryRequestsRef = useRef<ConferenceRetryRequestItem[]>(session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(results) : [])
+  const [retryIds, setRetryIds] = useState<string[] | null>(() =>
+    currentStep === 4 && processingState.perItemProgress.length
+      ? processingState.perItemProgress.map(item => item.id)
+      : null
+  )
+  const retryRequestsRef = useRef<ConferenceRetryRequestItem[]>(session.tracking?.retryItems ?? (session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(results) : []))
   const retryCollectionIdRef = useRef<string | undefined>(session.tracking?.collectionId)
   const validQueueItems = useMemo(
     () =>
-      getEligibleQueueItems(queueItems).filter(item => retryIds ? retryIds.includes(item.id) : !results.some(result => result.id === item.id && result.status === "ok")),
+      getEligibleQueueItems(queueItems).filter(item => (!retryIds || retryIds.includes(item.id)) && !results.some(result => result.id === item.id && result.status === "ok")),
     [queueItems, retryIds, results]
   )
   const trackedQueueItems = useMemo(
@@ -1172,7 +1194,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           : buildFailureResults(
               reattachQueueItems,
               snapshot.errorMessage || "Quick ingest could not reconnect to live job status.",
-              "failed"
+              "failed",
+              latestTracking.retryItems
             )
 
       const mergedResults = mergeWizardResults(resultsRef.current, reattachedResults)
@@ -1248,7 +1271,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     ) => {
       syncElapsed()
       const resolvedIds = new Set([...resultsRef.current, ...incomingResults].map(item => item.id))
-      applyResults([...incomingResults, ...buildFailureResults(validQueueItems.filter(item => !resolvedIds.has(item.id)), "The server returned no result for this input. Review the source and try again.", "failed")])
+      applyResults([...incomingResults, ...buildFailureResults(validQueueItems.filter(item => !resolvedIds.has(item.id)), "The server returned no result for this input. Review the source and try again.", "failed", retryRequestsRef.current.length ? retryRequestsRef.current : persistedTrackingRef.current?.retryItems)])
       updateProcessingState({
         status: nextStatus,
         estimatedRemaining: 0,
@@ -1276,7 +1299,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       const fallbackResults = buildFailureResults(
         unresolvedFallbackItems,
         message,
-        outcome
+        outcome,
+        retryRequestsRef.current.length ? retryRequestsRef.current : persistedTrackingRef.current?.retryItems
       )
       finalizeRun(outcome === "cancelled" ? "cancelled" : "error", fallbackResults)
     },
@@ -1484,6 +1508,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         ...(requestPayload.conferenceRetry
           ? {
               collectionId: requestPayload.conferenceRetry.collectionId,
+              retryItems: requestPayload.conferenceRetry.items,
               plannedItemIds: requestPayload.conferenceRetry.items.map(
                 (item) => item.collectionItemId
               ),
@@ -1712,10 +1737,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     (itemIds: string[], requests?: ConferenceRetryRequestItem[]) => {
       if (!operation.isCurrent() || !isOnlineForIngest || isCheckingConnection) return
       const requested = new Set(requests?.map(item => item.resultId) ?? itemIds)
-      const eligible = new Set(getEligibleQueueItems(queueItems).filter(item => item.url || item.file).map(item => item.id))
-      const failed = resultsRef.current.filter(item => requested.has(item.id) && eligible.has(item.id) &&
-      item.outcome !== "cancelled" && (item.status === "error" || item.outcome === "failed" || item.outcome === "submit_failed") &&
-      classifyError(item.error, item.data).retryable)
+      const failed = resultsRef.current.filter(item => requested.has(item.id) && canRetryWizardResult(item, queueItems))
       if (!failed.length) return
       const ids = failed.map((item) => item.id)
       setRetryIds(ids)
@@ -1728,6 +1750,19 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       cancelRequestedRef.current = false
       hasStartedRunRef.current = false
       activeSessionIdRef.current = null
+      runStartedAtRef.current = null
+      // Persist this attempt before upload/acknowledgment; old jobs must not be reattached.
+      markProcessingTracking({
+        mode: "webui-direct",
+        sessionId: `qi-direct-retry-${crypto.randomUUID()}`,
+        ...(retryCollectionIdRef.current && retryRequestsRef.current.length
+          ? {
+              collectionId: retryCollectionIdRef.current,
+              retryItems: retryRequestsRef.current,
+              durableMode: "durable_collection" as const
+            }
+          : {})
+      })
       updateProcessingState({
         status: "running",
         perItemProgress: ids.map((id) => ({
@@ -1741,7 +1776,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       })
       goToStep(4)
     },
-    [goToStep, isCheckingConnection, isOnlineForIngest, operation, queueItems, session.tracking, setResults, updateProcessingState]
+    [goToStep, isCheckingConnection, isOnlineForIngest, operation, queueItems, session.tracking, setResults, markProcessingTracking, updateProcessingState]
   )
 
   const handleReattach = useCallback((id: string, file: File) => {
@@ -1825,10 +1860,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     return () => { cancelled = true }
   }, [currentStep, navigate, onClose, open, operation, presetConfig, queueItems, results, reviewRetry, session.id])
 
-  const handleSearchKnowledge = useCallback(() => {
-    if (!operation.isCurrent()) return
-    navigate("/knowledge")
-  }, [navigate, operation])
+  const handleSearchKnowledge = useCallback(
+    (mediaIds: number[]) => {
+      if (!operation.isCurrent()) return
+      navigate(buildKnowledgeMediaScopePath(mediaIds))
+    },
+    [navigate, operation],
+  )
 
   const handleIngestMore = useCallback(() => {
     if (!operation.isCurrent()) return

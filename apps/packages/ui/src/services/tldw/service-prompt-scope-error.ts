@@ -112,6 +112,8 @@ export const isServicePromptRequestPath = (
   if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
+  if (/^\/api\/v1\/web-clipper\/save\/?$/.test(pathname))
+    return requestMethod === "POST"
   if (requestMethod === "GET" && (pathname === "/api/v1/notes/tasks/activity" || /^\/api\/v1\/notes\/[^/]+\/tasks$/.test(pathname))) return true
   if (/^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return ["GET", "PUT", "DELETE"].includes(requestMethod)
   if (/^\/api\/v1\/chat\/conversations\/[^/]+$/.test(pathname)) return ["GET", "PATCH"].includes(requestMethod)
@@ -125,6 +127,7 @@ export const isServicePromptRequestPath = (
     /^\/api\/v1\/characters(?:\/search)?\/?$/.test(pathname) ||
     pathname === "/api/v1/chat/conversations" ||
     /^\/api\/v1\/chat\/conversations\/[^/]+\/messages-with-context$/.test(pathname) ||
+    pathname === "/api/v1/notes/search/" ||
     pathname === "/api/v1/rag/source-health" ||
     /^\/api\/v1\/chatbooks\/download\/[^/]+$/.test(pathname)
   )) return true

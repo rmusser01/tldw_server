@@ -55,6 +55,92 @@ describe("submitQuickIngestBatch", () => {
     expect(result.results).toEqual([expect.objectContaining({ id: "failed", mediaId: 99, collectionItemId: 81, retryAttempt: 1 })])
     expect(mocks.sendMessage).not.toHaveBeenCalled()
   })
+  it.each([false, true])(
+    "reuses durable collection identity and retry metadata (extension=%s)",
+    async (extension) => {
+      mocks.runtimeId = extension ? "extension-test" : undefined
+      mocks.bgUpload.mockResolvedValue({
+        batch_id: "retry-batch",
+        jobs: [{ id: 501 }]
+      })
+      mocks.bgRequest.mockImplementation(async ({ path, body }) => {
+        if (path === "/api/v1/media/ingest/jobs/501")
+          return {
+            ok: true,
+            data: { status: "completed", result: { media_id: 3 } }
+          }
+        if (path === "/api/v1/media/collections/7/items/11")
+          return { id: 11, collection_id: 7, ...body }
+        throw new Error(`Unexpected new collection path: ${path}`)
+      })
+      const request = {
+        entries: [
+          {
+            id: "failed-item",
+            url: "https://example.com/source.pdf",
+            type: "pdf" as const
+          }
+        ],
+        files: [],
+        storeRemote: true,
+        processOnly: false,
+        conferenceBatchMetadata: {
+          collectionName: "Existing collection",
+          conferenceName: "Conference",
+          eventYear: "2026",
+          sharedTags: []
+        },
+        conferenceRetry: {
+          collectionId: "7",
+          items: [
+            {
+              resultId: "failed-item",
+              collectionItemId: "11",
+              retryAttempt: 2,
+              idempotencyKey: "conference-retry-11-2"
+            }
+          ]
+        }
+      }
+      const ack = await startQuickIngestSession(request)
+      const response = await submitQuickIngestBatch({
+        ...request,
+        __quickIngestSessionId: ack.sessionId
+      })
+      expect(response.results).toMatchObject([
+        {
+          id: "failed-item",
+          status: "ok",
+          mediaId: 3,
+          collectionItemId: 11,
+          retryAttempt: 2,
+          idempotencyKey: "conference-retry-11-2"
+        }
+      ])
+      expect(mocks.bgUpload.mock.calls[0][0].fields).toMatchObject({
+        media_collection_id: 7,
+        media_collection_item_id: 11,
+        planned_item_ids: ["11"],
+        idempotency_key: "conference-retry-11-2"
+      })
+      expect(mocks.bgRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: "/api/v1/media/collections/7/items/11",
+          method: "PATCH",
+          body: expect.objectContaining({
+            retry_count: 2,
+            idempotency_key: "conference-retry-11-2"
+          })
+        })
+      )
+      expect(
+        mocks.bgRequest.mock.calls.some(
+          ([request]) => request.method === "POST"
+        )
+      ).toBe(false)
+      expect(mocks.sendMessage).not.toHaveBeenCalled()
+    }
+  )
 
   it("retains saved-source Warning data through the real direct upload and job poller", async () => {
     const terminal = { status: "Warning", media_id: 1, error: null, warnings: ["Analysis failed for chunk 1"] }

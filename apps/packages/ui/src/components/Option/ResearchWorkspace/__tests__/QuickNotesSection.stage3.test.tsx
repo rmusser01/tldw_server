@@ -77,9 +77,26 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
-    selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  useWorkspaceStore: Object.assign(
+    (selector: (state: typeof workspaceStoreState) => unknown) =>
+      selector(workspaceStoreState),
+    { getState: () => workspaceStoreState, subscribe: () => () => {} }
+  )
+}))
+
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => ({
+    requestScope: {
+      config: {
+        serverUrl: "https://research.example",
+        authMode: "single-user"
+      },
+      userId: null
+    },
+    scopeSignal: new AbortController().signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    release: () => {}
+  })
 }))
 
 vi.mock("@/services/background-proxy", () => ({
@@ -195,7 +212,7 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
       if (path.includes("/api/v1/notes/search/") && path.includes("limit=8")) {
         return []
       }
-      if (path.includes("/api/v1/notes/42?expected_version=1")) {
+      if (path === "/api/v1/notes/42" && request.method === "PUT") {
         throw { status: 409, message: "version conflict" }
       }
       if (path.endsWith("/api/v1/notes/42")) {
@@ -261,7 +278,7 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
       if (path.includes("/api/v1/notes/search/") && path.includes("limit=8")) {
         return []
       }
-      if (path.includes("/api/v1/notes/7?expected_version=1")) {
+      if (path === "/api/v1/notes/7" && request.method === "PUT") {
         return {
           id: 7,
           title: "Saved Note",

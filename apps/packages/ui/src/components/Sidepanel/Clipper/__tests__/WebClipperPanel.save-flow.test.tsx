@@ -1,6 +1,6 @@
 import React from "react"
 import userEvent from "@testing-library/user-event"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { buildClipDraft } from "@/services/web-clipper/draft-builder"
 import {
@@ -18,6 +18,22 @@ const apiMocks = vi.hoisted(() => ({
   saveWebClip: vi.fn(),
   persistWebClipEnrichment: vi.fn(),
   createChatCompletion: vi.fn()
+}))
+
+const clipOwner = vi.hoisted(() => ({
+  controller: new AbortController(),
+  release: vi.fn()
+}))
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => ({
+    scopeSignal: clipOwner.controller.signal,
+    scopeInvalidatedSignal: clipOwner.controller.signal,
+    release: clipOwner.release,
+    requestScope: {
+      config: { serverUrl: "https://owner.test", authMode: "multi-user" },
+      userId: "owner"
+    }
+  })
 }))
 
 const openTabMock = vi.hoisted(() => vi.fn())
@@ -141,8 +157,60 @@ const chooseWorkspaceDestination = async (
 }
 
 describe("WebClipperPanel save flow", () => {
+  it("opens the saved canonical note in full-page Knowledge and fences a changed owner", async () => {
+    const id = "12345678-1234-4234-8234-123456789abc"
+    apiMocks.saveWebClip.mockResolvedValue({
+      status: "saved",
+      note: { id, title: "Recognizable saved source", version: 1 },
+      warnings: [],
+      attachments: []
+    })
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+    await userEvent.click(screen.getByRole("button", { name: "Save clip" }))
+    const ask = await screen.findByRole("button", {
+      name: "Ask captured source"
+    })
+    expect(apiMocks.saveWebClip.mock.calls[0][1]).toMatchObject({
+      requestScope: { userId: "owner" },
+      signal: clipOwner.controller.signal
+    })
+    expect(screen.getByText("Recognizable saved source")).toBeVisible()
+    await userEvent.click(ask)
+    expect(openTabMock).toHaveBeenCalledWith({
+      url: `chrome-extension://unit-test/options.html#/knowledge?note_ids=${id}`
+    })
+    expect(navigateMock).not.toHaveBeenCalled()
+    act(() => clipOwner.controller.abort())
+    expect(
+      screen.queryByRole("button", { name: "Ask captured source" })
+    ).toBeNull()
+  })
+  it("does not publish a captured-note handoff from a save completed after owner change", async () => {
+    const pending = createDeferred<any>()
+    apiMocks.saveWebClip.mockReturnValue(pending.promise)
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+    await userEvent.click(screen.getByRole("button", { name: "Save clip" }))
+    await waitFor(() => expect(apiMocks.saveWebClip).toHaveBeenCalledOnce())
+    act(() => clipOwner.controller.abort())
+    await act(async () =>
+      pending.resolve({
+        status: "saved",
+        note: {
+          id: "12345678-1234-4234-8234-123456789abc",
+          title: "Other owner"
+        },
+        warnings: []
+      })
+    )
+    expect(
+      screen.queryByRole("button", { name: "Ask captured source" })
+    ).toBeNull()
+    expect(screen.queryByText("Other owner")).toBeNull()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
+    clipOwner.controller = new AbortController()
     chromeStorageState.clear()
     window.sessionStorage.clear()
     window.localStorage.removeItem(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
@@ -275,7 +343,7 @@ describe("WebClipperPanel save flow", () => {
       expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
     })
     expect(apiMocks.listWorkspaces).toHaveBeenCalledTimes(1)
-    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+    expect(apiMocks.saveWebClip.mock.calls[0][0]).toEqual(
       expect.objectContaining({
         destination_mode: "workspace",
         workspace: { workspace_id: "workspace-beta" }
@@ -300,7 +368,7 @@ describe("WebClipperPanel save flow", () => {
     await waitFor(() => {
       expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
     })
-    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+    expect(apiMocks.saveWebClip.mock.calls[0][0]).toEqual(
       expect.objectContaining({
         destination_mode: "workspace",
         workspace: {
@@ -323,7 +391,7 @@ describe("WebClipperPanel save flow", () => {
     await waitFor(() => {
       expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
     })
-    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+    expect(apiMocks.saveWebClip.mock.calls[0][0]).toEqual(
       expect.objectContaining({
         note: expect.objectContaining({
           folder_id: 17
@@ -348,7 +416,7 @@ describe("WebClipperPanel save flow", () => {
     await waitFor(() => {
       expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
     })
-    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+    expect(apiMocks.saveWebClip.mock.calls[0][0]).toEqual(
       expect.objectContaining({
         note: expect.objectContaining({
           folder_id: 17
@@ -441,7 +509,7 @@ describe("WebClipperPanel save flow", () => {
     await waitFor(() => {
       expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
     })
-    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+    expect(apiMocks.saveWebClip.mock.calls[0][0]).toEqual(
       expect.objectContaining({
         workspace: { workspace_id: "workspace-fallback" }
       })
@@ -582,7 +650,7 @@ describe("WebClipperPanel save flow", () => {
       expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
     })
 
-    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+    expect(apiMocks.saveWebClip.mock.calls[0][0]).toEqual(
       expect.objectContaining({
         destination_mode: "workspace",
         workspace: { workspace_id: "workspace-alpha" }
@@ -782,7 +850,7 @@ describe("WebClipperPanel save flow", () => {
       expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
     })
 
-    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+    expect(apiMocks.saveWebClip.mock.calls[0][0]).toEqual(
       expect.objectContaining({
         note: expect.objectContaining({
           keywords: expect.arrayContaining(["research", "source", "captured"])
@@ -802,7 +870,7 @@ describe("WebClipperPanel save flow", () => {
       expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
     })
 
-    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+    expect(apiMocks.saveWebClip.mock.calls[0][0]).toEqual(
       expect.objectContaining({
         clip_id: "clip-shot-123",
         attachments: [
@@ -844,7 +912,7 @@ describe("WebClipperPanel save flow", () => {
       expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
     })
 
-    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+    expect(apiMocks.saveWebClip.mock.calls[0][0]).toEqual(
       expect.objectContaining({
         clip_id: "clip-rich-123",
         content: expect.objectContaining({
@@ -867,7 +935,7 @@ describe("WebClipperPanel save flow", () => {
       expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
     })
 
-    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+    expect(apiMocks.saveWebClip.mock.calls[0][0]).toEqual(
       expect.objectContaining({
         source_url: "https://example.com/story",
         capture_metadata: expect.objectContaining({

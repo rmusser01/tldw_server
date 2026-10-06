@@ -9,17 +9,17 @@ import MediaReviewPage from '../MediaReviewPage'
 import { useMediaReviewState } from '../hooks/useMediaReviewState'
 import { useMediaReviewActions } from '../hooks/useMediaReviewActions'
 
-// Test-only view of the protected runtime boundary; production Storage stays unchanged.
-type RawGetTestStorage = {
-  rawGet: (key: string) => Promise<string | null | undefined>
-}
-
 const mediaItems = Array.from({ length: 40 }).map((_, idx) => ({
   id: idx + 1,
   title: `Item ${idx + 1}`,
   snippet: `Snippet ${idx + 1}`,
   type: 'pdf',
   created_at: '2026-02-17T00:00:00.000Z'
+}))
+
+vi.mock("@/utils/research-workspace-prefill", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/utils/research-workspace-prefill")>(),
+  queueResearchWorkspacePrefill: (...args: unknown[]) => mocks.queuePrefill(...args)
 }))
 
 vi.mock('@/hooks/useHomeMilestoneScope', () => ({ useHomeMilestoneScope: () => 'server:alice' }))
@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   locationKey: 'initial',
   realFocusDropdown: false,
   items: null as any,
+  queuePrefill: vi.fn().mockResolvedValue(undefined),
   downloadBlob: vi.fn(),
   bgRequest: vi.fn(),
   refetch: vi.fn(),
@@ -422,6 +423,7 @@ vi.mock("@/components/Media/diff-worker-client", () => ({
 
 describe('MediaReviewPage active reading context', () => {
   beforeEach(() => {
+    vi.restoreAllMocks()
     mocks.authorityKey = 'verified-alice'
     mocks.authorityRevision = 0
     mocks.locationKey = 'initial'
@@ -536,6 +538,25 @@ describe('MediaReviewPage active reading context', () => {
     selectItemByCheckbox('Item 1')
     expect(screen.getByText('Content 3')).toBeInTheDocument()
     expect(mocks.bgRequest.mock.calls.filter(([r]) => String(r.path).startsWith('/api/v1/media/1?'))).toHaveLength(0)
+  })
+
+  it("hands all 40 cross-page selected sources to Ask and Research with retained titles and types", async () => {
+    const selected = mediaItems.map(item => ({ ...item, type: item.id === 1 ? "audio" : "pdf" }))
+    mocks.items = selected.slice(0, 20)
+    mocks.queuePrefill.mockClear()
+    mocks.navigate.mockClear()
+    const { rerender } = render(<MediaReviewPage />)
+    for (let id = 1; id <= 20; id++) selectItemByCheckbox(`Item ${id}`)
+    mocks.items = selected.slice(20)
+    rerender(<MediaReviewPage />)
+    for (let id = 21; id <= 40; id++) selectItemByCheckbox(`Item ${id}`)
+    const toolbar = screen.getByTestId("media-multi-batch-toolbar")
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Ask selected items" }))
+    expect(new URL(mocks.navigate.mock.calls.at(-1)![0], "https://local.test").searchParams.get("media_ids")).toBe(selected.map(item => item.id).join(","))
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Research with selected sources" }))
+    await waitFor(() => expect(mocks.queuePrefill).toHaveBeenCalledOnce())
+    expect(mocks.queuePrefill.mock.calls[0][0].sources.map((source: any) => ({ mediaId: source.mediaId, title: source.title, type: source.type }))).toEqual(selected.map(item => ({ mediaId: item.id, title: item.title, type: item.type })))
+    expect(mocks.bgRequest.mock.calls.filter(([r]) => /media\/\d+\?/.test(String(r.path)))).toHaveLength(0)
   })
 
   it('retains 40 selected metadata IDs but fetches only the active 30-item reading window', async () => {
@@ -746,7 +767,7 @@ describe('MediaReviewPage active reading context', () => {
   it('keeps an unread snapshot intact when the real registry storage read fails', async () => {
     const registry = await vi.importActual<typeof import('@/services/settings/registry')>('@/services/settings/registry')
     const storage = registry.getStorageForSetting({key:'media-review-selection-snapshot', defaultValue:null})
-    vi.spyOn(storage as unknown as RawGetTestStorage, 'rawGet').mockRejectedValue(new Error('Storage unavailable'))
+    vi.spyOn(storage, 'get').mockRejectedValue(new Error('Storage unavailable'))
     mocks.getSetting.mockImplementation(registry.getSetting)
     render(<MediaReviewPage />)
     await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith('Could not load the saved selection. Reopen Review to try again.'))
@@ -758,7 +779,7 @@ describe('MediaReviewPage active reading context', () => {
   it('persists an empty owned set after successful absence at the real registry boundary', async () => {
     const registry = await vi.importActual<typeof import('@/services/settings/registry')>('@/services/settings/registry')
     const storage = registry.getStorageForSetting({key:'media-review-selection-snapshot', defaultValue:null})
-    vi.spyOn(storage as unknown as RawGetTestStorage, 'rawGet').mockResolvedValue(undefined)
+    vi.spyOn(storage, 'get').mockResolvedValue(undefined)
     mocks.getSetting.mockImplementation(registry.getSetting)
     render(<MediaReviewPage />)
     await waitFor(() => expect(mocks.setSetting).toHaveBeenCalledWith(expect.objectContaining({key:'media-review-selection-snapshot'}), {version:1, authorityKey:'verified-alice', selectedIds:[]}))

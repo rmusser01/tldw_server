@@ -305,7 +305,8 @@ describe('AnalysisModal stage 1 cancel plumbing', () => {
       expect(onAnalysisGenerated).toHaveBeenCalledWith('Final analysis', expect.any(String))
     })
     await waitFor(() => {
-      expect(onClose).toHaveBeenCalledTimes(1)
+      expect(onClose).not.toHaveBeenCalled()
+      expect(screen.getByDisplayValue('Final analysis')).toBeVisible()
     })
     expect(mocks.bgStream).toHaveBeenCalledTimes(2)
     expect(screen.queryByText('Analysis generation cancelled')).not.toBeInTheDocument()

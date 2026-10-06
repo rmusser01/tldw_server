@@ -132,15 +132,15 @@ describe("NoResultsRecovery source diagnostics", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open Quick Ingest" }))
     expect(defaultProps.onOpenQuickIngest).toHaveBeenCalledOnce()
 
-    expect(screen.getByRole("link", { name: "Open source page" })).toHaveAttribute(
-      "href",
-      "/sources"
-    )
-    expect(screen.getByRole("link", { name: "Open source page" })).toHaveAttribute(
-      "data-router-link",
-      "true"
-    )
-    expect(screen.queryByRole("button", { name: "Add sources" })).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Open Media library" })
+    ).toHaveAttribute("href", "/media")
+    expect(
+      screen.getByRole("link", { name: "Open Media library" })
+    ).toHaveAttribute("data-router-link", "true")
+    expect(
+      screen.queryByRole("button", { name: "Add sources" })
+    ).not.toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: "Broaden source scope" })
     ).not.toBeInTheDocument()

@@ -4514,18 +4514,12 @@ export class TldwApiClientBase {
     })
   }
 
-  async searchNotes(query: string): Promise<any> {
-    const normalized = query.trim()
-    if (!normalized) {
-      return await this.listNotes()
-    }
-    const queryString = this.buildQuery({
-      query: normalized
-    })
-    return await bgRequest<any>({
-      path: `/api/v1/notes/search/${queryString}`,
-      method: "GET"
-    })
+  async searchNotes(
+    query: string,
+    params?: { limit?: number; offset?: number },
+    options?: ScopedRequestOptions,
+  ): Promise<any> {
+    return collectionsMethods.searchNotes.call(this, query, params, options)
   }
   // Prompts Methods
   async getPrompts(): Promise<any> {

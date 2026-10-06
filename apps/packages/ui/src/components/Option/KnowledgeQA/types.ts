@@ -235,6 +235,7 @@ export type KnowledgeSourceHealth = {
 }
 
 export type KnowledgeSourceHealthState = {
+  personalContentError?: string | null
   bySource: Partial<Record<RagSettings["sources"][number], KnowledgeSourceHealth>>
   sources: KnowledgeSourceHealth[]
   loading: boolean

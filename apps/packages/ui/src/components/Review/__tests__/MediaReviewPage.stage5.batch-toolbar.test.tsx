@@ -520,6 +520,20 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
     expect(mocks.setRagMediaIds).not.toHaveBeenCalled()
   })
 
+  it("continues the exact reviewed set into Knowledge instead of the whole library", async () => {
+    render(<MediaReviewPage />)
+    await screen.findByTestId("media-review-selection-count")
+    selectItemByCheckbox("Alpha paper")
+    selectItemByCheckbox("Beta notes")
+    const toolbar = await screen.findByTestId("media-multi-batch-toolbar")
+    fireEvent.click(
+      within(toolbar).getByRole("button", { name: "Ask selected items" }),
+    )
+    expect(mocks.navigate.mock.calls.at(-1)?.[0]).toBe(
+      "/knowledge?media_ids=1%2C2",
+    )
+  })
+
   it("shows batch toolbar when selection is non-empty", async () => {
     render(<MediaReviewPage />)
 

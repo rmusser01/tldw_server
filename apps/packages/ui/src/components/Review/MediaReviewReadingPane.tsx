@@ -1,3 +1,4 @@
+import { MediaKnowledgeActions } from "./MediaKnowledgeActions"
 import React from "react"
 import { Button, Tag, Tooltip, Radio, Select, Dropdown, Switch, Spin, Skeleton, Empty, Typography } from "antd"
 import { CopyIcon, HelpCircle, Settings2, ChevronLeft, ChevronRight, Layers, LayoutGrid, Focus, Rows3, Check, MessageSquare } from "lucide-react"
@@ -241,6 +242,11 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
+            <MediaKnowledgeActions
+              navigate={state.navigate}
+              key={String(d.id)}
+              items={[{ id: d.id, title: d.title, type: d.type }]}
+            />
             {viewMode === "spread" && includesId(selectedIds, d.id) && (
               <Tooltip title={t("mediaPage.unstackTooltip", "Remove this item from selection")}>
                 <Button size="small" onClick={() => removeFromSelection(d.id)}>
@@ -388,7 +394,18 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
               ) : hasAnalysis ? (
                 <ContentRenderer content={analysisShown} contentType="markdown" />
               ) : (
-                <span className="text-text-muted">{t("mediaPage.noAnalysis", "No analysis available")}</span>
+                <Button
+                  type="link"
+                  onClick={() =>
+                    state.navigate(
+                      `/media?id=${encodeURIComponent(String(d.id))}`,
+                    )
+                  }
+                >
+                  {t("mediaPage.generateAnalysisInMedia", {
+                    defaultValue: "Generate analysis in Media",
+                  })}
+                </Button>
               )}
             </div>
           </div>
@@ -404,10 +421,12 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
               size="small"
               type="link"
               onClick={() => {
-                setShowEmptyAnalysisIds((prev) => new Set(prev).add(key))
+                state.navigate(`/media?id=${encodeURIComponent(String(d.id))}`)
               }}
             >
-              {t("mediaPage.showEmptyAnalysisPanel", "Show panel")}
+              {t("mediaPage.generateAnalysisInMedia", {
+                defaultValue: "Generate analysis in Media",
+              })}
             </Button>
           </div>
         )}

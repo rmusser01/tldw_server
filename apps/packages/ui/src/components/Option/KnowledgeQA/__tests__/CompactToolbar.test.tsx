@@ -102,7 +102,9 @@ describe("CompactToolbar", () => {
 
   it("renders a compact source health summary when available", () => {
     renderToolbar({ sourceHealth })
-    expect(screen.getByText("Sources ready: 1 of 2")).toBeInTheDocument()
+    expect(
+      screen.getByText("Available services: 1 of 2 · Personal items: unknown")
+    ).toBeInTheDocument()
   })
 
   it("lets users refresh source health from the compact summary", async () => {
