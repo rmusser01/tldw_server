@@ -1,9 +1,17 @@
+import React, { useState } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { ComponentProps } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
 import { KnowledgeReadyState } from "../empty/KnowledgeReadyState"
 import type { KnowledgeSourceHealthState } from "../types"
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: { defaultValue?: string }) =>
+      options?.defaultValue ?? key,
+  }),
+}))
 
 type KnowledgeReadyStateTestProps = ComponentProps<typeof KnowledgeReadyState>
 
@@ -106,12 +114,23 @@ describe("KnowledgeReadyState activation", () => {
     renderReadyState({ hasSources: false, onAddSources })
 
     expect(screen.getByText("Ask Your Library")).toBeInTheDocument()
-    expect(
-      screen.getByText(/This page answers questions over searchable sources/i)
-    ).toBeInTheDocument()
+    const guide = screen.getByRole("button", { name: "How it works" })
+    expect(guide).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(guide)
+    expect(screen.getByText(/This page answers questions over searchable sources/i)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Add sources" }))
+    fireEvent.click(screen.getAllByRole("button", { name: "Add sources" })[0])
     expect(onAddSources).toHaveBeenCalledOnce()
+  })
+
+  it("places Add and Ask before optional guidance and recipes", () => {
+    renderReadyState({ children: <button>Ask</button> })
+    const add = screen.getByRole("button", { name: "Add sources" })
+    const ask = screen.getByRole("button", { name: "Ask" })
+    const guide = screen.getByRole("button", { name: "How it works" })
+    expect(add.compareDocumentPosition(ask) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(ask.compareDocumentPosition(guide) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(guide).toHaveAttribute("aria-expanded", "false")
   })
 
   it("distinguishes no history from a resumable history state", () => {
@@ -320,4 +339,86 @@ describe("KnowledgeReadyState activation", () => {
       screen.queryByText("Selected sources are unavailable. Open source settings or choose a different scope.")
     ).not.toBeInTheDocument()
   })
+})
+
+function RecipeComposer() {
+  const [query, setQuery] = useState("")
+  const [answer, setAnswer] = useState("")
+  const [scope, setScope] = useState("notes:note-uuid")
+  return (
+    <MemoryRouter>
+      <KnowledgeReadyState
+        {...defaultProps}
+        onPromptClick={setQuery}
+        onSelectSources={() => setScope("all")}
+        selectedSources={["notes"]}
+      />
+      <textarea
+        aria-label="Question"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      <button onClick={() => setAnswer(query)}>Ask</button>
+      <output aria-label="Answer">{answer}</output>
+      <output aria-label="Scope">{scope}</output>
+    </MemoryRouter>
+  )
+}
+
+describe("evidence-aware recipes", () => {
+  it.each([
+    "Compare these papers",
+    "Extract claims with evidence",
+    "Summarize this interview",
+    "Save a sourced brief",
+  ])(
+    "populates an editable %s question without asking or changing scope",
+    (label) => {
+      render(<RecipeComposer />)
+      fireEvent.click(screen.getByRole("button", { name: label }))
+      expect(
+        (screen.getByLabelText("Question") as HTMLTextAreaElement).value,
+      ).toMatch(/evidence|citations/i)
+      expect(screen.getByLabelText("Answer")).toHaveTextContent("")
+      expect(screen.getByLabelText("Scope")).toHaveTextContent(
+        "notes:note-uuid",
+      )
+      fireEvent.change(screen.getByLabelText("Question"), {
+        target: { value: "My edited question" },
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Ask" }))
+      expect(screen.getByLabelText("Answer")).toHaveTextContent(
+        "My edited question",
+      )
+    },
+  )
+})
+
+it("offers first-add for connected services with an empty personal library", () => {
+  const onAdd = vi.fn()
+  render(
+    <MemoryRouter>
+      <KnowledgeReadyState
+        suggestedPrompts={[]}
+        onPromptClick={vi.fn()}
+        onContinueRecent={vi.fn()}
+        onSelectSources={vi.fn()}
+        onAddSources={onAdd}
+        hasSources
+        hasRecentSession={false}
+        selectedSources={["media_db", "notes"]}
+        sourceHealth={
+          {
+            loading: false,
+            error: null,
+            loadedAt: null,
+            bySource: { media_db: { itemCount: 0 }, notes: { itemCount: 0 } },
+            sources: []
+          } as any
+        }
+      />
+    </MemoryRouter>
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Add your first source" }))
+  expect(onAdd).toHaveBeenCalledOnce()
 })

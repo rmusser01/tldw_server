@@ -106,7 +106,7 @@ describe("recent import metadata", () => {
           status: "ok",
           persisted: false,
           type: "web",
-          mediaId: 8
+          mediaId: null
         },
         { id: "failed", status: "error", type: "web", mediaId: 6 },
         { id: "duplicate", status: "ok", type: "web", mediaId: 5 }

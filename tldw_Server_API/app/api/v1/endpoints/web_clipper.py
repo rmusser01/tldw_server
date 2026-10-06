@@ -8,7 +8,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RateLimiter, User, get_rate_limiter_dep, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RateLimiter,
+    User,
+    get_rate_limiter_dep,
+    get_request_user,
+    require_expected_user,
+)
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
@@ -65,7 +71,12 @@ async def _check_rate_limit(
         )
 
 
-@router.post("/save", response_model=WebClipperSaveResponse, summary="Save a browser clip")
+@router.post(
+    "/save",
+    response_model=WebClipperSaveResponse,
+    summary="Save a browser clip",
+    dependencies=[Depends(require_expected_user)],
+)
 async def save_web_clip(
     request: Request,
     payload: WebClipperSaveRequest,

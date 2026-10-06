@@ -65,6 +65,9 @@ describe("Service Prompt scope policy", () => {
   })
   it.each([
     ["/api/v1/notes/", "POST", true],
+    ["/api/v1/notes/search/?tokens=workspace%3Aowned", "GET", true],
+    ["/api/v1/notes/search/", "POST", false],
+    ["/api/v1/notes/search/extra", "GET", false],
     ["/api/v1/notes/private-note", "GET", true],
     ["/api/v1/notes/private-note", "PUT", true],
     ["/api/v1/notes/", "GET", false],

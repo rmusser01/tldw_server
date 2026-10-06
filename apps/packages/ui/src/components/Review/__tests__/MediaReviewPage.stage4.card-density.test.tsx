@@ -528,9 +528,10 @@ describe("MediaReviewPage stage4 card density improvements", () => {
       expect(mocks.messageSuccess).toHaveBeenCalled()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /show panel/i }))
-    expect(screen.getByTestId("media-review-analysis-panel-2")).toBeInTheDocument()
-    expect(screen.getByText(/No analysis available/i)).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole("button", { name: /generate analysis in media/i }),
+    )
+    expect(mocks.navigate).toHaveBeenCalledWith("/media?id=2")
   })
 
   it("keeps helper thresholds aligned with card behavior", () => {

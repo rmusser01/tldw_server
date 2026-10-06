@@ -1,3 +1,4 @@
+import { MediaKnowledgeActions } from "./MediaKnowledgeActions"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React from "react"
 import {
@@ -2415,6 +2416,17 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
                     <div className="flex flex-wrap items-center gap-2">
                       {selected?.kind === "media" && (
                         <>
+                          <MediaKnowledgeActions
+                            navigate={navigate}
+                            key={String(selected.id)}
+                            items={[
+                              {
+                                id: selected.id,
+                                title: selected.title,
+                                type: selected.raw?.type,
+                              },
+                            ]}
+                          />
                           <Tooltip
                             title={
                               t(

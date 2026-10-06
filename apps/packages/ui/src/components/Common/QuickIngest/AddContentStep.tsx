@@ -541,8 +541,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         </Typography.Text>
         <Typography.Text className="block text-xs text-text-muted">
           {qi(
-            "wizard.addPurpose",
-            "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
+            "wizard.addReadinessPurpose",
+            "Add URLs or files. Stored items appear in Media. Knowledge search availability depends on source readiness; analysis and vector indexing are separate."
           )}
         </Typography.Text>
 

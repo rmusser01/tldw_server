@@ -865,7 +865,7 @@ const safeParseJson = (raw: string | null | undefined): unknown => {
   }
 }
 
-const hasResearchWorkspaceMigrationTombstone = (workspaceId: string): boolean => {
+export const hasResearchWorkspaceMigrationTombstone = (workspaceId: string): boolean => {
   const trimmedWorkspaceId = workspaceId.trim()
   if (!trimmedWorkspaceId || typeof localStorage === "undefined") return false
 
@@ -2292,7 +2292,7 @@ interface StudioActions {
   updateNoteKeywords: (keywords: string[]) => void
   clearCurrentNote: () => void
   captureToCurrentNote: (input: CaptureToNoteInput) => void
-  loadNote: (note: { id: number; title: string; content: string; keywords?: string[]; version?: number }) => void
+  loadNote: (note: { id: string | number; title: string; content: string; keywords?: string[]; version?: number }) => void
 }
 
 interface UIActions {
@@ -3178,7 +3178,10 @@ const coerceWorkspaceNoteForRehydrate = (candidate: unknown): WorkspaceNote => {
   }
 
   return {
-    id: typeof candidate.id === "number" ? candidate.id : undefined,
+    id: typeof candidate.id === "number" ||
+      (typeof candidate.id === "string" && candidate.id.trim())
+        ? candidate.id
+        : undefined,
     title: typeof candidate.title === "string" ? candidate.title : "",
     content: typeof candidate.content === "string" ? candidate.content : "",
     keywords: Array.isArray(candidate.keywords)

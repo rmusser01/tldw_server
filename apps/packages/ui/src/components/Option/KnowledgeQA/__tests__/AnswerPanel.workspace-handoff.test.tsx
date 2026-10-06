@@ -12,6 +12,10 @@ const messageOpenMock = vi.fn()
 const trackMetricMock = vi.fn()
 
 const state = {
+  isAuthorityCurrent: () => true,
+  answerTrustState: "uncited_degraded_answer",
+  answerEvidenceOrigin: "local_library",
+  settings: { sources: ["notes"], include_note_ids: ["note-uuid"] },
   answer: "Final answer with citation [1].",
   citations: [{ index: 1 }],
   isSearching: false,
@@ -31,6 +35,10 @@ const state = {
   messages: [] as Array<{ id: string; role: string }>,
   scrollToSource: vi.fn(),
 }
+
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({
+  useHomeMilestoneScope: () => "owner-a",
+}))
 
 vi.mock("@/services/feedback", () => ({
   getFeedbackSessionId: () => "session-1",
@@ -81,7 +89,9 @@ describe("AnswerPanel workspace handoff", () => {
     })
     render(<I18nextProvider i18n={i18n}><AnswerPanel /></I18nextProvider>)
 
-    fireEvent.click(screen.getByRole("button", { name: "Continue in editor" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue in Research Workspace" }),
+    )
 
     await waitFor(() =>
       expect(queueResearchWorkspacePrefillMock).toHaveBeenCalledWith(
@@ -89,7 +99,9 @@ describe("AnswerPanel workspace handoff", () => {
           threadId: "thread-xyz",
           query: "Compare reports",
           answer: "Final answer with citation [1].",
-        })
+          answerTrustState: "uncited_degraded_answer",
+          scope: expect.objectContaining({ include_note_ids: ["note-uuid"] }),
+        }), "owner-a"
       )
     )
     expect(trackMetricMock).toHaveBeenCalledWith({

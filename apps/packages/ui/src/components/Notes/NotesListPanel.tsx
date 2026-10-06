@@ -1,3 +1,4 @@
+import { stripKnowledgeNoteProvenance } from '@/utils/knowledge-note-provenance'
 import React from 'react'
 import { Button, Dropdown, Pagination, Spin, Tooltip } from 'antd'
 import { Clock3 as ClockIcon, Link2 as LinkIcon, Star as StarIcon, Tag as TagIcon } from 'lucide-react'
@@ -18,7 +19,9 @@ const truncateText = (value?: string | null, max?: number) => {
 }
 
 const derivePreviewText = (content?: string | null, title?: string | null) => {
-  const source = String(content || '').replace(/\r\n/g, '\n').trim()
+  const source = stripKnowledgeNoteProvenance(String(content || ''))
+    .replace(/\r\n/g, '\n')
+    .trim()
   if (!source) return ''
   const normalizedTitle = String(title || '')
     .trim()

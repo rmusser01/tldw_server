@@ -112,17 +112,26 @@ export const collectionsMethods = {
     })
   },
 
-  async searchNotes(this: TldwApiClientCore, query: string): Promise<any> {
+  async searchNotes(
+    this: TldwApiClientCore,
+    query: string,
+    params?: { limit?: number; offset?: number },
+    options?: ScopedRequestOptions,
+  ): Promise<any> {
     const normalized = query.trim()
     if (!normalized) {
-      return await this.listNotes()
+      return await this.listNotes(params, options)
     }
     const queryString = buildQuery({
-      query: normalized
+      query: normalized,
+      limit: params?.limit,
+      offset: params?.offset,
     })
     return await bgRequest<any>({
+      ...requestScopeFields(options?.requestScope),
       path: `/api/v1/notes/search/${queryString}`,
-      method: "GET"
+      method: "GET",
+      abortSignal: options?.signal,
     })
   },
 

@@ -40,31 +40,6 @@ type SearchBarProps = {
   widthMode?: "compact" | "wide"
 }
 
-function isInteractiveControlTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  return Boolean(
-    target.closest(
-      [
-        "button",
-        "a[href]",
-        "input",
-        "textarea",
-        "select",
-        "[role='button']",
-        "[role='link']",
-        "[role='menuitem']",
-        "[role='option']",
-        "[role='switch']",
-        "[role='tab']",
-      ].join(",")
-    )
-  )
-}
-
-function isKnowledgeSearchInputTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLInputElement && target.id === "knowledge-search-input"
-}
-
 export function SearchBar({
   className,
   autoFocus = true,
@@ -175,9 +150,13 @@ export function SearchBar({
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.defaultPrevented ||
+        (e.target instanceof HTMLElement &&
+          e.target.closest('[role="dialog"][aria-modal="true"]'))
+      )
+        return
       const targetIsEditable = isEditableTarget(e.target)
-      const targetIsInteractiveControl = isInteractiveControlTarget(e.target)
-      const targetIsKnowledgeSearchInput = isKnowledgeSearchInputTarget(e.target)
 
       // Focus search bar on "/" key
       if (e.key === "/" && !e.metaKey && !e.ctrlKey) {
@@ -186,23 +165,11 @@ export function SearchBar({
           inputRef.current?.focus()
         }
       }
-      // Cmd+K for new search
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.key.toLowerCase() === "k" &&
-        (!targetIsEditable || targetIsKnowledgeSearchInput) &&
-        (!targetIsInteractiveControl || targetIsKnowledgeSearchInput)
-      ) {
-        e.preventDefault()
-        clearResults()
-        setQuery("")
-        inputRef.current?.focus()
-      }
     }
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [clearResults, setQuery])
+  }, [])
 
   // Auto focus on mount
   useEffect(() => {
@@ -276,7 +243,11 @@ export function SearchBar({
   return (
     <form
       onSubmit={handleSubmit}
-      className={cn("mx-auto w-full", widthMode === "compact" && "max-w-3xl", className)}
+      className={cn(
+        "mx-auto w-full",
+        widthMode === "compact" && "max-w-3xl",
+        className,
+      )}
     >
       <p id="knowledge-qa-search-description" className="sr-only">
         Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
@@ -321,14 +292,14 @@ export function SearchBar({
             if (e.key === "ArrowDown") {
               e.preventDefault()
               setActiveSuggestionIndex((prev) =>
-                prev >= suggestions.length - 1 ? 0 : prev + 1
+                prev >= suggestions.length - 1 ? 0 : prev + 1,
               )
               return
             }
             if (e.key === "ArrowUp") {
               e.preventDefault()
               setActiveSuggestionIndex((prev) =>
-                prev <= 0 ? suggestions.length - 1 : prev - 1
+                prev <= 0 ? suggestions.length - 1 : prev - 1,
               )
               return
             }
@@ -337,7 +308,7 @@ export function SearchBar({
               if (!activeSuggestion) {
                 e.preventDefault()
                 setActiveSuggestionIndex(
-                  suggestions.length > 0 ? suggestions.length - 1 : -1
+                  suggestions.length > 0 ? suggestions.length - 1 : -1,
                 )
                 return
               }
@@ -359,10 +330,15 @@ export function SearchBar({
             "bg-transparent rounded-xl focus:outline-none",
             "placeholder:text-text-subtle",
             "transition-all duration-200",
-            isSearching && "opacity-75 cursor-not-allowed"
+            isSearching && "opacity-75 cursor-not-allowed",
           )}
           aria-label="Search your knowledge base"
           aria-describedby={searchDescriptionIds}
+          aria-activedescendant={
+            shouldShowSuggestions && activeSuggestionIndex >= 0
+              ? `knowledge-suggestion-${activeSuggestionIndex}`
+              : undefined
+          }
           aria-autocomplete="list"
           aria-expanded={shouldShowSuggestions}
           aria-controls={shouldShowSuggestions ? "knowledge-search-suggestions" : undefined}
@@ -372,10 +348,13 @@ export function SearchBar({
           <div
             id="knowledge-search-suggestions"
             role="listbox"
+            aria-label="Question suggestions"
             className="absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-xl border border-border bg-surface shadow-lg"
           >
             {suggestions.map((suggestion, index) => (
               <button
+                id={`knowledge-suggestion-${index}`}
+                tabIndex={-1}
                 key={suggestion.id}
                 type="button"
                 role="option"
@@ -384,7 +363,7 @@ export function SearchBar({
                   "flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors",
                   activeSuggestionIndex === index
                     ? "bg-primary/10 text-primary"
-                    : "hover:bg-hover"
+                    : "hover:bg-hover",
                 )}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => applySuggestion(suggestion)}
@@ -431,7 +410,7 @@ export function SearchBar({
                 "font-medium text-sm",
                 "transition-all duration-200",
                 "disabled:opacity-50 disabled:cursor-not-allowed",
-                "hover:bg-primaryStrong"
+                "hover:bg-primaryStrong",
               )}
             >
               {isSearching ? "Searching..." : "Ask"}
@@ -474,12 +453,19 @@ export function SearchBar({
       <div
         className={cn(
           "mt-2 flex items-center justify-between gap-3 text-xs text-text-muted",
-          showHintEmphasis && "text-sm text-text"
+          showHintEmphasis && "text-sm text-text",
         )}
       >
         <span className="truncate">
-          Press <kbd className="px-1.5 py-0.5 rounded font-mono text-text bg-gray-100 dark:bg-gray-800 border border-border/60">/</kbd> to focus,{" "}
-          <kbd className="px-1.5 py-0.5 rounded font-mono text-text bg-gray-100 dark:bg-gray-800 border border-border/60">Cmd+K</kbd> for new search
+          Press{" "}
+          <kbd className="px-1.5 py-0.5 rounded font-mono text-text bg-gray-100 dark:bg-gray-800 border border-border/60">
+            /
+          </kbd>{" "}
+          to focus,{" "}
+          <kbd className="px-1.5 py-0.5 rounded font-mono text-text bg-gray-100 dark:bg-gray-800 border border-border/60">
+            Cmd/Ctrl+K
+          </kbd>{" "}
+          opens the command palette
         </span>
         <div className="flex items-center gap-2">
           {isLocalOnlyThread && (
@@ -519,7 +505,10 @@ export function SearchBar({
               type="button"
               onClick={() => {
                 if (!webFallbackAvailable) return
-                updateSetting("enable_web_fallback", !settings.enable_web_fallback)
+                updateSetting(
+                  "enable_web_fallback",
+                  !settings.enable_web_fallback,
+                )
               }}
               disabled={!webFallbackAvailable}
               className={cn(
@@ -527,7 +516,7 @@ export function SearchBar({
                 webFallbackUsable
                   ? "border-primary/40 bg-primary/10 text-primary"
                   : "border-border bg-surface text-text-subtle hover:bg-hover hover:text-text",
-                !webFallbackAvailable && "opacity-60 cursor-not-allowed hover:bg-surface hover:text-text-subtle"
+                !webFallbackAvailable && "opacity-60 cursor-not-allowed hover:bg-surface hover:text-text-subtle",
               )}
               aria-pressed={webFallbackUsable}
               title={
