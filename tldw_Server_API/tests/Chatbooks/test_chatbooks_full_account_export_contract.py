@@ -64,17 +64,6 @@ class _DummyAuditService:
         return None
 
 
-class _PassingQuotaManager:
-    def __init__(self, *args, **kwargs) -> None:
-        return None
-
-    async def check_export_quota(self):
-        return True, "ok"
-
-    async def check_concurrent_jobs(self):
-        return True, "ok"
-
-
 async def _override_user() -> User:
     return User(id=1, username="tester", email=None, is_active=True)
 
@@ -98,7 +87,6 @@ def export_client(monkeypatch):
     app.dependency_overrides[chatbooks_endpoints.get_chatbook_service] = lambda: service
     app.dependency_overrides[chatbooks_endpoints.get_request_user] = _override_user
     app.dependency_overrides[chatbooks_endpoints.get_audit_service_for_user] = lambda: _DummyAuditService()
-    monkeypatch.setattr(chatbooks_endpoints, "QuotaManager", _PassingQuotaManager)
     return TestClient(app), service
 
 

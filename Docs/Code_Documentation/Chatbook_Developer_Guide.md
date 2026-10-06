@@ -28,7 +28,7 @@ graph TB
     subgraph "Service Layer"
         Service[ChatbookService]
         Validator[ChatbookValidator]
-        Quota[QuotaManager]
+        Quota[QuotaManager - off switch and file-size cap]
     end
 
     subgraph "Core Components"
@@ -69,7 +69,7 @@ tldw_Server_API/app/core/Chatbooks/
 ├── chatbook_models.py        # Data models and enums
 ├── chatbook_format_v1_1.py   # v1.1 feature registry, envelopes, inventory, preview/import validation
 ├── chatbook_validators.py    # Input validation
-├── quota_manager.py          # User quota management
+├── quota_manager.py          # Off switch and the 100 MB file-size cap
 ├── jobs_adapter.py          # Core Jobs adapter (queue/status integration)
 └── exceptions.py             # Custom exceptions
 
@@ -86,7 +86,7 @@ tldw_Server_API/app/api/v1/
 - **chatbook_models.py**: Defines ChatbookManifest, ExportJob, ImportJob models
 - **chatbook_format_v1_1.py**: Shared helpers for the v1.1 format contract
 - **chatbook_validators.py**: Input validation and sanitization
-- **quota_manager.py**: Manages user quotas and rate limiting
+- **quota_manager.py**: Keeps the quota off switch and the fixed 100 MB file-size cap. It has no tiers; daily export/import and concurrent-job limits are `limits.chatbooks_*` values enforced in `chatbook_service.py` job admission
 - **jobs_adapter.py**: Core Jobs integration for enqueueing and status mapping
 
 ## Database Schema
@@ -526,32 +526,24 @@ class CreateChatbookRequest(BaseModel):
 
 ### Quota Management
 
+Chatbooks have no tiers. Three per-user limits are UserProfiles values, unlimited unless a platform admin sets them and `USAGE_QUOTAS_ENABLED` is on:
+
+- `limits.chatbooks_exports_per_day`
+- `limits.chatbooks_imports_per_day`
+- `limits.chatbooks_concurrent_jobs`
+
+`ChatbookService._resolve_job_limits` reads them through `user_quota`, and `_check_chatbook_job_admission` (`chatbook_service.py`) compares them with the user's `export_jobs` / `import_jobs` rows. A refusal is a `QuotaExceededError` (HTTP 429). `QuotaManager` keeps only the off switch the admission check reads and the fixed file-size cap:
+
 ```python
+MAX_CHATBOOK_FILE_SIZE_MB = 100
+
 class QuotaManager:
-    """Manages user quotas and limits."""
-
-    async def check_export_quota(self) -> Tuple[bool, Optional[str]]:
-        """Check if user can create an export."""
-        # Check daily limit
-        today_exports = await self._count_today_exports()
-        if today_exports >= self.tier_limits['exports_per_day']:
-            return False, "Daily export limit reached"
-
-        # Check storage quota
-        used_storage = await self._calculate_storage_used()
-        if used_storage >= self.tier_limits['storage_bytes']:
-            return False, "Storage quota exceeded"
-
-        return True, None
-
-    async def check_file_size(self, size_bytes: int) -> Tuple[bool, Optional[str]]:
-        """Check if file size is within limits."""
-        max_size = self.tier_limits['max_file_size_bytes']
-        if size_bytes > max_size:
-            return False, f"File too large. Max: {max_size} bytes"
-
-        return True, None
+    # _quotas_disabled: True when usage quotas are off, or CHATBOOKS_DISABLE_QUOTAS is set
+    async def check_file_size(self, file_size_bytes: int) -> tuple[bool, str]:
+        """Refuse a file larger than MAX_CHATBOOK_FILE_SIZE_MB."""
 ```
+
+The upload endpoints call `check_file_size` (`endpoints/chatbooks.py`). The file-size cap is a fixed guardrail, not a usage quota. See `Docs/Operations/Usage_Quotas.md`.
 
 ### Authentication & Authorization
 
@@ -1038,7 +1030,7 @@ from prometheus_client import Counter, Histogram, Gauge
 export_counter = Counter(
     'chatbook_exports_total',
     'Total number of chatbook exports',
-    ['user_tier', 'status']
+    ['status']
 )
 
 export_duration = Histogram(
@@ -1059,15 +1051,9 @@ async def create_chatbook(self, **kwargs):
     active_jobs.labels(job_type='export').inc()
     try:
         # ... operation ...
-        export_counter.labels(
-            user_tier=self.user_tier,
-            status='success'
-        ).inc()
+        export_counter.labels(status='success').inc()
     except Exception as e:
-        export_counter.labels(
-            user_tier=self.user_tier,
-            status='failure'
-        ).inc()
+        export_counter.labels(status='failure').inc()
         raise
     finally:
         active_jobs.labels(job_type='export').dec()

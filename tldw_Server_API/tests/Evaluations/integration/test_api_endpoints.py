@@ -336,9 +336,6 @@ class TestBatchEvaluationEndpoint:
             "X-RateLimit-Tier",
             "X-RateLimit-PerMinute-Limit",
             "X-RateLimit-PerMinute-Remaining",
-            "X-RateLimit-Daily-Limit",
-            "X-RateLimit-Daily-Remaining",
-            "X-RateLimit-Tokens-Remaining",
             "X-RateLimit-Reset",
         ]:
             assert key in hdrs, f"Missing header: {key}"

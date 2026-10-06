@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import asyncpg
@@ -39,7 +39,8 @@ async def test_postgres_full_profile_reports_current_day_audio_usage(
     """A finite profile quota reports real current-day usage without a DATE encoding error."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
-    from tldw_Server_API.app.core.Usage import quota_resolver
+    from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import LedgerEntry, ResourceDailyLedger
+    from tldw_Server_API.app.core.Usage import quota_checks, quota_resolver
     from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
@@ -57,21 +58,24 @@ async def test_postgres_full_profile_reports_current_day_audio_usage(
         )
     finally:
         await connection.close()
-    await pool.execute(
-        """
-        INSERT INTO audio_usage_daily (user_id, day, minutes_used)
-        VALUES ($1, DATE '2026-09-09', 9.0)
-        """,
-        user_id,
-    )
+    # Reported minutes come from the resource ledger (real UTC day), not audio_usage_daily.
+    quota_checks.reset_ledger_cache()
+    ledger = ResourceDailyLedger(db_pool=pool)
+    await ledger.initialize()
+    now = datetime.now(timezone.utc)
+    seed = [(now - timedelta(days=1), 9.0, "yesterday")]
     if minutes_used is not None:
-        await pool.execute(
-            """
-            INSERT INTO audio_usage_daily (user_id, day, minutes_used)
-            VALUES ($1, DATE '2026-09-10', $2)
-            """,
-            user_id,
-            minutes_used,
+        seed.append((now, minutes_used, "today"))
+    for occurred_at, minutes, tag in seed:
+        await ledger.add(
+            LedgerEntry(
+                entity_scope="user",
+                entity_value=str(user_id),
+                category="minutes",
+                units=int(minutes * 60),
+                op_id=f"audio-profile-test:{user_id}:{tag}",
+                occurred_at=occurred_at,
+            )
         )
 
     overrides = UserProfileOverridesRepo(pool)
@@ -107,6 +111,7 @@ async def test_postgres_full_profile_reports_current_day_audio_usage(
             )
         finally:
             quota_resolver.invalidate_user(user_id)
+            quota_checks.reset_ledger_cache()
 
 
 @pytest.mark.asyncio

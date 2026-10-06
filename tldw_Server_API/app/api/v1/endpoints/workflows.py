@@ -96,6 +96,7 @@ from tldw_Server_API.app.core.testing import (
 )
 from tldw_Server_API.app.core.Usage.quota_checks import (
     as_quota_user_id,
+    rate_limit_headers,
     seconds_until_utc_midnight,
     workflows_runs_consume,
 )
@@ -1206,28 +1207,6 @@ async def _wait_for_run_visibility(
             return run
 
 
-def _build_rate_limit_headers(limit: int, remaining: int, reset_epoch: int) -> dict[str, str]:
-    """Return a dict including both legacy X-RateLimit-* and RFC-style RateLimit-* headers.
-
-    RateLimit-Reset is provided as delta-seconds; X-RateLimit-Reset remains epoch seconds.
-    """
-    import time as _time
-    now = int(_time.time())
-    delta = max(0, int(reset_epoch) - now)
-    headers = {
-        # RFC-ish
-        "RateLimit-Limit": str(limit),
-        "RateLimit-Remaining": str(max(0, remaining)),
-        "RateLimit-Reset": str(delta),
-        "Retry-After": str(delta),
-        # Legacy
-        "X-RateLimit-Limit": str(limit),
-        "X-RateLimit-Remaining": str(max(0, remaining)),
-        "X-RateLimit-Reset": str(reset_epoch),
-    }
-    return headers
-
-
 async def _enforce_workflows_daily_cap(
     *,
     request: Request,
@@ -1253,7 +1232,7 @@ async def _enforce_workflows_daily_cap(
         return
     retry_after = seconds_until_utc_midnight()
     limit = int(decision.limit or 0)
-    headers = _build_rate_limit_headers(limit, max(0, limit - int(decision.used)), int(time.time()) + retry_after)
+    headers = rate_limit_headers(limit, max(0, limit - int(decision.used)), retry_after)
     raise HTTPException(status_code=429, detail="Daily quota exceeded", headers=headers)
 
 

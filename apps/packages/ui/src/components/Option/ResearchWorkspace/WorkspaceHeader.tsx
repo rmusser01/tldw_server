@@ -450,7 +450,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       storageOriginUsedBytes >= 0 &&
       typeof storageOriginQuotaBytes === "number" &&
       Number.isFinite(storageOriginQuotaBytes) &&
-      storageOriginQuotaBytes > 0
+      storageOriginQuotaBytes >= 0
 
     const hasAccountUsage =
       typeof storageAccountUsedBytes === "number" &&
@@ -458,7 +458,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       storageAccountUsedBytes >= 0 &&
       typeof storageAccountQuotaBytes === "number" &&
       Number.isFinite(storageAccountQuotaBytes) &&
-      storageAccountQuotaBytes > 0
+      storageAccountQuotaBytes >= 0
 
     let accountUsageShortLabel: string | null = null
     let accountRatio: number | null = null
@@ -473,10 +473,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           ? String(Math.round(roundedAccountQuota))
           : roundedAccountQuota.toFixed(1)
       accountUsageShortLabel = `${roundedAccountUsed.toFixed(1)}/${accountQuotaLabel} MB`
-      accountRatio = Math.max(
-        0,
-        Math.min(1, storageAccountUsedBytes / storageAccountQuotaBytes)
-      )
+      accountRatio =
+        storageAccountQuotaBytes > 0
+          ? Math.max(0, Math.min(1, storageAccountUsedBytes / storageAccountQuotaBytes))
+          : 1
     }
 
     const ratio = accountRatio ?? workspaceRatio

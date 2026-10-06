@@ -432,7 +432,7 @@ def test_aggregate_quota_helper_import_logs_are_sanitized(monkeypatch):
 
     with monkeypatch.context() as ctx:
         ctx.setattr(loguru, "logger", logger_stub, raising=True)
-        ctx.delattr(audio_quota, "active_streams_count", raising=True)
+        ctx.delattr(audio_quota, "get_daily_minutes_used", raising=True)
         ctx.delattr(audio_quota, "can_start_job", raising=True)
         importlib.reload(mod)
 

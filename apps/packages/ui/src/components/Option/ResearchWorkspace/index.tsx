@@ -2152,11 +2152,14 @@ const ResearchWorkspaceBody: React.FC = () => {
     try {
       const response = await tldwClient.getCurrentUserStorageQuota()
       const usedMb = Number(response?.storage_used_mb)
-      const quotaMb = Number(response?.storage_quota_mb)
+      const rawQuota = response?.storage_quota_mb
+      const quotaMb = typeof rawQuota === "number" ? rawQuota : null
       const accountUsedBytes =
         Number.isFinite(usedMb) && usedMb >= 0 ? usedMb * 1024 * 1024 : null
       const accountQuotaBytes =
-        Number.isFinite(quotaMb) && quotaMb > 0 ? quotaMb * 1024 * 1024 : null
+        quotaMb !== null && Number.isFinite(quotaMb) && quotaMb >= 0
+          ? quotaMb * 1024 * 1024
+          : null
       setWorkspaceStorageUsage((previousState) => ({
         ...previousState,
         accountUsedBytes,
@@ -2170,11 +2173,14 @@ const ResearchWorkspaceBody: React.FC = () => {
         })
         const quotas = (profile as { quotas?: Record<string, unknown> } | null)?.quotas
         const usedMb = Number(quotas?.storage_used_mb)
-        const quotaMb = Number(quotas?.storage_quota_mb)
+        const rawQuota = quotas?.storage_quota_mb
+        const quotaMb = typeof rawQuota === "number" ? rawQuota : null
         const accountUsedBytes =
           Number.isFinite(usedMb) && usedMb >= 0 ? usedMb * 1024 * 1024 : null
         const accountQuotaBytes =
-          Number.isFinite(quotaMb) && quotaMb > 0 ? quotaMb * 1024 * 1024 : null
+          quotaMb !== null && Number.isFinite(quotaMb) && quotaMb >= 0
+            ? quotaMb * 1024 * 1024
+            : null
         setWorkspaceStorageUsage((previousState) => ({
           ...previousState,
           accountUsedBytes,

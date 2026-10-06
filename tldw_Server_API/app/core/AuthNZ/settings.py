@@ -323,8 +323,8 @@ class Settings(BaseSettings):
     # ===== Storage Settings =====
     DEFAULT_STORAGE_QUOTA_MB: int = Field(
         default=5120,  # 5GB
-        ge=100,
-        description="Default storage quota in MB"
+        ge=0,
+        description="Deprecated (spec 2): no longer sets any user's storage quota; only the one-time storage quota migration reads it to skip the old default."
     )
 
     USER_DATA_BASE_PATH: str = Field(
@@ -1573,6 +1573,11 @@ def get_settings() -> Settings:
         except _SETTINGS_IMPORT_EXCEPTIONS:
             pass
         _settings = Settings(**overrides)
+        if os.getenv("DEFAULT_STORAGE_QUOTA_MB") is not None:
+            logger.warning(
+                "DEFAULT_STORAGE_QUOTA_MB is deprecated and no longer sets any user's storage quota; "
+                "set limits.storage_quota_mb per user instead."
+            )
         try:
             base_dir = None
             if core_settings:

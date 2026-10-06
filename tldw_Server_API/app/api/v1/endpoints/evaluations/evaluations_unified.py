@@ -851,8 +851,8 @@ async def get_rate_limit_status(
             tier=summary.get("tier", "free"),
             limits={
                 "evaluations_per_minute": summary.get("limits", {}).get("per_minute", {}).get("evaluations", 0),
-                "evaluations_per_day": summary.get("limits", {}).get("daily", {}).get("evaluations", 0),
-                "tokens_per_day": summary.get("limits", {}).get("daily", {}).get("tokens", 0),
+                "evaluations_per_day": summary.get("limits", {}).get("daily", {}).get("evaluations"),
+                "tokens_per_day": summary.get("limits", {}).get("daily", {}).get("tokens"),
                 "cost_per_day": int(summary.get("limits", {}).get("daily", {}).get("cost", 0)),
                 "cost_per_month": int(summary.get("limits", {}).get("monthly", {}).get("cost", 0))
             },
@@ -863,8 +863,8 @@ async def get_rate_limit_status(
                 "cost_month": int(summary.get("usage", {}).get("month", {}).get("cost", 0))
             },
             remaining={
-                "daily_evaluations": summary.get("remaining", {}).get("daily_evaluations", 0),
-                "daily_tokens": summary.get("remaining", {}).get("daily_tokens", 0),
+                "daily_evaluations": summary.get("remaining", {}).get("daily_evaluations"),
+                "daily_tokens": summary.get("remaining", {}).get("daily_tokens"),
                 "daily_cost": int(summary.get("remaining", {}).get("daily_cost", 0)),
                 "monthly_cost": int(summary.get("remaining", {}).get("monthly_cost", 0))
             },

@@ -62,30 +62,3 @@ async def test_add_daily_minutes_records_ledger_even_on_legacy_failure(monkeypat
 
     assert len(fake_ledger_entries) == 1
     assert fake_ledger_entries[0].units == int(round(1.5 * 60))
-
-
-class _FakeGovernor:
-    def __init__(self):
-        self.renewed = []
-
-    async def renew(self, handle_id: str, ttl_s: int):
-        self.renewed.append((handle_id, ttl_s))
-
-
-@pytest.mark.asyncio
-async def test_heartbeat_jobs_renews_rg_handles(monkeypatch):
-    audio_quota._reset_in_process_counters_for_tests()
-    fake = _FakeGovernor()
-    # Seed two job handles for the user
-    audio_quota._rg_job_handles[123] = ["h1", "h2"]
-
-    async def _fake_get_gov():
-        return fake
-
-    monkeypatch.setattr(audio_quota, "_get_audio_rg_governor", _fake_get_gov)
-    monkeypatch.setenv("AUDIO_JOB_TTL_SECONDS", "90")
-
-    await audio_quota.heartbeat_jobs(123)
-
-    assert len(fake.renewed) == 2
-    assert all(ttl == 90 for _, ttl in fake.renewed)

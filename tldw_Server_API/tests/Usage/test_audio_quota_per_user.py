@@ -85,15 +85,7 @@ async def test_monthly_minutes_counter_error_fails_open_and_daily_path_still_run
     assert len(added) == 1
 
 
-async def test_synchronous_concurrency_is_unlimited(limits: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """can_start_job/can_start_stream no longer reserve RG leases (per-user sync concurrency is deferred)."""
-    fetched: list[str] = []
-
-    async def _recording_governor() -> None:
-        """Record any governor fetch."""
-        fetched.append("governor")
-
-    monkeypatch.setattr(audio_quota, "_get_audio_rg_governor", _recording_governor)
+async def test_synchronous_concurrency_is_unlimited(limits: dict) -> None:
+    """can_start_job/can_start_stream admit every request (per-user sync concurrency is deferred)."""
     assert await audio_quota.can_start_job(1) == (True, "OK")
     assert await audio_quota.can_start_stream(1) == (True, "OK")
-    assert fetched == []

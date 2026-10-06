@@ -4,11 +4,11 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 
 ## 1. Descriptive of Current Feature Set
 
-- Purpose: Export, import, preview, and manage user content as portable chatbooks (ZIP + manifest), with multi-user isolation, quotas, and async job processing.
+- Purpose: Export, import, preview, and manage user content as portable chatbooks (ZIP + manifest), with multi-user isolation, optional per-user limits, and async job processing.
 - Capabilities:
   - Sync/async export and import with robust validation and sanitization
   - Signed download URLs (optional), per-user storage roots, job tracking
-  - Quotas (storage, daily ops, concurrency, file caps) and health checks
+  - Per-user job limits (daily exports/imports, concurrency), a fixed file-size cap, and health checks
 - Inputs/Outputs:
   - Input: JSON requests for export/import/preview; file upload for import
   - Output: Job metadata, manifest preview, and downloadable ZIPs
@@ -43,7 +43,7 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
   -----------
   Client
     → POST /api/v1/chatbooks/export (async_mode=false)
-      → Validate (ChatbookValidator) + Quotas (QuotaManager)
+      → Validate (ChatbookValidator) + job admission (limits.chatbooks_*)
       → Service collects content → writes manifest + files → creates ZIP in exports/
       → Persist completed ExportJob (download_url + expires_at)
       ← 200 { job_id, download_url }
@@ -69,7 +69,7 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
   - `chatbook_service.py` (export/import/preview, job state, signed URLs)
   - `chatbook_format_v1_1.py` (v1.1 feature registry, `file_inventory`
     hashing, content envelopes, preview report, and pre-import validation)
-  - `chatbook_validators.py` (file/ZIP/manifest validation), `quota_manager.py` (tier limits)
+  - `chatbook_validators.py` (file/ZIP/manifest validation), `quota_manager.py` (off switch and file-size cap)
   - `chatbook_models.py` (content types, job models)
 - Chatbook v1.1:
   - Export is opt-in through `format_version: "1.1.0"`; omitted requests keep
@@ -102,7 +102,7 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 ## 3. Developer-Related/Relevant Information for Contributors
 
 - Path: `tldw_Server_API/app/core/Chatbooks`
-- Purpose: Backup, export, import, and preview of user content (conversations, notes, characters, world books, dictionaries, media, embeddings, generated docs) as a portable “chatbook” ZIP with a JSON manifest. Supports multi-user isolation, quotas, and async job processing.
+- Purpose: Backup, export, import, and preview of user content (conversations, notes, characters, world books, dictionaries, media, embeddings, generated docs) as a portable “chatbook” ZIP with a JSON manifest. Supports multi-user isolation, optional per-user limits, and async job processing.
 
 **Overview**
 - Produces ZIP archives containing a `manifest.json` plus referenced files (media, documents) based on user selections.
@@ -113,7 +113,7 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 - `chatbook_service.py`: Main service for export/import/preview and job tracking. Creates per-user storage, writes manifests/archives, manages job rows, optional signed URLs.
 - `chatbook_models.py`: Data classes and enums for manifests, content items, relationships, and job records (export/import + statuses).
 - `chatbook_validators.py`: Centralized validation and sanitization (filenames, ZIP integrity, traversal checks, ID formats, metadata limits).
-- `quota_manager.py`: Per-user quotas (storage, per-day ops, concurrent jobs, file size). DB-backed when available with fallbacks.
+- `quota_manager.py`: The quota off switch and the fixed 100 MB file-size cap. There are no tiers; daily export/import and concurrent-job limits are `limits.chatbooks_*` values enforced in `chatbook_service.py`.
 - `exceptions.py`: Domain-specific exceptions and helpers.
 
 **Content Types**
@@ -143,7 +143,7 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 - `GET  /health` → lightweight service health for storage checks.
 
 **Export Flow (Sync)**
-- Validate request with `ChatbookValidator` and quota checks (`QuotaManager`).
+- Validate request with `ChatbookValidator`; job admission checks the user's `limits.chatbooks_*` values.
 - Build working dir, gather selected content, write `manifest.json`, include optional media/embeddings.
 - Create a ZIP in the user’s `exports/` dir. Persist a completed `ExportJob` row to support download URL and expiry.
 
@@ -163,11 +163,9 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 - Access control: jobs and files are scoped to the authenticated user. Download validates ownership and path containment.
 
 **Quotas**
-- Managed by `quota_manager.py` with tiered limits (free, premium, enterprise). Defaults:
-  - Storage: 1GB free; 5GB premium
-  - Daily ops: 10 exports/imports free; 50 premium
-  - Concurrent jobs: 2 free; 5 premium
-  - File size caps enforced per tier
+- No tiers. `limits.chatbooks_exports_per_day`, `limits.chatbooks_imports_per_day` and `limits.chatbooks_concurrent_jobs` are per-user UserProfiles values, unlimited unless a platform admin sets them and `USAGE_QUOTAS_ENABLED` is on. `chatbook_service._check_chatbook_job_admission` enforces them (HTTP 429).
+- `quota_manager.py` keeps the off switch (`CHATBOOKS_DISABLE_QUOTAS`) and the fixed 100 MB file-size cap (`MAX_CHATBOOK_FILE_SIZE_MB`).
+- See `Docs/Operations/Usage_Quotas.md`.
 
 **Database**
 - The service initializes job tables in the per-user ChaChaNotes DB (`export_jobs`, `import_jobs`).
