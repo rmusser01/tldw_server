@@ -15,6 +15,7 @@ export type MediaItem = {
 
 export type MediaDetail = {
   id: string | number
+  source?: { title?: string; type?: string; url?: string }
   title?: string
   type?: string
   created_at?: string

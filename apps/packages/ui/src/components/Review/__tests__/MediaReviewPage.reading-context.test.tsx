@@ -740,6 +740,35 @@ describe('MediaReviewPage active reading context', () => {
     expect(screen.getByText('Item 1 of 39')).toBeInTheDocument()
   })
 
+  it('uses nested source identity for off-page reading and export from the real detail DTO', async () => {
+    mocks.bgRequest.mockResolvedValue({
+      media_id: 99,
+      source: { title: 'Example Domain', type: 'html', url: 'https://example.com/' },
+      processing: { analysis: 'Stored analysis' },
+      content: { text: 'Article body', word_count: 2 },
+      keywords: [],
+      versions: [],
+      has_original_file: false
+    })
+    const { result } = renderHook(() => {
+      const state = useMediaReviewState(React.useRef(null))
+      return { state, actions: useMediaReviewActions(state) }
+    })
+    await act(async () => { await result.current.actions.ensureDetail(99) })
+    expect(result.current.state.details[99]).toMatchObject({
+      id: 99, title: 'Example Domain', type: 'html'
+    })
+    act(() => result.current.state.setSelectedIds([99]))
+    await act(async () => { await result.current.actions.handleBatchExport('json') })
+    const blob = mocks.downloadBlob.mock.calls[0][0] as Blob
+    const exported = JSON.parse(await new Promise<string>(resolve => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.readAsText(blob)
+    }))
+    expect(exported.items[0]).toMatchObject({ title: 'Example Domain', type: 'html', content: 'Article body' })
+  })
+
   it('does not recapture a replacement owner for the second comparison detail', async () => {
     let resolveLeft!: (detail: unknown) => void
     mocks.bgRequest.mockImplementation(({path}) => String(path).includes('/media/1?')
