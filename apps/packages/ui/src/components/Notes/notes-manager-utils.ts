@@ -479,7 +479,7 @@ export type KeywordMergeDraft = {
 export type MarkdownToolbarAction = 'bold' | 'italic' | 'heading' | 'list' | 'link' | 'code'
 export type OfflineDraftSyncState = 'queued' | 'syncing' | 'conflict' | 'error'
 export type OfflineDraftEntry = {
-  pendingWrite?: { key: string; body: Record<string, any>; expectedVersion: number | null; previousTitle?: string | null }
+  pendingWrite?: { key: string; body: Record<string, unknown>; expectedVersion: number | null; previousTitle?: string | null }
   key: string
   noteId: string | null
   baseVersion: number | null
@@ -497,7 +497,7 @@ export type OfflineDraftSyncResult =
   | {
       status: 'synced'
       head?: KnowledgeNoteHead
-      submittedBody?: Record<string, any>
+      submittedBody?: Record<string, unknown>
       key: string
       noteId: string
       version: number | null
@@ -505,6 +505,7 @@ export type OfflineDraftSyncResult =
     }
   | {
       status: 'conflict' | 'error'
+      discardPendingWrite?: boolean
       key: string
       message: string
     }

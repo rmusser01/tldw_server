@@ -1,4 +1,6 @@
+import { isDefinitiveWriteRejection, isNotesProvenancePolicyUnavailable, NOTES_PROVENANCE_UNAVAILABLE_MESSAGE } from "@/services/tldw/api-error"
 import {
+  type KnowledgeNoteHead,
   knowledgeNoteHead,
   resolveKnowledgeNoteProvenance,
   knowledgeNoteWriteFields,
@@ -136,8 +138,14 @@ export interface UseNotesEditorStateDeps {
   onNoteRenamed?: (event: NoteRenamedEvent) => void
 }
 
+type NotesWriteResponse = KnowledgeNoteHead & {
+  id?: string | number
+  version?: number
+  last_modified?: string
+}
+
 const noteResourcePath = (id: string | number) =>
-  `/api/v1/notes/${encodeURIComponent(String(id))}`
+  `/api/v1/notes/${encodeURIComponent(String(id))}` as const
 
 const toNoteTitle = (note: unknown): string | null => {
   const value = note && typeof note === 'object' ? (note as { title?: unknown }).title : null
@@ -1223,6 +1231,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   // ---- version conflict ----
   const isVersionConflictError = React.useCallback((error: any) => {
+    if (isNotesProvenancePolicyUnavailable(error)) return false
     const msg = String(error?.message || '')
     const lower = msg.toLowerCase()
     const status = error?.status ?? error?.response?.status
@@ -1652,7 +1661,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         ownedSaveRequest = ownedRequest
         const request = async (
           init: BgRequestInit<`/${string}`, 'GET' | 'POST' | 'PUT'>,
-          onResponse?: (response: any, submittedBody: any) => void
+          onResponse?: (response: NotesWriteResponse, submittedBody: unknown) => void
         ) => {
           if (!isCurrent()) throw new DOMException('Note selection changed', 'AbortError')
           if (init.method === 'POST' || init.method === 'PUT') {
@@ -1667,7 +1676,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             savedEditRevision = pending.revision
             init = pending.request
           }
-          const response = await bgRequest<any>({ ...init, ...ownedRequest, headers: { ...init.headers, ...ownedRequest.headers } })
+          const response = await bgRequest<NotesWriteResponse>({ ...init, ...ownedRequest, headers: { ...init.headers, ...ownedRequest.headers } })
           onResponse?.(response, init.body)
           if (!isCurrent() || controller.signal.aborted) throw new DOMException('Note selection changed', 'AbortError')
           if (init.method === 'POST' || init.method === 'PUT') pendingWriteRef.current = null
@@ -1701,7 +1710,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
               !Number.isSafeInteger(snapshot.originalMetadata.knowledge_provenance_version) || snapshot.originalMetadata.knowledge_provenance_version <= 0 ||
               !/^sha256:[a-f0-9]{64}$/.test(snapshot.originalMetadata.knowledge_provenance_hash || ''))
             throw new Error('Reload the removed source history before restoring it.')
-          const restored = await request({ path: `${noteResourcePath(noteId)}/provenance/restore` as any, method: 'POST',
+          const restored = await request({ path: `${noteResourcePath(noteId)}/provenance/restore`, method: 'POST',
             headers: { 'Content-Type': 'application/json', 'expected-version': String(baseVersion) },
             body: { expected_provenance_version: snapshot.originalMetadata.knowledge_provenance_version, expected_provenance_hash: snapshot.originalMetadata.knowledge_provenance_hash },
           })
@@ -1804,7 +1813,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
               announceSavedTitle(
                 noteId,
                 previousSavedTitle,
-                toNoteTitle(saved) ?? (String(submittedBody?.title || '').trim() || previousSavedTitle),
+                toNoteTitle(saved) ?? (String((submittedBody as { title?: string } | undefined)?.title || '').trim() || previousSavedTitle),
                 requestAuthorityScope
               )
           )
@@ -1851,7 +1860,11 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           console.debug('[NotesManagerPage] Refresh after save failed:', e)
           return result
         }
-        const failure = classifyNoteSaveError(e)
+        if (isDefinitiveWriteRejection(e)) pendingWriteRef.current = null
+        const policyUnavailable = isNotesProvenancePolicyUnavailable(e)
+        const failure: NoteSaveFailure | null = policyUnavailable
+          ? { kind: 'validation', status: Number(e?.status) || null, message: t('option:notesSearch.sourceHistoryUnavailable', { defaultValue: NOTES_PROVENANCE_UNAVAILABLE_MESSAGE }) }
+          : classifyNoteSaveError(e)
         if (failure?.kind === 'conflict') {
           pendingWriteRef.current = null
           const draftKey = offlineDraftKeyFor(noteId)
@@ -1884,7 +1897,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
         dispatchSave({ type: 'save-failed', failure, queuedOffline, hasNewerEdits: hasNewerEdits() })
         settled = true
-        if (showSuccessMessage && !requestAuthorityScope) {
+        if (showSuccessMessage && (!requestAuthorityScope || policyUnavailable)) {
           // Without a verified owner there is no save state to show the problem in.
           message.error(describeSaveFailure(failure, false))
         }
@@ -1991,7 +2004,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           let expectedVersion: number | null = null
           let previousTitle: string | null = null
           if (draft.noteId) {
-            const remote = await bgRequest<any>({ ...requestScopeOptions, headers: ownerHeader, path: noteResourcePath(draft.noteId) as any, method: 'GET' })
+            const remote = await bgRequest<NotesWriteResponse>({ ...requestScopeOptions, headers: ownerHeader, path: noteResourcePath(draft.noteId), method: 'GET' })
             if (authorityChanged() || controller.signal.aborted) return cancelledResult
             previousTitle = toNoteTitle(remote)
             const remoteVersion = toNoteVersion(remote)
@@ -2014,9 +2027,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           offlineDraftQueueRef.current = queue
           setOfflineDraftQueue(queue)
         }
-        const saved = await bgRequest<any>({
+        const saved = await bgRequest<NotesWriteResponse>({
           ...requestScopeOptions,
-          path: draft.noteId ? noteResourcePath(draft.noteId) as any : '/api/v1/notes/',
+          path: draft.noteId ? noteResourcePath(draft.noteId) : '/api/v1/notes/',
           method: draft.noteId ? 'PUT' : 'POST',
           headers: { ...ownerHeader, 'Content-Type': 'application/json', 'Idempotency-Key': pending.key,
             ...(pending.expectedVersion != null ? { 'expected-version': String(pending.expectedVersion) } : {}),
@@ -2047,7 +2060,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         return {
           status: 'error',
           key: draft.key,
-          message: String(error?.message || 'Queued sync failed.')
+          discardPendingWrite: isDefinitiveWriteRejection(error),
+          message: isNotesProvenancePolicyUnavailable(error) ? NOTES_PROVENANCE_UNAVAILABLE_MESSAGE : String(error?.message || 'Queued sync failed.')
         }
       } finally {
         authorityRequestsRef.current.delete(controller)
@@ -2088,13 +2102,16 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         })
 
         const latestEntry = offlineDraftQueueRef.current[queuedEntry.key] || queuedEntry
+        const editorSelectionEpoch = noteSelectionEpochRef.current
+        const editorNoteId = selectedIdRef.current
+        const editorStillSelected = () => noteSelectionEpochRef.current === editorSelectionEpoch && selectedIdRef.current === editorNoteId
         const syncResult = await syncOfflineDraftEntry(latestEntry)
         if (authorityEpochRef.current !== requestEpoch || authorityScopeRef.current !== requestScope) return
         if (syncResult.status === 'synced' && syncResult.noteId) {
           successfulSyncs += 1
           const submitted = syncResult.submittedBody
           const differs = (value: { title: string; content: string; keywords: string[] }) => submitted && (
-            value.title !== (submitted.title || '') || stripKnowledgeNoteProvenance(value.content) !== stripKnowledgeNoteProvenance(submitted.content || '') ||
+            value.title !== (submitted.title || '') || stripKnowledgeNoteProvenance(value.content) !== stripKnowledgeNoteProvenance(String(submitted.content || '')) ||
             JSON.stringify(value.keywords) !== JSON.stringify(submitted.keywords || []))
           setOfflineDraftQueue((current) => {
             const queued = current[syncResult.key]
@@ -2108,7 +2125,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             }
             return next
           })
-          if ((selectedIdRef.current == null && syncResult.key === NOTES_OFFLINE_NEW_DRAFT_KEY) || String(selectedIdRef.current) === syncResult.noteId) {
+          if (editorStillSelected() && ((editorNoteId == null && syncResult.key === NOTES_OFFLINE_NEW_DRAFT_KEY) || String(editorNoteId) === syncResult.noteId)) {
             const latest = editRevisionRef.current
             const dirty = isDirtyRef.current || Boolean(differs({ title: latest.title, content: latest.content, keywords: latest.editorKeywords }))
             selectedIdRef.current = syncResult.noteId
@@ -2136,7 +2153,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
               }
             }
           })
-          if (syncResult.key === offlineDraftKeyFor(selectedIdRef.current)) {
+          if (editorStillSelected() && syncResult.key === offlineDraftKeyFor(selectedIdRef.current)) {
             dispatchSave({
               type: 'save-failed',
               failure: { kind: 'conflict', status: 409, message: syncResult.message },
@@ -2156,6 +2173,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
               [syncResult.key]: {
                 ...existing,
                 syncState: 'error',
+                ...(syncResult.discardPendingWrite ? { pendingWrite: undefined } : {}),
                 lastError: syncResult.message
               }
             }

@@ -292,6 +292,8 @@ export type KnowledgeQAMessage = {
 export type KnowledgeQAState = {
   // Search state
   query: string
+  // Question associated with displayed results; optional for legacy consumers.
+  resultQuery?: string | null
   isSearching: boolean
   hasSearched: boolean
   results: RagResult[]

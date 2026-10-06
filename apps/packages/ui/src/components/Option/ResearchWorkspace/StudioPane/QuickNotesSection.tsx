@@ -1,3 +1,4 @@
+import { isDefinitiveWriteRejection, isNotesProvenancePolicyUnavailable, NOTES_PROVENANCE_UNAVAILABLE_MESSAGE } from "@/services/tldw/api-error"
 import { KnowledgeNoteHistory } from "@/components/Notes/KnowledgeNoteHistory"
 import {
   knowledgeNoteHead,
@@ -816,8 +817,11 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       await loadWorkspaceNotes({ request, isCurrent })
     } catch (error: any) {
       if (!isCurrent()) return
-      // Handle version conflict
-      if (error?.message?.includes("version") || error?.status === 409) {
+      if (isDefinitiveWriteRejection(error)) pendingSaveRef.current = null
+      // A policy-blocked receipt remains uncertain and must retain its key/body.
+      if (isNotesProvenancePolicyUnavailable(error)) {
+        messageApi.error(t("playground:studio.sourceHistoryUnavailable", NOTES_PROVENANCE_UNAVAILABLE_MESSAGE))
+      } else if (error?.message?.includes("version") || error?.status === 409) {
         pendingSaveRef.current = null
         if (draft.id && scope && !String(error?.message).includes("encryption_unsupported")) {
           try {

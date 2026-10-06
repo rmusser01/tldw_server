@@ -119,6 +119,7 @@ const KNOWLEDGE_QA_SETTINGS_OVERRIDES: Partial<RagSettings> = {
 // Initial state
 const initialState: KnowledgeQAState = {
   query: "",
+  resultQuery: null,
   isSearching: false,
   hasSearched: false,
   results: [],
@@ -162,6 +163,7 @@ const isLocalThreadId = (id: string | null | undefined) =>
   Boolean(id && id.startsWith(LOCAL_THREAD_PREFIX))
 
 type ResultsPayload = {
+  query: string | null
   completedGenerationEnabled?: boolean | null
   results: RagResult[]
   answer: string | null
@@ -268,6 +270,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return {
         ...state,
         results: action.payload.results,
+        resultQuery: action.payload.query,
         completedGenerationEnabled: action.payload.completedGenerationEnabled ?? null,
         answer: action.payload.answer,
         citations: action.payload.citations,
@@ -286,6 +289,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return {
         ...state,
         results: action.payload.results,
+        resultQuery: action.payload.query,
         answer: action.payload.answer,
         citations: action.payload.citations,
         answerTrustState: action.payload.answerTrustState,
@@ -347,6 +351,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
     case "CLEAR_RESULTS":
       return {
         ...state,
+        resultQuery: null,
         results: [],
         completedGenerationEnabled: null,
         answer: null,
@@ -770,7 +775,11 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
     ragContext.search_query.trim().length > 0
       ? ragContext.search_query
       : null
-  const query = latestUserMessage?.content || queryFromContext
+  const answeredUserMessage = messages
+    .slice(0, messages.indexOf(latestAssistantMessage))
+    .reverse()
+    .find((message) => message.role === "user")
+  const query = queryFromContext || answeredUserMessage?.content || null
 
   return {
     query,
@@ -2246,7 +2255,7 @@ function OwnedKnowledgeQAProvider({
       if (!targetThreadId || isLocalThreadId(targetThreadId)) {
         const firstQuestion =
           messagesToSync.find((candidate) => candidate.role === "user")?.content ||
-          state.query ||
+          state.resultQuery || state.query ||
           "Knowledge QA"
         targetThreadId = await createNewThread(firstQuestion)
         if (!targetThreadId) return false
@@ -2361,6 +2370,7 @@ function OwnedKnowledgeQAProvider({
     state.currentThreadId,
     state.messages,
     state.query,
+    state.resultQuery,
     state.results,
     state.settings.strip_min_relevance,
   ])
@@ -2660,6 +2670,7 @@ function OwnedKnowledgeQAProvider({
                 dispatch({
                   type: "SET_PARTIAL_RESULTS",
                   payload: {
+                    query: trimmedQuery,
                     results: streamResults,
                     answer: partialAnswer,
                     citations: partialCitations,
@@ -2699,6 +2710,7 @@ function OwnedKnowledgeQAProvider({
                 dispatch({
                   type: "SET_PARTIAL_RESULTS",
                   payload: {
+                    query: trimmedQuery,
                     results: streamResults,
                     answer: partialAnswer,
                     citations: partialCitations,
@@ -2834,6 +2846,7 @@ function OwnedKnowledgeQAProvider({
         dispatch({
           type: "SET_RESULTS",
           payload: {
+            query: trimmedQuery,
             results,
             answer,
             citations,
@@ -3051,12 +3064,12 @@ function OwnedKnowledgeQAProvider({
   const rerunWithTokenLimit = useCallback(
     async (tokenLimit: number) => {
       const normalized = Math.max(64, Math.min(4000, Math.round(tokenLimit)))
-      await runKnowledgeQuery(state.query, false, {
+      await runKnowledgeQuery(state.resultQuery ?? state.query, false, {
         max_generation_tokens: normalized,
         enable_generation: true,
       })
     },
-    [runKnowledgeQuery, state.query]
+    [runKnowledgeQuery, state.query, state.resultQuery]
   )
 
   const clearResults = useCallback(() => {
@@ -3156,6 +3169,7 @@ function OwnedKnowledgeQAProvider({
         dispatch({
           type: "SET_RESULTS",
           payload: {
+            query: hydration.query,
             completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
             results: hydration.results,
             answer: hydration.answer,
@@ -3273,6 +3287,7 @@ function OwnedKnowledgeQAProvider({
           dispatch({
             type: "SET_RESULTS",
             payload: {
+              query: hydration.query,
               completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
               results: hydration.results,
               answer: hydration.answer,
@@ -3440,6 +3455,7 @@ function OwnedKnowledgeQAProvider({
         dispatch({
           type: "SET_RESULTS",
           payload: {
+            query: hydration.query,
             completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
             results: hydration.results,
             answer: hydration.answer,

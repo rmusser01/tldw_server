@@ -1,3 +1,4 @@
+import { isDefinitiveWriteRejection, isNotesProvenancePolicyUnavailable, NOTES_PROVENANCE_UNAVAILABLE_MESSAGE } from "@/services/tldw/api-error"
 import { toPrefillSource } from "@/utils/research-workspace-prefill"
 /**
  * ExportDialog - Export conversations as markdown/PDF with citations
@@ -100,11 +101,13 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     answerEvidenceOrigin,
     answerTrustReasonCodes,
     lastSearchScope,
-    query,
+    query: editableQuery,
+    resultQuery,
     settings,
     preset,
     searchDetails,
   } = useKnowledgeQA()
+  const query = resultQuery === undefined ? editableQuery : resultQuery ?? ""
   const message = useAntdMessage()
   const [options, setOptions] = useState<ExportOptions>(DEFAULT_OPTIONS)
   const [isExporting, setIsExporting] = useState(false)
@@ -463,8 +466,10 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
       if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
-      const mappedError =
-        error instanceof Error && error.message
+      if (isDefinitiveWriteRejection(error)) pendingNoteRef.current = null
+      const mappedError = isNotesProvenancePolicyUnavailable(error)
+        ? NOTES_PROVENANCE_UNAVAILABLE_MESSAGE
+        : error instanceof Error && error.message
           ? `Failed to save to Notes. ${error.message}`
           : "Failed to save to Notes."
       message.open({

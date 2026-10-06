@@ -91,3 +91,25 @@ export const getStructuredApiErrorDetail = (
         : undefined
   }
 }
+
+export const NOTES_PROVENANCE_UNAVAILABLE_MESSAGE =
+  "Source history is unavailable under the current server storage policy. Your draft is retained; retry when it is available."
+
+/** A read-policy gate can reject replay of a write that already committed. */
+export const isNotesProvenancePolicyUnavailable = (error: unknown): boolean => {
+  if (!isRecord(error)) return false
+  const details = isRecord(error.details) ? error.details : null
+  const detail = details?.detail ?? error.detail
+  const code = isRecord(detail) ? detail.error_code ?? detail.code : detail
+  return code === "notes_provenance_encryption_unsupported" ||
+    error.code === "notes_provenance_encryption_unsupported" ||
+    (typeof error.message === "string" && error.message.includes("notes_provenance_encryption_unsupported"))
+}
+
+/** HTTP client rejections allow corrected input; timeout/server/transport outcomes do not. */
+export const isDefinitiveWriteRejection = (error: unknown): boolean => {
+  if (!isRecord(error) || isNotesProvenancePolicyUnavailable(error)) return false
+  const response = isRecord(error.response) ? error.response : null
+  const status = error.status ?? response?.status
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 408
+}

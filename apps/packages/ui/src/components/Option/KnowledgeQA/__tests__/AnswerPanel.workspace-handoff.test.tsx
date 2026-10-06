@@ -31,6 +31,7 @@ const state = {
   ],
   searchDetails: null,
   query: "Compare reports",
+  resultQuery: "Compare reports",
   currentThreadId: "thread-xyz",
   messages: [] as Array<{ id: string; role: string }>,
   scrollToSource: vi.fn(),
@@ -76,6 +77,7 @@ vi.mock("../KnowledgeQAProvider", () => ({
 describe("AnswerPanel workspace handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    state.query = "New question, not searched"
     queueResearchWorkspacePrefillMock.mockResolvedValue(undefined)
     trackMetricMock.mockResolvedValue(undefined)
   })

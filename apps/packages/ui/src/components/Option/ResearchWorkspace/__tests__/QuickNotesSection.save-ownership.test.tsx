@@ -1,3 +1,4 @@
+import type { BgRequestInit } from "@/services/background-proxy"
 import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -82,7 +83,7 @@ const beginSave = async (boundary: "GET" | "PUT" | "POST") => {
   if (boundary === "POST") initial.id = undefined
   if (boundary === "PUT") initial.version = 3
   useWorkspaceStore.setState({ currentNote: initial })
-  mocks.request.mockImplementation(async (request: any) => {
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
     if (request.path.includes("/search/")) return []
     if (request.method === "GET") {
       if (boundary === "GET") await gate.promise
@@ -283,7 +284,7 @@ it("backfills only the exact absent child and retries a lost acknowledgment unch
     knowledge_provenance_state: "absent", knowledge_provenance_version: 0,
   } as WorkspaceNote })
   let first = true
-  mocks.request.mockImplementation(async (request: any) => {
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
     if (request.path.includes("/search/")) return []
     if (request.method === "GET") return { ...draft(), version: 4 }
     if (first) { first = false; throw new Error("Lost acknowledgment") }
@@ -316,4 +317,49 @@ it.each(["active", "deleted"] as const)("displays only the %s retained source hi
     expect(screen.queryByRole("link", { name: "Original source" })).not.toBeInTheDocument()
   } else expect(screen.queryByText("Retained excerpt")).not.toBeInTheDocument()
   expect(mocks.request.mock.calls.every(([request]) => !request.path.includes("foreign-note"))).toBe(true)
+})
+
+it('releases a definitively rejected request so corrected Quick Notes input gets a new identity', async () => {
+  useWorkspaceStore.setState({ currentNote: { ...draft(), version: 3, content: 'Invalid body' } })
+  mocks.request.mockImplementation(async request => {
+    if (request.path.includes('/search/')) return []
+    if (request.body?.content === 'Invalid body') throw Object.assign(new Error('validation rejected'), { status: 422 })
+    return { ...request.body, id: noteId, version: 4 }
+  })
+  render(<QuickNotesSection />)
+  fireEvent.click(screen.getByRole('button', { name: 'Update' }))
+  await waitFor(() => expect(mocks.error).toHaveBeenCalled())
+  act(() => { useWorkspaceStore.getState().updateNoteContent('Corrected body') })
+  fireEvent.click(screen.getByRole('button', { name: 'Update' }))
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled())
+  expect(writes()[1][0].body.content).toBe('Corrected body')
+  expect(writes()[1][0].headers['Idempotency-Key']).not.toBe(writes()[0][0].headers['Idempotency-Key'])
+})
+
+it('preserves a lost-ack create through a normalized policy 409', async () => {
+  const history = { origin: 'knowledge_qa', question: 'Original question' }
+  const marker = `<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`
+  useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined, content: `Original answer\n\n${marker}` } })
+  mocks.request.mockImplementation(async request => {
+    if (request.path.includes('/search/')) return []
+    const attempts = writes().length
+    if (attempts === 1) throw new Error('Lost acknowledgment')
+    if (attempts === 2) throw Object.assign(new Error('Knowledge provenance could not be saved; refresh its state and retry.'), {
+      status: 409, details: { detail: { error_code: 'notes_provenance_encryption_unsupported', message: 'Knowledge provenance could not be saved; refresh its state and retry.' } }
+    })
+    return { ...request.body, id: noteId, version: 1 }
+  })
+  render(<QuickNotesSection />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(mocks.error).toHaveBeenCalledTimes(1))
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(writes()).toHaveLength(2))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled())
+  act(() => { useWorkspaceStore.getState().updateNoteContent('Later draft') })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled())
+  expect(writes()[2][0].headers).toEqual(writes()[0][0].headers)
+  expect(writes()[2][0].body).toEqual(writes()[0][0].body)
+  expect(writes()[0][0].body.knowledge_provenance).toEqual(history)
+  expect(useWorkspaceStore.getState().currentNote.content).toBe('Later draft')
 })

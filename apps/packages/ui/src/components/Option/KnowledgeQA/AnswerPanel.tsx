@@ -191,6 +191,8 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     completedGenerationEnabled = null,
     search,
     query = "",
+    resultQuery,
+    lastSearchScope,
     currentThreadId = null,
     messages = [],
     setSettingsPanelOpen,
@@ -201,6 +203,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     sourceHealth,
     expertMode = false,
   } = useKnowledgeQA()
+  const answeredQuery = resultQuery === undefined ? query : resultQuery ?? ""
   const [isExpanded, setIsExpanded] = useState(false)
   const [answerFeedback, setAnswerFeedback] = useState<"up" | "down" | null>(null)
   const [answerFeedbackSubmitting, setAnswerFeedbackSubmitting] = useState(false)
@@ -440,7 +443,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
       await submitExplicitFeedback({
         conversation_id: currentThreadId || undefined,
         message_id: latestAssistantMessageId || undefined,
-        query: query?.trim() || undefined,
+        query: answeredQuery.trim() || undefined,
         feedback_type: "helpful",
         helpful: thumb === "up",
         feedback_id: searchDetails?.feedbackId || undefined,
@@ -523,14 +526,18 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     try {
       const payload = buildKnowledgeQaWorkspacePrefill({
         threadId: currentThreadId,
-        query,
+        query: answeredQuery,
         answer: normalizedAnswer,
         citations: citations.map((citation) => citation.index),
         results,
         answerTrustState,
         answerEvidenceOrigin,
         answerTrustReasonCodes,
-        scope: settings
+        scope: lastSearchScope ? {
+          sources: lastSearchScope.sources, include_media_ids: lastSearchScope.includeMediaIds,
+          include_note_ids: lastSearchScope.includeNoteIds, collection_id: lastSearchScope.collectionId,
+          keyword_filter: lastSearchScope.keywordFilter, enable_web_fallback: lastSearchScope.webFallback,
+        } : settings
           ? {
               sources: settings.sources,
               include_media_ids: settings.include_media_ids,

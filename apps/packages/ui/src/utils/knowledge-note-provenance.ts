@@ -55,25 +55,25 @@ export type KnowledgeNoteHead = {
 
 const MAX_MARKER_LENGTH = 1_000_000;
 const markerPattern = /^<!-- tldw-knowledge:v1:([^\r\n]+) -->$/gm;
-const isRecord = (value: unknown): value is Record<string, any> =>
+const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const keys = (
   value: unknown,
   allowed: string[],
-): value is Record<string, any> =>
+): value is Record<string, unknown> =>
   isRecord(value) && Object.keys(value).every((key) => allowed.includes(key));
 const shortString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= 512;
 const positiveId = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) > 0;
-const list = (value: unknown, valid: (item: any) => boolean): boolean =>
+const list = (value: unknown, valid: (item: unknown) => boolean): boolean =>
   Array.isArray(value) && value.length <= 100 && value.every(valid);
 const stringList = (value: unknown) => list(value, shortString);
-const optional = (value: unknown, valid: (item: any) => boolean) =>
+const optional = (value: unknown, valid: (item: unknown) => boolean) =>
   value == null || valid(value);
 const origin = (value: unknown) =>
-  ["local_library", "web_fallback", "mixed", "unknown_origin"].includes(
-    String(value),
+  typeof value === "string" && ["local_library", "web_fallback", "mixed", "unknown_origin"].includes(
+    value,
   );
 const excerpt = (value: unknown) =>
   typeof value === "string" && value.length <= 100_000;
@@ -118,6 +118,7 @@ const source = (value: unknown): boolean =>
   excerpt(value.excerpt) &&
   (value.mediaId === null || positiveId(value.mediaId)) &&
   shortString(value.title) &&
+  typeof value.type === "string" &&
   ["pdf", "video", "audio", "website", "text", "document"].includes(
     value.type,
   ) &&
@@ -179,7 +180,7 @@ export const validateKnowledgeNoteProvenance = (
       "trust_reason_codes",
       "sources",
     ]) ||
-    !["knowledge_qa", "reviewed_sources"].includes(value.origin) ||
+    (value.origin !== "knowledge_qa" && value.origin !== "reviewed_sources") ||
     !optional(value.trust_state, isKnowledgeAnswerTrustState) ||
     !optional(value.evidence_origin, origin) ||
     !optional(value.thread_id, shortString) ||
@@ -193,7 +194,7 @@ export const validateKnowledgeNoteProvenance = (
   try {
     const serialized = JSON.stringify(value);
     // JSON escapes lone surrogates, but neither server UTF-8 nor portable URI encoding accepts them.
-    const stringsValid = (item: any): boolean =>
+    const stringsValid = (item: unknown): boolean =>
       typeof item === "string"
         ? !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(
             item,
@@ -255,6 +256,7 @@ export const resolveKnowledgeNoteProvenance = (
       typeof record.content === "string" ? record.content : "",
     );
   const state = record.knowledge_provenance_state;
+  const metadata = isRecord(record.metadata) ? record.metadata : {};
   const canonical = state === "active" || state === "deleted";
   const provenance =
     state === "deleted"
@@ -264,9 +266,9 @@ export const resolveKnowledgeNoteProvenance = (
         : validateKnowledgeNoteProvenance(record.knowledge_provenance) ||
           validateKnowledgeNoteProvenance(record) ||
           validateKnowledgeNoteProvenance(
-            record.metadata?.knowledge_provenance,
+            metadata.knowledge_provenance,
           ) ||
-          validateKnowledgeNoteProvenance(record.metadata) ||
+          validateKnowledgeNoteProvenance(metadata) ||
           marker;
   const reconciliation =
     record.knowledge_provenance_reconciliation === "canonical_wins" ||
@@ -288,9 +290,9 @@ export const knowledgeNoteHead = (
   return {
     ...(record.knowledge_provenance_state !== undefined
       ? {
-          knowledge_provenance_state: record.knowledge_provenance_state,
-          knowledge_provenance_version: record.knowledge_provenance_version,
-          knowledge_provenance_hash: record.knowledge_provenance_hash,
+          knowledge_provenance_state: record.knowledge_provenance_state as KnowledgeNoteHead["knowledge_provenance_state"],
+          knowledge_provenance_version: record.knowledge_provenance_version as KnowledgeNoteHead["knowledge_provenance_version"],
+          knowledge_provenance_hash: record.knowledge_provenance_hash as KnowledgeNoteHead["knowledge_provenance_hash"],
         }
       : {}),
     knowledge_provenance: resolved.provenance,

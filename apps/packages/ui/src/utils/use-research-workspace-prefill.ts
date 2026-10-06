@@ -1,3 +1,4 @@
+import { isDefinitiveWriteRejection, isNotesProvenancePolicyUnavailable, NOTES_PROVENANCE_UNAVAILABLE_MESSAGE } from "@/services/tldw/api-error"
 import { normalizeNoteKeyword } from "@/services/note-keywords"
 import { bgRequest } from "@/services/background-proxy"
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
@@ -541,7 +542,7 @@ export function useResearchWorkspacePrefill(
                 body: pending.body,
               })
             } catch (error) {
-              if ((error as { status?: number })?.status === 409) {
+              if (isDefinitiveWriteRejection(error)) {
                 delete payload.pendingNoteWrite
                 await saveResearchWorkspacePrefill(payload)
               }
@@ -636,12 +637,12 @@ export function useResearchWorkspacePrefill(
           importing: false,
           error: null,
         })
-      } catch {
+      } catch (error) {
         if (isCurrent())
           setStatus((previous) => ({
             ...previous,
             importing: false,
-            error:
+            error: isNotesProvenancePolicyUnavailable(error) ? NOTES_PROVENANCE_UNAVAILABLE_MESSAGE :
               "Knowledge import could not be saved. Your pending evidence is retained; retry unfinished imports.",
           }))
       }

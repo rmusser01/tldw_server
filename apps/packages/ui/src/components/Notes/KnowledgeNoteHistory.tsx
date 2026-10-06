@@ -20,7 +20,12 @@ export function KnowledgeNoteHistory({ note }: { note: unknown }) {
       <summary className="cursor-pointer">
         {t("notesSearch.sourceHistory", "Original source history")}
       </summary>
-      <div className="mt-2 max-h-60 space-y-2 overflow-auto whitespace-pre-wrap break-words">
+      <div
+        className="mt-2 max-h-60 space-y-2 overflow-auto whitespace-pre-wrap break-words"
+        tabIndex={0}
+        role="region"
+        aria-label={t("notesSearch.sourceHistory", "Original source history")}
+      >
         <p>
           {t(
             "notesSearch.historyExplanation",

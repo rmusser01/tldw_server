@@ -1,3 +1,5 @@
+import type { BgRequestInit } from "@/services/background-proxy"
+import type { KnowledgeNoteProvenance } from "../knowledge-note-provenance"
 import {
   readKnowledgeNoteProvenance,
   retainKnowledgeNoteProvenance,
@@ -2252,8 +2254,8 @@ it("replays canonical import receipts without replacing edits made before retry"
   transfer.sources = transfer.sources.filter(source => source.sourceType === "notes")
   await queueResearchWorkspacePrefill(transfer, "alice")
   mocks.upload.mockResolvedValue({ media_id: 101 })
-  let canonical: any = null
-  const writes: any[] = []
+  let canonical: { id: string; content: string; knowledge_provenance: KnowledgeNoteProvenance } | null = null
+  const writes: BgRequestInit[] = []
   mocks.request.mockImplementation(async request => {
     if (request.method === "POST") {
       writes.push(request)
@@ -2287,8 +2289,8 @@ it("does not finish a partial import when its recovered receipt lacks newly atta
   mocks.upload.mockResolvedValueOnce({ media_id: 101 })
     .mockRejectedValueOnce(new Error("source unavailable"))
     .mockResolvedValueOnce({ media_id: 102 })
-  let canonical: any = null
-  const writes: any[] = []
+  let canonical: { id: string; content: string; knowledge_provenance: KnowledgeNoteProvenance } | null = null
+  const writes: BgRequestInit[] = []
   mocks.request.mockImplementation(async request => {
     if (request.method === "POST" || request.method === "PUT") {
       writes.push(request)
@@ -2320,5 +2322,34 @@ it("does not finish a partial import when its recovered receipt lacks newly atta
   expect(writes[2].headers["Idempotency-Key"]).not.toBe(writes[0].headers["Idempotency-Key"])
   expect(canonical.knowledge_provenance.research.sources.map(source => source.mediaId)).toEqual([101, 102])
   expect(stripKnowledgeNoteProvenance(canonical.content)).toBe("Later authored draft")
+  view.unmount()
+})
+
+it('retains the pending canonical import through a policy-blocked receipt replay', async () => {
+  const transfer = payload()
+  transfer.sources = transfer.sources.filter(source => source.sourceType === 'notes')
+  await queueResearchWorkspacePrefill(transfer, 'alice')
+  mocks.upload.mockResolvedValue({ media_id: 101 })
+  const writes: BgRequestInit[] = []
+  let canonical: { id: string; content: string; knowledge_provenance: KnowledgeNoteProvenance } | null = null
+  mocks.request.mockImplementation(async request => {
+    if (request.method === 'POST') {
+      writes.push(request)
+      canonical ||= { ...request.body, version: 1, knowledge_provenance_state: 'active', knowledge_provenance_version: 1 }
+      if (writes.length === 1) throw new Error('Lost response')
+      if (writes.length === 2) throw Object.assign(new Error('Policy unavailable'), { status: 409, details: { detail: { error_code: 'notes_provenance_encryption_unsupported' } } })
+    }
+    if (!canonical) throw Object.assign(new Error('missing'), { status: 404 })
+    return canonical
+  })
+  const view = renderHook(() => useResearchWorkspacePrefill('workspace-a', true, true))
+  await waitFor(() => expect(view.result.current.error).not.toBeNull())
+  await act(async () => { await view.result.current.retry() })
+  await waitFor(() => expect(view.result.current.error).toContain('server storage policy'))
+  await act(async () => { await view.result.current.retry() })
+  await waitFor(() => expect(view.result.current.error).toBeNull())
+  expect(writes).toHaveLength(3)
+  expect(writes[2].body).toEqual(writes[0].body)
+  expect(writes[2].headers).toEqual(writes[0].headers)
   view.unmount()
 })

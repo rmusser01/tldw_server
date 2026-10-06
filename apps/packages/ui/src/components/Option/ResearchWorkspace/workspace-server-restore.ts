@@ -266,13 +266,14 @@ export const restoreMigratedResearchWorkspace = async (options: {
       });
       assertCurrent();
       if (full.id !== candidate.id) throw new Error("Research note identity changed");
-      if (resolveKnowledgeNoteProvenance(full).provenance?.research?.workspace_id === workspaceId) {
+      const belongsToWorkspace = (full.keywords || []).map(normalizeNoteKeyword).includes(`workspace:${workspaceId}`);
+      if (belongsToWorkspace || resolveKnowledgeNoteProvenance(full).provenance?.research?.workspace_id === workspaceId) {
         canonical = full;
         break;
       }
     }
     if (canonical) {
-      const provenance = resolveKnowledgeNoteProvenance(canonical).provenance!;
+      const provenance = resolveKnowledgeNoteProvenance(canonical).provenance;
       snapshot.currentNote = {
         id: canonical.id,
         title: canonical.title,
@@ -291,9 +292,9 @@ export const restoreMigratedResearchWorkspace = async (options: {
       };
       snapshot.notes = snapshot.currentNote.content;
       snapshot.sources = snapshot.sources.map((source) => {
-        const retained = provenance.research!.sources.find(
-          (item) => item.mediaId === source.mediaId,
-        );
+        const retained = provenance?.research?.workspace_id === workspaceId
+          ? provenance.research.sources.find((item) => item.mediaId === source.mediaId)
+          : undefined;
         return retained
           ? { ...source, knowledgeQaEvidence: retained.evidence }
           : source;

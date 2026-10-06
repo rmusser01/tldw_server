@@ -1,3 +1,4 @@
+import type { BgRequestInit } from "@/services/background-proxy"
 import React from 'react'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -915,7 +916,7 @@ describe('Notes saved-state hydration and optional monitoring', () => {
   it('replays the original sourced save after a lost acknowledgment without clearing later edits', async () => {
     const history = { origin: 'knowledge_qa', question: 'Original question' }
     let stored = note('one', { content: `Body\n\n<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`, knowledge_provenance_state: 'absent', knowledge_provenance_version: 0 })
-    const writes: any[] = []
+    const writes: BgRequestInit[] = []
     mocks.request.mockImplementation(async request => {
       if (request.method === 'PUT') {
         writes.push(request)
@@ -939,14 +940,14 @@ describe('Notes saved-state hydration and optional monitoring', () => {
     expect(view.result.current.originalMetadata).toMatchObject({ knowledge_provenance_state: 'active', knowledge_provenance_version: 1 })
   })
   it('restores retained history explicitly while preserving edits and advancing both heads', async () => {
-    const gate = deferred<any>()
+    const gate = deferred<ReturnType<typeof note>>()
     const history = { origin: 'knowledge_qa', question: 'Original question' }
     const removed = note('one', { knowledge_provenance_state: 'deleted', knowledge_provenance_version: 4, knowledge_provenance_hash: `sha256:${'a'.repeat(64)}`, knowledge_provenance: null })
     mocks.request.mockImplementation(request => request.path.endsWith('/provenance/restore') ? gate.promise : Promise.resolve(removed))
     const view = renderEditor()
     await act(async () => { await view.result.current.loadDetail('one') })
     let restoring!: Promise<boolean>
-    act(() => { restoring = view.result.current.saveNote({ restoreProvenance: true } as any) })
+    act(() => { restoring = view.result.current.saveNote({ restoreProvenance: true }) })
     await waitFor(() => expect(mocks.request).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/notes/one/provenance/restore', method: 'POST', headers: expect.objectContaining({ 'expected-version': '2' }), body: { expected_provenance_version: 4, expected_provenance_hash: removed.knowledge_provenance_hash } })))
     act(() => view.result.current.setContentDirty('Dirty while restoring'))
     await act(async () => { gate.resolve({ ...removed, version: 3, knowledge_provenance_state: 'active', knowledge_provenance_version: 5, knowledge_provenance: history }); await restoring })
@@ -959,8 +960,8 @@ describe('Notes saved-state hydration and optional monitoring', () => {
   it('retains the queued sourced request identity across an offline retry and remount', async () => {
     const history = { origin: 'knowledge_qa', question: 'Offline question' }
     const original = `Offline body\n\n<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`
-    let stored: any = null
-    const writes: any[] = []
+    let stored: ReturnType<typeof note> | null = null
+    const writes: BgRequestInit[] = []
     mocks.request.mockImplementation(async request => {
       if (request.method === 'POST') {
         writes.push(request)
@@ -988,8 +989,8 @@ describe('Notes saved-state hydration and optional monitoring', () => {
 
   it('refreshes the exact owned history head after enrollment conflict and deliberately retries the preserved draft', async () => {
     const history = { origin: 'knowledge_qa', question: 'Q' }
-    let current: any = note('one', { content: `Body\n\n<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`, knowledge_provenance_state: 'absent', knowledge_provenance_version: 0 })
-    const writes: any[] = []
+    let current = note('one', { content: `Body\n\n<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`, knowledge_provenance_state: 'absent', knowledge_provenance_version: 0 })
+    const writes: BgRequestInit[] = []
     mocks.request.mockImplementation(async request => {
       if (request.method === 'PUT') {
         writes.push(request)
@@ -1012,7 +1013,7 @@ describe('Notes saved-state hydration and optional monitoring', () => {
     expect(writes[1].headers['Idempotency-Key']).not.toBe(writes[0].headers['Idempotency-Key'])
   })
   it('does not install an explicit restore acknowledgment after the account changes', async () => {
-    const gate = deferred<any>()
+    const gate = deferred<ReturnType<typeof note>>()
     const removed = note('one', { knowledge_provenance_state: 'deleted', knowledge_provenance_version: 4, knowledge_provenance_hash: `sha256:${'a'.repeat(64)}` })
     mocks.request.mockImplementation(request => request.path.endsWith('/provenance/restore') ? gate.promise : Promise.resolve(removed))
     const view = renderEditor()
@@ -1041,6 +1042,82 @@ describe('Notes saved-state hydration and optional monitoring', () => {
     await waitFor(() => expect(view.result.current.selectedId).toBe('created'))
     await act(async () => { gate.resolve(); await saving })
     expect(view.result.current.isDirty).toBe(false)
+  })
+
+  it.each([false, true])('acknowledges the offline queue without changing a switched editor (return to A=%s)', async returnToA => {
+    const gate = deferred<ReturnType<typeof note>>()
+    mocks.request.mockImplementation(request => request.method === 'PUT' ? gate.promise : Promise.resolve(note(request.path.endsWith('/two') ? 'two' : 'one')))
+    const view = renderEditor(false)
+    await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
+    await act(async () => { await view.result.current.loadDetail('one') })
+    act(() => { view.result.current.setContentDirty('Queued A') })
+    await act(async () => { await view.result.current.saveNote() })
+    view.rerender({ scope: authority(), online: true })
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledWith(expect.objectContaining({ method: 'PUT' })))
+    await act(async () => { await view.result.current.loadDetail('two') })
+    if (returnToA) await act(async () => { await view.result.current.loadDetail('one') })
+    act(() => { view.result.current.setContentDirty('Current authored draft') })
+    const selected = view.result.current.selectedId
+    const metadata = view.result.current.originalMetadata
+    await act(async () => { gate.resolve(note('one', { version: 3, knowledge_provenance_state: 'active', knowledge_provenance_version: 1 })) })
+    await waitFor(() => expect(view.result.current.offlineDraftQueue['note:one']).toBeUndefined())
+    expect(view.result.current.selectedId).toBe(selected)
+    expect(view.result.current.content).toBe('Current authored draft')
+    expect(view.result.current.originalMetadata).toEqual(metadata)
+    expect(view.result.current.selectedVersion).toBe(2)
+    expect(view.result.current.isDirty).toBe(true)
+  })
+
+  it('releases a definitively rejected request so corrected Notes input gets a new identity', async () => {
+    const view = renderEditor()
+    mocks.request.mockImplementation(async request => {
+      if (request.method === 'PUT' && request.body.content === 'Invalid body') throw Object.assign(new Error('validation rejected'), { status: 422 })
+      return note('one', request.method === 'PUT' ? { ...request.body, version: 3 } : {})
+    })
+    await act(async () => { await view.result.current.loadDetail('one') })
+    act(() => { view.result.current.setContentDirty('Invalid body') })
+    await act(async () => { expect(await view.result.current.saveNote()).toBe(false) })
+    act(() => { view.result.current.setContentDirty('Corrected body') })
+    await act(async () => { expect(await view.result.current.saveNote()).toBe(true) })
+    const writes = mocks.request.mock.calls.map(([request]) => request).filter(request => request.method === 'PUT')
+    expect(writes[1].body.content).toBe('Corrected body')
+    expect(writes[1].headers['Idempotency-Key']).not.toBe(writes[0].headers['Idempotency-Key'])
+  })
+
+  it.each([false, true])('preserves a lost-ack create through a normalized policy 409 (offline=%s)', async offline => {
+    const history = { origin: 'knowledge_qa', question: 'Original question' }
+    const marker = `<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`
+    const writes: Array<{ body: Record<string, unknown>; headers: Record<string, string> }> = []
+    mocks.request.mockImplementation(async request => {
+      if (request.method === 'POST') {
+        writes.push(request)
+        if (writes.length === 1) throw new Error('Lost acknowledgment')
+        if (writes.length === 2) throw Object.assign(new Error('Knowledge provenance could not be saved; refresh its state and retry.'), {
+          status: 409, details: { detail: { error_code: 'notes_provenance_encryption_unsupported', message: 'Knowledge provenance could not be saved; refresh its state and retry.' } }
+        })
+      }
+      return note('receipt-note', { ...writes[0]?.body, version: 1 })
+    })
+    const view = renderEditor(!offline)
+    await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
+    act(() => { view.result.current.setContentDirty(`Original sourced body\n\n${marker}`) })
+    await act(async () => { await view.result.current.saveNote() })
+    if (offline) view.rerender({ scope: authority(), online: true })
+    await waitFor(() => expect(writes).toHaveLength(1))
+    const retry = async () => {
+      if (offline) {
+        view.rerender({ scope: authority(), online: false })
+        view.rerender({ scope: authority(), online: true })
+      } else await act(async () => { await view.result.current.saveNote() })
+    }
+    await retry()
+    await waitFor(() => expect(writes).toHaveLength(2))
+    await retry()
+    await waitFor(() => expect(writes).toHaveLength(3))
+    expect(writes[2].headers['Idempotency-Key']).toBe(writes[0].headers['Idempotency-Key'])
+    expect(writes[2].body).toEqual(writes[0].body)
+    expect(writes[0].body.knowledge_provenance).toEqual(history)
+    await waitFor(() => expect(view.result.current.selectedId).toBe('receipt-note'))
   })
 
 })
