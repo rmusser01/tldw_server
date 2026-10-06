@@ -73,6 +73,17 @@ class NoteProvenanceStore:
             record = self._record(note_id, connection)
             return record if record and (include_deleted or not record["deleted"]) else None
 
+    def list_parent_notes(self, *, after_note_id: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+        """Page this owner's retained parents, including trash, in stable ID order."""
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise InputError("Knowledge provenance source page limit must be 1..200")
+        with self._db.transaction() as conn:
+            rows = conn.execute(
+                "SELECT * FROM notes WHERE client_id = ? AND id > ? ORDER BY id LIMIT ?",
+                (self._db.owner_user_id, after_note_id or "", limit),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     @staticmethod
     def _version(value: int, *, absent: bool = False) -> None:
         """Require independent positive safe integer revisions, or zero for absence."""

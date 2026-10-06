@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from time import monotonic_ns
 from typing import Any, Literal
 
@@ -989,6 +989,14 @@ class SyncV2Store:
         )
 
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
+        from .notes_provenance import expand_provenance_tombstone
+        if envelope.domain == "notes.note" and envelope.operation == "tombstone":
+            existing = self.get_existing_envelope_for_idempotency(envelope)
+            if existing is not None:
+                return existing
+        plan = expand_provenance_tombstone(envelope, store=self)
+        if plan is not None:
+            return self.insert_envelopes_atomic(plan)[0]
         return self.db.insert_envelope(envelope, connection=self._connection)
 
     def insert_claimed_conflict_resolution_envelope(
@@ -1045,12 +1053,14 @@ class SyncV2Store:
         trusted_notes_organization_bootstrap_id: str | None = None,
         trusted_notes_task_bootstrap_id: str | None = None,
         trusted_notes_task_coordinator: bool = False,
+        trusted_notes_provenance_bootstrap: Callable[[SyncEnvelopeCreate], bool] | None = None,
     ) -> list[SyncEnvelope]:
         """Insert one complete validated group or return its exact stored replay."""
 
         return self.db.insert_envelopes_atomic(
             envelopes,
             trusted_notes_organization_bootstrap_id=trusted_notes_organization_bootstrap_id,
+            trusted_notes_provenance_bootstrap=trusted_notes_provenance_bootstrap,
             trusted_notes_task_bootstrap_id=trusted_notes_task_bootstrap_id,
             trusted_notes_task_coordinator=trusted_notes_task_coordinator,
         )
@@ -1072,6 +1082,14 @@ class SyncV2Store:
         self,
         envelope: SyncEnvelopeCreate,
     ) -> SyncEnvelope | None:
+        if envelope.domain == "notes.note" and envelope.operation == "tombstone" and envelope.mutation_group_id is None:
+            from .mutation_group_validation import validate_stored_mutation_group
+            from .notes_provenance import singleton_delete_group_id
+            group_id = singleton_delete_group_id(envelope)
+            group = self.list_mutation_group(envelope.dataset_id, group_id)
+            if group:
+                validate_stored_mutation_group(group, dataset_id=envelope.dataset_id, mutation_group_id=group_id)
+                envelope = replace(envelope, mutation_group_id=group_id, mutation_step=0, mutation_step_count=len(group), mutation_plan_hash=group[0].mutation_plan_hash)
         return self.db.get_existing_envelope_for_idempotency(envelope)
 
     def list_envelopes_after(

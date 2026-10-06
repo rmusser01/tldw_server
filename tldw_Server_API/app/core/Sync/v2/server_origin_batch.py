@@ -129,6 +129,7 @@ def capture_server_origin_mutation_batch(
     idempotency_key: str,
     trusted_notes_organization_bootstrap_id: str | None = None,
     trusted_notes_link_bootstrap_id: str | None = None,
+    trusted_notes_provenance_bootstrap_id: str | None = None,
     trusted_notes_attachment_bootstrap_id: str | None = None,
     trusted_notes_task_bootstrap_id: str | None = None,
     trusted_notes_task_activity_bootstrap_id: str | None = None,
@@ -158,6 +159,7 @@ def capture_server_origin_mutation_batch(
         for item in (
             trusted_notes_organization_bootstrap_id,
             trusted_notes_link_bootstrap_id,
+            trusted_notes_provenance_bootstrap_id,
             trusted_notes_attachment_bootstrap_id,
             trusted_notes_task_bootstrap_id,
             trusted_notes_task_activity_bootstrap_id,
@@ -175,6 +177,7 @@ def capture_server_origin_mutation_batch(
     trusted_bootstrap_id = (
         trusted_notes_organization_bootstrap_id
         or trusted_notes_link_bootstrap_id
+        or trusted_notes_provenance_bootstrap_id
         or trusted_notes_attachment_bootstrap_id
         or trusted_notes_task_bootstrap_id
         or trusted_notes_task_activity_bootstrap_id
@@ -196,6 +199,13 @@ def capture_server_origin_mutation_batch(
     if not server_frontend_mutation_enabled_for_policy(dataset.encryption_policy):
         raise SyncServerOriginMutationNotSupportedError(dataset, plan[0].domain)
 
+    from .notes_provenance import expand_provenance_tombstone_steps
+    existing_group = service.store.list_mutation_group(
+        dataset.dataset_id,
+        _mutation_group_id(dataset.dataset_id, source=source, idempotency_key=normalized_key),
+    )
+    if trusted_notes_provenance_bootstrap_id is None:
+        plan = expand_provenance_tombstone_steps(plan, store=service.store, dataset_id=dataset.dataset_id, existing=existing_group)
     canonical_steps = tuple(
         _canonical_step(step, source=source, user_id=user_id) for step in plan
     )
@@ -283,6 +293,7 @@ def capture_server_origin_mutation_batch(
             inserted = service.store.insert_envelopes_atomic(
                 envelopes,
                 trusted_notes_organization_bootstrap_id=trusted_bootstrap_id,
+                trusted_notes_provenance_bootstrap=(bootstrap_step_verifier if trusted_notes_provenance_bootstrap_id is not None else None),
                 trusted_notes_task_bootstrap_id=(
                     trusted_notes_task_bootstrap_id
                     or trusted_notes_task_activity_bootstrap_id
@@ -548,7 +559,12 @@ def _evaluate_plan(
             if step.object_revision is None
             else step.object_revision
         )
+        if bootstrap_id is None and step.domain in {"notes.note", "notes.provenance"} and step.object_revision is not None and step.object_revision != _next_object_revision(prior_head):
+            raise SyncStoreError("notes_version_conflict")
         payload_hash, payload_size = canonical_payload_hash(dict(step.payload))
+        if step.domain == "notes.provenance":
+            from .notes_provenance_contract import notes_provenance_object_hash
+            payload_hash = notes_provenance_object_hash(step.payload, deleted=step.operation == "tombstone")
         if notes_attachment_bootstrap and step.domain == "attachment.ref":
             payload_hash = attachment_ref_v2_object_hash(
                 step.operation,
@@ -1278,6 +1294,12 @@ def _require_batch_write_ready(
             or state != "bootstrapping"
         ):
             raise SyncStoreError("notes_task_activity_sync_not_ready")
+    if "notes.provenance" in domains:
+        metadata = dataset.metadata.get("notes_provenance_v1", {})
+        if metadata.get("state") != "ready" and not (
+            metadata.get("state") == "initializing" and trusted_bootstrap_id == metadata.get("bootstrap_id")
+        ):
+            raise SyncStoreError("notes_provenance_sync_not_ready")
     if "notes.link" in domains:
         metadata = dataset.metadata.get("notes_link_v1")
         state = metadata.get("state") if isinstance(metadata, Mapping) else None

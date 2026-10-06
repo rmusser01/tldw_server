@@ -58,6 +58,7 @@ SyncDomain = Literal[
     "notes.folder",
     "notes.folder_link",
     "notes.link",
+    "notes.provenance",
     "notes.task",
     "notes.task_activity",
     "personal_context.manifest",
@@ -1101,6 +1102,7 @@ class SyncProfileDatasetStatusResponse(BaseModel):
     server_frontend_mutation_blockers: list[str] = Field(default_factory=list)
     notes_organization: SyncNotesOrganizationStatusResponse | None = None
     notes_link: SyncNotesOrganizationStatusResponse | None = None
+    notes_provenance: SyncNotesOrganizationStatusResponse | None = None
     notes_attachment: SyncNotesOrganizationStatusResponse | None = None
 
 
