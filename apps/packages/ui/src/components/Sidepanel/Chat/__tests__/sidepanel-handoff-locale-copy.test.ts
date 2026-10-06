@@ -1,3 +1,5 @@
+import playground from "@/assets/locale/en/playground.json"
+import extensionPlayground from "@/public/_locales/en/playground.json"
 import extensionSidepanel from "@/public/_locales/en/sidepanel.json"
 import sidepanel from "@/assets/locale/en/sidepanel.json"
 import { describe, expect, it } from "vitest"
@@ -19,4 +21,9 @@ it("mirrors opening choices and recovery copy in the source and flattened extens
   expect(source.greetingPicker?.start).toBe("Start with this greeting")
   for (const [key, text] of Object.entries(source.greetingPicker ?? {}))
     expect((extensionSidepanel as Record<string, { message: string }>)[`greetingPicker_${key}`]?.message).toBe(text)
+})
+
+it("mirrors fresh-copy checking and recovery feedback", () => {
+  for (const [key, value] of Object.entries(playground.sidepanelHandoff))
+    expect((extensionPlayground as Record<string, { message: string }>)[`sidepanelHandoff_${key}`]?.message).toBe(value)
 })

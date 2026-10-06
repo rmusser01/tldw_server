@@ -434,7 +434,8 @@ export const createSidepanelChatHandoff = async (
 }
 
 export const readSidepanelChatHandoff = async (
-  id: string
+  id: string,
+  options?: { throwOnReadError?: boolean }
 ): Promise<SidepanelChatHandoffPackage | null> => {
   const key = storageKey(id)
 
@@ -449,7 +450,8 @@ export const readSidepanelChatHandoff = async (
     }
 
     return pkg
-  } catch {
+  } catch (error) {
+    if (options?.throwOnReadError) throw error
     return null
   }
 }

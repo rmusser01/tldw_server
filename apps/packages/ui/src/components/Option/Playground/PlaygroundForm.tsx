@@ -2268,11 +2268,14 @@ export const PlaygroundForm = ({
     importedContext: importedSidepanelContext,
     removeImportedContext: clearImportedSidepanelContext,
     conflict: sidepanelHandoffConflict,
+    importPending: sidepanelImportPending,
+    conflictFeedback: sidepanelImportFeedback,
     insertHandoffDraft,
     replaceWithHandoffDraft,
     cancelHandoffImport,
   } = useSidepanelChatHandoffImport({
     draftValue: form.values.message || "",
+    getDraftRevision: form.getRevision,
     setMessageValue,
     notificationApi,
     t,
@@ -5579,10 +5582,19 @@ export const PlaygroundForm = ({
                         )}
                       </div>
                     </div>
+                    {(sidepanelImportPending || sidepanelImportFeedback) ? (
+                      <p role="status" className="basis-full text-text-muted">
+                        {sidepanelImportPending
+                          ? t("playground:sidepanelHandoff.checkingCopy", "Checking the copy…")
+                          : sidepanelImportFeedback}
+                      </p>
+                    ) : null}
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={insertHandoffDraft}
+                        disabled={sidepanelImportPending}
+                        aria-busy={sidepanelImportPending || undefined}
                         className="min-h-7 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                       >
                         {t(
@@ -5593,6 +5605,8 @@ export const PlaygroundForm = ({
                       <button
                         type="button"
                         onClick={replaceWithHandoffDraft}
+                        disabled={sidepanelImportPending}
+                        aria-busy={sidepanelImportPending || undefined}
                         className="min-h-7 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                       >
                         {t(

@@ -4075,5 +4075,17 @@
   },
   "composer_modelSortLabel": {
     "message": "Sort models"
+  },
+  "sidepanelHandoff_checkingCopy": {
+    "message": "Checking the copy…"
+  },
+  "sidepanelHandoff_draftChanged": {
+    "message": "Your draft changed while the copy was checked. Review it, then choose Insert or Replace again."
+  },
+  "sidepanelHandoff_readFailed": {
+    "message": "The copy could not be checked. Your draft remains here. Try Insert or Replace again."
+  },
+  "sidepanelHandoff_unavailableCopyDescription": {
+    "message": "The copy expired or could not be read. Your destination draft remains here. Copy again from the sidepanel to try again."
   }
 }

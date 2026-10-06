@@ -1510,5 +1510,11 @@
   "characterRail": {
     "nativePersonaUnavailable": "Saved persona chats cannot start in this view. Use an overlay personality instead; your current chat and draft are still here.",
     "selectionError": "The assistant could not be selected. Your current chat and draft are still here; try choosing again."
+  },
+  "sidepanelHandoff": {
+    "checkingCopy": "Checking the copy…",
+    "draftChanged": "Your draft changed while the copy was checked. Review it, then choose Insert or Replace again.",
+    "readFailed": "The copy could not be checked. Your draft remains here. Try Insert or Replace again.",
+    "unavailableCopyDescription": "The copy expired or could not be read. Your destination draft remains here. Copy again from the sidepanel to try again."
   }
 }

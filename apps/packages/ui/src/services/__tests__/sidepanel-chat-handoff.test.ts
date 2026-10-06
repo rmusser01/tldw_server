@@ -219,6 +219,22 @@ describe("sidepanel chat handoff storage service", () => {
     expect(storageState.remove).toHaveBeenCalledTimes(1)
   })
 
+  it("propagates storage read errors only for callers requesting a retryable read", async () => {
+    storageState.get.mockRejectedValueOnce(new Error("read failed"))
+    await expect(readSidepanelChatHandoff("handoff-existing")).resolves.toBeNull()
+    storageState.get.mockRejectedValueOnce(new Error("read failed"))
+    await expect(readSidepanelChatHandoff("handoff-existing", { throwOnReadError: true })).rejects.toThrow("read failed")
+    expect(storageState.remove).not.toHaveBeenCalled()
+  })
+
+  it("returns null for missing, expired or consumed copies even when read errors are propagated", async () => {
+    storageState.store.set(storageKey("expired"), buildStoredPackage({ id: "expired", expiresAt: new Date(NOW.getTime() - 1).toISOString() }))
+    storageState.store.set(storageKey("consumed"), buildStoredPackage({ id: "consumed", consumedAt: NOW.toISOString() }))
+    for (const id of ["missing", "expired", "consumed"]) {
+      await expect(readSidepanelChatHandoff(id, { throwOnReadError: true })).resolves.toBeNull()
+    }
+  })
+
   it("returns null and removes expired or malformed packages", async () => {
     const expired = buildStoredPackage({
       id: "expired",

@@ -23,19 +23,21 @@ export type SidepanelChatHandoffConflict = {
 
 type UseSidepanelChatHandoffImportDeps = {
   draftValue: string
+  getDraftRevision: () => number
   setMessageValue: SetMessageValue
   notificationApi?: NotificationApi
   t: (key: string, defaultValueOrOptions?: any, options?: any) => string
 }
 
 const appendImportedDraft = (currentDraft: string, importedDraft: string) => {
-  if (!currentDraft.trim()) return importedDraft
-  if (!importedDraft.trim()) return currentDraft
-  return `${currentDraft.trimEnd()}\n\n${importedDraft}`
+  if (!currentDraft) return importedDraft
+  if (!importedDraft) return currentDraft
+  return `${currentDraft}\n\n${importedDraft}`
 }
 
 export function useSidepanelChatHandoffImport({
   draftValue,
+  getDraftRevision,
   setMessageValue,
   notificationApi,
   t,
@@ -46,12 +48,22 @@ export function useSidepanelChatHandoffImport({
     React.useState<SidepanelChatHandoffPageContext | null>(null)
   const [conflict, setConflict] =
     React.useState<SidepanelChatHandoffConflict | null>(null)
+  const [importPending, setImportPending] = React.useState(false)
+  const [conflictFeedback, setConflictFeedback] = React.useState<string | null>(null)
+  const pendingChoiceRef = React.useRef<{ location: typeof location; draft: string; revision: number } | null>(null)
+  const locationRef = React.useRef(location)
+  locationRef.current = location
   const draftValueRef = React.useRef(draftValue)
+  draftValueRef.current = draftValue
   const handledHandoffIdsRef = React.useRef(new Set<string>())
 
-  React.useEffect(() => {
-    draftValueRef.current = draftValue
-  }, [draftValue])
+  React.useLayoutEffect(() => {
+    pendingChoiceRef.current = null
+    setImportPending(false)
+    setConflict(null)
+    setConflictFeedback(null)
+    return () => { pendingChoiceRef.current = null }
+  }, [location.key, location.pathname, location.search, location.hash])
 
   const cleanRouteHandoff = React.useCallback(() => {
     const params = new URLSearchParams(location.search)
@@ -75,8 +87,8 @@ export function useSidepanelChatHandoffImport({
         "Sidepanel handoff unavailable",
       ),
       description: t(
-        "playground:sidepanelHandoff.unavailableDescription",
-        "The imported sidepanel draft expired or could not be read. You can keep chatting normally.",
+        "playground:sidepanelHandoff.unavailableCopyDescription",
+        "The copy expired or could not be read. Your destination draft remains here. Copy again from the sidepanel to try again.",
       ),
     })
   }, [notificationApi, t])
@@ -122,7 +134,7 @@ export function useSidepanelChatHandoffImport({
         return
       }
 
-      if (draftValueRef.current.trim().length > 0) {
+      if (draftValueRef.current.length > 0) {
         handledHandoffIdsRef.current.add(handoff.id)
         setConflict({ handoff })
         return
@@ -140,21 +152,62 @@ export function useSidepanelChatHandoffImport({
     setImportedContext(null)
   }, [])
 
-  const insertHandoffDraft = React.useCallback(() => {
-    if (!conflict) return
-    applyImportedHandoff(
-      conflict.handoff,
-      appendImportedDraft(draftValueRef.current, conflict.handoff.draft.text),
-    )
-  }, [applyImportedHandoff, conflict])
+  const acceptHandoffDraft = React.useCallback(async (action: "insert" | "replace") => {
+    if (!conflict || pendingChoiceRef.current) return
+    const attempt = { location: locationRef.current, draft: draftValueRef.current, revision: getDraftRevision() }
+    pendingChoiceRef.current = attempt
+    setImportPending(true)
+    setConflictFeedback(null)
+    const isCurrent = () => pendingChoiceRef.current === attempt &&
+      locationRef.current.key === attempt.location.key &&
+      locationRef.current.pathname === attempt.location.pathname &&
+      locationRef.current.search === attempt.location.search &&
+      locationRef.current.hash === attempt.location.hash &&
+      new URLSearchParams(locationRef.current.search).get("handoff") === conflict.handoff.id
+    try {
+      const handoff = await readSidepanelChatHandoff(conflict.handoff.id, { throwOnReadError: true })
+      if (!isCurrent()) return
+      if (!handoff) {
+        setConflict(null)
+        showInvalidFeedback()
+        cleanRouteHandoff()
+        return
+      }
+      if (getDraftRevision() !== attempt.revision || draftValueRef.current !== attempt.draft) {
+        setConflictFeedback(t(
+          "playground:sidepanelHandoff.draftChanged",
+          "Your draft changed while the copy was checked. Review it, then choose Insert or Replace again.",
+        ))
+        return
+      }
+      applyImportedHandoff(handoff, action === "insert"
+        ? appendImportedDraft(draftValueRef.current, handoff.draft.text)
+        : handoff.draft.text)
+    } catch {
+      if (isCurrent()) setConflictFeedback(t(
+        "playground:sidepanelHandoff.readFailed",
+        "The copy could not be checked. Your draft remains here. Try Insert or Replace again.",
+      ))
+    } finally {
+      if (pendingChoiceRef.current === attempt) {
+        pendingChoiceRef.current = null
+        setImportPending(false)
+      }
+    }
+  }, [applyImportedHandoff, cleanRouteHandoff, conflict, getDraftRevision, showInvalidFeedback, t])
 
-  const replaceWithHandoffDraft = React.useCallback(() => {
-    if (!conflict) return
-    applyImportedHandoff(conflict.handoff, conflict.handoff.draft.text)
-  }, [applyImportedHandoff, conflict])
+  const insertHandoffDraft = React.useCallback(
+    () => acceptHandoffDraft("insert"), [acceptHandoffDraft],
+  )
+  const replaceWithHandoffDraft = React.useCallback(
+    () => acceptHandoffDraft("replace"), [acceptHandoffDraft],
+  )
 
   const cancelHandoffImport = React.useCallback(() => {
     if (!conflict) return
+    pendingChoiceRef.current = null
+    setImportPending(false)
+    setConflictFeedback(null)
     setConflict(null)
     cleanRouteHandoff()
     handledHandoffIdsRef.current.add(conflict.handoff.id)
@@ -165,6 +218,8 @@ export function useSidepanelChatHandoffImport({
     importedContext,
     removeImportedContext,
     conflict,
+    importPending,
+    conflictFeedback,
     insertHandoffDraft,
     replaceWithHandoffDraft,
     cancelHandoffImport,
