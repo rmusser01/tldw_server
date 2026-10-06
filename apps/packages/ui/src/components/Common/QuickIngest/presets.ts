@@ -48,7 +48,7 @@ export const DEFAULT_PRESETS: PresetMap = {
     common: {
       perform_analysis: true,
       perform_chunking: true,
-      overwrite_existing: true,
+      overwrite_existing: false,
       chunking_mode: "auto",
       auto_chunking_goal: "balanced",
       auto_chunking_use_llm: false

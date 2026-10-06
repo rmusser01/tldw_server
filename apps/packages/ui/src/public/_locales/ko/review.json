@@ -780,7 +780,7 @@
     "message": "페이지 {{page}}로 이동 중"
   },
   "mediaPage_spreadMode": {
-    "message": "비교"
+    "message": "나란히 배치"
   },
   "mediaPage_listMode": {
     "message": "집중"
@@ -789,13 +789,13 @@
     "message": "스택"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "선택한 항목을 나란히 비교해서 봅니다"
+    "message": "선택한 항목을 나란히 배치"
   },
   "mediaPage_listModeTooltip": {
     "message": "탐색으로 한 번에 한 항목씩 봅니다"
   },
   "mediaPage_allModeTooltip": {
-    "message": "선택한 항목을 스크롤 가능한 목록으로 모두 봅니다"
+    "message": "현재 읽기 범위를 스크롤 가능한 스택으로 표시"
   },
   "mediaPage_copyContentLabel": {
     "message": "콘텐츠 복사"
@@ -834,19 +834,19 @@
     "message": "항목 선택"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "왼쪽 패널에서 항목을 클릭해 뷰어에 추가하세요."
+    "message": "체크박스로 선택한 뒤 선택 항목 읽기를 누릅니다. 클릭 또는 Enter로 미리 봅니다."
   },
   "mediaPage_firstUseStep2": {
     "message": "보기 선택"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "\"비교\"는 나란히, \"집중\"은 한 번에 하나, \"스택\"은 모두 보기입니다."
+    "message": "나란히는 배치, 집중은 한 항목, 스택은 현재 읽기 범위입니다. 내용 비교는 텍스트를 비교합니다."
   },
   "mediaPage_firstUseStep3": {
     "message": "탐색"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "이전/다음 버튼 또는 키보드(Tab + Enter)로 항목을 이동하세요."
+    "message": "이전/다음 또는 j/k로 현재 맥락을 탐색합니다. Tab과 Space로 체크박스를 선택합니다."
   },
   "mediaPage_gotIt": {
     "message": "확인"
@@ -1327,5 +1327,11 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "분석 제공자를 선택한 후 분석을 다시 시도하세요."
+  },
+  "mediaPage_resultsHint": {
+    "message": "클릭 또는 Enter로 미리 봅니다. 체크박스에서 Space로 선택합니다. Shift+클릭으로 범위를 선택합니다."
+  },
+  "mediaPage_viewerAll": {
+    "message": "읽기 범위 (스택)"
   }
 }

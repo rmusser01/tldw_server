@@ -27,6 +27,11 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn()
 }))
 
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({
+  useQuickIngestAuthority: () => 'verified-alice',
+  quickIngestAuthority: { capture: () => ({ authorityKey: 'verified-alice', isCurrent: () => true, signal: new AbortController().signal }) }
+}))
+
 const interpolate = (template: string, values?: Record<string, unknown>) =>
   template.replace(/\{\{(\w+)\}\}/g, (_, key) => String(values?.[key] ?? ""))
 
@@ -47,7 +52,8 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("react-router-dom", () => ({
-  useNavigate: () => mocks.navigate
+  useNavigate: () => mocks.navigate,
+  useLocation: () => ({ key: 'initial' })
 }))
 
 vi.mock("@/hooks/useMessageOption", () => ({
@@ -141,6 +147,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
   MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING: { key: "mediaReviewFiltersCollapsed", defaultValue: false },
   MEDIA_REVIEW_FOCUSED_ID_SETTING: { key: "mediaReviewFocusedId", defaultValue: null },
   MEDIA_REVIEW_ORIENTATION_SETTING: { key: "mediaReviewOrientation", defaultValue: "vertical" },
+  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING: { key: 'media-review-selection-snapshot', defaultValue: null },
   MEDIA_REVIEW_SELECTION_SETTING: { key: "mediaReviewSelection", defaultValue: [] },
   MEDIA_REVIEW_VIEW_MODE_SETTING: { key: "mediaReviewViewMode", defaultValue: "spread" }
 }))
@@ -273,6 +280,7 @@ vi.mock("antd", async (importOriginal) => {
       <div>
         {Array.isArray(menu?.items)
           ? menu.items
+              .flatMap((item: any) => item?.children ?? [item])
               .filter((item: any) => item && item.type !== "divider")
               .map((item: any, idx: number) => (
                 <button

@@ -33,7 +33,8 @@ export const servicePromptPrincipalMatches = (
   if (current.authMode !== "multi-user") return false
   const expected = String(expectedUserId).trim()
   if (!expected) return false
-  return deriveScopedUserId({
+  return (
+    deriveScopedUserId({
     userId: null,
     authMode: "multi-user",
     accessToken:
@@ -43,6 +44,7 @@ export const servicePromptPrincipalMatches = (
     authMode: "multi-user",
     accessToken: null
   })
+  )
 }
 
 export const servicePromptRefreshLineageMatches = (
@@ -52,8 +54,10 @@ export const servicePromptRefreshLineageMatches = (
   if (expectedRefreshToken === undefined) return true
   if (typeof expectedRefreshToken !== "string") return false
   const expected = expectedRefreshToken.trim()
-  return Boolean(expected) &&
+  return (
+    Boolean(expected) &&
     String(current.refreshToken || "").trim() === expected
+)
 }
 
 export const servicePromptSingleUserApiKeyScopeMatches = (
@@ -67,10 +71,12 @@ export const servicePromptSingleUserApiKeyScopeMatches = (
     return expectedScope === undefined
   }
   if (typeof expectedScope !== "string") return false
-  return deriveSingleUserApiKeyCredentialScope(
+  return (
+    deriveSingleUserApiKeyCredentialScope(
     "single-user",
     typeof current.apiKey === "string" ? current.apiKey : null
   ) === expectedScope
+)
 }
 
 const readCanonicalPathname = (path: unknown): string | null => {
@@ -98,9 +104,12 @@ export const isServicePromptRequestPath = (
   const pathname = readCanonicalPathname(path)
   if (!pathname) return false
   const requestMethod = String(method || "GET").toUpperCase()
-  if (requestMethod === "PUT" && /^\/api\/v1\/media\/[0-9]+$/.test(pathname)) return true
+  if (["PUT", "DELETE"].includes(requestMethod) && /^\/api\/v1\/media\/[0-9]+$/.test(pathname)) return true
+  if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/keywords$/.test(pathname)) return true
+  if (requestMethod === "POST" && pathname === "/api/v1/media/bulk/keyword-update") return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/metadata$/.test(pathname)) return true
   if (requestMethod === "POST" && /^\/api\/v1\/media\/[0-9]+\/reprocess$/.test(pathname)) return true
+  if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
   if (requestMethod === "GET" && (pathname === "/api/v1/notes/tasks/activity" || /^\/api\/v1\/notes\/[^/]+\/tasks$/.test(pathname))) return true
@@ -123,12 +132,16 @@ export const isServicePromptRequestPath = (
     /^\/api\/v1\/chat\/messages\/[^/]+\/rag-context$/.test(pathname) ||
     pathname === "/api/v1/rag/search/stream" || pathname === "/api/v1/chatbooks/export"
   )) return true
-  if (requestMethod === "GET" && (/^\/api\/v1\/media\/ingest\/jobs\/[0-9]+$/.test(pathname) || /^\/api\/v1\/media\/[0-9]+\/file$/.test(pathname) || pathname === "/api/v1/media")) return true
+  if (requestMethod === "GET" && (/^\/api\/v1\/media\/ingest\/jobs\/[0-9]+$/.test(pathname) || /^\/api\/v1\/media\/[0-9]+\/file$/.test(pathname) || pathname === "/api/v1/media"||
+      pathname === "/api/v1/media/" ||
+      pathname === "/api/v1/media/ingest/jobs")) return true
   if (requestMethod === "POST" && (/^\/api\/v1\/media\/(?:ingest\/jobs(?:\/cancel)?|process-(?:audios|videos|pdfs|ebooks|documents|web-scraping)|search|collections)$/.test(pathname) || /^\/api\/v1\/media\/collections\/[0-9]+\/items$/.test(pathname))) return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/collections\/[0-9]+\/items\/[0-9]+$/.test(pathname)) return true
+  if (requestMethod === "POST" && (/^\/api\/v1\/media\/[0-9]+\/restore$/.test(pathname) || /^\/api\/v1\/notes\/(?!tasks\/|collections\/|trash\/|purge\/|permanent\/|keywords\/|folders\/|moodboards\/|templates\/|import\/|export(?:\.csv)?\/|search\/)[^/]+\/restore$/.test(pathname))) return true
   if (pathname === "/api/v1/notes/") return requestMethod === "POST"
   if (/^\/api\/v1\/notes\/[^/]+$/.test(pathname)) {
-    return ["GET", "PUT"].includes(requestMethod)
+    return (
+      ["GET", "PUT"].includes(requestMethod) || (requestMethod === "DELETE" && !/^\/api\/v1\/notes\/(?:tasks|collections|trash|purge|permanent|keywords|folders|moodboards|templates|import|export(?:\.csv)?|search)$/.test(pathname)))
   }
   if (pathname === "/api/v1/service-prompts") {
     return requestMethod === "GET"
@@ -140,13 +153,15 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "GET" && /^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return true
   if (/^\/api\/v1\/flashcards\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
   if (requestMethod === "GET") {
-    return pathname === "/api/v1/flashcards/decks" || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||
+    return (
+      pathname === "/api/v1/flashcards/decks" || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||
       pathname === "/api/v1/scheduled-tasks" ||
       pathname === "/api/v1/scheduled-tasks/results" ||
       pathname === "/api/v1/notifications" ||
       pathname === "/api/v1/chats/" || pathname === "/api/v1/chats/conversations" ||
       /^\/api\/v1\/chats\/[^/]+\/messages$/.test(pathname) ||
       /^\/api\/v1\/writing\/manuscripts\/(?:scenes\/[^/]+|projects\/[^/]+\/(?:characters|world-info))$/.test(pathname)
+    )
   }
   if (requestMethod !== "POST") return false
   if (pathname === "/api/v1/flashcards/review" || pathname === "/api/v1/flashcards/review-sessions/end") return true
@@ -155,8 +170,10 @@ export const isServicePromptRequestPath = (
   if (pathname === "/api/v1/chats/") return true
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/history\/(?:selection|legacy-projection)$/.test(pathname)) return true
   if (/^\/api\/v1\/chats\/[^/]+\/completions\/persist$/.test(pathname)) return true
-  return /^\/api\/v1\/(?:auth\/refresh|chat\/completions|media\/add|rag\/search|research\/websearch)$/.test(pathname) ||
+  return (
+    /^\/api\/v1\/(?:auth\/refresh|chat\/completions|media\/add|rag\/search|research\/websearch)$/.test(pathname) ||
     /^\/api\/v1\/chats\/[^/]+\/messages$/.test(pathname)
+)
 }
 
 export const createServicePromptScopeChangedError = () =>
@@ -169,8 +186,8 @@ export const createServicePromptScopeChangedError = () =>
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object"
-    ? value as Record<string, unknown>
-    : null
+    ? (value as Record<string, unknown>
+    ) : null
 
 export const isRequestConfigScopeChangedError = (error: unknown): boolean => {
   const seen = new Set<unknown>()
