@@ -368,3 +368,29 @@ read-only in-memory check with installed Next Webpack confirmed synthetic
 public-key substitution with zero emitted files. Publication remains pending.
 All eleven Qodo inline threads are resolved; final-head review still requires available Qodo
 credits. The owner's Change Summary waiver remains in force.
+
+### Latest-dev Rebase (2026-10-06 21:20 UTC)
+
+**Status:** Rebased code verified; fresh published-head CI and Qodo remain pending.
+
+Dev advanced to `1e06e03b587310ec023f3810c4480ea4e69b05f5` through PR #3016.
+The merge queue variable is unset and PR #3170 has no auto-merge request.
+The isolated checkout matched published `b243f153ed` and had no tracked changes.
+All eight PR commits rebased cleanly; range-diff marks every patch unchanged.
+None of the 100 incoming dev paths overlap the 16 PR paths, and shared UI
+source/test blobs remain identical to the previously reviewed published head.
+No other checkout or dependency symlink was changed.
+
+On rebased code head `0e64b9b81de52a9bbfac1604e5c60a0e1e388e10`, the
+18-file native matrix passed **676/676**, zero failed or pending. The actual
+full frontend compiler exited 0 with zero diagnostics. Helper ESLint reports
+zero errors/warnings; its existing Next pages-location setup notice is unchanged.
+Whitespace checks pass. The existing manual security assessment and Bandit
+TypeScript-parser limitation apply to the unchanged source. No new ADR is needed.
+
+All seven required gates passed on the prior published head, and must run on
+the new head. All eleven inline threads remain resolved. The fresh Qodo request
+updated billing notice `5984355774` at 17:31:48 UTC: credits are still exhausted.
+Do not repeat review commands while that state is unchanged. TASK-13425 remains
+In Progress pending fresh Qodo/CI and normal exact-head merge. The owner's
+Change Summary waiver remains in force; no merge or deployment is claimed.
