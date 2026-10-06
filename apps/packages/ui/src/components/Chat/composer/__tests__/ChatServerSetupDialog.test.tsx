@@ -55,6 +55,9 @@ describe("existing composer lifetime through setup dismissal", () => {
     fireEvent.change(settings, { target: { value: "https://unsaved.example.test" } })
     await user.click(screen.getByRole("button", { name: "Return to chat" }))
     expect(screen.getByRole("dialog", { name: "Discard connection changes?" })).toBeInTheDocument()
+    // jsdom focuses the dialog container; native focus is checked in the live journey.
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Discard connection changes?" })).toContainElement(document.activeElement as HTMLElement))
+    expect(screen.getByRole("button", { name: "Discard changes" })).not.toHaveFocus()
     await user.click(screen.getByRole("button", { name: "Keep editing" }))
     expect(screen.getByRole("dialog", { name: "Server settings" })).toBeInTheDocument()
     expect(settings).toHaveValue("https://unsaved.example.test")

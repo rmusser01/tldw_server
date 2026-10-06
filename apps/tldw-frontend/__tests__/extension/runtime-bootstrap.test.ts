@@ -311,6 +311,17 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(nextConfig.refreshToken).toBeUndefined()
   })
 
+  it("keeps a fresh advanced URL hint without creating authentication configuration", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "https://initial-api.example.test"
+    delete process.env.NEXT_PUBLIC_X_API_KEY
+    delete process.env.NEXT_PUBLIC_API_BEARER
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }))
+    await importAndAwaitBootstrap()
+    expect(readStoredValue("tldwServerUrl")).toBe("https://initial-api.example.test")
+    expect(localStorage.getItem("tldwConfig")).toBeNull()
+  })
+
   it("repairs a stale env LAN host to the current browser host during bootstrap", async () => {
     process.env.NEXT_PUBLIC_API_URL = "http://192.168.5.184:8000"
 
@@ -320,8 +331,7 @@ describe("runtime-bootstrap chrome shim", () => {
     await vi.waitFor(() => {
       expect(readStoredValue("tldwServerUrl")).toBe("http://localhost:8000")
 
-      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-      expect(nextConfig.serverUrl).toBe("http://localhost:8000")
+      expect(localStorage.getItem("tldwConfig")).toBeNull()
     })
   })
 

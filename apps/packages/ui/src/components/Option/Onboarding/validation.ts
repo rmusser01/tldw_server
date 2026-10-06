@@ -1,3 +1,4 @@
+import type { InitialChatSetupAttempt } from "@/utils/settings-return"
 import type { TFunction } from "i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
@@ -29,6 +30,7 @@ export type ManualServerTransitionInput = {
   apiKey: string
   persistence: ApiKeyPersistence
   assertCurrent?: () => void
+  initialSetup?: InitialChatSetupAttempt
 }
 
 export const shouldClearManualApiKeyForServerChange = (

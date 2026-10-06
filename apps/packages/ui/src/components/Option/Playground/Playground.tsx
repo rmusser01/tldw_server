@@ -729,6 +729,7 @@ const PlaygroundContent = () => {
   const translationRef = React.useRef(t);
   const previousThreadRef = React.useRef<string | null>(null);
   const initialConversationRef = React.useRef({
+    sourceSelectionRevision: usePlaygroundSessionStore.getState().sourceSelectionRevision,
     historyId: historyId ?? null,
     serverChatId: serverChatId ?? null,
     messagesLength: messages.length,
@@ -1882,7 +1883,8 @@ const PlaygroundContent = () => {
       return;
     }
 
-    if (hasCurrentServerChatSelection(useStoreMessageOption.getState().serverChatId)) return;
+    if (hasCurrentServerChatSelection(useStoreMessageOption.getState().serverChatId) ||
+      usePlaygroundSessionStore.getState().sourceSelectionRevision !== initialConversationRef.current.sourceSelectionRevision) return;
 
     // 1. Try session persistence first (restores exact state from nav-away)
     if (storedHistoryReference || shouldRestorePersistedSessionOnInit) {
@@ -1899,7 +1901,8 @@ const PlaygroundContent = () => {
     // 2. Fall back to existing webUIResumeLastChat behavior
     const revision = usePlaygroundSessionStore.getState().restoreRevision;
     const isCurrent = () => !signal.aborted &&
-      usePlaygroundSessionStore.getState().restoreRevision === revision;
+      usePlaygroundSessionStore.getState().restoreRevision === revision &&
+      usePlaygroundSessionStore.getState().sourceSelectionRevision === initialConversationRef.current.sourceSelectionRevision;
     const isEnabled = await webUIResumeLastChat();
     if (!isEnabled || !isCurrent()) return;
 

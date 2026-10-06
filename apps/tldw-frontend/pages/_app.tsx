@@ -1,3 +1,4 @@
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import "../styles/globals.css"
 import "@/assets/react-pdf.css"
 import { runtimeBootstrapReady } from "@web/extension/shims/runtime-bootstrap"
@@ -264,17 +265,35 @@ export default function App({ Component, pageProps }: AppProps) {
   const [authResolved, setAuthResolved] = React.useState(false)
   const [requiresLogin, setRequiresLogin] = React.useState(false)
   const [chatServerSetupOpen, setChatServerSetupOpen] = React.useState(false)
+  const [beginChatInitialSetup, setBeginChatInitialSetup] = React.useState<SettingsNavigationRequestDetail["beginInitialSetup"]>()
+  const setupRequestRevision = React.useRef(0)
+  const bootstrapSucceeded = React.useRef(false)
+  const closeChatServerSetup = React.useCallback(() => {
+    setupRequestRevision.current++
+    setChatServerSetupOpen(false)
+    setBeginChatInitialSetup(undefined)
+  }, [])
+  const assertInitialSetupAuthority = React.useCallback(() => {
+    if (routePath !== "/chat" || !authResolved || requiresLogin || !bootstrapSucceeded.current ||
+      getRuntimeApiKey() || getRuntimeApiBearer()) throw createServicePromptScopeChangedError()
+  }, [routePath, authResolved, requiresLogin])
   React.useEffect(() => {
-    if (routePath !== "/chat" || requiresLogin) setChatServerSetupOpen(false)
-  }, [routePath, requiresLogin])
+    if (routePath !== "/chat" || requiresLogin) closeChatServerSetup()
+  }, [routePath, requiresLogin, closeChatServerSetup])
   React.useEffect(() => {
     if (routePath !== "/chat" || !authResolved || requiresLogin) return
+    let mounted = true
     const openSetup = (event: Event) => {
       if (event.defaultPrevented) return
-      const destination = (event as CustomEvent<SettingsNavigationRequestDetail>).detail?.destination
+      const detail = (event as CustomEvent<SettingsNavigationRequestDetail>).detail
+      const destination = detail?.destination
       if (destination === "/settings/tldw") {
         event.preventDefault()
         setChatServerSetupOpen(true)
+        const revision = ++setupRequestRevision.current
+        queueMicrotask(() => {
+          if (mounted && revision === setupRequestRevision.current) setBeginChatInitialSetup(() => detail.beginInitialSetup)
+        })
       } else if (destination === "/settings/health") {
         const url = resolveSettingsNavigationUrl(destination, window.location.href)
         if (url) {
@@ -284,7 +303,7 @@ export default function App({ Component, pageProps }: AppProps) {
       }
     }
     window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, openSetup)
-    return () => window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, openSetup)
+    return () => { mounted = false; window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, openSetup) }
   }, [routePath, authResolved, requiresLogin])
   const didWarmRoutePrefetch = React.useRef(false)
 
@@ -296,8 +315,9 @@ export default function App({ Component, pageProps }: AppProps) {
     const refreshAuthState = async () => {
       const generation = ++refreshGeneration
       const isCurrent = () => !cancelled && generation === refreshGeneration
-      await runtimeBootstrapReady.catch(() => undefined)
+      const bootstrapped = await runtimeBootstrapReady.then(() => true, () => false)
       if (!isCurrent()) return
+      bootstrapSucceeded.current = bootstrapped
 
       const envAuthed =
         hasEnvApiAuth() ||
@@ -556,7 +576,8 @@ export default function App({ Component, pageProps }: AppProps) {
               {gatedContent}
             </ServerReadinessGate>
             {routePath === "/chat" && (
-              <ChatServerSetupDialog open={chatServerSetupOpen} onClose={() => setChatServerSetupOpen(false)} />
+              <ChatServerSetupDialog open={chatServerSetupOpen} onClose={closeChatServerSetup}
+                beginInitialSetup={beginChatInitialSetup} assertInitialSetupAuthority={assertInitialSetupAuthority} />
             )}
           </ErrorBoundary>
         </BackendRecoveryUiProvider>

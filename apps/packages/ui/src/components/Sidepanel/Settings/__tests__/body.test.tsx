@@ -62,9 +62,17 @@ describe("SettingsBody", () => {
     expect(screen.queryByText(/embedding defaults/i)).not.toBeInTheDocument()
   })
 
+  it("uses the actual WebUI route when the browser shim exposes getURL without an extension id", () => {
+    runtimeGlobals.browser = { runtime: { id: undefined, getURL: (path: string) => `https://webui.test${path}` } }
+    runtimeGlobals.chrome = undefined
+    render(<SettingsBody />)
+    expect(screen.getByRole("link", { name: "Server & auth" })).toHaveAttribute("href", "/settings/tldw")
+  })
+
   it("opens full options routes when rendered in an extension runtime", () => {
     runtimeGlobals.browser = {
       runtime: {
+        id: "test-extension",
         getURL: vi.fn((path: string) => `chrome-extension://test${path}`)
       }
     }
@@ -85,6 +93,7 @@ describe("SettingsBody", () => {
     runtimeGlobals.browser = undefined
     runtimeGlobals.chrome = {
       runtime: {
+        id: "chrome-extension",
         getURL: vi.fn((path: string) => `chrome-extension://chrome-only${path}`)
       }
     }

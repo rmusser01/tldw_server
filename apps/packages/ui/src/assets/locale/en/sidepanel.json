@@ -1,6 +1,10 @@
 {
   "chat": {
-    "restoreFailed": "Could not restore your saved chat. Retry to load it."
+    "restoreFailed": "Could not restore your saved chat. Retry to load it.",
+    "verificationFailed": "We couldn’t verify the chat connection",
+    "verificationHelp": "Retry or open server settings.",
+    "verifying": "Checking the chat connection…",
+    "serverSettings": "Server settings"
   },
   "tooltip": {
     "embed": "It may take a few minutes to embed the page. Please wait...",

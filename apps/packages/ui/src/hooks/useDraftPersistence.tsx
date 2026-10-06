@@ -123,6 +123,8 @@ interface DraftPersistenceOptions {
   enabled?: boolean
   /** Keep an exact in-flight fresh submission until its owner acknowledges it. */
   preserveEmptyDraft?: boolean
+  /** Fresh locally held input, such as an image, also prevents first-owner hydration. */
+  hasUnpersistedInput?: boolean
 }
 
 export type RetainedComposerDraft = DraftPayload & { storageKey: string; updatedAt: number }
@@ -159,7 +161,8 @@ export const useDraftPersistence = ({
   getMetadata,
   setValueWithMetadata,
   enabled = true,
-  preserveEmptyDraft = false
+  preserveEmptyDraft = false,
+  hasUnpersistedInput = false
 }: DraftPersistenceOptions): DraftPersistenceResult => {
   const draftBucket = React.useMemo(() => tabScoped
     ? createLocalRegistryBucket<DraftValue>({ prefix: DRAFT_BUCKET_PREFIX, ttlMs: DRAFT_TTL_MS, tabScoped: true })
@@ -212,7 +215,9 @@ export const useDraftPersistence = ({
     if (hydrationEditsRef.current.identity !== identity) {
       hydrationEditsRef.current = {
         identity,
-        changed: !hydrationEditsRef.current.identity.enabled && enabled && currentValue.length > 0
+        changed: (!hydrationEditsRef.current.identity.enabled && enabled && (currentValue.length > 0 || hasUnpersistedInput)) ||
+          (hydrationEditsRef.current.identity.enabled && enabled && previous.content !== currentValue &&
+            (!hydrationEditsRef.current.identity.isCurrent || hydrationEditsRef.current.identity.isCurrent()))
       }
     } else if (previous.content !== currentValue) {
       hydrationEditsRef.current.changed = true
@@ -221,7 +226,7 @@ export const useDraftPersistence = ({
       draftRevisionRef.current++
     }
     committedDraftRef.current = { content: currentValue, metadata }
-  }, [currentValue, getMetadata, identity, enabled])
+  }, [currentValue, getMetadata, identity, enabled, hasUnpersistedInput])
 
   // Restore unsent draft on mount
   React.useEffect(() => {

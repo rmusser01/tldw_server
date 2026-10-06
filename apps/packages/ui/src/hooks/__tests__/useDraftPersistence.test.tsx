@@ -47,6 +47,37 @@ describe("useDraftPersistence", () => {
     vi.useRealTimers()
   })
 
+  it("does not hydrate older text over a newly owned image-only input", async () => {
+    await bucketMocks.setMock("chat:first", "OLDER OWNED TEXT")
+    let value = ""
+    const restore = vi.fn((next: string) => { value = next })
+    const { rerender } = renderHook(({ enabled }) => useDraftPersistence({
+      storageKey: "chat:first", enabled, hasUnpersistedInput: true,
+      getValue: () => value, setValue: restore
+    }), { initialProps: { enabled: false } })
+    rerender({ enabled: true })
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(restore).not.toHaveBeenCalled()
+    expect(value).toBe("")
+  })
+
+  it.each([true, false])("qualifies a source-switch edit against the previous owner: %s", async previousOwnerCurrent => {
+    let value = ""
+    const firstOwner = () => previousOwnerCurrent
+    const nextOwner = () => true
+    const restore = vi.fn((next: string) => { value = next })
+    const { rerender } = renderHook(({ storageKey, isCurrent }) => useDraftPersistence({
+      storageKey, isCurrent, getValue: () => value, setValue: restore
+    }), { initialProps: { storageKey: "first", isCurrent: firstOwner } })
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    restore.mockClear()
+    value = "NEW OWNED IDEA"
+    rerender({ storageKey: "new", isCurrent: nextOwner })
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    if (previousOwnerCurrent) expect(restore).not.toHaveBeenCalled()
+    else expect(restore).toHaveBeenCalledWith("")
+  })
+
   it("does not persist again when value is unchanged and metadata callback identity changes", async () => {
     let value = "persistent draft"
 

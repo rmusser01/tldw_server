@@ -2,7 +2,11 @@ import { readChatCreationRecovery, listChatCreationRecovery, copyChatCreationRec
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { reviewNativeChatCreation } from "@/hooks/chat/native-history-character-send"
 import { normalizeConversationState } from "@/utils/conversation-state"
-import { requestSettingsNavigation } from "@/utils/settings-return"
+import { requestSettingsNavigation, SETTINGS_NAVIGATION_REQUEST_EVENT, type SettingsNavigationRequestDetail, type InitialChatSetupAttempt } from "@/utils/settings-return"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { connectionAuthoritiesMatch, deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import {
   type DraftMetadataObject,
   useDraftPersistence
@@ -11,7 +15,7 @@ import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import React from "react"
 import { useStoreMessageOption } from "@/store/option"
-import { chatDraftAddressKey, conversationDraftKey, isChatDraftHandle, type ChatDraftAddress, type ChatDraftHandle } from "@/utils/chat-draft-address"
+import { chatDraftAddressKey, conversationDraftKey, freshChatDraftAddress, isChatDraftHandle, type ChatDraftAddress, type ChatDraftHandle } from "@/utils/chat-draft-address"
 
 /**
  * Shared composer text primitive consumed by both Playground and Sidepanel.
@@ -139,6 +143,7 @@ export function useComposerText(
   const form = useSimpleForm<{ message: string; image: string }>({
     initialValues: { message: "", image: "" }
   })
+  const { getValues, getRevision, reset, setValues } = form
   const [promptAssistMutation, setPromptAssistMutation] =
     React.useState<ComposerPromptAssistMutation>({
       revision: 0,
@@ -211,13 +216,53 @@ export function useComposerText(
     [form, restoreWithMetadata]
   )
 
-  const { ownerKey, isCurrent } = useChatDraftOwner(() => {
+  const initialSetup = React.useRef<{
+    attempt: InitialChatSetupAttempt
+    phase: "captured" | "admitted" | "cleared" | "waiting"
+    address: ChatDraftAddress
+    draftRevision: number
+    inputRevision: number
+    values: { message: string; image: string } | null
+    metadata?: DraftMetadataObject
+    config: TldwConfig | null
+    settle: (retained: boolean) => void
+  } | null>(null)
+  const mounted = React.useRef(true)
+  const initialBoundarySeen = React.useRef(false)
+  const initialOwnershipCancelled = React.useRef(false)
+  const [initialSetupPending, setInitialSetupPending] = React.useState(false)
+  const [initialSetupComplete, setInitialSetupComplete] = React.useState(false)
+  React.useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false; initialSetup.current?.attempt.cancel() }
+  }, [])
+  const ownSetupEvent = (source?: Event) => initialSetup.current &&
+    (source as CustomEvent<{ initialSetupToken?: object }> | undefined)?.detail?.initialSetupToken === initialSetup.current.attempt.token
+  const { ownerKey, requestScope, isCurrent, hasEverOwned, verificationState } = useChatDraftOwner((source) => {
+    const checkpoint = initialSetup.current
+    if (checkpoint && ownSetupEvent(source) && checkpoint.phase === "admitted" &&
+      getRevision() === checkpoint.inputRevision) checkpoint.phase = "cleared"
+    else checkpoint?.attempt.cancel()
     pendingPromptAssistResetRef.current = null
     setSavedAttempt(null)
     attemptSourceRef.current = null
     setRestoreAttemptId(null)
-    form.reset()
+    reset()
     restoreWithMetadata?.("", undefined)
+    if (checkpoint && initialSetup.current === checkpoint && checkpoint.phase === "cleared") {
+      checkpoint.inputRevision = getRevision()
+    }
+  }, (_invalidated, source) => {
+    initialBoundarySeen.current = true
+    if (!ownSetupEvent(source)) initialSetup.current?.attempt.cancel()
+  }, () => {
+    const checkpoint = initialSetup.current
+    if (checkpoint?.phase === "captured" || checkpoint?.phase === "admitted") checkpoint.attempt.cancel()
+    if (initialOwnershipCancelled.current) {
+      initialOwnershipCancelled.current = false
+      reset()
+      restoreWithMetadata?.("", undefined)
+    }
   })
 
   const markPromptAssistAttemptSaved = React.useCallback(
@@ -241,16 +286,148 @@ export function useComposerText(
     bindFromStorageKey: bindFromDraftKey && ownerKey ? `${bindFromDraftKey}:owner:${ownerKey}` : undefined,
     tabScoped: tabScopedDraft,
     preserveEmptyDraft,
+    hasUnpersistedInput: form.values.image.length > 0,
     legacyStorageKey: draftKey,
     isCurrent,
     getValue: () => form.values.message,
     getMetadata: draftAddress ? metadata : getDraftMetadata,
     setValue: (value) => setMessageValue(value),
     setValueWithMetadata: restoreMessage,
-    enabled: draftEnabled && ownerKey !== null
+    enabled: draftEnabled && ownerKey !== null && !initialSetupPending
   })
   const historySelection = useHistorySelectionContext()
+  const setupComposer = React.useRef({ draftAddress, getDraftMetadata, restoreWithMetadata, historySelection })
+  React.useLayoutEffect(() => { setupComposer.current = { draftAddress, getDraftMetadata, restoreWithMetadata, historySelection } },
+    [draftAddress, getDraftMetadata, restoreWithMetadata, historySelection])
+  React.useEffect(() => {
+    if (recoverySurface !== "tldw:playgroundChatDraft") return
+    const request = (event: Event) => {
+      const detail = (event as CustomEvent<SettingsNavigationRequestDetail>).detail
+      if (detail?.destination !== "/settings/tldw" || detail.beginInitialSetup) return
+      const opening = useStoreMessageOption.getState()
+      detail.beginInitialSetup = () => {
+        const source = useStoreMessageOption.getState()
+        const view = setupComposer.current
+        const address = source.chatDraftAddress
+        const selection = view.historySelection?.getCurrent()
+        const values = getValues()
+        if (!mounted.current || initialSetup.current || hasEverOwned() || initialBoundarySeen.current ||
+          address !== opening.chatDraftAddress || source.chatDraftRevision !== opening.chatDraftRevision ||
+          address !== view.draftAddress || address?.kind !== "fresh" || address.scope.type !== "global" ||
+          !selection || selection.owner || selection.view || selection.status !== "idle" ||
+          source.historyId || source.serverChatId || source.messages.length || source.history.length || source.queuedMessages.length ||
+          source.isLoading || source.isProcessing || source.streaming || (!values.message && !values.image)) return null
+        let metadata: DraftMetadataObject | undefined
+        try {
+          const current = view.getDraftMetadata?.()
+          metadata = current === undefined ? undefined : JSON.parse(JSON.stringify(current))
+        } catch { return null }
+        let historyCurrent = view.historySelection!.fence()
+        let intentRevision = usePlaygroundSessionStore.getState().sourceSelectionRevision
+        const metadataSignature = JSON.stringify(metadata)
+        let resolve!: (retained: boolean) => void
+        const completed = new Promise<boolean>(done => { resolve = done })
+        const checkpoint = {
+          attempt: null as unknown as InitialChatSetupAttempt,
+          phase: "captured" as "captured" | "admitted" | "cleared" | "waiting",
+          address: address as ChatDraftAddress, draftRevision: source.chatDraftRevision, inputRevision: getRevision(),
+          values: values as { message: string; image: string } | null, metadata, config: null as TldwConfig | null,
+          settle: (retained: boolean) => {
+            if (initialSetup.current !== checkpoint) return
+            initialSetup.current = null
+            if (!retained && (checkpoint.phase === "captured" || checkpoint.phase === "admitted") && !hasEverOwned()) {
+              initialOwnershipCancelled.current = true
+            }
+            checkpoint.values = null
+            checkpoint.metadata = undefined
+            checkpoint.config = null
+            if (mounted.current) { setInitialSetupPending(false); setInitialSetupComplete(false) }
+            resolve(retained)
+          }
+        }
+        const assertCurrent = () => {
+          const current = useStoreMessageOption.getState()
+          if (!mounted.current || initialSetup.current !== checkpoint || !historyCurrent() ||
+            current.chatDraftAddress !== checkpoint.address || current.chatDraftRevision !== checkpoint.draftRevision ||
+            getRevision() !== checkpoint.inputRevision ||
+            usePlaygroundSessionStore.getState().sourceSelectionRevision !== intentRevision ||
+            current.historyId || current.serverChatId || current.messages.length || current.history.length || current.queuedMessages.length ||
+            ((checkpoint.phase === "captured" || checkpoint.phase === "admitted") &&
+              (hasEverOwned() || JSON.stringify(setupComposer.current.getDraftMetadata?.()) !== metadataSignature))) {
+            checkpoint.settle(false)
+            throw createServicePromptScopeChangedError()
+          }
+        }
+        checkpoint.attempt = {
+          token: {}, assertCurrent,
+          admit: () => {
+            assertCurrent()
+            if (checkpoint.phase !== "captured") throw createServicePromptScopeChangedError()
+            usePlaygroundSessionStore.getState().cancelPendingRestore()
+            usePlaygroundSessionStore.getState().markSourceSelectionIntent()
+            intentRevision = usePlaygroundSessionStore.getState().sourceSelectionRevision
+            checkpoint.phase = "admitted"
+          },
+          afterBoundary: config => {
+            const current = useStoreMessageOption.getState()
+            const selection = setupComposer.current.historySelection!.getCurrent()
+            if (initialSetup.current !== checkpoint || checkpoint.phase !== "cleared" ||
+              current.chatDraftAddress !== null || current.chatDraftRevision !== source.chatDraftRevision + 1 ||
+              getRevision() !== checkpoint.inputRevision || selection.owner || selection.view ||
+              !useStoreMessageOption.getState().setChatDraftAddress(freshChatDraftAddress(address.temporary), {
+                expectedRevision: current.chatDraftRevision, sourceAddress: null
+              })) {
+              checkpoint.settle(false)
+              throw createServicePromptScopeChangedError()
+            }
+            const accepted = useStoreMessageOption.getState()
+            checkpoint.address = accepted.chatDraftAddress!
+            checkpoint.draftRevision = accepted.chatDraftRevision
+            checkpoint.config = config
+            historyCurrent = setupComposer.current.historySelection!.fence()
+          },
+          complete: config => {
+            assertCurrent()
+            if (checkpoint.phase !== "cleared" || !connectionAuthoritiesMatch(config, checkpoint.config)) {
+              checkpoint.settle(false)
+              return completed
+            }
+            checkpoint.phase = "waiting"
+            setInitialSetupComplete(true)
+            return completed
+          },
+          cancel: () => checkpoint.settle(false)
+        }
+        initialSetup.current = checkpoint
+        setInitialSetupPending(true)
+        return checkpoint.attempt
+      }
+    }
+    window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, request)
+    return () => window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, request)
+  }, [recoverySurface, getValues, getRevision, hasEverOwned])
   const draftRevision = useStoreMessageOption(state => state.chatDraftRevision)
+  const sourceSelectionRevision = usePlaygroundSessionStore(state => state.sourceSelectionRevision)
+  React.useLayoutEffect(() => {
+    const checkpoint = initialSetup.current
+    if (!checkpoint) return
+    try { checkpoint.attempt.assertCurrent() } catch { return }
+    if (!initialSetupComplete || checkpoint.phase !== "waiting") return
+    if (verificationState === "error") { checkpoint.settle(false); return }
+    if (!ownerKey || !requestScope || !isCurrent()) return
+    const expected = checkpoint.config
+    if (!expected || requestScope.config.serverUrl.replace(/\/+$/, "") !== expected.serverUrl.replace(/\/+$/, "") ||
+      requestScope.config.authMode !== expected.authMode || (requestScope.config.authSource || "manual") !== "manual" ||
+      requestScope.config.expectedSingleUserApiKeyScope !== deriveSingleUserApiKeyCredentialScope(expected.authMode, expected.apiKey)) {
+      checkpoint.settle(false)
+      return
+    }
+    const values = checkpoint.values!
+    setValues(values)
+    setupComposer.current.restoreWithMetadata?.(values.message, checkpoint.metadata)
+    checkpoint.settle(true)
+  }, [initialSetupComplete, ownerKey, requestScope, isCurrent, verificationState, setValues,
+    form.values.message, form.values.image, draftRevision, sourceSelectionRevision, historySelection])
   const [creationStatus, setCreationStatus] = React.useState<{ owner: string | null; address: ChatDraftAddress | undefined; revision: number | null; active: ChatCreationRecovery | null; unavailable: boolean }>({ owner: null, address: undefined, revision: null, active: null, unavailable: false })
   const creationRecovery = creationStatus.owner === ownerKey && creationStatus.address === draftAddress && creationStatus.revision === draftRevision
     ? { active: creationStatus.active, unavailable: creationStatus.unavailable }
@@ -351,10 +528,11 @@ export function useComposerText(
       attemptId,
       fromValue: form.values.message
     }
-    form.reset()
+    reset()
     return attemptId
   }, [
     form,
+    reset,
     ownerKey,
     draftAddress,
     draftKey,

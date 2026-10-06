@@ -4,6 +4,8 @@ import { browser } from "wxt/browser"
 import { freshChatDraftAddress, isChatDraftAddress, isChatDraftHandle, chatDraftAddressKey, type ChatDraftAddress } from "@/utils/chat-draft-address"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import { captureChatDraftLoad, chatDraftAddressForReceipt } from "@/hooks/chat/chat-draft-transition"
+import { RecoveryCallout } from "@/components/ui/state/RecoveryCallout"
+import { resolveOptionsHref } from "@/utils/browser-runtime"
 import { requestSettingsNavigation } from "@/utils/settings-return"
 import { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { HistorySelectionContext, useHistorySelection, useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
@@ -447,10 +449,29 @@ const buildHistorySnapshot = ({
 }
 
 const SidepanelChat = () => {
-  const owner = useSidepanelChatOwner()
-  return owner
-    ? <OwnedSidepanelChat key={`${owner.ownerKey}:${owner.revision}`} owner={owner} />
-    : <PageAssistLoader />
+  const { owner, verificationState, retryVerification } = useSidepanelChatOwner()
+  const { t } = useTranslation(["sidepanel", "common"])
+  if (owner) return <OwnedSidepanelChat key={`${owner.ownerKey}:${owner.revision}`} owner={owner} />
+  if (verificationState === "checking") return <PageAssistLoader />
+  const checking = verificationState === "retrying"
+  return <div className="p-4">
+    <RecoveryCallout
+      state={checking ? "retrying" : "unavailable"}
+      role="alert"
+      aria-live="polite"
+      aria-atomic="true"
+      title={t("sidepanel:chat.verificationFailed", "We couldn’t verify the chat connection")}
+      message={checking
+        ? t("sidepanel:chat.verifying", "Checking the chat connection…")
+        : t("sidepanel:chat.verificationHelp", "Retry or open server settings.")}
+      primaryAction={{ label: t("common:retry", "Retry"), disabled: checking, onClick: retryVerification }}
+      secondaryActions={[{ label: t("sidepanel:chat.serverSettings", "Server settings"), onClick: () => {
+        if (requestSettingsNavigation("/settings/tldw")) {
+          window.open(resolveOptionsHref("/settings/tldw"), "_blank", "noopener,noreferrer")
+        }
+      } }]}
+    />
+  </div>
 }
 
 const OwnedSidepanelChat = ({ owner }: { owner: SidepanelChatOwner }) => {

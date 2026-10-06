@@ -2621,6 +2621,8 @@
     }
   },
   "tldw": {
+    "draftRetained": "Your draft is retained in this chat. Send it when you are ready.",
+    "draftNotRetained": "The draft could not be retained through this connection change.",
     "setupLink": "Set up server",
     "loadError": "Unable to load tldw server settings. Check your connection and try again.",
     "fields": {

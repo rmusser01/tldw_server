@@ -1,3 +1,4 @@
+import type { InitialChatSetupAttempt } from "@/utils/settings-return"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import type { ChatScope } from "@/types/chat-scope"
 import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
@@ -33,7 +34,7 @@ import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { createJsonResponseLike } from "@/services/tldw/json-response-like"
 import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
-import { createServicePromptScopeChangedError, servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
+import { createServicePromptScopeChangedError, isRequestConfigScopeChangedError, servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
 import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { appendPathQuery } from "@/services/tldw/path-utils"
@@ -73,6 +74,7 @@ import {
   invalidateRefreshSessionIfCurrent,
   isCompleteDeviceCredential,
   MANUAL_SESSION_KEY,
+  REFRESH_ROTATION_KEY,
   normalizeServerOrigin,
   resolveEffectiveTldwConfig,
   resolveManualCredential,
@@ -1748,7 +1750,7 @@ export class TldwApiClientBase {
     }
   }
 
-  private publishConfigUpdated(previousConfig: TldwConfig | null, onlyIfAuthorityChanged = false): void {
+  private publishConfigUpdated(previousConfig: TldwConfig | null, onlyIfAuthorityChanged = false, initialSetupToken?: object): void {
     const authorityChanged = !connectionAuthoritiesMatch(this.config, previousConfig)
     if (onlyIfAuthorityChanged && !authorityChanged) return
     if (authorityChanged) {
@@ -1756,7 +1758,7 @@ export class TldwApiClientBase {
     }
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("tldw:config-updated", {
-        detail: { authorityChanged }
+        detail: { authorityChanged, ...(initialSetupToken ? { initialSetupToken } : {}) }
       }))
     }
   }
@@ -2192,17 +2194,19 @@ export class TldwApiClientBase {
     this.applyConfigState()
   }
 
-  private async activateManualConfig(config: TldwConfig, previousConfig: TldwConfig | null): Promise<void> {
+  private async activateManualConfig(config: TldwConfig, previousConfig: TldwConfig | null, initialSetup?: InitialChatSetupAttempt): Promise<void> {
     this.config = config
     this.applyConfigState()
-    this.publishConfigUpdated(previousConfig, true)
+    this.publishConfigUpdated(previousConfig, true, initialSetup?.token)
+    initialSetup?.afterBoundary(config)
     await this.syncConnectionServerUrl(config.serverUrl)
-    this.publishConfigUpdated(config)
+    this.publishConfigUpdated(config, false, initialSetup?.token)
   }
 
   private async writeSessionOrMemoryUnlocked(
     input: { serverUrl: string; apiKey: string },
-    serverOrigin: string
+    serverOrigin: string,
+    assertCurrent?: () => void
   ): Promise<{ persistence: "session" | "memory"; config: TldwConfig }> {
     const persisted: TldwConfig = {
       authMode: "single-user",
@@ -2221,10 +2225,14 @@ export class TldwApiClientBase {
     const hydrated = { ...persisted, apiKey: input.apiKey }
 
     try {
+      assertCurrent?.()
       await this.storage.set("tldwConfig", persisted)
+      assertCurrent?.()
       await this.sessionStorage.set(MANUAL_SESSION_KEY, record)
+      assertCurrent?.()
       return { persistence: "session", config: hydrated }
-    } catch {
+    } catch (error) {
+      if (isRequestConfigScopeChangedError(error)) throw error
       await clearManualCredentials(this.storage, this.sessionStorage).catch(
         async () => {
           await this.sessionStorage
@@ -2249,6 +2257,7 @@ export class TldwApiClientBase {
     apiKey: string
     persistence: ApiKeyPersistence
     assertCurrent?: (current: TldwConfig | null) => void
+    initialSetup?: InitialChatSetupAttempt
   }): Promise<"device" | "session" | "memory"> {
     const serverUrl = String(input.serverUrl || "").trim()
     const apiKey = String(input.apiKey || "").trim()
@@ -2256,9 +2265,21 @@ export class TldwApiClientBase {
     if (!serverOrigin) throw new Error("Invalid server URL")
     if (!apiKey) throw new Error("API key is required")
 
+    const initialSetup = input.initialSetup
+    if (initialSetup) {
+      initialSetup.assertCurrent()
+      if (!hasManualSessionCredentialLock() || !(await this.hasNoWebUiConnectionConfiguration())) throw createServicePromptScopeChangedError()
+      initialSetup.assertCurrent()
+    }
     const previousConfig = await this.getConfig()
     input.assertCurrent?.(previousConfig)
+    let qualifiedInitialSetup = initialSetup
     const saved = await withManualSessionCredentialLock(async () => {
+      if (initialSetup) {
+        initialSetup.assertCurrent()
+        if (!(await this.hasNoWebUiConnectionConfiguration())) throw createServicePromptScopeChangedError()
+        initialSetup.assertCurrent()
+      }
       if (input.assertCurrent) {
         // Initialization can acquire this same credential lock for session cleanup.
         const current = await resolveEffectiveTldwConfig({ persistent: this.storage, session: this.sessionStorage },
@@ -2267,37 +2288,53 @@ export class TldwApiClientBase {
             : undefined)
         input.assertCurrent(current)
       }
-      await this.clearManualSingleUserCredentialsUnlocked()
+      // Strict first configuration has no previous credentials to clear.
+      if (!initialSetup) await this.clearManualSingleUserCredentialsUnlocked()
+      let saved: { persistence: ApiKeyPersistence | "memory"; config: TldwConfig }
       if (input.persistence !== "device") {
-        return await this.writeSessionOrMemoryUnlocked(
-          { serverUrl, apiKey },
-          serverOrigin
+        saved = await this.writeSessionOrMemoryUnlocked(
+          { serverUrl, apiKey }, serverOrigin, initialSetup?.assertCurrent
         )
+      } else {
+        const deviceConfig: TldwConfig = {
+          authMode: "single-user",
+          authSource: "manual",
+          serverUrl,
+          apiKey,
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: serverOrigin
+        }
+        try {
+          initialSetup?.assertCurrent()
+          await this.storage.set("tldwConfig", deviceConfig)
+          initialSetup?.assertCurrent()
+          await this.sessionStorage
+            .remove(MANUAL_SESSION_KEY)
+            .catch(() => undefined)
+          initialSetup?.assertCurrent()
+          saved = { persistence: "device", config: deviceConfig }
+        } catch (error) {
+          if (isRequestConfigScopeChangedError(error)) throw error
+          qualifiedInitialSetup?.cancel()
+          qualifiedInitialSetup = undefined
+          saved = await this.writeSessionOrMemoryUnlocked({ serverUrl, apiKey }, serverOrigin)
+        }
       }
-
-      const deviceConfig: TldwConfig = {
-        authMode: "single-user",
-        authSource: "manual",
-        serverUrl,
-        apiKey,
-        credentialSource: "manual",
-        apiKeyPersistence: "device",
-        apiKeyServerOrigin: serverOrigin
+      if (qualifiedInitialSetup) {
+        if (saved.persistence === "memory") {
+          qualifiedInitialSetup.cancel()
+          qualifiedInitialSetup = undefined
+        } else {
+          qualifiedInitialSetup.assertCurrent()
+          if (!(await this.verifyInitialWebUiConfiguration(saved.config))) throw createServicePromptScopeChangedError()
+          qualifiedInitialSetup.assertCurrent()
+          await this.activateManualConfig(saved.config, previousConfig, qualifiedInitialSetup)
+        }
       }
-      try {
-        await this.storage.set("tldwConfig", deviceConfig)
-        await this.sessionStorage
-          .remove(MANUAL_SESSION_KEY)
-          .catch(() => undefined)
-        return { persistence: "device" as const, config: deviceConfig }
-      } catch {
-        return await this.writeSessionOrMemoryUnlocked(
-          { serverUrl, apiKey },
-          serverOrigin
-        )
-      }
+      return saved
     })
-    await this.activateManualConfig(saved.config, previousConfig)
+    if (!qualifiedInitialSetup) await this.activateManualConfig(saved.config, previousConfig)
     return saved.persistence
   }
 
@@ -2335,6 +2372,55 @@ export class TldwApiClientBase {
     }
     this.publishConfigUpdated(null)
     if (failure) throw failure
+  }
+
+  /** Strict admission for an explicit initial WebUI Save; never initializes or migrates. */
+  async hasNoWebUiConnectionConfiguration(): Promise<boolean> {
+    return this.verifyInitialWebUiConfiguration()
+  }
+
+  private async verifyInitialWebUiConfiguration(expected?: TldwConfig): Promise<boolean> {
+    try {
+      const persisted = expected ? toPersistedTldwConfig(expected) : undefined
+      const session = expected?.apiKeyPersistence === "session" ? {
+        credentialSource: "manual", apiKeyPersistence: "session", apiKeyServerOrigin: expected.apiKeyServerOrigin, apiKey: expected.apiKey
+      } : undefined
+      const sync = createSafeStorage({ area: "sync", serde: safeStorageSerde })
+      const rawAbsent = () => {
+        const env = (import.meta as unknown as { env?: Record<string, unknown> }).env || {}
+        const processEnv: Record<string, string | undefined> = typeof process === "undefined" ? {} : process.env
+        if (getCurrentBrowserSurface() !== "webui-page" ||
+          (this.config !== null && (!expected || !connectionAuthoritiesMatch(this.config, expected))) ||
+          isHostedTldwDeployment() || getRuntimeSingleUserApiKeyOverride() ||
+          getQuickstartWebUiServerUrl() ||
+          [env.VITE_TLDW_API_KEY, env.VITE_TLDW_DEFAULT_API_KEY,
+            processEnv.VITE_TLDW_API_KEY, processEnv.VITE_TLDW_DEFAULT_API_KEY,
+            processEnv.NEXT_PUBLIC_X_API_KEY, processEnv.NEXT_PUBLIC_API_BEARER]
+            .some(value => value !== undefined && value !== "") ||
+          (window as Window & { __tldwRuntimeApiKey?: unknown }).__tldwRuntimeApiKey != null) return false
+        // The WebUI shim may fall back to memory; that cannot prove disk absence.
+        if ((this.storage as Storage & { hasPersistentBackend?: boolean }).hasPersistentBackend === false ||
+          (sync as Storage & { hasPersistentBackend?: boolean }).hasPersistentBackend === false) return false
+        return window.localStorage.getItem("tldwConfig") === (persisted ? JSON.stringify(persisted) : null) &&
+          [COOKIE_SESSION_CONFIG_KEY, REFRESH_ROTATION_KEY,
+          "plasmo-sync:tldwConfig", "apiKey", "accessToken", "access_token",
+          "tldwRuntimeSessionSingleUserApiKey", "tldwRuntimeAuthMetadata"]
+          .every(key => window.localStorage.getItem(key) === null) &&
+          window.sessionStorage.getItem(MANUAL_SESSION_KEY) === (session ? JSON.stringify(session) : null)
+      }
+      if (!rawAbsent()) return false
+      const values = await Promise.all([
+        this.storage.get("tldwConfig"), sync.get("tldwConfig"),
+        this.storage.get(COOKIE_SESSION_CONFIG_KEY), this.storage.get(REFRESH_ROTATION_KEY),
+        this.sessionStorage.get(MANUAL_SESSION_KEY)
+      ])
+      return JSON.stringify(values[0]) === JSON.stringify(persisted) &&
+        values.slice(1, 4).every(value => value === undefined) &&
+        JSON.stringify(values[4]) === JSON.stringify(session) && rawAbsent()
+    } catch {
+      // Failure or malformed authority retires only the initial-input exception.
+      return false
+    }
   }
 
   async getConfig(): Promise<TldwConfig | null> {
@@ -2395,7 +2481,8 @@ export class TldwApiClientBase {
   async updateConfig(
     config: Partial<TldwConfig>,
     assertCurrent?: (current: Partial<TldwConfig>) => void,
-    assertCommitted?: (current: Partial<TldwConfig>) => void
+    assertCommitted?: (current: Partial<TldwConfig>) => void,
+    initialSetupToken?: object
   ): Promise<void> {
     await this.initialize()
     let currentConfig = (await this.getConfig()) || ({} as TldwConfig)
@@ -2468,30 +2555,34 @@ export class TldwApiClientBase {
           // A delayed own notification may be older or newer than this read.
           // Read again instead of treating the notification as authoritative.
         } while (readRevision !== revision)
+        const hydrated = committed.apiKeyPersistence === "session" && committed.credentialSource === "manual"
+          ? { ...committed, apiKey: await resolveManualCredential(committed, { session: this.sessionStorage }) || undefined }
+          : committed
+        if (invalidated || !connectionAuthoritiesMatch(hydrated, newConfig)) throw createServicePromptScopeChangedError()
         try {
-          assertCommitted?.(committed)
+          assertCommitted?.(hydrated)
         } catch (error) {
           this.config = null
           throw error
         }
-        this.config = committed
+        this.config = hydrated
         this.applyConfigState()
       } finally {
         unwatch()
       }
-      this.publishConfigUpdated(previousConfig, true)
-      this.publishConfigUpdated(committed)
+      this.publishConfigUpdated(previousConfig, true, initialSetupToken)
+      this.publishConfigUpdated(this.config, false, initialSetupToken)
       return
     }
     await this.storage.set("tldwConfig", persisted)
-    this.config = persisted
+    this.config = newConfig
     this.applyConfigState()
     this.publishConfigUpdated(previousConfig, true)
     if (Object.prototype.hasOwnProperty.call(config, "serverUrl")) {
       await this.syncConnectionServerUrl(config.serverUrl)
     }
     await this.initialize().catch(() => null)
-    this.publishConfigUpdated(persisted)
+    this.publishConfigUpdated(newConfig)
   }
 
   async healthCheck(): Promise<boolean> {

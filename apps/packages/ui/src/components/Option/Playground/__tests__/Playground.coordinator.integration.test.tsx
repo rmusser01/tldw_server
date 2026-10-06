@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { Playground } from "../Playground"
 import { useStoreMessageOption } from "@/store/option"
+import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
 import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader"
 import { resolveEffectiveAssistantState, effectiveAssistantStateToSelection } from "@/hooks/chat/effective-assistant-state"
 import type { AssistantSelection } from "@/types/assistant-selection"
@@ -606,7 +607,9 @@ describe("Playground coordinator integration", () => {
     sessionPersistenceState.value.persistedHistoryId = null
     sessionPersistenceState.value.persistedServerChatId = null
     restoreDecisionState.value = false
-    usePlaygroundSessionStore.setState({ restoreRevision: 0 })
+    // Store identities and pending acceptance callbacks belong to one mounted test.
+    useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
+    usePlaygroundSessionStore.setState(usePlaygroundSessionStore.getInitialState(), true)
     vi.mocked(webUIResumeLastChat).mockReset()
     vi.mocked(webUIResumeLastChat).mockResolvedValue(false)
     vi.mocked(getRecentChatFromWebUI).mockReset()
@@ -705,6 +708,7 @@ describe("Playground coordinator integration", () => {
 
   it("retires a saved Character route before its accepted retry branch can be reasserted", async () => {
     realLoader.enabled = realLoader.webStorage = realLoader.session = realLoader.route = true
+    realLoader.selectionProbe = true
     restoreDecisionState.value = null
     localStorage.clear()
     usePlaygroundSessionStore.getState().clearSession()
@@ -716,9 +720,17 @@ describe("Playground coordinator integration", () => {
     window.history.replaceState({}, "", "/chat?mode=character&characterId=5&chatId=robot&keep=1")
     const view = render(<Playground />)
     try {
-      await waitFor(() => expect(useStoreMessageOption.getState().serverChatId).toBe("robot"))
+      await waitFor(() => {
+        expect(observedSelection?.status).toBe("ready")
+        expect(observedSelection?.getCurrent().owner?.conversation_id).toBe("robot")
+        expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "robot" })
+      })
       const parent = useStoreMessageOption.getState()
       act(() => {
+        // The accepted retry branch already exists on the server; later reads
+        // must return that branch rather than the fixed parent fixture.
+        tldwClientState.getChat.mockImplementation(async (id: string) => ({ id, title: "Robot chat", scope_type: "global", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat" }))
+        tldwClientState.listChatMessages.mockResolvedValue([{ id: "question", role: "user", content: "Question", version: 1 }, { id: "answer", role: "assistant", content: "Recovered answer", version: 1 }])
         window.dispatchEvent(new CustomEvent(CHAT_ROUTE_REPLACEMENT_EVENT, {
           detail: {
             href: window.location.href,
@@ -729,24 +741,19 @@ describe("Playground coordinator integration", () => {
             nextChatId: "retry-branch"
           }
         }))
-        useStoreMessageOption.setState({
-          serverChatId: "retry-branch",
-          serverChatMetaLoaded: true,
-          serverChatCharacterId: 5,
-          serverChatAssistantKind: "character",
-          serverChatAssistantId: "5",
-          messages: [
-            { id: "question", isBot: false, message: "Question", sources: [] },
-            { id: "answer", isBot: true, message: "Recovered answer", sources: [] }
-          ],
-          history: [{ role: "user", content: "Question" }, { role: "assistant", content: "Recovered answer" }]
-        })
+        const acceptDraft = captureChatDraftLoad("switch")
+        usePlaygroundSessionStore.getState().requestServerChatSelection("retry-branch", acceptDraft)
+        useStoreMessageOption.setState({ serverChatId: "retry-branch", historyId: null,
+          serverChatMetaLoaded: false, messages: [], history: [] })
       })
       expect(window.location.href).not.toContain("chatId=robot")
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)) })
       expect(useStoreMessageOption.getState().serverChatId).toBe("retry-branch")
       await waitFor(() => expect(window.location.href).toContain("chatId=retry-branch"), { timeout: 2500 })
-      expect(usePlaygroundSessionStore.getState().serverChatId).toBe("retry-branch")
+      await waitFor(() => expect(usePlaygroundSessionStore.getState().serverChatId).toBe("retry-branch"))
+      expect(observedSelection?.getCurrent().owner).toMatchObject({ kind: "native", conversation_id: "retry-branch" })
+      expect(observedSelection?.getCurrent().view).toMatchObject({ conversation_id: "retry-branch" })
+      expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "retry-branch" })
       view.unmount()
       useStoreMessageOption.setState({ historyId: null, serverChatId: null, history: [], messages: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null })
       tldwClientState.getChat.mockResolvedValue({ id: "retry-branch", title: "Robot retry", scope_type: "global", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat" })
@@ -816,6 +823,32 @@ describe("Playground coordinator integration", () => {
     await waitFor(() => {
       expect(restoreSession).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it("keeps a deliberate fresh source when ownership first becomes ready", async () => {
+    sessionPersistenceState.value.sessionScopeReady = false
+    sessionPersistenceState.value.hasPersistedSession = true
+    restoreDecisionState.value = true
+    vi.mocked(webUIResumeLastChat).mockResolvedValue(true)
+    const { rerender } = render(<Playground />)
+    act(() => usePlaygroundSessionStore.getState().markSourceSelectionIntent())
+    sessionPersistenceState.value.sessionScopeReady = true
+    rerender(<Playground />)
+    await act(async () => { await vi.dynamicImportSettled() })
+    expect(sessionPersistenceState.value.restoreSession).not.toHaveBeenCalled()
+    expect(getRecentChatFromWebUI).not.toHaveBeenCalled()
+  })
+
+  it("retires a held recent-chat read when a deliberate fresh source is chosen", async () => {
+    vi.mocked(webUIResumeLastChat).mockResolvedValue(true)
+    let release!: (value: unknown) => void
+    const pending = new Promise(resolve => { release = resolve })
+    vi.mocked(getRecentChatFromWebUI).mockReturnValue(pending as ReturnType<typeof getRecentChatFromWebUI>)
+    render(<Playground />)
+    await waitFor(() => expect(getRecentChatFromWebUI).toHaveBeenCalled())
+    act(() => usePlaygroundSessionStore.getState().markSourceSelectionIntent())
+    await act(async () => { release({ history: { id: "old-recent" }, messages: [] }); await pending })
+    expect(messageOptionState.value.setHistoryId).not.toHaveBeenCalled()
   })
 
   it("falls back to recent chat only when restore reports nothing restored", async () => {

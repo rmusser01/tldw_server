@@ -16,6 +16,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import LegacySidepanelChat from "../../../../../tldw-frontend/extension/routes/sidepanel-chat"
 import SidepanelChat from "../sidepanel-chat"
+import { SidepanelRouteShell } from "../sidepanel-route-shell"
+import { MemoryRouter } from "react-router-dom"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { useHistorySelectionContext, parseHistorySelectionHandoff, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import { requestSettingsNavigation, SETTINGS_NAVIGATION_REQUEST_EVENT } from "@/utils/settings-return"
 import type { HistoryBookmarkScope } from "@/db/dexie/types"
@@ -52,6 +55,8 @@ vi.mock("@/utils/safe-storage", () => ({
     get: (key: string) => io.read(key),
     set: (key: string, value: unknown) => io.write(key, value),
     getAll: async () => Object.fromEntries(io.data),
+    watch: io.noop,
+    unwatch: io.noop,
     remove: async (key: string) => {
       io.data.delete(key)
     }
@@ -94,7 +99,8 @@ vi.mock("@/hooks/useMessage", () => ({
     })
   }
 }))
-vi.mock("@/services/service-prompts", () => ({
+vi.mock("@/services/service-prompts", async original => ({
+  ...await original<typeof import("@/services/service-prompts")>(),
   loadServicePromptSnapshot: () => io.scope(),
   resolveServicePromptScope: async () => (await io.scope()).requestScope,
   subscribeToServicePromptConfigChanges: () => io.noop
@@ -308,7 +314,13 @@ vi.mock("@/components/Timeline", () => ({ TimelineModal: () => null }))
 vi.mock("@/components/Sidepanel/Notes/NoteQuickSaveModal", () => ({
   default: () => null
 }))
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: io.t }) }))
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: io.t, i18n: { language: "en", resolvedLanguage: "en" } }) }))
+vi.mock("~/hooks/useDarkmode", () => ({ useDarkMode: () => ({ mode: "light" }) }))
+vi.mock("@/hooks/useAutoButtonTitles", () => ({ useAutoButtonTitles: io.noop }))
+vi.mock("@/i18n", () => ({ ensureI18nNamespaces: async () => {} }))
+vi.mock("@/hooks/useServerCapabilities", () => ({ useServerCapabilities: () => ({ capabilities: null, loading: false }) }))
+vi.mock("@/utils/ui-diagnostics", () => ({ registerUiDiagnostics: io.noop }))
+vi.mock("~/components/Layouts/Layout", () => ({ default: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
 vi.mock(
   "@plasmohq/storage",
   async () =>
@@ -317,7 +329,7 @@ vi.mock(
 vi.mock("@/services/tldw/deployment-mode", () => ({
   isHostedTldwDeployment: () => false
 }))
-vi.mock("@/utils/browser-runtime", () => ({ isExtensionRuntime: () => false }))
+vi.mock("@/utils/browser-runtime", async original => ({ ...await original<typeof import("@/utils/browser-runtime")>(), isExtensionRuntime: () => false }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: async () => {},
@@ -421,7 +433,7 @@ describe.each([
 ] as const)("%s sidepanel snapshot ownership", (_name, Route) => {
   beforeEach(() => {
     vi.unstubAllGlobals()
-    vi.spyOn(window, "open").mockImplementation(() => ({}) as Window)
+    vi.spyOn(window, "open").mockReset().mockImplementation(() => ({}) as Window)
     io.user = "alice"
     io.sequence = 0
     io.localId = "foreign"
@@ -452,6 +464,101 @@ describe.each([
     window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
     useSidepanelChatTabsStore.getState().clear()
     useStoreChatModelSettings.getState().reset()
+  })
+
+  it("keeps recovery mounted during cold Retry, then mounts the verified chat", async () => {
+    const alice = await io.scope()
+    io.scope.mockRejectedValueOnce(new Error("offline"))
+    render(<Route />)
+    const retry = await screen.findByRole("button", { name: "Retry" })
+    const panel = screen.getByRole("alert")
+    expect(io.write).not.toHaveBeenCalled()
+    expect(screen.queryByRole("textbox", { name: "Composer draft" })).not.toBeInTheDocument()
+    let finish!: (value: unknown) => void
+    io.scope.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    retry.focus()
+    fireEvent.click(retry)
+    expect(retry).toBeDisabled()
+    expect(screen.getByRole("alert")).toBe(panel)
+    expect(screen.getByRole("button", { name: "Retry" })).toBe(retry)
+    expect(panel).toHaveTextContent("Checking the chat connection")
+    await act(async () => { finish(alice) })
+    await screen.findByRole("button", { name: "Open cached history" })
+    expect(useSidepanelChatTabsStore.getState().ownerKey).toBe(ownerKey("alice"))
+  })
+
+  it("offers another Retry after a repeated cold verification failure", async () => {
+    io.scope.mockRejectedValue(new Error("offline"))
+    render(<Route />)
+    const retry = await screen.findByRole("button", { name: "Retry" })
+    fireEvent.click(retry)
+    await waitFor(() => expect(retry).not.toBeDisabled())
+    expect(io.scope).toHaveBeenCalledTimes(2)
+    expect(io.write).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent("We couldn’t verify the chat connection")
+  })
+
+  it("keeps cold recovery when server-settings navigation is declined", async () => {
+    io.scope.mockRejectedValue(new Error("offline"))
+    render(<Route />)
+    const setup = await screen.findByRole("button", { name: "Server settings" })
+    const decline = (event: Event) => event.preventDefault()
+    window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, decline)
+    try { fireEvent.click(setup) } finally { window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, decline) }
+    expect(window.open).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toBeInTheDocument()
+    expect(io.write).not.toHaveBeenCalled()
+  })
+
+  if (_name === "shared") it.each(["extension", "webui"])("opens full server settings from the actual compact shell in %s", async surface => {
+    io.scope.mockRejectedValue(new Error("offline"))
+    if (surface === "extension") vi.stubGlobal("browser", { runtime: { id: "test-extension", getURL: (route: string) => `chrome-extension://test${route}` } })
+    else {
+      // The deployed WebUI installs the browser shim, including getURL without an extension id.
+      vi.stubGlobal("browser", { runtime: { id: undefined, getURL: (route: string) => `https://webui.test${route}` } })
+      vi.stubGlobal("chrome", undefined)
+    }
+    render(<MemoryRouter initialEntries={["/chat"]}><SidepanelRouteShell /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole("button", { name: "Server settings" }))
+    expect(window.open).toHaveBeenCalledWith(surface === "extension" ? "chrome-extension://test/options.html#/settings/tldw" : "/settings/tldw", "_blank", "noopener,noreferrer")
+    expect(screen.queryByTestId("not-found-recovery-panel")).not.toBeInTheDocument()
+    expect(screen.getByRole("alert")).toBeInTheDocument()
+    // The real shell persists its header preference, never chat/draft content.
+    expect(io.write.mock.calls).toEqual([["headerShortcutsExpanded", false]])
+  })
+
+  it.each(["account", "unmount"])("ignores a failed cold Retry after %s retirement", async ending => {
+    io.scope.mockRejectedValueOnce(new Error("offline"))
+    const page = render(<Route />)
+    const retry = await screen.findByRole("button", { name: "Retry" })
+    let reject!: (error: Error) => void
+    io.scope.mockImplementationOnce(() => new Promise((_resolve, rejectRead) => { reject = rejectRead }))
+    fireEvent.click(retry)
+    if (ending === "account") {
+      switchAccount("bob")
+      await screen.findByRole("button", { name: "Open cached history" })
+    } else page.unmount()
+    const writes = io.write.mock.calls.length
+    await act(async () => { reject(Object.assign(new Error("Expired Alice credentials"), { code: "service_prompt_scope_unresolved" })) })
+    expect(io.write).toHaveBeenCalledTimes(writes)
+    if (ending === "account") expect(useSidepanelChatTabsStore.getState().ownerKey).toBe(ownerKey("bob"))
+  })
+
+  it.each([
+    ["unresolved", Object.assign(new Error("Expired session"), { code: "service_prompt_scope_unresolved" })],
+    ["scope changed", createServicePromptScopeChangedError()],
+    ["401", Object.assign(new Error("Unauthenticated"), { status: 401 })]
+  ])("revokes the mounted chat for positive %s authority loss without deleting saved tabs", async (_reason, error) => {
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    fireEvent.click(await screen.findByRole("button", { name: "alice two" }))
+    const durable = io.data.get(storedKey("alice"))
+    io.scope.mockRejectedValue(error)
+    act(() => window.dispatchEvent(new Event("focus")))
+    await screen.findByRole("button", { name: "Retry" })
+    expect(useSidepanelChatTabsStore.getState().ownerKey).toBeNull()
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(io.data.get(storedKey("alice"))).toEqual(durable)
   })
 
   it("offers restore Retry without overwriting unread owned tabs", async () => {
@@ -985,10 +1092,17 @@ describe.each([
     const { saved, stale, mirror } = completedReplyFixture()
     io.data.set(storedKey("alice"), saved)
     io.local.mockResolvedValue(mirror)
+    const restoreStarted = Date.now()
     render(<Route />)
     await waitFor(() => expect(useStoreMessageOption.getState().messages[0]?.message).toBe("1\n2\n3\n4"))
     expect(useStoreMessageOption.getState().messages[0]?.id).toBe("reply-id")
-    expect(useStoreMessageOption.getState().queuedMessages).toEqual(stale.queuedMessages)
+    const restoredQueue = useStoreMessageOption.getState().queuedMessages
+    expect(restoredQueue).toEqual(stale.queuedMessages.map(request => ({ ...request,
+      status: "blocked", blockedReason: "restored_request", updatedAt: expect.any(Number) })))
+    for (const request of restoredQueue) {
+      expect(request.updatedAt).toBeGreaterThanOrEqual(restoreStarted)
+      expect(request.updatedAt).toBeLessThanOrEqual(Date.now())
+    }
     expect(useStoreMessageOption.getState().history).toEqual(stale.history)
     expect(useStoreChatModelSettings.getState().systemPrompt).toBe("ALICE PRIVATE PROMPT")
   })
@@ -1009,11 +1123,18 @@ describe.each([
     io.data.set(storedKey("alice"), saved)
     if (reason === "offline") io.local.mockRejectedValue(new Error("Mirror unavailable"))
     else io.local.mockResolvedValue(mirror)
+    const restoreStarted = Date.now()
     render(<Route />)
     await screen.findByRole("button", { name: "alice one" })
     await act(async () => {})
     expect(useStoreMessageOption.getState().messages).toEqual(stale.messages)
-    expect(useStoreMessageOption.getState().queuedMessages).toEqual(stale.queuedMessages)
+    const restoredQueue = useStoreMessageOption.getState().queuedMessages
+    expect(restoredQueue).toEqual(stale.queuedMessages.map(request => ({ ...request,
+      status: "blocked", blockedReason: "restored_request", updatedAt: expect.any(Number) })))
+    for (const request of restoredQueue) {
+      expect(request.updatedAt).toBeGreaterThanOrEqual(restoreStarted)
+      expect(request.updatedAt).toBeLessThanOrEqual(Date.now())
+    }
   })
 
   it.each(["account", "unmount"])("rejects a completed local reply arriving after %s", async boundary => {

@@ -1,3 +1,5 @@
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+
 const SETTINGS_RETURN_TO_KEY = "tldw:settingsReturnTo"
 export const SETTINGS_NAVIGATION_REQUEST_EVENT =
   "tldw:settings-navigation-request"
@@ -13,8 +15,19 @@ export type SettingsReturnChatContext = {
   serverChatId?: string | null
 }
 
+/** One mounted composer may carry fresh input through this explicit initial Save. */
+export type InitialChatSetupAttempt = {
+  token: object
+  assertCurrent: () => void
+  admit: () => void
+  afterBoundary: (config: TldwConfig) => void
+  complete: (config: TldwConfig) => Promise<boolean>
+  cancel: () => void
+}
+
 export type SettingsNavigationRequestDetail = {
   destination: string
+  beginInitialSetup?: () => InitialChatSetupAttempt | null
 }
 
 export const requestSettingsNavigation = (destination: string): boolean => {

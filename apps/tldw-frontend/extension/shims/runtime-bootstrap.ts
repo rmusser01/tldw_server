@@ -538,6 +538,12 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
       }
     }
 
+    if (!existing && !apiKey && !apiBearer) {
+      // A URL hint helps setup; it does not establish an authentication configuration.
+      if (next.serverUrl && shouldSyncStoredServerUrl) await storage.set("tldwServerUrl", next.serverUrl)
+      return
+    }
+
     if (changed || shouldSyncStoredServerUrl) {
       await storage.set("tldwConfig", next)
       if (next.serverUrl) {

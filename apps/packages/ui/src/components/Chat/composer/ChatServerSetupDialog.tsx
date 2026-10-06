@@ -3,9 +3,14 @@ import { Button, Modal } from "antd"
 import { useTranslation } from "react-i18next"
 import { useAntdModal } from "@/hooks/useAntdModal"
 import { TldwSettings } from "@/components/Option/Settings/tldw"
-import { resolveSettingsNavigationUrl } from "@/utils/settings-return"
+import { resolveSettingsNavigationUrl, type InitialChatSetupAttempt } from "@/utils/settings-return"
 
-export function ChatServerSetupDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ChatServerSetupDialog({ open, onClose, beginInitialSetup, assertInitialSetupAuthority }: {
+  open: boolean
+  onClose: () => void
+  beginInitialSetup?: () => InitialChatSetupAttempt | null
+  assertInitialSetupAuthority?: () => void
+}) {
   const { t } = useTranslation(["settings", "playground"])
   const modal = useAntdModal()
   const confirmation = React.useRef<ReturnType<typeof modal.confirm> | null>(null)
@@ -22,6 +27,7 @@ export function ChatServerSetupDialog({ open, onClose }: { open: boolean; onClos
         content: t("settings:tldw.unsaved.leave", "You have unsaved connection settings. Leave this page and discard these changes?"),
         okText: t("playground:composer.discardSettingsAction", "Discard changes"),
         cancelText: t("playground:composer.keepEditingSettings", "Keep editing"),
+        autoFocusButton: "cancel",
         onOk: onClose,
         onCancel: clearConfirmation,
         afterClose: clearConfirmation
@@ -42,6 +48,7 @@ export function ChatServerSetupDialog({ open, onClose }: { open: boolean; onClos
     }} destroyOnHidden
     styles={{ body: { maxHeight: "calc(100dvh - 180px)", overflowY: "auto" } }}
     footer={<Button disabled={saving} onClick={close}>{t("playground:composer.returnToChat", "Return to chat")}</Button>}>
-    <TldwSettings onDirtyChange={setDirty} onSavingChange={setSaving} onOpenDiagnostics={diagnostics} />
+    <TldwSettings onDirtyChange={setDirty} onSavingChange={setSaving} onOpenDiagnostics={diagnostics}
+      beginInitialSetup={beginInitialSetup} assertInitialSetupAuthority={assertInitialSetupAuthority} />
   </Modal>
 }

@@ -6,7 +6,7 @@ import {
   invalidateRefreshSessionIfCurrent,
   storeRefreshRotationIfCurrent
 } from "@/services/tldw/single-user-credential"
-import { requestSettingsNavigation } from "@/utils/settings-return"
+import { requestSettingsNavigation, SETTINGS_NAVIGATION_REQUEST_EVENT, type SettingsNavigationRequestDetail } from "@/utils/settings-return"
 import { COOKIE_SESSION_CONFIG_KEY } from "@/services/tldw/browser-networking"
 
 vi.mock("@web/lib/i18n-web", () => ({}))
@@ -85,8 +85,8 @@ const buddyLifetime = vi.hoisted(() => ({
 vi.mock("next/dynamic", () => ({
   default: (loader: () => unknown) => {
     if (loader.toString().includes("ChatServerSetupDialog"))
-      return ({ open, onClose }: { open: boolean; onClose: () => void }) => open ? (
-        <div role="dialog" aria-label="Server settings"><button onClick={onClose}>Return to chat</button></div>
+      return ({ open, onClose, beginInitialSetup }: { open: boolean; onClose: () => void; beginInitialSetup?: () => unknown }) => open ? (
+        <div role="dialog" aria-label="Server settings"><button onClick={onClose}>Return to chat</button><button onClick={() => beginInitialSetup?.()}>Capture fresh setup</button></div>
       ) : null
     if (loader.toString().includes("IndependentBuddyHost"))
       return function BuddyHostProbe() {
@@ -333,6 +333,32 @@ describe("App layout routing", () => {
         expect(editor).toHaveValue("SETUP ORIGINAL\nKEEP SECOND LINE")
         expect(mockRouter.push).not.toHaveBeenCalledWith("/settings/tldw")
       } finally { health.mockRestore() }
+    })
+    it.each(["before", "after"])("collects the mounted composer factory when its listener runs %s the App listener", async order => {
+      const factory = vi.fn(() => null)
+      const attach = (event: Event) => { (event as CustomEvent<SettingsNavigationRequestDetail>).detail.beginInitialSetup = factory }
+      if (order === "before") window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, attach)
+      try {
+        mountDraftPage()
+        await screen.findByRole("textbox", { name: "Chat draft probe" })
+        if (order === "after") window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, attach)
+        await act(async () => { requestSettingsNavigation("/settings/tldw") })
+        fireEvent.click(screen.getByRole("button", { name: "Capture fresh setup" }))
+        expect(factory).toHaveBeenCalledOnce()
+      } finally { window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, attach) }
+    })
+    it("keeps only the latest setup request's factory", async () => {
+      mountDraftPage()
+      await screen.findByRole("textbox", { name: "Chat draft probe" })
+      const first = vi.fn(() => null)
+      const second = vi.fn(() => null)
+      await act(async () => {
+        for (const beginInitialSetup of [first, second]) window.dispatchEvent(new CustomEvent(SETTINGS_NAVIGATION_REQUEST_EVENT,
+          { cancelable: true, detail: { destination: "/settings/tldw", beginInitialSetup } }))
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Capture fresh setup" }))
+      expect(first).not.toHaveBeenCalled()
+      expect(second).toHaveBeenCalledOnce()
     })
     it("opens recovery diagnostics separately while keeping the original Chat editor", async () => {
       const health = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}))

@@ -92,6 +92,16 @@ it("ignores a delayed billing advertisement after disconnecting the server", asy
   expect(screen.queryByRole("tab", { name: "Billing" })).not.toBeInTheDocument()
 })
 
+it("prefills a fresh URL hint while keeping credentials absent", async () => {
+  await storage.remove("tldwConfig")
+  await storage.set("tldwServerUrl", "https://initial-api.example.test")
+  mocks.getConfig.mockResolvedValue(null)
+  mount()
+  const field = await screen.findByRole("textbox", { name: "Server URL" })
+  await waitFor(() => expect(field).toHaveValue("https://initial-api.example.test"))
+  expect(localStorage.getItem("tldwConfig")).toBeNull()
+})
+
 it("loads the actual form before applying async configuration values", async () => {
   const errors = vi.spyOn(console, "error").mockImplementation(() => {})
   let resolve!: (config: TldwConfig) => void
