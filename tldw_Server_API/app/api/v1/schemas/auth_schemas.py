@@ -274,7 +274,7 @@ class UserResponse(BaseModel):
     is_verified: bool = Field(..., description="Email verification status")
     created_at: datetime = Field(..., description="Account creation time")
     last_login: Optional[datetime] = Field(None, description="Last login time")
-    storage_quota_mb: int = Field(..., description="Storage quota in MB")
+    storage_quota_mb: Optional[int] = Field(None, description="Storage quota in MB; null is unlimited")
     storage_used_mb: float = Field(..., description="Storage used in MB")
 
     model_config = {
@@ -417,9 +417,9 @@ class StorageQuotaResponse(BaseModel):
     """Storage quota information"""
     user_id: int = Field(..., description="User ID")
     storage_used_mb: float = Field(..., description="Storage used in MB")
-    storage_quota_mb: int = Field(..., description="Storage quota in MB")
-    available_mb: float = Field(..., description="Available storage in MB")
-    usage_percentage: float = Field(..., description="Usage percentage")
+    storage_quota_mb: Optional[int] = Field(None, description="Storage quota in MB; null means unlimited")
+    available_mb: Optional[float] = Field(None, description="Available storage in MB; null means unlimited")
+    usage_percentage: Optional[float] = Field(None, description="Usage percentage; null means unlimited")
 
     model_config = {
         "json_schema_extra": {

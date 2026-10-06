@@ -71,7 +71,7 @@ class UserUpdateRequest(BaseModel):
     is_active: bool | None = None
     is_verified: bool | None = None
     is_locked: bool | None = None
-    storage_quota_mb: int | None = Field(None, ge=100)
+    storage_quota_mb: int | None = Field(None, ge=0)
     reason: str | None = Field(default=None, min_length=8, max_length=500)
     admin_password: SecretStr | None = Field(default=None, max_length=128, repr=False)
     admin_reauth_token: SecretStr | None = Field(default=None, max_length=4096, repr=False)
@@ -145,7 +145,7 @@ class AdminUserCreateRequest(BaseModel):
     role: str = Field("user", pattern="^(user|admin)$")
     is_active: bool = True
     is_verified: bool = True
-    storage_quota_mb: int | None = Field(None, ge=100)
+    storage_quota_mb: int | None = Field(None, ge=0)
 
     @field_validator("username")
     @classmethod
@@ -176,7 +176,7 @@ class UserSummary(BaseModel):
     mfa_enabled: bool = False
     created_at: datetime
     last_login: datetime | None = None
-    storage_quota_mb: int
+    storage_quota_mb: int | None
     storage_used_mb: float
 
     model_config = ConfigDict(from_attributes=True)
@@ -453,7 +453,7 @@ class UserStats(BaseModel):
 class StorageStats(BaseModel):
     """Storage statistics"""
     total_used_mb: float
-    total_quota_mb: float
+    total_quota_mb: float | None
     average_used_mb: float
     max_used_mb: float
 

@@ -128,17 +128,24 @@ def test_legacy_self_dry_run_preserves_duplicate_key_order_without_writing(
 def test_legacy_admin_update_returns_string_version_applied_and_empty_skipped(
     auth_headers,
 ) -> None:
+    from tldw_Server_API.tests.UserProfile._storage_quota_helpers import patch_quota
+
     with TestClient(app) as client:
         user_id = _current_user_id(client, auth_headers)
-        response = client.patch(
-            f"/api/v1/admin/users/{user_id}/profile",
-            headers=auth_headers,
-            json={
-                "updates": [
-                    {"key": "limits.storage_quota_mb", "value": 4096},
-                ],
-            },
-        )
+        try:
+            response = client.patch(
+                f"/api/v1/admin/users/{user_id}/profile",
+                headers=auth_headers,
+                json={
+                    "updates": [
+                        {"key": "limits.storage_quota_mb", "value": 4096},
+                    ],
+                },
+            )
+        finally:
+            # This sets the shared single-user id's override; clear it so later tests
+            # in this worker don't see a stale 4096 quota (spec 2 Sec. 5).
+            patch_quota(client, auth_headers, user_id, None)
 
     assert response.status_code == 200
     payload = response.json()

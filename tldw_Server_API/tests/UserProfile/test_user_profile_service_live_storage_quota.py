@@ -93,6 +93,10 @@ async def test_build_quotas_falls_back_to_user_values_when_live_storage_fails(
     async def _fake_get_storage_service():
         return _BrokenStorageService()
 
+    async def _fake_resolved_storage_quota_mb(user_id: int) -> int:
+        del user_id
+        return 777
+
     monkeypatch.setattr(
         service,
         "_build_effective_config",
@@ -103,16 +107,24 @@ async def test_build_quotas_falls_back_to_user_values_when_live_storage_fails(
         "get_storage_service",
         _fake_get_storage_service,
     )
+    monkeypatch.setattr(
+        storage_quota_service_module,
+        "resolved_storage_quota_mb",
+        _fake_resolved_storage_quota_mb,
+    )
 
+    # The raw dict carries a stale legacy-column value (5120); the resolver stub returns a
+    # different value (777). Only a resolver-seeded result can land on 777.
     quotas = await service._build_quotas(
         {
             "id": 1,
-            "storage_quota_mb": 777,
+            "storage_quota_mb": 5120,
             "storage_used_mb": 12.5,
         }
     )
 
+    # Seeded from the resolver (patched above), not the raw user-context column.
     if quotas["storage_quota_mb"] != 777:
-        raise AssertionError("Expected storage_quota_mb to fall back to user-context value")
+        raise AssertionError("Expected storage_quota_mb to fall back to the resolved value")
     if quotas["storage_used_mb"] != 12.5:
         raise AssertionError("Expected storage_used_mb to fall back to user-context value")

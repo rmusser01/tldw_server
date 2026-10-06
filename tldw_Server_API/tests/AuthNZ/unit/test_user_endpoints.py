@@ -62,7 +62,9 @@ class TestUserEndpoints:
         assert data["username"] == test_user["username"]
         assert data["email"] == test_user["email"]
         assert data["role"] == test_user["role"]
-        assert data["storage_quota_mb"] == test_user["storage_quota_mb"]
+        # storage_quota_mb is the enforced limits.storage_quota_mb value, not the legacy
+        # users-table column the fixture seeds; no override is set, so it resolves to null.
+        assert data["storage_quota_mb"] is None
         assert data["storage_used_mb"] == test_user["storage_used_mb"]
 
         app.dependency_overrides.clear()

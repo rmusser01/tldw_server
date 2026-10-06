@@ -98,13 +98,12 @@ def test_team_override_delete_http_falls_back_to_org(auth_headers: dict) -> None
 
 
 def test_group_override_rejects_bad_input(auth_headers: dict) -> None:
-    """Unknown keys, storage, non-limits keys, invalid values and missing groups are refused."""
+    """Unknown keys, non-limits keys, invalid values and missing groups are refused."""
     with TestClient(app) as client:
         user_id = int(client.get("/api/v1/users/me/profile", headers=auth_headers).json()["user"]["id"])
         org_id, _ = _setup_org_and_team(user_id)
         base = f"/api/v1/admin/orgs/{org_id}/profile/overrides"
         assert client.put(f"{base}/limits.no_such_key", headers=auth_headers, json={"value": 1}).status_code == 400
-        assert client.put(f"{base}/limits.storage_quota_mb", headers=auth_headers, json={"value": 1}).status_code == 400
         assert client.put(f"{base}/preferences.ui.theme", headers=auth_headers, json={"value": 1}).status_code == 400
         assert client.put(f"{base}/{KEY}", headers=auth_headers, json={"value": -1}).status_code == 400
         assert client.put(f"/api/v1/admin/orgs/987654321/profile/overrides/{KEY}", headers=auth_headers, json={"value": 1}).status_code == 404

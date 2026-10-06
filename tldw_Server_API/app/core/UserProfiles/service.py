@@ -437,16 +437,17 @@ class UserProfileService:
         return org_ids, team_ids
 
     async def _build_quotas(self, user: dict[str, Any]) -> dict[str, Any]:
+        user_id = int(user.get("id"))
+        from tldw_Server_API.app.services.storage_quota_service import (
+            get_storage_service,
+            resolved_storage_quota_mb,
+        )
+
         quotas: dict[str, Any] = {
-            "storage_quota_mb": int(user.get("storage_quota_mb", 0) or 0),
+            "storage_quota_mb": await resolved_storage_quota_mb(user_id),
             "storage_used_mb": float(user.get("storage_used_mb", 0.0) or 0.0),
         }
-        user_id = int(user.get("id"))
         try:
-            from tldw_Server_API.app.services.storage_quota_service import (
-                get_storage_service,
-            )
-
             storage_service = await get_storage_service()
             storage_info = await storage_service.calculate_user_storage(
                 user_id=user_id,
@@ -454,8 +455,7 @@ class UserProfileService:
             )
             live_quota = storage_info.get("quota_mb")
             live_used = storage_info.get("total_mb")
-            if live_quota is not None:
-                quotas["storage_quota_mb"] = int(live_quota)
+            quotas["storage_quota_mb"] = live_quota
             if live_used is not None:
                 quotas["storage_used_mb"] = float(live_used)
         except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
