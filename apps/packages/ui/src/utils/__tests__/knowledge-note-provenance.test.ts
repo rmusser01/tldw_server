@@ -142,3 +142,49 @@ it.each([4, 0, -1, 1.5, "4"])(
       )
   },
 )
+
+const active = {
+  knowledge_provenance_state: "active",
+  knowledge_provenance_version: 3,
+  knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+  knowledge_provenance: original,
+}
+it("uses canonical history over a changed portable marker", () => {
+  const text = retainKnowledgeNoteProvenance(marker({ origin: "reviewed_sources" }), active)
+  expect(readKnowledgeNoteProvenance(text)).toEqual(original)
+})
+it("suppresses a removed history marker even if nested metadata still retains it", () => {
+  expect(retainKnowledgeNoteProvenance(marker(original), {
+    ...active, knowledge_provenance_state: "deleted", knowledge_provenance: null,
+    metadata: { knowledge_provenance: original },
+  })).toBe("")
+})
+it("does not replace a malformed active head with editable marker evidence", () => {
+  expect(readKnowledgeNoteProvenance(retainKnowledgeNoteProvenance(marker(original), {
+    ...active, knowledge_provenance: { origin: "invalid" },
+  }))).toBeNull()
+})
+it.each([undefined, "unsupported", "future-state"])("keeps portable compatibility for %s", state => {
+  expect(readKnowledgeNoteProvenance(retainKnowledgeNoteProvenance(marker(original), {
+    knowledge_provenance_state: state,
+  }))).toEqual(original)
+})
+it("retains direct question, reasons, nullable scope and original excerpts exactly", () => {
+  const value = { ...original, question: "What happened?", trust_reason_codes: ["missing_citations"],
+    scope: { collection_id: null, keyword_filter: "" }, sources: [{
+      originalId: "note-a", mediaId: null, title: "Note", type: "text", sourceType: "notes",
+      excerpt: "original excerpt", url: "", originalVersion: null,
+    }] }
+  expect(validateKnowledgeNoteProvenance(value)).toEqual(value)
+})
+it.each([
+  { ...original, arbitrary: "forbidden" },
+  { ...original, scope: { unknown: true } },
+  { ...original, sources: [{ originalId: null, mediaId: null, title: "T", type: "text", sourceType: null, excerpt: "", secret: "no" }] },
+  { ...original, thread_id: "😀".repeat(257) },
+  { ...original, scope: { sources: null } },
+  { ...original, question: "\ud800" },
+  { ...original, sources: Array.from({ length: 12 }, () => ({ originalId: null, mediaId: null, title: "T", type: "text", sourceType: null, excerpt: "😀".repeat(45000) })) },
+])("rejects strict or portable contract violation", value => {
+  expect(validateKnowledgeNoteProvenance(value)).toBeNull()
+})

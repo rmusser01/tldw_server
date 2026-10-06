@@ -96,7 +96,7 @@ const deferred = <T,>() => {
 }
 const authority = () =>
   createNotesGraphAuthorityScope(String(mocks.config.serverUrl), mocks.userId)
-const renderEditor = (isOnline = true) => {
+const renderEditor = (isOnline = true, refetch = async () => undefined) => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } }
   })
@@ -113,7 +113,7 @@ const renderEditor = (isOnline = true) => {
     listMode: 'active',
     setListMode: vi.fn(),
     data: [],
-    refetch: vi.fn(async () => undefined),
+    refetch: vi.fn(refetch),
     setPage: vi.fn(),
     setQuery: vi.fn(),
     setQueryInput: vi.fn(),
@@ -912,4 +912,135 @@ describe('Notes saved-state hydration and optional monitoring', () => {
       'thread-export',
     )
   })
+  it('replays the original sourced save after a lost acknowledgment without clearing later edits', async () => {
+    const history = { origin: 'knowledge_qa', question: 'Original question' }
+    let stored = note('one', { content: `Body\n\n<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`, knowledge_provenance_state: 'absent', knowledge_provenance_version: 0 })
+    const writes: any[] = []
+    mocks.request.mockImplementation(async request => {
+      if (request.method === 'PUT') {
+        writes.push(request)
+        stored = { ...stored, ...request.body, version: 3, knowledge_provenance_state: 'active', knowledge_provenance_version: 1, knowledge_provenance_hash: `sha256:${'a'.repeat(64)}` }
+        if (writes.length === 1) throw new Error('Lost acknowledgment')
+      }
+      return stored
+    })
+    const view = renderEditor()
+    await act(async () => { await view.result.current.loadDetail('one') })
+    act(() => view.result.current.setContentDirty('First edit'))
+    await act(async () => { expect(await view.result.current.saveNote()).toBe(false) })
+    act(() => view.result.current.setContentDirty('Later unsaved edit'))
+    await act(async () => { expect(await view.result.current.saveNote()).toBe(true) })
+    expect(writes[0].body).toMatchObject({ expected_provenance_version: 0, knowledge_provenance: history })
+    expect(writes[1].body).toEqual(writes[0].body)
+    expect(writes[0].headers['Idempotency-Key']).toBeTruthy()
+    expect(writes[1].headers).toEqual(writes[0].headers)
+    expect(view.result.current.content).toBe('Later unsaved edit')
+    expect(view.result.current.isDirty).toBe(true)
+    expect(view.result.current.originalMetadata).toMatchObject({ knowledge_provenance_state: 'active', knowledge_provenance_version: 1 })
+  })
+  it('restores retained history explicitly while preserving edits and advancing both heads', async () => {
+    const gate = deferred<any>()
+    const history = { origin: 'knowledge_qa', question: 'Original question' }
+    const removed = note('one', { knowledge_provenance_state: 'deleted', knowledge_provenance_version: 4, knowledge_provenance_hash: `sha256:${'a'.repeat(64)}`, knowledge_provenance: null })
+    mocks.request.mockImplementation(request => request.path.endsWith('/provenance/restore') ? gate.promise : Promise.resolve(removed))
+    const view = renderEditor()
+    await act(async () => { await view.result.current.loadDetail('one') })
+    let restoring!: Promise<boolean>
+    act(() => { restoring = view.result.current.saveNote({ restoreProvenance: true } as any) })
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/notes/one/provenance/restore', method: 'POST', headers: expect.objectContaining({ 'expected-version': '2' }), body: { expected_provenance_version: 4, expected_provenance_hash: removed.knowledge_provenance_hash } })))
+    act(() => view.result.current.setContentDirty('Dirty while restoring'))
+    await act(async () => { gate.resolve({ ...removed, version: 3, knowledge_provenance_state: 'active', knowledge_provenance_version: 5, knowledge_provenance: history }); await restoring })
+    expect(view.result.current.content).toBe('Dirty while restoring')
+    expect(view.result.current.selectedVersion).toBe(3)
+    expect(view.result.current.originalMetadata).toMatchObject({ knowledge_provenance_version: 5, knowledge_provenance: history })
+    expect(view.result.current.isDirty).toBe(true)
+  })
+
+  it('retains the queued sourced request identity across an offline retry and remount', async () => {
+    const history = { origin: 'knowledge_qa', question: 'Offline question' }
+    const original = `Offline body\n\n<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`
+    let stored: any = null
+    const writes: any[] = []
+    mocks.request.mockImplementation(async request => {
+      if (request.method === 'POST') {
+        writes.push(request)
+        stored = note('offline-created', { ...request.body, version: 1, knowledge_provenance_state: 'active', knowledge_provenance_version: 1 })
+        if (writes.length === 1) throw new Error('Lost response')
+      }
+      return stored || {}
+    })
+    const view = renderEditor(false)
+    await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
+    act(() => { view.result.current.setContentDirty(original) })
+    await act(async () => { await view.result.current.saveNote() })
+    view.rerender({ scope: authority(), online: true })
+    await waitFor(() => expect(writes.length).toBeGreaterThanOrEqual(1))
+    await waitFor(() => expect(view.result.current.saving).not.toBe(true))
+    view.unmount()
+    const reopened = renderEditor(true)
+    await waitFor(() => expect(writes.length).toBeGreaterThanOrEqual(2))
+    expect(writes[0].headers['Idempotency-Key']).toBeTruthy()
+    expect(writes[1].headers['Idempotency-Key']).toBe(writes[0].headers['Idempotency-Key'])
+    expect(writes[1].body).toEqual(writes[0].body)
+    expect(writes[0].body).toMatchObject({ knowledge_provenance: history, expected_provenance_version: 0 })
+    reopened.unmount()
+  })
+
+  it('refreshes the exact owned history head after enrollment conflict and deliberately retries the preserved draft', async () => {
+    const history = { origin: 'knowledge_qa', question: 'Q' }
+    let current: any = note('one', { content: `Body\n\n<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`, knowledge_provenance_state: 'absent', knowledge_provenance_version: 0 })
+    const writes: any[] = []
+    mocks.request.mockImplementation(async request => {
+      if (request.method === 'PUT') {
+        writes.push(request)
+        current = { ...current, knowledge_provenance_state: 'active', knowledge_provenance: history, knowledge_provenance_version: 1 }
+        if (writes.length === 1) throw Object.assign(new Error('provenance version conflict'), { status: 409 })
+        current = { ...current, ...request.body, version: 3 }
+      }
+      return current
+    })
+    const view = renderEditor()
+    await act(async () => { await view.result.current.loadDetail('one') })
+    act(() => { view.result.current.setContentDirty('Authored draft') })
+    await act(async () => { expect(await view.result.current.saveNote({ showSuccessMessage: false })).toBe(false) })
+    expect(view.result.current.content).toBe('Authored draft')
+    expect(view.result.current.originalMetadata).toMatchObject({ knowledge_provenance_version: 1 })
+    await act(async () => { expect(await view.result.current.saveNote({ showSuccessMessage: false })).toBe(true) })
+    expect(writes[0].body.expected_provenance_version).toBe(0)
+    expect(writes[1].body).not.toHaveProperty('expected_provenance_version')
+    expect(writes[1].headers['expected-version']).toBe('2')
+    expect(writes[1].headers['Idempotency-Key']).not.toBe(writes[0].headers['Idempotency-Key'])
+  })
+  it('does not install an explicit restore acknowledgment after the account changes', async () => {
+    const gate = deferred<any>()
+    const removed = note('one', { knowledge_provenance_state: 'deleted', knowledge_provenance_version: 4, knowledge_provenance_hash: `sha256:${'a'.repeat(64)}` })
+    mocks.request.mockImplementation(request => request.path.endsWith('/provenance/restore') ? gate.promise : Promise.resolve(removed))
+    const view = renderEditor()
+    await act(async () => { await view.result.current.loadDetail('one') })
+    let pending!: Promise<boolean>
+    act(() => { pending = view.result.current.saveNote({ restoreProvenance: true }) })
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/notes/one/provenance/restore' })))
+    mocks.userId = 8
+    view.rerender({ scope: authority(), online: true })
+    mocks.request.mockResolvedValue(note('two'))
+    await act(async () => { await view.result.current.loadDetail('two') })
+    await act(async () => { gate.resolve({ ...removed, version: 3, knowledge_provenance_state: 'active', knowledge_provenance_version: 5 }); expect(await pending).toBe(false) })
+    expect(view.result.current.content).toBe("Body two")
+    expect(view.result.current.originalMetadata?.knowledge_provenance_state).not.toBe("active")
+  })
+
+  it('does not count acknowledged history heads as authored edits during delayed refresh', async () => {
+    const gate = deferred<void>()
+    const history = { origin: 'knowledge_qa', question: 'Q' }
+    const saved = note('created', { knowledge_provenance_state: 'active', knowledge_provenance_version: 1, knowledge_provenance: history })
+    mocks.request.mockResolvedValue(saved)
+    const view = renderEditor(true, () => gate.promise)
+    act(() => { view.result.current.setContentDirty(`Draft\n\n<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`) })
+    let saving!: Promise<boolean>
+    act(() => { saving = view.result.current.saveNote() })
+    await waitFor(() => expect(view.result.current.selectedId).toBe('created'))
+    await act(async () => { gate.resolve(); await saving })
+    expect(view.result.current.isDirty).toBe(false)
+  })
+
 })

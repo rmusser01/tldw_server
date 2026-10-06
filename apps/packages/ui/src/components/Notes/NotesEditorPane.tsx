@@ -1,3 +1,4 @@
+import { KnowledgeNoteHistory } from "./KnowledgeNoteHistory"
 import React from 'react'
 import type { InputRef } from 'antd'
 import { Input, Typography, Select, Button, Tooltip, Spin } from 'antd'
@@ -208,6 +209,9 @@ export interface NotesEditorPaneProps {
 
   // Metrics
   metricSummaryText: string
+  revisionSummaryText: string
+  sourceHistory?: unknown
+  onRestoreSourceHistory?: () => void
   provenanceSummaryText: string
   queuedOfflineDraftCount: number
 
@@ -397,6 +401,8 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   wikilinkSelectionIndex,
   metricSummaryText,
   provenanceSummaryText,
+  onRestoreSourceHistory,
+  sourceHistory,
   queuedOfflineDraftCount,
   titleInputRef,
   contentTextareaRef,
@@ -1878,6 +1884,12 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
           >
             {provenanceSummaryText}
           </Typography.Text>
+          <KnowledgeNoteHistory note={sourceHistory} />
+          {onRestoreSourceHistory && (
+            <Button size="small" onClick={onRestoreSourceHistory} disabled={saving || editorDisabled}>
+              {t('option:notesSearch.restoreSourceHistory', { defaultValue: 'Restore retained source history' })}
+            </Button>
+          )}
           {queuedOfflineDraftCount > 0 && (
             <Typography.Text
               type="secondary"

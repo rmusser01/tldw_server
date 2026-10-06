@@ -65,6 +65,7 @@ const state = {
     generation_model: "gpt-4o-mini",
     enable_web_fallback: false,
   },
+  lastSearchScope: null as any,
   preset: "balanced",
   searchDetails: null as null | {
     expandedQueries?: string[]
@@ -76,10 +77,12 @@ const state = {
   },
 }
 
-vi.mock("../KnowledgeQAProvider", () => ({
+vi.mock("../KnowledgeQAProvider", () => {
+  const client = { createNote: createNoteMock, exportChatbook: exportChatbookMock, downloadChatbookExport: downloadChatbookExportMock, createConversationShareLink: createShareLinkMock, revokeConversationShareLink: revokeShareLinkMock }
+  return ({
   useKnowledgeQA: () => ({
     isAuthorityCurrent: () => true,
-    client: { createNote: createNoteMock, exportChatbook: exportChatbookMock, downloadChatbookExport: downloadChatbookExportMock, createConversationShareLink: createShareLinkMock, revokeConversationShareLink: revokeShareLinkMock },
+    client,
     messages: state.messages,
     currentThreadId: state.currentThreadId,
     results: state.results,
@@ -89,10 +92,11 @@ vi.mock("../KnowledgeQAProvider", () => ({
     answerEvidenceOrigin: state.answerEvidenceOrigin,
     query: state.query,
     settings: state.settings,
+    lastSearchScope: state.lastSearchScope,
     preset: state.preset,
     searchDetails: state.searchDetails,
   })
-}))
+})})
 
 vi.mock("@/hooks/useAntdMessage", () => ({
   useAntdMessage: () => ({
@@ -151,6 +155,7 @@ describe("ExportDialog accessibility", () => {
     }
     state.preset = "balanced"
     state.searchDetails = null
+    state.lastSearchScope = null
   })
 
   it("persists provenance in canonical content when NoteResponse drops metadata", async () => {
@@ -160,6 +165,10 @@ describe("ExportDialog accessibility", () => {
     await waitFor(() => expect(createNoteMock).toHaveBeenCalled())
     expect(createNoteMock.mock.calls[0][0]).toContain("<!-- tldw-knowledge:v1:")
     expect(createNoteMock.mock.calls[0][1].conversation_id).toBe("thread-1")
+    expect(createNoteMock.mock.calls[0][1]).toMatchObject({
+      expected_provenance_version: 0,
+      knowledge_provenance: { origin: "knowledge_qa", question: state.query, scope: { include_media_ids: [42], include_note_ids: ["note-a"] } },
+    })
     expect(await screen.findByRole("link", { name: "Open saved note" })).toHaveAttribute("href", "/notes?source_ref_id=canonical-export")
   })
   it("exposes modal dialog semantics", () => {
@@ -910,4 +919,24 @@ describe("ExportDialog accessibility", () => {
     expect(screen.getByRole("button", { name: /^Copy$/ })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Copied" })).not.toBeInTheDocument()
   })
+})
+
+it("retries Save to Notes with the exact portable body and request identity", async () => {
+  createNoteMock.mockRejectedValueOnce(new Error("Lost response")).mockResolvedValueOnce({ id: "saved" })
+  render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await waitFor(() => expect(messageOpenMock).toHaveBeenCalledWith(expect.objectContaining({ type: "error" })))
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await screen.findByRole("link", { name: "Open saved note" })
+  expect(createNoteMock.mock.calls[1]).toEqual(createNoteMock.mock.calls[0])
+  expect(createNoteMock.mock.calls[0][2].idempotencyKey).toBeTruthy()
+})
+
+it("retains the searched scope after the controls change", async () => {
+  state.lastSearchScope = { sources: ["notes"], includeNoteIds: ["original"], includeMediaIds: [], collectionId: 7, keywordFilter: ["original-topic"], webFallback: false }
+  render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await waitFor(() => expect(createNoteMock).toHaveBeenCalled())
+  expect(createNoteMock.mock.calls.at(-1)![1].knowledge_provenance.scope).toEqual({ sources: ["notes"], include_note_ids: ["original"], include_media_ids: [], collection_id: 7, keyword_filter: ["original-topic"], enable_web_fallback: false })
+  state.lastSearchScope = null
 })

@@ -1,3 +1,4 @@
+import { retainKnowledgeNoteProvenance, type KnowledgeNoteHead } from "@/utils/knowledge-note-provenance"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
 import type {
@@ -9,7 +10,7 @@ import type {
   NotesStudioTemplateType
 } from "./notes-studio-types"
 
-export type SingleNoteExportData = {
+export type SingleNoteExportData = KnowledgeNoteHead & {
   id?: string | number | null
   title: string
   content: string
@@ -43,7 +44,7 @@ const escapeYamlString = (value: string) =>
 
 export const buildSingleNoteMarkdown = (note: SingleNoteExportData): string => {
   const title = String(note.title || "").trim()
-  const content = String(note.content || "")
+  const content = retainKnowledgeNoteProvenance(String(note.content || ""), note)
   const keywords = normalizeKeywords(note.keywords || [])
 
   const heading = title ? `# ${title}\n\n` : ""
@@ -68,7 +69,7 @@ export const buildSingleNoteJson = (note: SingleNoteExportData): string =>
     {
       id: note.id ?? null,
       title: String(note.title || ""),
-      content: String(note.content || ""),
+      content: retainKnowledgeNoteProvenance(String(note.content || ""), note),
       keywords: normalizeKeywords(note.keywords || [])
     },
     null,
@@ -183,7 +184,7 @@ export const buildSingleNotePrintableHtml = (
   }
 ): string => {
   const title = String(note.title || "").trim()
-  const content = String(note.content || "")
+  const content = retainKnowledgeNoteProvenance(String(note.content || ""), note)
   const keywords = normalizeKeywords(note.keywords || [])
   const printableTitle = title || "Untitled note"
   const generatedAtIso = String(options?.generatedAtIso || new Date().toISOString())

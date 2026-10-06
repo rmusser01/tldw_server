@@ -2037,7 +2037,11 @@ it.each(["streamed", "restored"])(
 it("retains canonical import provenance in a fresh server workspace", async () => {
   let canonical: any = null
   mocks.request.mockImplementation(async ({ method, body }: any) => {
-    if (method === "POST") canonical = { ...body, version: 1 }
+    if (method === "POST") canonical = { ...body, version: 1,
+      content: stripKnowledgeNoteProvenance(body.content),
+      knowledge_provenance_state: "active", knowledge_provenance_version: 1,
+      knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+    }
     if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
     return canonical
   })
@@ -2052,7 +2056,7 @@ it("retains canonical import provenance in a fresh server workspace", async () =
   )
   await waitFor(() => expect(canonical).not.toBeNull())
   expect(
-    readKnowledgeNoteProvenance(canonical.content)?.research?.import_id,
+    canonical.knowledge_provenance?.research?.import_id,
   ).toBe(handoff.id)
   expect(useWorkspaceStore.getState().currentNote.id).toBe(canonical.id)
   expect(mocks.upload).toHaveBeenCalledTimes(1)
@@ -2242,3 +2246,79 @@ it.each(["note-first", "media-first"])(
     view.unmount()
   },
 )
+
+it("replays canonical import receipts without replacing edits made before retry", async () => {
+  const transfer = payload()
+  transfer.sources = transfer.sources.filter(source => source.sourceType === "notes")
+  await queueResearchWorkspacePrefill(transfer, "alice")
+  mocks.upload.mockResolvedValue({ media_id: 101 })
+  let canonical: any = null
+  const writes: any[] = []
+  mocks.request.mockImplementation(async request => {
+    if (request.method === "POST") {
+      writes.push(request)
+      if (!canonical) canonical = { ...request.body, version: 1, knowledge_provenance_state: "active", knowledge_provenance_version: 1, knowledge_provenance_hash: `sha256:${"a".repeat(64)}` }
+      if (writes.length === 1) throw new Error("Lost acknowledgment")
+    }
+    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
+    return canonical
+  })
+  const view = renderHook(() => useResearchWorkspacePrefill("workspace-a", true, true))
+  await waitFor(() => expect(view.result.current.error).not.toBeNull())
+  await act(async () => {
+    useWorkspaceStore.getState().updateNoteContent("Edited before receipt recovery")
+    await view.result.current.retry()
+  })
+  await waitFor(() => expect(view.result.current.error).toBeNull())
+  await waitFor(() => expect(view.result.current.importing).toBe(false))
+  expect(writes).toHaveLength(2)
+  expect(writes[1].body).toEqual(writes[0].body)
+  expect(writes[1].headers).toEqual(writes[0].headers)
+  expect(writes[0].headers["Idempotency-Key"]).toBeTruthy()
+  expect(stripKnowledgeNoteProvenance(useWorkspaceStore.getState().currentNote.content)).toBe("Edited before receipt recovery")
+  expect(useWorkspaceStore.getState().currentNote).toMatchObject({ id: canonical.id, isDirty: true, knowledge_provenance_version: 1 })
+  view.unmount()
+})
+
+it("does not finish a partial import when its recovered receipt lacks newly attached sources", async () => {
+  const transfer = payload()
+  transfer.sources = transfer.sources.slice(0, 3)
+  await queueResearchWorkspacePrefill(transfer, "alice")
+  mocks.upload.mockResolvedValueOnce({ media_id: 101 })
+    .mockRejectedValueOnce(new Error("source unavailable"))
+    .mockResolvedValueOnce({ media_id: 102 })
+  let canonical: any = null
+  const writes: any[] = []
+  mocks.request.mockImplementation(async request => {
+    if (request.method === "POST" || request.method === "PUT") {
+      writes.push(request)
+      if (!canonical || request.method === "PUT") canonical = {
+        ...request.body, id: transfer.id, version: writes.length,
+        knowledge_provenance_state: "active", knowledge_provenance_version: writes.length,
+        knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+      }
+      if (writes.length === 1) throw new Error("Lost acknowledgment")
+    }
+    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
+    return canonical
+  })
+  const view = renderHook(() => useResearchWorkspacePrefill("workspace-a", true, true))
+  await waitFor(() => expect(view.result.current.error).not.toBeNull())
+  await act(async () => {
+    useWorkspaceStore.getState().updateNoteContent("Later authored draft")
+    await view.result.current.retry()
+  })
+  await waitFor(() => expect(view.result.current.importing).toBe(false))
+  expect(view.result.current.error).not.toBeNull()
+  expect((await consumeResearchWorkspacePrefill("alice"))?.completed).not.toBe(true)
+  expect(writes[1].body).toEqual(writes[0].body)
+  expect(writes[1].headers).toEqual(writes[0].headers)
+  await act(async () => { await view.result.current.retry() })
+  await waitFor(() => expect(view.result.current.importing).toBe(false))
+  expect(view.result.current.error).toBeNull()
+  expect(writes[2].method).toBe("PUT")
+  expect(writes[2].headers["Idempotency-Key"]).not.toBe(writes[0].headers["Idempotency-Key"])
+  expect(canonical.knowledge_provenance.research.sources.map(source => source.mediaId)).toEqual([101, 102])
+  expect(stripKnowledgeNoteProvenance(canonical.content)).toBe("Later authored draft")
+  view.unmount()
+})

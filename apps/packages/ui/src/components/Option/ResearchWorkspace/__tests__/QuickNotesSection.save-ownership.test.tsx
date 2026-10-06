@@ -275,3 +275,45 @@ describe("Quick Notes save ownership across requests and acknowledgment", () => 
     expect(mocks.success).not.toHaveBeenCalled()
   })
 })
+
+it("backfills only the exact absent child and retries a lost acknowledgment unchanged", async () => {
+  const history = { origin: "knowledge_qa", question: "Original question" }
+  const marker = `<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`
+  useWorkspaceStore.setState({ currentNote: { ...draft(), content: `Body\n\n${marker}`, version: 3,
+    knowledge_provenance_state: "absent", knowledge_provenance_version: 0,
+  } as WorkspaceNote })
+  let first = true
+  mocks.request.mockImplementation(async (request: any) => {
+    if (request.path.includes("/search/")) return []
+    if (request.method === "GET") return { ...draft(), version: 4 }
+    if (first) { first = false; throw new Error("Lost acknowledgment") }
+    return { ...request.body, id: noteId, version: 4,
+      knowledge_provenance_state: "active", knowledge_provenance_version: 1,
+      knowledge_provenance_hash: `sha256:${"a".repeat(64)}`, knowledge_provenance: history,
+    }
+  })
+  render(<QuickNotesSection />)
+  fireEvent.click(screen.getByRole("button", { name: "Update" }))
+  await waitFor(() => expect(mocks.error).toHaveBeenCalled())
+  expect(writes()[0][0].body).toMatchObject({ knowledge_provenance: history, expected_provenance_version: 0 })
+  act(() => { useWorkspaceStore.getState().updateNoteContent("Newer unsaved draft") })
+  fireEvent.click(screen.getByRole("button", { name: "Update" }))
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled())
+  expect(writes()[1][0].body).toEqual(writes()[0][0].body)
+  expect(writes()[0][0].headers["Idempotency-Key"]).toBeTruthy()
+  expect(writes()[1][0].headers).toEqual(writes()[0][0].headers)
+  expect(useWorkspaceStore.getState().currentNote).toMatchObject({ content: "Newer unsaved draft", version: 4, isDirty: true, knowledge_provenance_version: 1 })
+})
+
+it.each(["active", "deleted"] as const)("displays only the %s retained source history", async state => {
+  const history = { origin: "knowledge_qa" as const, question: "Original evidence question", sources: [{ originalId: "foreign-note", mediaId: null, title: "Original source", type: "text" as const, sourceType: "notes", excerpt: "Retained excerpt", url: "javascript:alert(1)" }] }
+  useWorkspaceStore.setState({ currentNote: { ...draft(), content: "Edited answer", knowledge_provenance_state: state, knowledge_provenance: state === "active" ? history : null, knowledge_provenance_version: 3 } })
+  mocks.request.mockResolvedValue([])
+  render(<QuickNotesSection />)
+  if (state === "active") {
+    expect(screen.getByText("Original evidence question")).toBeInTheDocument()
+    expect(screen.getByText("Retained excerpt")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Original source" })).not.toBeInTheDocument()
+  } else expect(screen.queryByText("Retained excerpt")).not.toBeInTheDocument()
+  expect(mocks.request.mock.calls.every(([request]) => !request.path.includes("foreign-note"))).toBe(true)
+})

@@ -1,3 +1,4 @@
+import type { KnowledgeNoteSource } from "./knowledge-note-provenance"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
@@ -34,26 +35,19 @@ type KnowledgeQaResultLike = {
   }
 }
 
-export type WorkspaceKnowledgeQaPrefillSource = {
-  originalId: string | number | null
-  excerpt: string
-  snapshotMediaId?: number
-  originalVersion?: number
-  importError?: string
-  mediaId: number | null
-  title: string
-  type: WorkspaceSourceType
-  sourceType: string | null
-  url?: string
-  pageNumber?: number
-  citationIndex?: number
-}
+export type WorkspaceKnowledgeQaPrefillSource = KnowledgeNoteSource & { importError?: string }
 
 export type ResearchWorkspacePrefill = {
   kind: "knowledge_qa_thread"
   id: string
   ownerScope?: string
   workspaceId?: string
+  pendingNoteWrite?: {
+    idempotencyKey: string
+    method: "POST" | "PUT"
+    expectedVersion?: number
+    body: Record<string, unknown>
+  }
   canonicalNoteId?: string
   legacyNoteId?: number
   draftRetained?: boolean
@@ -156,7 +150,7 @@ const resolveMediaId = (result: KnowledgeQaResultLike): number | null => {
   return null
 }
 
-const toPrefillSource = (
+export const toPrefillSource = (
   result: KnowledgeQaResultLike,
   index: number,
   citedIndices: Set<number>,

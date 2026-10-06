@@ -1,3 +1,4 @@
+import { knowledgeNoteHead, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import type { WorkspaceSlice } from './types'
 import type { WorkspaceState } from '../workspace'
 import type { GeneratedArtifact, WorkspaceBanner } from '@/types/workspace'
@@ -188,7 +189,8 @@ export const createStudioSlice: WorkspaceSlice<StudioActions> = (set, get) => ({
       currentNote: {
         id: note.id,
         title: note.title,
-        content: note.content,
+        content: retainKnowledgeNoteProvenance(note.content, note),
+        ...knowledgeNoteHead(note),
         keywords: note.keywords || [],
         version: note.version,
         isDirty: false

@@ -1432,6 +1432,7 @@ function buildScopeSnapshot(
     preset,
     sources: [...settings.sources],
     webFallback: Boolean(settings.enable_web_fallback),
+    keywordFilter: settings.keyword_filter,
     collectionId:
       typeof settings.collection_id === "number" &&
       Number.isInteger(settings.collection_id) &&

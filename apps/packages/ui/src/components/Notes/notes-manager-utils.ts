@@ -1,3 +1,4 @@
+import type { KnowledgeNoteHead } from "@/utils/knowledge-note-provenance"
 import React from 'react'
 import { Modal, Input } from 'antd'
 import type { NotesTitleSuggestStrategy, NotesNotebookSetting } from '@/services/settings/ui-settings'
@@ -422,6 +423,7 @@ export const calculateSidebarHeight = () => {
 }
 
 export type SaveNoteOptions = {
+  restoreProvenance?: boolean
   showSuccessMessage?: boolean
   /** Who asked for the save; see NoteSaveTrigger in notes-save-machine.ts. */
   trigger?: 'auto' | 'manual' | 'retry' | 'leave' | 'switch' | 'keep-mine'
@@ -477,6 +479,7 @@ export type KeywordMergeDraft = {
 export type MarkdownToolbarAction = 'bold' | 'italic' | 'heading' | 'list' | 'link' | 'code'
 export type OfflineDraftSyncState = 'queued' | 'syncing' | 'conflict' | 'error'
 export type OfflineDraftEntry = {
+  pendingWrite?: { key: string; body: Record<string, any>; expectedVersion: number | null; previousTitle?: string | null }
   key: string
   noteId: string | null
   baseVersion: number | null
@@ -493,6 +496,8 @@ export type OfflineDraftEntry = {
 export type OfflineDraftSyncResult =
   | {
       status: 'synced'
+      head?: KnowledgeNoteHead
+      submittedBody?: Record<string, any>
       key: string
       noteId: string
       version: number | null
@@ -522,6 +527,9 @@ export const normalizeOfflineDraftQueue = (rawValue: unknown): Record<string, Of
             ? 'error'
             : 'queued'
     normalized[normalizedKey] = {
+      ...(typeof draft.pendingWrite?.key === 'string' && draft.pendingWrite.body && typeof draft.pendingWrite.body === 'object' &&
+        typeof draft.pendingWrite.body.content === 'string' && (draft.pendingWrite.expectedVersion === null || Number.isSafeInteger(draft.pendingWrite.expectedVersion))
+        ? { pendingWrite: draft.pendingWrite } : {}),
       key: normalizedKey,
       noteId: draft.noteId != null ? String(draft.noteId) : null,
       baseVersion:
