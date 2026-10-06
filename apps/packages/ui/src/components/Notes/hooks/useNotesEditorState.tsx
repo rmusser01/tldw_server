@@ -392,9 +392,15 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setWysiwygHtmlState(html)
     setWysiwygRevision((current) => current + 1)
   }, [])
+  // The user's own WYSIWYG edits, counted. A space at the end of a line or an
+  // empty new line leaves the Markdown as it was, yet it is an edit: it is part
+  // of the edit snapshot below, so a reload that was already on its way (a new
+  // note's first save) does not write the server copy over it (NE-01).
+  const [wysiwygInputCount, setWysiwygInputCount] = React.useState(0)
   /** Record HTML the editor already shows (user input or an in-place command); the DOM is left alone. */
   const recordWysiwygEditorHtml = React.useCallback((html: string) => {
     setWysiwygHtmlState(html)
+    setWysiwygInputCount((count) => count + 1)
   }, [])
   const [wysiwygSessionDirty, setWysiwygSessionDirty] = React.useState(false)
   const [editorCursorIndex, setEditorCursorIndex] = React.useState<number | null>(null)
@@ -448,7 +454,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const attachmentInputRef = React.useRef<HTMLInputElement | null>(null)
   const markdownBeforeWysiwygRef = React.useRef<string | null>(null)
   contentRef.current = content
-  const draftSnapshot = { title, content, editorKeywords, originalMetadata, backlinkConversationId, backlinkMessageId }
+  const draftSnapshot = { title, content, editorKeywords, originalMetadata, backlinkConversationId, backlinkMessageId, wysiwygInputCount }
   const editRevisionRef = React.useRef({ ...draftSnapshot, revision: 0 })
   if ((Object.keys(draftSnapshot) as Array<keyof typeof draftSnapshot>).some((key) => editRevisionRef.current[key] !== draftSnapshot[key])) {
     editRevisionRef.current = { ...draftSnapshot, revision: editRevisionRef.current.revision + 1 }

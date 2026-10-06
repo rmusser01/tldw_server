@@ -7,7 +7,7 @@
  */
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
@@ -221,6 +221,8 @@ describe("NotesManagerPage WYSIWYG typing (NE-01)", { timeout: 60_000 }, () => {
   let innerHtmlSetter: ReturnType<typeof vi.spyOn> | null = null
   let createdNote: { title: string; content: string } | null = null
   let holdCreate: Promise<void> | null = null
+  let holdReload: Promise<void> | null = null
+  let reloadAnswered = false
   let serverNotes: Record<string, { title: string; content: string }> = {}
   let conflictOnPut = false
 
@@ -234,6 +236,8 @@ describe("NotesManagerPage WYSIWYG typing (NE-01)", { timeout: 60_000 }, () => {
 
     createdNote = null
     holdCreate = null
+    holdReload = null
+    reloadAnswered = false
     serverNotes = Object.fromEntries(
       Object.entries(INITIAL_NOTES).map(([id, note]) => [id, { ...note }])
     )
@@ -256,6 +260,8 @@ describe("NotesManagerPage WYSIWYG typing (NE-01)", { timeout: 60_000 }, () => {
           return { id: "note-new", ...createdNote, version: 1, last_modified: "2026-10-03T00:00:00Z" }
         }
         if (path === "/api/v1/notes/note-new" && method === "GET" && createdNote) {
+          if (holdReload) await holdReload
+          reloadAnswered = true
           return {
             id: "note-new",
             ...createdNote,
@@ -478,6 +484,52 @@ describe("NotesManagerPage WYSIWYG typing (NE-01)", { timeout: 60_000 }, () => {
 
     fireEvent.click(screen.getByTestId("notes-input-mode-markdown"))
 
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(MARKDOWN_PLACEHOLDER)).toHaveValue("Hello world")
+    })
+  })
+
+  // The NE-01 browser spec lost a space typed right after the first autosave
+  // ("Hello worldagain"). A space at the end of a line leaves the Markdown as
+  // it was ("Hello " is saved as "Hello"), so it did not count as an edit, and
+  // the reload that follows a new note's first save wrote the server copy over
+  // it. The reload's answer and the keystroke are ordered here by hand.
+  it("keeps a space typed while the new note's first save is reloading it", async () => {
+    const user = userEvent.setup()
+    let answerReload: () => void = () => undefined
+    holdReload = new Promise<void>((resolve) => {
+      answerReload = resolve
+    })
+    renderPage()
+    fireEvent.change(await screen.findByPlaceholderText("Title"), {
+      target: { value: "Fresh note" }
+    })
+
+    const editor = await openWysiwygEditor()
+    await user.click(editor)
+    await user.type(editor, "Hello")
+    await user.keyboard("{Control>}s{/Control}")
+    await waitFor(() => {
+      expect(mockBgRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "/api/v1/notes/note-new", method: "GET" })
+      )
+    })
+
+    // The note is created and its reload is on the way: the user types a space.
+    await user.keyboard(" ")
+    expect(editor.textContent).toBe("Hello ")
+    answerReload()
+    await waitFor(() => expect(reloadAnswered).toBe(true))
+    // Let the reload finish and React commit whatever it wrote.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+
+    await user.keyboard("world")
+
+    expect(editor.textContent).toBe("Hello world")
+    expect(textBeforeCaret(editor)).toBe("Hello world")
+    fireEvent.click(screen.getByTestId("notes-input-mode-markdown"))
     await waitFor(() => {
       expect(screen.getByPlaceholderText(MARKDOWN_PLACEHOLDER)).toHaveValue("Hello world")
     })
