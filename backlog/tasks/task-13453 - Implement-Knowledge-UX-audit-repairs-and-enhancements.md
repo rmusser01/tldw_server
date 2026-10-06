@@ -1,7 +1,7 @@
 ---
 id: TASK-13453
 title: Implement Knowledge UX audit repairs and enhancements
-status: Done
+status: In Progress
 labels:
 - knowledge
 - ux
@@ -36,6 +36,7 @@ CI-compatible cache verification passed all30 existing prompt-settings tests, in
 Final complete affected-suite refresh on rebased product: 127 suites / 1910 tests PASS in532.89s using the existing frontend-required maxWorkers1/testTimeout15000 contract. This resolves the earlier default5-second cache timeouts; no application or committed timeout settings changed. Exact log /private/tmp/knowledge-ux-rebase-tests-ci-settings.log. Fresh dev recheck remains5775d3fb. Required remote license gate passed; remaining checks are queued for hosted runners. Record final local evidence now before any required product gates start.
 Post-rebase backend-required reached and failed the OpenAPI drift gate at head e3a2e03d695020a7baa6f85294e185b8ba95ca58 (run 37400352572). Investigating the generated fingerprint for the intentional web-clipper expected-user dependency; refresh with the existing canonical exporter and verify the schema delta before committing. All backend test and startup smoke steps passed; the container retry and its rollup passed.
 OpenAPI follow-up repaired through existing generate:api-types. CI-matching Python3.12/FastAPI0.142.2/Pydantic2.13.5/Starlette1.7.0 exports cfd0a1892138803a9b2f25ff3420420671bb6e61cec3a2b6ea21d8bb525e4734 with unchanged 2107 paths/3248 schemas. Removing only the optional expected-user header on POST web-clipper/save restores the prior hash exactly; no hidden API delta. Canonical drift check and official WebUI typecheck pass, with generated frontend types refreshed. Only fingerprint and tracking/verification evidence changed. PR #3196 remains pending remote required checks on the follow-up head; merge without Qodo remains explicitly authorized.
+Dev advanced to 587cd8e9fe3b42eba451b83c1ba690607035eace via Media UX PR #3194 while frontend-required was pending on 0ee9dcc3a1e063ce96fd10e48100e18ee01f43db; the other six required gates and critical journeys/UX smoke passed. Upstream changes overlap shared QuickIngest, review, API-client scope, and locales. Reopening to reconcile the latest-dev integration, verify preserved Knowledge and Media behaviors, and rerun current-head required gates before the authorized merge. Plan: Docs/Design/IMPLEMENTATION_PLAN_knowledge_media_dev_integration_20261005.md.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
