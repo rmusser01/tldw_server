@@ -918,6 +918,19 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
   // -------------------------------------------------------------------------
   // Step 1 -> Step 2: Advance to Configure
   // -------------------------------------------------------------------------
+  it("keeps eligible counts aligned and explains every excluded source in Review", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} initialState={{ selectedPreset: "quick", customBasePreset: "quick", presetConfig: resolvePresetMap().quick }} />)
+    await user.type(screen.getByPlaceholderText(/https:\/\/example\.com/i), "https://example.com/a\nhttps://example.com/a\ninvalid")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
+    expect(screen.getByText("1 eligible items in this run")).toBeInTheDocument()
+    expect(screen.getByText(/Settings apply to all eligible items in this run/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Next" }))
+    expect(screen.getByText(/Already queued — excluded/)).toBeInTheDocument()
+    expect(screen.getByText(/Invalid — excluded/)).toBeInTheDocument()
+  })
+
   it("Step 1 -> Step 2 — clicking configure advances to preset selector", async () => {
     const user = userEvent.setup()
     render(<WizardTestHarness onClose={onClose} />)
@@ -1028,7 +1041,10 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
 
   it("Step 2 — remains editable when provider discovery fails", async () => {
     const catalogError = new Error("catalog unavailable")
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const originalWarn = console.warn
+    const warn = vi.spyOn(console, "warn").mockImplementation((...args) => {
+      if (args[0] !== "[QuickIngest] Failed to load analysis providers" || args[1] !== catalogError) originalWarn(...args)
+    })
     getProvidersStatusMock.mockRejectedValue(catalogError)
     const user = userEvent.setup()
     try {
@@ -1642,7 +1658,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(screen.getByText("Skipped existing (1)")).toBeTruthy()
     expect(screen.getByText("Existing Article")).toBeTruthy()
     expect(
-      screen.getByText(/1 succeeded.*1 skipped.*1 failed/i)
+      screen.getByText(/1 excluded\/skipped.*1 succeeded.*1 failed/i)
     ).toBeTruthy()
   })
 
@@ -1845,11 +1861,11 @@ describe("QuickIngestWizardModal — real configure step", () => {
 
     // Advanced controls are hidden by default
     expect(screen.queryByTitle("Captions toggle")).not.toBeInTheDocument()
-    expect(screen.queryByText("Review before saving")).not.toBeInTheDocument()
+    expect(screen.queryByText("Review extracted content before saving")).not.toBeInTheDocument()
 
     // Expand advanced options to reveal them
     await expandAdvancedOptions(user)
-    expect(screen.getByText("Review before saving")).toBeInTheDocument()
+    expect(screen.getByText("Review extracted content before saving")).toBeInTheDocument()
     expect(screen.getByTitle("Captions toggle")).toBeInTheDocument()
 
     await user.click(analysisToggle)
@@ -1970,7 +1986,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       screen.getByLabelText(/store ingest results on your tldw server/i)
     )
 
-    const reviewToggle = screen.getByLabelText(/review before saving/i)
+    const reviewToggle = screen.getByLabelText(/review.*before saving/i)
     await user.click(reviewToggle)
 
     expect(

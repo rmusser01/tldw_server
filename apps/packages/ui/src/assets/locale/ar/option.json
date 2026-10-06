@@ -602,7 +602,7 @@
     "reviewStorageCapWarning_one": "{{count}} ملف يتجاوز حد المسودات المحلية ({{cap}}). أرفق المصادر قبل اعتماد الصوت/الفيديو.",
     "reviewStorageCapWarning_other": "{{count}} ملفات تتجاوز حد المسودات المحلية ({{cap}}). أرفق المصادر قبل اعتماد الصوت/الفيديو.",
     "storeAfterReview": "الحفظ بعد المراجعة",
-    "reviewBeforeStorage": "المراجعة قبل الحفظ",
+    "reviewBeforeStorage": "مراجعة المحتوى المستخرج قبل الحفظ",
     "reviewBeforeStorageHint": "قم بالمعالجة الآن ثم حرّر المسودات محليًا قبل اعتمادها على الخادم.",
     "reviewEnabled": "وضع المراجعة",
     "reviewStorageCap": "الحد الأقصى للمسودات المحلية هو {{cap}}.",

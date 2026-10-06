@@ -6,6 +6,7 @@ import type { WizardResultItem } from "../types"
 
 const wizardHarness = vi.hoisted(() => ({
   results: [] as WizardResultItem[],
+  queueItems: [] as any[],
   reset: vi.fn(),
 }))
 
@@ -35,6 +36,8 @@ vi.mock("../IngestWizardContext", () => ({
   useIngestWizard: () => ({
     state: {
       results: wizardHarness.results,
+      queueItems: wizardHarness.queueItems,
+      presetConfig: { common: { perform_chunking: true } },
       processingState: { elapsed: 10 },
     },
     reset: wizardHarness.reset,
@@ -69,7 +72,7 @@ describe("WizardResultsStep navigation buttons", () => {
     const warnings = screen.getByRole("region", { name: "Items saved with warnings" })
     expect(within(warnings).getByText("Analysis failed for chunk 1")).toBeVisible()
     expect(screen.queryByRole("region", { name: "Completed items" })).toBeNull()
-    expect(screen.getByText(/Total: 0 succeeded, 1 saved with warnings.*0 failed/)).toBeVisible()
+    expect(screen.getByText(/1 succeeded \(1 saved\).*0 failed/)).toBeVisible()
     expect(screen.queryByRole("button", { name: /retry/i })).toBeNull()
     fireEvent.click(within(warnings).getByRole("button", { name: /open .* media/i }))
     expect(onOpenMedia).toHaveBeenCalledWith(expect.objectContaining({ mediaId: 42 }))
@@ -85,8 +88,38 @@ describe("WizardResultsStep navigation buttons", () => {
       { id: "cancelled", status: "error", outcome: "cancelled", error: "Cancelled by user", type: "pdf" },
     )
     render(<WizardResultsStep onClose={vi.fn()} onRetryItems={vi.fn()} />)
-    expect(screen.getByText(/Total: 0 succeeded, 1 saved with warnings.*1 failed, 1 cancelled/)).toBeVisible()
+    expect(screen.getByText(/1 succeeded \(1 saved\).*1 failed.*1 cancelled/)).toBeVisible()
     expect(screen.queryByRole("button", { name: /retry/i })).toBeNull()
+  })
+
+  it("keeps unsaved analysis separate from saved continuation and Knowledge search", () => {
+    setSinglePdfResult({ mediaId: undefined, persisted: false, warning: "Analysis warning" })
+    render(<WizardResultsStep onClose={vi.fn()} onSearchKnowledge={vi.fn()} onReviewSavedItems={vi.fn()} />)
+    expect(screen.getByText("Extracted content; not saved")).toBeVisible()
+    expect(screen.queryByRole("button", { name: /Search.*Knowledge|Review.*saved items/ })).toBeNull()
+    expect(screen.queryByRole("region", { name: "Items saved with warnings" })).toBeNull()
+  })
+
+  it("accounts for every excluded input and shows readiness only with affirmative evidence", () => {
+    wizardHarness.queueItems = [
+      { id: "test-1", url: "https://source.test/a", validation: { valid: true } },
+      { id: "duplicate", url: "https://source.test/a", validation: { valid: true } },
+      { id: "invalid", url: "bad", validation: { valid: false, errors: ["Invalid URL format"] } },
+      { id: "unselected", url: "https://source.test/b", validation: { valid: true }, conferenceOverride: { selected: false } },
+    ]
+    render(<WizardResultsStep onClose={vi.fn()} />)
+    expect(screen.getByText(/4 added.*3 excluded.*1 succeeded.*1 saved.*0 failed.*0 cancelled/)).toBeVisible()
+    expect(screen.getByText("Invalid URL format")).toBeVisible()
+    expect(screen.getByText("Knowledge readiness unconfirmed")).toBeVisible()
+    expect(screen.queryByText("Ready for Knowledge")).toBeNull()
+  })
+
+  it("shows explicit configuration recovery for nonretryable failures", () => {
+    wizardHarness.results = [{ id: "auth", status: "error", type: "pdf", error: "Unauthorized 401" }]
+    const onCorrectItems = vi.fn()
+    render(<WizardResultsStep onClose={vi.fn()} onCorrectItems={onCorrectItems} />)
+    fireEvent.click(screen.getByRole("button", { name: /Correct.*auth/ }))
+    expect(onCorrectItems).toHaveBeenCalledWith(["auth"])
   })
 
   const setSinglePdfResult = (overrides: Partial<WizardResultItem> = {}) => {
@@ -104,6 +137,7 @@ describe("WizardResultsStep navigation buttons", () => {
   }
 
   beforeEach(() => {
+    wizardHarness.queueItems = []
     wizardHarness.reset.mockReset()
     sessionHarness.tracking = undefined
     capabilitiesHarness.capabilities = { hasKnowledgeQaMediaScope: false }
@@ -596,12 +630,12 @@ describe("WizardResultsStep navigation buttons", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Retry all 3 retryable errors",
+        name: "Retry all 2 retryable errors",
       })
     )
 
     expect(onRetryItems).toHaveBeenCalledWith(
-      ["13", "14", "15"],
+      ["13", "14"],
       [
         {
           resultId: "submit-1",
@@ -614,12 +648,6 @@ describe("WizardResultsStep navigation buttons", () => {
           collectionItemId: "14",
           retryAttempt: 3,
           idempotencyKey: "conference-retry-14-3",
-        },
-        {
-          resultId: "cancel-1",
-          collectionItemId: "15",
-          retryAttempt: 1,
-          idempotencyKey: "conference-retry-15-1",
         },
       ]
     )

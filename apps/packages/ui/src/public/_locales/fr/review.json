@@ -780,7 +780,7 @@
     "message": "Non autorisé à enregistrer"
   },
   "mediaPage_spreadMode": {
-    "message": "Comparer"
+    "message": "Côte à côte"
   },
   "mediaPage_listMode": {
     "message": "Focalisation"
@@ -789,13 +789,13 @@
     "message": "Empiler"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "Afficher les éléments sélectionnés côte à côte pour comparer"
+    "message": "Disposer les éléments sélectionnés côte à côte"
   },
   "mediaPage_listModeTooltip": {
     "message": "Afficher un élément à la fois avec la navigation"
   },
   "mediaPage_allModeTooltip": {
-    "message": "Afficher tous les éléments sélectionnés dans une liste déroulante"
+    "message": "Afficher la fenêtre de lecture actuelle en pile défilante"
   },
   "mediaPage_copyContentLabel": {
     "message": "Copier le contenu"
@@ -834,19 +834,19 @@
     "message": "Sélectionner des éléments"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "Cliquez sur les éléments dans le panneau de gauche pour les ajouter à votre visionneuse."
+    "message": "Cochez les éléments puis choisissez Lire la sélection. Clic ou Entrée prévisualise."
   },
   "mediaPage_firstUseStep2": {
     "message": "Choisir une vue"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "Utilisez « Comparer » pour côte à côte, « Focus » pour un à la fois, ou « Empiler » pour tout voir."
+    "message": "Côte à côte organise; Focus affiche un élément; Pile affiche la fenêtre actuelle. Comparer le contenu compare le texte."
   },
   "mediaPage_firstUseStep3": {
     "message": "Naviguer"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "Utilisez les boutons Précédent/Suivant ou le clavier (Tab + Entrée) pour parcourir les éléments."
+    "message": "Précédent/Suivant ou j/k parcourt le contexte actif. Tab puis Espace coche une case."
   },
   "mediaPage_gotIt": {
     "message": "Compris"
@@ -1327,5 +1327,11 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "Choisissez un fournisseur d'analyse, puis réessayez l'analyse."
+  },
+  "mediaPage_resultsHint": {
+    "message": "Clic ou Entrée pour prévisualiser. Espace coche une case. Maj+clic sélectionne une plage."
+  },
+  "mediaPage_viewerAll": {
+    "message": "Fenêtre de lecture (en pile)"
   }
 }

@@ -1,3 +1,4 @@
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({ useQuickIngestAuthority: () => 'verified-fixture', quickIngestAuthority: { capture: () => ({ authorityKey: 'verified-fixture', requestScope: { config: { serverUrl: 'http://localhost:8000', authMode: 'multi-user' }, userId: 'fixture' }, isCurrent: () => true }) } }))
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

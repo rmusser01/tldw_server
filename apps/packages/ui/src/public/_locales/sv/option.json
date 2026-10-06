@@ -555,7 +555,7 @@
     "message": "Spara efter granskning"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Granska före sparning"
+    "message": "Granska extraherat innehåll före sparande"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Bearbeta nu och redigera sedan utkast lokalt innan du sparar till servern."
@@ -2725,5 +2725,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "Offline-sparande är inte tillgängligt förrän ditt konto och den lokala lagringen har bekräftats. Dina ändringar förblir osparade."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

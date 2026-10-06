@@ -6,8 +6,6 @@ import type { VirtualItem } from "@tanstack/react-virtual"
 import { Alert } from "@/components/ui/primitives"
 import { clearSetting } from "@/services/settings/registry"
 import {
-  MEDIA_REVIEW_SELECTION_SETTING,
-  MEDIA_REVIEW_FOCUSED_ID_SETTING,
   MEDIA_REVIEW_VIEW_MODE_SETTING,
   MEDIA_REVIEW_ORIENTATION_SETTING,
   MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING
@@ -40,7 +38,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
     selectedIds, setSelectedIds, focusedId, setFocusedId,
     previewedId, previewedDetail, previewIndex,
     details, detailLoading, failedIds,
-    viewMode, viewModeState, setViewModeState, setViewMode,
+    viewMode, setViewModeState, setViewMode,
     viewerItems, focusedDetail, focusIndex, allResults,
     viewerRef, viewerParentRef, stackParentRef, cardRefs,
     viewerVirtualizer, stackVirtualizer,
@@ -48,25 +46,26 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
     helpModalOpen, setHelpModalOpen,
     isMobileViewport,
     orientation, setOrientation,
-    hideTranscriptTimings, setHideTranscriptTimings, shouldHideTranscriptTimings,
+    setHideTranscriptTimings, shouldHideTranscriptTimings,
     contentExpandedIds, setContentExpandedIds,
     analysisExpandedIds, setAnalysisExpandedIds,
     showEmptyAnalysisIds, setShowEmptyAnalysisIds,
     copiedIds, setCopiedIds,
     autoViewMode, setAutoViewModeSetting,
     autoModeInlineNotice, setAutoModeInlineNotice,
-    manualViewModePinned, setManualViewModePinned,
+    setManualViewModePinned,
     collapseOthers, setCollapseOthers,
-    selectedItemsDrawerOpen, setSelectedItemsDrawerOpen,
+    setSelectedItemsDrawerOpen,
     openAllLimit,
     hasTranscriptTimingContentInViewer,
     cardCls, setDetails, setQuery, setTypes, setKeywordTokens
   } = state
 
   // Determine what to show: previewed item (if no selection), or selected items in viewer mode
-  const showPreviewMode = selectedIds.length === 0 && previewedDetail != null
-  const effectiveItems = showPreviewMode ? [previewedDetail] : viewerItems
-  const navigationIndex = showPreviewMode ? previewIndex : focusIndex
+  const showPreviewMode = !state.readingActive && previewedId != null
+  const effectiveItems = React.useMemo(() => showPreviewMode ? (previewedDetail ? [previewedDetail] : []) : viewerItems, [showPreviewMode, previewedDetail, viewerItems])
+  const navigationIndex = showPreviewMode ? (previewIndex >= 0 ? previewIndex : 0) : focusIndex
+  const navigationTotal = state.navigationTotal ?? (state.readingActive ? selectedIds.length : Math.max(allResults.length, showPreviewMode ? 1 : 0))
 
   // Content for search/section navigation (use first effective item's content)
   const primaryContent = React.useMemo(() => {
@@ -77,7 +76,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
   }, [effectiveItems, shouldHideTranscriptTimings])
 
   const {
-    goRelative, scrollToCard, ensureDetail,
+    startSelectedReview, returnToPreview, changeReadingWindow, goRelative, scrollToCard, ensureDetail,
     removeFromSelection, addVisibleToSelection, replaceSelectionWithVisible,
     handleChatAboutSelection,
     expandAllContent, collapseAllContent, expandAllAnalysis, collapseAllAnalysis,
@@ -86,10 +85,10 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
 
   // Exit compare mode if selection drops below 2
   React.useEffect(() => {
-    if (inlineCompareMode && selectedIds.length < 2) {
+    if (inlineCompareMode && (selectedIds.length < 2 || !state.readingActive)) {
       setInlineCompareMode(false)
     }
-  }, [inlineCompareMode, selectedIds.length])
+  }, [inlineCompareMode, selectedIds.length, state.readingActive])
 
   // Ctrl+F to open in-content search, Ctrl+\ to toggle comparison
   React.useEffect(() => {
@@ -104,7 +103,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
         e.preventDefault()
         if (selectedIds.length >= 2 && selectedIds.length <= 4) {
           setInlineCompareMode((prev) => {
-            if (!prev) selectedIds.forEach((id) => void ensureDetail(id))
+            if (!prev) state.readingIds.forEach((id) => void ensureDetail(id))
             return !prev
           })
         }
@@ -112,7 +111,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
     }
     el.addEventListener("keydown", handler)
     return () => el.removeEventListener("keydown", handler)
-  }, [viewerRef, selectedIds, ensureDetail])
+  }, [viewerRef, selectedIds, state.readingIds, ensureDetail])
 
   const renderCard = (
     d: MediaDetail,
@@ -423,6 +422,18 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
       className="flex-1 border border-border rounded p-2 bg-surface h-full flex flex-col min-w-0 relative focus:outline-none focus:ring-2 focus:ring-primary/30"
     >
       <div className="sticky top-0 z-20 bg-surface pb-2 border-b border-border">
+        {isMobileViewport && <Button size="small" onClick={() => state.setMobileTab(1)}>{t('mediaPage.backToResults', 'Back to results')}</Button>}
+        <div className="mb-2 text-sm font-medium" data-testid="media-review-reading-context">
+          {showPreviewMode ? t('mediaPage.resultPreviewTitle', 'Result preview: {{title}}', {title: previewedDetail?.title || state.selectedMetadata[String(previewedId)]?.title || `Media ${previewedId}`}) : state.readingActive ? t('mediaPage.selectedReadingTitle', 'Selected reading: {{title}}', {title: focusedDetail?.title || state.selectedMetadata[String(focusedId)]?.title || `Media ${focusedId}`}) : t('mediaPage.reading', 'Reading')}
+          {state.readingActive && previewedId != null && <Button size="small" type="link" onClick={returnToPreview}>{t('mediaPage.returnToPreview', 'Return to preview')}</Button>}
+        </div>
+        {state.readingActive && <div className="mb-2 flex flex-wrap items-center gap-2" data-testid="media-review-reading-window">
+          <span className="text-xs text-text-muted">{t('mediaPage.readingWindow', 'Reading {{start}}–{{end}} of {{total}} selected ({{limit}} at a time)', {start: selectedIds.length ? state.readingWindowStart + 1 : 0, end: Math.min(selectedIds.length, state.readingWindowStart + openAllLimit), total: selectedIds.length, limit: openAllLimit})}</span>
+          {selectedIds.length > openAllLimit && <>
+            <Button size="small" disabled={state.readingWindowStart === 0} onClick={() => changeReadingWindow(-1)}>{t('mediaPage.previousReadingWindow', 'Previous reading window')}</Button>
+            <Button size="small" disabled={state.readingWindowStart + openAllLimit >= selectedIds.length} onClick={() => changeReadingWindow(1)}>{t('mediaPage.nextReadingWindow', 'Next reading window')}</Button>
+          </>}
+        </div>}
         {/* Row 1: View Controls */}
         <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
           <div className="flex items-center gap-3 flex-wrap">
@@ -433,9 +444,10 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                   ? t("mediaPage.viewerCount", "{{count}} open", { count: effectiveItems.length })
                   : viewMode === "list"
                     ? t("mediaPage.viewerSingle", "Single item view")
-                    : t("mediaPage.viewerAll", "All items (stacked)")}
+                    : t("mediaPage.viewerAll", "Reading window (stacked)")}
               </div>
             </div>
+            <span className="text-xs text-text-muted">{t("mediaPage.layout", "Layout")}</span>
             {isMobileViewport ? (
               <div className="flex items-center gap-2">
                 <Tag data-testid="mobile-view-mode-badge">
@@ -450,9 +462,9 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                       const nextMode = viewMode === "all" ? "list" : "all"
                       setViewModeState(nextMode)
                       if (nextMode === "all") {
-                        selectedIds.forEach((id) => void ensureDetail(id))
+                        state.readingIds.forEach((id) => void ensureDetail(id))
                       } else {
-                        const nextFocused = focusedId ?? selectedIds[0] ?? allResults[0]?.id
+                        const nextFocused = state.readingActive ? focusedId ?? selectedIds[0] : previewedId
                         if (nextFocused != null) {
                           setFocusedId(nextFocused)
                           void ensureDetail(nextFocused)
@@ -467,7 +479,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                 )}
               </div>
             ) : (
-              <Tooltip title={t("mediaPage.spreadModeTooltip", "View selected items side-by-side for comparison")}>
+              <Tooltip title={t("mediaPage.spreadModeTooltip", "Arrange selected items side-by-side")}>
                 <span>
                   <Radio.Group
                     value={viewMode}
@@ -476,8 +488,9 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                       setManualViewModePinned(true)
                       setAutoModeInlineNotice(null)
                       setViewMode(next)
+                      if (selectedIds.length) startSelectedReview(focusedId ?? undefined)
                       if (next === "list") {
-                        const id = focusedId ?? selectedIds[0] ?? allResults[0]?.id
+                        const id = state.readingActive ? focusedId ?? selectedIds[0] : previewedId
                         if (id != null) {
                           setFocusedId(id)
                           void ensureDetail(id)
@@ -485,16 +498,16 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                       } else if (next === "all") {
                         const ids = selectedIds.length > 0 ? selectedIds : allResults.slice(0, openAllLimit).map((m) => m.id)
                         setSelectedIds(ids)
-                        ids.forEach((id) => void ensureDetail(id))
+                        if (ids.length) startSelectedReview(ids[0])
                       }
                     }}
                     optionType="button"
                     size="small"
                   >
-                    <Tooltip title={t("mediaPage.spreadModeTooltip", "View selected items side-by-side for comparison")}>
+                    <Tooltip title={t("mediaPage.spreadModeTooltip", "Arrange selected items side-by-side")}>
                       <Radio.Button value="spread">
                         <LayoutGrid className="w-3.5 h-3.5 inline mr-1" />
-                        {t("mediaPage.spreadMode", "Compare")}
+                        {t("mediaPage.spreadMode", "Side-by-side")}
                         {selectedIds.length > 0 && <span className="ml-1 text-xs opacity-70">({selectedIds.length})</span>}
                       </Radio.Button>
                     </Tooltip>
@@ -504,12 +517,12 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                         {t("mediaPage.listMode", "Focus")}
                         {selectedIds.length > 0 && (
                           <span className="ml-1 text-xs opacity-70">
-                            ({focusedId != null ? selectedIds.indexOf(focusedId) + 1 : 1}/{selectedIds.length})
+                            ({state.readingActive ? Math.max(1, focusIndex + 1) : Math.max(1, navigationIndex + 1)}/{navigationTotal})
                           </span>
                         )}
                       </Radio.Button>
                     </Tooltip>
-                    <Tooltip title={t("mediaPage.allModeTooltip", "View all selected items in a scrollable list")}>
+                    <Tooltip title={t("mediaPage.allModeTooltip", "View the current reading window in a scrollable stack")}>
                       <Radio.Button value="all">
                         <Rows3 className="w-3.5 h-3.5 inline mr-1" />
                         {t("mediaPage.allMode", "Stack")}
@@ -525,12 +538,12 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                 size="small"
                 className="min-w-[12rem]"
                 placeholder={t("mediaPage.pickItem", "Pick an item")}
-                value={focusedId ?? undefined}
+                value={(state.readingActive ? focusedId : previewedId) ?? undefined}
                 onChange={(val) => {
-                  setFocusedId(val as any)
-                  void ensureDetail(val as any)
+                  if (state.readingActive) startSelectedReview(val as any)
+                  else actions.previewItem(val as string | number, true)
                 }}
-                options={allResults.map((m, idx) => ({
+                options={(state.readingActive ? selectedIds.map(id => state.selectedMetadata[String(id)] ?? {id, title: details[id]?.title}) : (state.previewNavigationIds ?? []).map(id => state.selectedMetadata[String(id)] ?? {id, title: details[id]?.title})).map((m, idx) => ({
                   label: `${idx + 1}. ${m.title || `Media ${m.id}`}`,
                   value: m.id
                 }))}
@@ -550,6 +563,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
             <Dropdown
               menu={{
                 items: [
+                  {key: 'readingGroup', type: 'group' as const, label: t('mediaPage.reading', 'Reading'), children: [
                   {
                     key: 'autoViewMode',
                     label: (
@@ -576,16 +590,18 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                       </div>
                     )
                   },
+                  ]},
                   { type: 'divider' as const },
+                  {key: 'selectionGroup', type: 'group' as const, label: t('mediaPage.selectionActions', 'Selection actions'), children: [
                   {
                     key: 'openAll',
-                    label: `${t("mediaPage.openAll", "Add visible to selection")} (${Math.min(allResults.length, openAllLimit)})`,
+                    label: `${t("mediaPage.openAll", "Add visible to selection")} (${allResults.length})`,
                     onClick: addVisibleToSelection,
                     disabled: allResults.length === 0
                   },
                   {
                     key: 'replaceWithVisible',
-                    label: `${t("mediaPage.replaceWithVisible", "Replace selection with visible")} (${Math.min(allResults.length, openAllLimit)})`,
+                    label: `${t("mediaPage.replaceWithVisible", "Replace selection with visible")} (${allResults.length})`,
                     onClick: replaceSelectionWithVisible,
                     disabled: allResults.length === 0
                   },
@@ -596,6 +612,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                     disabled: selectedIds.length === 0
                   },
                   { type: 'divider' as const },
+                  ]},
                   {
                     key: 'showGuide',
                     label: t("mediaPage.showGuide", "Show getting started guide"),
@@ -606,12 +623,14 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                     key: 'clearSession',
                     label: t("mediaPage.clearSession", "Clear review session"),
                     danger: true,
-                    onClick: async () => {
-                      await clearSetting(MEDIA_REVIEW_SELECTION_SETTING)
-                      await clearSetting(MEDIA_REVIEW_FOCUSED_ID_SETTING)
-                      await clearSetting(MEDIA_REVIEW_VIEW_MODE_SETTING)
-                      await clearSetting(MEDIA_REVIEW_ORIENTATION_SETTING)
-                      await clearSetting(MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING)
+                    onClick: () => {
+                      // Selection persists as an owned empty snapshot through the state hook.
+                      state.setReadingActive(false)
+                      void Promise.all([
+                        clearSetting(MEDIA_REVIEW_VIEW_MODE_SETTING),
+                        clearSetting(MEDIA_REVIEW_ORIENTATION_SETTING),
+                        clearSetting(MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING)
+                      ]).catch(() => message.error(t('mediaPage.selectionSaveFailed', 'Could not save the review selection. Try again.')))
                       setSelectedIds([])
                       setFocusedId(null)
                       setDetails({})
@@ -657,14 +676,14 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
             </Tooltip>
             <span className="text-xs text-text-muted min-w-[5rem] text-center">
               {navigationIndex >= 0
-                ? t("mediaPage.itemPosition", "Item {{current}} of {{total}}", { current: navigationIndex + 1, total: allResults.length })
+                ? t("mediaPage.itemPosition", "Item {{current}} of {{total}}", { current: navigationIndex + 1, total: navigationTotal })
                 : t("mediaPage.noItemSelected", "No item selected")}
             </span>
             <Tooltip title={t("mediaPage.nextItemTooltip", "Next item (→)")}>
               <Button
                 size="small"
                 onClick={() => goRelative(1)}
-                disabled={navigationIndex < 0 || navigationIndex >= allResults.length - 1}
+                disabled={navigationIndex < 0 || navigationIndex >= navigationTotal - 1}
                 icon={<ChevronRight className="w-4 h-4" />}
                 iconPlacement="end"
               >
@@ -709,7 +728,8 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                   if (inlineCompareMode) {
                     setInlineCompareMode(false)
                   } else {
-                    // Ensure all selected items have details loaded
+                    startSelectedReview()
+                    // Comparison is limited to four selected items.
                     selectedIds.forEach((id) => void ensureDetail(id))
                     setInlineCompareMode(true)
                   }
@@ -807,7 +827,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                       type={focusedId === id ? "primary" : "default"}
                       danger={hasFailed}
                       onClick={() => {
-                        setFocusedId(id)
+                        startSelectedReview(id)
                         scrollToCard(id)
                       }}
                       title={itemLabel}
@@ -836,7 +856,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                       ),
                       danger: hasFailed,
                       onClick: () => {
-                        setFocusedId(id)
+                        startSelectedReview(id)
                         scrollToCard(id)
                       }
                     }
@@ -878,19 +898,19 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
                     <li className="flex gap-2">
                       <span className="font-semibold text-primary">1.</span>
                       <span>
-                        <strong>{t('mediaPage.firstUseStep1', 'Select items')}</strong> — {t('mediaPage.firstUseStep1Desc', 'Click items in the left panel to add them to your viewer.')}
+                        <strong>{t('mediaPage.firstUseStep1', 'Select items')}</strong> — {t('mediaPage.firstUseStep1Desc', 'Use named checkboxes to select items, then choose Review selected. Click or Enter on a result to preview.')}
                       </span>
                     </li>
                     <li className="flex gap-2">
                       <span className="font-semibold text-primary">2.</span>
                       <span>
-                        <strong>{t('mediaPage.firstUseStep2', 'Choose a view')}</strong> — {t('mediaPage.firstUseStep2Desc', 'Use "Compare" for side-by-side, "Focus" for one at a time, or "Stack" to see all.')}
+                        <strong>{t('mediaPage.firstUseStep2', 'Choose a view')}</strong> — {t('mediaPage.firstUseStep2Desc', 'Use "Side-by-side" for side-by-side, "Focus" for one at a time, or "Stack" to see all.')}
                       </span>
                     </li>
                     <li className="flex gap-2">
                       <span className="font-semibold text-primary">3.</span>
                       <span>
-                        <strong>{t('mediaPage.firstUseStep3', 'Navigate')}</strong> — {t('mediaPage.firstUseStep3Desc', 'Use Prev/Next buttons or keyboard (Tab + Enter) to move through items.')}
+                        <strong>{t('mediaPage.firstUseStep3', 'Navigate')}</strong> — {t('mediaPage.firstUseStep3Desc', 'Use Prev/Next or j/k to navigate the active preview or selected set. Tab to a checkbox and Space selects.')}
                       </span>
                     </li>
                   </ol>

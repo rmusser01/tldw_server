@@ -6,10 +6,15 @@ import { Storage } from '@plasmohq/storage'
 import { useConnectionStore } from '@/store/connection'
 import { bgRequest } from '@/services/background-proxy'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
+import { setSetting } from '@/services/settings/registry'
+import { MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, MEDIA_REVIEW_SELECTION_SETTING, LAST_MEDIA_ID_SETTING } from '@/services/settings/ui-settings'
 import { useMediaSelection } from '../hooks/useMediaSelection'
 import type { MediaResultItem } from '@/components/Media/types'
 
-const mocks = vi.hoisted(() => ({ undo: vi.fn() }))
+const mocks = vi.hoisted(() => ({ undo: vi.fn(), download: vi.fn(), authority: 'verified-a', navigate: vi.fn() }))
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({ useQuickIngestAuthority: () => mocks.authority, quickIngestAuthority: { capture: () => { const authorityKey = mocks.authority; return { authorityKey, requestScope: { config: { serverUrl: 'http://fixture.invalid', authMode: 'multi-user' }, userId: 'alice' }, isCurrent: () => mocks.authority === authorityKey } } } }))
+vi.mock('react-router-dom', async original => ({ ...await original<typeof import('react-router-dom')>(), useNavigate: () => mocks.navigate }))
+vi.mock('@/utils/download-blob', () => ({ downloadBlob: mocks.download }))
 vi.mock('@/hooks/useUndoNotification', () => ({ useUndoNotification: () => ({ showUndoNotification: mocks.undo }) }))
 vi.mock('@/services/background-proxy', () => ({ bgRequest: vi.fn() }))
 vi.mock('@/services/tldw/TldwApiClient', () => ({ tldwClient: {} }))
@@ -21,10 +26,14 @@ const wrapper = ({ children }: React.PropsWithChildren) => <MemoryRouter>{childr
 const mount = (ownerScope: string | null = 'account-a') => {
   const feedback = { error: vi.fn(), warning: vi.fn(), success: vi.fn() }
   const refetch = vi.fn().mockResolvedValue({ data: items })
-  const view = renderHook(({ owner }) => useMediaSelection({
-    ownerScope: owner, t: key => key, message: feedback, displayResults: items, selected: null,
-    setSelected: vi.fn(), setSelectedContent: vi.fn(), setSelectedDetail: vi.fn(), setLastFetchedId: vi.fn(), refetch
-  }), { wrapper, initialProps: { owner: ownerScope } })
+  const view = renderHook(({ owner, rows }) => {
+    const [inspectorItem, setInspectorItem] = React.useState<MediaResultItem | null>(null)
+    const selection = useMediaSelection({
+    ownerScope: owner, t: key => key, message: feedback, displayResults: rows, selected: inspectorItem,
+    setSelected: setInspectorItem, setSelectedContent: vi.fn(), setSelectedDetail: vi.fn(), setLastFetchedId: vi.fn(), refetch
+    })
+    return { ...selection, inspectorItem, setInspectorItem }
+  }, { wrapper, initialProps: { owner: ownerScope, rows: items } })
   return { ...view, feedback, refetch }
 }
 const select = (view: ReturnType<typeof mount>) => act(() => {
@@ -52,7 +61,9 @@ beforeEach(() => {
       removeListener: (listener: (changes: Changes, area: string) => void) => listeners.delete(listener)
     }
   } })
+  mocks.authority = 'verified-a'
   localStorage.clear(); vi.clearAllMocks()
+  vi.mocked(setSetting).mockReset().mockResolvedValue(undefined)
   Reflect.deleteProperty(tldwClient, "getCurrentUserStorageQuota")
   Reflect.deleteProperty(tldwClient, "getCurrentUserProfile")
   vi.mocked(bgRequest).mockResolvedValue({ version: 1 })
@@ -61,6 +72,136 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('media selection authority', () => {
+  it('keeps both successive off-page tags in server payloads and exports without changing same-ID Notes', async () => {
+    const view = mount()
+    const note = { ...items[0], kind: 'note' as const, keywords: ['note-only'] }
+    act(() => view.rerender({ owner: 'account-a', rows: [items[0], note] }))
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.handleSelectAllVisibleItems(); view.result.current.setInspectorItem(note) })
+    act(() => view.rerender({ owner: 'account-a', rows: [items[1]] }))
+    for (const tag of ['first-new-tag', 'second-new-tag']) {
+      act(() => view.result.current.setBulkKeywordsDraft(tag))
+      await act(async () => view.result.current.handleBulkAddKeywords())
+    }
+    const updates = vi.mocked(bgRequest).mock.calls.filter(([request]) => request.method === 'PUT')
+    expect(updates.map(([request]) => request.body)).toEqual([{ keywords: ['private', 'first-new-tag'] }, { keywords: ['private', 'first-new-tag', 'second-new-tag'] }])
+    act(() => view.result.current.handleBulkExport())
+    const exported = JSON.parse(await mocks.download.mock.calls[0][0].text()).items
+    expect(exported.find((row: MediaResultItem) => row.kind === 'media').keywords).toEqual(['private', 'first-new-tag', 'second-new-tag'])
+    expect(exported.find((row: MediaResultItem) => row.kind === 'note').keywords).toEqual(['note-only'])
+    expect(view.result.current.inspectorItem).toEqual(note)
+  })
+
+  it('keeps successful tags when selecting more rows before the refreshed page arrives', async () => {
+    const view = mount()
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.toggleBulkItemSelection('media:1'); view.result.current.setBulkKeywordsDraft('first') })
+    await act(async () => view.result.current.handleBulkAddKeywords())
+    act(() => { view.result.current.handleSelectAllVisibleItems(); view.result.current.setBulkKeywordsDraft('second') })
+    await act(async () => view.result.current.handleBulkAddKeywords())
+    expect(vi.mocked(bgRequest).mock.calls.filter(([request]) => request.method === 'PUT' && request.path === '/api/v1/media/1').map(([request]) => request.body)).toEqual([{ keywords: ['private', 'first'] }, { keywords: ['private', 'first', 'second'] }])
+  })
+
+  it.each([false, true])('restores successful Note bulk trash with the captured deleted version and scope, mixed=%s', async mixed => {
+    const view = mount()
+    const note = { ...items[0], kind: 'note' as const }
+    act(() => view.rerender({ owner: 'account-a', rows: mixed ? [items[0], note] : [note] }))
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.handleSelectAllVisibleItems() })
+    vi.mocked(bgRequest).mockResolvedValue({ version: 7 })
+    let recovery!: Awaited<ReturnType<typeof view.result.current.handleBulkDelete>>
+    await act(async () => { recovery = await view.result.current.handleBulkDelete() })
+    expect(recovery).toMatchObject({ noteCount: 1, mediaCount: mixed ? 1 : 0 })
+    vi.mocked(bgRequest).mockClear()
+    await act(async () => expect(await recovery!.restoreNotes()).toBe(0))
+    expect(bgRequest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: '/api/v1/notes/1/restore?expected_version=8', method: 'POST', abortSignal: expect.any(AbortSignal), servicePromptConfig: expect.objectContaining({ expectedUserId: 'alice' }), headers: expect.objectContaining({ 'X-TLDW-Expected-User-ID': 'alice' }) }))
+    await act(async () => recovery!.restoreNotes())
+    expect(bgRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries only failed Note restores and refuses retained recovery after owner change', async () => {
+    const view = mount()
+    act(() => view.rerender({ owner: 'account-a', rows: items.map(item => ({ ...item, kind: 'note' as const })) }))
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.handleSelectAllVisibleItems() })
+    vi.mocked(bgRequest).mockResolvedValue({ version: 7 })
+    let recovery!: Awaited<ReturnType<typeof view.result.current.handleBulkDelete>>
+    await act(async () => { recovery = await view.result.current.handleBulkDelete() })
+    vi.mocked(bgRequest).mockClear().mockImplementation(async request => {
+      if (request.path === '/api/v1/notes/2/restore?expected_version=8') throw new Error('Conflict')
+      return {}
+    })
+    await act(async () => expect(await recovery!.restoreNotes()).toBe(1))
+    expect(vi.mocked(bgRequest).mock.calls.map(([request]) => request.path)).toEqual(['/api/v1/notes/1/restore?expected_version=8', '/api/v1/notes/2/restore?expected_version=8'])
+    vi.mocked(bgRequest).mockClear().mockResolvedValue({})
+    await act(async () => expect(await recovery!.restoreNotes()).toBe(0))
+    expect(vi.mocked(bgRequest).mock.calls.map(([request]) => request.path)).toEqual(['/api/v1/notes/2/restore?expected_version=8'])
+
+    // Keep a second original-owner callback with a still-deleted Note.
+    act(() => view.result.current.handleSelectAllVisibleItems())
+    vi.mocked(bgRequest).mockResolvedValue({ version: 11 })
+    await act(async () => { recovery = await view.result.current.handleBulkDelete() })
+    vi.mocked(bgRequest).mockClear()
+    mocks.authority = 'verified-b'
+    await act(async () => recovery!.restoreNotes())
+    expect(bgRequest).not.toHaveBeenCalled()
+  })
+
+  it('rejects retained actions when verified authority changes before React receives the owner update', async () => {
+    const view = mount(); select(view)
+    const staleDelete = view.result.current.handleBulkDelete
+    mocks.authority = 'verified-b'
+    await act(async () => staleDelete())
+    expect(bgRequest).not.toHaveBeenCalled()
+  })
+
+  it('uses refreshed selected metadata after changing page and preserves same-ID Note tags', async () => {
+    const view = mount()
+    const note = { ...items[0], kind: 'note' as const, keywords: ['note-only'] }
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.toggleBulkItemSelection('media:1'); view.result.current.setInspectorItem(note) })
+    act(() => view.rerender({ owner: 'account-a', rows: [{ ...items[0], keywords: ['latest-server-tag'] }] }))
+    act(() => view.rerender({ owner: 'account-a', rows: [items[1]] }))
+    act(() => view.result.current.setBulkKeywordsDraft('extra'))
+    await act(async () => view.result.current.handleBulkAddKeywords())
+    expect(bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/media/1', body: { keywords: ['latest-server-tag', 'extra'] } }))
+    expect(view.result.current.inspectorItem).toEqual(note)
+  })
+
+  it('keeps four kind-qualified selections across pages for export and owned media opening', async () => {
+    const pageOne = [{ ...items[0] }, { ...items[0], kind: 'note' as const, title: 'Same ID note' }]
+    const pageTwo = [{ ...items[1] }, { ...items[1], id: 3, title: 'Third media' }]
+    const view = mount()
+    act(() => view.rerender({ owner: 'account-a', rows: pageOne }))
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.toggleBulkItemSelection('media:1'); view.result.current.toggleBulkItemSelection('note:1') })
+    act(() => view.rerender({ owner: 'account-a', rows: pageTwo }))
+    act(() => view.result.current.handleSelectAllVisibleItems())
+    expect(view.result.current.bulkSelectedItems.map(row => `${row.kind}:${row.id}`)).toEqual(['media:1', 'note:1', 'media:2', 'media:3'])
+    act(() => view.result.current.setBulkKeywordsDraft('full-set'))
+    await act(async () => view.result.current.handleBulkAddKeywords())
+    expect(vi.mocked(bgRequest).mock.calls.filter(([request]) => request.method === 'PUT').map(([request]) => request.path)).toEqual(['/api/v1/media/1', '/api/v1/media/2', '/api/v1/media/3'])
+    act(() => view.result.current.setCollectionDraftName('Four selected records'))
+    await act(async () => view.result.current.handleAddSelectionToCollection())
+    await waitFor(() => expect(view.result.current.activeCollection?.itemIds).toEqual(['media:1', 'note:1', 'media:2', 'media:3']))
+    act(() => view.result.current.handleBulkExport())
+    const payload = JSON.parse(await mocks.download.mock.calls[0][0].text())
+    expect(payload.items.map((row: MediaResultItem) => `${row.kind}:${row.id}`)).toEqual(['media:1', 'note:1', 'media:2', 'media:3'])
+    await act(async () => view.result.current.handleOpenSelectionInMultiReview())
+    expect(setSetting).toHaveBeenCalledWith(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, { version: 1, authorityKey: 'verified-a', selectedIds: ['1', '2', '3'] })
+    expect(view.result.current.bulkSelectedNoteCount).toBe(1)
+    act(() => view.rerender({ owner: 'account-b', rows: pageTwo }))
+    expect(view.result.current.bulkSelectedItems).toEqual([])
+  })
+
+  it('retains a failed note when same-ID Media successfully moves to trash', async () => {
+    const view = mount()
+    act(() => view.rerender({ owner: 'account-a', rows: [items[0], { ...items[0], kind: 'note' as const }] }))
+    act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.toggleBulkItemSelection('media:1'); view.result.current.toggleBulkItemSelection('note:1') })
+    vi.mocked(bgRequest).mockImplementation(async request => {
+      if (request.method === 'DELETE' && request.path === '/api/v1/notes/1') throw new Error('Conflict')
+      return { version: 7 }
+    })
+    await act(async () => view.result.current.handleBulkDelete())
+    expect(view.result.current.bulkSelectedItems.map(row => `${row.kind}:${row.id}`)).toEqual(['note:1'])
+    expect(bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/notes/1', method: 'DELETE', headers: expect.objectContaining({ 'expected-version': '7', 'X-TLDW-Expected-User-ID': 'alice' }), abortSignal: expect.any(AbortSignal), servicePromptConfig: expect.objectContaining({ expectedUserId: 'alice' }) }))
+    expect(view.feedback.warning).toHaveBeenCalled()
+  })
+
   it('loads and parses the current owner quota through the guarded transport', async () => {
     Object.assign(tldwClient, { getCurrentUserStorageQuota: vi.fn() })
     vi.mocked(bgRequest).mockResolvedValue({ storage_used_mb: '15', storage_quota_mb: 100, usage_percentage: '15', warning: 'Near quota' })
@@ -187,7 +328,7 @@ describe('media selection authority', () => {
     await act(async () => { view.result.current.toggleFavorite('1') })
     expect(view.result.current.favorites).toEqual(['1'])
     const staleToggle = view.result.current.toggleFavorite
-    act(() => view.rerender({ owner: 'account-b' }))
+    act(() => view.rerender({ owner: 'account-b', rows: items }))
     expect(view.result.current.favorites).toEqual([])
     await act(async () => { staleToggle('2') })
     expect(view.result.current.favorites).toEqual([])
@@ -204,4 +345,103 @@ describe('media selection authority', () => {
     expect(view.result.current.favorites).toEqual([])
     expect(JSON.stringify(localStorage)).not.toContain('Unknown private project')
   })
+  describe.each(["selection", "single", "collection"] as const)(
+    "%s review publication",
+    (producer) => {
+      const prepare = async () => {
+        const view = mount()
+        select(view)
+        if (producer === "collection") {
+          await act(async () => {})
+          act(() => view.result.current.setCollectionDraftName("Exact saved set"))
+          await act(async () =>
+            view.result.current.handleAddSelectionToCollection()
+          )
+          await waitFor(() =>
+            expect(view.result.current.activeCollection?.itemIds).toEqual([
+              "media:1",
+              "media:2"
+            ])
+          )
+        }
+        view.feedback.error.mockClear()
+        const open = () =>
+          producer === "collection"
+            ? view.result.current.handleOpenCollectionInMultiReview()
+            : producer === "single"
+              ? view.result.current.handleOpenSelectionInMultiReview([items[1]])
+              : view.result.current.handleOpenSelectionInMultiReview()
+        return { view, open, ids: producer === "single" ? ["2"] : ["1", "2"] }
+      }
+
+      it.each([MEDIA_REVIEW_SELECTION_SETTING, LAST_MEDIA_ID_SETTING])(
+        "continues the exact owned snapshot when optional $key fails",
+        async (failed) => {
+          const { view, open, ids } = await prepare()
+          vi.mocked(setSetting).mockImplementation(async (setting) => {
+            if (setting.key === failed.key)
+              throw new Error("Optional storage failure")
+          })
+          await act(async () => {
+            await expect(open()).resolves.toBeUndefined()
+          })
+          expect(setSetting).toHaveBeenCalledWith(
+            MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING,
+            { version: 1, authorityKey: "verified-a", selectedIds: ids }
+          )
+          expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith("/media-multi")
+          expect(view.feedback.error).not.toHaveBeenCalled()
+        }
+      )
+
+      it("handles authoritative snapshot failure with retryable current-owner feedback", async () => {
+        const { view, open } = await prepare()
+        vi.mocked(setSetting).mockRejectedValue(
+          new Error("Required storage failure")
+        )
+        await act(async () => {
+          await expect(open()).resolves.toBeUndefined()
+        })
+        expect(mocks.navigate).not.toHaveBeenCalled()
+        expect(setSetting).toHaveBeenCalledTimes(1)
+        expect(view.feedback.error).toHaveBeenCalledWith(
+          "review:mediaPage.reviewSelectionSaveFailed"
+        )
+      })
+
+      it.each([
+        MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING,
+        MEDIA_REVIEW_SELECTION_SETTING,
+        LAST_MEDIA_ID_SETTING
+      ])(
+        "retires navigation and later writes during pending $key",
+        async (pendingSetting) => {
+          const { view, open } = await prepare()
+          let finish!: () => void
+          vi.mocked(setSetting).mockImplementation(async (setting) => {
+            if (setting.key === pendingSetting.key)
+              await new Promise<void>((resolve) => {
+                finish = resolve
+              })
+          })
+          let pending!: Promise<void>
+          act(() => {
+            pending = open()
+          })
+          await waitFor(() => expect(finish).toBeTypeOf("function"))
+          const count = vi.mocked(setSetting).mock.calls.length
+          mocks.authority = "verified-b"
+          await act(async () => {
+            finish()
+            await pending
+          })
+          expect(setSetting).toHaveBeenCalledTimes(count)
+          expect(mocks.navigate).not.toHaveBeenCalled()
+          expect(view.feedback.error).not.toHaveBeenCalled()
+        }
+      )
+    }
+  )
+
+
 })

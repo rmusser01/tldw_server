@@ -1,3 +1,4 @@
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({ useQuickIngestAuthority: () => 'verified-fixture', quickIngestAuthority: { capture: () => ({ authorityKey: 'verified-fixture', requestScope: { config: { serverUrl: 'http://localhost:8000', authMode: 'multi-user' }, userId: 'fixture' }, isCurrent: () => true }) } }))
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -339,17 +340,25 @@ vi.mock('@/components/Media/MediaLibraryStatsPanel', () => ({
 const renderMediaPage = (initialEntry: string) => {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/" element={<div data-testid="root-route" />} />
-        <Route path="/media" element={<ViewMediaPage />} />
-      </Routes>
-    </MemoryRouter>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/" element={<div data-testid="root-route" />} />
+          <Route path="/media" element={<ViewMediaPage />} />
+        </Routes>
+      </MemoryRouter>
     </QueryClientProvider>
   )
 }
 
 describe('ViewMediaPage metadata search integration', () => {
+  it("keeps recent imports in the primary Inspector without expanding Library tools", async () => {
+    renderMediaPage("/media")
+    expect(
+      await screen.findByTestId("media-ingest-jobs-panel")
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("media-library-tools-panel")).toBeNull()
+  })
+
   beforeEach(() => {
     mocks.bgRequest.mockReset()
     mocks.metadataPaths.length = 0

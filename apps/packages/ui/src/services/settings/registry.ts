@@ -130,7 +130,8 @@ export const normalizeSettingValue = <T>(
   return coerced
 }
 
-export const getSetting = async <T>(setting: SettingDef<T>): Promise<T> => {
+/** Opt in to read failures when absence must not authorize overwriting stored data. */
+export const getSetting = async <T>(setting: SettingDef<T>, options?: { throwOnError?: boolean }): Promise<T> => {
   try {
     await setting.beforeGet?.()
     const storage = getStorageForSetting(setting)
@@ -152,7 +153,8 @@ export const getSetting = async <T>(setting: SettingDef<T>): Promise<T> => {
     }
     writeLocalStorageValue(setting, normalized)
     return normalized
-  } catch {
+  } catch (error) {
+    if (options?.throwOnError) throw error
     return setting.defaultValue
   }
 }
