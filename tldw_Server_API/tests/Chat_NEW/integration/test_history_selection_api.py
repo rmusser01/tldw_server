@@ -548,3 +548,126 @@ def test_capture_reports_corrupt_selected_metadata_as_conflict(history_api, fiel
     response = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": "corrupt"})
     assert response.status_code == 409, response.text
     assert response.json()["detail"]["code"] == "invalid_metadata"  # nosec B101 - regression assertion
+
+
+@pytest.mark.parametrize(
+    "strategy,index,raw",
+    [
+        ("default", None, "  {{char}} welcomes {{user}}.\n\nChoose a path.  "),
+        (
+            "alternate_index",
+            0,
+            "Alternate zero — {{char}} opens a map for {{user}}.\n  ",
+        ),
+    ],
+)
+def test_seeded_character_opening_is_an_owned_assistant_root(
+    history_api, strategy, index, raw
+):
+    """Create through the real API, then select its exact canonical H1 row."""
+    client, db, _source, headers = history_api
+    character_id = db.add_character_card(
+        {
+            "name": "Native Greeter",
+            "first_message": "  {{char}} welcomes {{user}}.\n\nChoose a path.  ",
+            "alternate_greetings": [
+                "Alternate zero — {{char}} opens a map for {{user}}.\n  "
+            ],
+        }
+    )
+    params = {"seed_first_message": True, "greeting_strategy": strategy}
+    if index is not None:
+        params["alternate_index"] = index
+    created = client.post(
+        "/api/v1/chats/",
+        headers=headers,
+        params=params,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+            "temperature": 0.0,
+            "top_p": 0.0,
+        },
+    )
+    assert created.status_code == 201, created.text
+    cid = created.json()["id"]
+    listed = client.get(f"/api/v1/chats/{cid}/messages", headers=headers)
+    assert listed.status_code == 200, listed.text
+    messages = listed.json()["messages"]
+    assert len(messages) == 1
+    mid = messages[0]["id"]
+    selected = capture(
+        client, cid, headers, cursor={"kind": "after_message", "message_id": mid}
+    )
+    assert selected.status_code == 200, selected.text
+    body = selected.json()
+    assert body["status"] == "captured"
+    assert [
+        (row["id"], row["role"], row["settled"], row["parent_id"])
+        for row in body["rows"]
+    ] == [(mid, "assistant", True, None)]
+    assert body["snapshot"]["interpretation_status"] == {"kind": "parent_graph_v1"}
+    assert body["view"]["owner_key"] == body["snapshot"]["owner_key"]
+    assert body["selected_content"][0]["message"] == raw
+    assert db.get_message_by_id(mid)["content"] == raw
+    assert messages[0]["sender"] == "assistant"
+    state = db.get_roleplay_resume_state(cid)
+    effective = state["effective_completion"]
+    assert (
+        effective["provider"],
+        effective["model"],
+        effective["sampling"]["temperature"],
+        effective["sampling"]["top_p"],
+    ) == ("local-llm", "local-test", 0.0, 0.0)
+    assert (
+        client.get(f"/api/v1/chats/{cid}", headers=headers).json()["character_name"]
+        == "Native Greeter"
+    )
+    assert db.count_messages_for_conversation(cid) == 1
+
+
+@pytest.mark.parametrize("seed,greeting", [(False, "An unused greeting"), (True, "")])
+def test_factory_opening_change_preserves_supplied_and_existing_named_rows(
+    history_api, seed, greeting
+):
+    """The seed fix must not reclassify caller data or stored legacy history."""
+    from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+        create_character_conversation,
+    )
+
+    _client, db, source, _headers = history_api
+    old_id = db.add_message(
+        {
+            "conversation_id": source,
+            "sender": "Legacy Greeter",
+            "content": "Old raw {{char}}",
+        }
+    )
+    old = db.get_message_by_id(old_id)
+    character_id = db.add_character_card(
+        {"name": "New Greeter", "first_message": greeting}
+    )
+    cid = create_character_conversation(
+        db,
+        conversation_data={
+            "character_id": character_id,
+            "client_id": "1",
+            "title": "Compatibility",
+        },
+        provider="local-llm",
+        model="local-test",
+        seed_first_message=seed,
+        initial_messages=[
+            {
+                "id": "supplied-root",
+                "sender": "Supplied Greeter",
+                "content": "Keep {{char}} raw",
+            }
+        ],
+    )
+    assert [
+        (row["id"], row["sender"], row["content"], row["parent_message_id"])
+        for row in db.get_messages_for_conversation(cid)
+    ] == [("supplied-root", "Supplied Greeter", "Keep {{char}} raw", None)]
+    assert db.get_message_by_id(old_id) == old

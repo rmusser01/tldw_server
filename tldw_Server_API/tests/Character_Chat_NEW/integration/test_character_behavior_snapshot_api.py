@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Character_Chat.character_conversation_factory impo
     create_character_conversation,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_chat import (
+    load_chat_and_character,
     start_new_chat_session,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_io import (
@@ -1947,7 +1948,12 @@ def test_module_creator_greeting_seed_uses_same_stabilized_source_as_snapshot(
     assert [message["content"] for message in messages] == [
         "New accepted module greeting"
     ]
+    assert [(message["sender"], message["parent_message_id"]) for message in messages] == [("assistant", None)]
     assert history == [(None, "New accepted module greeting")]
+    _reloaded_character, reopened_history, _reloaded_image = load_chat_and_character(
+        character_db, conversation_id, "Alice"
+    )
+    assert reopened_history == history
 
 
 @pytest.mark.integration

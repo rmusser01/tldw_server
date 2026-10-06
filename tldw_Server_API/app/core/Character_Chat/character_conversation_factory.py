@@ -2512,10 +2512,8 @@ def create_character_conversation(
                     messages_to_persist.insert(
                         0,
                         {
-                            "sender": str(
-                                accepted_participants[0]["identity"].get("name")
-                                or "Assistant"
-                            ),
+                            "sender": "assistant",
+                            "parent_message_id": None,
                             "content": str(accepted_greeting["content"]),
                         },
                     )

@@ -205,7 +205,7 @@ Each stage delivers a reviewable behavior change. This is a design sequence, not
 
 ### Stage 3 — Character opening, terminology, and scoped setup
 
-**Task:** TASK-13456. **Status:** Not Started.
+**Task:** TASK-13456. **Status:** In Progress.
 
 **Goal:** understand and control character behavior and the next turn. Findings 4, 6, 7; presets and next-turn summary enhancements.
 
@@ -233,7 +233,7 @@ Each stage delivers a reviewable behavior change. This is a design sequence, not
 
 ### Stage 5 — Complete journeys and evidence-based polish
 
-**Task:** TASK-13458. **Status:** Not Started.
+**Task:** TASK-13458. **Status:** In Progress.
 
 **Goal:** verify all findings and enhancements together and publish the revised walkthrough.
 
@@ -281,3 +281,13 @@ The usability-study script uses uncoached standard and roleplay tasks for novice
 Preserve owner/account/workspace fences and explicit legacy-history review. Do not infer ancestry from displayed rows/timestamps, silently promote local owners, expose unfinished native forks, weaken CSP, or alter temporary retention accidentally. Keep scope-specific settings and privacy decisions intact. Use existing dependencies, locale source files and mirror tooling, shared components, and current test harnesses. Avoid a new settings framework, onboarding wizard, analytics collection, search index, or generic history aggregation service.
 
 This branch is isolated from the dirty primary checkout and from the completed audit branch. Written design approval is recorded, and Stage 1 application work is underway in reviewed incremental deliveries. Detailed plans follow the corrected contracts and accepted D7 reconciliation above. Completion is evidence-based by stage; unmet backend capabilities, native-shell checks, and human-study checks remain explicitly identified rather than disappearing from scope.
+
+## Live opening contract correction — TASK-13454.13
+
+Current dev8aeddeee36 is integrated at88a2d65aee after the passing frontend opening checkpoint a9822ac3a0 and notification fix1ba4415c2c. Live non-Sync creation exposed a canonical role gap: the transactional factory seeds the character display name into sender, while H1 uses sender as the protocol role. The assistant-only qualifier correctly refuses that row; known-ID reopening incorrectly attributes it to You. One create and zero provider calls were observed, and the original multiline draft remained recoverable.
+
+Correct only new factory-generated seed messages to sender assistant and explicit null parent; keep the accepted raw greeting unchanged. Reuse the existing owner-checked unique root-chain H1 interpretation. Do not fabricate user admission/settlement, normalize arbitrary named senders, rewrite older rows, or claim Sync support. Both production callers use the shared factory without other initial messages; test module startup/reopen as well as actual API create/messages/H1. Existing qualified character labels remain; immutable historical display names are a separate limitation because API identity currently reads the live card. No metadata/display framework is added to this bounded protocol fix.
+
+The actual preview/alternate choices do not mutate history. Own-message focus preserves exact input and trailing spaces. Opening actions fit390px and320px without horizontal overflow; screenshots are in /private/tmp/chat-ux-fresh-opening-390.jpg and /private/tmp/chat-ux-fresh-opening-320.jpg. Complete keyboard/zoom/screen-reader/package and other all-entry-point journeys remain required parent checks.
+
+Verified correction: relevant Python suites292 passed, actual module reopening passed, Bandit0 and no new Ruff diagnostics; both independent source reviews found no blockers. One explicit live save produced one owned settled assistant root with exact raw text and zero provider/user-turn requests. Cold reload returned the same chat and exact focused draft (/private/tmp/chat-greeting-canonical-owned-proof.json; /private/tmp/chat-ux-saved-greeting-reloaded.jpg). TASK-13454.11 also qualifies the canonical H1 message id for display-only greeting projection; no synthetic server ID/version or raw-content mutation is introduced. Its real formatter-to-renderer regression failed before that correction and now passes with the related checks (3suites32); both type gates pass and no new frontend lint diagnostics are introduced. User placeholders remain visible when no user display name is configured.
