@@ -922,7 +922,7 @@ async def create_transcription(
                 job_heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await job_heartbeat_task
-            period = "monthly" if await _audio_shim_attr("monthly_minutes_exhausted")(current_user.id) else "daily"
+            period = "monthly" if await _audio_shim_attr("monthly_minutes_exhausted")(current_user.id, minutes_est) else "daily"
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail=_dictation_error_detail(

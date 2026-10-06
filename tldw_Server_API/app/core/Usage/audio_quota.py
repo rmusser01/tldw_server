@@ -96,11 +96,6 @@ _audio_minutes_consume_locks: dict[int, asyncio.Lock] = {}
 _audio_minutes_consume_locks_lock = asyncio.Lock()
 
 
-def _reset_in_process_counters_for_tests() -> None:
-    """Reset in-process audio quota state for tests (no handle registries remain)."""
-    _audio_minutes_consume_locks.clear()
-
-
 async def _get_audio_minutes_consume_lock(user_id: int) -> asyncio.Lock:
     """Return the per-user lock used by fallback minute consumption."""
     uid = int(user_id)
@@ -370,12 +365,10 @@ async def get_monthly_minutes_used(user_id: int) -> float:
         return 0.0
 
 
-async def monthly_minutes_exhausted(user_id: int) -> bool:
-    """True when the user has a monthly minutes limit and has already used it up."""
-    limit = (await get_limits_for_user(user_id)).get("monthly_minutes")
-    if limit is None:
-        return False
-    return await get_monthly_minutes_used(user_id) >= float(limit)
+async def monthly_minutes_exhausted(user_id: int, minutes_requested: float) -> bool:
+    """True when this request would take the user past a monthly minutes limit (False when none is set or the counter fails)."""
+    limits = await get_limits_for_user(user_id)
+    return await _monthly_minutes_exhausted(user_id, limits.get("monthly_minutes"), minutes_requested)
 
 
 _daily_ledger: ResourceDailyLedger | None = None  # type: ignore[assignment]

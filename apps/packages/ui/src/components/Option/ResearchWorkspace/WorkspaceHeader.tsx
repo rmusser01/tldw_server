@@ -450,7 +450,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       storageOriginUsedBytes >= 0 &&
       typeof storageOriginQuotaBytes === "number" &&
       Number.isFinite(storageOriginQuotaBytes) &&
-      storageOriginQuotaBytes > 0
+      storageOriginQuotaBytes >= 0
 
     const hasAccountUsage =
       typeof storageAccountUsedBytes === "number" &&

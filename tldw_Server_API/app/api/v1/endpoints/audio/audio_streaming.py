@@ -1139,6 +1139,12 @@ async def _get_user_tier(user_id: int):
     return await _audio_shim_attr("get_user_tier")(user_id)
 
 
+async def _minutes_quota_name(user_id: int, minutes_requested: float) -> str:
+    """Quota name for a refused minutes request: monthly when the month limit is what it would pass."""
+    monthly = await _audio_shim_attr("monthly_minutes_exhausted")(user_id, minutes_requested)
+    return "monthly_minutes" if monthly else "daily_minutes"
+
+
 async def _get_limits_for_user(user_id: int):
     return await _audio_shim_attr("get_limits_for_user")(user_id)
 
@@ -1741,10 +1747,10 @@ async def websocket_transcribe(
                         increment_counter("audio_failopen_cap_exhausted_total", labels={"reason": "db_check"})
                     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
                         logger.debug(f"metrics increment failed (audio_failopen_cap_db_check): error={m_err}")
-                    raise _QuotaExceeded("daily_minutes") from None
+                    raise _QuotaExceeded(await _minutes_quota_name(user_id_for_usage, minutes_chunk)) from None
             if not allow:
                 # Raise structured signal to outer scope
-                raise _QuotaExceeded("daily_minutes")
+                raise _QuotaExceeded(await _minutes_quota_name(user_id_for_usage, minutes_chunk))
             used_minutes += minutes_chunk
             # Billing: accumulate fractional minutes; flush to cache when >= 1
             nonlocal _billing_minutes_accumulator
@@ -1805,9 +1811,7 @@ async def websocket_transcribe(
             )
             try:
                 if _outer_stream:
-                    _period = (
-                        "monthly" if await _audio_shim_attr("monthly_minutes_exhausted")(user_id_for_usage) else "daily"
-                    )
+                    _period = qe.quota.removesuffix("_minutes")
                     await _outer_stream.send_json(
                         _audio_ws_quota_error_payload(
                             quota=qe.quota,
@@ -4573,7 +4577,16 @@ async def streaming_limits(
         )
         used_month = 0.0
     monthly_limit = limits.get("monthly_minutes")
-    remaining_month = None if monthly_limit is None else max(0.0, float(monthly_limit) - float(used_month))
+    if monthly_limit is None:
+        remaining_month = None
+    else:
+        try:
+            remaining_month = max(0.0, float(monthly_limit) - float(used_month))
+        except (ValueError, TypeError) as e:
+            get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="audio").warning(
+                "Could not calculate remaining monthly minutes for user %s: %s", current_user.id, e
+            )
+            remaining_month = None
     try:
         tier = await _get_user_tier(current_user.id)
     except EXPECTED_DB_EXC as e:

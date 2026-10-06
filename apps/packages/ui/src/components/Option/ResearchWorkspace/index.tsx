@@ -2158,7 +2158,8 @@ const ResearchWorkspaceBody: React.FC = () => {
         Number.isFinite(usedMb) && usedMb >= 0 ? usedMb * 1024 * 1024 : null
       const accountQuotaBytes =
         quotaMb !== null && Number.isFinite(quotaMb) && quotaMb >= 0
-            ? quotaMb * 1024 * 1024 : null
+          ? quotaMb * 1024 * 1024
+          : null
       setWorkspaceStorageUsage((previousState) => ({
         ...previousState,
         accountUsedBytes,
@@ -2178,7 +2179,8 @@ const ResearchWorkspaceBody: React.FC = () => {
           Number.isFinite(usedMb) && usedMb >= 0 ? usedMb * 1024 * 1024 : null
         const accountQuotaBytes =
           quotaMb !== null && Number.isFinite(quotaMb) && quotaMb >= 0
-            ? quotaMb * 1024 * 1024 : null
+            ? quotaMb * 1024 * 1024
+            : null
         setWorkspaceStorageUsage((previousState) => ({
           ...previousState,
           accountUsedBytes,

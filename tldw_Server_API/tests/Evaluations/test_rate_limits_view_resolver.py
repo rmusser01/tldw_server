@@ -2,8 +2,8 @@
 
 import pytest
 
+from tldw_Server_API.app.core.Evaluations import user_rate_limiter
 from tldw_Server_API.app.core.Evaluations.user_rate_limiter import UserRateLimiter
-from tldw_Server_API.app.core.Usage import quota_resolver
 
 pytestmark = pytest.mark.unit
 
@@ -17,7 +17,7 @@ def caps(monkeypatch: pytest.MonkeyPatch) -> dict:
         """The test's cap for the key."""
         return values.get(key)
 
-    monkeypatch.setattr(quota_resolver, "user_quota", _user_quota)
+    monkeypatch.setattr(user_rate_limiter, "user_quota", _user_quota)
     return values
 
 

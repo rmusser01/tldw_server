@@ -35,6 +35,8 @@ from tldw_Server_API.app.core.Evaluations.config_manager import (
 )
 from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_user_scope
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Usage.quota_checks import as_quota_user_id
+from tldw_Server_API.app.core.Usage.quota_resolver import user_quota
 
 # Narrowed exception tuple for BLE001 fixes
 _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS = (
@@ -362,9 +364,6 @@ class UserRateLimiter:
             - metadata: Rate limit information and headers
         """
         config = await self._get_user_config(user_id)
-
-        from tldw_Server_API.app.core.Usage.quota_checks import as_quota_user_id
-        from tldw_Server_API.app.core.Usage.quota_resolver import user_quota
 
         quota_uid = as_quota_user_id(user_id)
         daily_caps = {
@@ -1114,9 +1113,6 @@ class UserRateLimiter:
             return total_evaluations, total_tokens, total_cost, monthly_cost
 
         total_evaluations, total_tokens, total_cost, monthly_cost = await self._run_db(_summary)
-
-        from tldw_Server_API.app.core.Usage.quota_checks import as_quota_user_id
-        from tldw_Server_API.app.core.Usage.quota_resolver import user_quota
 
         quota_uid = as_quota_user_id(user_id)
         if quota_uid is None:

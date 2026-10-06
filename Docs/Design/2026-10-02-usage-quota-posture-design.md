@@ -1,7 +1,7 @@
 # Usage quotas: off by default, set per user, team or org
 
 - **Date:** 2026-10-02
-- **Status:** Implemented (PRs #3098, #3144, #3199, and this PR)
+- **Status:** Implemented (PRs #3098, #3144, #3199 and PR D, TASK-13434)
 - **Backlog:** implementation tasks are filed after this spec is approved. Pre-existing bugs found during review are filed now (see [Known defects](#known-defects-outside-this-spec)).
 - **Scope:** Spec 2 of 2. Spec 1, the ingress safety net (`Docs/Design/2026-09-29-rg-ingress-safety-net-design.md`, ADR-056), is implemented. Spec 1 handles request rates; this spec handles usage budgets.
 

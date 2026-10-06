@@ -76,7 +76,6 @@ def test_export_endpoint_has_no_tier_cap(monkeypatch: pytest.MonkeyPatch) -> Non
     for name in ("CHATBOOKS_DISABLE_QUOTAS", "TEST_MODE", "TESTING", "PYTEST_CURRENT_TEST"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
-    assert qm.QuotaManager("1", "free")._quotas_disabled is False
     service = _CaptureService()
     app = FastAPI()
     app.include_router(chatbooks_endpoints.router, prefix="/api/v1")

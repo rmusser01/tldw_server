@@ -67,11 +67,27 @@ async def test_monthly_minutes_exhausted_only_with_a_limit(ledger: dict, monkeyp
 
     monkeypatch.setattr(audio_quota, "get_limits_for_user", _limits)
     ledger["month"] = 3600.0
-    assert await audio_quota.monthly_minutes_exhausted(7) is False
+    assert await audio_quota.monthly_minutes_exhausted(7, 1.0) is False
     limits["monthly_minutes"] = 60
-    assert await audio_quota.monthly_minutes_exhausted(7) is True
+    assert await audio_quota.monthly_minutes_exhausted(7, 1.0) is True
     limits["monthly_minutes"] = 61
-    assert await audio_quota.monthly_minutes_exhausted(7) is False
+    assert await audio_quota.monthly_minutes_exhausted(7, 1.0) is False
+
+
+async def test_monthly_denial_is_named_monthly_with_no_daily_limit(
+    ledger: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """59 of 60 monthly minutes used, 5 requested: the deny check and the predicate agree (real predicate)."""
+
+    async def _limits(user_id: int) -> dict:
+        """No daily limit, a 60-minute monthly one."""
+        return {"daily_minutes": None, "monthly_minutes": 60, "concurrent_jobs": None}
+
+    monkeypatch.setattr(audio_quota, "get_limits_for_user", _limits)
+    ledger["month"] = 59 * 60.0
+    allowed, _remaining = await audio_quota.check_daily_minutes_allow(7, 5.0)
+    assert allowed is False
+    assert await audio_quota.monthly_minutes_exhausted(7, 5.0) is True
 
 
 def test_dead_rg_handle_machinery_is_gone() -> None:
@@ -187,7 +203,7 @@ def test_monthly_breach_message_names_the_month(
 
     asked: list[int] = []
 
-    async def _exhausted(user_id: int) -> bool:
+    async def _exhausted(user_id: int, _minutes: float) -> bool:
         """Record the lookup and return the test's answer."""
         asked.append(user_id)
         return exhausted
@@ -227,3 +243,25 @@ def test_monthly_breach_message_names_the_month(
     assert resp.status_code == 402, resp.text
     assert f"Transcription quota exceeded ({period} minutes)" in resp.text
     assert asked == [1]
+
+
+@pytest.mark.parametrize(("monthly", "expected"), [(True, "monthly_minutes"), (False, "daily_minutes")])
+async def test_ws_minutes_quota_name_follows_the_monthly_check(
+    monthly: bool, expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The WebSocket quota name (and so its message) names the period the request would pass."""
+    asked: list[tuple[int, float]] = []
+
+    async def _exhausted(user_id: int, minutes: float) -> bool:
+        """Record the request and return the test's answer."""
+        asked.append((user_id, minutes))
+        return monthly
+
+    original = audio_streaming._audio_shim_attr
+    monkeypatch.setattr(
+        audio_streaming,
+        "_audio_shim_attr",
+        lambda name: _exhausted if name == "monthly_minutes_exhausted" else original(name),
+    )
+    assert await audio_streaming._minutes_quota_name(7, 0.5) == expected
+    assert asked == [(7, 0.5)]

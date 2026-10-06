@@ -63,7 +63,7 @@ Days and months are calendar UTC. With the switch on and the key unset, nothing 
 | Key | Limits | Counter it reads | Refusal |
 |---|---|---|---|
 | `limits.audio_daily_minutes` | Audio transcription minutes per day (HTTP, WebSocket streaming, realtime, workers) | Resource ledger `user/minutes` (stored in seconds) | HTTP 402 `{"status":"quota_exceeded","message":"Transcription quota exceeded (daily minutes)"}` |
-| `limits.transcription_minutes_per_month` | Transcription minutes per month | The same ledger rows summed over the month | HTTP 402, as above |
+| `limits.transcription_minutes_per_month` | Transcription minutes per month | The same ledger rows summed over the month | HTTP 402 `{"status":"quota_exceeded","message":"Transcription quota exceeded (monthly minutes)"}` |
 | `limits.audio_concurrent_jobs` | Audio jobs processing at once per user | The audio Jobs worker's count of `processing` rows for the owner | The job waits until the owner is under the cap. With `0` the job fails with `audio job quota is 0 for this user (limits.audio_concurrent_jobs)` |
 | `limits.llm_tokens_per_month` | LLM tokens per month, enforced on `/chat/completions` only | `llm_usage_log` summed per user over the month | HTTP 402 `{"error":"limit_exceeded","category":"llm_tokens_month",...}` |
 | `limits.rag_queries_per_day` | RAG queries per day (unified RAG, Text2SQL, MCP RAG) | Resource ledger `user/rag_queries` | HTTP 402 `{"error":"limit_exceeded","category":"rag_queries_day",...}` |

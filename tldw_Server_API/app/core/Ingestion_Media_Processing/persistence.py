@@ -332,7 +332,7 @@ async def _enforce_and_record_media_bytes(user_id: Any, total_uploaded_bytes: in
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Daily ingestion size budget exceeded.",
             headers=quota_checks.rate_limit_headers(
-                limit=int(limit_mb),
+                limit=int(round(float(limit_mb))),
                 remaining=int(max(0, remaining_bytes or 0) // (1024 * 1024)),
                 reset_seconds=quota_checks.seconds_until_utc_midnight(),
             ),
