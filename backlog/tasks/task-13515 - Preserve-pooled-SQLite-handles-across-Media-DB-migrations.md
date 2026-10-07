@@ -1,7 +1,7 @@
 ---
 id: TASK-13515
 title: Preserve pooled SQLite handles across Media DB migrations
-status: In Progress
+status: Done
 created_date: 2026-10-07 06:46
 priority: high
 modified_files:
@@ -35,6 +35,7 @@ Base dev e3c345b76f2d93527488b2015b9c3a2649c1f981. MCP search/resource calls did
 TDD: all three synthetic supported-upgrade/shared-backend/failure-retry cases failed before production edits with Cannot operate on a closed database, then passed after replacing raw close with existing pool invalidation and raw reopen with db.get_connection. Independent Python 3.12.13 run: 138 passed, 5 PostgreSQL-dependent skipped (Docker disabled; PostgreSQL unavailable), 83 warnings. Paths: schema bootstrap, shared SQLite backend registry, pool pruning, factory logging, owner logging. Scoped Ruff passed; production Bandit returned zero findings; git diff --check passed. Independent review in progress. No schema/API changes, startup suppression, new dependency or broader pool fallback.
 Independent final review: one P2 test-only cleanup finding addressed with existing clear_thread_local_connection in both new finally blocks; final scoped review has no remaining P1/P2 findings. Post-review Python 3.12.13 regression rerun: 138 passed, 5 PostgreSQL-dependent skipped, 83 existing warnings, 2.92 seconds. Ruff and Bandit on touched files passed (B101 assertions excluded for tests; production alone also zero findings). Requester explicitly waived the human-written Change summary merge requirement; do not represent an AI-authored summary as human-written. No ADR or user-facing documentation change required for restoring an existing internal ownership contract. Public CI/review feedback and merge remain pending.
 PR: https://github.com/rmusser01/tldw_server/pull/3208 (head65b073a7de2f294ead515e24dbc6bafa6fd764d7, current devbasee3c345b76f). Post-commit Backlog canonical-format ratchet: four passed on Python3.12.13. Requested CodeRabbit review completed on this exact head with no actionable comments. Qodo reports billing-blocked/out of credits; no Qodo review or approval is claimed. Required backend, coverage and container checks remain pending; no merge or replacement-image qualification claimed.
+Reviewed source implementation is complete; this does not claim PR merge, image qualification or deployment. All seven required checks succeeded on head5adab438fd, then protected merge was refused because dev advanced to1bd4a07a0b11c8dbeab62195cea50baf407de06c (PR3204). Rebased this branch cleanly onto that current dev; the two touched production/test files are unchanged by the intervening base commit. Required checks must rerun for the rebased head; prior-head success is historical only. Exact-head CodeRabbit review had no actionable findings; its test-docstring advisory was explicitly assessed in PRcomment6033128110 without changing established descriptive test naming. Qodo remains out-of-credits, not passed. Human Change summary gate was explicitly waived by requester. No private operational data or image change in this public unit.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
