@@ -216,6 +216,61 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()
   })
 
+  it("CS-04: a message sent while Stop's kept turn is still loading waits in the composer, then sends", async () => {
+    const server = createFakeTldwServer()
+    server.planCompletion({ chunks: ["Never shown"], pauseAfterChunks: 0 })
+    // Hold the history selection reads once Stop is pressed, so the view that
+    // follows the stopped question stays "Loading selected history" (slow CI).
+    const selectionRead = deferred()
+    let holdSelectionReads = false
+    const serverFetch = server.fetch
+    server.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+      if (holdSelectionReads && /\/history\/selection$/.test(new URL(url, server.url).pathname)) {
+        await selectionRead.promise
+      }
+      return serverFetch(input, init)
+    }
+    const view = await renderPlayground({ server })
+
+    await startSend(view, "Stop before any answer")
+    await waitFor(() => expect(server.completionRequests()).toHaveLength(1), HARNESS_WAIT)
+    holdSelectionReads = true
+    await view.user.click(await screen.findByRole("button", { name: "Stop Streaming" }, HARNESS_WAIT))
+    await waitForChatIdle()
+    await screen.findByText("Loading selected history", {}, HARNESS_WAIT)
+
+    // Sending now must not lose the message or fail with a raw error.
+    await view.user.click(view.composer)
+    await view.user.type(view.composer, "Ask again")
+    await view.user.keyboard("{Enter}")
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(view.composer).toHaveValue("Ask again")
+    expect(screen.queryByText("history_selection_not_ready")).not.toBeInTheDocument()
+    expect(server.completionRequests()).toHaveLength(1)
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
+
+    holdSelectionReads = false
+    selectionRead.resolve()
+    await waitFor(
+      () => expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled(),
+      HARNESS_WAIT
+    )
+    await view.user.click(screen.getByRole("button", { name: "Send message" }))
+    await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
+    await waitForChatIdle()
+    await waitFor(
+      () =>
+        expect(transcript()).toEqual([
+          { role: "user", text: "Stop before any answer" },
+          { role: "user", text: "Ask again" },
+          { role: "assistant", text: "Harness reply" }
+        ]),
+      HARNESS_WAIT
+    )
+    expect(screen.queryByText("history_selection_not_ready")).not.toBeInTheDocument()
+  })
+
   it("CS-04 / CS-N3: leaving /chat while a reply streams keeps the reply on return and creates no extra server chat", async () => {
     const server = createFakeTldwServer()
     const resume = deferred()

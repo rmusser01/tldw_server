@@ -3362,10 +3362,17 @@ export const PlaygroundForm = ({
   // Clear, or while a restored one is still loading) sends only once its
   // history-selection controller is idle; until then Send stays disabled and
   // the draft stays in the composer.
+  // CS-04: the same while any chat's selected history is loading, such as the
+  // view that follows a stopped or interrupted reply. The send path refuses a
+  // selection that is not ready, which used to drop the draft.
   const historySelection = useHistorySelectionContext();
   const historySelectionPending =
     !isSending &&
-    isFreshChatSelectionPending(historySelection, { historyId, serverChatId });
+    (historySelection?.status === "loading" ||
+      isFreshChatSelectionPending(historySelection, {
+        historyId,
+        serverChatId,
+      }));
   const runCharacterChatSendBlocker = React.useCallback(() => {
     if (characterChatSendBlocker?.active) {
       stopListening();
