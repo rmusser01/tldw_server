@@ -16,6 +16,9 @@ export type ServerChatHistoryItem = ServerChatSummary & {
 const SERVER_CHAT_FETCH_LIMIT = 200
 const SERVER_CHAT_FETCH_MAX_PAGES = 50
 const SERVER_CHAT_SEARCH_LIMIT = 50
+// Find a chat by what was said in it, not only by its title. Servers that
+// predate content search ignore the parameter and search titles as before.
+const SERVER_CHAT_SEARCH_FIELDS = "title,content"
 export const SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE = 25
 
 type FetchServerChatsPage = (params: {
@@ -91,6 +94,11 @@ export const filterServerChatHistoryItems = (
   }
 
   return items.filter((item) => {
+    // The server already matched this chat on its messages; the text is not in
+    // the row, so a title check here would wrongly drop it.
+    if (item.matched_in?.includes("content")) {
+      return true
+    }
     const haystack = `${item.title || ""} ${item.topic_label || ""} ${item.state || ""}`.toLowerCase()
     return haystack.includes(normalizedQuery)
   })
@@ -296,6 +304,7 @@ export const useServerChatHistory = (
           const response = await tldwClient.searchConversationsWithMeta(
             {
               query: normalizedQuery,
+              search_in: SERVER_CHAT_SEARCH_FIELDS,
               limit: searchLimit,
               offset: (searchPage - 1) * searchLimit,
               order_by: "recency",

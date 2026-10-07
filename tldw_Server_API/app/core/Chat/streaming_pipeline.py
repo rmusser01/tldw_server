@@ -31,6 +31,7 @@ class StreamingPipelineRequest:
     continuation_metadata: dict[str, Any] | None = None
     history_persistence_ack: bool | None = None
     user_message_id: str | None = None
+    partial_save_callback: Callable[..., Any] | None = None
 
 
 def create_chat_streaming_response(
@@ -56,6 +57,7 @@ def create_chat_streaming_response(
         "user_message_id": request.user_message_id,
         "continuation_metadata": request.continuation_metadata,
         "history_persistence_ack": request.history_persistence_ack,
+        "partial_save_callback": request.partial_save_callback,
     }
     factory_kwargs.update(
         {

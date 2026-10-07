@@ -115,6 +115,10 @@ vi.mock("../FolderPickerModal", () => ({
   FolderPickerModal: () => null
 }))
 
+vi.mock("@/hooks/useUndoNotification", () => ({
+  useUndoNotification: () => ({ showUndoNotification: vi.fn() })
+}))
+
 const search = vi.hoisted(() => vi.fn())
 const connection = vi.hoisted(() => ({ isConnected: true }))
 vi.mock("@/hooks/useConnectionState", () => ({
@@ -470,4 +474,27 @@ it("preserves same-owner cached title search across remounts", async () => {
   expect(search).toHaveBeenCalledOnce()
   remount.unmount()
   client.clear()
+})
+
+it("shows what was said under a server result that matched by message content (CS-02)", async () => {
+  search.mockResolvedValue({
+    chats: [
+      {
+        id: "weekly",
+        title: "Weekly sync",
+        created_at: "2026-09-20T00:00:00Z",
+        matched_in: ["content"],
+        match_snippet: "…keep the private codeword between us."
+      }
+    ],
+    total: 1
+  })
+  render(withClient(createClient(), owner(1)))
+
+  const snippet = await screen.findByText("…keep the private codeword between us.")
+  expect(screen.getByRole("button", { name: /^Weekly sync/ })).toContainElement(snippet)
+  expect(search).toHaveBeenCalledWith(
+    expect.objectContaining({ query: "private", search_in: "title,content" }),
+    expect.anything()
+  )
 })

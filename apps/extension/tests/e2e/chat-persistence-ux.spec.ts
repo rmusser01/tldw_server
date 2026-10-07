@@ -27,9 +27,9 @@ test.describe('Chat persistence UX', () => {
       await page.waitForTimeout(300)
     }
 
-    // By default, chats should be saved locally only.
+    // By default, chats are saved on this device only.
     await expect(
-      page.getByText(/Saved locally in this browser only/i).first()
+      page.getByText(/Saved on this device/i).first()
     ).toBeVisible()
 
     // Look for the save/temporary toggle switch
@@ -110,9 +110,9 @@ test.describe('Chat persistence UX', () => {
         await page.waitForTimeout(300)
       }
 
-      // Ensure we are in non-temporary (local) mode first - check for "Local only" badge
+      // Ensure we are in non-temporary (local) mode first
       await expect(
-        page.getByText(/Local only|Saved locally/i).first()
+        page.getByText(/Saved on this device/i).first()
       ).toBeVisible()
 
       // Look for server save promotion button or link

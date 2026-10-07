@@ -11,9 +11,11 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.Chat.history_selection import (
+    HistoryBranchChangedError,
     HistoryFencesV1,
     HistorySelectionError,
     HistorySelectionSnapshotV1,
+    history_branch_leaves,
     resolve_legacy_projection,
     resolve_parent_path,
     snapshot_to_wire,
@@ -697,6 +699,30 @@ class MessageStore:
 
         return MessageStore._history_digest(encode(message))
 
+    @staticmethod
+    def _require_history_tip(
+        snapshot: HistorySelectionSnapshotV1,
+        parent_id: str | None,
+        history_branch: bool | None,
+    ) -> None:
+        """Refuse a "must extend the latest message" admission whose tip already continued.
+
+        Runs under the owner lock against the validated statement snapshot, so live
+        children are exactly the non-deleted rows committed before this admission.
+        `None` (field absent) keeps the unchecked admission; `True` is an explicit
+        branch. Settlement, which adds replies and regenerated variants, never calls this.
+        """
+        if history_branch is not False:
+            return
+        leaves = history_branch_leaves(snapshot.nodes, snapshot.interpretation_status, parent_id)
+        if leaves:
+            raise HistoryBranchChangedError(
+                conversation_id=snapshot.conversation_id,
+                parent_message_id=parent_id,
+                leaf_ids=leaves,
+                history_version=snapshot.fences.history,
+            )
+
     def append_selected_history_input(
         self,
         conversation_id: str,
@@ -706,8 +732,14 @@ class MessageStore:
         owner_client_id: str,
         owner_key: str,
         conn: Any | None = None,
+        history_branch: bool | None = None,
     ) -> dict[str, Any]:
-        """Atomically validate selected history and append one accepted current input."""
+        """Atomically validate selected history and append one accepted current input.
+
+        `history_branch=False` requires the selection's last message to have no live
+        child (see `_require_history_tip`). A replay of an already-admitted message id
+        returns its admission before that check, whatever the flag.
+        """
         body, data = dict(selection), dict(message)
         if (
             body.get("owner_key") != owner_key
@@ -745,6 +777,7 @@ class MessageStore:
             parent = body["messages"][-1]["id"] if body["messages"] else None
             if "parent_message_id" in data and data["parent_message_id"] != parent:
                 raise HistorySelectionError("parent_mismatch")
+            self._require_history_tip(fresh, parent, history_branch)
             data.update(conversation_id=conversation_id, parent_message_id=parent, client_id=owner_client_id)
             mid = self.add_message(data, conn=active)
             if data.get("tool_calls") is not None or data.get("extra_metadata") is not None:
@@ -790,8 +823,13 @@ class MessageStore:
         owner_client_id: str,
         owner_key: str,
         conn: Any | None = None,
+        history_branch: bool | None = None,
     ) -> dict[str, Any]:
-        """Accept a server-owned current-input chain once, under one owner transaction."""
+        """Accept a server-owned current-input chain once, under one owner transaction.
+
+        `history_branch` has the same meaning as for `append_selected_history_input`;
+        a reused selection still fails first with `selection_already_consumed`.
+        """
         body = dict(selection)
         if not messages or any(message.get("sender") not in {"user", "tool"} for message in messages):
             raise HistorySelectionError("invalid_input")
@@ -816,7 +854,7 @@ class MessageStore:
                     and authority.get("admission", {}).get("selection_digest") == body.get("selection_digest")
                 ):
                     raise HistorySelectionError("selection_already_consumed")
-            self.validate_history_selection(
+            fresh, _ = self.validate_history_selection(
                 conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
             )
             scope = dict(
@@ -825,6 +863,7 @@ class MessageStore:
                 ).fetchone()
             )
             parent = body["messages"][-1]["id"] if body["messages"] else None
+            self._require_history_tip(fresh, parent, history_branch)
             chain = []
             for message in messages:
                 data = dict(message)
@@ -1801,8 +1840,13 @@ class MessageStore:
         sync_client_id: str,
         object_revision: int,
         object_hash: str,
+        owner_client_id: str | None = None,
     ) -> bool:
-        """Soft-delete all projections for a stable message from an accepted Sync v2 tombstone."""
+        """Soft-delete all projections for a stable message from an accepted Sync v2 tombstone.
+
+        ``owner_client_id`` limits the projections to chats that owner holds; see
+        ``get_messages_by_sync_stable_id``.
+        """
 
         normalized_stable_id = str(stable_message_id).strip()
         if not normalized_stable_id:
@@ -1810,7 +1854,9 @@ class MessageStore:
         if object_revision < 1:
             raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
 
-        existing_versions = self.get_messages_by_sync_stable_id(normalized_stable_id, include_deleted=True)
+        existing_versions = self.get_messages_by_sync_stable_id(
+            normalized_stable_id, include_deleted=True, owner_client_id=owner_client_id
+        )
         matched_versions = [
             version
             for version in existing_versions
@@ -1880,16 +1926,85 @@ class MessageStore:
                 self._advance_history_version(conn, affected_conversation_id)
         return True
 
+    def tombstone_unsynced_message_from_sync(
+        self,
+        *,
+        stable_message_id: str,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+    ) -> str:
+        """Make a message the Sync dataset holds no state for absent, and report what that took.
+
+        A device can tombstone a message this server never received through
+        Sync. The end state it asks for is "gone", so there is nothing to
+        conflict with: either no row carries the id, or the only rows are copies
+        kept outside Sync, which the delete now reaches too.
+
+        Rows that carry Sync history of their own are left alone. They were
+        projected from an object state this dataset does not have, so this
+        tombstone is not theirs to apply.
+
+        Only chats owned by ``sync_client_id`` are looked at. The lookup is by
+        message id, and on PostgreSQL one database holds every owner's messages;
+        with no Sync state to tie the id to this owner, the chat's owner is the
+        only thing that does.
+
+        Args:
+            stable_message_id: The message id the tombstone names.
+            sync_client_id: The projection's client id: the owner whose chats are
+                searched, and the id stamped on deleted rows.
+            object_revision: The tombstone's revision.
+            object_hash: The tombstone's payload hash, recorded on deleted rows so
+                a replay of the same tombstone recognises its own work.
+
+        Returns:
+            ``"absent"`` when no row carries the id and nothing changed,
+            ``"deleted"`` when the rows found are now soft-deleted, or
+            ``"foreign"`` when a row belongs to other Sync history and nothing changed.
+        """
+        normalized_stable_id = str(stable_message_id).strip()
+        if not normalized_stable_id:
+            raise InputError("stable_message_id cannot be empty.")  # noqa: TRY003
+
+        owner = str(sync_client_id)
+        existing_versions = self.get_messages_by_sync_stable_id(
+            normalized_stable_id, include_deleted=True, owner_client_id=owner
+        )
+        if not existing_versions:
+            return "absent"
+        for version in existing_versions:
+            sync_meta = ((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {}
+            recorded_hash = sync_meta.get("payload_hash")
+            applied_by_this_tombstone = bool(sync_meta.get("tombstoned")) and recorded_hash == object_hash
+            if recorded_hash and not applied_by_this_tombstone:
+                return "foreign"
+        self.tombstone_message_from_sync(
+            stable_message_id=normalized_stable_id,
+            sync_client_id=sync_client_id,
+            object_revision=object_revision,
+            object_hash=object_hash,
+            owner_client_id=owner,
+        )
+        return "deleted"
+
     def get_messages_by_sync_stable_id(
         self,
         stable_message_id: str,
         *,
         include_deleted: bool = False,
+        owner_client_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Fetch message projections associated with a Sync v2 stable message ID."""
+        """Fetch message projections associated with a Sync v2 stable message ID.
+
+        With ``owner_client_id``, only messages in chats that owner holds are
+        returned. A caller that has no Sync state tying the id to an owner must
+        pass it: the match is by id, across every chat the connection can read.
+        """
 
         self._db._ensure_message_metadata_table()
         deleted_clause = "" if include_deleted else "AND m.deleted = FALSE AND c.deleted = FALSE"
+        owner_clause = "" if owner_client_id is None else "AND c.client_id = ?"
         query = (
             "SELECT m.id, m.conversation_id, m.parent_message_id, m.sender, m.content, "
             "m.image_data, m.image_mime_type, m.timestamp, m.ranking, m.last_modified, "
@@ -1897,10 +2012,14 @@ class MessageStore:
             "FROM messages m "
             "LEFT JOIN message_metadata mm ON mm.message_id = m.id "
             "JOIN conversations c ON c.id = m.conversation_id "
-            f"WHERE 1 = 1 {deleted_clause} "  # nosec B608
+            f"WHERE 1 = 1 {deleted_clause} {owner_clause} "  # nosec B608
             "ORDER BY m.timestamp ASC, m.last_modified ASC, m.id ASC"
         )
-        cursor = self._db.execute_query(query)
+        cursor = (
+            self._db.execute_query(query)
+            if owner_client_id is None
+            else self._db.execute_query(query, (str(owner_client_id),))
+        )
         rows = cursor.fetchall()
         columns = [col[0] for col in cursor.description] if cursor.description else []
         results: list[dict[str, Any]] = []

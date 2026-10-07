@@ -25,6 +25,42 @@ import type { NoteStudioState, NotesStudioPaperSize } from '../notes-studio-type
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 
+/**
+ * Notes per export request. GET /api/v1/notes/ accepts limit up to 1000 and
+ * GET /api/v1/notes/search/ up to 100, so 100 is a full page for both.
+ */
+const EXPORT_PAGE_SIZE = 100
+/** Hard cap on export requests, whatever the server reports. */
+const MAX_EXPORT_REQUESTS = 1000
+const EXPORT_PREFLIGHT_NOTE_THRESHOLD = MAX_EXPORT_REQUESTS * EXPORT_PAGE_SIZE
+
+type ExportPage = { items: any[]; total: number | null }
+
+type GatherResult = {
+  arr: NoteListItem[]
+  limitReached: boolean
+  failedBatches: number
+  cancelled: boolean
+  /** Matching notes the server last reported, or null when it sent no total. */
+  expectedTotal: number | null
+}
+
+/** list_notes reports the library size as pagination.total (and a top-level total alias). */
+const readReportedTotal = (res: any): number | null => {
+  const raw = res?.pagination?.total ?? res?.total ?? res?.pagination?.total_items
+  if (raw == null) return null
+  const value = Number(raw)
+  return Number.isFinite(value) && value >= 0 ? value : null
+}
+
+const toExportNote = (n: any): NoteListItem => ({
+  id: n?.id,
+  title: n?.title,
+  content: n?.content,
+  updated_at: n?.updated_at,
+  keywords: extractKeywords(n)
+})
+
 export interface UseNotesExportDeps {
   message: MessageInstance
   confirmDanger: ConfirmDanger
@@ -41,7 +77,8 @@ export interface UseNotesExportDeps {
     q: string,
     toks: string[],
     page: number,
-    pageSize: number
+    pageSize: number,
+    signal?: AbortSignal
   ) => Promise<{ items: any[]; total: number }>
   /** From editor hook */
   selectedId: string | number | null
@@ -74,102 +111,118 @@ export function useNotesExport(deps: UseNotesExportDeps) {
   } = deps
 
   const [exportProgress, setExportProgress] = React.useState<ExportProgressState | null>(null)
+  const exportAbortRef = React.useRef<AbortController | null>(null)
 
-  const MAX_EXPORT_PAGES = 1000
-  const EXPORT_PREFLIGHT_NOTE_THRESHOLD = MAX_EXPORT_PAGES * 100
+  // Stop an in-flight export when the page unmounts.
+  React.useEffect(() => () => exportAbortRef.current?.abort(), [])
 
+  const cancelExport = React.useCallback(() => {
+    exportAbortRef.current?.abort()
+  }, [])
+
+  /**
+   * Collects every matching note with limit/offset paging, the only paging the
+   * notes list and search endpoints read. The loop ends on the reported total,
+   * on a short or empty page (so a missing total cannot loop), when a page adds
+   * no new note ids (a server that ignores the offset), on Cancel, or at
+   * MAX_EXPORT_REQUESTS.
+   */
   const gatherAllMatching = React.useCallback(async (
     format: ExportFormat
-  ): Promise<{ arr: NoteListItem[]; limitReached: boolean; failedBatches: number }> => {
+  ): Promise<GatherResult> => {
+    exportAbortRef.current?.abort()
+    const controller = new AbortController()
+    exportAbortRef.current = controller
+    const { signal } = controller
+
     const arr: NoteListItem[] = []
+    const seenIds = new Set<string>()
     let limitReached = false
     let failedBatches = 0
     let fetchedPages = 0
+    let expectedTotal: number | null = null
     const q = query.trim()
     const toks = effectiveKeywordTokens.map((k) => k.toLowerCase())
+    const isFiltered = Boolean(q) || toks.length > 0
     const updateProgress = () => {
       setExportProgress({
         format,
         fetchedNotes: arr.length,
         fetchedPages,
-        failedBatches
+        failedBatches,
+        totalNotes: expectedTotal
       })
     }
 
-    setExportProgress({
-      format,
-      fetchedNotes: 0,
-      fetchedPages: 0,
-      failedBatches: 0
-    })
-
-    if (q || toks.length > 0) {
-      let p = 1
-      const ps = 100
-      while (p <= MAX_EXPORT_PAGES) {
-        let items: any[] = []
-        try {
-          const result = await fetchFilteredNotesRaw(q, toks, p, ps)
-          items = result.items
-        } catch {
-          failedBatches += 1
-          updateProgress()
-          break
-        }
-        if (!items.length) break
-        arr.push(
-          ...items.map((n: any) => ({
-            id: n?.id,
-            title: n?.title,
-            content: n?.content,
-            updated_at: n?.updated_at,
-            keywords: extractKeywords(n)
-          }))
-        )
-        fetchedPages += 1
-        updateProgress()
-        if (items.length < ps) break
-        p++
+    const fetchPage = async (offset: number): Promise<ExportPage> => {
+      if (isFiltered) {
+        const page = offset / EXPORT_PAGE_SIZE + 1
+        const result = await fetchFilteredNotesRaw(q, toks, page, EXPORT_PAGE_SIZE, signal)
+        return { items: result.items, total: readReportedTotal(result) }
       }
-      if (p > MAX_EXPORT_PAGES) limitReached = true
-    } else {
-      let p = 1
-      const ps = 100
       const { bgRequest } = await import('@/services/background-proxy')
-      while (p <= MAX_EXPORT_PAGES) {
-        let res: any
-        try {
-          res = await bgRequest<any>({
-            path: `/api/v1/notes/?page=${p}&results_per_page=${ps}&include_keywords=true` as any,
-            method: 'GET' as any
-          })
-        } catch {
-          failedBatches += 1
-          updateProgress()
+      // Oldest first, so notes edited during the export keep their position.
+      const params = new URLSearchParams({
+        limit: String(EXPORT_PAGE_SIZE),
+        offset: String(offset),
+        include_keywords: 'true',
+        sort_by: 'created_at',
+        sort_order: 'asc'
+      })
+      const res = await bgRequest<any>({
+        path: `/api/v1/notes/?${params.toString()}` as `/${string}`,
+        method: 'GET' as any,
+        abortSignal: signal
+      })
+      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : [])
+      return { items, total: readReportedTotal(res) }
+    }
+
+    updateProgress()
+    try {
+      let offset = 0
+      let requests = 0
+      let done = false
+      while (!done) {
+        if (requests >= MAX_EXPORT_REQUESTS) {
+          limitReached = true
           break
         }
-        const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : [])
-        arr.push(
-          ...items.map((n: any) => ({
-            id: n?.id,
-            title: n?.title,
-            content: n?.content,
-            updated_at: n?.updated_at,
-            keywords: extractKeywords(n)
-          }))
-        )
-        if (items.length > 0) {
-          fetchedPages += 1
-          updateProgress()
+        requests += 1
+        let page: ExportPage
+        try {
+          page = await fetchPage(offset)
+        } catch {
+          if (!signal.aborted) {
+            failedBatches += 1
+            updateProgress()
+          }
+          break
         }
-        const pagination = res?.pagination
-        const totalPages = Number(pagination?.total_pages || (items.length < ps ? p : p + 1))
-        if (p >= totalPages || items.length === 0) break
-        p++
+        if (signal.aborted) break
+        if (page.total != null) expectedTotal = page.total
+        let added = 0
+        for (const note of page.items) {
+          if (note?.id != null) {
+            const key = String(note.id)
+            if (seenIds.has(key)) continue
+            seenIds.add(key)
+          }
+          arr.push(toExportNote(note))
+          added += 1
+        }
+        if (page.items.length > 0) fetchedPages += 1
+        updateProgress()
+        offset += EXPORT_PAGE_SIZE
+        done =
+          page.items.length < EXPORT_PAGE_SIZE ||
+          added === 0 ||
+          (expectedTotal != null && offset >= expectedTotal)
       }
-      if (p > MAX_EXPORT_PAGES) limitReached = true
+    } finally {
+      if (exportAbortRef.current === controller) exportAbortRef.current = null
     }
-    return { arr, limitReached, failedBatches }
+    return { arr, limitReached, failedBatches, cancelled: signal.aborted, expectedTotal }
   }, [effectiveKeywordTokens, fetchFilteredNotesRaw, query])
 
   const maybeConfirmExportPreflight = React.useCallback(
@@ -193,7 +246,8 @@ export function useNotesExport(deps: UseNotesExportDeps) {
   )
 
   const maybeWarnExportLimits = React.useCallback(
-    (arrLength: number, limitReached: boolean, failedBatches: number) => {
+    ({ arr, limitReached, failedBatches, expectedTotal }: GatherResult) => {
+      const arrLength = arr.length
       if (limitReached) {
         message.warning(`Export limited to ${arrLength} notes. Some notes may be excluded.`)
       }
@@ -204,6 +258,11 @@ export function useNotesExport(deps: UseNotesExportDeps) {
           } failed.`
         )
       }
+      if (!limitReached && failedBatches === 0 && expectedTotal != null && arrLength < expectedTotal) {
+        message.warning(
+          `Exported ${arrLength} of ${expectedTotal} matching notes. Some notes may be missing.`
+        )
+      }
     },
     [message]
   )
@@ -212,12 +271,11 @@ export function useNotesExport(deps: UseNotesExportDeps) {
     try {
       const allowed = await maybeConfirmExportPreflight('md')
       if (!allowed) return
-      const { arr, limitReached, failedBatches } = await gatherAllMatching('md')
-      if (arr.length === 0) {
-        message.info('No notes to export')
-        return
-      }
-      maybeWarnExportLimits(arr.length, limitReached, failedBatches)
+      const gathered = await gatherAllMatching('md')
+      if (gathered.cancelled) { message.info('Export cancelled'); return }
+      const { arr } = gathered
+      if (!arr.length) { message.info('No notes to export'); return }
+      maybeWarnExportLimits(gathered)
       const md = arr
         .map((n, idx) => `### ${n.title || `Note ${n.id ?? idx + 1}`}\n\n${String(n.content || '')}`)
         .join('\n\n---\n\n')
@@ -248,9 +306,11 @@ export function useNotesExport(deps: UseNotesExportDeps) {
     try {
       const allowed = await maybeConfirmExportPreflight('csv')
       if (!allowed) return
-      const { arr, limitReached, failedBatches } = await gatherAllMatching('csv')
+      const gathered = await gatherAllMatching('csv')
+      if (gathered.cancelled) { message.info('Export cancelled'); return }
+      const { arr } = gathered
       if (!arr.length) { message.info('No notes to export'); return }
-      maybeWarnExportLimits(arr.length, limitReached, failedBatches)
+      maybeWarnExportLimits(gathered)
       const escape = (s: any) => '"' + String(s ?? '').replace(/"/g, '""') + '"'
       const header = ['id','title','content','updated_at','keywords']
       const rows = [
@@ -294,9 +354,11 @@ export function useNotesExport(deps: UseNotesExportDeps) {
     try {
       const allowed = await maybeConfirmExportPreflight('json')
       if (!allowed) return
-      const { arr, limitReached, failedBatches } = await gatherAllMatching('json')
+      const gathered = await gatherAllMatching('json')
+      if (gathered.cancelled) { message.info('Export cancelled'); return }
+      const { arr } = gathered
       if (!arr.length) { message.info('No notes to export'); return }
-      maybeWarnExportLimits(arr.length, limitReached, failedBatches)
+      maybeWarnExportLimits(gathered)
       const blob = new Blob([JSON.stringify(arr, null, 2)], { type: 'application/json;charset=utf-8' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -494,6 +556,7 @@ export function useNotesExport(deps: UseNotesExportDeps) {
 
   return {
     exportProgress,
+    cancelExport,
     exportAll,
     exportAllCSV,
     exportAllJSON,

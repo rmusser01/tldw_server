@@ -162,6 +162,32 @@ The current tracked-character browser branch is server-managed and remains separ
 
 Versioned streaming must acknowledge successful settlement with the canonical saved result ID even when optional legacy stream metadata is disabled. This acknowledgement is emitted only after the owner save succeeds and is bound to the original admitted operation. Provider-supplied admission or result identity fields cannot become owner acknowledgements. A stop marker, successful provider completion or finished stream without that identity is not proof of persistence; retain the known admission and generated text as uncertain. Preserve the metadata flag's behavior for unversioned requests.
 
+### Leaf check at admission (D7 P1, 2026-10-04)
+
+H1 admission accepts any valid selection, so a view that missed a newer turn silently forks the chat. Both admission requests (`MessageCreate` and `ChatCompletionRequest`) accept an optional `tldw_history_branch` beside `tldw_history_selection_v1`, outside the digest-covered selection:
+
+- Omitted or `null`: no leaf check (the H1 behaviour), so older clients and digests are unaffected.
+- `false`: the send must extend the latest message. Under the owner lock, after selection validation and before any write, the owner refuses when the selection's last message already has a live child. Nothing is written and no provider is called.
+- `true`: an explicit branch (Edit & resend, "Branch here"), admitted beside any newer messages.
+
+The field without a selection is a 422. Rules:
+
+- A live child is a non-deleted row whose parent, under the selection's interpretation, is the selected tip. For `parent_graph_v1` that is `parent_message_id`. For an accepted `legacy_linear_v1` projection, a reviewed path member's parent is its predecessor in `ordered_path_ids`.
+- An empty or before-first selection has no tip, so existing root rows count as its children.
+- Siblings of the tip never count. Continuing from an older assistant variant is an explicit pager choice.
+- Settlement never runs the check, so regenerate (another reply settled against an admitted input) is unaffected. The legacy `tldw_continuation` and `tldw_regenerate_from_message_id` controls cannot be combined with a selection, so they never reach it.
+- A replay of an already-admitted message id returns its admission first, whatever the flag.
+- On the server-completion path, a reused selection still fails first with `selection_already_consumed`.
+- Leaves are computed from the same validated statement snapshot, so on SQLite (`BEGIN IMMEDIATE`) and PostgreSQL (`FOR UPDATE` on the conversation) two racing "extend latest" sends from one tip admit exactly one.
+
+The refusal is `409 {"detail": {"status": "stale_selection", "code": "history_branch_changed", "conversation_id", "parent_message_id", "leaf_ids", "history_version"}}`:
+
+- `parent_message_id` is the selected tip, `null` for an empty selection.
+- `leaf_ids` are the tip's live descendants without children, in snapshot order (oldest first).
+- `history_version` is the conversation's current history fence, as returned by `GET /chats/{id}`.
+
+The client recaptures, shows the "updated elsewhere" notice, and offers "Send after latest" or "Branch here" (P6).
+
 ### Active sync and compatibility
 
 The current default-personal-dataset helpers do not prove individual conversation enrollment. Existing sync routing must be respected, but cannot be used as permission to materialize H1 state natively. Before mutation, route through an adapter that supports retained selection/admission, or return `unsupported_history_capability` without writes. In H1 that adapter is not implemented; read/export remain available. H4 adds enrollment and transfer. Do not silently downgrade a versioned request to old timestamp history or bypass an enrolled owner.

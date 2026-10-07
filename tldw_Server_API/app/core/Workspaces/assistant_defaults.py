@@ -240,11 +240,13 @@ def resolve_new_conversation_assistant(
 def insert_resolved_workspace_conversation(
     db: CharactersRAGDB, *, resolved: ResolvedConversationAssistant,
     conversation_data: Mapping[str, Any], title_timestamp: str, conn: Any,
+    create_request_fingerprint: str | None = None,
 ) -> str:
     """Insert an admitted selection on the caller's transaction without resolving.
 
     Callers retain ownership, scope and lineage admission and transaction ownership.
     Only the preflight identity and derived title are replaced in a copied payload.
+    ``create_request_fingerprint`` marks a client-id create (D7 P3).
     """
     payload = dict(conversation_data)
     payload.update(
@@ -258,12 +260,15 @@ def insert_resolved_workspace_conversation(
         if resolved.request.assistant_kind in {"persona", "character"}
         else f"Chat ({title_timestamp})"
     )
-    return db.add_conversation(payload, conn=conn, assistant_startup=resolved.startup)
+    return db.add_conversation(
+        payload, conn=conn, assistant_startup=resolved.startup, create_request_fingerprint=create_request_fingerprint,
+    )
 
 
 def create_workspace_persona_conversation(
     db: CharactersRAGDB, *, user_id: str, request: ChatSessionCreate,
     conversation_data: Mapping[str, Any], title_timestamp: str,
+    create_request_fingerprint: str | None = None,
 ) -> str:
     """Atomically select and persist non-Character Workspace identity and origin.
 
@@ -291,4 +296,5 @@ def create_workspace_persona_conversation(
         resolved = resolve_workspace_assistant_startup(db, user_id=user_id, request=request, conn=conn)
         return insert_resolved_workspace_conversation(
             db, resolved=resolved, conversation_data=conversation_data, title_timestamp=title_timestamp, conn=conn,
+            create_request_fingerprint=create_request_fingerprint,
         )

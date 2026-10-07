@@ -184,6 +184,8 @@ export interface PlaygroundSendControlProps {
   isMobileViewport: boolean
   isSending: boolean
   isPreparingDocuments?: boolean
+  /** A fresh chat's history selection is not idle yet (CS-01, #3106). */
+  isHistorySelectionPending?: boolean
   isConnectionReady: boolean
   sendWhenEnter: boolean
   onSendWhenEnterChange: (checked: boolean) => void
@@ -212,6 +214,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       isMobileViewport,
       isSending,
       isPreparingDocuments = false,
+      isHistorySelectionPending = false,
       isConnectionReady,
       sendWhenEnter,
       onSendWhenEnterChange,
@@ -254,6 +257,11 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
               "playground:documentProcessing.preparingForSend",
               "Preparing documents"
             ) as string)
+      : isHistorySelectionPending
+        ? (t(
+            "playground:composer.historySelectionPending",
+            "Conversation history isn't ready yet. Wait for it to load, or start a new chat."
+          ) as string)
       : shouldQueuePrimaryAction
         ? ((isSending
             ? t(
@@ -326,7 +334,11 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 : "submit"
             }
             onClick={handlePrimaryButtonClick}
-            disabled={compareNeedsMoreModels || isPreparingDocuments}
+            disabled={
+              compareNeedsMoreModels ||
+              isPreparingDocuments ||
+              isHistorySelectionPending
+            }
             className={
               isMobileViewport
                 ? "min-h-[44px] min-w-[44px]"

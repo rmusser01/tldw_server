@@ -988,6 +988,7 @@ def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
                     "native_creation_operation_kind": None,
                     "native_creation_operation_id": None,
                     "native_bundle_json": None,
+                    "create_request_fingerprint": None,
                 },
             ]
     finally:

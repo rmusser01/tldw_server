@@ -7,9 +7,10 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator, model_serializer, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
+    HISTORY_BRANCH_FIELD_DESCRIPTION,
     HistoryAdmissionReferenceV1,
     HistoryAdmissionV1,
     HistorySelectionV1,
@@ -17,6 +18,7 @@ from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, reject_assistant_startup_input
+from tldw_Server_API.app.core.Chat.conversation_create_idempotency import normalize_client_conversation_id
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 from tldw_Server_API.app.core.Workspaces.chat_startup_schemas import (
     ALLOWED_CONVERSATION_STATES as ALLOWED_CONVERSATION_STATES,
@@ -138,6 +140,17 @@ class AssistantOverlaySettings(BaseModel):
 
 class ChatSessionCreate(BaseModel):
     """Schema for creating a new chat session."""
+    id: str | None = Field(
+        None,
+        description=(
+            "Optional client-generated chat id: a UUID in 8-4-4-4-12 form, stored lowercase. "
+            "The chat is created with this id. Repeating the same request returns the existing chat "
+            "with 200 and `Idempotency-Replayed: true`. Reusing the id for a different request, or an id "
+            "that is not available to the caller, returns 409 `chat_id_conflict`; repeating the request "
+            "after the chat was moved to trash returns 410 `chat_deleted`. Omit it for a server-generated id."
+        ),
+        json_schema_extra={"format": "uuid"},
+    )
     character_id: int | None = Field(None, description="ID of the character for this chat", gt=0)
     assistant_kind: Literal["character", "persona"] | None = Field(
         None,
@@ -185,6 +198,12 @@ class ChatSessionCreate(BaseModel):
             "title": "Evening Chat with Assistant"
         }
     }}
+
+    @field_validator("id")
+    @classmethod
+    def _validate_client_chat_id(cls, value: Optional[str]) -> Optional[str]:
+        """Accept only a canonical UUID so the client and server hold the same id."""
+        return None if value is None else normalize_client_conversation_id(value)
 
     @field_validator("state")
     @classmethod
@@ -419,10 +438,13 @@ class MessageCreate(BaseModel):
     """Schema for creating a new message."""
     id: str | None = Field(None, min_length=1, max_length=255)
     tldw_history_selection_v1: HistorySelectionV1 | None = None
+    tldw_history_branch: StrictBool | None = Field(None, description=HISTORY_BRANCH_FIELD_DESCRIPTION)
     tldw_history_admission_v1: HistoryAdmissionReferenceV1 | None = None
 
     @model_validator(mode="after")
     def _validate_history_fields(self) -> "MessageCreate":
+        if self.tldw_history_branch is not None and self.tldw_history_selection_v1 is None:
+            raise ValueError("tldw_history_branch requires tldw_history_selection_v1")
         if self.tldw_history_selection_v1 is not None and self.role != "user":
             raise ValueError("Selection requires user role")
         if self.tldw_history_admission_v1 is not None and self.role != "assistant":
@@ -500,7 +522,14 @@ class MessageResponse(BaseModel):
     images: Optional[list[str]] = Field(None, description="Complete ordered image data URLs, only when explicitly requested")
     version: int = Field(1, description="Version number for optimistic locking")
     tool_calls: Optional[list[dict[str, Any]]] = Field(None, description="Tool calls associated with this message (if any)")
-    metadata_extra: Optional[dict[str, Any]] = Field(None, description="Additional stored metadata for this message (if requested)")
+    metadata_extra: Optional[dict[str, Any]] = Field(
+        None,
+        description=(
+            "Additional stored metadata for this message (if requested). Assistant replies settled by the "
+            "server include generation_status (complete, stopped, interrupted, length or error) and, when "
+            "known, model_id, provider, finish_reason and usage (prompt_tokens, completion_tokens, total_tokens)."
+        ),
+    )
 
     @model_serializer(mode="wrap")
     def omit_unrequested_images(self, handler):

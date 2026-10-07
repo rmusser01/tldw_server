@@ -981,19 +981,19 @@
     "message": "Temporary chat: not saved in history and cleared when you close this window."
   },
   "composer_persistence_local": {
-    "message": "Saved locally in this browser only (not synced to your tldw server)."
+    "message": "Saved on this device only. This chat is not on your tldw server."
   },
   "composer_persistence_server": {
-    "message": "Saved Locally+Server"
+    "message": "Saved on your tldw server and on this device."
   },
   "composer_persistence_ephemeralPill": {
     "message": "Temporary"
   },
   "composer_persistence_localPill": {
-    "message": "Local only"
+    "message": "Saved on this device"
   },
   "composer_persistence_serverPill": {
-    "message": "Locally + Server"
+    "message": "Saved on server"
   },
   "composer_ephemeralLabel": {
     "message": "Ephemeral"
@@ -1038,10 +1038,10 @@
     "message": "Create a simple assistant persona (name and a short description are enough). Once it exists, the extension can reuse it when saving chats to your server."
   },
   "composer_persistence_serverInlineTitle": {
-    "message": "Saved locally + on your server"
+    "message": "Saved on your server"
   },
   "composer_persistence_serverInlineBody": {
-    "message": "This chat is stored both in this browser and on your tldw server, so you can reopen it from server history, keep a long-term record, and analyze it alongside other conversations."
+    "message": "This chat is saved on your tldw server and on this device, so you can reopen it from server history, keep a long-term record, and analyze it alongside other conversations."
   },
   "composer_conversationTags": {
     "message": "Conversation tags"
@@ -3733,5 +3733,17 @@
   },
   "mediaHandoff_cancel": {
     "message": "Cancel import"
+  },
+  "composer_persistence_serverSaving": {
+    "message": "Saved on this device. Waiting for your tldw server to confirm the latest changes."
+  },
+  "composer_persistence_serverSavingPill": {
+    "message": "Saving to server…"
+  },
+  "composer_persistence_serverFailed": {
+    "message": "Saved on this device. Your tldw server didn't confirm the latest changes."
+  },
+  "composer_persistence_serverFailedPill": {
+    "message": "Couldn't save to server"
   }
 }
