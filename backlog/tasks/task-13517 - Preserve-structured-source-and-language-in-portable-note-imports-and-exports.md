@@ -1,7 +1,7 @@
 ---
 id: TASK-13517
 title: Preserve structured source and language in portable note imports and exports
-status: In Progress
+status: Done
 created_date: 2026-10-07 03:08
 dependencies:
 - TASK-13513
@@ -13,7 +13,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
-updated_date: 2026-10-07 11:13
+updated_date: 2026-10-07 11:26
 ---
 
 ## Description
@@ -24,11 +24,11 @@ Let users move source files and portable notes without losing document text or l
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Raw source exports retain exact text with a matching mode extension; portable notes retain source as a string plus language and metadata.
-- [ ] #2 Versioned Chatbook/portable envelopes preserve Canvas and structured Notes together, with older supported readers retained.
-- [ ] #3 Unknown archive/envelope versions fail before storage mutation; recognized source extensions carry mode without sniffing document text.
-- [ ] #4 Targeted source/envelope/import/transaction tests verify exact-source round trips, atomic rejection and scoped static evidence.
-- [ ] #5 Relevant governing ADR is assessed/linked and repo-local completion notes name actual evidence and remaining limitations.
+- [x] #1 Raw source exports retain exact text with a matching mode extension; portable notes retain source as a string plus language and metadata.
+- [x] #2 Versioned Chatbook/portable envelopes preserve Canvas and structured Notes together, with older supported readers retained.
+- [x] #3 Unknown archive/envelope versions fail before storage mutation; recognized source extensions carry mode without sniffing document text.
+- [x] #4 Targeted source/envelope/import/transaction tests verify exact-source round trips, atomic rejection and scoped static evidence.
+- [x] #5 Relevant governing ADR is assessed/linked and repo-local completion notes name actual evidence and remaining limitations.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -49,21 +49,19 @@ Fix round1 (task-6-review.md / task-6-fix1-findings.md): retain exactly the decl
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented exact source downloads and tldw.note.v1 exports/imports under ADR065 and Rulings35/36. Existing Notes import schema/endpoint validates declared portable batches before mutation and carries omitted/null/opaque language through compound Sync capture, fingerprints, replay and optimistic overwrite. Bulk export requests complete canonical limit/offset pages with keywords/timestamps and refuses preview-only rows or unknown mode baselines. Targeted API/SQLite/Sync and U tests plus whole-W typecheck pass; immutable-base compatibility and scoped lint/security/formatter evidence is in .superpowers/sdd/2026-09-27-structured-document-editing/task-6-report.md in the companion Chatbook checkout. In Progress pending independent review; no controls or new service/dependency.
-Fix round1: root portable envelopes now take precedence over wrapper-shaped extra fields in the existing JSON extractor, and import execution reuses the exact preflight row set. Browser preview follows the same root precedence; source extension lookup accepts only own known modes while preserving opaque mode strings in portable output. Real API mixed-carrier controls passed across four wrappers and both discriminators with a preceding valid item; prototype-name and actual import-preview controls passed. Final targeted covering: S33 passed, U38 passed, whole-W typecheck exit0; reviewed-base scoped static/security and changed-region formatting show no new debt. ADR065 remains governing; tasks remain In Progress for independent re-review. Full fix evidence: task-6-report.md.
+Implemented exact raw-source downloads and tldw.note.v1 portable imports/exports under Docs/ADR/065-portable-note-language-and-negotiated-structured-editing.md. Existing API/import/Sync owners validate the complete selected portable carrier set before mutation and execute the retained preflight rows; actual browser preview shares root precedence. Own-property mode lookup preserves unknown modes while choosing .txt. Full-row paginated exports retain metadata and refuse preview-only baselines. Final targeted S33/U38 pass and whole-W captured typecheck exit0; immutable reviewed-base static/security and changed-region formatting introduce no debt. Independent task review and fix1 scoped review approved. Lessons recorded in backlog/docs/lessons-structured-notes.md. Full evidence is companion Chatbook .superpowers/sdd/2026-09-27-structured-document-editing/task-6-report.md. Existing lint/format debt and test warnings/telemetry remain disclosed; Stage35 pre-action failures were reproduced with the base hook only, without complete-base-suite or live browser/protected-peer claims. Production controls and cross-app release qualification remain later tasks.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Portable source and mode preservation complete for this unit; Sbebc888 original plus a223068 fix, S33/U38 targeted tests and whole-W typecheck0, scoped review approved. ADR065 applies. No full sweep or live deployment claim.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
