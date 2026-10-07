@@ -57,7 +57,7 @@ import { ChevronDown, ExternalLink } from "lucide-react"
 import React, { lazy, Suspense } from "react"
 import { useTranslation } from "react-i18next"
 import { SidePanelBody } from "~/components/Sidepanel/Chat/body"
-import { SidepanelForm } from "~/components/Sidepanel/Chat/form"
+import { SidepanelForm, type SidepanelWebUiOpenSource } from "~/components/Sidepanel/Chat/form"
 import { SidepanelHeaderSimple } from "~/components/Sidepanel/Chat/SidepanelHeaderSimple"
 import { ConnectionBanner } from "~/components/Sidepanel/Chat/ConnectionBanner"
 import { useMessage } from "~/hooks/useMessage"
@@ -2361,24 +2361,34 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
     return newChatLabel
   }, [activeTabId, tabs, newChatLabel])
 
+  const webUiOpenActionRef = React.useRef<(() => Promise<boolean>) | null>(null)
+  const [webUiOpenReady, setWebUiOpenReady] = React.useState(false)
+  const handleWebUiOpenReady = React.useCallback((action: (() => Promise<boolean>) | null) => {
+    const wasReady = webUiOpenActionRef.current !== null
+    webUiOpenActionRef.current = action
+    if (wasReady !== (action !== null)) setWebUiOpenReady(action !== null)
+  }, [])
+  const openHydratedChatInWebUi = React.useCallback(() => webUiOpenActionRef.current?.(), [])
   const openChatInWebUi = React.useCallback(async (
-    overrides: SidepanelChatWebUiHandoffOverrides = {}
+    overrides: SidepanelChatWebUiHandoffOverrides = {}, source: SidepanelWebUiOpenSource
   ) => {
-    const source = useStoreMessageOption.getState()
     const sourceTabId = useSidepanelChatTabsStore.getState().activeTabId
-    const current = () => !isRestoringChatRef.current && owner.isCurrent() &&
+    const current = () => source.isCurrent() && !isRestoringChatRef.current && owner.isCurrent() &&
       useSidepanelChatTabsStore.getState().activeTabId === sourceTabId &&
-      useStoreMessageOption.getState().chatDraftRevision === source.chatDraftRevision &&
-      useStoreMessageOption.getState().chatDraftAddress === source.chatDraftAddress
-    if (!current()) return
-    const snapshot = buildSnapshot(source)
-    const draft = textareaRef.current?.value ?? ""
+      useStoreMessageOption.getState().chatDraftRevision === source.state.chatDraftRevision &&
+      useStoreMessageOption.getState().chatDraftAddress === source.state.chatDraftAddress
+    if (!current()) return false
+    const snapshot = buildSnapshot(source.state)
+    const draft = source.draft
     const read = async <T,>(key: string): Promise<T | null> => {
       try { return await storageRef.current.get<T>(key) ?? null } catch { return null }
     }
     const stored = await read<Record<string, unknown>>("tldwConfig")
-    const legacy = await read<string>("webUiUrl") ?? await read<string>("webuiUrl")
-    if (!current()) return
+    if (!current()) return false
+    let legacy = await read<string>("webUiUrl")
+    if (!current()) return false
+    if (legacy === null) legacy = await read<string>("webuiUrl")
+    if (!current()) return false
     const config: SidepanelChatWebUiConfig = {
       serverUrl: typeof stored?.serverUrl === "string" ? stored.serverUrl : null,
       webUiUrl: typeof stored?.webUiUrl === "string" ? stored.webUiUrl
@@ -2393,8 +2403,9 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
       selectedQuickPrompt: snapshot.selectedQuickPrompt, temporaryChat: snapshot.temporaryChat,
       useOCR: snapshot.useOCR, title: activeTabLabel, ...overrides
     } })
-    if (!current()) return
+    if (!current()) return false
     if (!window.open(url, "_blank")) throw new Error("Window popup was blocked")
+    return true
   }, [activeTabLabel, buildSnapshot, owner])
 
   const commandPaletteChats = React.useMemo(
@@ -2519,9 +2530,9 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
             sidebarOpen={sidebarOpen}
             setSidebarOpen={setSidebarOpen}
             activeTitle={activeTabLabel}
-            chatReady={!isRestoringChat && owner.isCurrent()}
+            chatReady={!isRestoringChat && owner.isCurrent() && (Boolean(browser.runtime.id) || webUiOpenReady)}
             onRenameTitle={handleRenameActiveTab}
-            onOpenChatInWebUi={browser.runtime.id ? undefined : openChatInWebUi}
+            onOpenChatInWebUi={browser.runtime.id ? undefined : openHydratedChatInWebUi}
           />
           {messages.length > 0 ? <ConnectionBanner className="pt-12" /> : null}
         </div>
@@ -2773,6 +2784,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
                   onRecoverDraft={handleRecoverDraft}
                   onFindConversations={requestSidebarSearchFocus}
                   onOpenChatInWebUi={browser.runtime.id ? undefined : openChatInWebUi}
+                onWebUiOpenReady={handleWebUiOpenReady}
                 />
               </div>
             )}
@@ -2807,6 +2819,7 @@ const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
                 onRecoverDraft={handleRecoverDraft}
                   onFindConversations={requestSidebarSearchFocus}
                 onOpenChatInWebUi={browser.runtime.id ? undefined : openChatInWebUi}
+                onWebUiOpenReady={handleWebUiOpenReady}
               />
             </div>
           )}

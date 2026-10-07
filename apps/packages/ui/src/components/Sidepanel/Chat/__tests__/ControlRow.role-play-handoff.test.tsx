@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ControlRow } from "../ControlRow"
@@ -449,4 +449,80 @@ describe("ControlRow first-use guidance", () => {
     await waitFor(() => expect(more).toHaveFocus())
     expect(screen.getByText("Search your knowledge")).toBeVisible()
   })
+})
+
+it("does not steal More focus after a retired WebUI open settles", async () => {
+  mocks.runtimeId = undefined
+  let finish!: () => void
+  let current = true
+  const props = { ...defaultProps(), captureHandoffGuard: () => () => current, onOpenChatInWebUi: vi.fn(() => new Promise<void>(resolve => { finish = resolve })) }
+  const view = render(<ControlRow {...props} />)
+  fireEvent.click(screen.getByTestId("chat-open-full-app"))
+  current = false
+  view.rerender(<><ControlRow {...props} handoffSourceKey="new-source" /><button>Other task</button></>)
+  const other = screen.getByRole("button", { name: "Other task" })
+  other.focus()
+  await act(async () => { finish(); await new Promise(resolve => requestAnimationFrame(resolve)) })
+  expect(other).toHaveFocus()
+  mocks.runtimeId = "review-extension"
+})
+
+
+it("does not finish a superseded WebUI opening while the next opening is pending", async () => {
+  mocks.runtimeId = undefined
+  const finishes: Array<() => void> = []
+  const onOpen = vi.fn(() => new Promise<void>(resolve => { finishes.push(resolve) }))
+  render(<><ControlRow {...defaultProps()} onOpenChatInWebUi={onOpen} /><button>Other task</button></>)
+  const more = screen.getByRole("button", { name: "More tools" })
+  fireEvent.click(more)
+  fireEvent.click(screen.getByTestId("chat-open-full-app"))
+  fireEvent.click(screen.getByTestId("chat-open-full-app"))
+  const other = screen.getByRole("button", { name: "Other task" })
+  other.focus()
+  await act(async () => { finishes[0](); await new Promise(resolve => requestAnimationFrame(resolve)) })
+  expect(more).toHaveAttribute("aria-expanded", "true")
+  expect(other).toHaveFocus()
+  await act(async () => { finishes[1](); await new Promise(resolve => requestAnimationFrame(resolve)) })
+  expect(more).toHaveAttribute("aria-expanded", "false")
+  expect(more).toHaveFocus()
+  mocks.runtimeId = "review-extension"
+})
+
+
+it("leaves More and focus alone when another entry point retires the Form opening", async () => {
+  mocks.runtimeId = undefined
+  let finish!: (current: boolean) => void
+  const onOpen = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
+  render(<><ControlRow {...defaultProps()} onOpenChatInWebUi={onOpen} /><button>Other task</button></>)
+  const more = screen.getByRole("button", { name: "More tools" })
+  fireEvent.click(more)
+  fireEvent.click(screen.getByTestId("chat-open-full-app"))
+  const other = screen.getByRole("button", { name: "Other task" })
+  other.focus()
+  await act(async () => { finish(false); await new Promise(resolve => requestAnimationFrame(resolve)) })
+  expect(more).toHaveAttribute("aria-expanded", "true")
+  expect(other).toHaveFocus()
+  mocks.runtimeId = "review-extension"
+})
+
+
+it("finishes WebUI focus before a later task can take focus", async () => {
+  mocks.runtimeId = undefined
+  const frames: FrameRequestCallback[] = []
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.push(callback); return frames.length })
+  try {
+    let finish!: () => void
+    const onOpen = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
+    render(<><ControlRow {...defaultProps()} onOpenChatInWebUi={onOpen} /><button>Other task</button></>)
+    fireEvent.click(screen.getByRole("button", { name: "More tools" }))
+    fireEvent.click(screen.getByTestId("chat-open-full-app"))
+    await act(async () => { finish() })
+    const other = screen.getByRole("button", { name: "Other task" })
+    other.focus()
+    act(() => { frames.forEach(callback => callback(0)) })
+    expect(other).toHaveFocus()
+  } finally {
+    vi.unstubAllGlobals()
+    mocks.runtimeId = "review-extension"
+  }
 })

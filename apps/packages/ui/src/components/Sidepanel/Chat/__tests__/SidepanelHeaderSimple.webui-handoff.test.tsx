@@ -1,10 +1,11 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SidepanelHeaderSimple } from "../SidepanelHeaderSimple"
 
-const { runtimeGetURLMock, tabsCreateMock, runtime } = vi.hoisted(() => ({
+const { runtimeGetURLMock, tabsCreateMock, runtime, errorFeedback } = vi.hoisted(() => ({
+  errorFeedback: vi.fn(),
   runtime: { id: "header-extension" as string | undefined },
   runtimeGetURLMock: vi.fn((path: string) => `chrome-extension://test${path}`),
   tabsCreateMock: vi.fn().mockResolvedValue(undefined)
@@ -59,7 +60,7 @@ vi.mock("@/hooks/useMessage", () => ({
 
 vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => ({
-    error: vi.fn()
+    error: errorFeedback
   })
 }))
 
@@ -139,4 +140,36 @@ it("opens H1 expansion in the extension full page with only a scoped bookmark ad
   expect(expand).toBeDisabled()
   fireEvent.click(expand)
   expect(onOpenChatInWebUi).not.toHaveBeenCalled()
+})
+
+it.each(["unmount", "replacement", "not ready"])("suppresses retired header WebUI failure after %s", async boundary => {
+  runtime.id = undefined
+  errorFeedback.mockClear()
+  const log = vi.spyOn(console, "error").mockImplementation(() => {})
+  let reject!: (error: Error) => void
+  const onOpen = vi.fn(() => new Promise<void>((_, fail) => { reject = fail }))
+  const view = render(<SidepanelHeaderSimple onOpenChatInWebUi={onOpen} />)
+  fireEvent.click(screen.getByTestId("chat-open-full-screen"))
+  if (boundary === "unmount") view.unmount()
+  else view.rerender(<SidepanelHeaderSimple chatReady={boundary !== "not ready"} onOpenChatInWebUi={boundary === "replacement" ? vi.fn() : onOpen} />)
+  await act(async () => { reject(new Error("OLD ERROR")) })
+  expect(errorFeedback).not.toHaveBeenCalled()
+  log.mockRestore()
+})
+
+
+it("suppresses a superseded header opening failure for the same source", async () => {
+  runtime.id = undefined
+  errorFeedback.mockClear()
+  const log = vi.spyOn(console, "error").mockImplementation(() => {})
+  const rejects: Array<(error: Error) => void> = []
+  const onOpen = vi.fn(() => new Promise<void>((_, reject) => { rejects.push(reject) }))
+  render(<SidepanelHeaderSimple onOpenChatInWebUi={onOpen} />)
+  fireEvent.click(screen.getByTestId("chat-open-full-screen"))
+  fireEvent.click(screen.getByTestId("chat-open-full-screen"))
+  await act(async () => { rejects[0](new Error("SUPERSEDED ERROR")) })
+  expect(errorFeedback).not.toHaveBeenCalled()
+  await act(async () => { rejects[1](new Error("CURRENT ERROR")) })
+  expect(errorFeedback).toHaveBeenCalledOnce()
+  log.mockRestore()
 })

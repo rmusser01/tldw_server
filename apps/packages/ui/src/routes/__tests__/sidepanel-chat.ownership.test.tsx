@@ -243,7 +243,32 @@ const tabStorage = (): Storage => {
     getItem: key => entries.get(key) ?? null, setItem: (key, value) => { entries.set(key, value) },
     removeItem: key => { entries.delete(key) }, clear: () => entries.clear() }
 }
-const ComposerProbe = ({ draftKey, inputRef, onRecoverDraft }: { draftKey: string; inputRef?: React.RefObject<HTMLTextAreaElement>; onRecoverDraft?: RestoreChatDraft }) => {
+// Reuse the production Form source capture, opener and ready registration.
+// The real composer/registry/H1 remain mounted; document IO is a separate suite.
+const formOpeningNodes: ts.Node[] = []
+const collectOpening = (node: ts.Node) => { formOpeningNodes.push(node); ts.forEachChild(node, collectOpening) }
+collectOpening(formAst)
+const openingDeclaration = (name: string) => formOpeningNodes.find((node): node is ts.VariableDeclaration => ts.isVariableDeclaration(node) && node.name.getText(formAst) === name)
+const openingNames = ["documentWebUiHandoffRef", "getHandoffInputRevision", "handoffInputRevision", "handoffSelectionIsCurrent", "captureHandoffGuard", "openChatInWebUiWithDocumentHandoff"]
+const registrations = formOpeningNodes.filter(node => ts.isExpressionStatement(node) && node.getText(formAst).startsWith("React.useLayoutEffect") && node.getText(formAst).includes("onWebUiOpenReady"))
+const openingCleanup = formOpeningNodes.find(node => ts.isExpressionStatement(node) && /React\.use(?:Layout)?Effect\(\(\) => \(\) => documentWebUiHandoffRef/.test(node.getText(formAst)))
+const openingCode = ts.transpileModule(`function useFormOpening(props, composer) {
+  const { form, draftReady, isDraftOwnerCurrent } = composer;
+  const { chatDraftAddress: draftAddress, chatDraftRevision: sourceDraftRevision, historyId, serverChatId } = useStoreMessageOption();
+  const greetingHistorySelection = useHistorySelectionContext();
+  const contextFiles = [];
+  const currentDocumentSelectionKey = "no-files";
+  const currentDocumentSelectionKeyRef = React.useRef(currentDocumentSelectionKey);
+  const onOpenChatInWebUi = props.onOpenChatInWebUi;
+  const onWebUiOpenReady = props.onWebUiOpenReady;
+  ${openingNames.map(name => `const ${openingDeclaration(name)!.getText(formAst)};`).join("\n")}
+  ${openingCleanup?.getText(formAst) ?? ""}
+  ${registrations.map(node => node.getText(formAst)).join("\n")}
+}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+const useFormOpening = new Function("React", "useStoreMessageOption", "useHistorySelectionContext", "notification", "t", "tldwClient", `${openingCode}; return useFormOpening;`)(React, useStoreMessageOption, useHistorySelectionContext, { error: io.noop }, io.t, {})
+
+const ComposerProbe = (props: { draftKey: string; inputRef?: React.RefObject<HTMLTextAreaElement>; onRecoverDraft?: RestoreChatDraft }) => {
+  const { draftKey, inputRef, onRecoverDraft } = props
   const address = useStoreMessageOption(state => state.chatDraftAddress)
   React.useLayoutEffect(() => {
     if (!useStoreMessageOption.getState().chatDraftAddress) useStoreMessageOption.getState().startNewChatDraft()
@@ -261,6 +286,7 @@ const ComposerProbe = ({ draftKey, inputRef, onRecoverDraft }: { draftKey: strin
       ? conversationDraftKey(draftKey, transition.sourceAddress) : undefined,
     textareaRef: inputRef ?? React.createRef<HTMLTextAreaElement>()
   })
+  useFormOpening(props, composer)
   return <>{io.useRecovery && <ChatDraftRecovery listDrafts={composer.listRetainedDrafts} copyDraft={composer.copyRetainedDraft} onRestore={onRecoverDraft} disabled={!composer.draftReady} />}<textarea ref={inputRef} aria-label="Composer draft" disabled={!composer.draftReady}
     value={composer.form.values.message}
     onChange={event => composer.setMessageValue(event.target.value)} /></>
@@ -269,7 +295,7 @@ vi.mock("@/components/Sidepanel/Chat/form", () => ({
   SidepanelForm: (props: { draftKey: string }) => io.useComposer ? <ComposerProbe {...props} /> : null
 }))
 vi.mock("@/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({
-  SidepanelHeaderSimple: (props: { onOpenChatInWebUi?: () => void }) => <button
+  SidepanelHeaderSimple: (props: { chatReady?: boolean; onOpenChatInWebUi?: () => void }) => <button disabled={!props.chatReady}
     onClick={() => props.onOpenChatInWebUi?.()}>Open full chat in WebUI</button>
 }))
 vi.mock("@/components/Sidepanel/Chat/ConnectionBanner", () => ({
@@ -427,6 +453,14 @@ const completedReplyFixture = () => {
   return { saved, stale, mirror }
 }
 
+// The real auth watcher also writes the model-cache invalidation tombstone.
+// Recovery must not write chat state; retain every other write in this assertion.
+const recoveryWrites = () => io.write.mock.calls.filter(([key, value]) => {
+  if (key !== "tldwModelsCache") return true
+  expect(value).toMatchObject({ models: null, timestamp: 0, scope: null, invalidationToken: expect.any(String) })
+  return false
+})
+
 describe.each([
   ["shared", SidepanelChat],
   ["legacy", LegacySidepanelChat]
@@ -472,7 +506,7 @@ describe.each([
     render(<Route />)
     const retry = await screen.findByRole("button", { name: "Retry" })
     const panel = screen.getByRole("alert")
-    expect(io.write).not.toHaveBeenCalled()
+    expect(recoveryWrites()).toEqual([])
     expect(screen.queryByRole("textbox", { name: "Composer draft" })).not.toBeInTheDocument()
     let finish!: (value: unknown) => void
     io.scope.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
@@ -494,7 +528,7 @@ describe.each([
     fireEvent.click(retry)
     await waitFor(() => expect(retry).not.toBeDisabled())
     expect(io.scope).toHaveBeenCalledTimes(2)
-    expect(io.write).not.toHaveBeenCalled()
+    expect(recoveryWrites()).toEqual([])
     expect(screen.getByRole("alert")).toHaveTextContent("We couldn’t verify the chat connection")
   })
 
@@ -507,7 +541,7 @@ describe.each([
     try { fireEvent.click(setup) } finally { window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, decline) }
     expect(window.open).not.toHaveBeenCalled()
     expect(screen.getByRole("alert")).toBeInTheDocument()
-    expect(io.write).not.toHaveBeenCalled()
+    expect(recoveryWrites()).toEqual([])
   })
 
   if (_name === "shared") it.each(["extension", "webui"])("opens full server settings from the actual compact shell in %s", async surface => {
@@ -524,7 +558,7 @@ describe.each([
     expect(screen.queryByTestId("not-found-recovery-panel")).not.toBeInTheDocument()
     expect(screen.getByRole("alert")).toBeInTheDocument()
     // The real shell persists its header preference, never chat/draft content.
-    expect(io.write.mock.calls).toEqual([["headerShortcutsExpanded", false]])
+    expect(recoveryWrites()).toEqual([["headerShortcutsExpanded", false]])
   })
 
   it.each(["account", "unmount"])("ignores a failed cold Retry after %s retirement", async ending => {
@@ -1003,7 +1037,11 @@ describe.each([
     await waitFor(() => expect(window.open).toHaveBeenCalled())
     const url = new URL(String(vi.mocked(window.open).mock.calls.at(-1)![0]))
     expect(url.origin + url.pathname).toBe("https://webui.test/base/chat")
-    const payload = decodeSidepanelChatWebUiHandoff(new URLSearchParams(url.hash.slice(1)).get("handoff"))
+    const encoded = new URLSearchParams(url.hash.slice(1)).get("handoff")!
+    const raw = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"))
+    expect(raw).not.toHaveProperty("state")
+    expect(raw).not.toHaveProperty("isCurrent")
+    const payload = decodeSidepanelChatWebUiHandoff(encoded)
     expect(payload).toMatchObject({ draft: "CARRY THIS UNSENT TEXT", webSearch: true,
       historyId: null, serverChatId: null, temporaryChat: false })
     expect(screen.getByLabelText("Composer draft")).toHaveValue("CARRY THIS UNSENT TEXT")
@@ -1071,6 +1109,24 @@ describe.each([
     fireEvent.click(screen.getByRole("button", { name: "Open full chat in WebUI" }))
     await waitFor(() => expect(finish).toBeTypeOf("function"))
     fireEvent.click(screen.getByRole("button", { name: "New conversation" }))
+    await act(async () => { finish({ webUiUrl: "https://old-webui.test" }) })
+    expect(window.open).not.toHaveBeenCalled()
+  })
+
+  it.each(["input", "edit undo", "H1"])("retires WebUI config waiting when the actual composer changes %s", async boundary => {
+    io.useComposer = true
+    let finish!: (value: unknown) => void
+    io.read.mockImplementation(key => key === "tldwConfig" ? new Promise(resolve => { finish = resolve }) : Promise.resolve(io.data.get(key)))
+    render(<Route />)
+    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "EXACT SOURCE  " } })
+    fireEvent.click(screen.getByRole("button", { name: "Open full chat in WebUI" }))
+    await waitFor(() => expect(finish).toBeTypeOf("function"))
+    if (boundary === "H1") act(() => { io.controller!.beginLoad() })
+    else {
+      fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "NEW EDIT  " } })
+      if (boundary === "edit undo") fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "EXACT SOURCE  " } })
+    }
     await act(async () => { finish({ webUiUrl: "https://old-webui.test" }) })
     expect(window.open).not.toHaveBeenCalled()
   })

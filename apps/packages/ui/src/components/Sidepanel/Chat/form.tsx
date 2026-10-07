@@ -193,6 +193,12 @@ import {
   throwIfChatSubmitUnsuccessful
 } from "@/hooks/chat/chat-action-utils"
 
+export type SidepanelWebUiOpenSource = {
+  draft: string
+  state: ReturnType<typeof useStoreMessageOption.getState>
+  isCurrent: () => boolean
+}
+
 type Props = {
   dropedFile: File | undefined
   inputRef?: React.RefObject<HTMLTextAreaElement>
@@ -201,8 +207,10 @@ type Props = {
   onRecoverDraft?: RestoreChatDraft
   onFindConversations?: () => void
   onOpenChatInWebUi?: (
-    overrides?: SidepanelChatWebUiHandoffOverrides
-  ) => Promise<void> | void
+    overrides: SidepanelChatWebUiHandoffOverrides | undefined,
+    source: SidepanelWebUiOpenSource
+  ) => Promise<boolean | void> | boolean | void
+  onWebUiOpenReady?: (action: (() => Promise<boolean>) | null) => void
 }
 
 
@@ -222,7 +230,8 @@ export const SidepanelForm = ({
   draftKey,
   onRecoverDraft,
   onFindConversations,
-  onOpenChatInWebUi
+  onOpenChatInWebUi,
+  onWebUiOpenReady
 }: Props) => {
   const formContainerRef = React.useRef<HTMLDivElement>(null)
   const localTextareaRef = React.useRef<HTMLTextAreaElement>(null)
@@ -519,45 +528,7 @@ export const SidepanelForm = ({
     []
   )
   const documentWebUiHandoffRef = React.useRef<AbortController | null>(null)
-  React.useEffect(() => () => documentWebUiHandoffRef.current?.abort(), [])
-  const openChatInWebUiWithDocumentHandoff = React.useCallback(async () => {
-    if (!onOpenChatInWebUi) return
-    if (contextFiles.length === 0) {
-      await onOpenChatInWebUi()
-      return
-    }
-    documentWebUiHandoffRef.current?.abort()
-    const controller = new AbortController()
-    documentWebUiHandoffRef.current = controller
-    const source = useStoreMessageOption.getState()
-    const selectionKey = currentDocumentSelectionKeyRef.current
-    const current = () => !controller.signal.aborted && documentWebUiHandoffRef.current === controller &&
-      currentDocumentSelectionKeyRef.current === selectionKey &&
-      useStoreMessageOption.getState().chatDraftRevision === source.chatDraftRevision &&
-      useStoreMessageOption.getState().chatDraftAddress === source.chatDraftAddress
-    try {
-      const draft = await tldwClient.createDocumentUploadDraft({
-        payload: {
-          source: "sidepanel-chat-document-upload",
-          files: contextFiles
-        }
-      })
-      if (current()) await onOpenChatInWebUi({ chatDocumentDraftId: draft.draft_id })
-    } catch (error) {
-      if (!current()) return
-      console.error("[Sidepanel] Failed to create document handoff draft:", error)
-      notification.error({
-        message: t(
-          "sidepanel:composer.documentHandoffFailedTitle",
-          "Could not open documents in chat"
-        ),
-        description: t(
-          "sidepanel:composer.documentHandoffFailedDescription",
-          "Try again, or remove the files and open chat without them."
-        )
-      })
-    }
-  }, [contextFiles, notification, onOpenChatInWebUi, t])
+  React.useLayoutEffect(() => () => documentWebUiHandoffRef.current?.abort(), [])
   const [mentionActiveIndex, setMentionActiveIndex] = React.useState(0)
   const [dictationAutoFallbackEnabled] = useStorage(
     "dictation_auto_fallback",
@@ -945,6 +916,43 @@ export const SidepanelForm = ({
         current.historyId === expected.historyId && current.serverChatId === expected.serverChatId
     }
   }, [handoffSelectionIsCurrent, isDraftOwnerCurrent, getHandoffInputRevision, handoffInputRevision, draftAddress, sourceDraftRevision, historyId, serverChatId])
+  const openChatInWebUiWithDocumentHandoff = React.useCallback(async () => {
+    if (!draftReady || !onOpenChatInWebUi) return false
+    const sourceIsCurrent = captureHandoffGuard()
+    if (!sourceIsCurrent() || currentDocumentSelectionKeyRef.current !== currentDocumentSelectionKey) return false
+    documentWebUiHandoffRef.current?.abort()
+    const controller = new AbortController()
+    documentWebUiHandoffRef.current = controller
+    const state = useStoreMessageOption.getState()
+    const current = () => !controller.signal.aborted && documentWebUiHandoffRef.current === controller && sourceIsCurrent() &&
+      currentDocumentSelectionKeyRef.current === currentDocumentSelectionKey
+    const source: SidepanelWebUiOpenSource = { draft: form.getValues().message, state, isCurrent: current }
+    try {
+      if (contextFiles.length === 0) {
+        const opened = await onOpenChatInWebUi(undefined, source)
+        return opened !== false && current()
+      }
+      const draft = await tldwClient.createDocumentUploadDraft({
+        payload: { source: "sidepanel-chat-document-upload", files: contextFiles }
+      })
+      if (!current()) return false
+      const opened = await onOpenChatInWebUi({ chatDocumentDraftId: draft.draft_id }, source)
+      return opened !== false && current()
+    } catch (error) {
+      if (!current()) return false
+      if (contextFiles.length === 0) throw error
+      console.error("[Sidepanel] Failed to create document handoff draft:", error)
+      notification.error({
+        message: t("sidepanel:composer.documentHandoffFailedTitle", "Could not open documents in chat"),
+        description: t("sidepanel:composer.documentHandoffFailedDescription", "Try again, or remove the files and open chat without them.")
+      })
+      return false
+    }
+  }, [draftReady, captureHandoffGuard, currentDocumentSelectionKey, contextFiles, form, notification, onOpenChatInWebUi, t])
+  React.useLayoutEffect(() => {
+    onWebUiOpenReady?.(draftReady && onOpenChatInWebUi ? openChatInWebUiWithDocumentHandoff : null)
+  }, [draftReady, onOpenChatInWebUi, onWebUiOpenReady, openChatInWebUiWithDocumentHandoff])
+  React.useLayoutEffect(() => () => onWebUiOpenReady?.(null), [onWebUiOpenReady])
   const trackedSelectionPendingRef = React.useRef<{
     isCurrent: () => boolean
   } | null>(null)

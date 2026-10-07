@@ -101,7 +101,7 @@ interface ControlRowProps {
   isConnected: boolean
   onOpenChatInWebUi?: (
     overrides?: SidepanelChatWebUiHandoffOverrides
-  ) => Promise<void> | void
+  ) => Promise<boolean | void> | boolean | void
 }
 
 const ControlRowBase: React.FC<ControlRowProps> = ({
@@ -468,8 +468,9 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     draftReady && (hasDraftForHandoff || hasVisiblePageContextForHandoff)
   const copyDraftButtonDisabled =
     !copyDraftEnabled || copyDraftPending
-  const copySourceRef = React.useRef({ draftReady, handoffSourceKey, draftText, fullAppChatPath, hasVisiblePageContextForHandoff, getVisiblePageContextForHandoff })
-  copySourceRef.current = { draftReady, handoffSourceKey, draftText, fullAppChatPath, hasVisiblePageContextForHandoff, getVisiblePageContextForHandoff }
+  const webUiOpenAttemptRef = React.useRef(0)
+  const copySourceRef = React.useRef({ draftReady, handoffSourceKey, draftText, fullAppChatPath, hasVisiblePageContextForHandoff, getVisiblePageContextForHandoff, onOpenChatInWebUi })
+  copySourceRef.current = { draftReady, handoffSourceKey, draftText, fullAppChatPath, hasVisiblePageContextForHandoff, getVisiblePageContextForHandoff, onOpenChatInWebUi }
   React.useLayoutEffect(() => {
     copyDraftMountedRef.current = true
     return () => {
@@ -570,13 +571,23 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const openFullApp = async () => {
     if (historySelection && usesExtensionExpansion) { const route = await historySelection.prepareExpansionPath(); if (route) void openFullAppPath(route); return }
     if (onOpenChatInWebUi) {
+      const sourceIsCurrent = captureHandoffGuard()
+      const expected = copySourceRef.current
+      const attempt = ++webUiOpenAttemptRef.current
+      let completionCurrent = true
+      const current = () => completionCurrent && webUiOpenAttemptRef.current === attempt && copyDraftMountedRef.current && sourceIsCurrent() && copySourceRef.current.draftReady &&
+        copySourceRef.current.handoffSourceKey === expected.handoffSourceKey &&
+        copySourceRef.current.onOpenChatInWebUi === onOpenChatInWebUi
+      if (!current()) return
       Promise.resolve(onOpenChatInWebUi())
+        .then((opened) => { completionCurrent = opened !== false })
         .catch((error) => {
-          console.error("Failed to open WebUI chat handoff:", error)
+          if (current()) console.error("Failed to open WebUI chat handoff:", error)
         })
         .finally(() => {
+          if (!current()) return
           setMoreOpen(false)
-          requestAnimationFrame(() => moreBtnRef.current?.focus())
+          moreBtnRef.current?.focus()
         })
       return
     }

@@ -19,7 +19,7 @@ type SidepanelHeaderSimpleProps = {
   setSidebarOpen?: (open: boolean) => void
   activeTitle?: string
   onRenameTitle?: (nextTitle: string) => void
-  onOpenChatInWebUi?: () => Promise<void> | void
+  onOpenChatInWebUi?: () => Promise<boolean | void> | boolean | void
 }
 
 /**
@@ -116,6 +116,12 @@ export const SidepanelHeaderSimple = ({
     setIsEditingTitle(false)
   }, [activeTitle, draftTitle, onRenameTitle])
 
+  const webUiOpenAttemptRef = React.useRef(0)
+  const mountedRef = React.useRef(false)
+  const webUiViewRef = React.useRef({ chatReady, onOpenChatInWebUi, activeTitle })
+  webUiViewRef.current = { chatReady, onOpenChatInWebUi, activeTitle }
+  React.useLayoutEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
+
   const openFullScreen = React.useCallback(async () => {
     if (!chatReady) return
     const showFailure = () => {
@@ -127,7 +133,12 @@ export const SidepanelHeaderSimple = ({
       })
     }
     if (onOpenChatInWebUi && !usesExtensionExpansion) {
+      const attempt = ++webUiOpenAttemptRef.current
+      const expected = webUiViewRef.current
+      const current = () => webUiOpenAttemptRef.current === attempt && mountedRef.current && webUiViewRef.current.chatReady &&
+        webUiViewRef.current.onOpenChatInWebUi === expected.onOpenChatInWebUi && webUiViewRef.current.activeTitle === expected.activeTitle
       Promise.resolve(onOpenChatInWebUi()).catch((error) => {
+        if (!current()) return
         console.error("Failed to open WebUI chat handoff:", error)
         showFailure()
       })
