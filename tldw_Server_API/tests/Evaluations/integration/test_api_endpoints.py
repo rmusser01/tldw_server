@@ -23,6 +23,30 @@ from tldw_Server_API.tests.Evaluations.fixtures.sample_data import (
 from tldw_Server_API.tests.Evaluations.fixtures.database import create_test_database_with_data
 
 
+@pytest.fixture(autouse=True)
+def _offline_provider_credentials(
+    monkeypatch, healthy_no_override_tts_credential_snapshot
+):
+    """Use trusted server credentials with the existing mocked LLM calls."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test_api_key_for_mocked_calls")
+
+
+@pytest.mark.asyncio
+async def test_offline_provider_credentials_fail_closed(async_api_client, auth_headers):
+    """Offline fixtures must not bypass an unavailable credential store."""
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
+
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({}, healthy=False)
+    response = await async_api_client.post(
+        "/api/v1/evaluations/geval",
+        json={"source_text": "Source text long enough", "summary": "Summary text long enough"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["error_code"] == "credential_store_unavailable"
+
+
 @pytest.mark.integration
 class TestGEvalEndpoint:
     """Integration tests for G-Eval endpoint."""
@@ -204,8 +228,9 @@ class TestRAGEvaluationEndpoint:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    @pytest.mark.requires_llm
     async def test_rag_concurrent_evaluations(self, async_api_client, auth_headers):
-        """Test multiple concurrent RAG evaluations without mocking.
+        """Test concurrent real API/storage evaluations with a mocked provider.
 
         Keeps total requests under default rate limits and staggers slightly.
         """

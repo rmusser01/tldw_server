@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from typing import Any
 
 
 class _TimeoutContext:
-    """Normalize the stdlib and async-timeout expiration interfaces."""
+    """Normalize the stdlib and async-timeout public timeout interfaces."""
 
     def __init__(self, native_timeout: Any) -> None:
         self._native_timeout = native_timeout
@@ -22,6 +23,15 @@ class _TimeoutContext:
     def expired(self) -> bool:
         native_expired = self._native_timeout.expired
         return bool(native_expired() if callable(native_expired) else native_expired)
+
+    def reschedule(self, deadline: float) -> None:
+        """Set a finite absolute deadline in event-loop time coordinates."""
+        if not math.isfinite(deadline):
+            raise ValueError("timeout deadline must be finite")
+        if hasattr(self._native_timeout, "reschedule"):
+            self._native_timeout.reschedule(deadline)
+        else:
+            self._native_timeout.update(deadline)
 
 
 def timeout(delay: float | None) -> _TimeoutContext:

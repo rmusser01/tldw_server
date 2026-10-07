@@ -8,9 +8,12 @@ persistence and SQLite search/detail operations execute without substitutes.
 import mailbox
 import socket
 import sys
+import traceback
 import zipfile
 from email.message import EmailMessage
 from io import BytesIO
+from itertools import islice
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -53,9 +56,18 @@ def offline_client(tmp_path, monkeypatch):
     calls = []
     original_connect = socket.socket.connect
 
-    def forbidden(*_args, **_kwargs):
-        calls.append("model, background job, or outbound request")
-        raise AssertionError("Offline email validation forbids model work and outbound requests")
+    def forbidden(target):
+        def deny(*_args, **_kwargs):
+            # Source coordinates only: never retain locals, arguments or source text.
+            frames = [
+                {"filename": frame.f_code.co_filename, "lineno": lineno, "function": frame.f_code.co_name}
+                for frame, lineno in islice(traceback.walk_stack(sys._getframe(1)), 24)
+            ]
+            calls.append({"target": target, "frames": frames})
+            raise AssertionError("Offline email validation forbids model work and outbound requests")
+        return deny
+
+    deny_connect = forbidden("socket.socket.connect")
 
     def offline_connect(sock, address):
         # Windows' socketpair fallback connects to its own IPv4 loopback listener.
@@ -66,13 +78,17 @@ def offline_client(tmp_path, monkeypatch):
             and sys._getframe(1).f_code is socket._fallback_socketpair.__code__
         ):
             return original_connect(sock, address)
-        return forbidden()
+        return deny_connect()
 
-    monkeypatch.setattr(Summarization_General_Lib, "analyze", forbidden)
-    monkeypatch.setattr(claims_utils, "extract_claims_for_chunks", forbidden)
-    monkeypatch.setattr(ChatAutoChunkBoundaryAssistant, "refine", forbidden)
-    monkeypatch.setattr(EmbeddingsJobsAdapter, "create_job", forbidden)
-    monkeypatch.setattr(BackgroundTasks, "add_task", forbidden)
+    for target, name in (
+        (Summarization_General_Lib, "analyze"),
+        (claims_utils, "extract_claims_for_chunks"),
+        (ChatAutoChunkBoundaryAssistant, "refine"),
+        (EmbeddingsJobsAdapter, "create_job"),
+        (BackgroundTasks, "add_task"),
+    ):
+        owner = f"{target.__module__}.{target.__qualname__}" if isinstance(target, type) else target.__name__
+        monkeypatch.setattr(target, name, forbidden(f"{owner}.{name}"))
     for name in (
         "fetch",
         "afetch",
@@ -85,10 +101,10 @@ def offline_client(tmp_path, monkeypatch):
         "astream_sse",
         "stream_response",
     ):
-        monkeypatch.setattr(http_client, name, forbidden)
+        monkeypatch.setattr(http_client, name, forbidden(f"{http_client.__name__}.{name}"))
     monkeypatch.setattr(socket.socket, "connect", offline_connect)
-    monkeypatch.setattr(socket.socket, "connect_ex", forbidden)
-    monkeypatch.setattr(socket, "getaddrinfo", forbidden)
+    monkeypatch.setattr(socket.socket, "connect_ex", forbidden("socket.socket.connect_ex"))
+    monkeypatch.setattr(socket, "getaddrinfo", forbidden("socket.getaddrinfo"))
 
     class _UnlimitedQuota:
         """Quota is outside this harness; the synthetic user has no AuthNZ row."""
@@ -108,6 +124,7 @@ def offline_client(tmp_path, monkeypatch):
     # Quota remains outside this native parser/persistence harness.
     quota_service = SimpleNamespace(check_quota=AsyncMock(return_value=(True, {})))
     monkeypatch.setattr(storage_quota_service, "get_storage_quota_service", lambda: quota_service)
+    monkeypatch.setattr(persistence, "_enforce_and_record_media_bytes", AsyncMock())
     db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="offline-email-test")
     app = FastAPI()
     app.state.offline_forbidden_calls = calls
@@ -129,6 +146,39 @@ def offline_client(tmp_path, monkeypatch):
     finally:
         db.close_connection()
         assert calls == [], f"Forbidden calls occurred, including any caught by application code: {calls}"
+
+
+def test_offline_guard_records_target_and_argument_free_caller_after_swallowed_assertion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caught tripwire must still fail strict teardown without exposing its arguments."""
+    from tldw_Server_API.app.core import http_client
+
+    fixture = offline_client.__wrapped__(tmp_path, monkeypatch)
+    client = next(fixture)
+    payload = "private-mail-body-and-address@example.invalid"
+    try:
+        try:
+            http_client.fetch(payload, secret=payload)
+        except AssertionError:
+            pass
+        calls = client.app.state.offline_forbidden_calls
+        assert len(calls) == 1
+        assert isinstance(calls[0], dict)
+        assert calls[0]["target"] == "tldw_Server_API.app.core.http_client.fetch"
+        assert any(
+            frame["function"] == "test_offline_guard_records_target_and_argument_free_caller_after_swallowed_assertion"
+            and frame["filename"] == __file__ and frame["lineno"] > 0
+            for frame in calls[0]["frames"]
+        )
+        assert all(set(frame) == {"filename", "lineno", "function"} for frame in calls[0]["frames"])
+        assert set(calls[0]) == {"target", "frames"}
+        assert payload not in repr(calls)
+    finally:
+        with pytest.raises(AssertionError, match="Forbidden calls occurred") as failure:
+            next(fixture)
+    assert "tldw_Server_API.app.core.http_client.fetch" in str(failure.value)
+    assert payload not in str(failure.value)
 
 
 def test_offline_client_allows_windows_socketpair_fallback_and_blocks_remote_connect(offline_client):
@@ -155,6 +205,9 @@ def test_offline_client_allows_windows_socketpair_fallback_and_blocks_remote_con
         with pytest.raises(AssertionError, match="Offline email validation forbids"):
             client.connect_ex(("192.0.2.1", 9))
     assert len(offline_client.app.state.offline_forbidden_calls) == 3
+    assert [call["target"] for call in offline_client.app.state.offline_forbidden_calls] == [
+        "socket.socket.connect", "socket.socket.connect", "socket.socket.connect_ex",
+    ]
     offline_client.app.state.offline_forbidden_calls.clear()
 
 
@@ -200,6 +253,31 @@ def search(client, query: str):
     response = client.get("/api/v1/email/search", params={"q": query})
     assert response.status_code == 200, response.text
     return response.json()["items"]
+
+
+def test_offline_upload_does_not_enter_authnz_pool(
+    offline_client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Daily accounting cannot bootstrap AuthNZ in the native email harness."""
+    from tldw_Server_API.app.core.AuthNZ import database
+    from tldw_Server_API.app.core.DB_Management import Resource_Daily_Ledger
+    from tldw_Server_API.app.core.Usage import quota_resolver
+
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
+    quota_resolver.invalidate_all()
+    monkeypatch.setattr(persistence, "_media_ingestion_daily_ledger", None)
+    pool_entry = AsyncMock(side_effect=RuntimeError("AuthNZ is outside the offline email harness"))
+    monkeypatch.setattr(database, "get_db_pool", pool_entry)
+    monkeypatch.setattr(Resource_Daily_Ledger, "get_db_pool", pool_entry)
+
+    result = upload(offline_client, "synthetic-quota.eml", synthetic_message(77).as_bytes())
+    rows = search(offline_client, "uniquequartz")
+    assert len(rows) == 1
+    detail = offline_client.get(f"/api/v1/email/messages/{rows[0]['email_message_id']}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["media"]["id"] == result["db_id"]
+    assert detail.json()["body_text"] == "Uniquequartz synthetic body 77."
+    pool_entry.assert_not_called()
 
 
 @pytest.mark.parametrize("same_body", [False, True])

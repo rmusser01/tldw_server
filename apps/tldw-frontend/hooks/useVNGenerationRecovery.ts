@@ -16,6 +16,7 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
   const [error, setError] = useState<string | null>(null);
   const [unreadable, setUnreadable] = useState(false);
   const [verifiedRevision, setVerifiedRevision] = useState(0);
+  const [authority, setAuthority] = useState<VNCommandScope | null>(null);
   const mounted = useRef(false);
   const epoch = useRef(0);
   const verification = useRef(0);
@@ -43,6 +44,21 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
     }
   }, [report]);
 
+  const captureCurrent = useCallback((): Capture | null => {
+    const current = scope.current && { scope: scope.current, epoch: epoch.current };
+    return current && isCurrent(current) ? current : null;
+  }, [isCurrent]);
+
+  // Stable identity is for list loading, not permission to replay while revalidating.
+  const isAuthority = useCallback((candidate: VNCommandScope): boolean => {
+    if (!mounted.current || !sameVNCommandScope(lastAuthority.current, candidate)) return false;
+    try {
+      return createVNCommandScope(getApiBaseUrl(), Number(candidate.principal)).server === candidate.server;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const verify = useCallback(async (reloadDetails = false): Promise<Capture | null> => {
     let revision = epoch.current;
     const request = ++verification.current;
@@ -60,6 +76,7 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
       }
       scope.current = next;
       lastAuthority.current = next;
+      setAuthority((previous) => sameVNCommandScope(previous, next) ? previous : next);
       const saved = readVNCommands(next);
       records.current = saved;
       setCommands(saved);
@@ -138,6 +155,7 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
       boundary.current(clear);
       if (clear) {
         lastAuthority.current = null;
+        setAuthority(null);
         try { clearVNCommands(); } catch (failure) { report(failure); }
       }
       if (logout) setError('Sign in again to send generation requests.');
@@ -170,5 +188,6 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
     };
   }, [deactivate, report, verify]);
 
-  return { commands, ready, error, unreadable, verifiedRevision, verify, remember, forget, isCurrent, discardUnreadable };
+  return { commands, ready, error, unreadable, verifiedRevision, authority, captureCurrent, isAuthority,
+    verify, remember, forget, isCurrent, discardUnreadable };
 }

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import get_type_hints
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -105,6 +105,8 @@ def test_safe_interval_override_has_explicit_fire_time_types():
     }
 
 
+# Cold local-constant discovery scans imported modules during the first draws.
+@settings(deadline=timedelta(seconds=2))
 @given(
     st.datetimes(timezones=st.just(timezone.utc), min_value=datetime(2000, 1, 1), max_value=datetime(2100, 1, 1)),
     st.integers(min_value=60, max_value=86400 * 365),
