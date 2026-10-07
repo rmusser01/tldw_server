@@ -217,3 +217,45 @@ fingerprints bind the complete source/language pair and optimistic product versi
 New Chatbook Notes archives use verified 4.0 and identity-based JSON carriers,
 including null-language Notes and Canvas when present; readers 1.0–3.0 remain
 available. No new transport, store, capability provider or import service.
+
+### Browser engine qualification (E3, TASK-13518, 2026-10-07)
+
+Accept exact runtime pins `jsonc-parser` 3.3.1 (MIT) and `yaml` 2.8.1 (ISC)
+for the pure shared document engine. Both distributions have no runtime
+transitive dependencies. Qualification used isolated extracted distributions
+before this decision and package/lock adoption: the frozen 37-case contract,
+strict source/precision/key/position controls, actual Next webpack and WXT
+production module builds, and execution of their emitted code in fresh Chromium
+contexts. Evidence and precise supported/refused profiles are in
+`Docs/superpowers/reviews/2026-09-27-document-engine-browser.md`.
+
+JSON admission checks every strict visitor/scanner error, detects decoded keys
+within object scopes, and formats with source edits. JSONL retains physical
+record boundaries/terminators. YAML uses lexeme-by-lexeme public parser-stack
+depth checks, source-token documents, symbolic aliases and tag-aware exact key
+identities. Whitespace edits must retain the complete CST graph and every
+non-space token, including comments, directives, markers and scalar bytes.
+Generic parse/dump and runtime Prettier remain excluded.
+
+Absent document directives mean YAML 1.2. The candidate's inherited 1.1 behavior
+is not accepted as evidence for a later undirected document; mixed/inherited
+interpretation is explicitly refused before key checks. Unqualified tags,
+complex/alias keys, merge targets and scalar layouts likewise refuse formatting
+without inventing syntax errors. Qualified explicit 1.1/1.2 remain supported.
+
+The pure functions check 1 MiB UTF-8, depth 100, at most 100 displayed diagnostics,
+and cooperative two-second checkpoints. They cannot enforce hard termination or
+a heap/RSS ceiling. Parser calls, encoding and allocations may run between
+checkpoints. E4 owns terminable worker scheduling, startup/copy accounting and
+lifecycle; editor/save authority and storage limits are unchanged. No application
+surface imports the engine as part of E3.
+
+E3 final-admission clarification: yaml 2.8.1's 1.1 decimal-float matcher also
+accepts spellings without a mantissa digit (for example bare `.`), whereas the
+reviewed Python resolver treats bare `.` as a string. The browser explicitly
+refuses that candidate branch as unsupported, never complete or malformed; it
+must not infer zero or guess a replacement resolver. Special `.inf`/`.nan` forms
+remain separate, and default 1.2 plus quoted-dot string controls remain qualified.
+This narrows browser admission beyond the unchanged shared v1 fixture profile;
+source/save authority is unchanged. The late self-review correction was made
+after isolated package pinning but before final acceptance or a source commit.

@@ -11,3 +11,21 @@ Consume the exact carrier set admitted by preflight through execution. Give decl
 The source filename helper indexed a plain JavaScript extension table with the persisted opaque language string. Review found that `constructor`, `toString` and `__proto__` resolved inherited properties and produced source extensions outside the known-mode contract. Three parameterized cases failed before the fix and passed after `Object.hasOwn` guarded the existing lookup. They also assert that portable output retains each exact language string and source text remains exact.
 
 Check own known-mode membership before using an object as an extension table. Every unknown opaque mode uses the `.txt` source fallback; portable records preserve the raw mode. Evidence: `/private/tmp/f6-fix1-u-red.log` (three extension failures plus four preview failures), `/private/tmp/f6-fix1-u-green.log`, `/private/tmp/f6-fix1-u-covering.log` (38 tests passed).
+
+## TASK-13518: source directives and decimal spelling outrank candidate resolution
+
+Browser engine qualification found that yaml 2.8.1 inherits explicit YAML 1.1 into
+an undirected next document, while reviewed Python resets each document to its
+own directive or 1.2. A regression failed before the browser tracked source
+per-document directives and declined the mixed/inherited interpretation before
+key comparison. A second probe found that the candidate resolves bare 1.1 `.` as
+float NaN, whereas Python resolves it as a string; a naive exact-decimal normalizer
+then treated the missing mantissa as zero. Six controls failed before the browser
+explicitly refused candidate finite floats without a mantissa digit, then the
+whole YAML selection passed 69 tests. Default 1.2 and quoted dots remain strings.
+
+Do not use inherited parser state or a tolerant numeric match to establish
+cross-runtime semantics. Keep per-document source metadata, require a real
+mantissa for finite numeric identities, and decline unqualified interpretations
+without modifying the draft. Evidence: the E3 browser qualification report and
+`/private/tmp/tldw-task9-evidence/{version,mantissa}-{red,green}.log`.

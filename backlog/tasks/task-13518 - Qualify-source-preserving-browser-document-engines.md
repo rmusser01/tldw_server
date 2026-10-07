@@ -1,0 +1,72 @@
+---
+id: TASK-13518
+title: Qualify source-preserving browser document engines
+status: In Progress
+created_date: 2026-10-07 03:09
+dependencies:
+- TASK-13511
+assignee:
+- '@codex'
+labels:
+- notes
+- structured-editing
+documentation:
+- /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
+updated_date: 2026-10-07 12:59
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Provide local strict YAML, JSON and JSONL checks and reversible formatting without numerical or lexical corruption.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Supported shared fixtures agree with Python validity/categories and scalar-offset diagnostics; tolerant parse output alone never proves validity.
+- [x] #2 JSON and JSONL formatting preserves original numbers/strings, object order, decoded duplicate-key diagnostics, physical records/newlines and idempotence.
+- [x] #3 Qualified YAML formatting preserves comments, directives, markers, anchors, aliases, merges, scalar tokens/styles and semantic graph for nontrivial streams; unsupported constructs are explicitly refused.
+- [x] #4 UTF-16 positions convert correctly to Unicode scalar offsets and limits/source-safe failure categories are tested on real parser output.
+- [x] #5 Candidate versions/licenses and fixture evidence precede adoption; targeted tests, scoped type/static checks and web/extension loading controls pass.
+- [x] #6 Relevant governing ADR is assessed/linked and repo-local completion notes name actual evidence and remaining limitations.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+ADR required: yes
+ADR path: Docs/ADR/065-portable-note-language-and-negotiated-structured-editing.md (existing programme decision)
+Reason: qualify browser-local source-preserving engines and new runtime dependency/tooling choices under the approved cross-runtime language contract; amend the existing ADR before accepted dependency adoption, without a UI/save/worker authority change.
+1. Read task9 brief/binding constraints/context, applicable S/U/W/extension guidance and structured-notes lessons, ADR065, actual E1 TS constructors/shared fixtures and the reviewed Python public contract/qualification outcomes. Immutable S base bf0965412cb65b6fbfee3b31e5e211dbd2872841; C reviewed final engine ba744f9059d plus closure3ffaf527f304.
+2. Trace installed/native parser facilities before candidates, then add meaningful RED strict precision/lexeme/decoded-duplicate/JSONL/Unicode-position and YAML source/graph/version controls, including the independently confirmed Core decimal-only sign boundary.
+3. Qualify strict source scanner/visitor/text-edit JSON and physical-record JSONL with no resolved JavaScript object values as formatting source. Enforce depth during parsing, exact token equality, record/newline preservation and scalar-offset diagnostics.
+4. Qualify source-aware YAML APIs for nontrivial comments/multi-document/anchors/merges/block-scalars plus explicit unsupported refusal; compare shared validity/categories with the reviewed Python table without modifying fixture expectations. Record real package version/license/source invariants before accepting/pinning dependencies and lock updates; amend ADR065 before adoption.
+5. Run explicit contract/JSON/YAML/position selections and scoped lint/format/type checks, whole-W typecheck after shared edits, and actual Next/extension module-loading controls. No full sweep, runtime Prettier, editor/worker adoption, CDN, shared dependency rebind or user data/config.
+6. Write durable browser qualification report and full task-9-report.md with exact RED/GREEN/final commands/output/process exits, source/fixture hash, supported/refused constructs, resource/import/bundler observations and precise limits. Self-review and commit explicit unit paths; remain In Progress for fresh controller review.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Implemented pure request-aware JSON/JSONL and source-aware YAML checks and reversible formatting in four shared UI modules, with three focused test files. Adopted exact jsonc-parser 3.3.1 (MIT) and yaml 2.8.1 (ISC) only after isolated fixture/license/ADR/bundler qualification; late self-review version-inheritance and mantissa-less YAML 1.1 refusals were qualified and added to ADR-065 before final acceptance. No UI/save/worker authority changed.
+
+Evidence: final 142 targeted contract/JSON/YAML/position tests passed; strict scoped types, whole-W typecheck with the prescribed 8 GiB heap, scoped ESLint (zero warnings), Prettier and frozen Bun install passed. Actual default Next 16.1.4 Turbopack and WXT 0.20.13/Vite 5.4.21 imported-engine builds executed in fresh Chromium contexts; WXT bundle used extension-like CSP, not installed-extension lifecycle. All 37 unchanged shared fixture validity/category sets and admission agree with reviewed Python ba744f9059d; parser-specific span widths/multiplicity are disclosed. Fixture SHA-256 fcf516e4c0bb8ff7a19748a4d5f7deb8a30ad0078ea0ce2af0e1e81af50fb0d7.
+
+Limits: pure synchronous engine has cooperative two-second checks, 1 MiB UTF-8 source, depth 100 and diagnostic cap 100, but no hard termination or heap ceiling (large synthetic YAML reached about 318 MB whole-process RSS). Unsupported YAML profiles, including candidate 1.1 mantissa-less floats, are explicit; Python accepts bare 1.1 dot as a string. Later worker/lifecycle qualification remains required. No full suite; Bandit not applicable because no Python production source changed. Immutable base bf0965412cb65b6fbfee3b31e5e211dbd2872841.
+
+Paths: apps/packages/ui/src/services/document-editing/{engine,json-document,yaml-document,source-positions}.ts and __tests__/{json-document,yaml-document,source-positions}.test.ts; apps/packages/ui/package.json; apps/bun.lock; Docs/ADR/065-portable-note-language-and-negotiated-structured-editing.md; backlog/docs/lessons-structured-notes.md. Durable qualification: Docs/superpowers/reviews/2026-09-27-document-engine-browser.md. Complete commands/output: Chatbook plan workspace task-9-report.md, raw captures /private/tmp/tldw-task9-evidence. Self-review completed; remains In Progress for fresh controller review.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Pure browser engines qualified with 142 passing targeted tests, actual Next/WXT browser loading, unchanged shared fixtures and explicit YAML/resource/lifecycle limits; awaiting controller review.
+<!-- SECTION:FINAL_SUMMARY:END -->
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
