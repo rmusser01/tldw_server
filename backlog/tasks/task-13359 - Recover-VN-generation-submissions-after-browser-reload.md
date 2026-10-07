@@ -3,17 +3,17 @@ id: TASK-13359
 title: Recover VN generation submissions after browser reload
 status: Done
 assignee: []
-created_date: '2026-09-25 17:01'
-updated_date: '2026-09-25 17:42'
+created_date: 2026-09-25 17:01
+updated_date: 2026-09-25 17:42
 labels:
-  - vn-assets
-  - backend
-  - frontend
+- vn-assets
+- backend
+- frontend
 dependencies:
-  - TASK-13358
+- TASK-13517
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/2021'
-  - 'https://github.com/rmusser01/tldw_server/pull/3016'
+- https://github.com/rmusser01/tldw_server/issues/2021
+- https://github.com/rmusser01/tldw_server/pull/3016
 priority: high
 ---
 

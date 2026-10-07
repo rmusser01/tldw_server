@@ -1,6 +1,6 @@
 # VN Asset Generation Durability
 
-Backlog: TASK-13356. GitHub: #2021.
+Backlog: TASK-13516 (formerly TASK-13356). GitHub: #2021.
 
 ## Goal
 

@@ -1,6 +1,6 @@
 # VN Stacked Review Test Follow-up
 
-Task: TASK-13369. Human approval: "address all the ci failures and review findings then!"
+Task: TASK-13518 (formerly TASK-13369). Human approval: "address all the ci failures and review findings then!"
 This answers the previously presented four-findings bounded test/docs design.
 Parent #3016 and child #3067 production behavior remain unchanged by these fixes.
 
