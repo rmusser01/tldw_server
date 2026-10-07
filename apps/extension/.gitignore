@@ -64,3 +64,4 @@ node_modules/
 /tmp-playwright-profile
 /UX
 /SillyTavern-Timelines-master
+.watchlists-e2e-report.json
