@@ -6,7 +6,7 @@ Draft PR: [#3204](https://github.com/rmusser01/tldw_server/pull/3204).
 
 ## Source and implementation
 
-Latest remote dev: `1fc353c3f67c93ba05102e7b0136ac4acac8f510`, refetched unchanged after final source verification. Tested source: `9a277cf162321753321ffa0448a51e73464d7150`, on `codex/media-live-ux-fixes-20261006`. The original Media implementation was already merged through PR 3194; this branch carries the subsequent validation evidence and bounded follow-up fixes.
+Dev baseline at the completed source validation: `1fc353c3f67c93ba05102e7b0136ac4acac8f510`, refetched unchanged after that verification. Tested source: `9a277cf162321753321ffa0448a51e73464d7150`, on `codex/media-live-ux-fixes-20261006`. The original Media implementation was already merged through PR 3194; this branch carries the subsequent validation evidence and bounded follow-up fixes.
 
 ADR required: **no**. Existing detail/session/job contracts, account ownership checks, ingestion target selection, rich-content sanitizer and ICU localization remain the governing boundaries. [ADR-059](../ADR/059-backlog-py-task-editor-cutover.md) governs task editing. No new dependency, API, schema, persistence format or provider behavior was introduced.
 
@@ -43,6 +43,8 @@ Screenshots:
 ## Verification and limits
 
 - **17 files / 411 tests passed**, 54.93 seconds, with the repository CI timeout of 15000 ms. Includes session/authority fencing, nested identity, reading/keyboard scope, raw export, metadata/parser, read-aloud, navigation and actual ICU resources. Local Node 26 differs from CI Node 20; this is scoped local evidence.
+- CI exposed one missed integration expectation for the newly correct singular Configure label. The existing test failed before the one-line assertion correction; the full wizard integration file then passed **53/53 tests**, 12.06 seconds, with the same 15000 ms timeout. Application source did not change in this follow-up. The changed test passes the PR’s ESLint rules with zero errors; all 33 warning messages match the prior head. Bandit was invoked on the changed TypeScript test with zero findings and one unsupported-language parse error.
+- [CI run 37492771649](https://github.com/rmusser01/tldw_server/actions/runs/37492771649), on head `8e1363e1cb69c08858e3760deeb2feaf02f0456d`, also reported `core-route-identity` expecting “First-time setup.” That failure reproduced on the exact dev baseline in both failed-file and shard-context replays; the final ratchet rejected differing test identities/order. It is not a Media regression. Required CI must be confirmed on the new head; no all-green CI claim is made.
 - WebUI `bun run typecheck --incremental false`: passed separately from the build, which skips type validation by project configuration.
 - WebUI `bun run lint`: exit 0, zero errors and the same 180 baseline warnings. No warning-free claim.
 - WebUI `TLDW_INTERNAL_API_ORIGIN=http://127.0.0.1:18882 bun run compile:prod`: passed; token sync passed; shared app 589.6 KB gzip under the 600 KB budget.
@@ -58,4 +60,4 @@ The task browser and servers are stopped; ports 18881/18882/18883 have no listen
 
 Original tracked status matches its before snapshot, and every earlier untracked entry remains present. Exact full porcelain bytes differ because another workstream added 157 files under its own `.venv-uat-py312-20261006`; those files and the unrelated open browser were left untouched. No checkout/reset/clean/staging operation targeted the original workspace. Git's existing loose-object warning was left alone.
 
-The completed task-specific implementation plan is removed per repository guidance. No implementation item remains open in TASK-13504–13507. Merge still requires the requester’s own `Change summary` under [the repository policy](../superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md): “Every AI-generated pull request must include a human-written `Change summary`.” The PR is prepared as a draft; the human summary for earlier PR 3194 is not reused as ownership of this follow-up.
+The completed task-specific implementation plan is removed per repository guidance. No implementation item remains open in TASK-13504–13507. The requester supplied a new human-owned `Change summary` for PR 3204; it was saved verbatim and verified against the PR body, satisfying [the repository policy](../superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md). The PR remains a draft pending review, required CI and merge authorization. The integration assertion follow-up temporarily reused three dependency links; those links are removed before committing. No new test services or browser were started.

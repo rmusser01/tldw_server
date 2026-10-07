@@ -218,6 +218,41 @@
       "ratchet_tests_passed": 4,
       "warnings": 4,
       "log": "/private/tmp/media-backlog-ratchet-final-20261006.log"
+    },
+    "integration_ci_followup": {
+      "file": "apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx",
+      "change": "One assertion now expects the correct singular label: 1 eligible item in this run.",
+      "application_source_changed": false,
+      "red": {
+        "failed": 1,
+        "skipped": 52,
+        "duration_seconds": 1.96,
+        "log": "/private/tmp/media-pr3204-copy-ci-red-20261006.log"
+      },
+      "green": {
+        "passed": 53,
+        "duration_seconds": 12.06,
+        "timeout_ms": 15000,
+        "log": "/private/tmp/media-pr3204-copy-ci-green-20261006.log"
+      },
+      "bandit": {
+        "findings": 0,
+        "typescript_parse_errors": 1,
+        "limitation": "Bandit cannot parse TypeScript; this is not a TypeScript security pass."
+      },
+      "eslint": {
+        "errors": 0,
+        "warnings": 33,
+        "messages_unchanged_from_prior_head": true
+      }
+    },
+    "ci_observation": {
+      "run_url": "https://github.com/rmusser01/tldw_server/actions/runs/37492771649",
+      "head": "8e1363e1cb69c08858e3760deeb2feaf02f0456d",
+      "new_regression": "The missed singular Configure-label expectation, reproduced and corrected in the integration follow-up.",
+      "baseline_failure": "core-route-identity expects First-time setup; reproduced in failed-file and exact-shard-context replays at dev baseline 1fc353c3f67c93ba05102e7b0136ac4acac8f510.",
+      "ratchet_limit": "Head/base Vitest test identities or file-local order differ; no all-green CI claim.",
+      "new_head_required_ci": "pending"
     }
   },
   "limits": [
@@ -250,13 +285,16 @@
       "apps/extension/.wxt"
     ],
     "temporary_models_preserved": true,
-    "completed_own_plan_removed": true
+    "completed_own_plan_removed": true,
+    "integration_followup_dependency_links_removed": 3,
+    "integration_followup_cleanup_at": "2026-10-07T02:05:37.471208+00:00"
   },
   "pull_request": {
     "url": "https://github.com/rmusser01/tldw_server/pull/3204",
     "draft": true,
     "base": "dev",
-    "human_change_summary": "pending",
-    "merged": false
+    "human_change_summary": "provided_verbatim",
+    "merged": false,
+    "human_change_summary_verified_at": "2026-10-07T02:04:27.152543+00:00"
   }
 }
