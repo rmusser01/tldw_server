@@ -1,7 +1,7 @@
 ---
 id: TASK-13515
 title: Preserve negotiated source language in Notes clients
-status: In Progress
+status: Done
 created_date: 2026-10-07 03:07
 dependencies:
 - TASK-13513
@@ -13,7 +13,7 @@ labels:
 - structured-editing
 documentation:
 - Docs/ADR/065-portable-note-language-and-negotiated-structured-editing.md
-updated_date: 2026-10-07 05:10
+updated_date: 2026-10-07 06:50
 ---
 
 ## Description
@@ -24,11 +24,11 @@ Keep language intent and exact source safe when clients and servers support diff
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Clients require explicit authenticated language capability and isolate or invalidate capability state on server/profile changes.
-- [ ] #3 Old or unavailable peers leave actionable durable pending intent; a body-only acknowledgement never clears pending language.
-- [ ] #4 Targeted compatibility tests and scoped static/security evidence cover publication rechecks and account isolation.
-- [ ] #5 Relevant governing ADR is assessed/linked and repo-local completion notes name actual evidence and remaining limitations.
-- [ ] #5 Clear Notes round trips and compatible private builder/receiver fixtures preserve exact source, language and lineage; unavailable private server transport retains ciphertext-backed local pending intent.
+- [x] #1 Clients require explicit authenticated language capability and isolate or invalidate capability state on server/profile changes.
+- [x] #2 Old or unavailable peers leave actionable durable pending intent; a body-only acknowledgement never clears pending language.
+- [x] #3 Targeted compatibility tests and scoped static/security evidence cover publication rechecks and account isolation.
+- [x] #4 Relevant governing ADR is assessed/linked and repo-local completion notes name actual evidence and remaining limitations.
+- [x] #5 Clear Notes round trips and compatible private builder/receiver fixtures preserve exact source, language and lineage; unavailable private server transport retains ciphertext-backed local pending intent.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -48,27 +48,21 @@ Browser ownership/cache correction: U/src/services/tldw/domains/collections.ts o
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Implemented authenticated fresh Notes capability checks and complete nullable language publication in the existing browser client owner. Collections mixin is the single createNote implementation; account changes refuse mutation/cleanup and unsupported peers remain actionable pending. ADR065 extends the locked Notes contract without adding private transport.
+Verification: browser25 tests, server compatibility10 and whole frontend typecheck passed on final browser code; scoped ESLint introduced none against immutable base, inherited Prettier debt unchanged; diff check passed. Final client scoped fix2 review clean; server has no fix2 production delta. Bandit not applicable to TypeScript-only server changes; Chatbook touched Python had no introduced security findings.
+Limits: actual server private Notes transport unavailable; compatible encrypted builder/receiver fixtures do not claim actual private server publication. Source-safe UI and pending-reason presentation remain later integration work.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Browser Notes publication uses one authenticated owner with complete language semantics. UI25, server10 and frontend typecheck passed; independent review clean. Actual private transport remains unavailable with local intent retained.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-Implemented negotiated complete language snapshots, authenticated publication guards and exact omission/null preservation. Existing local mutation/outbox owners retain unsupported intent; scoped immutable origin proof prevents cross-account drain. Fresh probes and scoped mirror/current-authority injection are documented corrections under ADR194/065. Verification and limitations: task-4-report.md in the controller SDD directory. Status remains In Progress pending independent review.
-
-Fix round1: remove duplicated base createNote implementation; existing collections mixin is the single owner through declaration merging/Object.assign. Browser25tests and final whole frontend typecheck pass. Explicit W ESLint config from U supports scoped syntax/rules with no introduced diagnostics against immutable fix base; W-only Next pages rule emits applicability notice. Inherited formatter debt unchanged. Task remains In Progress for independent review.
