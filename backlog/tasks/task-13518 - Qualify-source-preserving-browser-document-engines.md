@@ -1,7 +1,7 @@
 ---
 id: TASK-13518
 title: Qualify source-preserving browser document engines
-status: In Progress
+status: Done
 created_date: 2026-10-07 03:09
 dependencies:
 - TASK-13511
@@ -12,7 +12,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
-updated_date: 2026-10-07 13:30
+updated_date: 2026-10-07 13:45
 ---
 
 ## Description
@@ -61,18 +61,19 @@ Review fix round 1/5 closes Important I1/I2 from base 9d50710a37cab6bd759b0b55b6
 Evidence: I1 RED 2 failed/74 passed -> 76 passed; I2 RED 7 failed/77 passed (including three layout failures), then 3 failed/81 passed; expanded layout RED 5 failed/86 passed -> final whole YAML 91 passed. Strict scoped types, whole-W 8 GiB typecheck, changed-source ESLint/Prettier and diff checks pass. Final browser-target engine rebuilt (85 modules/no externals) and 15 exact-hole/positive/layout bundle cases pass; 260791-byte artifact SHA256 2ebc823bdccb659abe3b00d003733a9539ff594d18c83d0a1f49254ae546c1c2. Original bundle/captures retained; current engine-final.mjs points to amended artifact. Frozen fixture SHA unchanged. No unchanged JSON/positions/contracts, benchmarks, Next/WXT builds or old browser controls rerun; their existing 9d50710a37 provenance is historical, not new amended-source qualification.
 
 Paths: yaml-document.ts and its existing YAML test owner; durable browser qualification report; structured-notes lessons; this task. Bounded fix evidence appended to Chatbook plan task-9-report.md; exact commands/output/exits/source/artifact hashes under /private/tmp/tldw-task9-evidence/fix1. Self-review complete; remaining cooperative timing/heap/lifecycle limits and deferred inherited warning M1 unchanged. Bandit N/A, no Python production edits. Keep In Progress for fresh scoped controller review.
+Controller closure: fresh independent scoped review over 9d50710a37..4f1f7356c6e3bb69efae92e9361cf8044c1e2a0c is clean: Important I1/I2 addressed, authorized Ruling38 key-property indentation scope verified, zero new Critical/Important/Minor findings. Full review/report and retained command/output/exit/hash records were read. All five initial Cannot Verify groups are explicitly dispositioned in the plan workspace scope-resolution record. Current evidence is whole YAML 91 plus 15 amended browser-target bundle controls in Node and scoped/whole-W types/static checks; original 142 and real Next/WXT Chromium loading are historical 9d evidence, not an unexecuted combined 164 or a new real-browser run. ADR065, durable browser qualification and incident lesson updated. No Python touched: Bandit N/A. E4 owns actual termination/lease/debounce/cleanup; I2/I3/I5 own mounted editor/history/release gates. Synthetic ~318 MB is current whole-Node-process RSS, neither peak nor heap cap. Deferred original M1 warning noise is retained for final review; no remaining E3 blocking findings. All six AC and six repo DoD requirements satisfied within this unit's bounded scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Review fix1: merge duplicate/tag-value admission and approved CST property-prefix indentation corrected; 91 YAML tests and 15 amended bundle controls pass, static/types clean; In Progress pending fresh review.
+Pure browser JSON/JSONL/YAML engines qualified; merge duplicate/tag-value and scoped tagged-key indentation fixes independently reviewed clean. Current 91 YAML/15 bundle controls, original 142/Next/WXT evidence and exact static/type exits recorded. All AC/DoD complete; hard worker and mounted editor/release gates remain with E4/I2/I3/I5; M1 warnings deferred.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
