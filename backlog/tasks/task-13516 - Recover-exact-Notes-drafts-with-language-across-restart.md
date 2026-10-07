@@ -1,7 +1,7 @@
 ---
 id: TASK-13516
 title: Recover exact Notes drafts with language across restart
-status: In Progress
+status: Done
 created_date: 2026-10-07 03:08
 dependencies:
 - TASK-13513
@@ -13,7 +13,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
-updated_date: 2026-10-07 08:23
+updated_date: 2026-10-07 08:33
 ---
 
 ## Description
@@ -24,12 +24,12 @@ Keep unsaved edits recoverable across navigation, rejected saves and process res
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Body and source language share one canonical draft revision, including language-only mutation, conflicts and explicit null reset.
-- [ ] #2 An empty rejected draft recovers exactly after navigation and restart without claiming a successful save.
-- [ ] #3 Recovery is scoped to authority/workspace/note and removed only after its matching complete save; older acknowledgements preserve newer edits.
-- [ ] #4 Storage/quota failures prevent discard-producing navigation and show a truthful error; existing storage ownership is reused without diagnostics persistence.
-- [ ] #5 Targeted recovery/session tests cover profile isolation, logout, restart and actual copy/history owners touched by this change.
-- [ ] #6 Relevant governing ADR is assessed/linked and repo-local completion notes name actual evidence and remaining limitations.
+- [x] #1 Body and source language share one canonical draft revision, including language-only mutation, conflicts and explicit null reset.
+- [x] #2 An empty rejected draft recovers exactly after navigation and restart without claiming a successful save.
+- [x] #3 Recovery is scoped to authority/workspace/note and removed only after its matching complete save; older acknowledgements preserve newer edits.
+- [x] #4 Storage/quota failures prevent discard-producing navigation and show a truthful error; existing storage ownership is reused without diagnostics persistence.
+- [x] #5 Targeted recovery/session tests cover profile isolation, logout, restart and actual copy/history owners touched by this change.
+- [x] #6 Relevant governing ADR is assessed/linked and repo-local completion notes name actual evidence and remaining limitations.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -50,22 +50,19 @@ Reason: implement approved scoped durable-draft recovery and serialized-language
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented versioned language-bearing recovery in the existing authority-scoped browser offline queue. Source and language share revisions, empty/rejected drafts survive navigation and reload, older/incomplete acknowledgements and quota failures retain pending state, and actual Notes page conversion/duplication handlers are source-safe. ADR-065 amended. Final affected Vitest selection: 22 passed; whole frontend TypeScript check passed. Immutable-base ESLint/formatter comparison adds no findings; unrelated pin-order test failure reproduced at immutable base. Remains In Progress for controller review; full evidence and limitations in F5 report.
-F5 fix round 1: queue completion validates current note/selection before using editor state; ordinary save and queue sync exclude each other in both orders. Fresh drafts use known null/default mode while loading/legacy remain gated; legacy recovery borrows metadata only from its matching version. Ruling31 pauses automatic error replay until Save/edit requeues, with stable-error and retry controls. Fresh known-null on an incapable server remains locally pending, not Saved. Browser RED5 plus retry RED1 reproduced; affected structured/authority/actual-page coverage passed 30 tests and whole W typecheck passed. Scoped ESLint adds no findings against eeed576b4f. Remains In Progress for independent review.
-F5 fix round 2 (Rulings32–33): reset clears pending detail-load ownership; v3 existing recovery entries capture narrowly validated implicit-default provenance. Untouched ordinary creates omit metadata and require exact source/valid identity/version acknowledgements on legacy servers; explicit same-null selections, recognized modes and ambiguous historical entries retain capability/language checks. Actual duplication preserves known/unknown mode plus provenance through the existing reset helper. RED11 plus actual-duplicate RED2 reproduced; final affected trio53 passed and whole W typecheck exit0 recorded. Scoped ESLint unchanged; scoped formatter replay unchanged. C production unchanged/no C tests. Remains In Progress for independent review.
+Implemented coherent language-bearing recovery in the existing authority-scoped browser queue (v3), with matching source/revision cleanup, quota/authority fences and stable retained-error replay until Save/edit. Untouched fresh defaults carry narrowly validated provenance and retain ordinary legacy-create compatibility; explicit/null/future metadata remains capability-protected. Actual New/reset and duplicate handlers preserve loading ownership and known/unknown mode/provenance. Governing ADR065 amended before serialization. Evidence: final post-format structured/authority/actual-page trio53; whole frontend typecheck exit0 recorded; no introduced scoped ESLint, direct changed-region/test formatting evidence. Initial task review and two scoped rounds are clean. Inherited whole-file/static debt and baseline pin-order fixture limitation remain disclosed; no external live-server/OS-kill or downstream formatter adoption claim.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+F5 complete after independent review and two scoped fixes. Exact authority-scoped drafts, legacy creation and duplicate provenance are covered by final53; whole frontend typecheck exit0. ADR065 applies. Known inherited static/formatter debt and later live/editor qualification gates are recorded in the F5 report and ledger.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
