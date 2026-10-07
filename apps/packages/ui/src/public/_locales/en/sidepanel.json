@@ -171,13 +171,13 @@
     "message": "Enable temporary mode?"
   },
   "composer_tempChatConfirmContent": {
-    "message": "This will clear your current conversation. Messages won't be saved."
+    "message": "This will clear your current conversation. New Temporary messages can remain on this device across reloads until you close or clear the chat. They will not be added to server history."
   },
   "composer_tempChatDisableConfirmTitle": {
     "message": "Disable temporary mode?"
   },
   "composer_tempChatDisableConfirmContent": {
-    "message": "This will clear your current conversation. Messages will start saving again."
+    "message": "This will clear your current Temporary conversation. New messages can be stored in chat history."
   },
   "composer_tempChatDisabledClearedMessages": {
     "message": "Temporary chat disabled. Previous messages cleared."

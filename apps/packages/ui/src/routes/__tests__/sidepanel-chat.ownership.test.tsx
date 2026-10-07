@@ -617,31 +617,60 @@ describe.each([
     expect(useSidepanelChatTabsStore.getState().tabs).toHaveLength(2)
   })
 
-  it("retains a verified unsent-only Temporary locator while excluding live transcript and derived labels from durable tabs", async () => {
+  it("retains an owned Temporary transcript and locator while excluding queued sends and derived labels from durable tabs", async () => {
     render(<Route />)
-    await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).toBeTruthy())
+    await waitFor(() =>
+      expect(useSidepanelChatTabsStore.getState().activeTabId).toBeTruthy()
+    )
     act(() => {
       useStoreMessageOption.getState().setTemporaryChat(true)
       useStoreMessageOption.getState().startNewChatDraft(true)
       useStoreMessageOption.getState().setHistoryId("temp")
-      useStoreMessageOption.getState().setMessages(snapshot("TEMPORARY PRIVATE TURN").messages)
-      useStoreMessageOption.getState().setHistory(snapshot("TEMPORARY PRIVATE TURN").history)
-      useStoreMessageOption.getState().setQueuedMessages([buildQueuedRequest({ promptText: "TEMPORARY QUEUED TURN" })])
+      useStoreMessageOption
+        .getState()
+        .setMessages(snapshot("TEMPORARY PRIVATE TURN").messages)
+      useStoreMessageOption
+        .getState()
+        .setHistory(snapshot("TEMPORARY PRIVATE TURN").history)
+      useStoreMessageOption
+        .getState()
+        .setQueuedMessages([
+          buildQueuedRequest({ promptText: "TEMPORARY QUEUED TURN" })
+        ])
     })
     const id = useSidepanelChatTabsStore.getState().activeTabId!
     const address = useStoreMessageOption.getState().chatDraftAddress!
     act(() => window.dispatchEvent(new Event("beforeunload")))
     await waitFor(() => {
-      const durable = io.data.get(storedKey("alice")) as ReturnType<typeof tabsState>
+      const durable = io.data.get(storedKey("alice")) as ReturnType<
+        typeof tabsState
+      >
       expect(durable.snapshotsById[id]).toMatchObject({
-        chatDraftHandle: { address, ownerHash: chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }) },
-        temporaryChat: true, messages: [], history: [], queuedMessages: [], historyId: null, serverChatId: null, historySelectionReference: null
+        chatDraftHandle: {
+          address,
+          ownerHash: chatDraftOwnerKey({
+            config: { serverUrl: "http://chat.test", authMode: "multi-user" },
+            userId: "alice"
+          })
+        },
+        temporaryChat: true,
+        messages: snapshot("TEMPORARY PRIVATE TURN").messages,
+        history: snapshot("TEMPORARY PRIVATE TURN").history,
+        queuedMessages: [],
+        historyId: null,
+        serverChatId: null,
+        historySelectionReference: null
       })
-      expect(JSON.stringify(durable)).not.toContain("TEMPORARY PRIVATE TURN")
+      expect(JSON.stringify(durable)).toContain("TEMPORARY PRIVATE TURN")
+      expect(durable.tabs.find((tab) => tab.id === id)?.label).toBe("New chat")
       expect(JSON.stringify(durable)).not.toContain("TEMPORARY QUEUED TURN")
     })
-    expect(useSidepanelChatTabsStore.getState().getSnapshot(id)?.messages[0]?.message).toBe("TEMPORARY PRIVATE TURN")
-    expect(useStoreMessageOption.getState().messages[0]?.message).toBe("TEMPORARY PRIVATE TURN")
+    expect(
+      useSidepanelChatTabsStore.getState().getSnapshot(id)?.messages[0]?.message
+    ).toBe("TEMPORARY PRIVATE TURN")
+    expect(useStoreMessageOption.getState().messages[0]?.message).toBe(
+      "TEMPORARY PRIVATE TURN"
+    )
   })
 
   it.each([false, true])("recovers a departed unsent draft into a new compact tab (Temporary %s)", async temporary => {
@@ -827,27 +856,89 @@ describe.each([
     first.unmount()
   })
 
-  it("retains Temporary RAM and next unsent text on warm return, then only unsent text on cold reload", async () => {
+  it.each(["history", "messages"])(
+    "cold restores a safe fresh view from malformed owned Temporary %s",
+    async (field) => {
+      const saved = tabsState()
+      const address = {
+        kind: "fresh" as const,
+        id: "malformed-temp",
+        scope: { type: "global" as const },
+        temporary: true
+      }
+      saved.activeTabId = "alice-two"
+      Object.assign(saved.snapshotsById["alice-two"], {
+        chatDraftHandle: {
+          address,
+          ownerHash: chatDraftOwnerKey({
+            config: { serverUrl: "http://chat.test", authMode: "multi-user" },
+            userId: "alice"
+          })
+        },
+        temporaryChat: true,
+        historyId: "temp",
+        [field]: [null]
+      })
+      io.data.set(storedKey("alice"), saved)
+      render(<Route />)
+      await waitFor(() =>
+        expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(address)
+      )
+      expect(useStoreMessageOption.getState()).toMatchObject({
+        temporaryChat: true,
+        history: [],
+        messages: [],
+        historyId: null,
+        serverChatId: null
+      })
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    }
+  )
+
+  it("retains owned Temporary transcript and next unsent text on warm return and cold reload", async () => {
     io.useComposer = true
     let view = render(<Route />)
-    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
+    await waitFor(() =>
+      expect(screen.getByLabelText("Composer draft")).toBeEnabled()
+    )
     act(() => {
       useStoreMessageOption.getState().setTemporaryChat(true)
       useStoreMessageOption.getState().startNewChatDraft(true)
       useStoreMessageOption.getState().setHistoryId("temp")
-      useStoreMessageOption.getState().setHistory(snapshot("TEMP PRIVATE REPLY").history)
-      useStoreMessageOption.getState().setMessages(snapshot("TEMP PRIVATE REPLY").messages)
-      useStoreMessageOption.getState().setQueuedMessages([buildQueuedRequest({ promptText: "TEMP PRIVATE QUEUE" })])
+      useStoreMessageOption
+        .getState()
+        .setHistory(snapshot("TEMP PRIVATE REPLY").history)
+      useStoreMessageOption
+        .getState()
+        .setMessages(snapshot("TEMP PRIVATE REPLY").messages)
+      useStoreMessageOption
+        .getState()
+        .setQueuedMessages([
+          buildQueuedRequest({ promptText: "TEMP PRIVATE QUEUE" })
+        ])
     })
     const address = useStoreMessageOption.getState().chatDraftAddress!
-    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toBeEnabled())
-    fireEvent.change(screen.getByLabelText("Composer draft"), { target: { value: "NEXT TEMP UNSENT" } })
+    await waitFor(() =>
+      expect(screen.getByLabelText("Composer draft")).toBeEnabled()
+    )
+    fireEvent.change(screen.getByLabelText("Composer draft"), {
+      target: { value: "NEXT TEMP UNSENT" }
+    })
     view.unmount()
     await act(async () => {})
-    expect(JSON.stringify(io.data.get(storedKey("alice")))).not.toContain("TEMP PRIVATE")
+    expect(JSON.stringify(io.data.get(storedKey("alice")))).toContain(
+      "TEMP PRIVATE REPLY"
+    )
+    expect(JSON.stringify(io.data.get(storedKey("alice")))).not.toContain(
+      "TEMP PRIVATE QUEUE"
+    )
     view = render(<Route />)
     await screen.findByText("TEMP PRIVATE REPLY")
-    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toHaveValue("NEXT TEMP UNSENT"))
+    await waitFor(() =>
+      expect(screen.getByLabelText("Composer draft")).toHaveValue(
+        "NEXT TEMP UNSENT"
+      )
+    )
     expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(address)
     expect(useStoreMessageOption.getState().historyId).toBe("temp")
     view.unmount()
@@ -855,10 +946,23 @@ describe.each([
     useSidepanelChatTabsStore.getState().clear()
     useStoreMessageOption.getState().startNewChatDraft(false)
     render(<Route />)
-    await waitFor(() => expect(screen.getByLabelText("Composer draft")).toHaveValue("NEXT TEMP UNSENT"))
-    expect(useStoreMessageOption.getState()).toMatchObject({ chatDraftAddress: address, temporaryChat: true,
-      history: [], messages: [], queuedMessages: [], historyId: null, serverChatId: null })
-    expect(screen.queryByText("TEMP PRIVATE REPLY")).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByLabelText("Composer draft")).toHaveValue(
+        "NEXT TEMP UNSENT"
+      )
+    )
+    expect(useStoreMessageOption.getState()).toMatchObject({
+      chatDraftAddress: address,
+      temporaryChat: true,
+      history: snapshot("TEMP PRIVATE REPLY").history,
+      messages: snapshot("TEMP PRIVATE REPLY").messages,
+      queuedMessages: [],
+      historyId: null,
+      serverChatId: null
+    })
+    expect(
+      within(screen.getByRole("log")).getByText("TEMP PRIVATE REPLY")
+    ).toBeInTheDocument()
   })
 
   it.each(["local", "native"])("loads the exact qualified %s handle and its retained composer text", async kind => {

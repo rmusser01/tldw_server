@@ -137,19 +137,31 @@ const reference = {
   owner_kind: "local"
 }
 function ColdDraft() {
-  const address = useStoreMessageOption(state => state.chatDraftAddress)
+  const address = useStoreMessageOption((state) => state.chatDraftAddress)
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   React.useLayoutEffect(() => {
-    if (!useStoreMessageOption.getState().chatDraftAddress) useStoreMessageOption.getState().startNewChatDraft()
+    if (!useStoreMessageOption.getState().chatDraftAddress)
+      useStoreMessageOption.getState().startNewChatDraft()
   }, [])
   const composer = useComposerText({
-    draftKey: address ? conversationDraftKey("cold-composer", address) : "cold-composer",
+    draftKey: address
+      ? conversationDraftKey("cold-composer", address)
+      : "cold-composer",
     draftEnabled: address !== null,
     tabScopedDraft: true,
     textareaRef
   })
-  return <textarea ref={textareaRef} aria-label="Restored draft" value={composer.form.values.message} readOnly />
+  return (
+    <textarea
+      ref={textareaRef}
+      aria-label="Restored draft"
+      disabled={!composer.draftReady}
+      value={composer.form.values.message}
+      onChange={(event) => composer.setMessageValue(event.target.value)}
+    />
+  )
 }
+
 function ColdSession({ automaticRestore = true, withDraft = false }: { automaticRestore?: boolean; withDraft?: boolean }) {
   const selection = useHistorySelectionContext()!
   React.useLayoutEffect(() => { controller = selection }, [selection])
@@ -381,6 +393,158 @@ it.each([false, true])("cold restores the retained unsent text through the actua
   expect(mocks.capture).not.toHaveBeenCalled()
   expect(mocks.recent).not.toHaveBeenCalled()
 })
+
+it("cold restores a completed Temporary transcript and next draft through the real session and composer", async () => {
+  let view = mount(true, true)
+  await waitFor(() => expect(outcome).toBe("not-restored"))
+  const transcript = {
+    history: [
+      { role: "user" as const, content: "TEMP QUESTION" },
+      { role: "assistant" as const, content: "TEMP REPLY" }
+    ],
+    messages: [
+      {
+        id: "temp-user",
+        isBot: false,
+        name: "You",
+        message: "TEMP QUESTION",
+        sources: []
+      },
+      {
+        id: "temp-reply",
+        isBot: true,
+        name: "Assistant",
+        message: "TEMP REPLY",
+        sources: [],
+        images: ["data:image/png;base64,dGVzdA=="]
+      }
+    ]
+  }
+  act(() => {
+    const state = useStoreMessageOption.getState()
+    state.setTemporaryChat(true)
+    state.startNewChatDraft(true)
+    state.setHistoryId("temp")
+    state.setHistory(transcript.history)
+    state.setMessages(transcript.messages)
+    state.setQueuedMessages([
+      buildQueuedRequest({
+        id: "temp-queue",
+        clientRequestId: "temp-request",
+        promptText: "DO NOT RESEND TEMP QUEUE"
+      })
+    ])
+  })
+  const address = useStoreMessageOption.getState().chatDraftAddress!
+  await waitFor(() =>
+    expect(
+      screen.getByRole("textbox", { name: "Restored draft" })
+    ).toBeEnabled()
+  )
+  fireEvent.change(screen.getByRole("textbox", { name: "Restored draft" }), {
+    target: { value: "NEXT TEMP UNSENT" }
+  })
+  act(() => window.dispatchEvent(new Event("pagehide")))
+  expect(usePlaygroundSessionStore.getState()).toMatchObject({
+    chatDraftHandle: { address, ownerHash },
+    temporaryTranscript: transcript,
+    historyId: null,
+    serverChatId: null,
+    queuedMessages: []
+  })
+  view.unmount()
+  const persisted = sessionStorage.getItem("tldw-playground-session")!
+  useStoreMessageOption.setState({
+    chatDraftAddress: null,
+    temporaryChat: false,
+    historyId: null,
+    serverChatId: null,
+    history: [],
+    messages: [],
+    queuedMessages: []
+  })
+  usePlaygroundSessionStore.getState().clearSession()
+  sessionStorage.setItem("tldw-playground-session", persisted)
+  await usePlaygroundSessionStore.persist.rehydrate()
+  outcome = undefined
+  mocks.recent.mockClear()
+  view = mount(true, true)
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Restored draft" })).toHaveValue(
+      "NEXT TEMP UNSENT"
+    )
+  )
+  expect(screen.getByTestId("transcript")).toHaveTextContent(
+    "TEMP QUESTION / TEMP REPLY"
+  )
+  expect(useStoreMessageOption.getState()).toMatchObject({
+    chatDraftAddress: address,
+    temporaryChat: true,
+    ...transcript,
+    historyId: null,
+    serverChatId: null,
+    queuedMessages: []
+  })
+  expect(controller.getCurrent().owner).toBeNull()
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(mocks.recent).not.toHaveBeenCalled()
+  view.unmount()
+})
+
+it.each(["wrong-owner", "history-null", "messages-null"])(
+  "does not publish a rejected Temporary transcript (%s)",
+  (invalid) => {
+    const address = {
+      kind: "fresh" as const,
+      id: "rejected-temp",
+      scope: { type: "global" as const },
+      temporary: true
+    }
+    const temporaryTranscript = {
+      history:
+        invalid === "history-null"
+          ? [null]
+          : [{ role: "assistant", content: "PRIVATE REJECTED REPLY" }],
+      messages:
+        invalid === "messages-null"
+          ? [null]
+          : [
+              {
+                isBot: true,
+                name: "Assistant",
+                message: "PRIVATE REJECTED REPLY",
+                sources: []
+              }
+            ]
+    } as unknown as NonNullable<
+      ReturnType<
+        typeof usePlaygroundSessionStore.getState
+      >["temporaryTranscript"]
+    >
+    usePlaygroundSessionStore.getState().saveSession({
+      chatDraftHandle: {
+        address,
+        ownerHash: invalid === "wrong-owner" ? "b".repeat(64) : ownerHash
+      },
+      temporaryTranscript,
+      scopeKey: "current"
+    })
+    mount()
+    return waitFor(() => {
+      expect(outcome).toBe("cancelled")
+      expect(useStoreMessageOption.getState()).toMatchObject({
+        history: [],
+        messages: [],
+        historyId: null,
+        serverChatId: null
+      })
+      expect(usePlaygroundSessionStore.getState().temporaryTranscript).toEqual(
+        temporaryTranscript
+      )
+      expect(mocks.capture).not.toHaveBeenCalled()
+    })
+  }
+)
 
 it("defers a fresh handle while owner verification is pending, then rejects another account", async () => {
   let finish!: (value: typeof verifiedScope) => void

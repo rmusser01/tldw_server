@@ -702,7 +702,7 @@
     "message": "Live transcript will appear here while recording."
   },
   "actions_temporaryOn": {
-    "message": "Temporary chat (not saved)"
+    "message": "Temporary chat (on this device)"
   },
   "actions_temporaryOff": {
     "message": "Save chat to history"
@@ -978,7 +978,7 @@
     "message": "Close Search & Context"
   },
   "composer_persistence_ephemeral": {
-    "message": "Temporary chat: not saved in history and cleared when you close this window."
+    "message": "Temporary chat can stay on this device across reloads until closed or cleared. It is not added to server history."
   },
   "composer_persistence_local": {
     "message": "Saved on this device only. This chat is not on your tldw server."
@@ -3783,7 +3783,7 @@
     "message": "Temporary"
   },
   "composer_persistence_temporaryModeHelp": {
-    "message": "New messages are not added to saved chat history. Draft text may remain on this device."
+    "message": "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device."
   },
   "composer_persistence_historyControl": {
     "message": "Chat history"
@@ -4279,5 +4279,8 @@
   },
   "composer_sceneSourceUnavailable": {
     "message": "Close this panel and check your account verification and selected chat before reopening scene settings."
+  },
+  "header_newTemporaryChat": {
+    "message": "Temporary chat (on this device)"
   }
 }

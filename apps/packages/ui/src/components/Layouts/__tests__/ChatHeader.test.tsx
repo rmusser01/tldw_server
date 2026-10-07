@@ -136,7 +136,7 @@ describe("ChatHeader shortcut toggle", () => {
       screen.getByRole("button", { name: "Show shortcuts" }),
       screen.getByRole("button", { name: "Search commands - Open command palette" }),
       screen.getByRole("button", { name: "New saved chat" }),
-      screen.getByRole("button", { name: "Temporary chat (not saved)" }),
+      screen.getByRole("button", { name: "Temporary chat (on this device)" }),
       screen.getByRole("button", { name: "Character chat" }),
       screen.getByRole("button", { name: "Open settings" }),
       screen.getByRole("button", { name: "Switch to light theme" }),
@@ -185,7 +185,7 @@ describe("ChatHeader shortcut toggle", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "New saved chat" }))
     fireEvent.click(
-      screen.getByRole("button", { name: "Temporary chat (not saved)" })
+      screen.getByRole("button", { name: "Temporary chat (on this device)" })
     )
     fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
 
@@ -209,7 +209,7 @@ describe("ChatHeader shortcut toggle", () => {
       screen.queryByRole("button", { name: "New saved chat" })
     ).not.toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: "Temporary chat (not saved)" })
+      screen.queryByRole("button", { name: "Temporary chat (on this device)" })
     ).not.toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: "Character chat" })
@@ -221,10 +221,10 @@ describe("ChatHeader shortcut toggle", () => {
     render(<ChatHeader {...props} />)
 
     expect(
-      screen.getByRole("button", { name: "Temporary chat (not saved)" }).className
+      screen.getByRole("button", { name: "Temporary chat (on this device)" }).className
     ).toContain("hidden")
     expect(
-      screen.getByRole("button", { name: "Temporary chat (not saved)" }).className
+      screen.getByRole("button", { name: "Temporary chat (on this device)" }).className
     ).toContain("sm:inline-flex")
     expect(screen.getByRole("button", { name: "Character chat" }).className).toContain(
       "hidden"
@@ -333,7 +333,7 @@ describe("ChatHeader shortcut toggle", () => {
     expect(badge).toHaveTextContent("Temporary")
     expect(badge).toHaveAttribute(
       "title",
-      "New messages are not added to saved chat history. Draft text may remain on this device."
+      "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device."
     )
   })
 
@@ -391,5 +391,5 @@ it("labels history eligibility without claiming an acknowledged save", () => {
 
 it("explains Temporary history without promising removal of retained local drafts", () => {
   render(<ChatHeader {...createProps({ temporaryChat: true })} />)
-  expect(screen.getByText("Temporary")).toHaveAttribute("title", "New messages are not added to saved chat history. Draft text may remain on this device.")
+  expect(screen.getByText("Temporary")).toHaveAttribute("title", "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device.")
 })

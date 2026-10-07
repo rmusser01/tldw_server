@@ -3,7 +3,7 @@ import type { ServerChatSaveStatus } from "@/store/server-chat-save-status"
 /**
  * Where a chat is saved, derived only from acknowledged state (CS-03 / XS-05,
  * #3104):
- * - "temporary": a temporary chat, which is not saved;
+ * - "temporary": an on-device Temporary chat outside server history;
  * - "local": saved on this device only (no server chat id);
  * - "serverSaving": a server chat whose latest write is still in flight;
  * - "serverFailed": a server chat whose latest write was not acknowledged;
@@ -69,7 +69,7 @@ export const getChatPersistenceCopy = (
         description: translate(
           t,
           "ephemeral",
-          "Temporary chat: not saved in history and cleared when you close this window."
+          "Temporary chat can stay on this device across reloads until closed or cleared. It is not added to server history."
         )
       }
     case "serverSaving":

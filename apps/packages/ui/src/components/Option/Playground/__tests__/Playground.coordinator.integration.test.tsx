@@ -1655,7 +1655,7 @@ describe("Playground coordinator integration", () => {
     } finally { release(); view.unmount(); queryClient.clear() }
   })
 
-  it.each([[0, "New saved chat"], [70, "New saved chat"], [0, "Temporary chat (not saved)"], [70, "Temporary chat (not saved)"]] as const)("UAT355 %sms %s clears the pre-send Character workflow", async (delay, action) => {
+  it.each([[0, "New saved chat"], [70, "New saved chat"], [0, "Temporary chat (on this device)"], [70, "Temporary chat (on this device)"]] as const)("UAT355 %sms %s clears the pre-send Character workflow", async (delay, action) => {
     const routeKind = "search"
     realLoader.route = true
     routeCommitDelay = delay

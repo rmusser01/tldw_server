@@ -98,3 +98,38 @@ it("stores only an initialization address and clears it with the session", () =>
   usePlaygroundSessionStore.getState().clearSession()
   expect(usePlaygroundSessionStore.getState().historySelectionReference).toBeNull()
 })
+
+
+it.each([false, true])(
+  "keeps only a valid Temporary session eligible beyond ordinary bookmark expiry (%s)",
+  (temporary) => {
+    const chatDraftHandle: ChatDraftHandle = {
+      ownerHash: "a".repeat(64),
+      address: {
+        kind: "fresh",
+        id: "age",
+        scope: { type: "global" },
+        temporary
+      }
+    }
+    usePlaygroundSessionStore
+      .getState()
+      .saveSession({ scopeKey: "scope:a", chatDraftHandle })
+    usePlaygroundSessionStore.setState({
+      lastUpdated: Date.now() - 48 * 60 * 60 * 1000
+    })
+    expect(usePlaygroundSessionStore.getState().isSessionStale()).toBe(
+      !temporary
+    )
+    expect(usePlaygroundSessionStore.getState().isSessionValid("scope:a")).toBe(
+      temporary
+    )
+    expect(usePlaygroundSessionStore.getState().isSessionValid("scope:b")).toBe(
+      false
+    )
+    usePlaygroundSessionStore.getState().clearSession()
+    expect(usePlaygroundSessionStore.getState().isSessionValid("scope:a")).toBe(
+      false
+    )
+  }
+)

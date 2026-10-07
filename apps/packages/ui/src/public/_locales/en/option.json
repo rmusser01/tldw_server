@@ -456,7 +456,7 @@
     "message": "Enter a new title"
   },
   "temporaryChat": {
-    "message": "Temporary chat (not saved)"
+    "message": "Temporary chat (on this device)"
   },
   "more_copy_group": {
     "message": "Copy"

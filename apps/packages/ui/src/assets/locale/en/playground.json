@@ -1,4 +1,7 @@
 {
+  "header": {
+    "newTemporaryChat": "Temporary chat (on this device)"
+  },
   "mediaHandoff": {
     "conflictLabel": "Media handoff conflict",
     "conflict": "Your composer already has a draft. Insert the media source, replace your draft, or cancel the import.",
@@ -448,7 +451,7 @@
     "spaceKeyHint": "Press <kbd>Space</kbd> to toggle recording"
   },
   "actions": {
-    "temporaryOn": "Temporary chat (not saved)",
+    "temporaryOn": "Temporary chat (on this device)",
     "temporaryOff": "Save chat to history",
     "webSearchOn": "Web search on",
     "webSearchOff": "Web search off",
@@ -568,8 +571,8 @@
       "historyModeTitle": "History on",
       "historyModeHelp": "New messages can be stored in chat history.",
       "temporaryModeTitle": "Temporary",
-      "temporaryModeHelp": "New messages are not added to saved chat history. Draft text may remain on this device.",
-      "ephemeral": "Temporary chat: not saved in history and cleared when you close this window.",
+      "temporaryModeHelp": "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device.",
+      "ephemeral": "Temporary chat can stay on this device across reloads until closed or cleared. It is not added to server history.",
       "local": "Saved on this device only. This chat is not on your tldw server.",
       "server": "Saved on your tldw server and on this device.",
       "ephemeralPill": "Temporary",

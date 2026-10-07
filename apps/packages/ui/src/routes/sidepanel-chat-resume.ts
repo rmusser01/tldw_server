@@ -31,33 +31,84 @@ export type SidepanelTabsState = {
 export const getTabsStorageKey = (id: number | null | undefined, ownerKey: string) =>
   `sidepanelChatTabsState:v2:${encodeURIComponent(ownerKey)}:${id !== null && id !== undefined ? `tab-${id}` : "global"}`
 
-/** Durable tabs retain setup and private draft locators, never Temporary history. */
+/** Durable tabs retain setup, draft locators and owned Temporary transcripts. */
 export const durableSidepanelTabs = (
   state: SidepanelTabsState,
   ownerHash: string,
   newChatLabel = "New chat"
 ): SidepanelTabsState => {
   const snapshotsById: SidepanelTabsState["snapshotsById"] = {}
-  const tabs = state.tabs.map(tab => {
+  const tabs = state.tabs.map((tab) => {
     const snapshot = state.snapshotsById[tab.id]
     if (!snapshot) return { ...tab }
-    const handle = isChatDraftHandle(snapshot.chatDraftHandle) && snapshot.chatDraftHandle.ownerHash === ownerHash &&
-      (snapshot.chatDraftHandle.address.kind !== "fresh" || snapshot.chatDraftHandle.address.temporary === snapshot.temporaryChat) &&
-      (!snapshot.temporaryChat || snapshot.chatDraftHandle.address.kind === "fresh") ? snapshot.chatDraftHandle : null
+    const handle =
+      isChatDraftHandle(snapshot.chatDraftHandle) &&
+      snapshot.chatDraftHandle.ownerHash === ownerHash &&
+      (snapshot.chatDraftHandle.address.kind !== "fresh" ||
+        snapshot.chatDraftHandle.address.temporary ===
+          snapshot.temporaryChat) &&
+      (!snapshot.temporaryChat ||
+        snapshot.chatDraftHandle.address.kind === "fresh")
+        ? snapshot.chatDraftHandle
+        : null
     const fresh = handle?.address.kind === "fresh"
     const clearHistory = snapshot.temporaryChat || fresh
+    const retainTemporary =
+      snapshot.temporaryChat &&
+      fresh &&
+      !snapshot.serverChatId &&
+      (snapshot.historyId === null || snapshot.historyId === "temp") &&
+      Array.isArray(snapshot.history) &&
+      Array.isArray(snapshot.messages) &&
+      snapshot.history.every(
+        (row) =>
+          row &&
+          ["user", "assistant", "system"].includes(row.role) &&
+          typeof row.content === "string"
+      ) &&
+      snapshot.messages.every(
+        (row) =>
+          row &&
+          typeof row.isBot === "boolean" &&
+          typeof row.name === "string" &&
+          typeof row.message === "string"
+      )
     snapshotsById[tab.id] = {
-      ...snapshot, selectedQuickPrompt: null, chatDraftAddress: null, chatDraftHandle: handle,
-      ...(clearHistory ? {
-        history: [], messages: [], historyId: null, serverChatId: null, historySelectionReference: null,
-        serverChatState: null, serverChatTopic: null, serverChatClusterId: null, serverChatSource: null, serverChatExternalRef: null
-      } : handle?.address.kind === "native" ? { historyId: null } : {}),
+      ...snapshot,
+      selectedQuickPrompt: null,
+      chatDraftAddress: null,
+      chatDraftHandle: handle,
+      ...(clearHistory
+        ? {
+            history: [],
+            messages: [],
+            historyId: null,
+            serverChatId: null,
+            historySelectionReference: null,
+            serverChatState: null,
+            serverChatTopic: null,
+            serverChatClusterId: null,
+            serverChatSource: null,
+            serverChatExternalRef: null
+          }
+        : handle?.address.kind === "native"
+          ? { historyId: null }
+          : {}),
+      ...(retainTemporary
+        ? { history: snapshot.history, messages: snapshot.messages }
+        : {}),
       ...(snapshot.temporaryChat ? { queuedMessages: [] } : {})
     }
     return {
       ...tab,
-      ...(clearHistory ? { historyId: null, serverChatId: null, serverChatTopic: null } : handle?.address.kind === "native" ? { historyId: null } : {}),
-      ...(snapshot.temporaryChat ? { label: newChatLabel, labelSource: "auto" as const } : {})
+      ...(clearHistory
+        ? { historyId: null, serverChatId: null, serverChatTopic: null }
+        : handle?.address.kind === "native"
+          ? { historyId: null }
+          : {}),
+      ...(snapshot.temporaryChat
+        ? { label: newChatLabel, labelSource: "auto" as const }
+        : {})
     }
   })
   return { ...state, tabs, snapshotsById }

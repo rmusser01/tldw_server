@@ -314,3 +314,69 @@ it.each([false, true])("does not durably retain an active insertion command in a
   expect({ quick: durable.snapshotsById["logical-draft"].selectedQuickPrompt, system: durable.snapshotsById["logical-draft"].selectedSystemPrompt, originalQuick: original.selectedQuickPrompt })
     .toEqual({ quick: null, system: "system context", originalQuick: "one-time command" })
 })
+
+
+it.each(["current", "wrong-owner", "unowned", "saved-id", "server-id"])(
+  "retains only an owned fresh Temporary transcript (%s)",
+  (source) => {
+    const saved = draftOnlyTabs(true)
+    const original = saved.snapshotsById["logical-draft"]
+    const ownerHash = original.chatDraftHandle!.ownerHash
+    original.historyId = "temp"
+    original.history = [{ role: "assistant", content: "TEMP EXACT REPLY" }]
+    original.messages = [
+      {
+        id: "temp-reply",
+        isBot: true,
+        name: "Assistant",
+        message: "TEMP EXACT REPLY",
+        sources: []
+      }
+    ]
+    if (source === "wrong-owner")
+      original.chatDraftHandle!.ownerHash = "b".repeat(64)
+    if (source === "unowned") original.chatDraftHandle = null
+    if (source === "saved-id") original.historyId = "saved-local"
+    if (source === "server-id") original.serverChatId = "saved-server"
+    const durable = durableSidepanelTabs(saved as SidepanelTabsState, ownerHash)
+      .snapshotsById["logical-draft"]
+    expect({
+      history: durable.history,
+      messages: durable.messages,
+      historyId: durable.historyId,
+      serverChatId: durable.serverChatId
+    }).toEqual({
+      history: source === "current" ? original.history : [],
+      messages: source === "current" ? original.messages : [],
+      historyId: null,
+      serverChatId: null
+    })
+  }
+)
+
+it.each(["history-null", "history-shape", "messages-null", "messages-shape"])(
+  "does not retain malformed owned Temporary rows (%s)",
+  (malformed) => {
+    const saved = draftOnlyTabs(true)
+    const original = saved.snapshotsById["logical-draft"]
+    const ownerHash = original.chatDraftHandle!.ownerHash
+    original.history = [{ role: "assistant", content: "VALID REPLY" }]
+    original.messages = [
+      { isBot: true, name: "Assistant", message: "VALID REPLY", sources: [] }
+    ]
+    if (malformed.startsWith("history"))
+      original.history = [
+        malformed.endsWith("null") ? null : { role: "assistant", content: {} }
+      ] as unknown as SidepanelChatSnapshot["history"]
+    else
+      original.messages = [
+        malformed.endsWith("null") ? null : {}
+      ] as unknown as SidepanelChatSnapshot["messages"]
+    const durable = durableSidepanelTabs(saved as SidepanelTabsState, ownerHash)
+      .snapshotsById["logical-draft"]
+    expect({ history: durable.history, messages: durable.messages }).toEqual({
+      history: [],
+      messages: []
+    })
+  }
+)

@@ -54,6 +54,8 @@ const selectSessionOptions = (state: ReturnType<typeof useStoreMessageOption.get
   ragEnableCitations: state.ragEnableCitations,
   queuedMessages: state.queuedMessages,
   temporaryChat: state.temporaryChat,
+  temporaryHistory: state.temporaryChat ? state.history : undefined,
+  temporaryMessages: state.temporaryChat ? state.messages : undefined,
   setHistoryId: state.setHistoryId,
   setServerChatId: state.setServerChatId,
   setServerChatTitle: state.setServerChatTitle,
@@ -135,6 +137,8 @@ export function usePlaygroundSessionPersistence() {
     ragEnableCitations,
     queuedMessages,
     temporaryChat,
+    temporaryHistory,
+    temporaryMessages,
     setHistoryId,
     setServerChatId,
     setServerChatTitle,
@@ -223,7 +227,13 @@ export function usePlaygroundSessionPersistence() {
       if (!draftOwnerKey || !isCurrentDraftOwner()) return null
       // The composer's automatic fresh allocation must not replace a cold restore target.
       if (chatDraftAddress.kind === "fresh") {
-        if (historyId || serverChatId || chatDraftAddress.temporary !== temporaryChat) return null
+        if (
+          (historyId !== null && !(temporaryChat && historyId === "temp")) ||
+          serverChatId ||
+          chatDraftAddress.temporary !== temporaryChat ||
+          (temporaryChat &&
+            (live.history !== temporaryHistory || live.messages !== temporaryMessages))
+        ) return null
       } else {
         const selected = historySelection?.getCurrent()
         const qualified = selected?.owner && selected.view
@@ -303,9 +313,11 @@ export function usePlaygroundSessionPersistence() {
 
     return {
       chatDraftHandle,
+      temporaryTranscript: chatDraftAddress?.kind === "fresh" && temporaryChat
+        ? { history: temporaryHistory!, messages: temporaryMessages! } : null,
       historySelectionReference: chatDraftAddress?.kind === "fresh" ? null : historySelection?.getReference() ?? null,
       // Native authority is the validated server address; a mirror is rediscovered on load.
-      historyId: chatDraftAddress?.kind === "native" ? null : historyId,
+      historyId: chatDraftAddress?.kind === "native" || temporaryChat ? null : historyId,
       serverChatId,
       trackedAssistantSelection,
       trackedAssistantKind,
@@ -334,6 +346,8 @@ export function usePlaygroundSessionPersistence() {
   }, [
     chatDraftAddress,
     chatDraftRevision,
+    temporaryHistory,
+    temporaryMessages,
     draftOwnerKey,
     isCurrentDraftOwner,
     historySelection,
@@ -602,6 +616,12 @@ export function usePlaygroundSessionPersistence() {
     }
   }, [])
 
+  useEffect(() => {
+    const flush = () => flushPendingSessionSaveRef.current()
+    window.addEventListener("pagehide", flush)
+    return () => window.removeEventListener("pagehide", flush)
+  }, [])
+
   // Restore session from persisted state
   const restoreSessionState = useCallback(async (): Promise<PlaygroundSessionRestoreOutcome> => {
     if (hasCurrentServerChatSelection(useStoreMessageOption.getState().serverChatId)) return "cancelled"
@@ -655,6 +675,31 @@ export function usePlaygroundSessionPersistence() {
       setQueuedMessages(restoreQueuedRequests(savedHandle?.address.kind === "fresh" && savedHandle.address.temporary ? [] : sessionStore.queuedMessages ?? []))
     }
     if (savedHandle?.address.kind === "fresh") {
+      const transcript =
+        savedHandle.address.temporary &&
+        !sessionStore.serverChatId &&
+        (sessionStore.historyId === null || sessionStore.historyId === "temp")
+          ? sessionStore.temporaryTranscript
+          : null
+      if (
+        transcript &&
+        (!Array.isArray(transcript.history) ||
+          !Array.isArray(transcript.messages) ||
+          !transcript.history.every(
+            (row) =>
+              row &&
+              ["user", "assistant", "system"].includes(row.role) &&
+              typeof row.content === "string"
+          ) ||
+          !transcript.messages.every(
+            (row) =>
+              row &&
+              typeof row.isBot === "boolean" &&
+              typeof row.name === "string" &&
+              typeof row.message === "string"
+          ))
+      )
+        return "cancelled"
       const source = useStoreMessageOption.getState()
       if (!isCurrentRestore() || !source.setChatDraftAddress(savedHandle.address, {
         kind: "switch", expectedRevision: source.chatDraftRevision, sourceAddress: source.chatDraftAddress
@@ -669,8 +714,8 @@ export function usePlaygroundSessionPersistence() {
       setServerChatCharacterId(null)
       setServerChatPersonaMemoryMode(null)
       setServerChatMetaLoaded(false)
-      setHistory([])
-      setMessages([])
+      setHistory(transcript?.history ?? [])
+      setMessages(transcript?.messages ?? [])
       restoreSettings()
       return "restored"
     }

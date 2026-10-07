@@ -173,6 +173,90 @@ describe("usePlaygroundSessionPersistence", () => {
     view.unmount()
   })
 
+  it.each(["transcript", "New", "account"])(
+    "does not resurrect a held Temporary save after %s",
+    async (boundary) => {
+      act(() => {
+        const state = useStoreMessageOption.getState()
+        state.setTemporaryChat(true)
+        state.startNewChatDraft(true)
+        state.setHistoryId("temp")
+        state.setHistory([{ role: "assistant", content: "INITIAL TEMP" }])
+        state.setMessages([
+          { isBot: true, name: "Assistant", message: "INITIAL TEMP", sources: [] }
+        ])
+      })
+      const view = renderHook(() => usePlaygroundSessionPersistence())
+      await waitFor(() =>
+        expect(
+          usePlaygroundSessionStore.getState().temporaryTranscript?.messages[0]
+            ?.message
+        ).toBe("INITIAL TEMP")
+      )
+      let release!: (value: null) => void
+      mocks.getConfig.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve
+          })
+      )
+      act(() => {
+        useStoreMessageOption
+          .getState()
+          .setHistory([{ role: "assistant", content: "OLD HELD TEMP" }])
+        useStoreMessageOption.getState().setMessages([
+          {
+            isBot: true,
+            name: "Assistant",
+            message: "OLD HELD TEMP",
+            sources: []
+          }
+        ])
+      })
+      await waitFor(() => expect(release).toBeTypeOf("function"), {
+        timeout: 2500
+      })
+      act(() => {
+        const state = useStoreMessageOption.getState()
+        if (boundary === "transcript") {
+          state.setHistory([{ role: "assistant", content: "LATEST TEMP" }])
+          state.setMessages([
+            {
+              isBot: true,
+              name: "Assistant",
+              message: "LATEST TEMP",
+              sources: []
+            }
+          ])
+        } else if (boundary === "New") {
+          state.setTemporaryChat(false)
+          state.startNewChatDraft(false)
+          state.setHistoryId(null)
+          state.setHistory([])
+          state.setMessages([])
+          usePlaygroundSessionStore.getState().clearSession()
+        } else {
+          mocks.scopeSignal.abort()
+          window.dispatchEvent(
+            new CustomEvent("tldw:auth-principal-changed", {
+              detail: { kind: "logout" }
+            })
+          )
+        }
+      })
+      act(() => window.dispatchEvent(new Event("pagehide")))
+      await act(async () => {
+        release(null)
+        await Promise.resolve()
+      })
+      expect(
+        usePlaygroundSessionStore.getState().temporaryTranscript?.messages[0]
+          ?.message ?? null
+      ).toBe(boundary === "transcript" ? "LATEST TEMP" : null)
+      view.unmount()
+    }
+  )
+
   it("preserves a saved selection and queue when identity verification is unavailable, then retries", async () => {
     const saved = { historyId: "bob-history", serverChatId: "bob-chat", scopeKey: "global",
       queuedMessages: [buildQueuedRequest({ id: "queued-bob", clientRequestId: "request-bob", message: "Private queued question" })] }

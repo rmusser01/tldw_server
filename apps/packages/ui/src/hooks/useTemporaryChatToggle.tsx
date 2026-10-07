@@ -84,7 +84,7 @@ export const useTemporaryChatToggle = (
           ),
           content: t(
             "sidepanel:composer.tempChatConfirmContent",
-            "This will clear your current conversation. Messages won't be saved."
+            "This will clear your current conversation. New Temporary messages can remain on this device across reloads until you close or clear the chat. They will not be added to server history."
           ),
           okText: t("common:confirm", "Confirm"),
           cancelText: t("common:cancel", "Cancel"),
@@ -113,7 +113,7 @@ export const useTemporaryChatToggle = (
           ),
           content: t(
             "sidepanel:composer.tempChatDisableConfirmContent",
-            "This will clear your current conversation. Messages will start saving again."
+            "This will clear your current Temporary conversation. New messages can be stored in chat history."
           ),
           okText: t("common:confirm", "Confirm"),
           cancelText: t("common:cancel", "Cancel"),

@@ -419,13 +419,13 @@ export function ChatHeader({
             </Tooltip>
           ) : null}
           {showTemporaryChatAction ? (
-            <Tooltip title={t("playground:header.newTemporaryChat", "Temporary chat (not saved)")}>
+            <Tooltip title={t("playground:header.newTemporaryChat", "Temporary chat (on this device)")}>
               <button
                 type="button"
                 onClick={onStartTemporaryChat}
-                aria-label={t("playground:header.newTemporaryChat", "Temporary chat (not saved)") as string}
+                aria-label={t("playground:header.newTemporaryChat", "Temporary chat (on this device)") as string}
                 className={`hidden items-center justify-center rounded-md px-2 py-1.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text sm:inline-flex ${focusRingClasses}`}
-                title={t("playground:header.newTemporaryChat", "Temporary chat (not saved)")}
+                title={t("playground:header.newTemporaryChat", "Temporary chat (on this device)")}
               >
                 {t("playground:header.temporaryShort", "Temp")}
               </button>

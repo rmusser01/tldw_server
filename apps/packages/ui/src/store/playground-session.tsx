@@ -1,3 +1,4 @@
+import type { ChatHistory, Message } from "@/store/option"
 import type { HistorySelectionReference } from "@/hooks/chat/useHistorySelection"
 import type { HistoryLoadReceipt } from "@/hooks/chat/useHistorySelection"
 import { createWithEqualityFn } from "zustand/traditional"
@@ -56,6 +57,12 @@ const createBrowserStorage = (): StateStorage => {
     },
     setItem: (key, value) => {
       tabStorage.setItem(key, value)
+      // A Temporary transcript belongs to this tab; sessionStorage ends at Close.
+      const persisted = JSON.parse(value)
+      if (persisted.state?.temporaryTranscript) {
+        persisted.state.temporaryTranscript = null
+        value = JSON.stringify(persisted)
+      }
       durableStorage.setItem(key, value)
     },
     removeItem: (key) => {
@@ -67,6 +74,7 @@ const createBrowserStorage = (): StateStorage => {
 
 export interface PlaygroundSessionData {
   chatDraftHandle?: ChatDraftHandle | null
+  temporaryTranscript?: { history: ChatHistory; messages: Message[] } | null
   // Core identifier (used to restore messages from Dexie)
   historySelectionReference?: HistorySelectionReference | null
   historyId: string | null
@@ -114,8 +122,16 @@ interface PlaygroundSessionState extends PlaygroundSessionData {
   isSessionValid: (expectedScopeKey?: string | null) => boolean
 }
 
+const isTemporarySession = (state: PlaygroundSessionData) =>
+  isChatDraftHandle(state.chatDraftHandle) &&
+  state.chatDraftHandle.address.kind === "fresh" &&
+  state.chatDraftHandle.address.temporary &&
+  (state.historyId === null || state.historyId === "temp") &&
+  state.serverChatId === null
+
 const initialState: PlaygroundSessionData = {
   chatDraftHandle: null,
+  temporaryTranscript: null,
   historySelectionReference: null,
   historyId: null,
   serverChatId: null,
@@ -178,7 +194,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       isSessionStale: () => {
         const { lastUpdated } = get()
         if (lastUpdated === 0) return true
-        return Date.now() - lastUpdated > STALE_THRESHOLD_MS
+        return !isTemporarySession(get()) && Date.now() - lastUpdated > STALE_THRESHOLD_MS
       },
 
       isSessionValid: (expectedScopeKey) => {
@@ -196,7 +212,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
           serverChatId !== null ||
           isChatDraftHandle(chatDraftHandle) ||
           queuedMessages.length > 0
-        const isNotStale = lastUpdated > 0 && Date.now() - lastUpdated <= STALE_THRESHOLD_MS
+        const isNotStale = lastUpdated > 0 && (isTemporarySession(get()) || Date.now() - lastUpdated <= STALE_THRESHOLD_MS)
         const matchesScope =
           typeof expectedScopeKey === "undefined" || expectedScopeKey === null
             ? true
@@ -215,6 +231,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       ),
       partialize: (state) => ({
         chatDraftHandle: state.chatDraftHandle,
+        temporaryTranscript: isTemporarySession(state) ? state.temporaryTranscript ?? null : null,
         historySelectionReference: state.historySelectionReference,
         historyId: state.historyId,
         serverChatId: state.serverChatId,

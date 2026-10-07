@@ -25,7 +25,7 @@ vi.mock("react-i18next", () => ({
 
 const historyHelp = "New messages can be stored in chat history."
 const temporaryHelp =
-  "New messages are not added to saved chat history. Draft text may remain on this device."
+  "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device."
 
 type ModeProps = {
   temporaryChat: boolean
@@ -162,7 +162,7 @@ describe("chat history mode is independent of a save outcome", () => {
     })
   })
 
-  it("explains Temporary without promising transcript retention or deletion on close", () => {
+  it("explains Temporary device lifetime without claiming a server save", () => {
     const hook = renderHook(() =>
       usePersistenceMode({
         ...initial,

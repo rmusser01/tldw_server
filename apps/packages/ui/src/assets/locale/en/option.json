@@ -929,7 +929,7 @@
   "validationSelectModel": "Please select a model to continue",
   "deleteHistoryConfirmation": "Are you sure you want to delete this history?",
   "editHistoryTitle": "Enter a new title",
-  "temporaryChat": "Temporary chat (not saved)",
+  "temporaryChat": "Temporary chat (on this device)",
   "more": {
     "copy": {
       "group": "Copy",
