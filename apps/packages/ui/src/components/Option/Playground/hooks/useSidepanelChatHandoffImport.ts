@@ -217,8 +217,8 @@ export function useSidepanelChatHandoffImport({
   }, [applyImportedHandoff, captureGuard, cleanRouteHandoff, destinationKey, location, ready, retireConflict, showInvalidFeedback])
 
   const removeImportedContext = React.useCallback(() => {
-    setImportedContext(null)
-  }, [])
+    setImportedContext(current => current === importedContext ? null : current)
+  }, [importedContext])
 
   const isConflictCurrent = React.useCallback(() => readyRef.current && conflict !== null &&
     conflictOwnerRef.current?.conflict === conflict && conflictOwnerRef.current.isOwned() &&

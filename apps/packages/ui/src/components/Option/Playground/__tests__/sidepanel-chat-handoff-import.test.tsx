@@ -324,6 +324,41 @@ describe("sidepanel chat handoff import", () => {
 
   afterEach(() => { vi.useRealTimers() })
 
+  it("preserves replacement imported context when an older send removes its context", async () => {
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    const replacementContext = { ...importedPageContext, title: "Replacement article", url: "https://example.test/replacement" }
+    serviceMocks.readSidepanelChatHandoff.mockImplementation(async (id: string) =>
+      buildPackage(id === "handoff-2" ? { id, pageContext: replacementContext } : { id }))
+    renderWithRoute(<HookHarness replacementEntry="/chat?handoff=handoff-2" onImportChange={value => { displayed = value }} />)
+    await waitFor(() => expect(displayed.importedContext).toBe(importedPageContext))
+    const removeSubmittedContext = displayed.removeImportedContext
+    fireEvent.click(screen.getByRole("button", { name: "New fragment route" }))
+    await screen.findByRole("button", { name: "Replace" })
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }))
+    await waitFor(() => expect(displayed.importedContext).toBe(replacementContext))
+    act(() => removeSubmittedContext())
+    expect(displayed.importedContext).toBe(replacementContext)
+    expect(screen.getByRole("button", { name: "Remove imported context from Replacement article" })).toBeInTheDocument()
+  })
+
+  it("does not let an initially empty context callback clear a later import", async () => {
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    renderWithRoute(<HookHarness onImportChange={value => { displayed = value }} />)
+    const removeEmptyContext = displayed.removeImportedContext
+    await waitFor(() => expect(displayed.importedContext).toBe(importedPageContext))
+    act(() => removeEmptyContext())
+    expect(displayed.importedContext).toBe(importedPageContext)
+  })
+
+  it("removes the unchanged current imported context", async () => {
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    renderWithRoute(<HookHarness onImportChange={value => { displayed = value }} />)
+    await waitFor(() => expect(displayed.importedContext).toBe(importedPageContext))
+    act(() => displayed.removeImportedContext())
+    expect(displayed.importedContext).toBeNull()
+    expect(screen.queryByRole("button", { name: "Remove imported context from Imported article" })).not.toBeInTheDocument()
+  })
+
   const fragmentRoute = (draft: string, route: "hash" | "query" = "hash") => {
     const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft })
     return route === "hash" ? `/chat?keep=query#handoff=${encoded}&keep=hash` : `/chat?keep=query&handoff=${encoded}#keep=hash`

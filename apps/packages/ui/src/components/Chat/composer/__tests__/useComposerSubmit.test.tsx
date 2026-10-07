@@ -141,3 +141,36 @@ it("reports dispatch rejection to the recovery hook and preserves the original e
   expect(onSendError).toHaveBeenCalledWith(error)
   expect(afterSend).not.toHaveBeenCalled()
 })
+
+it.each(["resolve", "reject"])("does not run another source's completion hooks after %s", async outcome => {
+  let finish!: () => void, retired = false
+  const wait = new Promise<void>(resolve => { finish = resolve })
+  const failure = new Error("original failure")
+  const options = {
+    sendMessage: async () => { await wait; if (outcome === "reject") throw failure; return "saved" },
+    captureCompletionGuard: () => () => !retired
+  }
+  const { result } = renderHook(() => useComposerSubmit(options))
+  const afterSend = vi.fn(), onSendError = vi.fn()
+  const pending = result.current.dispatch({}, { afterSend, onSendError }).catch(error => error)
+  retired = true; finish()
+  expect(await pending).toBe(outcome === "reject" ? failure : "saved")
+  expect(afterSend).not.toHaveBeenCalled()
+  expect(onSendError).not.toHaveBeenCalled()
+})
+
+it("refuses an already retired composer before optimistic cleanup or dispatch", async () => {
+  const sendMessage = vi.fn(async () => "unused"),
+    beforeSend = vi.fn();
+  const view = renderHook(() =>
+    useComposerSubmit({
+      sendMessage,
+      captureCompletionGuard: () => () => false,
+    }),
+  );
+  await expect(
+    view.result.current.dispatch("old", { beforeSend }),
+  ).rejects.toMatchObject({ name: "AbortError" });
+  expect(sendMessage).not.toHaveBeenCalled();
+  expect(beforeSend).not.toHaveBeenCalled();
+});

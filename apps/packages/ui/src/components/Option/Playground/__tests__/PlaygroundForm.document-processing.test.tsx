@@ -16,8 +16,9 @@ vi.mock("@/components/Chat/composer/hooks/useComposerSubmit", () => ({
   useComposerSubmit: ({ sendMessage }: { sendMessage: (payload: any) => Promise<any> }) => ({
     dispatch: async (
       payload: any,
-      options?: { afterSend?: (result: unknown) => void }
+      options?: { beforeSend?: () => void; afterSend?: (result: unknown) => void }
     ) => {
+      options?.beforeSend?.()
       const result = await sendMessage(payload)
       options?.afterSend?.(result)
       return result

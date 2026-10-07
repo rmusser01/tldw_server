@@ -180,7 +180,107 @@ describe("usePersonaLiveControl", () => {
     expect(result.current.focusedSession?.sessionId).toBe("sess-b")
   })
 
-  it("ignores a discarded StrictMode startup list after starting a session", async () => {
+  it("shares a pending startup list through StrictMode replay", async () => {
+    const pending = deferred<PersonaLiveSessionList>()
+    mocks.listPersonaLiveSessions.mockReturnValue(pending.promise)
+    const { result } = renderHook(() => usePersonaLiveControl(), {
+      wrapper: React.StrictMode
+    })
+
+    expect(mocks.listPersonaLiveSessions).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      pending.resolve({
+        sessions: [session({ isFocused: true })],
+        focusedSessionId: "sess-1"
+      })
+    })
+    expect(result.current.loading).toBe(false)
+    expect(result.current.focusedSession?.sessionId).toBe("sess-1")
+  })
+
+  it("keeps a settled startup list through repeated effect replay", async () => {
+    let revision = 0
+    const registerEffect = React.useEffect
+    const replay = vi
+      .spyOn(React, "useEffect")
+      .mockImplementation((effect, deps) =>
+        registerEffect(effect, deps ? [...deps, revision] : deps)
+      )
+    try {
+      mocks.listPersonaLiveSessions.mockResolvedValue({
+        sessions: [session({ isFocused: true })],
+        focusedSessionId: "sess-1"
+      })
+      const { result, rerender, unmount } = renderHook(() =>
+        usePersonaLiveControl()
+      )
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      for (revision = 1; revision <= 3; revision++) {
+        rerender()
+        await act(async () => {})
+        expect(result.current.focusedSession?.sessionId).toBe("sess-1")
+      }
+      expect(mocks.listPersonaLiveSessions).toHaveBeenCalledTimes(1)
+      await act(async () => {
+        await result.current.reload()
+      })
+      expect(mocks.listPersonaLiveSessions).toHaveBeenCalledTimes(2)
+      unmount()
+    } finally {
+      replay.mockRestore()
+    }
+  })
+
+  it.each(["resolve", "reject"])(
+    "reattaches a pending explicit reload after effect replay (%s)",
+    async (outcome) => {
+      let revision = 0
+      const registerEffect = React.useEffect
+      const replay = vi
+        .spyOn(React, "useEffect")
+        .mockImplementation((effect, deps) =>
+          registerEffect(effect, deps ? [...deps, revision] : deps)
+        )
+      try {
+        const { result, rerender, unmount } = renderHook(() =>
+          usePersonaLiveControl()
+        )
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        const pending = deferred<PersonaLiveSessionList>()
+        mocks.listPersonaLiveSessions.mockReturnValueOnce(pending.promise)
+        let reload!: Promise<PersonaLiveSessionList | undefined>
+        act(() => {
+          reload = result.current.reload().catch(() => undefined)
+        })
+        revision++
+        rerender()
+        await act(async () => {
+          if (outcome === "resolve") {
+            pending.resolve({
+              sessions: [session({ isFocused: true })],
+              focusedSessionId: "sess-1"
+            })
+          } else {
+            pending.reject(new Error("Refresh failed"))
+          }
+          await reload
+        })
+        expect(mocks.listPersonaLiveSessions).toHaveBeenCalledTimes(2)
+        expect(result.current.loading).toBe(false)
+        if (outcome === "resolve") {
+          expect(result.current.focusedSession?.sessionId).toBe("sess-1")
+          expect(result.current.error).toBeNull()
+        } else {
+          expect(result.current.error).toBe("Refresh failed")
+        }
+        unmount()
+      } finally {
+        replay.mockRestore()
+      }
+    }
+  )
+
+  it("ignores an earlier StrictMode startup list after starting a session", async () => {
     const discarded = deferred<PersonaLiveSessionList>()
     mocks.listPersonaLiveSessions.mockReturnValueOnce(discarded.promise)
     mocks.createPersonaLiveSession.mockResolvedValueOnce(
@@ -189,8 +289,6 @@ describe("usePersonaLiveControl", () => {
     const { result } = renderHook(() => usePersonaLiveControl(), {
       wrapper: React.StrictMode
     })
-    await waitFor(() => expect(result.current.loading).toBe(false))
-
     await act(async () => {
       await result.current.startTextSession("persona-1")
       discarded.resolve({ sessions: [], focusedSessionId: null })
@@ -199,6 +297,109 @@ describe("usePersonaLiveControl", () => {
     expect(result.current.focusedSession?.sessionId).toBe("sess-current")
     expect(result.current.canSendText).toBe(true)
     expect(result.current.error).toBeNull()
+  })
+
+  it("loads fresh lists for changed scope, re-enable and actual remount", async () => {
+    const { result, rerender, unmount } = renderHook(
+      (options) => usePersonaLiveControl(options),
+      {
+        initialProps: {
+          defaultPersonaId: "persona-1",
+          surface: "chat",
+          autoLoad: true
+        }
+      }
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    rerender({
+      defaultPersonaId: " persona-1 ",
+      surface: " chat ",
+      autoLoad: true
+    })
+    expect(mocks.listPersonaLiveSessions).toHaveBeenCalledTimes(1)
+    rerender({
+      defaultPersonaId: "persona-2",
+      surface: "chat",
+      autoLoad: true
+    })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(mocks.listPersonaLiveSessions).toHaveBeenCalledTimes(2)
+    rerender({
+      defaultPersonaId: "persona-2",
+      surface: "companion.conversation",
+      autoLoad: true
+    })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(mocks.listPersonaLiveSessions).toHaveBeenCalledTimes(3)
+    rerender({
+      defaultPersonaId: "persona-2",
+      surface: "companion.conversation",
+      autoLoad: false
+    })
+    rerender({
+      defaultPersonaId: "persona-2",
+      surface: "companion.conversation",
+      autoLoad: true
+    })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(mocks.listPersonaLiveSessions).toHaveBeenCalledTimes(4)
+    unmount()
+    const fresh = renderHook(() =>
+      usePersonaLiveControl({
+        defaultPersonaId: "persona-2",
+        surface: "companion.conversation"
+      })
+    )
+    await waitFor(() => expect(fresh.result.current.loading).toBe(false))
+    expect(mocks.listPersonaLiveSessions).toHaveBeenCalledTimes(5)
+  })
+
+  it("ignores a pending automatic list after autoload is disabled", async () => {
+    const pending = deferred<PersonaLiveSessionList>()
+    mocks.listPersonaLiveSessions.mockReturnValue(pending.promise)
+    const { result, rerender } = renderHook(
+      (autoLoad) => usePersonaLiveControl({ autoLoad }),
+      { initialProps: true }
+    )
+    rerender(false)
+    await act(async () => {
+      pending.resolve({
+        sessions: [session({ isFocused: true })],
+        focusedSessionId: "sess-1"
+      })
+    })
+    expect(result.current.loading).toBe(false)
+    expect(result.current.sessions).toEqual([])
+  })
+
+  it("retains a startup error through replay and recovers on explicit reload", async () => {
+    let revision = 0
+    const registerEffect = React.useEffect
+    const replay = vi
+      .spyOn(React, "useEffect")
+      .mockImplementation((effect, deps) =>
+        registerEffect(effect, deps ? [...deps, revision] : deps)
+      )
+    try {
+      mocks.listPersonaLiveSessions.mockRejectedValueOnce(new Error("Offline"))
+      const { result, rerender, unmount } = renderHook(() =>
+        usePersonaLiveControl()
+      )
+      await waitFor(() => expect(result.current.error).toBe("Offline"))
+      revision++
+      rerender()
+      await act(async () => {})
+      expect(mocks.listPersonaLiveSessions).toHaveBeenCalledTimes(1)
+      expect(result.current.error).toBe("Offline")
+      await act(async () => {
+        await result.current.reload()
+      })
+      expect(mocks.listPersonaLiveSessions).toHaveBeenCalledTimes(2)
+      expect(result.current.error).toBeNull()
+      unmount()
+    } finally {
+      replay.mockRestore()
+    }
   })
 
   it.each(["start", "focus"])(

@@ -1,4 +1,5 @@
-import { act, renderHook } from "@testing-library/react"
+import React from "react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { useComposerQueue } from "../hooks/useComposerQueue"
 import { buildQueuedRequest, restoreQueuedRequests, type QueuedRequest } from "@/utils/chat-request-queue"
@@ -82,3 +83,76 @@ describe("restored requests require review even when already connected", () => {
     expect(test.readQueue()).toEqual([])
   })
 })
+
+
+describe("automatic queue dispatch ownership", () => {
+  it.each(["success", "failure"] as const)("runs a ready replacement queue while the old source is held and ignores its late %s", async outcome => {
+    type Actor = "A" | "B"
+    const actor = { current: "A" as Actor }
+    const firstB = buildQueuedRequest({ conversationId: "B", promptText: "B first" })
+    const queues: Record<Actor, QueuedRequest[]> = {
+      A: [buildQueuedRequest({ conversationId: "A", promptText: "A held" })],
+      B: [firstB, buildQueuedRequest({ conversationId: "B", promptText: "B next" })]
+    }
+    let resolveA!: () => void, rejectA!: (error: Error) => void, resolveB!: () => void
+    const heldA = new Promise<void>((resolve, reject) => { resolveA = resolve; rejectA = reject })
+    const heldB = new Promise<void>(resolve => { resolveB = resolve })
+    const wire: string[] = []
+    const sendQueuedRequest = async (item: QueuedRequest) => {
+      wire.push(item.promptText)
+      if (item.promptText === "A held") await heldA
+      if (item.promptText === "B first") await heldB
+    }
+    let publishRender: (() => void) | undefined
+    const publishQueue: UseQueueSetter = value => {
+      queues[actor.current] = typeof value === "function" ? value(queues[actor.current]) : value
+      publishRender?.()
+    }
+    const setterA = vi.fn(publishQueue), setterB = vi.fn(publishQueue)
+    const view = renderHook(({ source, ready }: { source: Actor; ready: boolean }) => {
+      const [, publish] = React.useState(0)
+      publishRender = () => publish(revision => revision + 1)
+      const canCommit = React.useMemo(() => () => ready && actor.current === source, [source, ready])
+      return useComposerQueue({
+        isConnectionReady: true, isStreaming: false,
+        queuedMessages: queues[source], setQueuedMessages: source === "A" ? setterA : setterB,
+        sendQueuedRequest, canCommitDispatchResult: canCommit,
+        stopStreamingRequest: () => {}, resolveConversationId: () => source,
+        buildQueuedDocuments: () => [], buildQueuedRequestSnapshot: () => ({}),
+        isQueuedDispatchBlocked: false, cancelCurrentAndRunDisabledReasonText: null
+      })
+    }, { initialProps: { source: "A" as Actor, ready: true } })
+
+    try {
+      await waitFor(() => expect(wire).toEqual(["A held"]))
+      const originalWrites = setterA.mock.calls.length
+      actor.current = "B"
+      view.rerender({ source: "B", ready: false })
+      await act(async () => {})
+      expect(setterB).not.toHaveBeenCalled()
+      expect(queues.B.map(item => item.status)).toEqual(["queued", "queued"])
+
+      view.rerender({ source: "B", ready: true })
+      await waitFor(() => expect(wire).toEqual(["A held", "B first"]))
+      await act(async () => {
+        if (outcome === "success") resolveA()
+        else rejectA(new Error("retired A failed"))
+        await heldA.catch(() => {})
+      })
+      expect(setterA).toHaveBeenCalledTimes(originalWrites)
+
+      // An old finally must not unlock B while B's own dispatch is still held.
+      act(() => view.result.current.queuedRequestActions.remove(firstB.id))
+      await act(async () => {})
+      expect(wire).toEqual(["A held", "B first"])
+      expect(queues.B.map(item => item.promptText)).toEqual(["B next"])
+      await act(async () => { resolveB(); await heldB })
+      await waitFor(() => expect(wire).toEqual(["A held", "B first", "B next"]))
+      await waitFor(() => expect(queues.B).toEqual([]))
+    } finally {
+      await act(async () => { resolveA(); resolveB(); await Promise.allSettled([heldA, heldB]) })
+    }
+  })
+})
+
+type UseQueueSetter = (value: QueuedRequest[] | ((previous: QueuedRequest[]) => QueuedRequest[])) => void

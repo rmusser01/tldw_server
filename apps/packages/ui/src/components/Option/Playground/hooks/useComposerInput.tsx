@@ -604,6 +604,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     messageDisplayValue,
     collapsedDisplayMeta,
     textAreaFocus,
+    captureCompletionGuard: composerText.captureCompletionGuard,
     // Collapsed editing
     syncCollapsedCaret,
     commitCollapsedEdit,

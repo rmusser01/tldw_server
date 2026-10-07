@@ -1055,6 +1055,8 @@ export const PlaygroundForm = ({
     React.useState(false);
   const [modeLauncherOpen, setModeLauncherOpen] = React.useState(false);
   const [openUIRequestMode, setOpenUIRequestMode] = React.useState(false);
+  const openUIRequestRevisionRef = React.useRef(0);
+  const openUIRequestRevision = openUIRequestRevisionRef.current;
   const [modeAnnouncement, setModeAnnouncement] = React.useState<string | null>(
     null,
   );
@@ -2196,6 +2198,7 @@ export const PlaygroundForm = ({
     draftReady,
     draftOwnerKey,
     isDraftOwnerCurrent,
+    captureCompletionGuard,
     retainCurrentDraft,
     creationRecovery,
     reviewCreatedChat,
@@ -3346,6 +3349,8 @@ export const PlaygroundForm = ({
     onMutate: () => ({
       errorKeyToDismiss: chatErrorBanner?.key ?? null,
       ownerScope: homeScope,
+      isCurrent: captureCompletionGuard(),
+      canFocus: captureCompletionGuard(true),
     }),
     onSuccess: (data, _variables, context) => {
       const result = normalizeChatSubmitResult(data);
@@ -3353,18 +3358,21 @@ export const PlaygroundForm = ({
         if (context?.ownerScope) {
           useMilestoneStore.getState().markScopedMilestone(context.ownerScope, "first_chat");
         }
+        if (!context?.isCurrent()) return;
         dismissChatErrorAfterSuccessfulSubmit(context?.errorKeyToDismiss ?? null);
         void trackOnboardingChatSubmitSuccess(
           typeof window !== "undefined" ? window.location.pathname : "/chat",
+          context.isCurrent,
         );
       }
-      textAreaFocus();
+      if (!context?.isCurrent()) return;
+      if (context.canFocus()) textAreaFocus();
       queryClient.invalidateQueries({
         queryKey: ["fetchChatHistory"],
       });
     },
-    onError: (error) => {
-      textAreaFocus();
+    onError: (_error, _variables, context) => {
+      if (context?.canFocus()) textAreaFocus();
     },
   });
 
@@ -3462,7 +3470,9 @@ export const PlaygroundForm = ({
     temporaryChat,
   ]);
 
+  const queuedCompletionIsCurrent = React.useMemo(captureCompletionGuard, [captureCompletionGuard]);
   const queueMgmt = usePlaygroundQueueManagement({
+    canCommitDispatchResult: queuedCompletionIsCurrent,
     getDispatchDisabledReason: getSubmitDisabledReason,
     captureDispatchFence: captureAssistantActionGuard,
     composerModels,
@@ -3619,6 +3629,7 @@ export const PlaygroundForm = ({
   );
 
   const { submitForm, submitFormRef, isPreparingDocuments } = usePlaygroundSubmit({
+    captureCompletionGuard,
     form,
     draftReady,
     beginPromptAssistReset,
@@ -3647,7 +3658,11 @@ export const PlaygroundForm = ({
     importedSidepanelContext,
     clearImportedSidepanelContext,
     sendMessage,
-    clearOpenUIRequestMode: () => setOpenUIRequestMode(false),
+    clearOpenUIRequestMode: () => {
+      if (openUIRequestRevisionRef.current !== openUIRequestRevision) return;
+      openUIRequestRevisionRef.current++;
+      setOpenUIRequestMode(false);
+    },
     clearSelectedDocuments,
     clearUploadedFiles,
     reserveDocumentProcessingTurn,
@@ -4142,6 +4157,7 @@ export const PlaygroundForm = ({
     currentApiProvider: currentChatModelSettings.apiProvider,
     formMessage: form.values.message || "",
     sendMessage,
+    captureCompletionGuard,
     textAreaFocus,
     notificationApi,
     t,
@@ -5222,7 +5238,7 @@ export const PlaygroundForm = ({
     >
       <button
         type="button"
-        onClick={() => setOpenUIRequestMode((current) => !current)}
+        onClick={() => { openUIRequestRevisionRef.current++; setOpenUIRequestMode((current) => !current); }}
         disabled={isSending}
         aria-pressed={openUIRequestMode}
         aria-label={t("playground:composer.openuiMode", "OpenUI") as string}

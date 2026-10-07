@@ -246,22 +246,23 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
         </div>
       ) : null}
 
-      {isOpen && !isDormant ? (
-        <BuddyShellPopover
-          buddySummary={buddySummary}
-          personaId={personaId}
-          visualDiagnostic={visualDiagnostic}
-          liveControl={liveControl}
-          globalAmbientMode={globalAmbientMode}
-          personaAmbientMode={personaAmbientMode}
-          effectiveAmbientMode={effectiveAmbientMode}
-          ambientSurface={ambientSurface}
-          ambientPreferenceMessage={ambientPreferenceMessage}
-          onGlobalAmbientModeChange={onGlobalAmbientModeChange}
-          onPersonaAmbientModeChange={onPersonaAmbientModeChange}
-          onClose={onCloseControls}
-        />
-      ) : null}
+      {/* Closing keeps the draft and pending request within this Persona lifetime. */}
+      <BuddyShellPopover
+        key={personaId?.trim() || ""}
+        isOpen={isOpen && !isDormant}
+        buddySummary={buddySummary}
+        personaId={personaId}
+        visualDiagnostic={visualDiagnostic}
+        liveControl={liveControl}
+        globalAmbientMode={globalAmbientMode}
+        personaAmbientMode={personaAmbientMode}
+        effectiveAmbientMode={effectiveAmbientMode}
+        ambientSurface={ambientSurface}
+        ambientPreferenceMessage={ambientPreferenceMessage}
+        onGlobalAmbientModeChange={onGlobalAmbientModeChange}
+        onPersonaAmbientModeChange={onPersonaAmbientModeChange}
+        onClose={onCloseControls}
+      />
     </div>
   )
 }

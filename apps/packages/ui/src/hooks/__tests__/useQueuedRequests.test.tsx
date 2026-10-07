@@ -144,6 +144,107 @@ describe("useQueuedRequests", () => {
     expect(queueRef.current.map((item) => item.id)).toEqual([second.id])
   })
 
+  it("retains a queued request while its source is not ready and dispatches after a ready render", async () => {
+    const first = buildQueuedRequest({ promptText: "waiting for draft hydration" })
+    const initialQueue = [first]
+    const queueRef = { current: initialQueue }
+    const setQueue = createQueueSetter(queueRef)
+    const sendQueuedRequest = vi.fn().mockResolvedValue(undefined)
+
+    const { result, rerender } = renderHook(
+      ({ ready }: { ready: boolean }) =>
+        useQueuedRequests({
+          isConnectionReady: true,
+          isStreaming: false,
+          queue: queueRef.current,
+          setQueue,
+          sendQueuedRequest,
+          canCommitDispatchResult: () => ready,
+          stopStreamingRequest: vi.fn()
+        }),
+      { initialProps: { ready: false } }
+    )
+
+    await act(async () => {
+      expect(await result.current.flushNext()).toBeNull()
+    })
+
+    expect(sendQueuedRequest).not.toHaveBeenCalled()
+    expect(setQueue).not.toHaveBeenCalled()
+    expect(queueRef.current).toBe(initialQueue)
+
+    rerender({ ready: true })
+
+    await act(async () => {
+      expect(await result.current.flushNext()).toMatchObject({
+        id: first.id,
+        promptText: "waiting for draft hydration",
+        status: "sending"
+      })
+    })
+
+    expect(sendQueuedRequest).toHaveBeenCalledTimes(1)
+    expect(queueRef.current).toEqual([])
+  })
+
+  it.each(["success", "failure"] as const)(
+    "keeps the captured source predicate through an in-flight %s after a ready rerender",
+    async (outcome) => {
+      const first = buildQueuedRequest({ promptText: "original source" })
+      const queueRef = { current: [first] }
+      const setQueue = createQueueSetter(queueRef)
+      let sourceCurrent = true
+      const originalPredicate = () => sourceCurrent
+      let resolveSend: (() => void) | undefined
+      let rejectSend: ((error: Error) => void) | undefined
+      const sendQueuedRequest = vi.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            resolveSend = resolve
+            rejectSend = reject
+          })
+      )
+
+      const { result, rerender } = renderHook(
+        ({ canCommit }: { canCommit: () => boolean }) =>
+          useQueuedRequests({
+            isConnectionReady: true,
+            isStreaming: false,
+            queue: queueRef.current,
+            setQueue,
+            sendQueuedRequest,
+            canCommitDispatchResult: canCommit,
+            stopStreamingRequest: vi.fn()
+          }),
+        { initialProps: { canCommit: originalPredicate } }
+      )
+
+      let flushPromise: Promise<QueuedRequest | null> | undefined
+      await act(async () => {
+        flushPromise = result.current.flushNext()
+        await Promise.resolve()
+      })
+
+      expect(queueRef.current[0]?.status).toBe("sending")
+      sourceCurrent = false
+      const replacementQueue = [{ ...first, promptText: "replacement source" }]
+      queueRef.current = replacementQueue
+      rerender({ canCommit: () => true })
+
+      await act(async () => {
+        if (outcome === "success") {
+          resolveSend?.()
+        } else {
+          rejectSend?.(new Error("original dispatch failed"))
+        }
+        expect(await flushPromise).toBeNull()
+      })
+
+      expect(queueRef.current).toBe(replacementQueue)
+      expect(sendQueuedRequest).toHaveBeenCalledTimes(1)
+    }
+  )
+
   it("does not restore queued items after clear-all during an in-flight send", async () => {
     const first = buildQueuedRequest({ promptText: "first" })
     const second = buildQueuedRequest({ promptText: "second" })

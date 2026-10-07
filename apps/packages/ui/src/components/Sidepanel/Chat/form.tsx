@@ -403,6 +403,7 @@ export const SidepanelForm = ({
     draftReady,
     draftOwnerKey,
     isDraftOwnerCurrent,
+    captureCompletionGuard,
     retainCurrentDraft,
     clearDraft,
     creationRecovery,
@@ -500,7 +501,12 @@ export const SidepanelForm = ({
     }
   }, [])
   const messageInputProps = form.getInputProps("message")
-  const [knowledgeMentionActive, setKnowledgeMentionActive] = React.useState(false)
+  const [knowledgeMentionActive, setKnowledgeMentionState] = React.useState(false)
+  const knowledgeMentionRevision = React.useRef(0)
+  const setKnowledgeMentionActive = React.useCallback((active: boolean) => {
+    knowledgeMentionRevision.current++
+    setKnowledgeMentionState(active)
+  }, [])
   const [knowledgePanelOpen, setKnowledgePanelOpen] = React.useState(false)
   const imageValueRef = React.useRef(form.values.image)
   React.useEffect(() => {
@@ -553,6 +559,7 @@ export const SidepanelForm = ({
     addDocument,
     removeDocument,
     clearSelectedDocuments,
+    clearSubmittedDocuments,
     reloadTabs,
     handleMentionsOpen
   } = useTabMentions(textareaRef, { includeActive: true })
@@ -1631,7 +1638,7 @@ export const SidepanelForm = ({
     setKnowledgeMentionActive(true)
     window.dispatchEvent(new CustomEvent("tldw:toggle-rag"))
     removeMentionToken()
-  }, [removeMentionToken])
+  }, [removeMentionToken, setKnowledgeMentionActive])
 
   const handleFileMention = React.useCallback(() => {
     contextFileInputRef.current?.click()
@@ -2016,6 +2023,7 @@ export const SidepanelForm = ({
   ): Promise<void> {
     if (!connectionReadyRef.current || sidepanelDocumentPreparationRef.current) return
     const connectionGeneration = connectionGenerationRef.current
+    const submittedKnowledgeMentionRevision = knowledgeMentionRevision.current
     const intent = resolveSubmissionIntent(rawMessage, options)
     if (intent.invalidImageCommand) {
       notification.error({
@@ -2198,7 +2206,7 @@ export const SidepanelForm = ({
         : preparedDocumentAttachments.contextFiles
       }
 
-      if (!connectionReadyRef.current || connectionGenerationRef.current !== connectionGeneration) return
+      if (!connectionReadyRef.current || connectionGenerationRef.current !== connectionGeneration || !captureCompletionGuard()()) return
       let promptAssistAttemptId: number | null = null
       await submitDispatch(
       {
@@ -2232,9 +2240,11 @@ export const SidepanelForm = ({
             markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
             // Legacy void outcomes can include a swallowed failure.
             if (result !== undefined) clearDraft(promptAssistAttemptId)
-            clearSelectedDocuments()
-            setContextFiles([])
-            setKnowledgeMentionActive(false)
+            if (!intent.isImageCommand) {
+              clearSubmittedDocuments(selectedDocuments)
+              setContextFiles(current => current === contextFiles ? [] : current)
+              if (knowledgeMentionRevision.current === submittedKnowledgeMentionRevision) setKnowledgeMentionActive(false)
+            }
           } else if (promptAssistAttemptId !== null) {
             restorePromptAssistAttempt(promptAssistAttemptId)
           }
@@ -2747,18 +2757,19 @@ export const SidepanelForm = ({
   greetingSubmitGateRef.current = isGreetingPreparing
   const { mutateAsync: sendMessage, isPending: isSending } = useMutation({
     mutationFn: onSubmit,
-    onSuccess: () => {
-      textAreaFocus()
+    onMutate: () => ({ canFocus: captureCompletionGuard(true) }),
+    onSuccess: (_data, _variables, context) => {
+      if (context?.canFocus()) textAreaFocus()
     },
-    onError: (error) => {
-      textAreaFocus()
+    onError: (_error, _variables, context) => {
+      if (context?.canFocus()) textAreaFocus()
     }
   })
 
   // Shared composer dispatch. Wraps sendMessage with before/after hooks so
   // Sidepanel's "reset + focus before, clear attachments after" pattern
   // mirrors Playground's. See Chat/composer/hooks/useComposerSubmit.ts.
-  const { dispatch: submitDispatch } = useComposerSubmit({ sendMessage })
+  const { dispatch: submitDispatch } = useComposerSubmit({ sendMessage, captureCompletionGuard })
 
   const buildQueuedDocuments = React.useCallback(
     (): ChatDocuments =>
@@ -2973,6 +2984,7 @@ export const SidepanelForm = ({
     ]
   )
 
+  const queuedCompletionIsCurrent = React.useMemo(captureCompletionGuard, [captureCompletionGuard])
   const sidepanelQueueCancelReasonText =
     isSending && serverChatId
       ? t(
@@ -2987,7 +2999,7 @@ export const SidepanelForm = ({
     queuedMessages,
     setQueuedMessages,
     sendQueuedRequest,
-    canCommitDispatchResult: conversationMetadata.isQueuedCompletionCurrent,
+    canCommitDispatchResult: () => queuedCompletionIsCurrent() && conversationMetadata.isQueuedCompletionCurrent(),
     stopStreamingRequest,
     resolveConversationId: resolveQueueConversationId,
     buildQueuedDocuments,

@@ -110,6 +110,8 @@ export interface UseComposerTextResult {
   setMessageValue: (value: string) => void
   /** Focuses the textarea (no-op on mobile to avoid unwanted keyboard pop-up). */
   textAreaFocus: () => void
+  /** Retain the rendered source through delivery; focus also belongs to its initiator. */
+  captureCompletionGuard: (forFocus?: boolean) => () => boolean
   /** Whether the draft was recently persisted — for the "Draft saved" indicator. */
   draftSaved: boolean
   /** Whether this owner's saved draft has finished restoring. */
@@ -428,6 +430,25 @@ export function useComposerText(
   }, [recoverySurface, getValues, getRevision, hasEverOwned])
   const draftRevision = useStoreMessageOption(state => state.chatDraftRevision)
   const sourceSelectionRevision = usePlaygroundSessionStore(state => state.sourceSelectionRevision)
+  const restoreRevision = usePlaygroundSessionStore(state => state.restoreRevision)
+  const renderedAddress = draftAddress ?? useStoreMessageOption.getState().chatDraftAddress
+  const captureCompletionGuard = React.useCallback((forFocus = false) => {
+    const focused = typeof document !== "undefined" ? document.activeElement : null
+    const inputRevision = getRevision()
+    const sourceIsCurrent = () => mounted.current && isCurrent() &&
+      usePlaygroundSessionStore.getState().sourceSelectionRevision === sourceSelectionRevision &&
+      usePlaygroundSessionStore.getState().restoreRevision === restoreRevision
+    const source = useStoreMessageOption.getState()
+    const beganCurrent = draftReady && renderedAddress !== null && sourceIsCurrent() && source.chatDraftAddress === renderedAddress && source.chatDraftRevision === draftRevision
+    return () => {
+      const current = useStoreMessageOption.getState(), transition = current.chatDraftTransition
+      const sameSource = current.chatDraftAddress === renderedAddress && current.chatDraftRevision === draftRevision
+      const ownBind = current.chatDraftAddress !== null && current.chatDraftRevision === draftRevision + 1 && transition?.kind === "bind" &&
+        transition.sourceAddress === renderedAddress && transition.destinationKey === chatDraftAddressKey(current.chatDraftAddress)
+      return beganCurrent && sourceIsCurrent() && (sameSource || ownBind) &&
+        (!forFocus || (focused !== null && typeof document !== "undefined" && focused !== document.body && document.activeElement === focused && getRevision() === inputRevision))
+    }
+  }, [draftReady, isCurrent, renderedAddress, draftRevision, sourceSelectionRevision, restoreRevision, getRevision])
   React.useLayoutEffect(() => {
     const checkpoint = initialSetup.current
     if (!checkpoint) return
@@ -739,6 +760,7 @@ export function useComposerText(
     promptAssistSavedAttemptId,
     setMessageValue,
     textAreaFocus,
+    captureCompletionGuard,
     draftSaved,
     draftReady,
     draftOwnerKey: ownerKey,

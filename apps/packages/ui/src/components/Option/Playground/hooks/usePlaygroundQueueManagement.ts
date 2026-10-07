@@ -95,6 +95,7 @@ export interface UsePlaygroundQueueManagementDeps {
     models: string[],
     capability: string
   ) => boolean
+  canCommitDispatchResult?: () => boolean
   sendMessage: (payload: Record<string, any>) => Promise<ChatSubmitResult | void>
   stopStreamingRequest: (options?: { discardTurn?: boolean }) => void
   form: {
@@ -195,6 +196,7 @@ export function usePlaygroundQueueManagement(
     setUseOCR,
     compareModelsSupportCapability,
     sendMessage,
+    canCommitDispatchResult,
     stopStreamingRequest,
     form,
     clearSelectedDocuments,
@@ -568,6 +570,7 @@ export function usePlaygroundQueueManagement(
       : null
 
   const queue = useComposerQueue({
+    canCommitDispatchResult,
     isConnectionReady,
     isStreaming: isSending,
     queuedMessages,

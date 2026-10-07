@@ -38,6 +38,7 @@ import {
   type ServicePromptSnapshot
 } from "@/services/service-prompts"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { isChatSubmitSuccess, normalizeChatSubmitResult, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 import { parseJsonObject } from "./utils"
 
 // ---------------------------------------------------------------------------
@@ -56,7 +57,8 @@ export interface UsePlaygroundImageGenDeps {
   selectedModel: string | null
   currentApiProvider: string | undefined
   formMessage: string
-  sendMessage: (payload: Record<string, any>) => Promise<unknown>
+  sendMessage: (payload: Record<string, any>) => Promise<ChatSubmitResult | void>
+  captureCompletionGuard?: (forFocus?: boolean) => () => boolean
   textAreaFocus: () => void
   notificationApi: {
     error: (opts: { message: string; description?: string }) => void
@@ -84,6 +86,7 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
     currentApiProvider,
     formMessage,
     sendMessage,
+    captureCompletionGuard,
     textAreaFocus,
     notificationApi,
     t,
@@ -143,6 +146,17 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
     React.useState<ImageGenerationRefineMetadata | undefined>(undefined)
   const [imageGenerateSubmitting, setImageGenerateSubmitting] =
     React.useState(false)
+
+  const imageSendRef = React.useRef<{ isCurrent: () => boolean } | null>(null)
+  const modalRevision = React.useRef(0)
+  React.useLayoutEffect(() => {
+    const active = imageSendRef.current
+    if (active && !active.isCurrent()) {
+      imageSendRef.current = null
+      setImageGenerateSubmitting(false)
+    }
+  }, [captureCompletionGuard, imageGenerateSubmitting])
+  React.useEffect(() => () => { imageSendRef.current = null; modalRevision.current++ }, [])
 
   // ---- derived ----
   const imagePromptStrategies = React.useMemo(() => getImagePromptStrategies(), [])
@@ -238,6 +252,9 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
   )
 
   const openImageGenerateModal = React.useCallback(() => {
+    modalRevision.current++
+    imageSendRef.current = null
+    setImageGenerateSubmitting(false)
     setToolsPopoverOpen(false)
     setImagePromptContextBreakdown([])
     clearImagePromptRefineState()
@@ -270,6 +287,9 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
   ])
 
   const closeImageGenerateModal = React.useCallback(() => {
+    modalRevision.current++
+    imageSendRef.current = null
+    setImageGenerateSubmitting(false)
     setImageGenerateReferenceFileId(undefined)
     setImageGenerateModalOpen(false)
   }, [])
@@ -486,6 +506,11 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
   }, [clearImagePromptRefineState])
 
   const submitImageGenerateModal = React.useCallback(async () => {
+    const sourceIsCurrent = captureCompletionGuard?.() ?? (() => true)
+    const canFocus = captureCompletionGuard?.(true) ?? (() => true)
+    if (!sourceIsCurrent() || imageSendRef.current) return
+    const revision = modalRevision.current
+
     const prompt = imageGeneratePrompt.trim()
     const backend = imageGenerateBackend.trim()
     if (!backend) {
@@ -556,9 +581,11 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
       extraParams: parsedExtraParams
     }
 
+    const attempt = { isCurrent: () => sourceIsCurrent() && modalRevision.current === revision }
+    imageSendRef.current = attempt
     setImageGenerateSubmitting(true)
     try {
-      await sendMessage({
+      const result = await sendMessage({
         message: prompt,
         image: "",
         docs: [],
@@ -571,9 +598,12 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
         imageGenerationSource: "generate-modal",
         imageEventSyncPolicy: imageGenerateSyncPolicy
       })
+      if (imageSendRef.current !== attempt || !attempt.isCurrent() || !isChatSubmitSuccess(normalizeChatSubmitResult(result))) return
+      const focusIsCurrent = canFocus()
       closeImageGenerateModal()
-      textAreaFocus()
+      if (focusIsCurrent) textAreaFocus()
     } catch (error: any) {
+      if (imageSendRef.current !== attempt || !attempt.isCurrent()) return
       notificationApi.error({
         message: t("error", { defaultValue: "Error" }),
         description:
@@ -584,7 +614,10 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
           )
       })
     } finally {
-      setImageGenerateSubmitting(false)
+      if (imageSendRef.current === attempt) {
+        imageSendRef.current = null
+        setImageGenerateSubmitting(false)
+      }
     }
   }, [
     imageGenerateBackend,
@@ -604,6 +637,7 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
     imageGenerateWidth,
     imageGenerateRefineMetadata,
     closeImageGenerateModal,
+    captureCompletionGuard,
     notificationApi,
     sendMessage,
     t,

@@ -106,7 +106,7 @@ const helperSource = ts.transpileModule(`const {
   connectionReadyRef, connectionGenerationRef, sidepanelDocumentPreparationRef, resolveSubmissionIntent, notification, t, selectedDocuments, contextFiles,
   stopListening, selectedModel, availableChatModelIds, form, ensureEmbeddingModelAvailable, conversationContextComposition, history,
   submitDispatch, beginPromptAssistReset, textAreaFocus, markPromptAssistAttemptSaved, clearDraft, clearSelectedDocuments, setContextFiles,
-  setKnowledgeMentionActive, restorePromptAssistAttempt
+  setKnowledgeMentionActive, restorePromptAssistAttempt, knowledgeMentionRevision, clearSubmittedDocuments, captureCompletionGuard
 } = scope;
 ${directHelper.getText(ast)}
 return sendCurrentFormMessage;`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
@@ -122,7 +122,7 @@ it.each([false, true])("actual compact context preparation does not clear or sen
     connectionReadyRef: { current: true }, connectionGenerationRef: { current: 0 }, sidepanelDocumentPreparationRef: { current: null },
     stopListening: vi.fn(async () => {}), ensureEmbeddingModelAvailable: vi.fn(async () => true),
     conversationContextComposition: { composeForSend: vi.fn(() => waiting) }, submitDispatch: dispatcher.result.current.dispatch,
-    clearDraft: vi.fn(), setContextFiles: vi.fn(), setKnowledgeMentionActive: vi.fn()
+    clearDraft: vi.fn(), setContextFiles: vi.fn(), setKnowledgeMentionActive: vi.fn(), knowledgeMentionRevision: {current:0}, clearSubmittedDocuments:vi.fn(),captureCompletionGuard:()=>()=>true
   }
   const send = compactDirect(normalizeChatModelId, findUnavailableChatModel, normalizeChatSubmitResult, isChatSubmitSuccess, scope) as (text: string, image: string) => Promise<void>
   const pending = send(test.form.values.message, test.form.values.image)
@@ -138,3 +138,23 @@ it.each([false, true])("actual compact context preparation does not clear or sen
   expect(scope.setContextFiles).not.toHaveBeenCalled()
   expect(test.form.values).toEqual({ message: "KEEP RAW  ", image: "KEEP IMAGE" })
 })
+
+it("retired full-page preparation preserves input before optimistic reset", async () => {
+  const test = makeWebDeps(true, false);
+  test.deps.captureCompletionGuard = () => () => false;
+  const view = renderHook(() => usePlaygroundSubmit(test.deps));
+  let error: unknown;
+  await act(async () => {
+    view.result.current.submitForm();
+    try {
+      await test.wait();
+    } catch (caught) {
+      error = caught;
+    }
+  });
+  expect(test.form.reset).not.toHaveBeenCalled();
+  expect(test.deps.beginPromptAssistReset).not.toHaveBeenCalled();
+  expect(test.deps.clearSelectedDocuments).not.toHaveBeenCalled();
+  expect(test.deps.sendMessage).not.toHaveBeenCalled();
+  expect(error).toBeUndefined();
+});

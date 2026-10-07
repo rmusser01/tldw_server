@@ -25,6 +25,7 @@ import React from "react"
 
 export interface UseComposerSubmitOptions<TPayload, TResult = unknown> {
   sendMessage: (payload: TPayload) => Promise<TResult>
+  captureCompletionGuard?: () => () => boolean
 }
 
 export interface ComposerSubmitHooks<TResult = unknown> {
@@ -42,24 +43,27 @@ export interface UseComposerSubmitResult<TPayload, TResult = unknown> {
 
 export function useComposerSubmit<TPayload, TResult = unknown>({
   sendMessage,
+  captureCompletionGuard,
 }: UseComposerSubmitOptions<TPayload, TResult>): UseComposerSubmitResult<
   TPayload,
   TResult
 > {
   const dispatch = React.useCallback(
     async (payload: TPayload, hooks?: ComposerSubmitHooks<TResult>) => {
+      const isCurrent = captureCompletionGuard?.() ?? (() => true)
+      if (!isCurrent()) throw new DOMException("The active chat changed before sending", "AbortError")
       hooks?.beforeSend?.()
       let result: TResult
       try {
         result = await sendMessage(payload)
       } catch (error) {
-        hooks?.onSendError?.(error)
+        if (isCurrent()) hooks?.onSendError?.(error)
         throw error
       }
-      hooks?.afterSend?.(result)
+      if (isCurrent()) hooks?.afterSend?.(result)
       return result
     },
-    [sendMessage]
+    [sendMessage, captureCompletionGuard]
   )
 
   return { dispatch }

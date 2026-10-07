@@ -2,6 +2,7 @@
 import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 import { usePlaygroundImageGen } from "../usePlaygroundImageGen"
 
 const mocks = vi.hoisted(() => ({
@@ -240,3 +241,111 @@ describe("usePlaygroundImageGen Service Prompts", () => {
     expect(mocks.releaseSnapshot).toHaveBeenCalledOnce()
   })
 })
+
+const heldSend = () => {
+  let resolve!: (value: ChatSubmitResult | void) => void,
+    reject!: (reason: Error) => void;
+  const promise = new Promise<ChatSubmitResult | void>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+};
+describe("image send completion ownership", () => {
+  beforeEach(() => mocks.notificationError.mockReset());
+  const setup = (
+    sendMessage: (
+      payload: Record<string, unknown>,
+    ) => Promise<ChatSubmitResult | void>,
+    captureCompletionGuard = (_focus?: boolean) => () => true,
+  ) => {
+    const deps = { ...baseDeps(), sendMessage, captureCompletionGuard };
+    const view = renderHook(() => usePlaygroundImageGen(deps));
+    act(() => {
+      view.result.current.openImageGenerateModal();
+      view.result.current.setImageGeneratePrompt("Original image");
+    });
+    return { ...view, deps };
+  };
+  it.each(["submitted", "failed", "skipped"] as const)(
+    "preserves a reopened modal after an old %s result",
+    async (status) => {
+      const old = heldSend(),
+        next = heldSend(),
+        send = vi
+          .fn()
+          .mockReturnValueOnce(old.promise)
+          .mockReturnValueOnce(next.promise);
+      const view = setup(send);
+      let first!: Promise<void>, second!: Promise<void>;
+      act(() => {
+        first = view.result.current.submitImageGenerateModal();
+      });
+      act(() => {
+        view.result.current.closeImageGenerateModal();
+        view.result.current.openImageGenerateModal();
+        view.result.current.setImageGeneratePrompt("New image");
+      });
+      act(() => {
+        second = view.result.current.submitImageGenerateModal();
+      });
+      await act(async () => {
+        old.resolve(
+          status === "submitted"
+            ? { status }
+            : status === "failed"
+              ? { status, errorMessage: "Failed" }
+              : { status, reason: "Skipped" },
+        );
+        await first;
+      });
+      expect(view.result.current.imageGenerateModalOpen).toBe(true);
+      expect(view.result.current.imageGenerateSubmitting).toBe(true);
+      expect(view.deps.textAreaFocus).not.toHaveBeenCalled();
+      await act(async () => {
+        next.resolve({ status: "submitted" });
+        await second;
+      });
+      expect(view.result.current.imageGenerateModalOpen).toBe(false);
+      expect(view.result.current.imageGenerateSubmitting).toBe(false);
+    },
+  );
+  it("does not notify a new source after a held rejection and releases its own pending state", async () => {
+    const send = heldSend();
+    let current = true;
+    const guard = () => {
+      const began = current;
+      return () => began && current;
+    };
+    const view = setup(() => send.promise, guard);
+    let pending!: Promise<void>;
+    act(() => {
+      pending = view.result.current.submitImageGenerateModal();
+    });
+    current = false;
+    view.deps.captureCompletionGuard = () => () => false;
+    view.rerender();
+    expect(view.result.current.imageGenerateSubmitting).toBe(false);
+    await act(async () => {
+      send.reject(new Error("Old request failed"));
+      await pending;
+    });
+    expect(mocks.notificationError).not.toHaveBeenCalled();
+  });
+  it.each(["failed", "skipped"] as const)(
+    "keeps the current modal available after %s",
+    async (status) => {
+      const view = setup(async () =>
+        status === "failed"
+          ? { status, errorMessage: "Failed" }
+          : { status, reason: "Skipped" },
+      );
+      await act(async () => {
+        await view.result.current.submitImageGenerateModal();
+      });
+      expect(view.result.current.imageGenerateModalOpen).toBe(true);
+      expect(view.result.current.imageGenerateSubmitting).toBe(false);
+      expect(view.deps.textAreaFocus).not.toHaveBeenCalled();
+    },
+  );
+});

@@ -138,7 +138,11 @@ export function useQueuedRequests({
   )
 
   const flushNext = React.useCallback(async () => {
-    if (!connectionReadyRef.current || isStreaming) {
+    if (
+      !connectionReadyRef.current ||
+      isStreaming ||
+      (canCommitDispatchResult && !canCommitDispatchResult())
+    ) {
       return null
     }
 

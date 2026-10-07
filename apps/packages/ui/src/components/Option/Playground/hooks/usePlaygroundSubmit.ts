@@ -70,6 +70,7 @@ export type UsePlaygroundSubmitDeps = {
   researchContext?: ChatResearchContext
   importedSidepanelContext?: SidepanelChatHandoffPageContext | null
   clearImportedSidepanelContext?: () => void
+  captureCompletionGuard?: () => () => boolean
   sendMessage: (args: any) => Promise<any>
   clearOpenUIRequestMode: () => void
   clearSelectedDocuments: () => void
@@ -166,6 +167,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     importedSidepanelContext,
     clearImportedSidepanelContext,
     sendMessage,
+    captureCompletionGuard,
     clearOpenUIRequestMode,
     clearSelectedDocuments,
     clearUploadedFiles,
@@ -219,7 +221,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
   // Route through the shared composer dispatch so cross-cutting concerns
   // (metrics, error handling) have one home if we need them later.
-  const { dispatch } = useComposerSubmit({ sendMessage })
+  const { dispatch } = useComposerSubmit({ sendMessage, captureCompletionGuard })
 
   const buildPinnedMessage = React.useCallback(
     (message: string, options?: { ignorePinnedResults?: boolean }) => {
@@ -534,34 +536,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         }
       }
       if (!currentDraft()) return
-      const promptAssistAttemptId = beginPromptAssistReset()
-      form.reset()
-      clearSelectedDocuments()
-      clearUploadedFiles()
-      textAreaFocus()
-      const projectedForSubmission = projectTokenBudget({
-        conversationTokens:
-          conversationTokenCount +
-          characterContextTokenEstimate +
-          pinnedSourceTokenEstimate,
-        draftTokens: estimateTokensForText(messageForModel ?? visiblePrompt),
-        maxTokens: resolvedMaxContext
-      })
-      if (projectedForSubmission.isOverLimit || projectedForSubmission.isNearLimit) {
-        notificationApi.warning({
-          message: t("playground:tokens.preSendWarningTitle", "Context budget warning"),
-          description: projectedForSubmission.isOverLimit
-            ? t(
-                "playground:tokens.preSendOverLimit",
-                "Projected send exceeds the model context window. Consider trimming prompt/context before sending."
-              )
-            : t(
-                "playground:tokens.preSendNearLimit",
-                "Projected send is near the context window limit."
-              )
-        })
-      }
-      setLastSubmittedContext(currentContextSnapshot)
+      let promptAssistAttemptId!: number
 
       const payload = {
         image: intent.isImageCommand ? "" : value.image,
@@ -594,7 +569,39 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         ...(mergedRequestOverrides ? { requestOverrides: mergedRequestOverrides } : {})
       }
 
-      await dispatch(payload, {
+      const completionIsCurrent = captureCompletionGuard?.() ?? (() => true)
+      if (!completionIsCurrent()) return
+      const result = await dispatch(payload, {
+        beforeSend: () => {
+          promptAssistAttemptId = beginPromptAssistReset()
+          form.reset()
+          clearSelectedDocuments()
+          clearUploadedFiles()
+          textAreaFocus()
+          const projectedForSubmission = projectTokenBudget({
+            conversationTokens:
+              conversationTokenCount +
+              characterContextTokenEstimate +
+              pinnedSourceTokenEstimate,
+            draftTokens: estimateTokensForText(messageForModel ?? visiblePrompt),
+            maxTokens: resolvedMaxContext
+          })
+          if (projectedForSubmission.isOverLimit || projectedForSubmission.isNearLimit) {
+            notificationApi.warning({
+              message: t("playground:tokens.preSendWarningTitle", "Context budget warning"),
+              description: projectedForSubmission.isOverLimit
+                ? t(
+                    "playground:tokens.preSendOverLimit",
+                    "Projected send exceeds the model context window. Consider trimming prompt/context before sending."
+                  )
+                : t(
+                    "playground:tokens.preSendNearLimit",
+                    "Projected send is near the context window limit."
+                  )
+            })
+          }
+          setLastSubmittedContext(currentContextSnapshot)
+        },
         afterSend: (result) => {
           if (isChatSubmitSuccess(normalizeChatSubmitResult(result as any))) {
             markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
@@ -607,7 +614,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         },
         onSendError: () => restorePromptAssistAttempt(promptAssistAttemptId)
       })
-      if (openUIRequestMode) {
+      if (openUIRequestMode && completionIsCurrent() && isChatSubmitSuccess(normalizeChatSubmitResult(result))) {
         clearOpenUIRequestMode()
       }
       } finally {

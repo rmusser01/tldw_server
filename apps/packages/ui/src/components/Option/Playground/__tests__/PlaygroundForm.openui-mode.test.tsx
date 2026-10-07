@@ -5,6 +5,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { useSimpleForm } from "@/hooks/useSimpleForm"
 import * as mediaHandoff from "@/services/tldw/media-chat-handoff"
 import type { MediaChatHandoffPayload } from "@/services/tldw/media-chat-handoff"
 import { useMilestoneStore } from "@/store/milestones"
@@ -839,32 +840,8 @@ vi.mock("../hooks", async () => {
       useDroppedFiles: vi.fn()
     }),
     useComposerInput: () => {
-      const [values, setValues] = React.useState({ message: "", image: "" })
-      const form = {
-        values,
-        errors: { message: null },
-        setFieldValue: (field: string, value: string) =>
-          setValues((prev) => ({ ...prev, [field]: value })),
-        setFieldError: vi.fn(),
-        clearFieldError: vi.fn(),
-        reset: () => setValues({ message: "", image: "" }),
-        onSubmit:
-          (handler: (values: { message: string; image: string }) => void) =>
-          async (event?: React.FormEvent) => {
-            event?.preventDefault?.()
-            await handler(values)
-          },
-        getInputProps: (field: "message" | "image") => ({
-          value: values[field],
-          onChange: (
-            event: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>
-          ) =>
-            setValues((prev) => ({
-              ...prev,
-              [field]: event.target.value
-            }))
-        })
-      }
+      const form = useSimpleForm({initialValues:{message:"",image:""}})
+      const values = form.values
 
       return {
         form,
@@ -873,12 +850,14 @@ vi.mock("../hooks", async () => {
         markPromptAssistAttemptSaved: vi.fn(),
         typing: false,
         setMessageValue: (value: string) =>
-          setValues((prev) => ({ ...prev, message: value })),
+          form.setFieldValue("message", value),
         restoreMessageValue: vi.fn(),
         messageDisplayValue: values.message,
         collapsedDisplayMeta: null,
         textareaRef: { current: null },
         textAreaFocus: vi.fn(),
+        captureCompletionGuard: () => () => true,
+        creationRecovery: {active:null,unavailable:false},
         syncCollapsedCaret: vi.fn(),
         commitCollapsedEdit: vi.fn(),
         replaceCollapsedRange: vi.fn(),
@@ -888,7 +867,7 @@ vi.mock("../hooks", async () => {
         handleTextareaMouseUp: vi.fn(),
         handleTextareaChange: (
           event: React.ChangeEvent<HTMLTextAreaElement>
-        ) => setValues((prev) => ({ ...prev, message: event.target.value })),
+        ) => form.setFieldValue("message", event.target.value),
         handleTextareaSelect: vi.fn(),
         markComposerPerf: vi.fn(),
         measureComposerPerf: vi.fn(),
@@ -1704,6 +1683,30 @@ describe("PlaygroundForm OpenUI mode", () => {
     await act(async () => { resolve({ status, errorMessage: "Failed", reason: "Skipped" }) })
     expect(useMilestoneStore.getState().scopedMilestones["server-a:alice"]?.first_chat != null).toBe(status === "submitted")
     expect(useMilestoneStore.getState().scopedMilestones["server-a:bob"]?.first_chat).toBeUndefined()
+  })
+
+  it("keeps OpenUI reselected while the earlier send is pending", async () => {
+    const held=defer<unknown>();onSubmitMock.mockImplementationOnce(()=>held.promise as never)
+    const user=userEvent.setup();render(<PlaygroundForm droppedFiles={[]} />)
+    const toggle=screen.getByRole("button",{name:/OpenUI/i})
+    await user.click(toggle);await user.type(screen.getByTestId("composer-textarea"),"Original UI")
+    await user.click(screen.getAllByRole("button",{name:"Send"})[0])
+    await waitFor(()=>expect(onSubmitMock).toHaveBeenCalledOnce())
+    await user.click(toggle);await user.click(toggle)
+    expect(toggle).toHaveAttribute("aria-pressed","true")
+    await act(async()=>{held.resolve({status:"submitted"})})
+    expect(toggle).toHaveAttribute("aria-pressed","true")
+  })
+
+  it.each(["failed","skipped"])("retains OpenUI intent for a handled %s send", async status => {
+    const held=defer<unknown>();onSubmitMock.mockImplementationOnce(()=>held.promise as never)
+    const user=userEvent.setup();render(<PlaygroundForm droppedFiles={[]} />)
+    const toggle=screen.getByRole("button",{name:/OpenUI/i})
+    await user.click(toggle);await user.type(screen.getByTestId("composer-textarea"),"Retry this UI")
+    await user.click(screen.getAllByRole("button",{name:"Send"})[0])
+    await waitFor(()=>expect(onSubmitMock).toHaveBeenCalledOnce())
+    await act(async()=>{held.resolve({status})})
+    expect(toggle).toHaveAttribute("aria-pressed","true")
   })
 
   it("sends the next prompt with OpenUI request overrides", async () => {

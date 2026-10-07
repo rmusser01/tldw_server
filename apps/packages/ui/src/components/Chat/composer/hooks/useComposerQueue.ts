@@ -273,11 +273,17 @@ export function useComposerQueue(
   }, [isConnectionReady, queuedMessages, setQueuedMessages])
 
   // Auto-drain only connected queued work after the current response.
-  const autoDrainingRef = React.useRef(false)
+  const autoDrainingRef = React.useRef<{ isCurrent: () => boolean } | null>(null)
+  const [autoDrainRevision, resumeAutoDrain] = React.useReducer(revision => revision + 1, 0)
+  React.useLayoutEffect(() => {
+    const active = autoDrainingRef.current
+    if (active && !active.isCurrent()) autoDrainingRef.current = null
+  })
   React.useEffect(() => {
     const next = queuedMessages[0]
     if (
       autoDrainingRef.current ||
+      canCommitDispatchResult?.() === false ||
       !next ||
       !isConnectionReady ||
       isStreaming ||
@@ -287,11 +293,17 @@ export function useComposerQueue(
       return
     }
 
-    autoDrainingRef.current = true
+    const attempt = { isCurrent: canCommitDispatchResult ?? (() => true) }
+    autoDrainingRef.current = attempt
     void queuedRequestActions.flushNext().finally(() => {
-      autoDrainingRef.current = false
+      if (autoDrainingRef.current === attempt) {
+        autoDrainingRef.current = null
+        if (attempt.isCurrent()) resumeAutoDrain()
+      }
     })
   }, [
+    autoDrainRevision,
+    canCommitDispatchResult,
     isConnectionReady,
     isQueuedDispatchBlocked,
     isStreaming,

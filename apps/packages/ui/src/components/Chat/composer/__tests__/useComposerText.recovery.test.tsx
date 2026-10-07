@@ -76,7 +76,12 @@ const deployedAfterSend = (
     "restorePromptAssistAttempt",
     "isChatSubmitSuccess",
     "normalizeChatSubmitResult",
-    "clearSelectedDocuments",
+    "clearSubmittedDocuments",
+    "selectedDocuments",
+    "contextFiles",
+    "intent",
+    "knowledgeMentionRevision",
+    "submittedKnowledgeMentionRevision",
     "setContextFiles",
     "setKnowledgeMentionActive",
     `${afterSendCode}; return afterSend;`
@@ -88,6 +93,11 @@ const deployedAfterSend = (
     isChatSubmitSuccess,
     normalizeChatSubmitResult,
     vi.fn(),
+    [],
+    [],
+    {isImageCommand:false},
+    {current:0},
+    0,
     vi.fn(),
     vi.fn()
   ) as (
