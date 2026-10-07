@@ -370,7 +370,7 @@ export function MediaIngestJobsPanel() {
                     <button
                       className={actionClass}
                       onClick={() => void reviewSaved(item)}>
-                      {qi("reviewImportSaved", "Review {{count}} saved items", {
+                      {qi("reviewImportSaved", item.savedMediaIds.length === 1 ? "Review {{count}} saved item" : "Review {{count}} saved items", {
                         count: item.savedMediaIds.length
                       })}
                     </button>

@@ -13,6 +13,7 @@ import {
   UploadCloud
 } from 'lucide-react'
 import { getTextStats } from '@/utils/text-stats'
+import { stripMediaMetadata } from '@/utils/media-metadata-display'
 import { formatRelativeTime } from '@/utils/dateFormatters'
 import { estimateReadingTimeMinutes } from '../mediaMetadataUtils'
 import type { MediaResultItem } from '../types'
@@ -189,7 +190,7 @@ export function useContentMetadata(deps: UseContentMetadataDeps) {
 
   // Text stats
   const { wordCount, charCount, paragraphCount } = useMemo(() => {
-    const text = content || ''
+    const text = isNote ? content : stripMediaMetadata(content)
     const apiWordCount = mediaDetail?.content?.word_count
     const {
       wordCount: computedWordCount,
@@ -197,13 +198,13 @@ export function useContentMetadata(deps: UseContentMetadataDeps) {
       paragraphCount
     } = getTextStats(text)
     const wordCountValue =
-      typeof apiWordCount === 'number' ? apiWordCount : computedWordCount
+      text === content && typeof apiWordCount === 'number' ? apiWordCount : computedWordCount
     return {
       wordCount: wordCountValue,
       charCount,
       paragraphCount
     }
-  }, [content, mediaDetail])
+  }, [content, isNote, mediaDetail])
 
   const readingTimeMinutes = useMemo(
     () =>

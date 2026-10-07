@@ -156,7 +156,12 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       })
         .then((detail) => {
           if (!operation.isCurrent()) throw new Error("Review owner changed")
-          return detail
+          return {
+            ...detail,
+            id,
+            title: detail.title ?? detail.source?.title,
+            type: detail.type ?? detail.source?.type
+          }
         })
         .finally(() => {
           detailRequests.current.delete(key)

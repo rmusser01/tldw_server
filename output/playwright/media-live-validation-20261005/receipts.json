@@ -1,0 +1,822 @@
+{
+  "revision": "7226596cca5b875ad6e121a15133f69600152258",
+  "responses": {
+    "document-job-status": {
+      "id": 1,
+      "uuid": "9851c55b-05cb-4ee6-94dd-ce2c8c0c71e5",
+      "status": "completed",
+      "job_type": "media_ingest_item",
+      "owner_user_id": "1",
+      "created_at": "2026-10-06 05:14:12",
+      "started_at": "2026-10-06 05:14:14",
+      "completed_at": "2026-10-06 05:14:14",
+      "cancelled_at": null,
+      "cancellation_reason": null,
+      "progress_percent": 100.0,
+      "progress_message": "completed",
+      "result": {
+        "status": "Success",
+        "media_id": 1,
+        "media_uuid": "f37c4f2b-c3f4-4446-8e3e-ff08513fa924",
+        "error": null,
+        "warnings": null,
+        "db_message": "Media 'Live validation retrieval guide' added."
+      },
+      "error_message": null,
+      "media_type": "document",
+      "source": "/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_ingest_job_kn124ts9/retrieval-guide.md",
+      "source_kind": "file",
+      "batch_id": "3d225c2d-880e-46cd-afc3-be32c3368170",
+      "collection_id": null,
+      "planned_item_id": null,
+      "idempotency_key": null
+    },
+    "embedding-real-status": {
+      "media_id": 1,
+      "has_embeddings": true,
+      "embedding_count": 1,
+      "embedding_model": "/private/tmp/media-live-validation-20261005/minilm",
+      "last_generated": null
+    },
+    "embedding-redis-submit": {
+      "media_id": 1,
+      "status": "accepted",
+      "message": "Embedding generation started",
+      "embedding_count": null,
+      "embedding_model": "/private/tmp/media-live-validation-20261005/minilm",
+      "chunks_processed": null,
+      "job_id": "03328304-cbab-463e-8aed-6ea7b83ae3fe"
+    },
+    "analysis-loaded-status": {
+      "id": 8,
+      "uuid": "bfc77037-e2a8-4043-918a-33f9cb5980d3",
+      "status": "completed",
+      "job_type": "media_ingest_item",
+      "owner_user_id": "1",
+      "created_at": "2026-10-06 05:20:18",
+      "started_at": "2026-10-06 05:20:19",
+      "completed_at": "2026-10-06 05:20:20",
+      "cancelled_at": null,
+      "cancellation_reason": null,
+      "progress_percent": 100.0,
+      "progress_message": "completed",
+      "result": {
+        "status": "Success",
+        "media_id": 6,
+        "media_uuid": "0470a6c8-5bb8-46e7-b086-81e87b04353d",
+        "error": null,
+        "warnings": null,
+        "db_message": "Media 'Real local analysis red-kite-573' added."
+      },
+      "error_message": null,
+      "media_type": "document",
+      "source": "/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_ingest_job_u8j7unsl/analysis-unique.md",
+      "source_kind": "file",
+      "batch_id": "58853be3-5af8-4589-bfab-affea6d7ca23",
+      "collection_id": null,
+      "planned_item_id": null,
+      "idempotency_key": null
+    },
+    "audio-submit": {
+      "batch_id": "15daf98d-0e54-4d03-84c1-24a82dcc4b57",
+      "jobs": [
+        {
+          "id": 2,
+          "uuid": "3aba863e-2260-4696-86d2-b140e7ab9ece",
+          "source": "/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_ingest_job_ez3r_eox/speech.wav",
+          "source_kind": "file",
+          "status": "queued",
+          "collection_id": null,
+          "planned_item_id": null,
+          "idempotency_key": null
+        }
+      ],
+      "errors": []
+    },
+    "document-ingest-submit": {
+      "batch_id": "3d225c2d-880e-46cd-afc3-be32c3368170",
+      "jobs": [
+        {
+          "id": 1,
+          "uuid": "9851c55b-05cb-4ee6-94dd-ce2c8c0c71e5",
+          "source": "/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_ingest_job_kn124ts9/retrieval-guide.md",
+          "source_kind": "file",
+          "status": "queued",
+          "collection_id": null,
+          "planned_item_id": null,
+          "idempotency_key": null
+        }
+      ],
+      "errors": []
+    },
+    "note-1": {
+      "title": "Native recovery validation 1",
+      "content": "Original note 1: preserve the silver-wren-642 evidence after moving to Trash, reloading, and restoring.",
+      "conversation_id": null,
+      "message_id": null,
+      "id": "bd36e2c4-d843-458f-a6a3-6bd8b61f2c20",
+      "created_at": "2026-10-06T05:14:44.806000Z",
+      "last_modified": "2026-10-06T05:14:44.806000Z",
+      "version": 1,
+      "client_id": "1",
+      "deleted": false,
+      "studio": null,
+      "keywords": [
+        {
+          "keyword": "media-validation",
+          "id": 1,
+          "sync_id": "d77a1f8f-1be5-4550-a222-83af8b885b0f",
+          "created_at": "2026-10-06T05:14:44.807000Z",
+          "last_modified": "2026-10-06T05:14:44.807000Z",
+          "version": 1,
+          "client_id": "1",
+          "deleted": false,
+          "note_count": null
+        },
+        {
+          "keyword": "recovery",
+          "id": 2,
+          "sync_id": "edd18f80-25b0-4fd9-871f-d522aa93e8f9",
+          "created_at": "2026-10-06T05:14:44.808000Z",
+          "last_modified": "2026-10-06T05:14:44.808000Z",
+          "version": 1,
+          "client_id": "1",
+          "deleted": false,
+          "note_count": null
+        }
+      ],
+      "folders": [],
+      "keyword_sync": null
+    },
+    "notes-trash-before-restore": {
+      "notes": [
+        {
+          "title": "Native recovery validation 1",
+          "content": "Original note 1: preserve the silver-wren-642 evidence after moving to Trash, reloading, and restoring.",
+          "conversation_id": null,
+          "message_id": null,
+          "id": "bd36e2c4-d843-458f-a6a3-6bd8b61f2c20",
+          "created_at": "2026-10-06T05:14:44.806000Z",
+          "last_modified": "2026-10-06T05:28:37.502000Z",
+          "version": 2,
+          "client_id": "1",
+          "deleted": true,
+          "studio": null,
+          "keywords": null,
+          "folders": [],
+          "keyword_sync": null
+        },
+        {
+          "title": "Native recovery validation 2",
+          "content": "Original note 2: preserve the silver-wren-642 evidence after moving to Trash, reloading, and restoring.",
+          "conversation_id": null,
+          "message_id": null,
+          "id": "75a5e571-665a-4f5e-8553-676a007aa054",
+          "created_at": "2026-10-06T05:14:44.830000Z",
+          "last_modified": "2026-10-06T05:28:37.482000Z",
+          "version": 2,
+          "client_id": "1",
+          "deleted": true,
+          "studio": null,
+          "keywords": null,
+          "folders": [],
+          "keyword_sync": null
+        }
+      ],
+      "items": [
+        {
+          "title": "Native recovery validation 1",
+          "content": "Original note 1: preserve the silver-wren-642 evidence after moving to Trash, reloading, and restoring.",
+          "conversation_id": null,
+          "message_id": null,
+          "id": "bd36e2c4-d843-458f-a6a3-6bd8b61f2c20",
+          "created_at": "2026-10-06T05:14:44.806000Z",
+          "last_modified": "2026-10-06T05:28:37.502000Z",
+          "version": 2,
+          "client_id": "1",
+          "deleted": true,
+          "studio": null,
+          "keywords": null,
+          "folders": [],
+          "keyword_sync": null
+        },
+        {
+          "title": "Native recovery validation 2",
+          "content": "Original note 2: preserve the silver-wren-642 evidence after moving to Trash, reloading, and restoring.",
+          "conversation_id": null,
+          "message_id": null,
+          "id": "75a5e571-665a-4f5e-8553-676a007aa054",
+          "created_at": "2026-10-06T05:14:44.830000Z",
+          "last_modified": "2026-10-06T05:28:37.482000Z",
+          "version": 2,
+          "client_id": "1",
+          "deleted": true,
+          "studio": null,
+          "keywords": null,
+          "folders": [],
+          "keyword_sync": null
+        }
+      ],
+      "results": [
+        {
+          "title": "Native recovery validation 1",
+          "content": "Original note 1: preserve the silver-wren-642 evidence after moving to Trash, reloading, and restoring.",
+          "conversation_id": null,
+          "message_id": null,
+          "id": "bd36e2c4-d843-458f-a6a3-6bd8b61f2c20",
+          "created_at": "2026-10-06T05:14:44.806000Z",
+          "last_modified": "2026-10-06T05:28:37.502000Z",
+          "version": 2,
+          "client_id": "1",
+          "deleted": true,
+          "studio": null,
+          "keywords": null,
+          "folders": [],
+          "keyword_sync": null
+        },
+        {
+          "title": "Native recovery validation 2",
+          "content": "Original note 2: preserve the silver-wren-642 evidence after moving to Trash, reloading, and restoring.",
+          "conversation_id": null,
+          "message_id": null,
+          "id": "75a5e571-665a-4f5e-8553-676a007aa054",
+          "created_at": "2026-10-06T05:14:44.830000Z",
+          "last_modified": "2026-10-06T05:28:37.482000Z",
+          "version": 2,
+          "client_id": "1",
+          "deleted": true,
+          "studio": null,
+          "keywords": null,
+          "folders": [],
+          "keyword_sync": null
+        }
+      ],
+      "count": 2,
+      "limit": 100,
+      "offset": 0,
+      "total": 2,
+      "has_more": false,
+      "next_offset": null,
+      "pagination": {
+        "mode": "offset",
+        "limit": 100,
+        "offset": 0,
+        "total": 2,
+        "has_more": false,
+        "next_offset": null
+      }
+    },
+    "corrected-pdf-detail": {
+      "media_id": 7,
+      "source": {
+        "url": "recoverable-corrected.pdf",
+        "title": "recoverable-corrected",
+        "duration": null,
+        "type": "pdf"
+      },
+      "processing": {
+        "prompt": null,
+        "analysis": null,
+        "safe_metadata": {
+          "title": "recoverable-corrected",
+          "author": "Unknown"
+        },
+        "model": "Imported",
+        "timestamp_option": null,
+        "chunking_status": "pending",
+        "vector_processing_status": 0
+      },
+      "content": {
+        "metadata": {},
+        "text": "Recovered PDF validation\n\nMarker: teal-ibis-286\n\nA corrected source should save without reprocessing prior successes.",
+        "word_count": 14
+      },
+      "keywords": [],
+      "timestamps": [],
+      "versions": [
+        {
+          "uuid": "4fb2cb6f-a110-4b7b-8ec7-e739bbe5f9e6",
+          "media_id": 7,
+          "version_number": 1,
+          "created_at": "2026-10-06T05:42:13.900000Z",
+          "prompt": null,
+          "analysis_content": null,
+          "safe_metadata": {
+            "title": "recoverable-corrected",
+            "author": "Unknown"
+          },
+          "content": null
+        }
+      ],
+      "has_original_file": false,
+      "original_file_url": null
+    },
+    "fts-retrieval": {
+      "items": [
+        {
+          "id": 1,
+          "title": "Live validation retrieval guide",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "completed",
+          "created_at": "2026-10-06T05:14:14.054Z",
+          "updated_at": "2026-10-06T05:26:56.960Z"
+        }
+      ],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 1
+      },
+      "results": [
+        {
+          "id": 1,
+          "title": "Live validation retrieval guide",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "completed",
+          "created_at": "2026-10-06T05:14:14.054Z",
+          "updated_at": "2026-10-06T05:26:56.960Z"
+        }
+      ]
+    },
+    "note-2": {
+      "title": "Native recovery validation 2",
+      "content": "Original note 2: preserve the silver-wren-642 evidence after moving to Trash, reloading, and restoring.",
+      "conversation_id": null,
+      "message_id": null,
+      "id": "75a5e571-665a-4f5e-8553-676a007aa054",
+      "created_at": "2026-10-06T05:14:44.830000Z",
+      "last_modified": "2026-10-06T05:14:44.830000Z",
+      "version": 1,
+      "client_id": "1",
+      "deleted": false,
+      "studio": null,
+      "keywords": [
+        {
+          "keyword": "media-validation",
+          "id": 1,
+          "sync_id": "d77a1f8f-1be5-4550-a222-83af8b885b0f",
+          "created_at": "2026-10-06T05:14:44.807000Z",
+          "last_modified": "2026-10-06T05:14:44.807000Z",
+          "version": 1,
+          "client_id": "1",
+          "deleted": false,
+          "note_count": null
+        },
+        {
+          "keyword": "recovery",
+          "id": 2,
+          "sync_id": "edd18f80-25b0-4fd9-871f-d522aa93e8f9",
+          "created_at": "2026-10-06T05:14:44.808000Z",
+          "last_modified": "2026-10-06T05:14:44.808000Z",
+          "version": 1,
+          "client_id": "1",
+          "deleted": false,
+          "note_count": null
+        }
+      ],
+      "folders": [],
+      "keyword_sync": null
+    },
+    "analysis-saved-detail": {
+      "media_id": 6,
+      "source": {
+        "url": "analysis-unique.md",
+        "title": "Real local analysis red-kite-573",
+        "duration": null,
+        "type": "document"
+      },
+      "processing": {
+        "prompt": "Summarize the source in two concise sentences. Mention its unique marker. /no_think",
+        "analysis": "- **Bulleted Note**:  \n  - **Unique marker**: red-kite-573  \n  - **Summary**: The source is identified by its unique marker, red-kite-573.  \n  - **Summary**: The document is summarized as identifying by its unique marker.  \n\n- **Note**:  \n  - **Unique marker**: red-kite-573  \n  - **Summary**: The source is identified by its unique marker, red-kite-573.",
+        "safe_metadata": {
+          "title": "Real local analysis red-kite-573",
+          "author": "Unknown"
+        },
+        "model": "Imported",
+        "timestamp_option": null,
+        "chunking_status": "completed",
+        "vector_processing_status": 0
+      },
+      "content": {
+        "metadata": {},
+        "text": "# Local analysis validation\n\nThe unique marker red-kite-573 identifies this new document. A research librarian preserves original source context, verifies saved content, and distinguishes successful ingestion from completed AI analysis and semantic indexing.\n",
+        "word_count": 33
+      },
+      "keywords": [],
+      "timestamps": [],
+      "versions": [
+        {
+          "uuid": "a4c01b75-c3c0-4f58-9c2f-4b0791304025",
+          "media_id": 6,
+          "version_number": 1,
+          "created_at": "2026-10-06T05:20:20.834000Z",
+          "prompt": "Summarize the source in two concise sentences. Mention its unique marker. /no_think",
+          "analysis_content": "- **Bulleted Note**:  \n  - **Unique marker**: red-kite-573  \n  - **Summary**: The source is identified by its unique marker, red-kite-573.  \n  - **Summary**: The document is summarized as identifying by its unique marker.  \n\n- **Note**:  \n  - **Unique marker**: red-kite-573  \n  - **Summary**: The source is identified by its unique marker, red-kite-573.",
+          "safe_metadata": {
+            "title": "Real local analysis red-kite-573",
+            "author": "Unknown"
+          },
+          "content": null
+        }
+      ],
+      "has_original_file": false,
+      "original_file_url": null
+    },
+    "vector-retrieval": {
+      "results": [
+        {
+          "id": "media_1_chunk_0",
+          "document": "# Retrieval validation guide\n\nThe validation archive uses the unique marker cobalt-heron-742. This document explains semantic retrieval of archived evidence. Keep source context, inspect exact content and verify restored Notes before making conclusions.\n\n## Method\n\nA meaningful retrieval result returns the saved item id, source provenance and matching evidence about a cobalt heron in an archive.",
+          "metadata": {
+            "media_id": "1",
+            "title": "Live validation retrieval guide",
+            "chunk_index": 0,
+            "chunk_type": "text",
+            "author": "Unknown",
+            "chunk_start": 0,
+            "embedding_provider": "huggingface",
+            "embedding_model": "/private/tmp/media-live-validation-20261005/minilm",
+            "chunk_end": 398
+          },
+          "distance": 20.948116302490234
+        }
+      ],
+      "count": 1
+    },
+    "note-1-restored": {
+      "title": "Native recovery validation 1",
+      "content": "Original note 1: preserve the silver-wren-642 evidence after moving to Trash, reloading, and restoring.",
+      "conversation_id": null,
+      "message_id": null,
+      "id": "bd36e2c4-d843-458f-a6a3-6bd8b61f2c20",
+      "created_at": "2026-10-06T05:14:44.806000Z",
+      "last_modified": "2026-10-06T05:29:46.965000Z",
+      "version": 3,
+      "client_id": "1",
+      "deleted": false,
+      "studio": null,
+      "keywords": [
+        {
+          "keyword": "media-validation",
+          "id": 1,
+          "sync_id": "d77a1f8f-1be5-4550-a222-83af8b885b0f",
+          "created_at": "2026-10-06T05:14:44.807000Z",
+          "last_modified": "2026-10-06T05:14:44.807000Z",
+          "version": 1,
+          "client_id": "1",
+          "deleted": false,
+          "note_count": null
+        },
+        {
+          "keyword": "recovery",
+          "id": 2,
+          "sync_id": "edd18f80-25b0-4fd9-871f-d522aa93e8f9",
+          "created_at": "2026-10-06T05:14:44.808000Z",
+          "last_modified": "2026-10-06T05:14:44.808000Z",
+          "version": 1,
+          "client_id": "1",
+          "deleted": false,
+          "note_count": null
+        }
+      ],
+      "folders": [],
+      "keyword_sync": null
+    },
+    "audio-status": {
+      "id": 2,
+      "uuid": "3aba863e-2260-4696-86d2-b140e7ab9ece",
+      "status": "completed",
+      "job_type": "media_ingest_item",
+      "owner_user_id": "1",
+      "created_at": "2026-10-06 05:15:24",
+      "started_at": "2026-10-06 05:15:26",
+      "completed_at": "2026-10-06 05:15:29",
+      "cancelled_at": null,
+      "cancellation_reason": null,
+      "progress_percent": 100.0,
+      "progress_message": "completed",
+      "result": {
+        "status": "Success",
+        "media_id": 2,
+        "media_uuid": "3f232034-d9c6-460e-8da9-48d0df7defb4",
+        "error": null,
+        "warnings": [
+          "Model tiny is not available locally and will be downloaded on first use. This may take several minutes depending on model size and internet connection."
+        ],
+        "db_message": "Media 'Actual spoken validation recording' added."
+      },
+      "error_message": null,
+      "media_type": "audio",
+      "source": "/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_ingest_job_ez3r_eox/speech.wav",
+      "source_kind": "file",
+      "batch_id": "15daf98d-0e54-4d03-84c1-24a82dcc4b57",
+      "collection_id": null,
+      "planned_item_id": null,
+      "idempotency_key": null
+    },
+    "note-2-restored": {
+      "title": "Native recovery validation 2",
+      "content": "Original note 2: preserve the silver-wren-642 evidence after moving to Trash, reloading, and restoring.",
+      "conversation_id": null,
+      "message_id": null,
+      "id": "75a5e571-665a-4f5e-8553-676a007aa054",
+      "created_at": "2026-10-06T05:14:44.830000Z",
+      "last_modified": "2026-10-06T05:30:47.462000Z",
+      "version": 3,
+      "client_id": "1",
+      "deleted": false,
+      "studio": null,
+      "keywords": [
+        {
+          "keyword": "media-validation",
+          "id": 1,
+          "sync_id": "d77a1f8f-1be5-4550-a222-83af8b885b0f",
+          "created_at": "2026-10-06T05:14:44.807000Z",
+          "last_modified": "2026-10-06T05:14:44.807000Z",
+          "version": 1,
+          "client_id": "1",
+          "deleted": false,
+          "note_count": null
+        },
+        {
+          "keyword": "recovery",
+          "id": 2,
+          "sync_id": "edd18f80-25b0-4fd9-871f-d522aa93e8f9",
+          "created_at": "2026-10-06T05:14:44.808000Z",
+          "last_modified": "2026-10-06T05:14:44.808000Z",
+          "version": 1,
+          "client_id": "1",
+          "deleted": false,
+          "note_count": null
+        }
+      ],
+      "folders": [],
+      "keyword_sync": null
+    },
+    "final-library": {
+      "items": [
+        {
+          "id": 7,
+          "title": "recoverable-corrected",
+          "type": "pdf",
+          "status": "pending",
+          "created_at": "2026-10-06T05:42:13.878Z",
+          "updated_at": "2026-10-06T05:42:13.878Z",
+          "url": "/api/v1/media/7"
+        },
+        {
+          "id": 1,
+          "title": "Live validation retrieval guide",
+          "type": "document",
+          "status": "completed",
+          "created_at": "2026-10-06T05:14:14.054Z",
+          "updated_at": "2026-10-06T05:26:56.960Z",
+          "url": "/api/v1/media/1"
+        },
+        {
+          "id": 6,
+          "title": "Real local analysis red-kite-573",
+          "type": "document",
+          "status": "completed",
+          "created_at": "2026-10-06T05:20:20.831Z",
+          "updated_at": "2026-10-06T05:20:20.831Z",
+          "url": "/api/v1/media/6"
+        },
+        {
+          "id": 5,
+          "title": "batch-b",
+          "type": "document",
+          "status": "pending",
+          "created_at": "2026-10-06T05:18:31.409Z",
+          "updated_at": "2026-10-06T05:18:31.409Z",
+          "url": "/api/v1/media/5"
+        },
+        {
+          "id": 4,
+          "title": "batch-a",
+          "type": "document",
+          "status": "pending",
+          "created_at": "2026-10-06T05:18:29.381Z",
+          "updated_at": "2026-10-06T05:18:29.381Z",
+          "url": "/api/v1/media/4"
+        },
+        {
+          "id": 3,
+          "title": "Example Domain",
+          "type": "web_document",
+          "status": "skipped",
+          "created_at": "2026-10-06T05:18:29.141Z",
+          "updated_at": "2026-10-06T05:18:29.153Z",
+          "url": "/api/v1/media/3"
+        },
+        {
+          "id": 2,
+          "title": "Actual spoken validation recording",
+          "type": "audio",
+          "status": "completed",
+          "created_at": "2026-10-06T05:15:29.341Z",
+          "updated_at": "2026-10-06T05:15:29.348Z",
+          "url": "/api/v1/media/2"
+        }
+      ],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 7,
+        "total_pages": 1,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 7
+      }
+    },
+    "audio-saved-detail": {
+      "media_id": 2,
+      "source": {
+        "url": "speech.wav",
+        "title": "Actual spoken validation recording",
+        "duration": null,
+        "type": "audio"
+      },
+      "processing": {
+        "prompt": null,
+        "analysis": "[Analysis Not Requested]",
+        "safe_metadata": {
+          "title": "Actual spoken validation recording",
+          "source_hash": "374fa8481dbedbc3e9943c94f265164531da4e96d70f1a25ec08b34a899cb6d1",
+          "video_lite": {
+            "summary": "[Analysis Not Requested]",
+            "summary_status": "ready"
+          }
+        },
+        "model": "whisper-tiny",
+        "timestamp_option": null,
+        "chunking_status": "completed",
+        "vector_processing_status": 0
+      },
+      "content": {
+        "metadata": {},
+        "text": "[00:00:00-00:00:05] This text was transcribed using whisper model: tiny\nDetected language: en\n\nThis is the Media Validation Recording, a blue heron lives beside the research library.\n[00:00:05-00:00:09] We are checking real speech transcription, saved content, and recovery.\n[00:00:09-00:00:11] The validation number is 742.",
+        "word_count": 43
+      },
+      "keywords": [],
+      "timestamps": [],
+      "versions": [
+        {
+          "uuid": "b8815def-2eba-4d93-87da-ad35893a5ae7",
+          "media_id": 2,
+          "version_number": 1,
+          "created_at": "2026-10-06T05:15:29.343000Z",
+          "prompt": null,
+          "analysis_content": "[Analysis Not Requested]",
+          "safe_metadata": {
+            "title": "Actual spoken validation recording",
+            "source_hash": "374fa8481dbedbc3e9943c94f265164531da4e96d70f1a25ec08b34a899cb6d1",
+            "video_lite": {
+              "summary": "[Analysis Not Requested]",
+              "summary_status": "ready"
+            }
+          },
+          "content": null
+        }
+      ],
+      "has_original_file": false,
+      "original_file_url": null
+    },
+    "web-source-detail": {
+      "media_id": 3,
+      "source": {
+        "url": "https://example.com/",
+        "title": "Example Domain",
+        "duration": null,
+        "type": "web_document"
+      },
+      "processing": {
+        "prompt": null,
+        "analysis": null,
+        "safe_metadata": {
+          "title": "Example Domain",
+          "author": "N/A",
+          "url": "https://example.com",
+          "date": "N/A",
+          "source": "web"
+        },
+        "model": "web-scraping-import",
+        "timestamp_option": null,
+        "chunking_status": "skipped",
+        "vector_processing_status": 0
+      },
+      "content": {
+        "metadata": {},
+        "text": "[METADATA]\n        {\n  \"url\": \"https://example.com\",\n  \"ingestion_date\": \"2026-10-05 22:18:29\",\n  \"content_hash\": \"0a080719be9fbb82a86a45b80dc8c2a430fbe17dc93d23758debac092864d00f\",\n  \"scraping_pipeline\": \"trafilatura\",\n  \"date\": \"N/A\",\n  \"author\": \"N/A\",\n  \"crawl_depth\": null,\n  \"crawl_parent_url\": null,\n  \"crawl_score\": null\n}\n        [/METADATA]\n\n        This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.",
+        "word_count": 48
+      },
+      "keywords": [
+        "default",
+        "no_keyword_set"
+      ],
+      "timestamps": [],
+      "versions": [],
+      "has_original_file": false,
+      "original_file_url": null
+    }
+  },
+  "failed_only_retry_response": {
+    "batch_id": "6cfe3c5e-ef47-4966-8e1a-a5c140d22edf",
+    "jobs": [
+      {
+        "id": 10,
+        "uuid": "75374125-cde9-4d2b-a060-d2fa2d556946",
+        "source": "/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_ingest_job_7fldgsyq/recoverable.pdf",
+        "source_kind": "file",
+        "status": "queued",
+        "collection_id": null,
+        "planned_item_id": null,
+        "idempotency_key": null
+      }
+    ],
+    "errors": []
+  },
+  "focused_tests": {
+    "command": "node node_modules/vitest/vitest.mjs run src/components/Review/__tests__/MediaReviewPage.reading-context.test.tsx src/components/Review/__tests__/MediaReviewPage.stage6.keyboard-scope.test.tsx src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx src/components/Common/QuickIngest/__tests__/WizardResultsStep.navigation.test.tsx src/utils/__tests__/media-detail-content.test.ts --maxWorkers=1 --no-file-parallelism --testTimeout=15000",
+    "cwd": "apps/packages/ui",
+    "files_passed": 5,
+    "tests_passed": 288,
+    "duration_seconds": 34.47,
+    "initial_default_timeout": "One test timed out twice at 5000ms; unchanged existing CI timeout is 15000ms."
+  },
+  "ui_evidence": {
+    "correction-review": "### Page\n- Page URL: http://127.0.0.1:18881/media\n- Page Title: Media | tldw\n### Snapshot\n```yaml\n- generic [active] [ref=f6e11]:\n  - generic [ref=f6e14]:\n    - link \"Skip to main content\" [ref=f6e15] [cursor=pointer]:\n      - /url: \"#main-content\"\n    - generic [ref=f6e16]:\n      - button \"Expand sidebar\" [ref=f6e17] [cursor=pointer]\n      - button \"New Chat\" [ref=f6e21] [cursor=pointer]\n      - generic [ref=f6e24]:\n        - button \"Quick Ingest\" [ref=f6e25] [cursor=pointer]\n        - button \"Chat\" [ref=f6e29] [cursor=pointer]\n        - button \"Prompts\" [ref=f6e32] [cursor=pointer]\n        - button \"Characters\" [ref=f6e36] [cursor=pointer]\n        - button \"Chat Dictionaries\" [ref=f6e41] [cursor=pointer]\n        - button \"World Books\" [ref=f6e45] [cursor=pointer]\n        - button \"Notes\" [ref=f6e48] [cursor=pointer]\n        - button \"Knowledge QA\" [ref=f6e52] [cursor=pointer]\n        - button \"Media\" [ref=f6e60] [cursor=pointer]\n        - button \"Document Workspace\" [ref=f6e63] [cursor=pointer]\n        - button \"Research Workspace\" [ref=f6e69] [cursor=pointer]\n        - button \"Kanban\" [ref=f6e75] [cursor=pointer]\n        - button \"Watchlists\" [ref=f6e77] [cursor=pointer]\n      - generic [ref=f6e82]:\n        - button \"Open Notes Dock\" [ref=f6e83] [cursor=pointer]\n        - button \"Open Quick Chat Helper (sidebar)\" [ref=f6e88] [cursor=pointer]\n        - button \"Settings\" [ref=f6e91] [cursor=pointer]\n    - main [ref=f6e95]:\n      - generic [ref=f6e96]:\n        - generic [ref=f6e99]:\n          - generic [ref=f6e100]:\n            - button \"Expand sidebar\" [ref=f6e101] [cursor=pointer]\n            - generic [ref=f6e103]:\n              - img \"tldw Assistant\" [ref=f6e104]\n              - generic [ref=f6e105]: tldw Assistant\n              - button \"Companion Home\" [ref=f6e106] [cursor=pointer]\n              - button \"Show shortcuts\" [ref=f6e110] [cursor=pointer]\n          - generic [ref=f6e113]:\n            - button \"Search - Open command palette\" [ref=f6e114] [cursor=pointer]:\n              - generic [ref=f6e118]: Search\n              - generic [ref=f6e119]: \u2318K\n            - button \"Open settings\" [ref=f6e120] [cursor=pointer]\n            - generic [ref=f6e132]:\n              - button \"Notifications, 0 unread\" [ref=f6e133] [cursor=pointer]\n              - status [ref=f6e137]: Notifications are active\n            - button \"Switch to light theme\" [ref=f6e138] [cursor=pointer]\n            - button \"Show keyboard shortcuts\" [ref=f6e145] [cursor=pointer]:\n              - generic [ref=f6e146]: \"?\"\n        - generic [ref=f6e148]:\n          - generic [ref=f6e150]:\n            - generic [ref=f6e151]:\n              - generic [ref=f6e152]:\n                - heading \"Media Inspector\" [level=1] [ref=f6e153]\n                - generic [ref=f6e154]:\n                  - generic [ref=f6e155]: 6 / 6\n                  - button \"Add media\" [ref=f6e156] [cursor=pointer]\n                  - button \"Trash\" [ref=f6e157] [cursor=pointer]\n                  - button \"Bulk\" [ref=f6e161] [cursor=pointer]\n              - generic [ref=f6e164]:\n                - button \"Show media only\" [pressed] [ref=f6e165] [cursor=pointer]:\n                  - generic [ref=f6e166]: Media\n                  - generic [ref=f6e167]: \"6\"\n                - button \"Show notes only\" [ref=f6e168] [cursor=pointer]:\n                  - generic [ref=f6e169]: Notes\n                  - generic [ref=f6e170]: \"0\"\n            - generic [ref=f6e172]:\n              - button \"Recent imports (1)\" [expanded] [ref=f6e173] [cursor=pointer]\n              - generic [ref=f6e442]:\n                - list [ref=f6e443]:\n                  - listitem [ref=f6e444]:\n                    - paragraph [ref=f6e445]: batch-a.md\n                    - paragraph [ref=f6e446]: 5 sources \u00b7 Some items failed \u00b7 Just now\n                    - status [ref=f6e447]: 4 processing outcomes received\n                    - generic [ref=f6e448]:\n                      - button \"Resume import\" [ref=f6e449] [cursor=pointer]\n                      - button \"Refresh import\" [ref=f6e450] [cursor=pointer]\n                      - button \"Review 3 saved items\" [ref=f6e456] [cursor=pointer]\n                - group [ref=f6e457]:\n                  - generic \"Optional diagnostics\" [ref=f6e458] [cursor=pointer]\n            - generic [ref=f6e178]:\n              - generic [ref=f6e179]:\n                - generic [ref=f6e180]: Find media\n                - button \"Collapse find media panel\" [expanded] [ref=f6e182] [cursor=pointer]\n              - generic [ref=f6e185]:\n                - generic [ref=f6e186]:\n                  - textbox \"Search media (title/content)\" [ref=f6e191]\n                  - button \"Search syntax help\" [ref=f6e193] [cursor=pointer]: \"?\"\n                - button \"Search\" [ref=f6e194] [cursor=pointer]\n                - generic [ref=f6e195]:\n                  - generic [ref=f6e196]:\n                    - generic [ref=f6e197]: Filters\n                    - button \"Clear all\" [ref=f6e201] [cursor=pointer]\n                  - generic [ref=f6e202]:\n                    - generic [ref=f6e203]: Search mode\n                    - generic [ref=f6e204]:\n                      - button \"Full-text search\" [pressed] [ref=f6e205] [cursor=pointer]: Full-text\n                      - button \"Metadata search\" [ref=f6e206] [cursor=pointer]: Metadata\n                  - generic [ref=f6e207]:\n                    - generic [ref=f6e208]: Sort by\n                    - generic [ref=f6e209] [cursor=pointer]:\n                      - generic [ref=f6e210]:\n                        - generic \"Relevance\" [ref=f6e211]\n                        - combobox \"Sort by\" [ref=f6e212]\n                      - img \"down\" [ref=f6e214]\n                  - generic [ref=f6e217]:\n                    - generic [ref=f6e218]: Date range\n                    - generic [ref=f6e219]:\n                      - generic [ref=f6e220]:\n                        - text: Start date\n                        - textbox \"Start date\" [ref=f6e221]\n                      - generic [ref=f6e222]:\n                        - text: End date\n                        - textbox \"End date\" [ref=f6e223]\n                  - button \"Advanced search\" [ref=f6e225] [cursor=pointer]\n                  - generic [ref=f6e229] [cursor=pointer]:\n                    - checkbox \"Favorites only\" [ref=f6e230]\n                    - generic [ref=f6e233]: Favorites only\n                  - generic [ref=f6e234]:\n                    - button \"Media types\" [ref=f6e235] [cursor=pointer]\n                    - generic [ref=f6e240]:\n                      - generic [ref=f6e241] [cursor=pointer]:\n                        - checkbox \"Filter by Document\" [ref=f6e242]\n                        - generic [ref=f6e243]: Document\n                      - generic [ref=f6e244] [cursor=pointer]:\n                        - checkbox \"Filter by Web Document\" [ref=f6e245]\n                        - generic [ref=f6e246]: Web Document\n                      - generic [ref=f6e247] [cursor=pointer]:\n                        - checkbox \"Filter by Audio\" [ref=f6e248]\n                        - generic [ref=f6e249]: Audio\n                  - button \"Keywords\" [ref=f6e251] [cursor=pointer]\n                  - generic [ref=f6e256]:\n                    - generic [ref=f6e257]: Exclude keywords\n                    - generic [ref=f6e259]:\n                      - generic [ref=f6e260]:\n                        - generic: Exclude keyword\n                        - combobox \"Exclude keyword\" [ref=f6e262]\n                      - img \"down\" [ref=f6e264]\n                    - generic [ref=f6e267]: Use excluded keywords to remove items containing those terms.\n                    - generic [ref=f6e268]: 4 exclude keyword suggestions available\n                - generic [ref=f6e269]:\n                  - generic [ref=f6e270]:\n                    - generic [ref=f6e271]: Collection\n                    - combobox \"Collection\" [ref=f6e272]:\n                      - option \"All items\" [selected]\n                  - paragraph [ref=f6e273]: Create collections from bulk selection to organize related items.\n            - generic [ref=f6e274]:\n              - generic [ref=f6e276]:\n                - generic [ref=f6e277]:\n                  - generic [ref=f6e278]:\n                    - generic [ref=f6e279]: Results\n                    - generic [ref=f6e280]: 6 / 6\n                  - generic [ref=f6e281]:\n                    - button \"Standard view\" [pressed] [ref=f6e282] [cursor=pointer]\n                    - button \"Compact view\" [ref=f6e288] [cursor=pointer]\n                - generic [ref=f6e290]:\n                  - 'button \"Select media: Live validation retrieval guide\" [ref=f6e291] [cursor=pointer]':\n                    - generic [ref=f6e292]:\n                      - button \"Add to favorites\" [ref=f6e297]\n                      - generic [ref=f6e300]:\n                        - generic [ref=f6e301]:\n                          - generic [ref=f6e302]: MEDIA\n                          - generic [ref=f6e303]: document\n                          - generic [ref=f6e304]: 22m ago\n                        - generic [ref=f6e305]: Live validation retrieval guide\n                        - generic [ref=f6e306]:\n                          - generic \"cobalt-heron-742\" [ref=f6e307]\n                          - generic \"media-validation\" [ref=f6e308]\n                  - 'button \"Select media: Real local analysis red-kite-573\" [ref=f6e309] [cursor=pointer]':\n                    - generic [ref=f6e310]:\n                      - button \"Add to favorites\" [ref=f6e315]\n                      - generic [ref=f6e318]:\n                        - generic [ref=f6e319]:\n                          - generic [ref=f6e320]: MEDIA\n                          - generic [ref=f6e321]: document\n                          - generic [ref=f6e322]: 16m ago\n                        - generic [ref=f6e323]: Real local analysis red-kite-573\n                  - 'button \"Select media: batch-b\" [ref=f6e324] [cursor=pointer]':\n                    - generic [ref=f6e325]:\n                      - button \"Add to favorites\" [ref=f6e330]\n                      - generic [ref=f6e333]:\n                        - generic [ref=f6e334]:\n                          - generic [ref=f6e335]: MEDIA\n                          - generic [ref=f6e336]: document\n                          - generic [ref=f6e341]: 17m ago\n                        - generic [ref=f6e342]: batch-b\n                  - 'button \"Select media: batch-a\" [ref=f6e343] [cursor=pointer]':\n                    - generic [ref=f6e344]:\n                      - button \"Add to favorites\" [ref=f6e349]\n                      - generic [ref=f6e352]:\n                        - generic [ref=f6e353]:\n                          - generic [ref=f6e354]: MEDIA\n                          - generic [ref=f6e355]: document\n                          - generic [ref=f6e360]: 17m ago\n                        - generic [ref=f6e361]: batch-a\n                  - 'button \"Select media: Example Domain\" [ref=f6e362] [cursor=pointer]':\n                    - generic [ref=f6e363]:\n                      - button \"Add to favorites\" [ref=f6e368]\n                      - generic [ref=f6e371]:\n                        - generic [ref=f6e372]:\n                          - generic [ref=f6e373]: MEDIA\n                          - generic [ref=f6e374]: web_document\n                          - generic [ref=f6e375]: 17m ago\n                        - generic [ref=f6e376]: Example Domain\n                        - generic [ref=f6e377]:\n                          - generic \"default\" [ref=f6e378]\n                          - generic \"no_keyword_set\" [ref=f6e379]\n                  - 'button \"Select media: Actual spoken validation recording\" [ref=f6e380] [cursor=pointer]':\n                    - generic [ref=f6e381]:\n                      - button \"Add to favorites\" [ref=f6e386]\n                      - generic [ref=f6e389]:\n                        - generic [ref=f6e390]:\n                          - generic [ref=f6e391]: MEDIA\n                          - generic [ref=f6e392]: audio\n                          - generic [ref=f6e393]: 20m ago\n                        - generic [ref=f6e394]: Actual spoken validation recording\n              - generic [ref=f6e395]:\n                - generic [ref=f6e396]:\n                  - generic [ref=f6e397]: 6 of 6 results\n                  - generic [ref=f6e398]:\n                    - generic [ref=f6e399]: \"Per page:\"\n                    - combobox \"Per page:\" [ref=f6e400]:\n                      - option \"20\" [selected]\n                      - option \"50\"\n                      - option \"100\"\n                - button \"? for shortcuts\" [ref=f6e402] [cursor=pointer]:\n                  - generic [ref=f6e403]: \"?\"\n                  - generic [ref=f6e404]: for shortcuts\n            - button \"Jump to\" [ref=f6e406] [cursor=pointer]\n            - button \"Library tools\" [ref=f6e411] [cursor=pointer]\n          - button \"Collapse sidebar\" [ref=f6e416] [cursor=pointer]\n          - generic [ref=f6e422]:\n            - button \"Create study pack\" [disabled] [ref=f6e424]\n            - generic [ref=f6e426]:\n              - heading \"No media item selected\" [level=2] [ref=f6e434]\n              - paragraph [ref=f6e435]: Select a media item from the left sidebar to view its content and analyses here.\n              - button \"Keyboard Shortcuts\" [ref=f6e436] [cursor=pointer]\n              - button \"Open Quick Ingest\" [ref=f6e438] [cursor=pointer]\n      - generic [ref=f6e459]:\n        - dialog \"Quick Ingest (5)\":\n          - generic [ref=f6e460]:\n            - button \"Close\" [ref=f6e461] [cursor=pointer]:\n              - generic \"Close\" [ref=f6e462]:\n                - img \"close\" [ref=f6e463]\n            - generic [ref=f6e466]: Quick Ingest (5)\n            - generic [ref=f6e468]:\n              - navigation \"Ingest wizard progress\" [ref=f6e469]:\n                - list [ref=f6e470]:\n                  - listitem [ref=f6e471]:\n                    - 'button \"Step 1: Add (completed)\" [ref=f6e472] [cursor=pointer]':\n                      - generic [ref=f6e476]: Add\n                      - generic [ref=f6e477]: 5 items\n                  - listitem [ref=f6e479]:\n                    - 'button \"Step 2: Configure (completed)\" [ref=f6e674] [cursor=pointer]':\n                      - generic [ref=f6e484]: Configure\n                      - generic [ref=f6e677]: Quick\n                  - listitem [ref=f6e487]:\n                    - 'button \"Step 3: Review (current)\" [disabled] [ref=f6e678]':\n                      - generic [ref=f6e492]: Review\n                  - listitem [ref=f6e495]:\n                    - 'button \"Step 4: Processing\" [disabled] [ref=f6e612]':\n                      - generic [ref=f6e500]: Processing\n                  - listitem [ref=f6e502]:\n                    - 'button \"Step 5: Results\" [disabled] [ref=f6e615]':\n                      - generic [ref=f6e507]: Results\n              - generic [ref=f6e679]:\n                - generic [ref=f6e680]:\n                  - heading \"Ready to Process\" [level=2] [ref=f6e681]\n                  - paragraph [ref=f6e682]: 2 items | Quick preset\n                - paragraph [ref=f6e683]: Processing time depends on the content, selected options, and server.\n                - generic [ref=f6e684]:\n                  - list \"Items to process\" [ref=f6e685]:\n                    - listitem [ref=f6e686]:\n                      - generic \"batch-a.md\" [ref=f6e690]\n                      - generic [ref=f6e691]: Quick \u00b7 Invalid \u2014 excluded\n                    - listitem [ref=f6e692]:\n                      - generic \"batch-b.md\" [ref=f6e696]\n                      - generic [ref=f6e697]: Quick \u00b7 Invalid \u2014 excluded\n                    - listitem [ref=f6e698]:\n                      - generic \"recoverable.pdf\" [ref=f6e702]\n                      - generic [ref=f6e703]: Quick \u00b7 Extract\n                    - listitem [ref=f6e704]:\n                      - generic \"https://example.com\" [ref=f6e708]\n                      - generic [ref=f6e709]: Quick \u00b7 Scrape\n                    - listitem [ref=f6e710]:\n                      - generic \"https://example.com\" [ref=f6e714]\n                      - generic [ref=f6e715]: Quick \u00b7 Already queued \u2014 excluded\n                  - paragraph [ref=f6e716]: \"Replacement disabled: existing saved sources are preserved.\"\n                  - paragraph [ref=f6e717]: \"Storage: Server\"\n                - generic [ref=f6e718]:\n                  - button \"Back to Settings\" [ref=f6e719] [cursor=pointer]\n                  - button \"Start processing\" [ref=f6e722] [cursor=pointer]: Start Processing\n  - alert [ref=f6e10]\n```\n",
+    "retry-outcome": "### Page\n- Page URL: http://127.0.0.1:18881/media\n- Page Title: Media | tldw\n### Snapshot\n```yaml\n- generic [active] [ref=f6e11]:\n  - generic [ref=f6e14]:\n    - link \"Skip to main content\" [ref=f6e15] [cursor=pointer]:\n      - /url: \"#main-content\"\n    - generic [ref=f6e16]:\n      - button \"Expand sidebar\" [ref=f6e17] [cursor=pointer]\n      - button \"New Chat\" [ref=f6e21] [cursor=pointer]\n      - generic [ref=f6e24]:\n        - button \"Quick Ingest\" [ref=f6e25] [cursor=pointer]\n        - button \"Chat\" [ref=f6e29] [cursor=pointer]\n        - button \"Prompts\" [ref=f6e32] [cursor=pointer]\n        - button \"Characters\" [ref=f6e36] [cursor=pointer]\n        - button \"Chat Dictionaries\" [ref=f6e41] [cursor=pointer]\n        - button \"World Books\" [ref=f6e45] [cursor=pointer]\n        - button \"Notes\" [ref=f6e48] [cursor=pointer]\n        - button \"Knowledge QA\" [ref=f6e52] [cursor=pointer]\n        - button \"Media\" [ref=f6e60] [cursor=pointer]\n        - button \"Document Workspace\" [ref=f6e63] [cursor=pointer]\n        - button \"Research Workspace\" [ref=f6e69] [cursor=pointer]\n        - button \"Kanban\" [ref=f6e75] [cursor=pointer]\n        - button \"Watchlists\" [ref=f6e77] [cursor=pointer]\n      - generic [ref=f6e82]:\n        - button \"Open Notes Dock\" [ref=f6e83] [cursor=pointer]\n        - button \"Open Quick Chat Helper (sidebar)\" [ref=f6e88] [cursor=pointer]\n        - button \"Settings\" [ref=f6e91] [cursor=pointer]\n    - main [ref=f6e95]:\n      - generic [ref=f6e96]:\n        - generic [ref=f6e99]:\n          - generic [ref=f6e100]:\n            - button \"Expand sidebar\" [ref=f6e101] [cursor=pointer]\n            - generic [ref=f6e103]:\n              - img \"tldw Assistant\" [ref=f6e104]\n              - generic [ref=f6e105]: tldw Assistant\n              - button \"Companion Home\" [ref=f6e106] [cursor=pointer]\n              - button \"Show shortcuts\" [ref=f6e110] [cursor=pointer]\n          - generic [ref=f6e113]:\n            - button \"Search - Open command palette\" [ref=f6e114] [cursor=pointer]:\n              - generic [ref=f6e118]: Search\n              - generic [ref=f6e119]: \u2318K\n            - button \"Open settings\" [ref=f6e120] [cursor=pointer]\n            - generic [ref=f6e132]:\n              - button \"Notifications, 0 unread\" [ref=f6e133] [cursor=pointer]\n              - status [ref=f6e137]: Notifications are active\n            - button \"Switch to light theme\" [ref=f6e138] [cursor=pointer]\n            - button \"Show keyboard shortcuts\" [ref=f6e145] [cursor=pointer]:\n              - generic [ref=f6e146]: \"?\"\n        - generic [ref=f6e148]:\n          - generic [ref=f6e150]:\n            - generic [ref=f6e151]:\n              - generic [ref=f6e152]:\n                - heading \"Media Inspector\" [level=1] [ref=f6e153]\n                - generic [ref=f6e154]:\n                  - generic [ref=f6e155]: 6 / 6\n                  - button \"Add media\" [ref=f6e156] [cursor=pointer]\n                  - button \"Trash\" [ref=f6e157] [cursor=pointer]\n                  - button \"Bulk\" [ref=f6e161] [cursor=pointer]\n              - generic [ref=f6e164]:\n                - button \"Show media only\" [pressed] [ref=f6e165] [cursor=pointer]:\n                  - generic [ref=f6e166]: Media\n                  - generic [ref=f6e167]: \"6\"\n                - button \"Show notes only\" [ref=f6e168] [cursor=pointer]:\n                  - generic [ref=f6e169]: Notes\n                  - generic [ref=f6e170]: \"0\"\n            - generic [ref=f6e172]:\n              - button \"Recent imports (1)\" [expanded] [ref=f6e173] [cursor=pointer]\n              - generic [ref=f6e442]:\n                - list [ref=f6e443]:\n                  - listitem [ref=f6e444]:\n                    - paragraph [ref=f6e445]: batch-a.md\n                    - paragraph [ref=f6e446]: 5 sources \u00b7 Some items failed \u00b7 Just now\n                    - status [ref=f6e447]: 4 processing outcomes received\n                    - generic [ref=f6e448]:\n                      - button \"Resume import\" [ref=f6e449] [cursor=pointer]\n                      - button \"Refresh import\" [ref=f6e450] [cursor=pointer]\n                      - button \"Review 3 saved items\" [ref=f6e456] [cursor=pointer]\n                - group [ref=f6e457]:\n                  - generic \"Optional diagnostics\" [ref=f6e458] [cursor=pointer]\n            - generic [ref=f6e178]:\n              - generic [ref=f6e179]:\n                - generic [ref=f6e180]: Find media\n                - button \"Collapse find media panel\" [expanded] [ref=f6e182] [cursor=pointer]\n              - generic [ref=f6e185]:\n                - generic [ref=f6e186]:\n                  - textbox \"Search media (title/content)\" [ref=f6e191]\n                  - button \"Search syntax help\" [ref=f6e193] [cursor=pointer]: \"?\"\n                - button \"Search\" [ref=f6e194] [cursor=pointer]\n                - generic [ref=f6e195]:\n                  - generic [ref=f6e196]:\n                    - generic [ref=f6e197]: Filters\n                    - button \"Clear all\" [ref=f6e201] [cursor=pointer]\n                  - generic [ref=f6e202]:\n                    - generic [ref=f6e203]: Search mode\n                    - generic [ref=f6e204]:\n                      - button \"Full-text search\" [pressed] [ref=f6e205] [cursor=pointer]: Full-text\n                      - button \"Metadata search\" [ref=f6e206] [cursor=pointer]: Metadata\n                  - generic [ref=f6e207]:\n                    - generic [ref=f6e208]: Sort by\n                    - generic [ref=f6e209] [cursor=pointer]:\n                      - generic [ref=f6e210]:\n                        - generic \"Relevance\" [ref=f6e211]\n                        - combobox \"Sort by\" [ref=f6e212]\n                      - img \"down\" [ref=f6e214]\n                  - generic [ref=f6e217]:\n                    - generic [ref=f6e218]: Date range\n                    - generic [ref=f6e219]:\n                      - generic [ref=f6e220]:\n                        - text: Start date\n                        - textbox \"Start date\" [ref=f6e221]\n                      - generic [ref=f6e222]:\n                        - text: End date\n                        - textbox \"End date\" [ref=f6e223]\n                  - button \"Advanced search\" [ref=f6e225] [cursor=pointer]\n                  - generic [ref=f6e229] [cursor=pointer]:\n                    - checkbox \"Favorites only\" [ref=f6e230]\n                    - generic [ref=f6e233]: Favorites only\n                  - generic [ref=f6e234]:\n                    - button \"Media types\" [ref=f6e235] [cursor=pointer]\n                    - generic [ref=f6e240]:\n                      - generic [ref=f6e241] [cursor=pointer]:\n                        - checkbox \"Filter by Document\" [ref=f6e242]\n                        - generic [ref=f6e243]: Document\n                      - generic [ref=f6e244] [cursor=pointer]:\n                        - checkbox \"Filter by Web Document\" [ref=f6e245]\n                        - generic [ref=f6e246]: Web Document\n                      - generic [ref=f6e247] [cursor=pointer]:\n                        - checkbox \"Filter by Audio\" [ref=f6e248]\n                        - generic [ref=f6e249]: Audio\n                  - button \"Keywords\" [ref=f6e251] [cursor=pointer]\n                  - generic [ref=f6e256]:\n                    - generic [ref=f6e257]: Exclude keywords\n                    - generic [ref=f6e259]:\n                      - generic [ref=f6e260]:\n                        - generic: Exclude keyword\n                        - combobox \"Exclude keyword\" [ref=f6e262]\n                      - img \"down\" [ref=f6e264]\n                    - generic [ref=f6e267]: Use excluded keywords to remove items containing those terms.\n                    - generic [ref=f6e268]: 4 exclude keyword suggestions available\n                - generic [ref=f6e269]:\n                  - generic [ref=f6e270]:\n                    - generic [ref=f6e271]: Collection\n                    - combobox \"Collection\" [ref=f6e272]:\n                      - option \"All items\" [selected]\n                  - paragraph [ref=f6e273]: Create collections from bulk selection to organize related items.\n            - generic [ref=f6e274]:\n              - generic [ref=f6e276]:\n                - generic [ref=f6e277]:\n                  - generic [ref=f6e278]:\n                    - generic [ref=f6e279]: Results\n                    - generic [ref=f6e280]: 6 / 6\n                  - generic [ref=f6e281]:\n                    - button \"Standard view\" [pressed] [ref=f6e282] [cursor=pointer]\n                    - button \"Compact view\" [ref=f6e288] [cursor=pointer]\n                - generic [ref=f6e290]:\n                  - 'button \"Select media: Live validation retrieval guide\" [ref=f6e291] [cursor=pointer]':\n                    - generic [ref=f6e292]:\n                      - button \"Add to favorites\" [ref=f6e297]\n                      - generic [ref=f6e300]:\n                        - generic [ref=f6e301]:\n                          - generic [ref=f6e302]: MEDIA\n                          - generic [ref=f6e303]: document\n                          - generic [ref=f6e304]: 25m ago\n                        - generic [ref=f6e305]: Live validation retrieval guide\n                        - generic [ref=f6e306]:\n                          - generic \"cobalt-heron-742\" [ref=f6e307]\n                          - generic \"media-validation\" [ref=f6e308]\n                  - 'button \"Select media: Real local analysis red-kite-573\" [ref=f6e309] [cursor=pointer]':\n                    - generic [ref=f6e310]:\n                      - button \"Add to favorites\" [ref=f6e315]\n                      - generic [ref=f6e318]:\n                        - generic [ref=f6e319]:\n                          - generic [ref=f6e320]: MEDIA\n                          - generic [ref=f6e321]: document\n                          - generic [ref=f6e322]: 19m ago\n                        - generic [ref=f6e323]: Real local analysis red-kite-573\n                  - 'button \"Select media: batch-b\" [ref=f6e324] [cursor=pointer]':\n                    - generic [ref=f6e325]:\n                      - button \"Add to favorites\" [ref=f6e330]\n                      - generic [ref=f6e333]:\n                        - generic [ref=f6e334]:\n                          - generic [ref=f6e335]: MEDIA\n                          - generic [ref=f6e336]: document\n                          - generic [ref=f6e341]: 21m ago\n                        - generic [ref=f6e342]: batch-b\n                  - 'button \"Select media: batch-a\" [ref=f6e343] [cursor=pointer]':\n                    - generic [ref=f6e344]:\n                      - button \"Add to favorites\" [ref=f6e349]\n                      - generic [ref=f6e352]:\n                        - generic [ref=f6e353]:\n                          - generic [ref=f6e354]: MEDIA\n                          - generic [ref=f6e355]: document\n                          - generic [ref=f6e360]: 21m ago\n                        - generic [ref=f6e361]: batch-a\n                  - 'button \"Select media: Example Domain\" [ref=f6e362] [cursor=pointer]':\n                    - generic [ref=f6e363]:\n                      - button \"Add to favorites\" [ref=f6e368]\n                      - generic [ref=f6e371]:\n                        - generic [ref=f6e372]:\n                          - generic [ref=f6e373]: MEDIA\n                          - generic [ref=f6e374]: web_document\n                          - generic [ref=f6e375]: 21m ago\n                        - generic [ref=f6e376]: Example Domain\n                        - generic [ref=f6e377]:\n                          - generic \"default\" [ref=f6e378]\n                          - generic \"no_keyword_set\" [ref=f6e379]\n                  - 'button \"Select media: Actual spoken validation recording\" [ref=f6e380] [cursor=pointer]':\n                    - generic [ref=f6e381]:\n                      - button \"Add to favorites\" [ref=f6e386]\n                      - generic [ref=f6e389]:\n                        - generic [ref=f6e390]:\n                          - generic [ref=f6e391]: MEDIA\n                          - generic [ref=f6e392]: audio\n                          - generic [ref=f6e393]: 24m ago\n                        - generic [ref=f6e394]: Actual spoken validation recording\n              - generic [ref=f6e395]:\n                - generic [ref=f6e396]:\n                  - generic [ref=f6e397]: 6 of 6 results\n                  - generic [ref=f6e398]:\n                    - generic [ref=f6e399]: \"Per page:\"\n                    - combobox \"Per page:\" [ref=f6e400]:\n                      - option \"20\" [selected]\n                      - option \"50\"\n                      - option \"100\"\n                - button \"? for shortcuts\" [ref=f6e402] [cursor=pointer]:\n                  - generic [ref=f6e403]: \"?\"\n                  - generic [ref=f6e404]: for shortcuts\n            - button \"Jump to\" [ref=f6e406] [cursor=pointer]\n            - button \"Library tools\" [ref=f6e411] [cursor=pointer]\n          - button \"Collapse sidebar\" [ref=f6e416] [cursor=pointer]\n          - generic [ref=f6e422]:\n            - button \"Create study pack\" [disabled] [ref=f6e424]\n            - generic [ref=f6e426]:\n              - heading \"No media item selected\" [level=2] [ref=f6e434]\n              - paragraph [ref=f6e435]: Select a media item from the left sidebar to view its content and analyses here.\n              - button \"Keyboard Shortcuts\" [ref=f6e436] [cursor=pointer]\n              - button \"Open Quick Ingest\" [ref=f6e438] [cursor=pointer]\n      - generic [ref=f6e459]:\n        - dialog \"Quick Ingest\":\n          - generic [ref=f6e460]:\n            - button \"Close\" [ref=f6e461] [cursor=pointer]:\n              - generic \"Close\" [ref=f6e462]:\n                - img \"close\" [ref=f6e463]\n            - generic [ref=f6e466]: Quick Ingest\n            - generic [ref=f6e468]:\n              - navigation \"Ingest wizard progress\" [ref=f6e469]:\n                - list [ref=f6e470]:\n                  - listitem [ref=f6e471]:\n                    - 'button \"Step 1: Add (completed)\" [ref=f6e844] [cursor=pointer]':\n                      - generic [ref=f6e476]: Add\n                      - generic [ref=f6e847]: 5 items\n                  - listitem [ref=f6e479]:\n                    - 'button \"Step 2: Configure (completed)\" [ref=f6e907] [cursor=pointer]':\n                      - generic [ref=f6e484]: Configure\n                      - generic [ref=f6e910]: Quick\n                  - listitem [ref=f6e487]:\n                    - 'button \"Step 3: Review (completed)\" [ref=f6e958] [cursor=pointer]':\n                      - generic [ref=f6e492]: Review\n                      - generic [ref=f6e961]: Reviewed\n                  - listitem [ref=f6e495]:\n                    - 'button \"Step 4: Processing (completed)\" [ref=f6e1015] [cursor=pointer]':\n                      - generic [ref=f6e500]: Processing\n                  - listitem [ref=f6e502]:\n                    - 'button \"Step 5: Results (current)\" [disabled] [ref=f6e1018]':\n                      - generic [ref=f6e507]: Results\n              - generic [ref=f6e1019]:\n                - generic [ref=f6e1020]:\n                  - status [ref=f6e1021]: 5 added \u00b7 1 excluded/skipped \u00b7 3 succeeded (3 saved) \u00b7 1 failed \u00b7 0 cancelled\n                  - region \"Excluded inputs\" [ref=f6e1022]:\n                    - generic [ref=f6e1023]:\n                      - paragraph [ref=f6e1024]: https://example.com\n                      - paragraph [ref=f6e1025]: Already queued. Use Process again to include this duplicate, or remove it from the queue.\n                  - region \"Completed items\" [ref=f6e1026]:\n                    - heading \"Succeeded (3)\" [level=3] [ref=f6e1027]\n                    - generic [ref=f6e1030]:\n                      - generic [ref=f6e1031]:\n                        - generic [ref=f6e1034]:\n                          - generic \"https://example.com\" [ref=f6e1035]\n                          - paragraph [ref=f6e1036]: Saved\n                          - paragraph [ref=f6e1037]: Knowledge readiness unconfirmed\n                        - button \"Open https://example.com in Media\" [ref=f6e1039] [cursor=pointer]: Open in Media\n                      - generic [ref=f6e1044]:\n                        - generic [ref=f6e1047]:\n                          - generic \"batch-a.md\" [ref=f6e1048]\n                          - paragraph [ref=f6e1049]: Saved\n                          - paragraph [ref=f6e1050]: Knowledge readiness unconfirmed\n                        - button \"Open batch-a.md in Media\" [ref=f6e1052] [cursor=pointer]: Open in Media\n                      - generic [ref=f6e1057]:\n                        - generic [ref=f6e1060]:\n                          - generic \"batch-b.md\" [ref=f6e1061]\n                          - paragraph [ref=f6e1062]: Saved\n                          - paragraph [ref=f6e1063]: Knowledge readiness unconfirmed\n                        - button \"Open batch-b.md in Media\" [ref=f6e1065] [cursor=pointer]: Open in Media\n                  - generic [ref=f6e1070]:\n                    - paragraph [ref=f6e1071]: What's next?\n                    - generic [ref=f6e1072]:\n                      - button \"Review these 3 saved items\" [ref=f6e1073] [cursor=pointer]\n                      - button \"Ask added items\" [ref=f6e1074] [cursor=pointer]\n                      - button \"Open in Document Workspace\" [ref=f6e1078] [cursor=pointer]\n                  - generic [ref=f6e1081]:\n                    - generic [ref=f6e1082]: Review failed items\n                    - button \"Export failed items list\" [ref=f6e1084] [cursor=pointer]: Export failed list\n                  - region \"Error items\" [ref=f6e1088]:\n                    - heading \"Failed during processing (1)\" [level=3] [ref=f6e1089]\n                    - generic [ref=f6e1094]:\n                      - generic [ref=f6e1099]:\n                        - generic \"recoverable.pdf\" [ref=f6e1100]\n                        - paragraph [ref=f6e1101]: An unexpected error occurred. Check the error details or server logs before trying again.\n                      - generic [ref=f6e1102]:\n                        - generic [ref=f6e1103]: Error \u00b7 Review Details\n                        - button \"Correct settings for recoverable.pdf\" [ref=f6e1107] [cursor=pointer]: Correct settings\n                - generic [ref=f6e1108]:\n                  - paragraph [ref=f6e1109]: 1s elapsed\n                  - generic [ref=f6e1110]:\n                    - button \"Start a new ingest\" [ref=f6e1111] [cursor=pointer]: Ingest More\n                    - button \"Close the ingest wizard\" [ref=f6e1112] [cursor=pointer]: Done\n  - alert [ref=f6e10]\n```\n",
+    "keyboard-j": "### Page\n- Page URL: http://127.0.0.1:18881/media-multi?media_ids=3,4,5\n- Page Title: Media Analysis | tldw\n### Snapshot\n```yaml\n- generic [ref=f5e2]:\n  - generic [ref=f5e9]:\n    - link \"Skip to main content\" [ref=f5e10] [cursor=pointer]:\n      - /url: \"#main-content\"\n    - generic [ref=f5e11]:\n      - button \"Expand sidebar\" [ref=f5e12] [cursor=pointer]\n      - button \"New Chat\" [ref=f5e16] [cursor=pointer]\n      - generic [ref=f5e19]:\n        - button \"Quick Ingest\" [ref=f5e20] [cursor=pointer]\n        - button \"Chat\" [ref=f5e24] [cursor=pointer]\n        - button \"Prompts\" [ref=f5e27] [cursor=pointer]\n        - button \"Characters\" [ref=f5e31] [cursor=pointer]\n        - button \"Chat Dictionaries\" [ref=f5e36] [cursor=pointer]\n        - button \"World Books\" [ref=f5e40] [cursor=pointer]\n        - button \"Notes\" [ref=f5e43] [cursor=pointer]\n        - button \"Knowledge QA\" [ref=f5e47] [cursor=pointer]\n        - button \"Media\" [ref=f5e55] [cursor=pointer]\n        - button \"Document Workspace\" [ref=f5e58] [cursor=pointer]\n        - button \"Research Workspace\" [ref=f5e64] [cursor=pointer]\n        - button \"Kanban\" [ref=f5e70] [cursor=pointer]\n        - button \"Watchlists\" [ref=f5e72] [cursor=pointer]\n      - generic [ref=f5e77]:\n        - button \"Open Notes Dock\" [ref=f5e78] [cursor=pointer]\n        - button \"Open Quick Chat Helper (sidebar)\" [ref=f5e83] [cursor=pointer]\n        - button \"Settings\" [ref=f5e86] [cursor=pointer]\n    - main [ref=f5e90]:\n      - generic [ref=f5e91]:\n        - generic [ref=f5e94]:\n          - generic [ref=f5e95]:\n            - button \"Expand sidebar\" [ref=f5e96] [cursor=pointer]\n            - generic [ref=f5e98]:\n              - img \"tldw Assistant\" [ref=f5e99]\n              - generic [ref=f5e100]: tldw Assistant\n              - button \"Companion Home\" [ref=f5e101] [cursor=pointer]\n              - button \"Show shortcuts\" [ref=f5e105] [cursor=pointer]\n          - generic [ref=f5e108]:\n            - button \"Search - Open command palette\" [ref=f5e109] [cursor=pointer]:\n              - generic [ref=f5e113]: Search\n              - generic [ref=f5e114]: \u2318K\n            - button \"Open settings\" [ref=f5e115] [cursor=pointer]\n            - generic [ref=f5e127]:\n              - button \"Notifications, 0 unread\" [ref=f5e128] [cursor=pointer]\n              - status [ref=f5e132]: Notifications are active\n            - button \"Switch to light theme\" [ref=f5e133] [cursor=pointer]\n            - button \"Show keyboard shortcuts\" [ref=f5e140] [cursor=pointer]:\n              - generic [ref=f5e141]: \"?\"\n        - generic [ref=f5e143]:\n          - status [ref=f5e144]: 3 selected\n          - generic [ref=f5e146]:\n            - generic [ref=f5e148]:\n              - generic [ref=f5e149]:\n                - textbox \"Search media (title/content)\" [ref=f5e150]\n                - generic [ref=f5e151]:\n                  - button \"Search\" [ref=f5e152] [cursor=pointer]\n                  - button \"Clear\" [ref=f5e154] [cursor=pointer]\n              - generic [ref=f5e156]:\n                - generic [ref=f5e157]:\n                  - generic [ref=f5e158]:\n                    - generic: Media types\n                    - combobox \"Media types\" [ref=f5e160]\n                  - img \"down\" [ref=f5e162]\n                - generic [ref=f5e165] [cursor=pointer]:\n                  - generic [ref=f5e166]:\n                    - generic \"Relevance\" [ref=f5e167]\n                    - combobox \"Sort\" [ref=f5e168]\n                  - img \"down\" [ref=f5e170]\n                - group \"Date range\" [ref=f5e173]:\n                  - textbox \"Start date\" [ref=f5e175]\n                  - generic [ref=f5e176]: to\n                  - textbox \"End date\" [ref=f5e177]\n                - generic [ref=f5e178]:\n                  - generic [ref=f5e179]:\n                    - generic: Keywords\n                    - combobox \"Keywords\" [ref=f5e181]\n                  - img \"down\" [ref=f5e183]\n                - generic [ref=f5e186]:\n                  - generic [ref=f5e187] [cursor=pointer]:\n                    - checkbox \"Search full content (slower)\" [ref=f5e189]\n                    - generic [ref=f5e191]: Search full content (slower)\n                  - generic [ref=f5e192]: Scans current page results.\n            - separator \"Resize filter panel\" [ref=f5e193]\n            - generic [ref=f5e196]:\n              - generic [ref=f5e197]:\n                - generic [ref=f5e198]: 3 selected\n                - generic [ref=f5e199]: \"Selection status: Ready to review\"\n                - button \"Review selected (3)\" [ref=f5e200] [cursor=pointer]\n              - generic [ref=f5e202]:\n                - generic [ref=f5e203]: \"Selected across pages: 3\"\n                - button \"View selected items\" [ref=f5e204] [cursor=pointer]\n              - generic [ref=f5e206]:\n                - generic [ref=f5e207]:\n                  - heading \"Results (6)\" [level=2] [ref=f5e208]\n                  - generic [ref=f5e209]:\n                    - generic [ref=f5e210]: Click or Enter to preview. Space on a checkbox selects. Shift+click selects a range.\n                    - button \"Clear selection\" [ref=f5e211] [cursor=pointer]\n                - generic [ref=f5e214]:\n                  - button \"Select Live validation retrieval guide Live validation retrieval guide document 10/5/2026, 10:14:14 PM\" [ref=f5e215] [cursor=pointer]:\n                    - generic [ref=f5e216]:\n                      - checkbox \"Select Live validation retrieval guide\" [ref=f5e220]\n                      - generic [ref=f5e222]:\n                        - generic [ref=f5e223]: Live validation retrieval guide\n                        - generic [ref=f5e224]:\n                          - generic [ref=f5e225]: document\n                          - generic [ref=f5e226]: 10/5/2026, 10:14:14 PM\n                  - button \"Select Real local analysis red-kite-573 Real local analysis red-kite-573 document 10/5/2026, 10:20:20 PM\" [ref=f5e227] [cursor=pointer]:\n                    - generic [ref=f5e228]:\n                      - checkbox \"Select Real local analysis red-kite-573\" [ref=f5e232]\n                      - generic [ref=f5e234]:\n                        - generic [ref=f5e235]: Real local analysis red-kite-573\n                        - generic [ref=f5e236]:\n                          - generic [ref=f5e237]: document\n                          - generic [ref=f5e238]: 10/5/2026, 10:20:20 PM\n                  - button \"Select batch-b batch-b document 10/5/2026, 10:18:31 PM\" [ref=f5e239] [cursor=pointer]:\n                    - generic [ref=f5e240]:\n                      - checkbox \"Select batch-b\" [checked] [ref=f5e244]\n                      - generic [ref=f5e246]:\n                        - generic [ref=f5e247]: batch-b\n                        - generic [ref=f5e248]:\n                          - generic [ref=f5e249]: document\n                          - generic [ref=f5e250]: 10/5/2026, 10:18:31 PM\n                  - button \"Select batch-a batch-a document 10/5/2026, 10:18:29 PM\" [ref=f5e251] [cursor=pointer]:\n                    - generic [ref=f5e252]:\n                      - checkbox \"Select batch-a\" [checked] [ref=f5e256]\n                      - generic [ref=f5e258]:\n                        - generic [ref=f5e259]: batch-a\n                        - generic [ref=f5e260]:\n                          - generic [ref=f5e261]: document\n                          - generic [ref=f5e262]: 10/5/2026, 10:18:29 PM\n                  - button \"Select Example Domain Example Domain web_document 10/5/2026, 10:18:29 PM\" [ref=f5e263] [cursor=pointer]:\n                    - generic [ref=f5e264]:\n                      - checkbox \"Select Example Domain\" [checked] [ref=f5e268]\n                      - generic [ref=f5e270]:\n                        - generic [ref=f5e271]: Example Domain\n                        - generic [ref=f5e272]:\n                          - generic [ref=f5e273]: web_document\n                          - generic [ref=f5e274]: 10/5/2026, 10:18:29 PM\n                  - button \"Select Actual spoken validation recording Actual spoken validation recording audio 10/5/2026, 10:15:29 PM\" [ref=f5e275] [cursor=pointer]:\n                    - generic [ref=f5e276]:\n                      - checkbox \"Select Actual spoken validation recording\" [ref=f5e280]\n                      - generic [ref=f5e282]:\n                        - generic [ref=f5e283]: Actual spoken validation recording\n                        - generic [ref=f5e284]:\n                          - generic [ref=f5e285]: audio\n                          - generic [ref=f5e286]: 10/5/2026, 10:15:29 PM\n                - generic [ref=f5e287]:\n                  - generic [ref=f5e288]: Use pagination or open all visible items\n                  - list [ref=f5e289]:\n                    - listitem \"Previous Page\" [ref=f5e290]:\n                      - button [disabled] [ref=f5e291]:\n                        - img \"left\" [ref=f5e292]\n                    - listitem \"1\" [ref=f5e295] [cursor=pointer]\n                    - listitem \"Next Page\" [ref=f5e297]:\n                      - button [disabled] [ref=f5e298]:\n                        - img \"right\" [ref=f5e299]\n              - generic [ref=f5e302]:\n                - generic [ref=f5e303]: 3 selected\n                - button \"Ask selected items\" [ref=f5e304] [cursor=pointer]\n                - button \"Research with selected sources\" [ref=f5e306] [cursor=pointer]\n                - textbox \"Batch keywords\" [ref=f5e308]:\n                  - /placeholder: Batch keywords (comma-separated)\n                - button \"Add tags\" [ref=f5e309] [cursor=pointer]\n                - generic [ref=f5e311] [cursor=pointer]:\n                  - generic [ref=f5e312]:\n                    - generic \"JSON\" [ref=f5e313]\n                    - combobox \"Export format\" [ref=f5e314]\n                  - img \"down\" [ref=f5e316]\n                - button \"Export selected\" [ref=f5e319] [cursor=pointer]\n                - button \"Reprocess\" [ref=f5e321] [cursor=pointer]\n                - button \"Move to trash\" [ref=f5e323] [cursor=pointer]\n            - separator \"Resize results panel\" [ref=f5e325]\n            - generic [active] [ref=f5e328]:\n              - generic [ref=f5e329]:\n                - generic [ref=f5e330]: \"Selected reading: batch-a\"\n                - generic [ref=f5e331]: Reading 1\u20133 of 3 selected (30 at a time)\n                - generic [ref=f5e334]:\n                  - generic [ref=f5e335]:\n                    - generic [ref=f5e336]: Viewer\n                    - generic [ref=f5e337]: 3 open\n                  - generic [ref=f5e338]: Layout\n                  - radiogroup [ref=f5e340]:\n                    - generic [ref=f5e341] [cursor=pointer]:\n                      - generic [ref=f5e342]:\n                        - radio \"Side-by-side(3)\" [checked]\n                      - generic [ref=f5e343]:\n                        - text: Side-by-side\n                        - generic [ref=f5e349]: (3)\n                    - generic [ref=f5e350] [cursor=pointer]:\n                      - generic [ref=f5e351]:\n                        - radio \"Focus(2/3)\"\n                      - generic [ref=f5e352]:\n                        - text: Focus\n                        - generic [ref=f5e359]: (2/3)\n                    - generic [ref=f5e360] [cursor=pointer]:\n                      - generic [ref=f5e361]:\n                        - radio \"Stack(3)\"\n                      - generic [ref=f5e362]:\n                        - text: Stack\n                        - generic [ref=f5e365]: (3)\n                  - radiogroup [ref=f5e367]:\n                    - generic [ref=f5e368] [cursor=pointer]:\n                      - generic [ref=f5e369]:\n                        - radio \"Vertical\" [checked]\n                      - text: Vertical\n                    - generic [ref=f5e370] [cursor=pointer]:\n                      - generic [ref=f5e371]:\n                        - radio \"Horizontal\"\n                      - text: Horizontal\n                  - button \"Options\" [ref=f5e372] [cursor=pointer]\n                - generic [ref=f5e380]:\n                  - generic [ref=f5e381]:\n                    - button \"Prev\" [ref=f5e382] [cursor=pointer]\n                    - generic [ref=f5e383]: Item 2 of 3\n                    - button \"Next\" [ref=f5e384] [cursor=pointer]\n                  - generic [ref=f5e389]:\n                    - button \"Expand/Collapse\" [ref=f5e390] [cursor=pointer]\n                    - button \"Compare content\" [ref=f5e399] [cursor=pointer]\n                    - button \"Chat about selection (3)\" [ref=f5e401] [cursor=pointer]\n                    - button \"Multi-Item Review keyboard shortcuts\" [ref=f5e406] [cursor=pointer]:\n                      - generic [ref=f5e407]: \"?\"\n                - button \"Search in content...\" [ref=f5e409] [cursor=pointer]\n                - generic [ref=f5e411]:\n                  - generic [ref=f5e412]: Open items\n                  - generic [ref=f5e413]: Search/filter in sidebar, inspect in viewer, jump using Open items.\n                  - generic [ref=f5e414]:\n                    - button \"1. Media 3\" [ref=f5e415] [cursor=pointer]\n                    - button \"2. Media 4\" [ref=f5e417] [cursor=pointer]\n                    - button \"3. Media 5\" [ref=f5e419] [cursor=pointer]\n              - generic [ref=f5e424]:\n                - generic [ref=f5e425]:\n                  - generic [ref=f5e426]:\n                    - generic [ref=f5e427]:\n                      - generic [ref=f5e428]: Media 3\n                      - generic [ref=f5e432]:\n                        - generic [ref=f5e433]: https://example.com/\n                        - generic [ref=f5e434]: 1k chars\n                    - generic [ref=f5e435]:\n                      - button \"Ask this item\" [ref=f5e436] [cursor=pointer]\n                      - button \"Research with this source\" [ref=f5e438] [cursor=pointer]\n                      - button \"Unstack\" [ref=f5e440] [cursor=pointer]\n                      - button \"Copy\" [ref=f5e442] [cursor=pointer]\n                  - generic [ref=f5e450]:\n                    - generic [ref=f5e451]:\n                      - generic [ref=f5e452]: Media Content\n                      - button \"Expand\" [ref=f5e454] [cursor=pointer]\n                    - generic [ref=f5e459]: \"[METADATA] { \\\"url\\\": \\\"https://example.com\\\", \\\"ingestion_date\\\": \\\"2026-10-05 22:18:29\\\", \\\"content_hash\\\": \\\"0a080719be9fbb82a86a45b80dc8c2a430fbe17dc93d23758debac092864d00f\\\", \\\"scraping_pipeline\\\": \\\"trafilatura\\\", \\\"date\\\": \\\"N/A\\\", \\\"author\\\": \\\"N/A\\\", \\\"crawl_depth\\\": null, \\\"crawl_parent_url\\\": null, \\\"crawl_score\\\": null } [/METADATA] This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.\"\n                  - generic [ref=f5e461]:\n                    - generic [ref=f5e462]: Analysis not available\n                    - button \"Generate analysis in Media\" [ref=f5e463] [cursor=pointer]\n                - generic [ref=f5e465]:\n                  - generic [ref=f5e466]:\n                    - generic [ref=f5e467]:\n                      - generic [ref=f5e468]: Media 4\n                      - generic [ref=f5e472]: batch-a.md\n                    - generic [ref=f5e474]:\n                      - button \"Ask this item\" [ref=f5e475] [cursor=pointer]\n                      - button \"Research with this source\" [ref=f5e477] [cursor=pointer]\n                      - button \"Unstack\" [ref=f5e479] [cursor=pointer]\n                      - button \"Copy\" [ref=f5e481] [cursor=pointer]\n                  - generic [ref=f5e489]:\n                    - generic [ref=f5e490]:\n                      - generic [ref=f5e491]: Media Content\n                      - button \"Expand\" [ref=f5e493] [cursor=pointer]\n                    - generic [ref=f5e498]: \"# Batch alpha Marker amber-otter-318 identifies the first item in this batch. Researchers should keep source context when reviewing multiple media items.\"\n                  - generic [ref=f5e500]:\n                    - generic [ref=f5e501]: Analysis not available\n                    - button \"Generate analysis in Media\" [ref=f5e502] [cursor=pointer]\n                - generic [ref=f5e504]:\n                  - generic [ref=f5e505]:\n                    - generic [ref=f5e506]:\n                      - generic [ref=f5e507]: Media 5\n                      - generic [ref=f5e511]: batch-b.md\n                    - generic [ref=f5e513]:\n                      - button \"Ask this item\" [ref=f5e514] [cursor=pointer]\n                      - button \"Research with this source\" [ref=f5e516] [cursor=pointer]\n                      - button \"Unstack\" [ref=f5e518] [cursor=pointer]\n                      - button \"Copy\" [ref=f5e520] [cursor=pointer]\n                  - generic [ref=f5e528]:\n                    - generic [ref=f5e529]:\n                      - generic [ref=f5e530]: Media Content\n                      - button \"Expand\" [ref=f5e532] [cursor=pointer]\n                    - generic [ref=f5e537]: \"# Batch beta Marker violet-finch-905 identifies the second item in this batch. Accessible batch review separates preview from checkbox selection.\"\n                  - generic [ref=f5e539]:\n                    - generic [ref=f5e540]: Analysis not available\n                    - button \"Generate analysis in Media\" [ref=f5e541] [cursor=pointer]\n          - generic [ref=f5e543]:\n            - generic [ref=f5e544]:\n              - generic [ref=f5e545]: 3 selected\n              - generic [ref=f5e546]: Reading item 2 of 3\n            - generic [ref=f5e547]: \"? for shortcuts\"\n  - alert [ref=f5e1]\n```\n",
+    "keyboard-input-guard": "### Page\n- Page URL: http://127.0.0.1:18881/media-multi?media_ids=3,4,5\n- Page Title: Media Analysis | tldw\n### Snapshot\n```yaml\n- generic [ref=f5e2]:\n  - generic [ref=f5e9]:\n    - link \"Skip to main content\" [ref=f5e10] [cursor=pointer]:\n      - /url: \"#main-content\"\n    - generic [ref=f5e11]:\n      - button \"Expand sidebar\" [ref=f5e12] [cursor=pointer]\n      - button \"New Chat\" [ref=f5e16] [cursor=pointer]\n      - generic [ref=f5e19]:\n        - button \"Quick Ingest\" [ref=f5e20] [cursor=pointer]\n        - button \"Chat\" [ref=f5e24] [cursor=pointer]\n        - button \"Prompts\" [ref=f5e27] [cursor=pointer]\n        - button \"Characters\" [ref=f5e31] [cursor=pointer]\n        - button \"Chat Dictionaries\" [ref=f5e36] [cursor=pointer]\n        - button \"World Books\" [ref=f5e40] [cursor=pointer]\n        - button \"Notes\" [ref=f5e43] [cursor=pointer]\n        - button \"Knowledge QA\" [ref=f5e47] [cursor=pointer]\n        - button \"Media\" [ref=f5e55] [cursor=pointer]\n        - button \"Document Workspace\" [ref=f5e58] [cursor=pointer]\n        - button \"Research Workspace\" [ref=f5e64] [cursor=pointer]\n        - button \"Kanban\" [ref=f5e70] [cursor=pointer]\n        - button \"Watchlists\" [ref=f5e72] [cursor=pointer]\n      - generic [ref=f5e77]:\n        - button \"Open Notes Dock\" [ref=f5e78] [cursor=pointer]\n        - button \"Open Quick Chat Helper (sidebar)\" [ref=f5e83] [cursor=pointer]\n        - button \"Settings\" [ref=f5e86] [cursor=pointer]\n    - main [ref=f5e90]:\n      - generic [ref=f5e91]:\n        - generic [ref=f5e94]:\n          - generic [ref=f5e95]:\n            - button \"Expand sidebar\" [ref=f5e96] [cursor=pointer]\n            - generic [ref=f5e98]:\n              - img \"tldw Assistant\" [ref=f5e99]\n              - generic [ref=f5e100]: tldw Assistant\n              - button \"Companion Home\" [ref=f5e101] [cursor=pointer]\n              - button \"Show shortcuts\" [ref=f5e105] [cursor=pointer]\n          - generic [ref=f5e108]:\n            - button \"Search - Open command palette\" [ref=f5e109] [cursor=pointer]:\n              - generic [ref=f5e113]: Search\n              - generic [ref=f5e114]: \u2318K\n            - button \"Open settings\" [ref=f5e115] [cursor=pointer]\n            - generic [ref=f5e127]:\n              - button \"Notifications, 0 unread\" [ref=f5e128] [cursor=pointer]\n              - status [ref=f5e132]: Notifications are active\n            - button \"Switch to light theme\" [ref=f5e133] [cursor=pointer]\n            - button \"Show keyboard shortcuts\" [ref=f5e140] [cursor=pointer]:\n              - generic [ref=f5e141]: \"?\"\n        - generic [ref=f5e143]:\n          - status [ref=f5e144]: 3 selected\n          - generic [ref=f5e146]:\n            - generic [ref=f5e148]:\n              - generic [ref=f5e149]:\n                - textbox \"Search media (title/content)\" [active] [ref=f5e150]: j\n                - generic [ref=f5e151]:\n                  - button \"Search\" [ref=f5e152] [cursor=pointer]\n                  - button \"Clear\" [ref=f5e154] [cursor=pointer]\n              - generic [ref=f5e156]:\n                - generic [ref=f5e157]:\n                  - generic [ref=f5e158]:\n                    - generic: Media types\n                    - combobox \"Media types\" [ref=f5e160]\n                  - img \"down\" [ref=f5e162]\n                - generic [ref=f5e165] [cursor=pointer]:\n                  - generic [ref=f5e166]:\n                    - generic \"Relevance\" [ref=f5e167]\n                    - combobox \"Sort\" [ref=f5e168]\n                  - img \"down\" [ref=f5e170]\n                - group \"Date range\" [ref=f5e173]:\n                  - textbox \"Start date\" [ref=f5e175]\n                  - generic [ref=f5e176]: to\n                  - textbox \"End date\" [ref=f5e177]\n                - generic [ref=f5e178]:\n                  - generic [ref=f5e179]:\n                    - generic: Keywords\n                    - combobox \"Keywords\" [ref=f5e181]\n                  - img \"down\" [ref=f5e183]\n                - generic [ref=f5e186]:\n                  - generic [ref=f5e187] [cursor=pointer]:\n                    - checkbox \"Search full content (slower)\" [ref=f5e189]\n                    - generic [ref=f5e191]: Search full content (slower)\n                  - generic [ref=f5e192]: Scans current page results.\n            - separator \"Resize filter panel\" [ref=f5e193]\n            - generic [ref=f5e196]:\n              - generic [ref=f5e197]:\n                - generic [ref=f5e198]: 3 selected\n                - generic [ref=f5e199]: \"Selection status: Ready to review\"\n                - button \"Review selected (3)\" [ref=f5e200] [cursor=pointer]\n              - generic [ref=f5e202]:\n                - generic [ref=f5e203]: \"Selected across pages: 3\"\n                - button \"View selected items\" [ref=f5e204] [cursor=pointer]\n              - generic [ref=f5e206]:\n                - generic [ref=f5e207]:\n                  - heading \"Results\" [level=2] [ref=f5e552]\n                  - generic [ref=f5e209]:\n                    - generic [ref=f5e210]: Click or Enter to preview. Space on a checkbox selects. Shift+click selects a range.\n                    - button \"Clear selection\" [ref=f5e211] [cursor=pointer]\n                - generic [ref=f5e553]:\n                  - img \"No data\" [ref=f5e555]\n                  - generic [ref=f5e567]: No media found. Use Quick ingest in the header to add media from your recordings and files.\n                  - button \"Open Quick Ingest\" [ref=f5e570] [cursor=pointer]\n              - generic [ref=f5e302]:\n                - generic [ref=f5e303]: 3 selected\n                - button \"Ask selected items\" [ref=f5e304] [cursor=pointer]\n                - button \"Research with selected sources\" [ref=f5e306] [cursor=pointer]\n                - textbox \"Batch keywords\" [ref=f5e308]:\n                  - /placeholder: Batch keywords (comma-separated)\n                - button \"Add tags\" [ref=f5e309] [cursor=pointer]\n                - generic [ref=f5e311] [cursor=pointer]:\n                  - generic [ref=f5e312]:\n                    - generic \"JSON\" [ref=f5e313]\n                    - combobox \"Export format\" [ref=f5e314]\n                  - img \"down\" [ref=f5e316]\n                - button \"Export selected\" [ref=f5e319] [cursor=pointer]\n                - button \"Reprocess\" [ref=f5e321] [cursor=pointer]\n                - button \"Move to trash\" [ref=f5e323] [cursor=pointer]\n            - separator \"Resize results panel\" [ref=f5e325]\n            - generic [ref=f5e328]:\n              - generic [ref=f5e329]:\n                - generic [ref=f5e330]: \"Selected reading: batch-a\"\n                - generic [ref=f5e331]: Reading 1\u20133 of 3 selected (30 at a time)\n                - generic [ref=f5e334]:\n                  - generic [ref=f5e335]:\n                    - generic [ref=f5e336]: Viewer\n                    - generic [ref=f5e337]: 3 open\n                  - generic [ref=f5e338]: Layout\n                  - radiogroup [ref=f5e340]:\n                    - generic [ref=f5e341] [cursor=pointer]:\n                      - generic [ref=f5e342]:\n                        - radio \"Side-by-side(3)\" [checked]\n                      - generic [ref=f5e343]:\n                        - text: Side-by-side\n                        - generic [ref=f5e349]: (3)\n                    - generic [ref=f5e350] [cursor=pointer]:\n                      - generic [ref=f5e351]:\n                        - radio \"Focus(2/3)\"\n                      - generic [ref=f5e352]:\n                        - text: Focus\n                        - generic [ref=f5e359]: (2/3)\n                    - generic [ref=f5e360] [cursor=pointer]:\n                      - generic [ref=f5e361]:\n                        - radio \"Stack(3)\"\n                      - generic [ref=f5e362]:\n                        - text: Stack\n                        - generic [ref=f5e365]: (3)\n                  - radiogroup [ref=f5e367]:\n                    - generic [ref=f5e368] [cursor=pointer]:\n                      - generic [ref=f5e369]:\n                        - radio \"Vertical\" [checked]\n                      - text: Vertical\n                    - generic [ref=f5e370] [cursor=pointer]:\n                      - generic [ref=f5e371]:\n                        - radio \"Horizontal\"\n                      - text: Horizontal\n                  - button \"Options\" [ref=f5e372] [cursor=pointer]\n                - generic [ref=f5e380]:\n                  - generic [ref=f5e381]:\n                    - button \"Prev\" [ref=f5e382] [cursor=pointer]\n                    - generic [ref=f5e383]: Item 2 of 3\n                    - button \"Next\" [ref=f5e384] [cursor=pointer]\n                  - generic [ref=f5e389]:\n                    - button \"Expand/Collapse\" [ref=f5e390] [cursor=pointer]\n                    - button \"Compare content\" [ref=f5e399] [cursor=pointer]\n                    - button \"Chat about selection (3)\" [ref=f5e401] [cursor=pointer]\n                    - button \"Multi-Item Review keyboard shortcuts\" [ref=f5e406] [cursor=pointer]:\n                      - generic [ref=f5e407]: \"?\"\n                - button \"Search in content...\" [ref=f5e409] [cursor=pointer]\n                - generic [ref=f5e411]:\n                  - generic [ref=f5e412]: Open items\n                  - generic [ref=f5e413]: Search/filter in sidebar, inspect in viewer, jump using Open items.\n                  - generic [ref=f5e414]:\n                    - button \"1. Media 3\" [ref=f5e415] [cursor=pointer]\n                    - button \"2. Media 4\" [ref=f5e417] [cursor=pointer]\n                    - button \"3. Media 5\" [ref=f5e419] [cursor=pointer]\n              - generic [ref=f5e424]:\n                - generic [ref=f5e425]:\n                  - generic [ref=f5e426]:\n                    - generic [ref=f5e427]:\n                      - generic [ref=f5e428]: Media 3\n                      - generic [ref=f5e432]:\n                        - generic [ref=f5e433]: https://example.com/\n                        - generic [ref=f5e434]: 1k chars\n                    - generic [ref=f5e435]:\n                      - button \"Ask this item\" [ref=f5e436] [cursor=pointer]\n                      - button \"Research with this source\" [ref=f5e438] [cursor=pointer]\n                      - button \"Unstack\" [ref=f5e440] [cursor=pointer]\n                      - button \"Copy\" [ref=f5e442] [cursor=pointer]\n                  - generic [ref=f5e450]:\n                    - generic [ref=f5e451]:\n                      - generic [ref=f5e452]: Media Content\n                      - button \"Expand\" [ref=f5e454] [cursor=pointer]\n                    - generic [ref=f5e459]: \"[METADATA] { \\\"url\\\": \\\"https://example.com\\\", \\\"ingestion_date\\\": \\\"2026-10-05 22:18:29\\\", \\\"content_hash\\\": \\\"0a080719be9fbb82a86a45b80dc8c2a430fbe17dc93d23758debac092864d00f\\\", \\\"scraping_pipeline\\\": \\\"trafilatura\\\", \\\"date\\\": \\\"N/A\\\", \\\"author\\\": \\\"N/A\\\", \\\"crawl_depth\\\": null, \\\"crawl_parent_url\\\": null, \\\"crawl_score\\\": null } [/METADATA] This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.\"\n                  - generic [ref=f5e461]:\n                    - generic [ref=f5e462]: Analysis not available\n                    - button \"Generate analysis in Media\" [ref=f5e463] [cursor=pointer]\n                - generic [ref=f5e465]:\n                  - generic [ref=f5e466]:\n                    - generic [ref=f5e467]:\n                      - generic [ref=f5e468]: Media 4\n                      - generic [ref=f5e472]: batch-a.md\n                    - generic [ref=f5e474]:\n                      - button \"Ask this item\" [ref=f5e475] [cursor=pointer]\n                      - button \"Research with this source\" [ref=f5e477] [cursor=pointer]\n                      - button \"Unstack\" [ref=f5e479] [cursor=pointer]\n                      - button \"Copy\" [ref=f5e481] [cursor=pointer]\n                  - generic [ref=f5e489]:\n                    - generic [ref=f5e490]:\n                      - generic [ref=f5e491]: Media Content\n                      - button \"Expand\" [ref=f5e493] [cursor=pointer]\n                    - generic [ref=f5e498]: \"# Batch alpha Marker amber-otter-318 identifies the first item in this batch. Researchers should keep source context when reviewing multiple media items.\"\n                  - generic [ref=f5e500]:\n                    - generic [ref=f5e501]: Analysis not available\n                    - button \"Generate analysis in Media\" [ref=f5e502] [cursor=pointer]\n                - generic [ref=f5e504]:\n                  - generic [ref=f5e505]:\n                    - generic [ref=f5e506]:\n                      - generic [ref=f5e507]: Media 5\n                      - generic [ref=f5e511]: batch-b.md\n                    - generic [ref=f5e513]:\n                      - button \"Ask this item\" [ref=f5e514] [cursor=pointer]\n                      - button \"Research with this source\" [ref=f5e516] [cursor=pointer]\n                      - button \"Unstack\" [ref=f5e518] [cursor=pointer]\n                      - button \"Copy\" [ref=f5e520] [cursor=pointer]\n                  - generic [ref=f5e528]:\n                    - generic [ref=f5e529]:\n                      - generic [ref=f5e530]: Media Content\n                      - button \"Expand\" [ref=f5e532] [cursor=pointer]\n                    - generic [ref=f5e537]: \"# Batch beta Marker violet-finch-905 identifies the second item in this batch. Accessible batch review separates preview from checkbox selection.\"\n                  - generic [ref=f5e539]:\n                    - generic [ref=f5e540]: Analysis not available\n                    - button \"Generate analysis in Media\" [ref=f5e541] [cursor=pointer]\n          - generic [ref=f5e543]:\n            - generic [ref=f5e544]:\n              - generic [ref=f5e545]: 3 selected\n              - generic [ref=f5e546]: Reading item 2 of 3\n            - generic [ref=f5e547]: \"? for shortcuts\"\n  - alert [ref=f5e1]\n```\n",
+    "notes-trash-reloaded": "### Page\n- Page URL: http://127.0.0.1:18881/notes\n- Page Title: Notes | tldw\n### Snapshot\n```yaml\n- generic [ref=f3e2]:\n  - generic [ref=f3e5]:\n    - link \"Skip to main content\" [ref=f3e6] [cursor=pointer]:\n      - /url: \"#main-content\"\n    - generic [ref=f3e7]:\n      - button \"Expand sidebar\" [ref=f3e8] [cursor=pointer]\n      - button \"New Chat\" [ref=f3e12] [cursor=pointer]\n      - generic [ref=f3e15]:\n        - button \"Quick Ingest\" [ref=f3e16] [cursor=pointer]\n        - button \"Chat\" [ref=f3e20] [cursor=pointer]\n        - button \"Prompts\" [ref=f3e23] [cursor=pointer]\n        - button \"Characters\" [ref=f3e27] [cursor=pointer]\n        - button \"Chat Dictionaries\" [ref=f3e32] [cursor=pointer]\n        - button \"World Books\" [ref=f3e36] [cursor=pointer]\n        - button \"Notes\" [ref=f3e39] [cursor=pointer]\n        - button \"Knowledge QA\" [ref=f3e43] [cursor=pointer]\n        - button \"Media\" [ref=f3e51] [cursor=pointer]\n        - button \"Document Workspace\" [ref=f3e54] [cursor=pointer]\n        - button \"Research Workspace\" [ref=f3e60] [cursor=pointer]\n        - button \"Kanban\" [ref=f3e66] [cursor=pointer]\n        - button \"Watchlists\" [ref=f3e68] [cursor=pointer]\n      - generic [ref=f3e73]:\n        - button \"Open Notes Dock\" [ref=f3e74] [cursor=pointer]\n        - button \"Open Quick Chat Helper (sidebar)\" [ref=f3e79] [cursor=pointer]\n        - button \"Settings\" [ref=f3e82] [cursor=pointer]\n    - main [ref=f3e86]:\n      - generic [ref=f3e87]:\n        - generic [ref=f3e90]:\n          - generic [ref=f3e91]:\n            - button \"Expand sidebar\" [ref=f3e92] [cursor=pointer]\n            - generic [ref=f3e94]:\n              - img \"tldw Assistant\" [ref=f3e95]\n              - generic [ref=f3e96]: tldw Assistant\n              - button \"Companion Home\" [ref=f3e97] [cursor=pointer]\n              - button \"Show shortcuts\" [ref=f3e101] [cursor=pointer]\n          - generic [ref=f3e104]:\n            - button \"Search - Open command palette\" [ref=f3e105] [cursor=pointer]:\n              - generic [ref=f3e109]: Search\n              - generic [ref=f3e110]: \u2318K\n            - button \"Open settings\" [ref=f3e111] [cursor=pointer]\n            - generic [ref=f3e123]:\n              - button \"Notifications, 0 unread\" [ref=f3e124] [cursor=pointer]\n              - status [ref=f3e128]: Notifications are active\n            - button \"Switch to light theme\" [ref=f3e129] [cursor=pointer]\n            - button \"Show keyboard shortcuts\" [ref=f3e136] [cursor=pointer]:\n              - generic [ref=f3e137]: \"?\"\n        - generic [ref=f3e139]:\n          - link \"Skip to notes list\" [ref=f3e140] [cursor=pointer]:\n            - /url: \"#notes-list-region\"\n          - link \"Skip to editor\" [ref=f3e141] [cursor=pointer]:\n            - /url: \"#notes-editor-region\"\n          - paragraph [ref=f3e142]: \"Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs.\"\n          - region \"Notes list\" [ref=f3e143]:\n            - generic [ref=f3e144]:\n              - generic [ref=f3e145]:\n                - generic [ref=f3e146]:\n                  - generic [ref=f3e147]:\n                    - generic [ref=f3e148]: Notes\n                    - generic [ref=f3e149]: 2 total\n                  - button \"New note\" [ref=f3e150] [cursor=pointer]\n                - generic [ref=f3e153]:\n                  - generic [ref=f3e154]:\n                    - button \"Views\" [expanded] [ref=f3e156] [cursor=pointer]\n                    - generic [ref=f3e161]:\n                      - generic [ref=f3e162]:\n                        - button \"Notes\" [ref=f3e163] [cursor=pointer]\n                        - button \"Trash\" [active] [ref=f3e165] [cursor=pointer]\n                      - generic [ref=f3e167]:\n                        - button \"List\" [disabled] [ref=f3e168]\n                        - button \"Timeline\" [disabled] [ref=f3e170]\n                        - button \"Inbox\" [disabled] [ref=f3e172]\n                        - button \"Collection\" [disabled] [ref=f3e174]\n                        - button \"Graph\" [disabled] [ref=f3e176]\n                      - generic [ref=f3e185]:\n                        - button \"Organize\" [ref=f3e186] [cursor=pointer]\n                        - button \"Organize help\" [ref=f3e192] [cursor=pointer]:\n                          - img \"question-circle\" [ref=f3e193]\n                  - generic [ref=f3e379]: Restore notes from trash to edit them again.\n              - generic [ref=f3e247]:\n                - generic [ref=f3e249]:\n                  - generic [ref=f3e250]: Trash\n                  - generic [ref=f3e251]:\n                    - button \"Import\" [disabled] [ref=f3e252]\n                    - button \"Sync folder\" [disabled] [ref=f3e254]\n                    - button \"Export\" [disabled] [ref=f3e256]\n                - list \"Notes\" [ref=f3e380]:\n                  - listitem [ref=f3e381]:\n                    - generic [ref=f3e382]:\n                      - generic [ref=f3e383]: Native recovery validation 1\n                      - generic [ref=f3e384]: \"Original note 1: preserve the silver-wren-642 evidence after moving to Trash, reloading, and restoring.\"\n                      - generic [ref=f3e385]:\n                        - generic [ref=f3e386]: Deleted \u00b7 10/5/2026, 10:28:37 PM\n                        - button \"Restore\" [ref=f3e387] [cursor=pointer]\n                  - listitem [ref=f3e389]:\n                    - generic [ref=f3e390]:\n                      - generic [ref=f3e391]: Native recovery validation 2\n                      - generic [ref=f3e392]: \"Original note 2: preserve the silver-wren-642 evidence after moving to Trash, reloading, and restoring.\"\n                      - generic [ref=f3e393]:\n                        - generic [ref=f3e394]: Deleted \u00b7 10/5/2026, 10:28:37 PM\n                        - button \"Restore\" [ref=f3e395] [cursor=pointer]\n                - generic [ref=f3e398]:\n                  - generic [ref=f3e399]: Showing 1-2 of 2\n                  - list [ref=f3e400]:\n                    - listitem \"Previous Page\" [ref=f3e401]:\n                      - button [disabled] [ref=f3e402]:\n                        - img \"left\" [ref=f3e403]\n                    - listitem \"1\" [ref=f3e406] [cursor=pointer]\n                    - listitem \"Next Page\" [ref=f3e408]:\n                      - button [disabled] [ref=f3e409]:\n                        - img \"right\" [ref=f3e410]\n                    - listitem [ref=f3e413]:\n                      - generic [ref=f3e414]:\n                        - generic [ref=f3e415]:\n                          - generic \"20 / page\" [ref=f3e416]\n                          - combobox \"Page Size\" [ref=f3e417]\n                        - img \"down\" [ref=f3e419]\n          - button \"Collapse sidebar\" [ref=f3e272] [cursor=pointer]\n          - region \"Note editor\" [ref=f3e276]:\n            - generic [ref=f3e277]:\n              - generic [ref=f3e279]:\n                - heading \"New note\" [level=5] [ref=f3e280]\n                - status [ref=f3e281]: No server save status yet\n              - generic [ref=f3e282]:\n                - button \"Save note\" [disabled] [ref=f3e283]:\n                  - generic: Save\n                - button \"Save and start another note\" [disabled] [ref=f3e284]:\n                  - generic: Save & new\n                - group \"Editor mode\" [ref=f3e285]:\n                  - button \"Edit\" [pressed] [ref=f3e286] [cursor=pointer]\n                  - button \"Split\" [ref=f3e291] [cursor=pointer]\n                  - button \"Preview\" [ref=f3e296] [cursor=pointer]\n                - button \"Create study pack\" [disabled] [ref=f3e302]\n                - button \"More actions\" [ref=f3e303] [cursor=pointer]\n            - generic [ref=f3e309]:\n              - generic [ref=f3e310]:\n                - generic [ref=f3e311]: Select or create a note\n                - generic [ref=f3e312]: Choose a note from the list to start editing, or create a new one.\n                - button \"Create note\" [ref=f3e313] [cursor=pointer]\n                - generic [ref=f3e315]: \"Tip: Type [[ in a note to link to another note.\"\n              - generic [ref=f3e316]:\n                - textbox \"Note title\" [ref=f3e317]:\n                  - /placeholder: Title\n                - button \"Generate title from content\" [disabled] [ref=f3e318]:\n                  - generic: Generate title\n                - button \"Keyboard shortcuts\" [ref=f3e319] [cursor=pointer]\n              - generic [ref=f3e322]:\n                - generic [ref=f3e323]:\n                  - generic: Tags\n                  - combobox \"Note tags\" [ref=f3e325]\n                - img \"down\" [ref=f3e327]\n              - generic [ref=f3e330]:\n                - group \"Input mode\" [ref=f3e331]:\n                  - button \"Markdown\" [ref=f3e332] [cursor=pointer]\n                  - button \"WYSIWYG\" [ref=f3e334] [cursor=pointer]\n                - generic [ref=f3e336]: Formatting\n                - button \"Bold\" [ref=f3e337] [cursor=pointer]\n                - button \"Italic\" [ref=f3e341] [cursor=pointer]\n                - button \"Heading\" [ref=f3e345] [cursor=pointer]\n                - button \"List\" [ref=f3e349] [cursor=pointer]\n                - button \"Link\" [ref=f3e352] [cursor=pointer]\n                - button \"Attachment\" [ref=f3e357] [cursor=pointer]\n                - button \"Code\" [ref=f3e361] [cursor=pointer]\n                - generic [ref=f3e368]: Assist\n                - button \"Summarize\" [disabled] [ref=f3e369]\n                - button \"Expand outline\" [disabled] [ref=f3e370]\n                - button \"Suggest tags\" [disabled] [ref=f3e371]\n              - generic [ref=f3e373]:\n                - textbox \"Note content\" [ref=f3e374]:\n                  - /placeholder: Write your note here... (Markdown supported)\n                - generic [ref=f3e375]: Markdown + LaTeX supported\n              - generic [ref=f3e376]:\n                - text: 0 words \u00b7 0 chars \u00b7 0 mins read\n                - generic [ref=f3e377]: Version pending \u00b7 Not saved yet\n                - generic [ref=f3e378]: \"Origin: Typed manually\"\n  - alert [ref=f3e1]\n```\n",
+    "corrected-final-outcome": "### Page\n- Page URL: http://127.0.0.1:18881/media\n- Page Title: Media | tldw\n### Snapshot\n```yaml\n- generic [active] [ref=f6e11]:\n  - generic [ref=f6e14]:\n    - link \"Skip to main content\" [ref=f6e15] [cursor=pointer]:\n      - /url: \"#main-content\"\n    - generic [ref=f6e16]:\n      - button \"Expand sidebar\" [ref=f6e17] [cursor=pointer]\n      - button \"New Chat\" [ref=f6e21] [cursor=pointer]\n      - generic [ref=f6e24]:\n        - button \"Quick Ingest\" [ref=f6e25] [cursor=pointer]\n        - button \"Chat\" [ref=f6e29] [cursor=pointer]\n        - button \"Prompts\" [ref=f6e32] [cursor=pointer]\n        - button \"Characters\" [ref=f6e36] [cursor=pointer]\n        - button \"Chat Dictionaries\" [ref=f6e41] [cursor=pointer]\n        - button \"World Books\" [ref=f6e45] [cursor=pointer]\n        - button \"Notes\" [ref=f6e48] [cursor=pointer]\n        - button \"Knowledge QA\" [ref=f6e52] [cursor=pointer]\n        - button \"Media\" [ref=f6e60] [cursor=pointer]\n        - button \"Document Workspace\" [ref=f6e63] [cursor=pointer]\n        - button \"Research Workspace\" [ref=f6e69] [cursor=pointer]\n        - button \"Kanban\" [ref=f6e75] [cursor=pointer]\n        - button \"Watchlists\" [ref=f6e77] [cursor=pointer]\n      - generic [ref=f6e82]:\n        - button \"Open Notes Dock\" [ref=f6e83] [cursor=pointer]\n        - button \"Open Quick Chat Helper (sidebar)\" [ref=f6e88] [cursor=pointer]\n        - button \"Settings\" [ref=f6e91] [cursor=pointer]\n    - main [ref=f6e95]:\n      - generic [ref=f6e96]:\n        - generic [ref=f6e99]:\n          - generic [ref=f6e100]:\n            - button \"Expand sidebar\" [ref=f6e101] [cursor=pointer]\n            - generic [ref=f6e103]:\n              - img \"tldw Assistant\" [ref=f6e104]\n              - generic [ref=f6e105]: tldw Assistant\n              - button \"Companion Home\" [ref=f6e106] [cursor=pointer]\n              - button \"Show shortcuts\" [ref=f6e110] [cursor=pointer]\n          - generic [ref=f6e113]:\n            - button \"Search - Open command palette\" [ref=f6e114] [cursor=pointer]:\n              - generic [ref=f6e118]: Search\n              - generic [ref=f6e119]: \u2318K\n            - button \"Open settings\" [ref=f6e120] [cursor=pointer]\n            - generic [ref=f6e132]:\n              - button \"Notifications, 0 unread\" [ref=f6e133] [cursor=pointer]\n              - status [ref=f6e137]: Notifications are active\n            - button \"Switch to light theme\" [ref=f6e138] [cursor=pointer]\n            - button \"Show keyboard shortcuts\" [ref=f6e145] [cursor=pointer]:\n              - generic [ref=f6e146]: \"?\"\n        - generic [ref=f6e148]:\n          - generic [ref=f6e150]:\n            - generic [ref=f6e151]:\n              - generic [ref=f6e152]:\n                - heading \"Media Inspector\" [level=1] [ref=f6e153]\n                - generic [ref=f6e154]:\n                  - generic [ref=f6e155]: 7 / 7\n                  - button \"Add media\" [ref=f6e156] [cursor=pointer]\n                  - button \"Trash\" [ref=f6e157] [cursor=pointer]\n                  - button \"Bulk\" [ref=f6e161] [cursor=pointer]\n              - generic [ref=f6e164]:\n                - button \"Show media only\" [pressed] [ref=f6e165] [cursor=pointer]:\n                  - generic [ref=f6e166]: Media\n                  - generic [ref=f6e167]: \"7\"\n                - button \"Show notes only\" [ref=f6e168] [cursor=pointer]:\n                  - generic [ref=f6e169]: Notes\n                  - generic [ref=f6e170]: \"0\"\n            - generic [ref=f6e172]:\n              - button \"Recent imports (2)\" [expanded] [ref=f6e1332] [cursor=pointer]\n              - generic [ref=f6e442]:\n                - list [ref=f6e443]:\n                  - listitem [ref=f6e1333]:\n                    - paragraph [ref=f6e1334]: recoverable-corrected.pdf\n                    - paragraph [ref=f6e1335]: 1 sources \u00b7 Completed \u00b7 Just now\n                    - status [ref=f6e1336]: 1 processing outcomes received\n                    - generic [ref=f6e1337]:\n                      - button \"Resume import\" [ref=f6e1338] [cursor=pointer]\n                      - button \"Refresh import\" [ref=f6e1339] [cursor=pointer]\n                      - button \"Review 1 saved items\" [ref=f6e1402] [cursor=pointer]\n                  - listitem [ref=f6e444]:\n                    - paragraph [ref=f6e445]: batch-a.md\n                    - paragraph [ref=f6e446]: 5 sources \u00b7 Some items failed \u00b7 2m ago\n                    - generic [ref=f6e448]:\n                      - button \"Refresh import\" [ref=f6e450] [cursor=pointer]\n                      - button \"Review 3 saved items\" [ref=f6e456] [cursor=pointer]\n                - group [ref=f6e457]:\n                  - generic \"Optional diagnostics\" [ref=f6e458] [cursor=pointer]\n            - generic [ref=f6e178]:\n              - generic [ref=f6e179]:\n                - generic [ref=f6e180]: Find media\n                - button \"Collapse find media panel\" [expanded] [ref=f6e182] [cursor=pointer]\n              - generic [ref=f6e185]:\n                - generic [ref=f6e186]:\n                  - textbox \"Search media (title/content)\" [ref=f6e191]\n                  - button \"Search syntax help\" [ref=f6e193] [cursor=pointer]: \"?\"\n                - button \"Search\" [ref=f6e194] [cursor=pointer]\n                - generic [ref=f6e195]:\n                  - generic [ref=f6e196]:\n                    - generic [ref=f6e197]: Filters\n                    - button \"Clear all\" [ref=f6e201] [cursor=pointer]\n                  - generic [ref=f6e202]:\n                    - generic [ref=f6e203]: Search mode\n                    - generic [ref=f6e204]:\n                      - button \"Full-text search\" [pressed] [ref=f6e205] [cursor=pointer]: Full-text\n                      - button \"Metadata search\" [ref=f6e206] [cursor=pointer]: Metadata\n                  - generic [ref=f6e207]:\n                    - generic [ref=f6e208]: Sort by\n                    - generic [ref=f6e209] [cursor=pointer]:\n                      - generic [ref=f6e210]:\n                        - generic \"Relevance\" [ref=f6e211]\n                        - combobox \"Sort by\" [ref=f6e212]\n                      - img \"down\" [ref=f6e214]\n                  - generic [ref=f6e217]:\n                    - generic [ref=f6e218]: Date range\n                    - generic [ref=f6e219]:\n                      - generic [ref=f6e220]:\n                        - text: Start date\n                        - textbox \"Start date\" [ref=f6e221]\n                      - generic [ref=f6e222]:\n                        - text: End date\n                        - textbox \"End date\" [ref=f6e223]\n                  - button \"Advanced search\" [ref=f6e225] [cursor=pointer]\n                  - generic [ref=f6e229] [cursor=pointer]:\n                    - checkbox \"Favorites only\" [ref=f6e230]\n                    - generic [ref=f6e233]: Favorites only\n                  - generic [ref=f6e234]:\n                    - button \"Media types\" [ref=f6e235] [cursor=pointer]\n                    - generic [ref=f6e240]:\n                      - generic [ref=f6e241] [cursor=pointer]:\n                        - checkbox \"Filter by Document\" [ref=f6e242]\n                        - generic [ref=f6e243]: Document\n                      - generic [ref=f6e244] [cursor=pointer]:\n                        - checkbox \"Filter by Web Document\" [ref=f6e245]\n                        - generic [ref=f6e246]: Web Document\n                      - generic [ref=f6e247] [cursor=pointer]:\n                        - checkbox \"Filter by Audio\" [ref=f6e248]\n                        - generic [ref=f6e249]: Audio\n                      - generic [ref=f6e1403] [cursor=pointer]:\n                        - checkbox \"Filter by PDF\" [ref=f6e1404]\n                        - generic [ref=f6e1405]: PDF\n                  - button \"Keywords\" [ref=f6e251] [cursor=pointer]\n                  - generic [ref=f6e256]:\n                    - generic [ref=f6e257]: Exclude keywords\n                    - generic [ref=f6e259]:\n                      - generic [ref=f6e260]:\n                        - generic: Exclude keyword\n                        - combobox \"Exclude keyword\" [ref=f6e262]\n                      - img \"down\" [ref=f6e264]\n                    - generic [ref=f6e267]: Use excluded keywords to remove items containing those terms.\n                    - generic [ref=f6e268]: 4 exclude keyword suggestions available\n                - generic [ref=f6e269]:\n                  - generic [ref=f6e270]:\n                    - generic [ref=f6e271]: Collection\n                    - combobox \"Collection\" [ref=f6e272]:\n                      - option \"All items\" [selected]\n                  - paragraph [ref=f6e273]: Create collections from bulk selection to organize related items.\n            - generic [ref=f6e274]:\n              - generic [ref=f6e276]:\n                - generic [ref=f6e277]:\n                  - generic [ref=f6e278]:\n                    - generic [ref=f6e279]: Results\n                    - generic [ref=f6e280]: 7 / 7\n                  - generic [ref=f6e281]:\n                    - button \"Standard view\" [pressed] [ref=f6e282] [cursor=pointer]\n                    - button \"Compact view\" [ref=f6e288] [cursor=pointer]\n                - generic [ref=f6e290]:\n                  - 'button \"Select media: recoverable-corrected\" [ref=f6e1406] [cursor=pointer]':\n                    - generic [ref=f6e1407]:\n                      - button \"Add to favorites\" [ref=f6e1412]\n                      - generic [ref=f6e1415]:\n                        - generic [ref=f6e1416]:\n                          - generic [ref=f6e1417]: MEDIA\n                          - generic [ref=f6e1418]: pdf\n                          - generic [ref=f6e1423]: Just now\n                        - generic [ref=f6e1424]: recoverable-corrected\n                  - 'button \"Select media: Live validation retrieval guide\" [ref=f6e291] [cursor=pointer]':\n                    - generic [ref=f6e292]:\n                      - button \"Add to favorites\" [ref=f6e297]\n                      - generic [ref=f6e300]:\n                        - generic [ref=f6e301]:\n                          - generic [ref=f6e302]: MEDIA\n                          - generic [ref=f6e303]: document\n                          - generic [ref=f6e304]: 28m ago\n                        - generic [ref=f6e305]: Live validation retrieval guide\n                        - generic [ref=f6e306]:\n                          - generic \"cobalt-heron-742\" [ref=f6e307]\n                          - generic \"media-validation\" [ref=f6e308]\n                  - 'button \"Select media: Real local analysis red-kite-573\" [ref=f6e309] [cursor=pointer]':\n                    - generic [ref=f6e310]:\n                      - button \"Add to favorites\" [ref=f6e315]\n                      - generic [ref=f6e318]:\n                        - generic [ref=f6e319]:\n                          - generic [ref=f6e320]: MEDIA\n                          - generic [ref=f6e321]: document\n                          - generic [ref=f6e322]: 22m ago\n                        - generic [ref=f6e323]: Real local analysis red-kite-573\n                  - 'button \"Select media: batch-b\" [ref=f6e324] [cursor=pointer]':\n                    - generic [ref=f6e325]:\n                      - button \"Add to favorites\" [ref=f6e330]\n                      - generic [ref=f6e333]:\n                        - generic [ref=f6e334]:\n                          - generic [ref=f6e335]: MEDIA\n                          - generic [ref=f6e336]: document\n                          - generic [ref=f6e341]: 23m ago\n                        - generic [ref=f6e342]: batch-b\n                  - 'button \"Select media: batch-a\" [ref=f6e343] [cursor=pointer]':\n                    - generic [ref=f6e344]:\n                      - button \"Add to favorites\" [ref=f6e349]\n                      - generic [ref=f6e352]:\n                        - generic [ref=f6e353]:\n                          - generic [ref=f6e354]: MEDIA\n                          - generic [ref=f6e355]: document\n                          - generic [ref=f6e360]: 23m ago\n                        - generic [ref=f6e361]: batch-a\n                  - 'button \"Select media: Example Domain\" [ref=f6e362] [cursor=pointer]':\n                    - generic [ref=f6e363]:\n                      - button \"Add to favorites\" [ref=f6e368]\n                      - generic [ref=f6e371]:\n                        - generic [ref=f6e372]:\n                          - generic [ref=f6e373]: MEDIA\n                          - generic [ref=f6e374]: web_document\n                          - generic [ref=f6e375]: 23m ago\n                        - generic [ref=f6e376]: Example Domain\n                        - generic [ref=f6e377]:\n                          - generic \"default\" [ref=f6e378]\n                          - generic \"no_keyword_set\" [ref=f6e379]\n                  - 'button \"Select media: Actual spoken validation recording\" [ref=f6e380] [cursor=pointer]':\n                    - generic [ref=f6e381]:\n                      - button \"Add to favorites\" [ref=f6e386]\n                      - generic [ref=f6e389]:\n                        - generic [ref=f6e390]:\n                          - generic [ref=f6e391]: MEDIA\n                          - generic [ref=f6e392]: audio\n                          - generic [ref=f6e393]: 26m ago\n                        - generic [ref=f6e394]: Actual spoken validation recording\n              - generic [ref=f6e395]:\n                - generic [ref=f6e396]:\n                  - generic [ref=f6e397]: 7 of 7 results\n                  - generic [ref=f6e398]:\n                    - generic [ref=f6e399]: \"Per page:\"\n                    - combobox \"Per page:\" [ref=f6e400]:\n                      - option \"20\" [selected]\n                      - option \"50\"\n                      - option \"100\"\n                - button \"? for shortcuts\" [ref=f6e402] [cursor=pointer]:\n                  - generic [ref=f6e403]: \"?\"\n                  - generic [ref=f6e404]: for shortcuts\n            - button \"Jump to\" [ref=f6e406] [cursor=pointer]\n            - button \"Library tools\" [ref=f6e411] [cursor=pointer]\n          - button \"Collapse sidebar\" [ref=f6e416] [cursor=pointer]\n          - generic [ref=f6e422]:\n            - button \"Create study pack\" [disabled] [ref=f6e424]\n            - generic [ref=f6e426]:\n              - heading \"No media item selected\" [level=2] [ref=f6e434]\n              - paragraph [ref=f6e435]: Select a media item from the left sidebar to view its content and analyses here.\n              - button \"Keyboard Shortcuts\" [ref=f6e436] [cursor=pointer]\n              - button \"Open Quick Ingest\" [ref=f6e438] [cursor=pointer]\n      - generic [ref=f6e1113]:\n        - dialog \"Quick Ingest\":\n          - generic [ref=f6e1114]:\n            - button \"Close\" [ref=f6e1115] [cursor=pointer]:\n              - generic \"Close\" [ref=f6e1116]:\n                - img \"close\" [ref=f6e1117]\n            - generic [ref=f6e1120]: Quick Ingest\n            - generic [ref=f6e1122]:\n              - navigation \"Ingest wizard progress\" [ref=f6e1123]:\n                - list [ref=f6e1124]:\n                  - listitem [ref=f6e1125]:\n                    - 'button \"Step 1: Add (completed)\" [ref=f6e1207] [cursor=pointer]':\n                      - generic [ref=f6e1130]: Add\n                      - generic [ref=f6e1210]: 1 item\n                  - listitem [ref=f6e1132]:\n                    - 'button \"Step 2: Configure (completed)\" [ref=f6e1305] [cursor=pointer]':\n                      - generic [ref=f6e1137]: Configure\n                      - generic [ref=f6e1308]: Quick\n                  - listitem [ref=f6e1139]:\n                    - 'button \"Step 3: Review (completed)\" [ref=f6e1345] [cursor=pointer]':\n                      - generic [ref=f6e1144]: Review\n                      - generic [ref=f6e1348]: Reviewed\n                  - listitem [ref=f6e1146]:\n                    - 'button \"Step 4: Processing (completed)\" [ref=f6e1425] [cursor=pointer]':\n                      - generic [ref=f6e1151]: Processing\n                  - listitem [ref=f6e1153]:\n                    - 'button \"Step 5: Results (current)\" [disabled] [ref=f6e1428]':\n                      - generic [ref=f6e1158]: Results\n              - generic [ref=f6e1429]:\n                - generic [ref=f6e1430]:\n                  - status [ref=f6e1431]: 1 added \u00b7 0 excluded/skipped \u00b7 1 succeeded (1 saved) \u00b7 0 failed \u00b7 0 cancelled\n                  - region \"Completed items\" [ref=f6e1432]:\n                    - heading \"Succeeded (1)\" [level=3] [ref=f6e1433]\n                    - generic [ref=f6e1437]:\n                      - generic [ref=f6e1440]:\n                        - generic \"recoverable-corrected.pdf\" [ref=f6e1441]\n                        - paragraph [ref=f6e1442]: Saved\n                        - paragraph [ref=f6e1443]: Knowledge readiness unconfirmed\n                      - button \"Open recoverable-corrected.pdf in Media\" [ref=f6e1445] [cursor=pointer]: Open in Media\n                  - generic [ref=f6e1450]:\n                    - paragraph [ref=f6e1451]: What's next?\n                    - generic [ref=f6e1452]:\n                      - button \"Review these 1 saved items\" [ref=f6e1453] [cursor=pointer]\n                      - button \"Ask added items\" [ref=f6e1454] [cursor=pointer]\n                      - button \"Open in Document Workspace\" [ref=f6e1458] [cursor=pointer]\n                - generic [ref=f6e1461]:\n                  - paragraph [ref=f6e1462]: 2s elapsed\n                  - generic [ref=f6e1463]:\n                    - button \"Start a new ingest\" [ref=f6e1464] [cursor=pointer]: Ingest More\n                    - button \"Close the ingest wizard\" [ref=f6e1465] [cursor=pointer]: Done\n  - alert [ref=f6e10]\n```\n"
+  },
+  "native_accessibility": {
+    "voiceover_speech_verified": false,
+    "original_foreground_restored": "ChatGPT",
+    "voiceover_process_after_cleanup": false,
+    "observed_controls": [
+      "- [10] AXWebArea \"Media Analysis | tldw\" actions=[AXShowMenu, AXScrollToVisible]",
+      "- [118] AXButton \"Review selected (3)\" actions=[AXShowMenu, AXScrollToVisible]",
+      "- [149] AXButton \"Select batch-b \u00a0 batch-b document 10/5/2026, 10:18:31 PM\" actions=[AXShowMenu, AXScrollToVisible]",
+      "- [152] AXCheckBox \"Select batch-b\" (Select batch-b) actions=[AXShowMenu, AXScrollToVisible]",
+      "- [159] AXButton \"Select batch-a \u00a0 batch-a document 10/5/2026, 10:18:29 PM\" actions=[AXShowMenu, AXScrollToVisible]",
+      "- [162] AXCheckBox \"Select batch-a\" (Select batch-a) actions=[AXShowMenu, AXScrollToVisible]",
+      "- [220] AXStaticText = \"Selected reading: Example Domain\" actions=[AXShowMenu, AXScrollToVisible]",
+      "- [258] AXButton \"Next\" actions=[AXShowMenu, AXScrollToVisible]",
+      "- [264] AXStaticText = \"Open items\" actions=[AXShowMenu, AXScrollToVisible]",
+      "- [265] AXStaticText = \"Search/filter in sidebar, inspect in viewer, jump using Open items.\" actions=[AXShowMenu, AXScrollToVisible]"
+    ]
+  },
+  "screenshots_sha256": {
+    "mixed-real-results.png": "75449aff487187174a83ab3ad30f8832ddc2f711ee629629586ef961c6946c2f",
+    "correction-review.png": "836a9ee6d06d58beeac7de6d6c3ec1ded1ce105a8b7aa80e7502f463359fea11",
+    "corrected-real-results.png": "c30ca969c8438e03eea13f1541d79af6203f44882c70745722a2cbd6d5db73ae",
+    "saved-batch-mobile.png": "5eada25029b4b261f22334684272e8ea4cd0d2cee10def52cbe747ef4a3582f8"
+  },
+  "extension_build": {
+    "command": "bun run build:chrome:prod",
+    "cwd": "apps/extension",
+    "result": "passed",
+    "duration_seconds": 37.7,
+    "size_mb": 49.25,
+    "initial_command_error": "Direct node invocation lacked npm script PATH: spawnSync wxt ENOENT. Standard package script passed."
+  },
+  "live_mobile_axe": {
+    "result": "not executed: scanner injection blocked by application CSP",
+    "csp_relaxed": false
+  },
+  "cleanup": {
+    "dev_revision_at_finish": "7226596cca5b875ad6e121a15133f69600152258",
+    "original_checkout_porcelain_bytes_equal": true,
+    "original_branch": "codex/post2970-uat-20260920",
+    "original_frontmost_restored": "ChatGPT",
+    "voiceover_running": false,
+    "owned_browser_sessions_closed": [
+      "media-live-validation",
+      "media-voiceover-validation"
+    ],
+    "owned_processes_stopped": [
+      "frontend 58918",
+      "API 82718",
+      "Redis stage worker 83948",
+      "Redis 87001"
+    ],
+    "dedicated_ports_without_listeners": [
+      18881,
+      18882,
+      18883
+    ],
+    "dependency_links_removed": true,
+    "whisper_cache_preserved_at": "/private/tmp/media-live-validation-20261005/managed-whisper-cache"
+  }
+}

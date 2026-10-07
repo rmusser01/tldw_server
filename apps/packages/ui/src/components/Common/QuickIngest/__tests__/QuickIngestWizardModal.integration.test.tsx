@@ -924,7 +924,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     await user.type(screen.getByPlaceholderText(/https:\/\/example\.com/i), "https://example.com/a\nhttps://example.com/a\ninvalid")
     await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
     await user.click(screen.getByText(/Configure 1 item\b/i))
-    expect(screen.getByText("1 eligible items in this run")).toBeInTheDocument()
+    expect(screen.getByText("1 eligible item in this run")).toBeInTheDocument()
     expect(screen.getByText(/Settings apply to all eligible items in this run/)).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Next" }))
     expect(screen.getByText(/Already queued — excluded/)).toBeInTheDocument()
