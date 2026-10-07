@@ -129,3 +129,19 @@ verify the FINAL range-diff and scope before any protected publication. The
 expected owned published head is 03d59483ade43fcf7462344bc10faa8066ef4907.
 Fresh allocation checks, independent/CodeRabbit review and live exact-head CI
 remain required; Qodo stays set aside and Stage 3 remains In Progress.
+
+## Published Rebase And Summary Context (2026-10-06)
+
+Dev advanced independently to 3ca1ff055be3c75a7fa844a02b5d8ba925baa2be.
+The six-commit rebase completed with exit 0 at
+b1cc8f081671e4e675460f75efe1086af39b3cf5. The FINAL range-diff preserves all
+six patches unchanged; fresh allocation, historical preservation, scoped hooks
+and diff checks pass. Protected publication used the full expected owned
+03d59483ade43fcf7462344bc10faa8066ef4907 lease and was verified afterward.
+
+The independent whole-diff reviewer found one remaining interim TASK-13518
+claim in TASK-13526's final summary. Official backlog-py now adds the current
+mapping and labels the previous summary as a historical checkpoint, preserving
+every sentence verbatim. This is tracking clarification, not a product defect.
+The corrected head still needs fresh independent/CodeRabbit review, exact-head
+required CI and verified normal merge. Stage 3 remains In Progress.
