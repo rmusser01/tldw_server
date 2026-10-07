@@ -9,6 +9,7 @@ import { getBuiltinPresets, getDefaultTheme } from '../presets';
 
 const require = createRequire(import.meta.url);
 const foregroundVar = '--color-primary-foreground';
+const strongForegroundVar = '--color-primary-strong-foreground';
 const black = '0 0 0';
 const white = '255 255 255';
 
@@ -93,6 +94,93 @@ describe('shared primary button foreground', () => {
       );
     }
   });
+
+  it.each(["tldw-frontend", "extension"])(
+    "generates hover and pressed foreground utilities in %s",
+    async (client) => {
+      const config = require(`../../../../../${client}/tailwind.config.js`)
+      const result = await postcss([
+        tailwindcss({
+          ...config,
+          content: [
+            {
+              raw: '<button class="hover:text-primary-strong-foreground active:text-primary-strong-foreground">Start</button>'
+            }
+          ]
+        })
+      ]).process("@tailwind utilities;", { from: undefined })
+      const colors: string[] = []
+      result.root.walkDecls("color", (decl) => {
+        colors.push(decl.value)
+      })
+      expect(colors).toEqual([
+        expect.stringContaining("var(--color-primary-strong-foreground)"),
+        expect.stringContaining("var(--color-primary-strong-foreground)")
+      ])
+    }
+  )
+
+  it("defines readable strong foreground defaults in both stylesheet modes", () => {
+    const css = postcss.parse(
+      readFileSync(require.resolve("../../assets/tailwind-shared.css"), "utf8")
+    )
+    for (const selector of [":root", ".dark"]) {
+      const colors = new Map<string, string>()
+      css.walkRules(selector, (rule) => {
+        rule.walkDecls((decl) => {
+          colors.set(decl.prop, decl.value)
+        })
+      })
+      expect(colors.get(strongForegroundVar), selector).toBeTruthy()
+      expect(
+        contrastRatio(
+          colors.get(strongForegroundVar)!,
+          colors.get("--color-primary-strong")!
+        ),
+        selector
+      ).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  it("derives strong foregrounds for every palette and custom strong-color edit independently of primary", () => {
+    for (const theme of getBuiltinPresets()) {
+      for (const tokens of Object.values(theme.palette)) {
+        for (const primaryStrong of [
+          tokens.primaryStrong,
+          black,
+          "117 117 117",
+          "118 118 118",
+          white
+        ]) {
+          applyThemeTokens({ ...tokens, primaryStrong }, theme)
+          const foreground =
+            document.documentElement.style.getPropertyValue(strongForegroundVar)
+          expect([black, white], `${theme.id}/${primaryStrong}`).toContain(
+            foreground
+          )
+          expect(contrastRatio(foreground, primaryStrong)).toBeGreaterThanOrEqual(
+            Math.max(
+              contrastRatio(black, primaryStrong),
+              contrastRatio(white, primaryStrong),
+              4.5
+            )
+          )
+        }
+      }
+    }
+  })
+
+  it("clears the strong foreground when returning to stylesheet defaults", () => {
+    const theme = getDefaultTheme()
+    applyThemeTokens({ ...theme.palette.light, primaryStrong: black }, theme)
+    expect(
+      document.documentElement.style.getPropertyValue(strongForegroundVar)
+    ).toBe(white)
+    clearThemeTokens()
+    expect(
+      document.documentElement.style.getPropertyValue(strongForegroundVar)
+    ).toBe("")
+  })
 
   it('clears the derived foreground when returning to stylesheet defaults', () => {
     const theme = getDefaultTheme();

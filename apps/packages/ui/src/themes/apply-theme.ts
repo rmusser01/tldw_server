@@ -35,6 +35,7 @@ const ALL_CSS_VARS: string[] = [
   // Colors
   ...Object.values(TOKEN_TO_CSS_VAR),
   "--color-primary-foreground",
+  "--color-primary-strong-foreground",
   // Shadows
   "--shadow-sm",
   "--shadow-md",
@@ -100,12 +101,18 @@ export function applyThemeTokens(tokens: ThemeColorTokens, theme: ThemeDefinitio
     style.setProperty(cssVar, tokens[key as keyof ThemeColorTokens] as string)
   }
 
-  style.setProperty(
-    "--color-primary-foreground",
-    contrastRatio("0 0 0", tokens.primary) >= contrastRatio("255 255 255", tokens.primary)
-      ? "0 0 0"
-      : "255 255 255"
-  )
+  for (const [key, cssVar] of [
+    ["primary", "--color-primary-foreground"],
+    ["primaryStrong", "--color-primary-strong-foreground"]
+  ] as const) {
+    style.setProperty(
+      cssVar,
+      contrastRatio("0 0 0", tokens[key]) >=
+        contrastRatio("255 255 255", tokens[key])
+        ? "0 0 0"
+        : "255 255 255"
+    )
+  }
 
   // --- Shadows (raw CSS values) ---
   style.setProperty("--shadow-sm", tokens.shadowSm)
