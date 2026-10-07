@@ -474,3 +474,26 @@ describe("Notes activity original ownership", () => {
     expect(isServicePromptRequestPath(path, method)).toBe(allowed)
   })
 })
+
+
+describe("owned Persona transport: bounded setup scope", () => {
+  it.each([
+    ["/api/v1/persona/profiles/owned", "PATCH", true],
+    ["/api/v1/persona/profiles/owned?expected_version=2", "PATCH", true],
+    ["/api/v1/persona/profiles/owned/voice-commands", "GET", true],
+    ["/api/v1/persona/profiles/owned/voice-commands?include_disabled=true", "GET", true],
+    ["/api/v1/persona/profiles/owned/connections", "GET", true],
+    ["/api/v1/persona/profiles/owned", "GET", true],
+    ["/api/v1/persona/profiles/owned", "PUT", false],
+    ["/api/v1/persona/profiles/owned/voice-commands", "POST", false],
+    ["/api/v1/persona/profiles/owned/connections", "PATCH", false],
+    ["/api/v1/persona/profiles/owned/connections/extra", "GET", false],
+    ["/api/v1/persona/profiles/owned/voice-commands/extra", "GET", false],
+    ["/api/v1/persona/profiles/owned/policy-rules", "GET", false],
+    ["/api/v1/persona/profiles/a%2fb/connections", "GET", false],
+    ["/api/v1/persona/profiles/%2e%2e", "PATCH", false],
+    ["/api/v1/persona/profiles//connections", "GET", false]
+  ])("owned Persona transport: %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+})

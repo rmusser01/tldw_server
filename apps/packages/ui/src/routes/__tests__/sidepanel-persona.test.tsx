@@ -8,6 +8,8 @@ import {
 } from "@/components/Common/PersonaBuddy"
 import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import { SELECTED_ASSISTANT_STORAGE_KEY } from "@/utils/selected-assistant-storage"
+import type { PersonaSetupState } from "@/hooks/usePersonaSetupWizard"
+import type { tldwClient } from "@/services/tldw/TldwApiClient"
 
 const mocks = vi.hoisted(() => ({
   isOnline: true,
@@ -2759,10 +2761,14 @@ describe("SidepanelPersona", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
 
+    const sentLiveMessage = getSentPayloads(ws).filter((payload) => payload.type === "user_message").pop()
     ws.emitMessage(
       JSON.stringify({
         event: "assistant_delta",
-        text_delta: "Here is the answer from the live session."
+        session_id: sentLiveMessage?.session_id,
+        client_message_id: sentLiveMessage?.client_message_id,
+        text_delta: "Here is the answer from the live session.",
+        done: true,
       })
     )
 
@@ -8147,5 +8153,504 @@ describe("SidepanelPersona", () => {
     fireEvent.click(screen.getByTestId("persona-state-editor-toggle-button"))
     expect(screen.getByTestId("persona-state-soul-input")).toBeInTheDocument()
     expect(screen.getByText("Hide editor")).toBeInTheDocument()
+  })
+
+  const bootOwnedLiveSetup = async () => {
+    mocks.location.search = "?persona_id=garden-helper&tab=live"
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: ""
+    })
+    let version = 2
+    let profileReads = 0
+    let setup: PersonaSetupState = {
+      status: "in_progress", version: 1, run_id: "owned-run-1",
+      current_step: "test", completed_steps: ["persona", "voice", "commands", "safety"],
+      completed_at: null, last_test_type: null
+    }
+    type SetupRequestBody = {
+      setup?: PersonaSetupState
+      event_type?: string
+      heard_text?: string
+    }
+    const patches: Array<{ path: string; body: SetupRequestBody }> = []
+    const events: Array<Record<string, unknown>> = []
+    mocks.fetchWithAuth.mockImplementation((
+      path: string,
+      init?: { method?: string; body?: SetupRequestBody }
+    ) => {
+      const method = String(init?.method || "GET").toUpperCase()
+      if (path.includes("/persona/catalog")) return Promise.resolve({
+        ok: true, json: async () => [{ id: "garden-helper", name: "Garden Helper" }, { id: "second-helper", name: "Second Helper" }]
+      })
+      if (path.includes("/persona/sessions?")) return Promise.resolve({ ok: true, json: async () => [] })
+      if (path === "/api/v1/persona/session") return Promise.resolve({
+        ok: true, json: async () => ({ session_id: "sess-owned", persona: { id: "garden-helper" } })
+      })
+      if (path.includes("/persona/sessions/sess-owned")) return Promise.resolve({
+        ok: true, json: async () => ({ session_id: "sess-owned", persona_id: "garden-helper", status: "active", preferences: {} })
+      })
+      if (path.includes("/setup-events") && method === "POST") {
+        events.push(init?.body || {})
+        return Promise.resolve({ ok: true, json: async () => ({ event_id: "evt-owned", run_id: "owned-run-1", event_type: init?.body?.event_type, deduped: false }) })
+      }
+      if (path.includes("/setup-analytics")) return Promise.resolve({
+        ok: true, json: async () => ({ persona_id: "garden-helper", summary: { total_runs: 0, completion_rate: 0 } })
+      })
+      if (path.includes("/voice-commands/test")) return Promise.resolve({
+        ok: true, json: async () => ({ heard_text: init?.body?.heard_text, matched: true, command_name: "Search Notes" })
+      })
+      if (path.includes("/voice-commands")) return Promise.resolve({
+        ok: true, json: async () => ({ commands: [], total: 0 })
+      })
+      if (path.includes("/connections")) return Promise.resolve({
+        ok: true, json: async () => []
+      })
+      if (path.includes("/persona/profiles/second-helper")) return Promise.resolve({
+        ok: true, json: async () => ({ id: "second-helper", version: 2,
+          voice_defaults: { confirmation_mode: "always" },
+          setup: { ...setup, run_id: "second-run" }
+        })
+      })
+      if (path.includes("/persona/profiles/garden-helper")) {
+        if (method === "GET") profileReads += 1
+        if (method === "PATCH") {
+          patches.push({ path, body: init?.body ?? {} })
+          version += 1
+          setup = { ...setup, ...init?.body?.setup }
+        }
+        return Promise.resolve({ ok: true, json: async () => ({
+          id: "garden-helper", version,
+          voice_defaults: { confirmation_mode: "always" }, setup,
+          use_persona_state_context_default: true
+        }) })
+      }
+      return Promise.resolve({ ok: false, error: `unhandled path: ${path}`, json: async () => ({}) })
+    })
+    render(<SidepanelPersona />)
+    await waitFor(() => expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("test"))
+    fireEvent.click(screen.getByRole("button", { name: "Connect live session" }))
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.emitOpen())
+    await screen.findByPlaceholderText("Try a live message")
+    return { ws, patches, events, bumpVersion: () => { version += 1 }, bumpRunId: () => { setup = { ...setup, run_id: "owned-run-2" } }, profileReads: () => profileReads, sent: () => getSentPayloads(ws).filter(payload => payload.type === "user_message") }
+  }
+
+  const sendOwnedLiveTest = (text = "summarize my assistant setup") => {
+    fireEvent.change(screen.getByPlaceholderText("Try a live message"), { target: { value: text } })
+    fireEvent.click(screen.getByRole("button", { name: "Send live test" }))
+  }
+
+  const connectAnotherOwnedSocket = async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Connect live session" }))
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2))
+    const next = MockWebSocket.instances[1]
+    act(() => next.emitOpen())
+    await screen.findByPlaceholderText("Try a live message")
+    return next
+  }
+
+  const enterOwnedLiveDetourWithPendingPrompt = async (ws: MockWebSocket, text: string) => {
+    let failed = false
+    ws.send.mockImplementation((payload: string) => {
+      if (JSON.parse(payload).type === "user_message" && !failed) {
+        failed = true
+        throw new Error("Socket send failed")
+      }
+    })
+    sendOwnedLiveTest(text)
+    fireEvent.click(await screen.findByRole("button", { name: "Try again in Live Session" }))
+    await waitFor(() => expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument())
+    fireEvent.change(screen.getByPlaceholderText("Ask Persona..."), { target: { value: text } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    const requests = getSentPayloads(ws).filter(payload => payload.type === "user_message")
+    expect(requests).toHaveLength(2)
+    expect(requests[1].text).toBe(text)
+    return requests[1].client_message_id
+  }
+
+  const reconnectOwnedLiveDetour = async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2))
+    const next = MockWebSocket.instances[1]
+    act(() => next.emitOpen())
+    await screen.findByPlaceholderText("Ask Persona...")
+    return next
+  }
+
+  const returnFromOwnedLiveDetour = async () => {
+    const returnButton = screen.queryByRole("button", { name: "Return to setup" })
+    if (returnButton) fireEvent.click(returnButton)
+    await waitFor(() => expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("test"))
+  }
+
+  it("owned typed setup: sends a nonempty request ID with the setup live message", async () => {
+    const { sent } = await bootOwnedLiveSetup()
+    sendOwnedLiveTest()
+    expect(sent()).toHaveLength(1)
+    expect(sent()[0].session_id).toBe("sess-owned")
+    expect(typeof sent()[0].client_message_id).toBe("string")
+    expect(String(sent()[0].client_message_id).trim()).not.toBe("")
+  })
+
+  it("owned typed setup: matching final response credits the pending prompt", async () => {
+    const { ws, sent } = await bootOwnedLiveSetup()
+    sendOwnedLiveTest("original prompt")
+    const requestId = sent()[0].client_message_id
+    expect(typeof requestId).toBe("string")
+    expect(requestId.trim()).not.toBe("")
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "sess-owned",
+      client_message_id: requestId,
+      text_delta: "Finished answer", done: true
+    })))
+    expect(await screen.findByText("Live session responded: Finished answer")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Finish with live session" })).toBeInTheDocument()
+  })
+
+  it("owned typed setup: a nonfinal matching delta cannot credit the test", async () => {
+    const { ws, sent } = await bootOwnedLiveSetup()
+    sendOwnedLiveTest()
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "sess-owned",
+      client_message_id: sent()[0].client_message_id,
+      text_delta: "partial", done: false
+    })))
+    expect(screen.queryByRole("button", { name: "Finish with live session" })).not.toBeInTheDocument()
+    expect(screen.getByText("Live test sent: summarize my assistant setup")).toBeInTheDocument()
+  })
+
+  it.each(["wrong request", "missing request", "wrong session"])(
+    "owned typed setup: %s cannot credit the pending test",
+    async (caseName) => {
+      const { ws, sent } = await bootOwnedLiveSetup()
+      sendOwnedLiveTest()
+      const message: Record<string, unknown> = {
+        event: "assistant_delta", session_id: "sess-owned", text_delta: "Other answer", done: true
+      }
+      if (caseName === "wrong request") message.client_message_id = "other-request"
+      if (caseName === "wrong session") {
+        message.session_id = "other-session"
+        message.client_message_id = sent()[0].client_message_id
+      }
+      act(() => ws.emitMessage(JSON.stringify(message)))
+      expect(screen.queryByRole("button", { name: "Finish with live session" })).not.toBeInTheDocument()
+      expect(screen.getByText("Live test sent: summarize my assistant setup")).toBeInTheDocument()
+    }
+  )
+
+  it.each(["CONVERSATION_UNAVAILABLE", "USER_TURN_FAILED", "TURN_CANCELLED", "SESSION_UNAVAILABLE"])(
+    "owned typed setup: matching %s retires the pending test with retry guidance",
+    async (reasonCode) => {
+      const { ws, sent } = await bootOwnedLiveSetup()
+      sendOwnedLiveTest()
+      act(() => ws.emitMessage(JSON.stringify({
+        event: "notice", session_id: "sess-owned",
+        client_message_id: sent()[0].client_message_id,
+        reason_code: reasonCode, message: "Turn failed: please retry"
+      })))
+      expect(screen.getByText("Try sending the live test again or reconnect the live session.")).toBeInTheDocument()
+      expect(screen.queryByText("Live test sent: summarize my assistant setup")).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Finish with live session" })).not.toBeInTheDocument()
+    }
+  )
+
+  it("owned typed setup: only a matching session-wide terminal retires an ID-less pending test", async () => {
+    const { ws } = await bootOwnedLiveSetup()
+    sendOwnedLiveTest()
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "notice", session_id: "other-session", reason_code: "SESSION_TERMINAL", message: "Other session ended"
+    })))
+    expect(screen.getByText("Live test sent: summarize my assistant setup")).toBeInTheDocument()
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "notice", session_id: "sess-owned", reason_code: "SESSION_TERMINAL", message: "Session ended"
+    })))
+    expect(screen.queryByText("Live test sent: summarize my assistant setup")).not.toBeInTheDocument()
+  })
+
+  it("owned typed setup: a cancellation for another request leaves this prompt pending", async () => {
+    const { ws } = await bootOwnedLiveSetup()
+    sendOwnedLiveTest()
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "notice", session_id: "sess-owned", client_message_id: "other-request",
+      reason_code: "TURN_CANCELLED", message: "Other turn cancelled"
+    })))
+    expect(screen.getByText("Live test sent: summarize my assistant setup")).toBeInTheDocument()
+  })
+
+  it("owned typed setup: retry gets a new ID and the old reply cannot credit it", async () => {
+    const { ws, sent } = await bootOwnedLiveSetup()
+    sendOwnedLiveTest("first prompt")
+    const firstId = sent()[0].client_message_id
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "notice", session_id: "sess-owned", client_message_id: firstId,
+      reason_code: "USER_TURN_FAILED", message: "First failed"
+    })))
+    sendOwnedLiveTest("second prompt")
+    expect(sent()).toHaveLength(2)
+    expect(String(sent()[1].client_message_id || "")).not.toBe("")
+    expect(sent()[1].client_message_id).not.toBe(firstId)
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "sess-owned", client_message_id: firstId,
+      text_delta: "Old answer", done: true
+    })))
+    expect(screen.queryByRole("button", { name: "Finish with live session" })).not.toBeInTheDocument()
+    expect(screen.getByText("Live test sent: second prompt")).toBeInTheDocument()
+  })
+
+  it("owned typed setup: a second send cannot replace an outstanding setup prompt", async () => {
+    const { sent } = await bootOwnedLiveSetup()
+    sendOwnedLiveTest("first prompt")
+    sendOwnedLiveTest("second prompt")
+    expect(sent()).toHaveLength(1)
+    expect(screen.getByText("Live test sent: first prompt")).toBeInTheDocument()
+  })
+
+  it.each(["disconnect", "socket close"])(
+    "owned typed setup: %s retires the pending attempt across a new socket",
+    async (change) => {
+      const { ws } = await bootOwnedLiveSetup()
+      const oldRequestId = await enterOwnedLiveDetourWithPendingPrompt(ws, "summarize my assistant setup")
+      if (change === "disconnect") fireEvent.click(screen.getByRole("button", { name: "Disconnect" }))
+      else act(() => ws.close())
+      const currentSocket = await reconnectOwnedLiveDetour()
+      act(() => currentSocket.emitMessage(JSON.stringify({
+        event: "assistant_delta", session_id: "sess-owned",
+        client_message_id: oldRequestId, text_delta: "Late answer", done: true
+      })))
+      await returnFromOwnedLiveDetour()
+      expect(screen.queryByRole("button", { name: "Finish with live session" })).not.toBeInTheDocument()
+      expect(screen.queryByText("Live test sent: summarize my assistant setup")).not.toBeInTheDocument()
+    }
+  )
+
+  it.each(["auth", "authority"])("owned typed setup: %s retires the pending attempt", async (change) => {
+    const { ws, sent } = await bootOwnedLiveSetup()
+    sendOwnedLiveTest()
+    act(() => window.dispatchEvent(new CustomEvent(
+      change === "auth" ? "tldw:auth-principal-changed" : "tldw:config-updated",
+      { detail: change === "authority" ? { authorityChanged: true } : { kind: "logout" } }
+    )))
+    const currentSocket = screen.queryByPlaceholderText("Try a live message")
+      ? ws : await connectAnotherOwnedSocket()
+    act(() => currentSocket.emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "sess-owned",
+      client_message_id: sent()[0].client_message_id,
+      text_delta: "Late answer", done: true
+    })))
+    expect(screen.queryByRole("button", { name: "Finish with live session" })).not.toBeInTheDocument()
+  })
+
+  it("owned typed setup: detour Send keeps its first pending prompt while another Send is attempted", async () => {
+    const { ws, sent } = await bootOwnedLiveSetup()
+    let failed = false
+    ws.send.mockImplementation((payload: string) => {
+      if (JSON.parse(payload).type === "user_message" && !failed) {
+        failed = true
+        throw new Error("Socket send failed")
+      }
+    })
+    sendOwnedLiveTest("original prompt")
+    fireEvent.click(await screen.findByRole("button", { name: "Try again in Live Session" }))
+    await waitFor(() => expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument())
+    const composer = screen.getByPlaceholderText("Ask Persona...")
+    fireEvent.change(composer, { target: { value: "original prompt" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    const requestId = sent()[1].client_message_id
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "notice", session_id: "sess-owned", client_message_id: "other-request",
+      reason_code: "TURN_CANCELLED", message: "Other turn cancelled"
+    })))
+    expect(screen.getByText("Other turn cancelled")).toBeInTheDocument()
+    fireEvent.change(composer, { target: { value: "second prompt" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    expect(sent()).toHaveLength(2)
+    expect(sent()[1].text).toBe("original prompt")
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "sess-owned", client_message_id: requestId,
+      text_delta: "Original answer", done: true
+    })))
+    expect(await screen.findByRole("button", { name: "Finish with live session" })).toBeInTheDocument()
+  })
+
+  it("owned typed setup: ordinary config refresh keeps a matching pending response valid", async () => {
+    const { ws, sent } = await bootOwnedLiveSetup()
+    sendOwnedLiveTest()
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } })))
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "sess-owned",
+      client_message_id: sent()[0].client_message_id,
+      text_delta: "Finished answer", done: true
+    })))
+    expect(await screen.findByRole("button", { name: "Finish with live session" })).toBeInTheDocument()
+  })
+
+  it.each(["round trip", "new run"] as const)(
+    "owned typed setup: %s retires the outstanding request before a late reply",
+    async (change) => {
+      const { ws, patches, bumpRunId, profileReads } = await bootOwnedLiveSetup()
+      const requestId = await enterOwnedLiveDetourWithPendingPrompt(ws, "pending prompt")
+      const picker = screen.getByLabelText("Editing persona")
+      const beforeSwitchReads = profileReads()
+      fireEvent.change(picker, { target: { value: "second-helper" } })
+      await waitFor(() => expect((picker as HTMLSelectElement).value).toBe("second-helper"))
+      if (change === "new run") bumpRunId()
+      fireEvent.change(picker, { target: { value: "garden-helper" } })
+      await waitFor(() => expect(profileReads()).toBeGreaterThan(beforeSwitchReads))
+      await act(async () => { await Promise.resolve() })
+      fireEvent.click(screen.getByRole("button", { name: "Disconnect" }))
+      const currentSocket = await reconnectOwnedLiveDetour()
+      act(() => currentSocket.emitMessage(JSON.stringify({
+        event: "assistant_delta", session_id: "sess-owned", client_message_id: requestId,
+        text_delta: "Old answer", done: true
+      })))
+      await returnFromOwnedLiveDetour()
+      expect(screen.queryByRole("button", { name: "Finish with live session" })).not.toBeInTheDocument()
+      expect(patches).toHaveLength(0)
+    }
+  )
+
+  it("owned Finish: a matched owned live response persists the scoped completion and handoff", async () => {
+    const { ws, sent, patches, events } = await bootOwnedLiveSetup()
+    sendOwnedLiveTest("confirm assistant")
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "sess-owned",
+      client_message_id: sent()[0].client_message_id,
+      text_delta: "Confirmed", done: true
+    })))
+    fireEvent.click(await screen.findByRole("button", { name: "Finish with live session" }))
+    await waitFor(() => expect(screen.getByTestId("persona-setup-handoff-card")).toBeInTheDocument())
+    expect(patches).toHaveLength(1)
+    expect(patches[0].path).toContain("expected_version=2")
+    expect(patches[0].body.setup).toMatchObject({
+      status: "completed", run_id: "owned-run-1", last_test_type: "live_session"
+    })
+    expect(events.some(event => event.event_type === "setup_completed")).toBe(true)
+  })
+
+  it.each(["version", "run"] as const)(
+    "owned Finish: a matched success cannot finish after a new %s reload",
+    async (change) => {
+    const { ws, sent, patches, bumpVersion, bumpRunId, profileReads } = await bootOwnedLiveSetup()
+    sendOwnedLiveTest("old version prompt")
+    const requestId = sent()[0].client_message_id
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "sess-owned", client_message_id: requestId,
+      text_delta: "Old success", done: true
+    })))
+    expect(await screen.findByRole("button", { name: "Finish with live session" })).toBeInTheDocument()
+    const picker = screen.getByLabelText("Editing persona")
+    const beforeSwitchReads = profileReads()
+    fireEvent.change(picker, { target: { value: "second-helper" } })
+    await waitFor(() => expect((picker as HTMLSelectElement).value).toBe("second-helper"))
+    if (change === "version") bumpVersion()
+    else bumpRunId()
+    fireEvent.change(picker, { target: { value: "garden-helper" } })
+    await waitFor(() => expect(profileReads()).toBeGreaterThan(beforeSwitchReads))
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByPlaceholderText("Try a live message")).toBeInTheDocument()
+    const staleFinish = screen.queryByRole("button", { name: "Finish with live session" })
+    await act(async () => {
+      if (staleFinish) fireEvent.click(staleFinish)
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    expect(patches).toHaveLength(0)
+    expect(screen.queryByTestId("persona-setup-handoff-card")).not.toBeInTheDocument()
+    }
+  )
+
+  it("owned Finish: a matched dry run retains the current confirmation choice", async () => {
+    const { patches } = await bootOwnedLiveSetup()
+    fireEvent.change(screen.getByPlaceholderText("Try a spoken phrase"), {
+      target: { value: "search notes" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Run dry-run test" }))
+    await screen.findByText(/Matched Search Notes/i)
+    fireEvent.click(screen.getByRole("button", { name: "Finish with dry-run test" }))
+    await waitFor(() => expect(screen.getByTestId("persona-setup-handoff-card")).toBeInTheDocument())
+    expect(patches).toHaveLength(1)
+    expect(screen.getByTestId("persona-setup-handoff-card")).toHaveTextContent("Always ask")
+  })
+
+  it("owned reviewed setup: socket close during held Finish retires saving without a completion write", async () => {
+    const { ws, sent, patches, events } = await bootOwnedLiveSetup()
+    sendOwnedLiveTest("finish after answer")
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "sess-owned",
+      client_message_id: sent()[0].client_message_id,
+      text_delta: "Finished answer", done: true
+    })))
+    const originalFetch = mocks.fetchWithAuth.getMockImplementation()!
+    type ProfileResponse = Awaited<ReturnType<typeof tldwClient.fetchWithAuth>>
+    const summaryReads: Array<{ path: string; resolve: (value: ProfileResponse) => void }> = []
+    mocks.fetchWithAuth.mockImplementation((
+      path: string,
+      init?: Parameters<typeof tldwClient.fetchWithAuth>[1]
+    ) => {
+      if (init?.method === "GET" && [
+        "/api/v1/persona/profiles/garden-helper/voice-commands",
+        "/api/v1/persona/profiles/garden-helper/connections"
+      ].includes(path)) {
+        return new Promise<ProfileResponse>(resolve => summaryReads.push({ path, resolve }))
+      }
+      return originalFetch(path, init)
+    })
+    fireEvent.click(await screen.findByRole("button", { name: "Finish with live session" }))
+    await waitFor(() => expect(summaryReads).toHaveLength(2))
+    act(() => ws.close())
+    await act(async () => {
+      summaryReads.forEach(({ path, resolve }) => resolve({
+        ok: true,
+        json: async () => path.endsWith("/voice-commands") ? { commands: [], total: 0 } : [],
+        text: async () => ""
+      }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    expect(patches).toHaveLength(0)
+    expect(screen.queryByTestId("persona-setup-handoff-card")).not.toBeInTheDocument()
+    expect(events.some(event => event.event_type === "setup_completed")).toBe(false)
+    expect(screen.getByRole("button", { name: /Connect live session|Retry live connection/ })).toBeEnabled()
+  })
+
+  it("owned reviewed setup: editing B keeps A conversation live but cannot send or credit B setup on A socket", async () => {
+    const { ws, sent } = await bootOwnedLiveSetup()
+    const picker = screen.getByLabelText("Editing persona")
+    fireEvent.change(picker, { target: { value: "second-helper" } })
+    await waitFor(() => expect((picker as HTMLSelectElement).value).toBe("second-helper"))
+    await screen.findByPlaceholderText("Try a live message")
+    expect(screen.getByText(/Your live conversation continues with Garden Helper/)).toBeInTheDocument()
+    expect(ws.close).not.toHaveBeenCalled()
+    const before = sent().length
+    sendOwnedLiveTest("B setup must not use A")
+    expect(sent()).toHaveLength(before)
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "sess-owned",
+      client_message_id: "A-conversation-only", text_delta: "A answer", done: true
+    })))
+    expect(screen.queryByRole("button", { name: "Finish with live session" })).not.toBeInTheDocument()
+    expect(ws.close).not.toHaveBeenCalled()
+  })
+
+  it("owned reviewed setup: Return to setup admits a fresh Send and rejects the abandoned detour reply", async () => {
+    const { ws, sent } = await bootOwnedLiveSetup()
+    const abandonedId = await enterOwnedLiveDetourWithPendingPrompt(ws, "detour prompt")
+    fireEvent.click(screen.getByRole("button", { name: "Return to setup" }))
+    await waitFor(() => expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("test"))
+    sendOwnedLiveTest("fresh setup prompt")
+    expect(sent()).toHaveLength(3)
+    const freshId = sent()[2].client_message_id
+    expect(typeof freshId).toBe("string")
+    expect(freshId).not.toBe(abandonedId)
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "sess-owned", client_message_id: abandonedId,
+      text_delta: "Abandoned reply", done: true
+    })))
+    expect(screen.queryByRole("button", { name: "Finish with live session" })).not.toBeInTheDocument()
+    expect(screen.getByText("Live test sent: fresh setup prompt")).toBeInTheDocument()
+    act(() => ws.emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "sess-owned", client_message_id: freshId,
+      text_delta: "Fresh answer", done: true
+    })))
+    expect(await screen.findByRole("button", { name: "Finish with live session" })).toBeInTheDocument()
   })
 })

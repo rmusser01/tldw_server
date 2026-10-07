@@ -12,6 +12,7 @@ import type { PersonaSetupState, PersonaSetupStep } from "@/hooks/usePersonaSetu
 import { usePersonaSetupWizard } from "@/hooks/usePersonaSetupWizard"
 import type { PersonaGardenTabKey } from "@/utils/persona-garden-route"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 import type {
   PersonaInfo,
@@ -23,6 +24,7 @@ import type {
   SetupHandoffConsumedAction,
   SetupCommandDetourState,
   SetupLiveDetourState,
+  SetupLiveAttempt,
   SetupVisualDetourState,
 } from "../personaTypes"
 import {
@@ -71,6 +73,7 @@ export interface UsePersonaSetupOrchestratorDeps {
   activeTabRef: React.MutableRefObject<PersonaGardenTabKey>
   setupWizardAwaitingLiveResponseRef: React.MutableRefObject<boolean>
   setupWizardLastLiveTextRef: React.MutableRefObject<string>
+  setupLiveAttemptRef?: React.MutableRefObject<SetupLiveAttempt | null>
 }
 
 export interface UsePersonaSetupOrchestratorReturn {
@@ -203,6 +206,7 @@ export function usePersonaSetupOrchestrator(
     activeTabRef,
     setupWizardAwaitingLiveResponseRef,
     setupWizardLastLiveTextRef,
+    setupLiveAttemptRef,
   } = deps
 
   const selectionGenerationRef = React.useRef(0)
@@ -343,8 +347,85 @@ export function usePersonaSetupOrchestrator(
     }
   }, [selectedPersonaId])
   const [setupWizardDryRunLoading, setSetupWizardDryRunLoading] = React.useState(false)
-  const [setupTestOutcome, setSetupTestOutcome] =
+  const [setupTestOutcome, setSetupTestOutcomeState] =
     React.useState<SetupTestOutcome | null>(null)
+  const setupTestOutcomeRef = React.useRef<SetupTestOutcome | null>(null)
+  const successScopeRef = React.useRef<{
+    personaId: string; runId: string | null; version: number; generation: number; authority: number
+  } | null>(null)
+  const authorityGenerationRef = React.useRef(0)
+  const finishingRef = React.useRef<{ outcome: SetupTestOutcome } | null>(null)
+  const dryRunRef = React.useRef<object | null>(null)
+  const retireFinish = React.useCallback(() => {
+    if (!finishingRef.current) return
+    finishingRef.current = null
+    setSetupWizardSaving(false)
+  }, [])
+  const retireDryRun = React.useCallback(() => {
+    if (!dryRunRef.current) return
+    dryRunRef.current = null
+    setSetupWizardDryRunLoading(false)
+  }, [])
+  const latestScopeRef = React.useRef({
+    personaId: selectedPersonaId, runId: currentSetupRunId,
+    version: savedPersonaProfileVersion, step: personaSetupWizard.currentStep,
+    required: personaSetupWizard.isSetupRequired,
+  })
+  latestScopeRef.current = {
+    personaId: selectedPersonaId, runId: currentSetupRunId,
+    version: savedPersonaProfileVersion, step: personaSetupWizard.currentStep,
+    required: personaSetupWizard.isSetupRequired,
+  }
+  const setSetupTestOutcome = React.useCallback<React.Dispatch<React.SetStateAction<SetupTestOutcome | null>>>((value) => {
+    const previous = setupTestOutcomeRef.current
+    const next = typeof value === "function" ? value(previous) : value
+    setupTestOutcomeRef.current = next
+    if (next !== previous) {
+      if (finishingRef.current?.outcome === previous) retireFinish()
+      const scope = latestScopeRef.current
+      successScopeRef.current = next?.kind === "dry_run_match" || next?.kind === "live_success"
+        ? { personaId: scope.personaId, runId: scope.runId, version: scope.version || 0,
+            generation: selectionGenerationRef.current, authority: authorityGenerationRef.current }
+        : null
+    }
+    setSetupTestOutcomeState(next)
+  }, [retireFinish])
+  const scopeIsCurrent = React.useCallback((scope: NonNullable<typeof successScopeRef.current>) => {
+    const current = latestScopeRef.current
+    return Boolean(current.required && current.step === "test" && scope.version > 0 &&
+      current.personaId === scope.personaId && current.runId === scope.runId &&
+      current.version === scope.version && selectionGenerationRef.current === scope.generation &&
+      authorityGenerationRef.current === scope.authority)
+  }, [])
+  React.useEffect(() => watchChatAccountChanges((invalidated) => {
+    if (!invalidated) return
+    authorityGenerationRef.current += 1
+    retireFinish()
+    retireDryRun()
+    if (setupLiveAttemptRef) setupLiveAttemptRef.current = null
+    setupWizardAwaitingLiveResponseRef.current = false
+    setSetupTestOutcome(null)
+  }), [retireDryRun, retireFinish, setSetupTestOutcome, setupLiveAttemptRef,
+    setupWizardAwaitingLiveResponseRef])
+  const previousScopeRef = React.useRef(latestScopeRef.current)
+  React.useEffect(() => {
+    const previous = previousScopeRef.current
+    const current = latestScopeRef.current
+    if (previous.personaId !== current.personaId || previous.runId !== current.runId ||
+      previous.version !== current.version || previous.step !== current.step ||
+      previous.required !== current.required) {
+      if (setupLiveAttemptRef) setupLiveAttemptRef.current = null
+      setupWizardAwaitingLiveResponseRef.current = false
+      retireFinish()
+      retireDryRun()
+      setSetupTestOutcome(null)
+    }
+    previousScopeRef.current = current
+    return () => { if (setupLiveAttemptRef) setupLiveAttemptRef.current = null }
+  }, [selectedPersonaId, currentSetupRunId, savedPersonaProfileVersion,
+    personaSetupWizard.currentStep, personaSetupWizard.isSetupRequired,
+    retireDryRun, retireFinish, setSetupTestOutcome,
+    setupLiveAttemptRef, setupWizardAwaitingLiveResponseRef])
   const [setupTestResumeNote, setSetupTestResumeNote] =
     React.useState<string | null>(null)
 
@@ -392,7 +473,7 @@ export function usePersonaSetupOrchestrator(
     if (!personaSetupWizard.isSetupRequired || personaSetupWizard.currentStep === "test") {
       return
     }
-    setSetupWizardDryRunLoading(false)
+    retireDryRun()
     setSetupTestOutcome(null)
     setSetupTestResumeNote(null)
     setSetupCommandDetour(null)
@@ -401,7 +482,10 @@ export function usePersonaSetupOrchestrator(
     setSetupNoMatchPhrase(null)
     setupWizardLastLiveTextRef.current = ""
     setupWizardAwaitingLiveResponseRef.current = false
-  }, [personaSetupWizard.currentStep, personaSetupWizard.isSetupRequired, setupWizardAwaitingLiveResponseRef, setupWizardLastLiveTextRef])
+    if (setupLiveAttemptRef) setupLiveAttemptRef.current = null
+  }, [personaSetupWizard.currentStep, personaSetupWizard.isSetupRequired, retireDryRun,
+    setupLiveAttemptRef, setupWizardAwaitingLiveResponseRef, setupWizardLastLiveTextRef,
+    setSetupTestOutcome])
 
   React.useEffect(() => {
     const normalizedPersonaId = String(selectedPersonaId || "").trim()
@@ -1054,14 +1138,24 @@ export function usePersonaSetupOrchestrator(
 
   const completePersonaSetup = React.useCallback(
     async (testType: "dry_run" | "live_session") => {
-      const personaId = String(selectedPersonaId || "").trim()
-      if (!personaId) return
+      if (testType !== "dry_run" && testType !== "live_session") return
+      const scope = successScopeRef.current
+      const outcome = setupTestOutcomeRef.current
+      if (!scope || !outcome || !scopeIsCurrent(scope) || finishingRef.current ||
+        (testType === "dry_run" ? outcome?.kind !== "dry_run_match" : outcome?.kind !== "live_success")) return
+      const personaId = scope.personaId
+      const finishToken = { outcome }
+      finishingRef.current = finishToken
+      const isCurrentFinish = () => finishingRef.current === finishToken &&
+        successScopeRef.current === scope && setupTestOutcomeRef.current === outcome &&
+        scopeIsCurrent(scope)
+      let applied = false
       setSetupWizardSaving(true)
       clearSetupStepError("test")
       try {
         const resolvedReviewSummary = await resolveSetupReviewSummary(personaId)
-        const resolvedRunId =
-          String(savedPersonaSetup?.run_id || "").trim() || createSetupRunId()
+        if (!isCurrentFinish()) return
+        const resolvedRunId = scope.runId || createSetupRunId()
         const completedSetup: PersonaSetupState = {
           status: "completed",
           version: 1,
@@ -1072,15 +1166,18 @@ export function usePersonaSetupOrchestrator(
           last_test_type: testType,
         }
         const response = await tldwClient.fetchWithAuth(
-          buildSetupProfileUpdatePath(personaId) as any,
+          buildSetupProfileUpdatePath(personaId, scope.version) as any,
           { method: "PATCH", body: { setup: completedSetup } }
         )
+        if (!isCurrentFinish()) return
         if (!response.ok) {
           throw new Error(
             response.error || "Failed to complete assistant setup"
           )
         }
         const payload = (await response.json()) as PersonaProfileResponse
+        if (!isCurrentFinish()) return
+        applied = true
         applyPersonaProfileResponse(payload, { setup: completedSetup })
         const handoffTargetTab = setupIntentTargetTab || activeTab
         const recommendedAction = deriveSetupHandoffRecommendedAction({
@@ -1119,13 +1216,19 @@ export function usePersonaSetupOrchestrator(
         setSetupVisualDetour(null)
         setSetupNoMatchPhrase(null)
         setupWizardLastLiveTextRef.current = ""
+        setupWizardAwaitingLiveResponseRef.current = false
+        if (setupLiveAttemptRef) setupLiveAttemptRef.current = null
       } catch (setupError: any) {
+        if (!isCurrentFinish()) return
         setSetupStepError(
           "test",
           String(setupError?.message || "Failed to complete assistant setup")
         )
       } finally {
-        setSetupWizardSaving(false)
+        if (finishingRef.current === finishToken && (applied || isCurrentFinish())) {
+          finishingRef.current = null
+          setSetupWizardSaving(false)
+        }
       }
     },
     [
@@ -1136,11 +1239,13 @@ export function usePersonaSetupOrchestrator(
       createSetupRunId,
       emitSetupAnalyticsEvent,
       resolveSetupReviewSummary,
-      savedPersonaSetup?.run_id,
-      selectedPersonaId,
+      scopeIsCurrent,
       setActiveTab,
       setupIntentTargetTab,
       setSetupStepError,
+      setSetupTestOutcome,
+      setupLiveAttemptRef,
+      setupWizardAwaitingLiveResponseRef,
       setupWizardLastLiveTextRef,
     ]
   )
@@ -1154,7 +1259,6 @@ export function usePersonaSetupOrchestrator(
       const nextSetup = buildPersonaSetupInProgress("persona", [], {
         runId: createSetupRunId(),
       })
-      setSetupWizardSaving(true)
       clearAllSetupStepErrors()
       setSetupIntentPersonaId(personaId)
       setSetupIntentTargetTab(activeTab)
@@ -1168,6 +1272,8 @@ export function usePersonaSetupOrchestrator(
       setupWizardLastLiveTextRef.current = ""
       setSetupHandoff(null)
       setupWizardAwaitingLiveResponseRef.current = false
+      if (setupLiveAttemptRef) setupLiveAttemptRef.current = null
+      setSetupWizardSaving(true)
       try {
         const response = await tldwClient.fetchWithAuth(
           buildSetupProfileUpdatePath(personaId) as any,
@@ -1199,6 +1305,8 @@ export function usePersonaSetupOrchestrator(
       emitSetupAnalyticsEvent,
       selectedPersonaId,
       setSetupStepError,
+      setSetupTestOutcome,
+      setupLiveAttemptRef,
       setupWizardAwaitingLiveResponseRef,
       setupWizardLastLiveTextRef,
     ]
@@ -1230,7 +1338,22 @@ export function usePersonaSetupOrchestrator(
     async (heardText: string) => {
       const personaId = String(selectedPersonaId || "").trim()
       const normalizedHeardText = String(heardText || "").trim()
-      if (!personaId || !normalizedHeardText) return
+      if (!personaId || !normalizedHeardText ||
+        !latestScopeRef.current.required || latestScopeRef.current.step !== "test") return
+      const requestScope = {
+        ...latestScopeRef.current, generation: selectionGenerationRef.current,
+        authority: authorityGenerationRef.current,
+      }
+      const requestToken = {}
+      const ownsRequest = () => {
+        const current = latestScopeRef.current
+        return dryRunRef.current === requestToken &&
+          current.personaId === requestScope.personaId && current.runId === requestScope.runId &&
+          current.version === requestScope.version && current.step === "test" && current.required &&
+          selectionGenerationRef.current === requestScope.generation &&
+          authorityGenerationRef.current === requestScope.authority
+      }
+      dryRunRef.current = requestToken
       setSetupWizardDryRunLoading(true)
       clearSetupStepError("test")
       setSetupTestResumeNote(null)
@@ -1249,6 +1372,7 @@ export function usePersonaSetupOrchestrator(
           command_name?: string | null
           failure_phase?: string | null
         }
+        if (!ownsRequest()) return
         const resolvedHeardText = String(
           payload?.heard_text || normalizedHeardText
         )
@@ -1266,6 +1390,7 @@ export function usePersonaSetupOrchestrator(
           })
         }
       } catch (setupError: any) {
+        if (!ownsRequest()) return
         setSetupTestOutcome({
           kind: "dry_run_failure",
           message: String(
@@ -1273,10 +1398,13 @@ export function usePersonaSetupOrchestrator(
           ),
         })
       } finally {
-        setSetupWizardDryRunLoading(false)
+        if (ownsRequest()) {
+          dryRunRef.current = null
+          setSetupWizardDryRunLoading(false)
+        }
       }
     },
-    [clearSetupStepError, selectedPersonaId]
+    [clearSetupStepError, selectedPersonaId, setSetupTestOutcome]
   )
 
   // ── Command detour / live detour ──
@@ -1331,6 +1459,7 @@ export function usePersonaSetupOrchestrator(
     const detourSource = setupLiveDetour?.source || null
     setSetupLiveDetour(null)
     setupWizardAwaitingLiveResponseRef.current = false
+    if (setupLiveAttemptRef) setupLiveAttemptRef.current = null
     setSetupTestResumeNote(
       "Live session is still available if you want to retry."
     )
@@ -1341,7 +1470,8 @@ export function usePersonaSetupOrchestrator(
         detourSource,
       })
     }
-  }, [emitSetupAnalyticsEvent, setupLiveDetour?.source, setupWizardAwaitingLiveResponseRef])
+  }, [emitSetupAnalyticsEvent, setupLiveDetour?.source, setupLiveAttemptRef,
+    setupWizardAwaitingLiveResponseRef])
 
   const handleOpenVisualSetupDetour = React.useCallback(() => {
     setSetupVisualDetour({
@@ -1377,14 +1507,15 @@ export function usePersonaSetupOrchestrator(
       })
       setSetupCommandDetour(null)
       setSetupTestOutcome(null)
-      setSetupWizardDryRunLoading(false)
+      retireDryRun()
       setSetupTestResumeNote(
         "Command saved. Run the same phrase again to confirm setup."
       )
       setActiveTab(setupIntentTargetTab || "live")
       return true
     },
-    [emitSetupAnalyticsEvent, setActiveTab, setupCommandDetour, setupIntentTargetTab]
+    [emitSetupAnalyticsEvent, retireDryRun, setActiveTab, setSetupTestOutcome,
+      setupCommandDetour, setupIntentTargetTab]
   )
 
   // ── Consume handoff action ──

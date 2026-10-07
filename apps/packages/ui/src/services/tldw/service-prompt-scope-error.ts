@@ -156,6 +156,8 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/chat\/conversations\/[^/]+$/.test(pathname)) return ["GET", "PATCH"].includes(requestMethod)
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/share-links$/.test(pathname)) return requestMethod === "POST"
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/share-links\/[^/]+$/.test(pathname)) return requestMethod === "DELETE"
+  if (/^\/api\/v1\/persona\/profiles\/[^/]+$/.test(pathname) && requestMethod === "PATCH") return true
+  if (/^\/api\/v1\/persona\/profiles\/[^/]+\/(?:voice-commands|connections)$/.test(pathname) && requestMethod === "GET") return true
   if (requestMethod === "GET" && (
     /^\/api\/v1\/workspaces\/?$/.test(pathname) ||
     /^\/api\/v1\/workspaces\/[^/]+\/(?:context|artifacts|notes)$/.test(pathname) ||
