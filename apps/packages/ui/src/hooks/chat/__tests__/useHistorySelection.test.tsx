@@ -21,6 +21,7 @@ import { resolveHistorySelection } from "@/utils/history-selection"
 const mocks = vi.hoisted(() => ({
   openButtons: [] as Array<() => void>,
   bookmarks: new Map<string, any>(),
+  saveBookmark: vi.fn<() => Promise<void>>(async () => {}),
   configChanged: null as null | (() => void),
   forkCandidate: vi.fn(async (..._args: any[]) => null as any),
   forkRecords: vi.fn(async (..._args: any[]) => [] as any[]),
@@ -73,6 +74,7 @@ vi.mock("@/db/dexie/history-selection", async (original) => ({
     ) ?? null,
   saveHistoryBookmark: async (scope: any, view: any) => {
     await mocks.beforeBookmark()
+    await mocks.saveBookmark()
     return mocks.bookmarks.set(
       JSON.stringify([
         scope,
@@ -193,6 +195,7 @@ beforeEach(() => {
   mocks.configChanged = null
   controllers = {}
   mocks.bookmarks.clear()
+  mocks.saveBookmark.mockReset().mockResolvedValue(undefined)
   mocks.profile.mockReset().mockResolvedValue("profile")
   mocks.localOwner
     .mockReset()
@@ -248,6 +251,72 @@ it("does not publish a late capture error after deliberate selection is cancelle
   expect(mounted.result.current.getCurrent().error).toBeNull()
   expect(mounted.result.current.canAutomaticallyLoad()).toBe(false)
 })
+it.each([false, true])(
+  'does not restore a cancelled fresh owner or overwrite a newer handoff while saving its bookmark: newer=%s',
+  async (newer) => {
+    const storageKey = 'cancelled-fresh-bookmark';
+    sessionStorage.removeItem(storageKey);
+    let entered!: () => void, finish!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    mocks.saveBookmark.mockImplementationOnce(async () => {
+      entered();
+      await held;
+    });
+    let current = true;
+    const mounted = renderHook(() => useHistorySelection({ storageKey }));
+    let pending!: Promise<boolean>;
+    act(() => {
+      pending = mounted.result.current.loadConversation(
+        {
+          serverChatId: 'chat',
+          resetOnCancel: true,
+          isCurrent: () => current,
+        },
+        null
+      );
+    });
+    await act(async () => {
+      await started;
+    });
+    current = false;
+    let newerReference: ReturnType<typeof mounted.result.current.getStoredReference> = null;
+    if (newer) {
+      const destination = renderHook(() => useHistorySelection({ storageKey }));
+      await act(async () => {
+        await destination.result.current.open(owner, null);
+      });
+      newerReference = destination.result.current.getStoredReference();
+      expect(newerReference).not.toBeNull();
+      destination.unmount();
+    }
+    await act(async () => {
+      finish();
+      expect(await pending).toBe(false);
+    });
+    expect(mounted.result.current.getCurrent().owner).toBeNull();
+    expect(mounted.result.current.getReference()).toBeNull();
+    expect(mounted.result.current.getStoredReference()).toEqual(newerReference);
+    mounted.unmount();
+    const reloaded = renderHook(() => useHistorySelection({ storageKey }));
+    expect(reloaded.result.current.getStoredReference()).toEqual(newerReference);
+    if (!newer) {
+      current = true;
+      await act(async () => {
+        expect(await reloaded.result.current.loadConversation({ serverChatId: 'chat' }, null)).toBe(
+          true
+        );
+      });
+      expect(reloaded.result.current.getStoredReference()?.conversation_id).toBe('chat');
+    }
+    sessionStorage.removeItem(storageKey);
+  }
+);
+
 describe("mounted history selection", () => {
   it("keeps identical initialization independent and follows only the originating view revision", async () => {
     render(

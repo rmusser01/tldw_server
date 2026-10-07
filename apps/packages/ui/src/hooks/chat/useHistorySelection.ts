@@ -249,10 +249,21 @@ export function useHistorySelection(
   }, [invalidate, publish])
   const retireCancelledLoad = useCallback((token: number, owner: HistoryOwnerV1, view?: HistoryViewSelectionV1) => {
     if (token !== epoch.current || live.current.owner !== owner || (view && live.current.view !== view)) return
-    reset()
+    invalidate()
+    releaseOwnerLease.current?.()
+    releaseOwnerLease.current = null
+    if (storageKey.current) {
+      const stored = sessionStorage.getItem(storageKey.current)
+      const reference = stored
+        ? parseHistorySelectionHandoff("historySelection=" + encodeURIComponent(stored))
+        : null
+      // Another mounted view may already own the shared reload handoff.
+      if (reference?.client_session_id === identity.current!.client)
+        sessionStorage.removeItem(storageKey.current)
+    }
     // Retiring provisional ownership is not consent to replay the old load.
     publish({ ...initialState(), status: "stale_selection" })
-  }, [publish, reset])
+  }, [invalidate, publish])
   const persist = useCallback(
     async (scope: HistoryBookmarkScope, view: HistoryViewSelectionV1, isCurrent: () => boolean) => {
       const operation = saves.current
