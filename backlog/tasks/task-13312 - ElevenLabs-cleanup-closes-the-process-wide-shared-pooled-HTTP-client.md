@@ -57,9 +57,9 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Duplicate of TASK-13314 (same finding, filed twice), fixed in b5b6dc66a9. AC2 reworded 2026-09-23: deleting the override outright would leak the client the convenience API creates without initialize(); b5b6dc66a9 instead tracks _owns_client and closes only an owned client, which is the openai_adapter behaviour for the pooled case. AC1/AC5: unload_provider (POST .../unload) and the init-failure finally both go through adapter.close() -> _cleanup_resources; test_pool_still_serves_a_live_client_after_adapter_close runs that path against the real HTTPConnectionPool and asserts the next get_client returns the same live, unclosed client, so the retry-after-cooldown request gets a working client. AC3: no provider needs pool teardown; none calls aclose on a pooled client. AC4: test_cleanup_failure_log_sanitizes_exception_text was retargeted to the owned path in b5b6dc66a9. Follow-up found while verifying, fixed in 9569e97ecd: clone_voice, get_usage and generate_stream still created their own client inline without setting _owns_client, so close()/unload dropped it unclosed (leak). They now use _ensure_client. Regression test test_other_convenience_calls_own_and_close_their_client[clone_voice|get_usage]: red on ea1cbc6941, green after. tests/TTS: 8 failed/602 passed before vs 6/604 after; the only difference is the two new tests (6 pre-existing, unrelated). Bandit clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

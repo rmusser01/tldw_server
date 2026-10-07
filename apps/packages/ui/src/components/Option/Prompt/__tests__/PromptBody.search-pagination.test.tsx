@@ -128,6 +128,15 @@ vi.mock("antd", async () => {
   const actual = await vi.importActual<typeof import("antd")>("antd")
   return {
     ...actual,
+    // Keep notification payload assertions without mounting auto-close timers.
+    notification: {
+      ...actual.notification,
+      open: vi.fn(),
+      success: vi.fn(),
+      info: vi.fn(),
+      warning: vi.fn(),
+      error: vi.fn()
+    },
     Skeleton: () => <div data-testid="prompts-loading-skeleton" />,
     Table: (props: any) => {
       const rows = Array.isArray(props?.dataSource) ? props.dataSource : []
@@ -535,6 +544,32 @@ describe("PromptBody server search and pagination", () => {
     expect(screen.getByTestId("prompt-location-search")).toHaveTextContent("?tab=trash")
   })
 
+  it.each(["studio", "copilot"])(
+    "preserves the requested %s tab while connection verification is pending",
+    async (tab) => {
+      state.isOnline = false
+      const { rerenderPromptBody } = renderPromptBody([`/prompts?tab=${tab}`])
+      expect(screen.getByTestId("prompt-location-search")).toHaveTextContent(`?tab=${tab}`)
+      state.isOnline = true
+      rerenderPromptBody()
+      await waitFor(() =>
+        expect(screen.getByTestId("prompt-location-search")).toHaveTextContent(`?tab=${tab}`)
+      )
+    }
+  )
+
+  it("keeps the selected remote tab across a temporary connection loss", async () => {
+    const { rerenderPromptBody } = renderPromptBody(["/prompts?tab=studio"])
+    state.isOnline = false
+    rerenderPromptBody()
+    expect(screen.getByTestId("prompt-location-search")).toHaveTextContent("?tab=studio")
+    state.isOnline = true
+    rerenderPromptBody()
+    await waitFor(() =>
+      expect(screen.getByTestId("prompt-location-search")).toHaveTextContent("?tab=studio")
+    )
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     window.sessionStorage.clear()
@@ -675,7 +710,10 @@ describe("PromptBody server search and pagination", () => {
     })
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    await waitFor(() =>
+      expect(document.querySelector(".ant-notification-notice")).toBeNull()
+    )
     setViewportWidth(1280)
     vi.clearAllMocks()
     vi.restoreAllMocks()

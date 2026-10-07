@@ -1765,7 +1765,7 @@ _swagger_ui_params = {
 
 app = FastAPI(
     title="tldw API",
-    version="0.1.45",
+    version="0.1.46",
     description=APP_DESCRIPTION,
     terms_of_service="https://github.com/rmusser01/tldw_server",
     contact={
@@ -2067,7 +2067,7 @@ try:
     from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag  # noqa: E402
 
     try:
-        _rg_global_enabled = bool(_rg_enabled_flag(False))
+        _rg_global_enabled = bool(_rg_enabled_flag(True))
     except _STARTUP_GUARD_EXCEPTIONS:
         _rg_global_enabled = False
 

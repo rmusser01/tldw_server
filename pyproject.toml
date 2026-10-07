@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 ###########################
 [project]
 name = "tldw-server"
-version = "0.1.45"
+version = "0.1.46"
 description = "A comprehensive research assistant and media analysis platform - Too Long; Didn't Watch Server"
 requires-python = ">=3.12"
 readme = "README.md"
@@ -53,7 +53,7 @@ dependencies = [
   "typer>=0.12.0",
   "defusedxml>=0.7.0",
   "email-validator>=2.0.0",
-  "fastapi>=0.141.1,<0.142.0",
+  "fastapi>=0.142.1,<0.143.0",
   "httpcore[asyncio]>=1.0.9,<2",
   "httpx>=0.24.0",
   "certifi>=2024.2.2",
@@ -465,18 +465,13 @@ db_opensearch = [
   "elasticsearch>=8.0.0"
 ]
 
-# Gradio tooling
-gradio = [
-  "gradio>=4.0.0"
-]
-
 gpu_monitoring = [
   "pynvml>=11.5.0; platform_system == \"Linux\""
 ]
 
 # All optional dependencies
 all = [
-  "tldw-server[dev,evaluation,data-tools,chunking_multilingual,gradio,ingestion_email,media_wiki,web_research,STT_All,TTS_All,TTS_higgs,TTS_vibevoice,backend_onnx,db_postgres,ocr_points_sglang,gpu_monitoring]"
+  "tldw-server[dev,evaluation,data-tools,chunking_multilingual,ingestion_email,media_wiki,web_research,STT_All,TTS_All,TTS_higgs,TTS_vibevoice,backend_onnx,db_postgres,ocr_points_sglang,gpu_monitoring]"
 ]
 
 ###########################
@@ -562,7 +557,7 @@ tldw_Server_API = [
 # Tools - Tests
 ###########################
 [tool.pytest.ini_options]
-pythonpath = ["apps/mcp-unified/src", "packages/tldw_profile_core/src"]
+pythonpath = ["apps/mcp-unified/src", "packages/tldw_profile_core/src", "tools/backlog-py/src"]
 filterwarnings = [
     "ignore::DeprecationWarning:pkg_resources:",
     "ignore::DeprecationWarning:speechbrain.pretrained:",

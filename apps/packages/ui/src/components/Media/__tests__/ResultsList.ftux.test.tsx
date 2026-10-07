@@ -49,7 +49,7 @@ describe("ResultsList FTUX", () => {
     fireEvent.change(input, { target: { value: "https://youtube.com/watch?v=test" } })
     fireEvent.click(screen.getByRole("button", { name: /ingest/i }))
     expect(emptyProps.onOpenQuickIngest).toHaveBeenCalledWith(
-      expect.objectContaining({ source: "https://youtube.com/watch?v=test" })
+      expect.objectContaining({ source: "manual", url: "https://youtube.com/watch?v=test" })
     )
   })
 

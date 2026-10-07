@@ -9,7 +9,10 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="secure snapshots require POSIX confinement"),
+]
 
 from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import (
     Fingerprint,

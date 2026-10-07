@@ -25,18 +25,16 @@ Current-head PR #2692 actionlint failed because the install step used process su
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: raw.githubusercontent.com returned 429 in the process substitution used by bash <(curl ...). Bash then read an empty process-substitution file and exited successfully, so the next step failed because ./actionlint was never created. Replaced the install step with gh release download using github.token, pinned v1.7.12, then tar/install/version check.
 
 Bandit not applicable because this task only changes a GitHub Actions workflow and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed the actionlint CI install path so download failures are fail-fast and less prone to unauthenticated raw GitHub rate limits. Verified the targeted workflow set with a locally downloaded actionlint v1.7.12 binary.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

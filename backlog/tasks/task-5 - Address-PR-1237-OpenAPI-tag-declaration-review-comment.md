@@ -41,9 +41,9 @@ Resolve the live review thread on PR #1237 by verifying the OpenAPI tag declarat
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a focused OpenAPI schema-cache regression test and added a cache-boundary comment in custom_openapi(). Verification: targeted pytest for the new regression plus existing tag-declaration contract passed (2 passed, 5 warnings); git diff --check passed; Bandit on main.py passed with zero findings; Bandit on touched app/test files passed with B101 skipped because pytest asserts are expected in tests. A full test_openapi_contracts.py run timed out in existing TestClient startup/teardown after one test, so the focused contract verification is the reliable signal for this review comment.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

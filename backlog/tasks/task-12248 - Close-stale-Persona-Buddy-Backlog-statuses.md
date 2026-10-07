@@ -34,13 +34,13 @@ Verify the referenced GitHub issues are closed, update the stale task statuses/f
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified GitHub issue #1450 is closed, issue #1468 is closed, and visual-pack reuse/library epic #1449 is closed. Updated TASK-192, TASK-194, and TASK-203 from In Progress to Done; TASK-192 also now has checked Definition of Done items and a final summary matching its completed design evidence.
 
 Also updated TASK-257 from In Progress to Done after closing GitHub issues #1566 and #1543; this keeps the Persona Chat Stage 2 parent Backlog record aligned with the completed optional judge V1.
 
 Verification: git diff --check passed. Backlog In Progress list no longer includes Persona/Buddy, Persona Visual, or Persona Chat judge tasks; remaining In Progress items are unrelated WebUI/VN/ACP work. Bandit skipped because this cleanup touches Backlog Markdown metadata only and no Python code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

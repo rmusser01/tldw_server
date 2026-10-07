@@ -245,6 +245,21 @@ describe("ServerChatList reliability states", () => {
     expect(mocks.selectServerChat.mock.invocationCallOrder[0]).toBeLessThan(onConversationSelected.mock.invocationCallOrder[0])
   })
 
+  it("opens a saved chat read-only in temporary mode without management actions (TASK-13389)", () => {
+    historyState.value.data = [createChat()]
+    historyState.value.total = 1
+    historyState.value.hasUsableData = true
+    const onConversationSelected = vi.fn()
+    render(<ServerChatList searchQuery="" readOnly onConversationSelected={onConversationSelected} />)
+
+    expect(screen.queryByRole("button", { name: "common:pin" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "More actions: Recovered chat" })).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Recovered chat" }))
+    expect(mocks.selectServerChat).toHaveBeenCalledTimes(1)
+    expect(onConversationSelected).toHaveBeenCalledTimes(1)
+  })
+
   it.each(["bulk", "trash"])("does not report conversation selection for %s actions", (mode) => {
     historyState.value.data = [createChat()]
     historyState.value.total = 1

@@ -35,7 +35,7 @@ Implement the user-approved next Service Prompts slice for synchronous /api/v1/m
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved in this task conversation. Isolated branch codex/document-summary-service-prompt starts at dev c5dfe0ff73. Backlog MCP search has not returned; using official CLI fallback.
 
 Implemented literal document system guidance using the existing registry, storage, shared Settings and processor arguments. Resolved once before uploads/downloads; explicit request system prompt (including multipart empty string) wins, custom user instructions remain unchanged, and no override snapshots the deployment default. RED: 9 initial backend tests failed; UI localization regression failed; multipart empty-field HTTP regression failed. GREEN final: pytest document summary + registry/API + JSON document + media usage suites: 119 passed (9 existing warnings); Vitest Settings + Service Prompts service/domain suites: 194 passed; extension tsc --noEmit -p tsconfig.compile.json: passed; Ruff check and format check: passed; ESLint touched shared files: exit 0 (Next pages-directory configuration notice only); Bandit two production Python files: zero findings/errors, report /tmp/bandit_document_summary_service_prompt.json. Independent review found multipart normalization issue, fixed test-first and re-reviewed with no further findings. Full repository tests and browser end-to-end tests not run. Queued/persisted ingestion, PDFs and ebooks remain intentionally excluded. Local implementation only; no PR created or merge attempted.
@@ -49,7 +49,7 @@ Qodo fixes: reproduced three real SQLite lifecycle failures (successful probe, f
 Independent review of the Qodo patch found no Critical or Important issues and confirmed retaining the request-boundary orchestration is justified by the existing Notes pattern and bypass requirements. Post-format lifecycle/document regression rerun: 20 passed. Publishing fixes and replying to all four Qodo threads; CI and human Change summary remain merge gates.
 
 Implementation and review are complete. Qodo marked all three fixes resolved and the architecture suggestion dismissed; all four threads are resolved. The user supplied the human-written Change summary and it is in PR #2867. All required checks passed on 0aedb1cd50; the separate macOS research-stream timing failure passed on a single diagnostic rerun without code changes. Dev advanced during CI, so rebased cleanly onto 5cd10750d8; git range-diff confirms all three PR patches are unchanged. Fresh rebased verification: 138 focused backend tests passed (9 warnings), Ruff passed, Bandit three touched production files zero findings/errors (/tmp/bandit_document_summary_rebase.json). This closes the implementation task; PR merge remains pending the refreshed-head checks and is monitored separately.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

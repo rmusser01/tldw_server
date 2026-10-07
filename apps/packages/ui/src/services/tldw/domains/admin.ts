@@ -669,7 +669,7 @@ export const adminMethods = {
     return await bgRequest<any>({ path: `/api/v1/admin/storage-quotas/users/${userId}`, method: "GET" })
   },
 
-  async updateUserStorageQuota(userId: number, payload: { quota_mb: number }): Promise<any> {
+  async updateUserStorageQuota(userId: number, payload: { quota_mb: number | null }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/storage-quotas/users/${userId}`,
       method: "PUT",

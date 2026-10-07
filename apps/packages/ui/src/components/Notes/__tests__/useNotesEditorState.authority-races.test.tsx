@@ -44,8 +44,45 @@ const renderEditor = () => {
 describe('Notes editor authority races', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     mocks.tasks.mockResolvedValue({ tasks: [], reconciliation: null })
     mocks.activity.mockResolvedValue({ events: [] })
+  })
+
+  it('keeps the old note immutable while the newly selected detail is pending', async () => {
+    const next = deferred<unknown>()
+    mocks.request.mockImplementation(({ path }: { path: string }) => path.endsWith('/next')
+      ? next.promise : Promise.resolve({ id: 'old', title: 'Old note', content: 'Old body' }))
+    const view = renderEditor()
+    await act(async () => { await view.result.current.loadDetail('old') })
+    let loading!: Promise<boolean>
+    act(() => { loading = view.result.current.loadDetail('next') })
+    act(() => { view.result.current.setTitle('Title intended for next') })
+    expect(view.result.current.title).toBe('Old note')
+    act(() => { view.result.current.setContentDirty('Edit intended for next') })
+    expect(view.result.current.content).toBe('Old body')
+    await act(async () => {
+      next.resolve({ id: 'next', title: 'Next note', content: 'Next body' })
+      await loading
+    })
+    expect(view.result.current.selectedId).toBe('next')
+    expect(view.result.current.content).toBe('Next body')
+  })
+
+  it('refuses an old-note save until the selected detail resolves', async () => {
+    const next = deferred<unknown>()
+    mocks.request.mockImplementation(({ path }: { path: string }) => path.endsWith('/next')
+      ? next.promise : Promise.resolve({ id: 'old', title: 'Old note', content: 'Old body' }))
+    const view = renderEditor()
+    await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
+    await act(async () => { await view.result.current.loadDetail('old') })
+    let loading!: Promise<boolean>
+    act(() => { loading = view.result.current.loadDetail('next') })
+    let saved!: boolean
+    await act(async () => { saved = await view.result.current.saveNote({ showSuccessMessage: false }) })
+    expect(saved).toBe(false)
+    expect(view.result.current.offlineDraftQueue).toEqual({})
+    await act(async () => { next.resolve({ id: 'next', content: 'Next body' }); await loading })
   })
 
   it('ignores an old detail response after Alice → Bob → Alice', async () => {
@@ -99,7 +136,7 @@ describe('Notes editor authority races', () => {
   it('keeps an offline edit dirty when scoped draft persistence throws', async () => {
     const view = renderEditor()
     await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    const setItem = vi.spyOn(Object.getPrototypeOf(window.localStorage), 'setItem').mockImplementation(() => {
       throw new Error('storage unavailable')
     })
     try {
@@ -124,7 +161,7 @@ describe('Notes editor authority races', () => {
   it('does not acknowledge an offline draft unless scoped storage retains it', async () => {
     const view = renderEditor()
     await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined)
+    const setItem = vi.spyOn(Object.getPrototypeOf(window.localStorage), 'setItem').mockImplementation(() => undefined)
     try {
       act(() => {
         view.result.current.setTitle('Draft without a retained write')

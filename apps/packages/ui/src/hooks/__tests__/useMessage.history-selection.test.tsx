@@ -1,4 +1,5 @@
 import React from "react"
+import { getLatestChatErrorBannerEntry } from "@/components/Option/Playground/PlaygroundChatErrorBanner"
 import { act, render, renderHook, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -250,9 +251,11 @@ vi.mock("@/services/service-prompts", () => ({
 }))
 
 vi.mock("~/store/option", () => ({
-  useStoreMessageOption: (
-    selector?: (state: Record<string, unknown>) => unknown
-  ) => (selector ? selector(mocks.storeState) : mocks.storeState)
+  useStoreMessageOption: Object.assign(
+    (selector?: (state: Record<string, unknown>) => unknown) =>
+      selector ? selector(mocks.storeState) : mocks.storeState,
+    { getState: () => mocks.storeState, subscribe: () => () => {} }
+  )
 }))
 
 vi.mock("~/store", () => ({
@@ -281,13 +284,17 @@ vi.mock("@/hooks/chat/useChatBaseState", () => ({
 
 vi.mock("@/hooks/chat/useSelectedModel", () => ({
   useSelectedModel: () => ({
-    selectedModel: "model-1",
+    selectedModel: mocks.storeState.selectedModel,
     setSelectedModel: vi.fn()
   })
 }))
 
 vi.mock("@/store/model", () => {
-  const state = { apiProvider: "provider-1", reset: vi.fn() }
+  const state = {
+    apiProvider: "provider-1", reset: vi.fn(),
+    activeSettingsScope: "global",
+    getEffectiveSettings: () => ({ apiProvider: "provider-1" })
+  }
   return {
     useStoreChatModelSettings: Object.assign(() => state, {
       getState: () => state
@@ -360,8 +367,10 @@ vi.mock("@/services/model-settings", () => ({
 vi.mock("@/models", async () => {
   const { ChatTldw } = await import("@/models/ChatTldw")
   return {
-    pageAssistModel: async (options: any) =>
-      new ChatTldw({ ...options, temperature: 0.23 })
+    pageAssistModel: async (options: any) => {
+      await h1.beforeModel()
+      return new ChatTldw({ ...options, temperature: 0.23 })
+    }
   }
 })
 
@@ -457,7 +466,8 @@ const h1 = vi.hoisted(() => ({
   append: vi.fn(),
   wire: vi.fn(),
   recover: vi.fn(),
-  dismiss: vi.fn()
+  dismiss: vi.fn(),
+  beforeModel: vi.fn()
 }))
 vi.mock("@/hooks/chat/useHistorySelection", async (original) => ({
   ...(await original<any>()),
@@ -571,6 +581,7 @@ beforeEach(async () => {
   h1.auth = new AbortController()
   h1.native = false
   h1.persona = false
+  h1.beforeModel.mockReset()
   mocks.chatBaseState.historyId = "history-1"
   mocks.storeState.temporaryChat = false
   mocks.storeState.serverChatCharacterId = null
@@ -581,6 +592,7 @@ beforeEach(async () => {
   mocks.chatBaseState.selectedSystemPrompt = ""
   mocks.storeState.fileRetrievalEnabled = false
   mocks.storeState.toolChoice = "auto"
+  mocks.storeState.selectedModel = "model-1"
   mocks.storeState.serverChatId = "tracked-chat-1"
   mocks.chatBaseState.history = [
     { role: "user", content: "old question" },
@@ -691,6 +703,38 @@ it("mounted sidepanel normal submit uses canonical A1 selection and pre-admits i
     user.tldw_history_selection_v1.messages.map((row: any) => row.id)
   ).toEqual(["u-old", "a1"])
   expect(assistant.tldw_history_admission_v1.input_message_id).toBe(user.id)
+  expect(h1.append).toHaveBeenCalledTimes(2)
+})
+
+it.each(["model", "tools"])("rejects an ordinary sidepanel send after its global %s selector changes during preparation", async changed => {
+  const { result } = renderHook(() => useMessage())
+  h1.beforeModel.mockImplementation(() => {
+    if (changed === "model") mocks.storeState.selectedModel = "changed-model"
+    else mocks.storeState.toolChoice = "none"
+  })
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(h1.append).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+})
+
+it.each(["model", "tools"])("keeps an explicit sidepanel %s override after its unrelated global selector changes", async overridden => {
+  const { result } = renderHook(() => useMessage())
+  h1.beforeModel.mockImplementation(() => {
+    if (overridden === "model") mocks.storeState.selectedModel = "changed-model"
+    else mocks.storeState.toolChoice = "required"
+  })
+  await act(async () => {
+    await result.current.onSubmit({
+      message: "next", image: "",
+      requestOverrides: overridden === "model"
+        ? { selectedModel: "fixed-model" }
+        : { toolChoice: "none" }
+    })
+  })
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.wire.mock.calls[0][0].model).toBe(overridden === "model" ? "fixed-model" : "model-1")
   expect(h1.append).toHaveBeenCalledTimes(2)
 })
 
@@ -819,6 +863,63 @@ const nativeAdmission = (request: any) => ({
   originating_selection_revision:
     request.tldw_history_selection_v1.selection_revision
 })
+
+it.each(["http502", "sse-afteradmission"])("native provider recovery for %s retains its receipt and exposes existing model settings", async failure => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  const safeMessage = "The selected provider credentials could not be authenticated."
+  h1.wire.mockImplementation(async function* (request) {
+    if (failure === "http502") throw Object.assign(new Error(safeMessage), {
+      status: 502, details: { detail: { error_code: "provider_authentication_failed", message: safeMessage } }
+    })
+    if (failure !== "sse-beforeadmission") yield { tldw_history_admission_v1: nativeAdmission(request) }
+    if (failure === "sse-afterpartial") yield { choices: [{ delta: { content: "partial result" } }] }
+    yield { error: { code: "provider_authentication_failed", message: safeMessage } }
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => { await result.current.onSubmit({ message: "next", image: "" }) })
+  const shown = mocks.setMessages.mock.lastCall?.[0]
+  const banner = getLatestChatErrorBannerEntry(shown)
+  expect(banner).toMatchObject({ summary: "Character chat model setup needs attention.", recoveryAction: "open-model-settings", category: "character_chat.provider_unconfigured" })
+  expect(banner!.detail).toContain("provider_authentication_failed")
+  expect(banner!.detail).toContain(safeMessage)
+  expect(shown.at(-1).id).toMatch(/^native-draft-/)
+  expect(shown.at(-1).serverMessageId).toBeUndefined()
+  expect(shown.filter((row: { isBot: boolean }) => !row.isBot).map((row: { message: string }) => row.message)).not.toContain("next")
+  const retained = h1.recover.mock.lastCall?.[2]
+  expect(retained).toMatchObject({ persistence: "server", state: failure === "sse-afterpartial" ? "generated_unsaved" : failure === "sse-afteradmission" ? "accepted_unsent" : "unknown", input_text: "next", result_text: failure === "sse-afterpartial" ? "partial result" : "" })
+  expect(retained.assistant_id).toBeUndefined()
+  if (failure === "http502" || failure === "sse-beforeadmission") expect(retained.admission).toBeUndefined()
+  else expect(retained.admission.input_message_id).toBe("native-input")
+  expect(h1.dismiss).not.toHaveBeenCalled()
+  expect(h1.controller.followResult).not.toHaveBeenCalled()
+  await expect(result.current.regenerateLastMessage()).rejects.toThrow("unsupported_history_regeneration")
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.append).not.toHaveBeenCalled()
+  expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+  expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
+})
+
+it.each(["navigation", "account"])("native provider recovery cannot overwrite a changed %s", async boundary => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  h1.wire.mockImplementation(async function* () {
+    if (boundary === "navigation") h1.controller.navigate()
+    else h1.auth.abort()
+    mocks.setMessages.mockClear()
+    yield { error: { code: "provider_authentication_failed", message: "Safe provider failure" } }
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => { await result.current.onSubmit({ message: "next", image: "" }) })
+  expect(mocks.setMessages).not.toHaveBeenCalled()
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.recover.mock.lastCall?.[2]).toMatchObject({ persistence: "server", state: "unknown", input_text: "next" })
+  expect(h1.recover.mock.lastCall?.[2].assistant_id).toBeUndefined()
+  expect(h1.controller.followResult).not.toHaveBeenCalled()
+})
+
 
 it("native before-first sends no historical content and retains unacknowledged text separately", async () => {
   h1.native = true

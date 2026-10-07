@@ -2,7 +2,7 @@
 """Pydantic schemas for user profile endpoints."""
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -106,7 +106,7 @@ class UserProfileSecurity(BaseModel):
 class UserProfileQuotas(BaseModel):
     """Quota and usage section of the profile response."""
 
-    storage_quota_mb: int = Field(..., description="Storage quota in MB")
+    storage_quota_mb: Optional[int] = Field(None, description="Storage quota in MB; null is unlimited")
     storage_used_mb: float = Field(..., description="Storage used in MB")
     audio: Optional[dict[str, Any]] = Field(
         None,
@@ -262,3 +262,20 @@ class UserProfileBatchResponse(BaseModel):
     limit: int = Field(..., description="Page size")
     pages: int = Field(..., description="Total page count")
     pagination: PagePaginationMeta
+
+
+class GroupLimitOverrideRequest(BaseModel):
+    """Body for setting a team/org ``limits.*`` override; ``value`` null removes it."""
+
+    # Any, not int | float | None: that would let Pydantic coerce True -> 1 and
+    # "5" -> 5 before _validate_value's type checks ever run (spec 2 review A2).
+    value: Any = None
+
+
+class GroupLimitOverrideResponse(BaseModel):
+    """The team/org override after the write; ``value`` null means removed."""
+
+    scope: Literal["org", "team"]
+    id: int
+    key: str
+    value: int | float | None

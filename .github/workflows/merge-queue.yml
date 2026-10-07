@@ -1,0 +1,57 @@
+name: Merge Queue
+
+# One-at-a-time merge queue for dev (TASK-13462).
+# Spec: Docs/superpowers/specs/2026-10-04-merge-queue-design.md
+#
+# Wakes when a PR into dev is armed for auto-merge, disarmed or closed, and on every push to
+# dev. The queue-tick job of each required workflow runs the same script after a failed gate.
+# Nothing here is triggered from the default branch: the triggers that read main's copy of a
+# workflow are deliberately absent, because nothing in the queue may depend on main.
+#
+# No concurrency group: a job cancelled while pending shows on the PR as a red check, and racing
+# runs are already safe in Helper_Scripts/ci/merge_queue.py (pinned-head rebase, repeatable
+# evictions and comments).
+#
+# The job checks out dev, never the PR, so the code that runs with write permissions is always
+# dev's. The queue itself never arms auto-merge, merges or pushes.
+#
+# Kill switch: repository variable MERGE_QUEUE. Unset or off = nothing runs; dry = decisions are
+# written to the job summary only; on = act.
+on:
+  pull_request:
+    types: [auto_merge_enabled, auto_merge_disabled, closed]
+    branches: [dev]
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  queue:
+    name: Merge queue
+    if: >-
+      (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
+      (github.event_name == 'push' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # write: rebase the front PR's branch, comment and disarm, dispatch/cancel/delete runs.
+      contents: write
+      pull-requests: write
+      actions: write
+      # read: the six required check runs and the license commit status on the front PR's head.
+      checks: read
+      statuses: read
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: dev
+          persist-credentials: false
+      - name: Advance the queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_QUEUE: ${{ vars.MERGE_QUEUE }}
+        run: python3 -m Helper_Scripts.ci.merge_queue

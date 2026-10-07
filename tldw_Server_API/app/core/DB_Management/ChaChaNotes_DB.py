@@ -81,6 +81,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
     DatabaseBackend,
     DatabaseConfig,
     QueryResult,
+    SavedViewNameUniqueConstraintError,
     UniqueConstraintError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
@@ -110,6 +111,8 @@ from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLit
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (  # noqa: E402
     ClosedChaChaOperationError,
     ConnectionState,
+    ExternalConnection,
+    chacha_operation,
     current_connection_state,
 )
 from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend  # noqa: E402
@@ -685,8 +688,9 @@ RawBackendConnection: TypeAlias = sqlite3.Connection | SupportsRawBackendConnect
 class BackendManagedTransaction:
     """Context manager leveraging the backend's native transaction handling."""
 
-    def __init__(self, db: CharactersRAGDB):
+    def __init__(self, db: CharactersRAGDB, *, preserve_existing: bool = False):
         self._db = db
+        self._preserve_existing = preserve_existing
         self._raw_conn = None
         self._wrapper = None
         self._managed = False
@@ -700,8 +704,15 @@ class BackendManagedTransaction:
         try:
             self._raw_conn = self._db._get_thread_connection()
             self._managed = self._depth == 0
-            self._state.tx_depth = self._depth + 1
             backend = self._db._get_pinned_backend() or self._db.backend
+            if self._preserve_existing:
+                status = getattr(getattr(self._raw_conn, "info", None), "transaction_status", None)
+                self._managed = bool(
+                    self._managed
+                    and getattr(status, "name", None) == "IDLE"
+                    and backend._tx_depth(self._raw_conn) == 0
+                )
+            self._state.tx_depth = self._depth + 1
             self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn, backend)
             return self._wrapper
         except BaseException:
@@ -777,8 +788,9 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 73  # Companion storage after Persona, history, and native fork migrations
-    _POSTGRES_SCHEMA_VERSION = 77
+    _CURRENT_SCHEMA_VERSION = 74  # Permanent Workspace startup receipts after Companion storage
+    _POSTGRES_SCHEMA_VERSION = 78
+    _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -7260,9 +7272,13 @@ BEGIN
 
   IF (
     SELECT count(*)
-      FROM pg_policies
-     WHERE schemaname = current_schema()
-       AND (tablename, policyname) IN (
+      -- Presence checks need stored trees, not pg_policies expression deparsing.
+      -- Deparsing can lock Media relations during concurrent schema bootstrap.
+      FROM pg_policy AS policy
+      JOIN pg_class AS relation ON relation.oid = policy.polrelid
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+     WHERE namespace.nspname = current_schema()
+       AND (relation.relname, policy.polname) IN (
          (
            'shared_workspace_chat_threads',
            'shared_workspace_chat_threads_tenant_isolation'
@@ -7272,8 +7288,8 @@ BEGIN
            'shared_workspace_chat_requests_tenant_isolation'
          )
        )
-       AND qual IS NOT NULL
-       AND with_check IS NOT NULL
+       AND policy.polqual IS NOT NULL
+       AND policy.polwithcheck IS NOT NULL
   ) <> 2 THEN
     RAISE EXCEPTION 'Shared workspace chat v61 policy catalog is incomplete';
   END IF;
@@ -7736,10 +7752,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             SharedWorkspaceChatStore,
         )
         from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskStore
+        from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store import WorkspaceChatStartupStore
 
         self.character_store = CharacterStore(self)
         self.conversation_store = ConversationStore(self)
         self.native_forks = NativeForkStore(self)
+        self.workspace_chat_startups = WorkspaceChatStartupStore(self)
         self.native_assets = NativeChatAssetStore(self)
         self.conversation_resume_store = ConversationResumeStore(self)
         self.message_store = MessageStore(self)
@@ -7778,6 +7796,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             self._initialize_schema()
             self._mark_backend_bootstrapped(self._backend)
+            if self._owner_managed_backend and self.backend_type == BackendType.SQLITE and not self.is_memory_db:
+                # File bootstrap owns this checkout; runtime work opens its own.
+                self.close_connection()
             logger.debug(f"CharactersRAGDB initialization completed successfully for {self.db_path_str}")
         except (CharactersRAGDBError, sqlite3.Error) as e:
             logger.critical(f"FATAL: DB Initialization failed for {self.db_path_str}: {e}", exc_info=True)
@@ -8622,11 +8643,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(f"Execute Many failed: {exc}") from exc  # noqa: TRY003
 
     # --- Transaction Context ---
-    def transaction(self) -> TransactionContextManager | BackendManagedTransaction:
-        """Return a context manager for database transactions."""
+    def transaction(self, *, preserve_existing: bool = False) -> TransactionContextManager | BackendManagedTransaction:
+        """Optionally join driver-open caller work without committing or rolling it back."""
         if self.backend_type == BackendType.SQLITE:
             return TransactionContextManager(self)
-        return BackendManagedTransaction(self)
+        return BackendManagedTransaction(self, preserve_existing=preserve_existing)
 
     # --- Schema Initialization and Migration ---
     @classmethod
@@ -8729,6 +8750,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (70, "_migrate_from_v70_to_v71"),
             (71, "_migrate_from_v71_to_v72"),
             (72, "_migrate_from_v72_to_v73_persona_companion"),
+            (73, "_migrate_from_v73_to_v74"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17911,6 +17933,31 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 76:
             raise SchemaError("Native fork PostgreSQL migration V75->V76 failed version verification.")  # noqa: TRY003
 
+    def _migrate_from_v73_to_v74(self, conn: sqlite3.Connection) -> None:
+        """Install permanent startup receipts inside the registered SQLite migration."""
+        from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
+            workspace_chat_startup_schema_statements,
+        )
+
+        for statement in workspace_chat_startup_schema_statements(postgres=False):
+            conn.execute(statement)
+        conn.execute("UPDATE db_schema_version SET version = 74 WHERE schema_name = ? AND version = 73", (self._SCHEMA_NAME,))
+        if self._get_db_version(conn) != 74:
+            raise SchemaError("Workspace startup migration V73->V74 failed version verification.")
+
+    def _migrate_from_v77_to_v78_postgres(self, conn: Any) -> None:
+        """Install PostgreSQL receipts with forced owner RLS before the version bump."""
+        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_workspace_chat_startup_rls_sql
+        from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
+            workspace_chat_startup_schema_statements,
+        )
+
+        for statement in (*workspace_chat_startup_schema_statements(postgres=True), *build_workspace_chat_startup_rls_sql()):
+            self.backend.execute(statement, connection=conn)
+        self.backend.execute("UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 77", (78, self._SCHEMA_NAME), connection=conn)
+        if self._get_schema_version_postgres(conn) != 78:
+            raise SchemaError("Workspace startup PostgreSQL migration V77->V78 failed version verification.")
+
     def _migrate_from_v74_to_v75_postgres(self, conn: Any) -> None:
         """Create the PostgreSQL projection store and protected nullable provenance."""
         statements = (
@@ -18293,41 +18340,51 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _repair_conversation_assistant_identity(self, conn: Any) -> None:
         """Repair only historical missing Character fields, comparing locked normalized bindings."""
-        query = """
-            SELECT id, character_id, assistant_kind, assistant_id, persona_memory_mode,
-                   assistant_startup_json
-              FROM conversations
-             WHERE character_id IS NOT NULL
-               AND (COALESCE(TRIM(assistant_kind), '') = ''
-                    OR COALESCE(TRIM(assistant_id), '') = '')
-        """
         if self.backend_type == BackendType.POSTGRESQL:
-            # This runs on every current-schema open, which must not need a writable
-            # transaction (f5f5b63005): lock rows only when one actually needs repair.
-            if conn.execute(query + " LIMIT 1").fetchone() is None:
-                return
-            query += " FOR UPDATE"
-        rows = conn.execute(query).fetchall()
-        for row in rows:
-            kind = row["assistant_kind"]
-            assistant_id = row["assistant_id"]
-            if kind is None or not kind.strip(" "):
-                kind = "character"
-            if assistant_id is None or not assistant_id.strip(" "):
-                assistant_id = str(row["character_id"])
-            try:
-                binding = self.conversation_store._normalize_conversation_assistant_identity(
-                    character_id=row["character_id"], assistant_kind=kind,
-                    assistant_id=assistant_id, persona_memory_mode=row["persona_memory_mode"],
-                )
-            except InputError:
-                preserve_origin = False
-            else:
-                preserve_origin = self.conversation_store._assistant_identity_matches(row, binding)
-            conn.execute(
-                "UPDATE conversations SET assistant_kind = ?, assistant_id = ?, assistant_startup_json = ? WHERE id = ?",
-                (kind, assistant_id, row["assistant_startup_json"] if preserve_origin else None, row["id"]),
+            # Schema transactions own their checkout independently of a live request.
+            repair_scope = chacha_operation(
+                independent=True,
+                bindings=(ExternalConnection(self, conn._connection, conn._backend),),
             )
+        else:
+            repair_scope = contextlib.nullcontext()
+        with repair_scope:
+            if self.backend_type == BackendType.POSTGRESQL:
+                conn = BackendConnectionWrapper(self, conn._connection, conn._backend)
+            query = """
+                SELECT id, character_id, assistant_kind, assistant_id, persona_memory_mode,
+                       assistant_startup_json
+                  FROM conversations
+                 WHERE character_id IS NOT NULL
+                   AND (COALESCE(TRIM(assistant_kind), '') = ''
+                        OR COALESCE(TRIM(assistant_id), '') = '')
+            """
+            if self.backend_type == BackendType.POSTGRESQL:
+                # Clean storage needs validation without requesting write permissions.
+                if conn.execute(query + " LIMIT 1").fetchone() is None:
+                    return
+                query += " FOR UPDATE"
+            rows = conn.execute(query).fetchall()
+            for row in rows:
+                kind = row["assistant_kind"]
+                assistant_id = row["assistant_id"]
+                if kind is None or not kind.strip(" "):
+                    kind = "character"
+                if assistant_id is None or not assistant_id.strip(" "):
+                    assistant_id = str(row["character_id"])
+                try:
+                    binding = self.conversation_store._normalize_conversation_assistant_identity(
+                        character_id=row["character_id"], assistant_kind=kind,
+                        assistant_id=assistant_id, persona_memory_mode=row["persona_memory_mode"],
+                    )
+                except InputError:
+                    preserve_origin = False
+                else:
+                    preserve_origin = self.conversation_store._assistant_identity_matches(row, binding)
+                conn.execute(
+                    "UPDATE conversations SET assistant_kind = ?, assistant_id = ?, assistant_startup_json = ? WHERE id = ?",
+                    (kind, assistant_id, row["assistant_startup_json"] if preserve_origin else None, row["id"]),
+                )
 
     def _ensure_recent_voice_command_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Backfill voice command schema columns after version-number collisions."""
@@ -21089,6 +21146,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 73 and current_db_version == 72:
                         self._migrate_from_v72_to_v73_persona_companion(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 74 and current_db_version == 73:
+                        self._migrate_from_v73_to_v74(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21556,6 +21616,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 73 and current_db_version == 72:
                     self._migrate_from_v72_to_v73_persona_companion(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 74 and current_db_version == 73:
+                    self._migrate_from_v73_to_v74(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25366,7 +25429,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 return
 
-        with postgres_schema_migration(backend, self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT) as conn:
+        with postgres_schema_migration(backend, self._POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT) as conn:
             self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
             if self._postgres_schema_is_current(conn):
                 if target_version >= 74:
@@ -25417,7 +25480,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25439,6 +25502,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 77 and current_version < 77:
                     self._migrate_from_v76_to_v77_persona_companion_postgres(conn)
                     current_version = 77
+                if target_version >= 78 and current_version < 78:
+                    self._migrate_from_v77_to_v78_postgres(conn)
+                    current_version = 78
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -25880,6 +25946,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v76_to_v77_persona_companion_postgres(conn)
                 self._runtime_schema_version = 77
                 current_version = 77
+
+            if target_version >= 78 and current_version < 78:
+                self._migrate_from_v77_to_v78_postgres(conn)
+                self._runtime_schema_version = 78
+                current_version = 78
 
             if current_version < target_version:
                 logger.warning(
@@ -28452,16 +28523,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not hard and workspace["deleted"]:
             raise self._workspace_delete_incomplete(workspace_id)
         deleted_clause = "" if hard else " AND deleted = ?"
-        params: tuple[Any, ...] = (workspace_id, self.client_id)
+        params: tuple[Any, ...] = (workspace_id,)
         if not hard:
             params += (False,)
         residual = conn.execute(
-            "SELECT id FROM conversations WHERE workspace_id = ? AND client_id = ? "  # nosec B608 - only a fixed deleted predicate is appended.
+            "SELECT id FROM conversations WHERE workspace_id = ? "  # nosec B608 - only a fixed deleted predicate is appended.
             "AND scope_type = 'workspace'" + deleted_clause + " "
-            "AND (required_projection_version IS NOT NULL OR native_bundle_json IS NOT NULL "
-            "OR native_creation_operation_kind IS NOT NULL OR native_creation_operation_id IS NOT NULL) "
+            "AND ((client_id = ? AND (required_projection_version IS NOT NULL OR native_bundle_json IS NOT NULL "
+            "OR native_creation_operation_kind IS NOT NULL OR native_creation_operation_id IS NOT NULL)) "
+            "OR EXISTS (SELECT 1 FROM workspace_chat_startup_receipts r "
+            "WHERE r.conversation_id = conversations.id AND r.owner_user_id = ?)) "
             "LIMIT 1",
-            params,
+            (*params, self.client_id, self.owner_user_id),
         ).fetchone()
         if residual is not None:
             raise self._workspace_delete_incomplete(workspace_id)
@@ -28514,7 +28587,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conversation_version = conversation["version"] if isinstance(conversation, dict) else conversation[1]
             failed_message_ids: set[str] = set()
             while True:
-                batch = self.get_messages_for_conversation(conversation_id, limit=100, offset=0)
+                # Settle this page's reads before invoking independently owned deletes.
+                with self.transaction():
+                    batch = self.get_messages_for_conversation(conversation_id, limit=100, offset=0)
                 batch = [m for m in batch if m.get("id") not in failed_message_ids]
                 if not batch:
                     break
@@ -28733,15 +28808,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     @staticmethod
     def _is_workspace_source_saved_view_postgres_unique_error(exc: Exception) -> bool:
-        """Match only SQLSTATE 23505 for the named saved-view unique constraint."""
-        if isinstance(exc, UniqueConstraintError):
-            # The backend redacts driver diagnostics (no __cause__, no
-            # constraint name). The table's only other unique key is the
-            # uuid4 primary key, and the caller re-reads the named conflict
-            # in a fresh transaction before reporting it.
-            return True
+        """Match the exact safe category or legacy named driver uniqueness error."""
         current: BaseException | None = exc
         while current is not None:
+            if isinstance(current, SavedViewNameUniqueConstraintError):
+                return True
             sqlstate = getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)
             diagnostics = getattr(current, "diag", None)
             constraint_name = getattr(diagnostics, "constraint_name", None)
@@ -45736,6 +45807,8 @@ for _message_store_method in (
     "count_root_messages_for_conversation",
     "get_root_messages_for_conversation",
     "get_messages_for_conversation_by_parent_ids",
+    "add_retry_system_instruction_block",
+    "get_retry_message_context",
     "has_system_message_for_conversation",
     "update_message",
     "soft_delete_message",

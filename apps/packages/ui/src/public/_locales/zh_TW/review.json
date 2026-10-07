@@ -780,7 +780,7 @@
     "message": "沒有權限儲存"
   },
   "mediaPage_spreadMode": {
-    "message": "比較"
+    "message": "並排版面"
   },
   "mediaPage_listMode": {
     "message": "聚焦"
@@ -789,13 +789,13 @@
     "message": "堆疊"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "並排顯示所選項目以便比較"
+    "message": "將所選項目並排排列"
   },
   "mediaPage_listModeTooltip": {
     "message": "一次顯示一個項目並可導覽"
   },
   "mediaPage_allModeTooltip": {
-    "message": "在可捲動清單中顯示所有所選項目"
+    "message": "以可捲動堆疊顯示目前閱讀視窗"
   },
   "mediaPage_copyContentLabel": {
     "message": "複製內容"
@@ -834,19 +834,19 @@
     "message": "選取項目"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "點擊左側面板中的項目以加入檢視器。"
+    "message": "使用核取方塊選取項目，再選擇閱讀所選項目。點擊或 Enter 預覽。"
   },
   "mediaPage_firstUseStep2": {
     "message": "選擇檢視"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "使用「比較」進行並排，「聚焦」一次一個，或用「堆疊」查看全部。"
+    "message": "並排用於版面；聚焦顯示單一項目；堆疊顯示目前閱讀視窗。比較內容用於比較文字。"
   },
   "mediaPage_firstUseStep3": {
     "message": "導覽"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "使用上一個/下一個按鈕或鍵盤 (Tab + Enter) 在項目間移動。"
+    "message": "使用上一項/下一項或 j/k 瀏覽目前預覽或選取集合。Tab 定位核取方塊，空白鍵選取。"
   },
   "mediaPage_gotIt": {
     "message": "知道了"
@@ -1327,5 +1327,11 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "Choose an analysis provider, then retry analysis."
+  },
+  "mediaPage_resultsHint": {
+    "message": "點擊或 Enter 預覽。核取方塊上的空白鍵選取項目。Shift+點擊選取範圍。"
+  },
+  "mediaPage_viewerAll": {
+    "message": "閱讀視窗（堆疊）"
   }
 }

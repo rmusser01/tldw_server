@@ -1179,7 +1179,7 @@
     "message": "Enregistrer après révision"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Réviser avant d’enregistrer"
+    "message": "Vérifier le contenu extrait avant l’enregistrement"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Traitez maintenant, puis modifiez les brouillons localement avant de les valider sur votre serveur."
@@ -2758,5 +2758,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "L’enregistrement hors ligne est indisponible tant que votre compte et le stockage local ne sont pas confirmés. Vos modifications ne sont pas enregistrées."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

@@ -6,23 +6,7 @@ from typing import Any
 from loguru import logger
 
 
-COMPAT_PATHS: dict[str, dict[str, Any]] = {
-    "web_scraping_legacy_fallback": {
-        "source": "tldw_Server_API.app.services.web_scraping_service",
-        "sunset": "2026-06-30",
-        "successor": "enhanced_web_scraping_service",
-    },
-    "llm_chat_legacy_session": {
-        "source": "tldw_Server_API.app.core.LLM_Calls.chat_calls",
-        "sunset": "2026-07-15",
-        "successor": "http_client.fetch streaming + provider adapters",
-    },
-    "auth_db_execute_compat": {
-        "source": "tldw_Server_API.app.services.auth_service",
-        "sunset": "2026-08-01",
-        "successor": "backend-specific auth db adapters",
-    },
-}
+COMPAT_PATHS: dict[str, dict[str, Any]] = {}
 
 _WARNED_THIS_CYCLE: ContextVar[frozenset[str]] = ContextVar(
     "runtime_deprecation_warned_keys",

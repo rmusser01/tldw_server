@@ -20,20 +20,22 @@ from typing import Any, Optional, Union
 
 from loguru import logger as _loguru_logger
 
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 from tldw_Server_API.app.core.Utils.backoff import is_sqlite_locked_error
 
 from ..sqlite_policy import configure_sqlite_connection
 from .base import (
-    ConstraintViolationError,
     BackendFeatures,
     BackendType,
     ConnectionPool,
+    ConstraintViolationError,
     DatabaseBackend,
     DatabaseConfig,
     DatabaseError,
     FTSQuery,
     QueryResult,
     TransientContentionError,
+    UniqueConstraintError,
 )
 from .fts_translator import FTSQueryTranslator
 
@@ -74,6 +76,15 @@ def _sqlite_file_path_from_uri(db_uri: str) -> Optional[Path]:
         return candidate.resolve()
     except (OSError, RuntimeError, ValueError):
         return candidate
+
+
+def _sqlite_allows_creation(db_path: str) -> bool:
+    """Return whether the SQLite URI permits creating its file and directories."""
+    if not db_path.startswith("file:"):
+        return True
+    mode = _url.parse_qs(_url.urlparse(db_path).query).get("mode", [""])[0]
+    return mode not in {"rw", "ro"}
+
 
 class SQLiteConnectionPool(ConnectionPool):
     """SQLite-specific connection pool using thread-local storage."""
@@ -141,7 +152,7 @@ class SQLiteConnectionPool(ConnectionPool):
     def _create_connection(self) -> sqlite3.Connection:
         """Create a new SQLite connection with optimal settings."""
         # Ensure database directory exists for file-backed DBs
-        if not self._is_memory:
+        if not self._is_memory and _sqlite_allows_creation(self.db_path):
             try:
                 dbp = _sqlite_file_path_from_uri(self.db_path) if self._use_uri else Path(self.db_path)
                 if dbp and dbp.parent and not dbp.parent.exists():
@@ -156,25 +167,29 @@ class SQLiteConnectionPool(ConnectionPool):
             uri=self._use_uri,
         )
 
-        # Set row factory for dict-like access
-        conn.row_factory = sqlite3.Row
+        try:
+            # Set row factory for dict-like access
+            conn.row_factory = sqlite3.Row
 
-        configure_sqlite_connection(
-            conn,
-            use_wal=bool(self.config.sqlite_wal_mode),
-            synchronous="NORMAL" if self.config.sqlite_wal_mode else None,
-            foreign_keys=bool(self.config.sqlite_foreign_keys),
-            busy_timeout_ms=10000,
-            cache_size=-2000,
-        )
+            configure_sqlite_connection(
+                conn,
+                use_wal=bool(self.config.sqlite_wal_mode),
+                synchronous="NORMAL" if self.config.sqlite_wal_mode else None,
+                foreign_keys=bool(self.config.sqlite_foreign_keys),
+                busy_timeout_ms=10000,
+                cache_size=-2000,
+            )
 
-        def history_sha256(value: Any) -> str | None:
-            if value is None:
-                return None
-            return hashlib.sha256(value.encode("utf-8") if isinstance(value, str) else bytes(value)).hexdigest()
+            def history_sha256(value: Any) -> str | None:
+                if value is None:
+                    return None
+                return hashlib.sha256(value.encode("utf-8") if isinstance(value, str) else bytes(value)).hexdigest()
 
-        # Register once on the real handle before any statement can use it.
-        conn.create_function("h1_sha256", 1, history_sha256, deterministic=True)
+            # Register once on the real handle before any statement can use it.
+            conn.create_function("h1_sha256", 1, history_sha256, deterministic=True)
+        except BaseException:
+            conn.close()
+            raise
         return conn
 
     def return_connection(self, connection: sqlite3.Connection) -> None:
@@ -186,7 +201,7 @@ class SQLiteConnectionPool(ConnectionPool):
 
         A different current handle remains cached and usable. Matching cached
         handles use ``clear_thread_local_connection()``: ordinary close failures
-        are logged with a traceback, and the handle is detached to prevent reuse
+        are logged by exception type, and the handle is detached to prevent reuse
         even if the underlying resource could not be closed.
 
         Args:
@@ -211,7 +226,7 @@ class SQLiteConnectionPool(ConnectionPool):
         """Close and detach the current thread's cached connection.
 
         Ordinary exceptions from close are logged with connection/thread context
-        and traceback. The failed handle is still detached so subsequent borrows
+        and exception type. The failed handle is still detached so subsequent borrows
         create a fresh connection; its underlying resource may remain open. This
         method does not retry or reuse that handle.
 
@@ -229,11 +244,12 @@ class SQLiteConnectionPool(ConnectionPool):
                 if conn:
                     try:
                         conn.close()
-                    except Exception:
-                        logger.exception(
+                    except Exception as exc:  # noqa: BLE001 - detach after any ordinary close failure
+                        logger.error(  # noqa: TRY400 - privacy boundary excludes exception details
                             "Failed to close rejected SQLite connection {connection_id} "
-                            "on thread {thread_id}; detaching it to prevent reuse",
+                            "on thread {thread_id}; detaching it to prevent reuse (error_type={error_type})",
                             connection_id=id(conn), thread_id=thread_id,
+                            error_type=exception_type_for_log(exc),
                         )
             finally:
                 self._connections.pop(thread_id, None)
@@ -247,7 +263,7 @@ class SQLiteConnectionPool(ConnectionPool):
         try:
             yield conn
         except Exception as e:
-            logger.exception(f"Error in connection context: {e}")
+            logger.error("SQLite connection context failed (error_type={})", exception_type_for_log(e))  # noqa: TRY400 - no exception data
             raise
 
     def close_all(self) -> None:
@@ -273,7 +289,9 @@ class SQLiteConnectionPool(ConnectionPool):
                 try:
                     conn.close()
                 except (OSError, RuntimeError, sqlite3.Error) as e:
-                    logger.exception(f"Error closing connection: {e}")
+                    logger.error(  # noqa: TRY400 - no exception data
+                        "SQLite connection close failed (error_type={})", exception_type_for_log(e)
+                    )
             self._connections.clear()
             self._thread_refs.clear()
 
@@ -329,7 +347,7 @@ class SQLiteBackend(DatabaseBackend):
         is_memory, use_uri = _classify_sqlite_path(raw_path)
 
         # Ensure database directory exists for file-backed DBs
-        if not is_memory:
+        if not is_memory and _sqlite_allows_creation(raw_path):
             if use_uri:
                 db_path = _sqlite_file_path_from_uri(raw_path)
                 if db_path is not None:
@@ -345,15 +363,19 @@ class SQLiteBackend(DatabaseBackend):
             uri=use_uri,
         )
 
-        conn.row_factory = sqlite3.Row
+        try:
+            conn.row_factory = sqlite3.Row
 
-        configure_sqlite_connection(
-            conn,
-            use_wal=bool(self.config.sqlite_wal_mode),
-            synchronous="NORMAL" if self.config.sqlite_wal_mode else None,
-            foreign_keys=bool(self.config.sqlite_foreign_keys),
-            busy_timeout_ms=10000,
-        )
+            configure_sqlite_connection(
+                conn,
+                use_wal=bool(self.config.sqlite_wal_mode),
+                synchronous="NORMAL" if self.config.sqlite_wal_mode else None,
+                foreign_keys=bool(self.config.sqlite_foreign_keys),
+                busy_timeout_ms=10000,
+            )
+        except BaseException:
+            conn.close()
+            raise
 
         return conn
 
@@ -439,6 +461,7 @@ class SQLiteBackend(DatabaseBackend):
         start_time = time.time()
         redacted_failure = False
         constraint_failure = False
+        unique_failure = False
         contention_failure = False
 
         conn = connection or self.get_pool().get_connection()
@@ -477,9 +500,15 @@ class SQLiteBackend(DatabaseBackend):
             # FOREIGN KEY and UNIQUE. The raise stays outside this except block so the
             # driver exception is never chained; the message is unchanged.
             constraint_failure = isinstance(e, sqlite3.IntegrityError)
+            unique_failure = (
+                constraint_failure
+                and getattr(e, "sqlite_errorcode", None) == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+            )
             contention_failure = is_sqlite_locked_error(e)
 
         if redacted_failure:
+            if unique_failure:
+                raise UniqueConstraintError("SQLite query execution failed")
             if constraint_failure:
                 raise ConstraintViolationError("SQLite query execution failed")
             if contention_failure:
@@ -525,7 +554,7 @@ class SQLiteBackend(DatabaseBackend):
             # Execute the schema as a script
             conn.executescript(schema)
         except sqlite3.Error as e:
-            logger.exception(f"Schema creation failed: {e}")
+            logger.error("SQLite schema creation failed (error_type={})", exception_type_for_log(e))  # noqa: TRY400 - privacy boundary excludes exception details
             raise DatabaseError(f"Failed to create schema: {e}") from e
 
     def table_exists(self, table_name: str, connection: Optional[sqlite3.Connection] = None) -> bool:

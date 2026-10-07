@@ -53,7 +53,7 @@ Found by the comprehensive core-module review (Sync reviewer, reproduced end-to-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Duplicate of TASK-13300 (filed twice during the 2026-09-22 review). Work and status are tracked there.
 
 
@@ -68,7 +68,7 @@ Verification: tldw_Server_API/tests/Sync/test_sync_v2_service.py 166 passed (was
 
 Notes from the other branch (merged 2026-09-27):
 Closed 2026-09-27, re-verified on dev. AC #2 stays unchecked on purpose: declined for the reason recorded above, not left undone.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

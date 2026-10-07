@@ -2438,6 +2438,8 @@ async def test_auto_continue_cancellation_drains_sync_adapter_before_exit(
     """Cancellation drains continuation work and marks only usable late output."""
 
     entered = threading.Event()
+    entered_async = asyncio.Event()
+    loop = asyncio.get_running_loop()
     release = threading.Event()
     marked: list[str] = []
     mark_attempts: list[str] = []
@@ -2473,6 +2475,7 @@ async def test_auto_continue_cancellation_drains_sync_adapter_before_exit(
     async def blocking_followup(**_kwargs):
         def invoke_sync_adapter() -> Any:
             entered.set()
+            loop.call_soon_threadsafe(entered_async.set)
             release.wait()
             return _late_continuation_response(late_outcome, sentinel)
 
@@ -2502,7 +2505,7 @@ async def test_auto_continue_cancellation_drains_sync_adapter_before_exit(
         )
     )
     try:
-        assert await asyncio.to_thread(entered.wait, 10.0)
+        await asyncio.wait_for(entered_async.wait(), timeout=10.0)
         assert mark_attempts == ["openai"]
         assert marked == []
         task.cancel()
@@ -2530,6 +2533,8 @@ async def test_cancelled_continuation_drains_real_adapter_before_classify_mark_a
 
     lifecycle: list[str] = []
     continuation_entered = threading.Event()
+    continuation_entered_async = asyncio.Event()
+    loop = asyncio.get_running_loop()
     release_continuation = threading.Event()
     drain_entered = _install_owned_worker_drain_probe(monkeypatch)
     predicate = getattr(chat_service, "_nonstream_provider_result_is_usable", None)
@@ -2553,6 +2558,7 @@ async def test_cancelled_continuation_drains_real_adapter_before_classify_mark_a
         if not any(message.get("role") == "tool" for message in payload["messages"]):
             return _build_llm_response_with_tool_calls()
         continuation_entered.set()
+        loop.call_soon_threadsafe(continuation_entered_async.set)
         assert release_continuation.wait(timeout=2.0)
         return _late_continuation_response(
             "valid_text",
@@ -2638,7 +2644,7 @@ async def test_cancelled_continuation_drains_real_adapter_before_classify_mark_a
 
     task = asyncio.create_task(invoke())
     try:
-        assert await asyncio.to_thread(continuation_entered.wait, 1.0)
+        await asyncio.wait_for(continuation_entered_async.wait(), timeout=1.0)
         task.cancel()
         await asyncio.wait_for(drain_entered.wait(), timeout=1.0)
         assert task.done() is False

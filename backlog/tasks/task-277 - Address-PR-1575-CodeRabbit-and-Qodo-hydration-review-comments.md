@@ -31,11 +31,11 @@ Resolve the current actionable review comments on PR #1575 for the OpenWebUI att
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified and fixed current PR #1575 CodeRabbit/Qodo comments: bounded image reads, import-preview freshness in the hydration run gate, full warning totals with truncated warning lists, private attachment storage root permissions, Windows/UNC warning redaction, retry-on-conflict for appended message image positions, and API test fixture/schema hardening.
 
 Verification: targeted backend review regressions passed (7 selected); focused OpenWebUI hydration backend/docs suite passed (79 passed); OpenWebUI import UI vitest file passed (7 passed); Bandit on touched backend implementation files reported 0 findings and 0 errors; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -45,13 +45,13 @@ Reconcile the WebUI dependency audit for GitHub issue #1346 with current origin/
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Refreshed Docs/Design/WebUI_Dependency_Audit.md after confirming PR #1390 merged into origin/dev at 9ae5726bc01db212376316f6954e7eed589ec830. The audit now marks PR #1357, PR #1359, PR #1365, PR #1368, PR #1375, PR #1385, and PR #1390 as completed issue #1346 cleanup work, updates the stale rows for pubsub-js, @types/pubsub-js, buffer, stream-browserify, @hookform/resolvers, react-hook-form, axios, and clsx to removed, and removes those packages from the active quick-cleanup/replacement queue.
 
 Current manifest evidence across apps/tldw-frontend/package.json, apps/packages/ui/package.json, and apps/extension/package.json found no direct declarations for pubsub-js, @types/pubsub-js, buffer, stream-browserify, @hookform/resolvers, react-hook-form, axios, or clsx. Exact active-code import scans found no package imports for those names. dayjs remains directly declared and imported only from shared UI source/tests, including simple display-formatting surfaces and Ant Design DatePicker/DateRangePicker Dayjs value contracts.
 
 Verification: git diff --check exited 0; stale quick-cleanup rg for already removed package names exited 1 with no matches; the Node manifest check printed "removed issue-1346 package declarations absent"; the exact active-code package-import scan for removed names exited 1 with no matches; the dayjs scan listed the remaining shared UI imports. Bandit skipped because no Python files were modified.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

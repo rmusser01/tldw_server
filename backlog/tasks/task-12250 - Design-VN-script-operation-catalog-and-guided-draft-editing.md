@@ -45,13 +45,13 @@ Design the next API-first VN authoring sprint from GitHub issue #1610: backend-o
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Wrote design spec at `Docs/superpowers/specs/2026-05-12-vn-script-authoring-catalog-design.md`.
 - Ran a focused spec review through subagent Raman. Addressed findings around non-mutating preview validation, generation/profile-owned limits, generated-choice patch shape, strict parameter schemas, concrete error details, and backend-owned invalid-draft behavior.
 - Re-ran focused review through subagent Hegel; result was APPROVED.
 - Ran an additional local critique at user request before implementation planning. Tightened capability-token ownership, supplied-draft preview semantics, transport status mapping, and nested snippet-parameter validation.
 - Bandit skipped because this task only changes Markdown design/task documents.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

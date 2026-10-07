@@ -418,15 +418,30 @@ This repository uses Backlog.md for task tracking and historical work records. A
 
 Read-only investigation can proceed without a Backlog.md task. If investigation turns into edits, stop, find or create a Backlog.md task, and then continue. Creating or updating Backlog.md task records is the tracking mechanism itself and does not require a separate recursive task.
 
-Use Backlog.md through the official MCP workflow when available. First read the workflow overview exposed by the installed MCP server, such as `backlog://workflow/overview` or `backlog://docs/task-workflow`; if MCP resources are unavailable, call `backlog.get_backlog_instructions()` if that tool exists. Use the `instruction` selector for `task-creation`, `task-execution`, or `task-finalization` when needed.
+Use backlog-py (`tools/backlog-py`), the repository's Python Backlog.md clone, to read and change task files ([ADR-059](Docs/ADR/059-backlog-py-task-editor-cutover.md)). Run it from the repository root as `PYTHONPATH=tools/backlog-py/src python -m backlog_py --cwd <repo> ...`, or install it once with `pip install -e tools/backlog-py` and use the `backlog-py` command. Never install it as `backlog` on PATH.
+
+Do not use the Node `backlog` CLI or the Backlog.md MCP server to create or edit task files. The Node CLI writes `SECTION:NOTES` where backlog-py writes `SECTION:IMPLEMENTATION_NOTES`, and a Node edit of a backlog-py task, even a label-only edit, nests the notes and duplicates the final-summary markers. In `backend-required`, `tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py` fails a PR whose added or edited task files are not canonical; on a PR that changes only `backlog/`, the `backlog-task-format` pre-commit hook flags them instead.
 
 Search before creating tasks to avoid duplicates. Prefer one Backlog.md task per reviewable unit of work, and split work that grows too broad. Keep the task current with status, notes, plan links, touched files when useful, verification results, blockers, PR links, and final summary.
 
 Backlog.md does not replace this repo's superpowers workflow. Use the existing brainstorming, spec, implementation-plan, test-driven development, review, verification, Bandit, and commit requirements whenever they apply; link those artifacts from the Backlog.md task instead of duplicating them.
 
-If MCP is unavailable but the CLI works, use CLI fallback commands such as `backlog search "query" --plain`, `backlog task list --plain`, `backlog task <id> --plain`, `backlog task create`, `backlog task edit`, and `backlog board`. Do not manually edit Backlog.md task files unless MCP/CLI/Web paths are unavailable and the user explicitly approves the exception.
+Common backlog-py commands (prefix each with the invocation above):
 
-If neither MCP nor CLI is available, pause before making repo file changes unless the user explicitly approves a temporary exception. Commit Backlog.md task changes with the related work unless the user asks for different staging.
+- Read: `search "query" --plain`, `task list --plain`, `task <id>` (the whole file; `--plain` prints only the header and description), `board`.
+- Create: `task create "Title" -d "Why and what" --ac "Criterion" --ac "Another" -l label1,label2 --dep TASK-1 [--id TASK-N] [--notes "..."]`.
+- Edit: `task edit <id>` with `-s "In Progress"`, `-t "New title"` (renames the file), `-l labels` (replaces them), `--ac "Added criterion"`, `--remove-ac N`, `--check-ac N`, `--check-dod N`, `--append-notes "..."` (repeatable), `--notes "..."` (replaces them), `--final-summary "..."`, `--dep TASK-1`.
+- Repair: `task normalize [--check] [path...]` rewrites Node-format or nested sections into the canonical format without dropping text; every backlog-py edit already does this for the file it touches.
+
+Task ids collide when concurrent sessions each take the next local id. Before creating a task, find the highest id across `origin/dev` and all open PR branches, and pass a higher one with `--id`:
+
+```bash
+git fetch origin dev --quiet
+{ git ls-tree -r --name-only origin/dev backlog/; gh pr list --state open --limit 500 --json files --jq '.[].files[].path'; } \
+  | sed -nE 's|^backlog/.*task-([0-9]+)[ .].*|\1|p' | sort -n | tail -1
+```
+
+Do not hand-edit task files unless backlog-py cannot make the change and the user explicitly approves the exception. If backlog-py itself cannot run, pause before making repo file changes unless the user explicitly approves a temporary exception. Commit Backlog.md task changes with the related work unless the user asks for different staging.
 
 ### 0a. Architecture Decision Records
 
@@ -552,6 +567,15 @@ When multiple valid approaches exist, choose based on:
 - A diff recap or pasted AI text without clear human ownership does not satisfy this gate.
 - If the human requester cannot explain the rationale in their own words, the PR is not merge-ready.
 - Canonical policy: `Docs/superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md`
+
+### Merging into dev
+
+`dev` requires seven statuses on a head that is up to date with `dev`, so merges are serial. Check the merge queue's mode first: `gh variable get MERGE_QUEUE`.
+
+- **`on`:** arm auto-merge when reviews are settled (`gh pr merge <n> --auto --merge`) and leave the PR alone. Never rebase, update or hand-merge an armed PR. Disarm (`gh pr merge <n> --disable-auto`) before pushing more work, then arm again. Never click "Approve and run" on a queue-rebased PR.
+- **unset, `off` or `dry`:** rebase only the PR that is about to merge, wait for the required statuses, then merge. Do not keep every open PR rebased.
+
+Details: `Docs/Development/CI_REQUIRED_GATES.md`, "Merge Queue".
 
 ### Security Validation
 

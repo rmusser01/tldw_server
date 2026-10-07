@@ -1,8 +1,8 @@
 import asyncio
 import os
 import tempfile
-import pytest
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -15,25 +15,25 @@ def _run(coro):
     return loop.run_until_complete(coro)
 
 
-def _setup_env():
-    os.environ["TEST_MODE"] = "true"
-    os.environ["AUTH_MODE"] = "single_user"
-    os.environ["SINGLE_USER_API_KEY"] = "test-api-key-1234567890"
-    os.environ["SINGLE_USER_FIXED_ID"] = "1"
-    os.environ["PROFILE"] = "single_user"
-    os.environ["SINGLE_USER_ALLOWED_IPS"] = ""
-    os.environ["MCP_JWT_SECRET"] = "x" * 64
-    os.environ["MCP_API_KEY_SALT"] = "s" * 64
-    os.environ["MCP_ENABLE_MEDIA_MODULE"] = "false"
-    os.environ["MCP_MODULES_CONFIG"] = os.path.join(
+def _setup_env(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")
+    monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+    monkeypatch.setenv("PROFILE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_ALLOWED_IPS", "")
+    monkeypatch.setenv("MCP_JWT_SECRET", "x" * 64)
+    monkeypatch.setenv("MCP_API_KEY_SALT", "s" * 64)
+    monkeypatch.setenv("MCP_ENABLE_MEDIA_MODULE", "false")
+    monkeypatch.setenv("MCP_MODULES_CONFIG", os.path.join(
         tempfile.gettempdir(),
         "mcp_modules_empty.yaml",
-    )
-    os.environ["MCP_MODULES"] = (
+    ))
+    monkeypatch.setenv("MCP_MODULES", (
         "media=tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module:MediaModule,"
         "chats=tldw_Server_API.app.core.MCP_unified.modules.implementations.chats_module:ChatsModule,"
         "characters=tldw_Server_API.app.core.MCP_unified.modules.implementations.characters_module:CharactersModule"
-    )
+    ))
     try:
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
         reset_settings()
@@ -43,11 +43,15 @@ def _setup_env():
 
 @pytest.fixture(scope="module")
 def client():
-    _setup_env()
-    from fastapi import FastAPI
-    from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_router
-    from tldw_Server_API.app.core.MCP_unified.server import reset_mcp_server
+    monkeypatch = pytest.MonkeyPatch()
+    _setup_env(monkeypatch)
+    from tldw_Server_API.app.core.MCP_unified import get_mcp_server
     from tldw_Server_API.app.core.MCP_unified.config import get_config
+    from tldw_Server_API.app.core.MCP_unified.server import reset_mcp_server
+    from tldw_Server_API.app.core.MCP_unified.tests.support import (
+        build_mcp_admin_auth_override,
+        build_mcp_test_client,
+    )
 
     try:
         get_config.cache_clear()  # type: ignore[attr-defined]
@@ -56,10 +60,20 @@ def client():
 
     _run(reset_mcp_server())
 
-    app = FastAPI()
-    app.include_router(mcp_router, prefix="/api/v1")
-    with TestClient(app) as c:
-        yield c
+    try:
+        with build_mcp_test_client(auth_principal_override=build_mcp_admin_auth_override()) as c:
+            class _AllowAll:
+                async def check_permission(self, *args, **kwargs):
+                    return True
+
+            get_mcp_server().protocol.rbac_policy = _AllowAll()
+            yield c
+    finally:
+        monkeypatch.undo()
+        get_config.cache_clear()  # type: ignore[attr-defined]
+        from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+        reset_settings()
+        _run(reset_mcp_server())
 
 
 def _auth_headers():

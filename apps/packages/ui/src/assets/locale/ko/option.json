@@ -600,7 +600,7 @@
     "reviewStorageCapWarning_one": "{{count}}개 파일이 로컬 초안 한도({{cap}})를 초과했습니다. 오디오/비디오를 저장하기 전에 소스를 첨부하세요.",
     "reviewStorageCapWarning_other": "{{count}}개 파일이 로컬 초안 한도({{cap}})를 초과했습니다. 오디오/비디오를 저장하기 전에 소스를 첨부하세요.",
     "storeAfterReview": "검토 후 저장",
-    "reviewBeforeStorage": "저장 전에 검토",
+    "reviewBeforeStorage": "저장하기 전에 추출된 콘텐츠 검토",
     "reviewBeforeStorageHint": "지금 처리한 뒤 서버에 저장하기 전에 로컬에서 초안을 편집하세요.",
     "reviewEnabled": "검토 모드",
     "reviewStorageCap": "로컬 초안은 {{cap}}개로 제한됩니다.",

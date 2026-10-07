@@ -89,7 +89,6 @@ from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
 from tldw_Server_API.app.core.Chatbooks import chatbook_service
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import media_module as media_module_impl
 from tldw_Server_API.app.core.Sync import Sync_Client as sync_client_module
-from tldw_Server_API.app.core.Sync import server_sync_processor
 from tldw_Server_API.app.services import ingestion_sources_worker
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import quizzes_module
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import slides_module
@@ -134,7 +133,6 @@ from tldw_Server_API.app.services import media_ingest_jobs_worker
 from tldw_Server_API.app.services import outputs_purge_scheduler
 from tldw_Server_API.app.services import storage_cleanup_service
 from tldw_Server_API.app.services import tts_history_cleanup_service
-from tldw_Server_API.app.services import web_scraping_service
 
 
 class _LazyLegacyMediaDBProxy(ModuleType):
@@ -1609,22 +1607,23 @@ def test_data_tables_imports_input_error_from_media_db_errors_and_not_media_db_v
 
 
 def test_sync_imports_db_errors_from_media_db_errors_and_not_media_db_v2(monkeypatch):
+    from tldw_Server_API.app.core.Sync import server_sync_processor
+
     monkeypatch.setattr(legacy_media_db, "ConflictError", object(), raising=False)
     monkeypatch.setattr(legacy_media_db, "DatabaseError", object(), raising=False)
     monkeypatch.setattr(legacy_media_db, "InputError", object(), raising=False)
     monkeypatch.setattr(legacy_media_db, "MediaDatabase", object(), raising=False)
 
-    # The v1 processor that raises these errors moved out of the endpoint into
-    # core.Sync.server_sync_processor (8656be117f); the endpoint re-exports it.
-    processor_module = importlib.reload(server_sync_processor)
+    processor = importlib.reload(server_sync_processor)
     module = importlib.reload(sync)
 
-    assert processor_module.ConflictError is media_db_errors.ConflictError
-    assert processor_module.DatabaseError is media_db_errors.DatabaseError
-    assert processor_module.InputError is media_db_errors.InputError
-    assert "MediaDatabase" not in processor_module.__dict__
-    assert module.ServerSyncProcessor is processor_module.ServerSyncProcessor
+    assert module.ServerSyncProcessor is processor.ServerSyncProcessor
+    assert processor.ConflictError is media_db_errors.ConflictError
+    assert processor.DatabaseError is media_db_errors.DatabaseError
+    assert processor.InputError is media_db_errors.InputError
     assert "MediaDatabase" not in module.__dict__
+    assert "MediaDatabase" not in processor.__dict__
+    assert "Media_DB_v2" not in inspect.getsource(processor)
 
 
 def test_db_manager_does_not_bind_detail_helpers_from_media_db_v2(monkeypatch):
@@ -2029,11 +2028,6 @@ def test_book_processing_lib_no_longer_imports_add_media_with_keywords_from_db_m
     )
 
 
-def test_web_scraping_service_imports_managed_media_database_from_media_db_api():
-    module = importlib.reload(web_scraping_service)
-    assert module.managed_media_database is media_db_api.managed_media_database
-
-
 def test_media_files_cleanup_service_imports_managed_media_database_from_media_db_api():
     module = importlib.reload(media_files_cleanup_service)
     assert module.managed_media_database is media_db_api.managed_media_database
@@ -2233,6 +2227,8 @@ def test_claims_service_does_not_bind_media_database_from_shim(monkeypatch):
     module = importlib.reload(claims_service)
     assert module.managed_media_database is media_db_api.managed_media_database
     assert "MediaDatabase" not in module.__dict__
+    assert "from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase" in inspect.getsource(module)
+    assert "Media_DB_v2" not in inspect.getsource(module)
 
 
 def test_media_module_imports_create_media_database_from_media_db_api(monkeypatch):

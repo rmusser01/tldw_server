@@ -5,17 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to Some kind of Versioning
 
-
 ## [Unreleased]
 
 ### Added
 
+
 ### Changed
+
 
 ### Fixed
 
+
 ### Removed
 
+## [0.1.46] - 2026-10-01
+
+Promotes development changes since 0.1.45 through PR #3073. See the
+[change inventory](Docs/Development/releases/0.1.46-change-inventory.md).
+
+### Added
+
+- **Ambient Persona Buddy:** idle-only companion modes, global and per-Persona preferences, accessible controls, reduced-motion support, and visual-pack review, activation and fork workflows. The companion does not make runtime model calls (#2817, #3056).
+- **Workspace Persona startup:** preserve strict startup receipts and selected Persona context (#3041).
+- **VN recovery and media feedback:** recover VN commands and show source hints when extraction fails (#3028, #3050).
+- **Authenticated Email uploads:** include the merged upload, tenancy, privacy and search work (#3023).
+- **Agent-task message storage:** keep raw messages in a separate encrypted, owner-scoped store while automation tables remain metadata-only. This release includes the storage/authoring slice; executor integration remains separately tracked (#3039).
+
+### Changed
+
+- **Python 3.12 or newer is required.** FastAPI is updated to 0.142.1; upgrade the runtime before installing (#3053, #3065).
+- **Resource Governance:** use one enable switch and the shared policy resolver. Disabled governance does not construct a governor; authentication fallback and safety-net relief follow that policy (#3066, #3068, #3070).
+- Reuse the shared SSE adapter helpers and move root implementation plans into `Docs/Plans/` (#3040, #2979).
+
+### Fixed
+
+- **Chat account isolation and persistence:** bind drafts, retries, saved images, Character/Knowledge QA settings and conversations to the correct account across navigation and reconnects; repair stale requests, temporary-mode reads and mirror deletion (#2979, #3038, #3046, #3062, #3064).
+- **PostgreSQL reliability:** repair authentication, Notes/search, profile updates, Sync, Jobs startup, saved-view conflicts and connection handling while preserving existing transaction and write-guard behavior (#2979).
+- **Personal Context Sync progress:** finish an authority row once it is staged, so a relay deadline cannot strand a pending envelope and block later pushes or pulls (TASK-13410, #3078).
+- **Authentication and diagnostics:** enforce capability-disclosure and llama.cpp authentication, preserve AuthNZ startup causes and profile-version reasons, and protect Audio status routes (#3003, #3008, #3047, #3063, #3058).
+- **AuthNZ setup privacy:** automatic key generation no longer prints secret values; explicitly requested interactive generation retains manual-copy output.
+- **Workflow reliability:** repair Study, evaluation, World Book, media/audio and command-palette findings from the merged engineering sweep (#2979, #3011).
+- **CI and platform checks:** repair admission/shard reporting, latent frontend tests, Buddy browser acceptance, and macOS guest boot/payload cleanup (#3036, #3044, #3054, #3056, #3022, #3051).
+
+Broader certification and remaining UAT/native follow-ups stay separately tracked;
+this release does not claim a fresh full certification pass.
 
 ## [0.1.45] - 2026-09-27
 

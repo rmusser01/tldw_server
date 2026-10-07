@@ -44,13 +44,11 @@ Task 4 implemented with opt-in FastAPI route mounting in mcp_unified/gateway/fas
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Task 4 implementation under the approved subagent-driven workflow.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Final review results: latest spec compliance review passed; latest code-quality review found no Critical runtime/security issues. The remaining Important reviewer note was Backlog closeout, addressed here. Expanded Task 4 touched scope includes mcp_unified/gateway/profile_runtime.py and mcp_unified/gateway/tool_use_reporting.py for the explicit unfiltered admin catalog path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

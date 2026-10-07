@@ -534,7 +534,7 @@
     "message": "റിവ്യൂ കഴിഞ്ഞ് സംഭരിക്കുക"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "സംരക്ഷിക്കുന്നതിന് മുമ്പ് റിവ്യൂ ചെയ്യുക"
+    "message": "സംരക്ഷിക്കുന്നതിന് മുമ്പ് വേർതിരിച്ച ഉള്ളടക്കം പരിശോധിക്കുക"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "ഇപ്പോൾ പ്രോസസ്സ് ചെയ്യുക, തുടർന്ന് നിങ്ങളുടെ സെർവറിൽ കമ്മിറ്റുചെയ്യുന്നതിന് മുമ്പ് ഡ്രാഫ്റ്റുകൾ ലോക്കലായി എഡിറ്റ് ചെയ്യുക."
@@ -2680,5 +2680,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "നിങ്ങളുടെ അക്കൗണ്ടും പ്രാദേശിക സംഭരണവും സ്ഥിരീകരിക്കുന്നതുവരെ ഓഫ്‌ലൈൻ സേവ് ലഭ്യമല്ല. നിങ്ങളുടെ മാറ്റങ്ങൾ സേവ് ചെയ്യപ്പെടാതെ തുടരും."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

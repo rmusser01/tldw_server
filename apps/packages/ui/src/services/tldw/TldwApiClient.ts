@@ -1,3 +1,4 @@
+import { BoundedTtlCache } from "./bounded-ttl-cache"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import type { ChatScope } from "@/types/chat-scope"
 import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
@@ -33,8 +34,9 @@ import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { createJsonResponseLike } from "@/services/tldw/json-response-like"
 import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
-import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
+import { createServicePromptScopeChangedError, servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
 import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { appendPathQuery } from "@/services/tldw/path-utils"
 import { inferUploadMediaTypeFromUrl } from "@/services/tldw/media-routing"
 import {
@@ -67,6 +69,7 @@ import type {
 } from "@/services/tldw/single-user-credential"
 import {
   clearManualCredentials,
+  getBuildTimeApiKey,
   hasNewerCurrentAccessToken,
   hasInvalidatedRefreshSession,
   invalidateRefreshSessionIfCurrent,
@@ -334,9 +337,9 @@ export interface ChatbookAccountScopeResponse {
 export interface CurrentUserStorageQuotaResponse {
   user_id: number
   storage_used_mb: number
-  storage_quota_mb: number
-  available_mb: number
-  usage_percentage: number
+  storage_quota_mb: number | null
+  available_mb: number | null
+  usage_percentage: number | null
 }
 
 export interface OpenAIOAuthAuthorizeRequest {
@@ -1473,7 +1476,7 @@ export interface AdminUserSummary {
   is_verified: boolean
   created_at: string
   last_login?: string | null
-  storage_quota_mb: number
+  storage_quota_mb: number | null
   storage_used_mb: number
 }
 
@@ -1491,7 +1494,7 @@ export interface AdminUserUpdateRequest {
   is_active?: boolean
   is_verified?: boolean
   is_locked?: boolean
-  storage_quota_mb?: number
+  storage_quota_mb?: number | null
 }
 
 export interface AdminUserCreateRequest {
@@ -1671,19 +1674,30 @@ export interface SandboxWorkspaceDiagnosticsResponse {
   links: SandboxWorkspaceDiagnosticsLinks
 }
 
+// Cookie-session owners can change without changing the connection config.
+// One watcher fences all client instances without retaining each instance.
+let domainCacheAccountRevision = 0
+const stopWatchingDomainCacheAccount = watchChatAccountChanges(invalidated => {
+  if (invalidated) domainCacheAccountRevision += 1
+})
+const domainCacheHot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
+domainCacheHot?.dispose(stopWatchingDomainCacheAccount)
+
 export class TldwApiClientBase {
   private storage: Storage
   private sessionStorage: Storage
   private config: TldwConfig | null = null
+  private configInitialization = 0
+  private completedConfigInitialization = 0
   private baseUrl: string = ''
   private headers: HeadersInit = {}
-  characterCache = new Map<string, { value: any; expiresAt: number }>()
+  characterCache = new BoundedTtlCache<any>()
   characterInFlight = new Map<string, Promise<any>>()
-  chatMessagesCache = new Map<
-    string,
-    { value: ServerChatMessage[]; expiresAt: number }
-  >()
+  chatMessagesCache = new BoundedTtlCache<ServerChatMessage[]>()
   chatMessagesInFlight = new Map<string, Promise<ServerChatMessage[]>>()
+  private domainCacheConfig: TldwConfig | null = null
+  private domainCacheAccountRevision = -1
+  private domainCacheRevision = 0
   private openApiPathSet: Set<string> | null = null
   private openApiPathSetPromise: Promise<Set<string> | null> | null = null
   private resolvedPathCache = new Map<string, string>()
@@ -1760,22 +1774,6 @@ export class TldwApiClientBase {
     }
   }
 
-  private getEnvApiKey(): string | null {
-    try {
-      const env: any = (import.meta as any)?.env || {}
-      const processEnv: Record<string, string | undefined> =
-        typeof process === "undefined" ? {} : process.env || {}
-      const raw =
-        (env?.VITE_TLDW_API_KEY as string | undefined) ??
-        (env?.VITE_TLDW_DEFAULT_API_KEY as string | undefined) ??
-        processEnv.NEXT_PUBLIC_X_API_KEY
-      const key = (raw || "").trim()
-      return key || null
-    } catch {
-      return null
-    }
-  }
-
   private isDevMode(): boolean {
     try {
       const env: any = (import.meta as any)?.env || {}
@@ -1833,6 +1831,57 @@ export class TldwApiClientBase {
     return `${chatId}${query || ""}`
   }
 
+  private invalidateDomainCaches(): void {
+    this.domainCacheRevision += 1
+    this.characterCache.clear()
+    this.characterInFlight.clear()
+    this.chatMessagesCache.clear()
+    this.chatMessagesInFlight.clear()
+  }
+
+  async getDomainCacheRevision(): Promise<number> {
+    const accountRevision = domainCacheAccountRevision
+    const startedRevision = this.domainCacheRevision
+    try {
+      // getConfig alone may retain a previous server or API-key connection.
+      await this.initialize()
+      const initializedConfig = this.config
+      const config = await this.ensureConfigForRequest(true, initializedConfig)
+      if (accountRevision !== domainCacheAccountRevision ||
+          !connectionAuthoritiesMatch(initializedConfig, this.config)) {
+        throw createServicePromptScopeChangedError()
+      }
+      if (this.domainCacheAccountRevision !== accountRevision ||
+          !connectionAuthoritiesMatch(config, this.domainCacheConfig)) {
+        this.invalidateDomainCaches()
+      }
+      this.domainCacheConfig = { ...config }
+      this.domainCacheAccountRevision = accountRevision
+      return this.domainCacheRevision
+    } catch (error) {
+      if (this.domainCacheRevision === startedRevision) {
+        this.invalidateDomainCaches()
+        this.domainCacheConfig = null
+      }
+      throw error
+    }
+  }
+
+  assertDomainCacheRevision(revision: number): void {
+    // Keep the final check synchronous with cache reads and publication.
+    if (revision !== this.domainCacheRevision ||
+        this.domainCacheAccountRevision !== domainCacheAccountRevision) {
+      throw createServicePromptScopeChangedError()
+    }
+  }
+
+  getDomainCacheConfigSnapshot(revision: number): TldwConfig {
+    this.assertDomainCacheRevision(revision)
+    if (!this.domainCacheConfig) throw createServicePromptScopeChangedError()
+    // Domain single-flight owns these reads; do not join a transport-only key.
+    return { ...this.domainCacheConfig }
+  }
+
   invalidateChatMessagesCache(chatId?: string | number): void {
     const cid = chatId != null ? String(chatId) : null
     if (!cid) {
@@ -1850,8 +1899,11 @@ export class TldwApiClientBase {
     return "tldw server API key is still set to a placeholder value. Replace it with your real API key in Settings → tldw server before continuing."
   }
 
-  async ensureConfigForRequest(requireAuth: boolean): Promise<TldwConfig> {
-    const cfg = (await this.getConfig()) || null
+  async ensureConfigForRequest(
+    requireAuth: boolean,
+    resolvedConfig?: TldwConfig | null
+  ): Promise<TldwConfig> {
+    const cfg = (resolvedConfig === undefined ? await this.getConfig() : resolvedConfig) || null
     const hostedMode = isHostedTldwDeployment()
     const runtimeApiKey = !hostedMode
       ? getRuntimeSingleUserApiKeyOverride()
@@ -2048,6 +2100,7 @@ export class TldwApiClientBase {
   }
 
   async initialize(): Promise<void> {
+    const initialization = ++this.configInitialization
     let storedManual = await this.storage.get<TldwConfig>("tldwConfig")
     if (!storedManual) {
       try {
@@ -2066,7 +2119,7 @@ export class TldwApiClientBase {
       }
     }
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
-    const envApiKey = quickstartWebUiServerUrl ? null : this.getEnvApiKey()
+    const envApiKey = quickstartWebUiServerUrl ? null : getBuildTimeApiKey()
     const storedCookieSession =
       quickstartWebUiServerUrl && !isCookieSessionConfigInvalidated()
         ? await this.storage
@@ -2167,10 +2220,11 @@ export class TldwApiClientBase {
           }
         : undefined
     )
+    let config: TldwConfig | null
     if (!stored) {
       // True first-run without quickstart auth material: leave config null so
       // callers can distinguish unconfigured from misconfigured/unreachable.
-      this.config = null
+      config = null
     } else {
       const hydrated: TldwConfig = {
         ...stored,
@@ -2186,8 +2240,17 @@ export class TldwApiClientBase {
       } else if (!hydrated.apiKey && envApiKey) {
         hydrated.apiKey = envApiKey
       }
-      this.config = hydrated
+      config = hydrated
     }
+    // An older storage read must not overwrite a newer owner's config or token.
+    if (initialization < this.completedConfigInitialization) {
+      if (!connectionAuthoritiesMatch(config, this.config)) {
+        throw createServicePromptScopeChangedError()
+      }
+      return
+    }
+    this.completedConfigInitialization = initialization
+    this.config = config
     this.applyConfigState()
   }
 
@@ -2381,9 +2444,14 @@ export class TldwApiClientBase {
     )
   }
 
-  async updateConfig(config: Partial<TldwConfig>): Promise<void> {
+  async updateConfig(
+    config: Partial<TldwConfig>,
+    assertCurrent?: (current: Partial<TldwConfig>) => void,
+    assertCommitted?: (current: Partial<TldwConfig>) => void
+  ): Promise<void> {
     await this.initialize()
     let currentConfig = (await this.getConfig()) || ({} as TldwConfig)
+    assertCurrent?.(currentConfig)
     const previousConfig = currentConfig
     const targetAuthMode = config.authMode || currentConfig.authMode
     const submittedApiKey = Object.prototype.hasOwnProperty.call(config, "apiKey")
@@ -2419,8 +2487,52 @@ export class TldwApiClientBase {
         ({} as TldwConfig)
     }
 
+    // The auth attempt may have expired while configuration reads were pending.
+    assertCurrent?.(currentConfig)
     const newConfig = { ...currentConfig, ...config } as TldwConfig
     const persisted = toPersistedTldwConfig(newConfig)
+    if (assertCurrent) {
+      // Observe the write as well as its verification: either await can cross
+      // an account boundary, including a switch away and back to this account.
+      let invalidated = false
+      let revision = 0
+      const unwatch = watchChatAccountChanges((changed, current) => {
+        if (current) {
+          revision += 1
+          if (!connectionAuthoritiesMatch(current, persisted)) invalidated = true
+        } else if (changed) invalidated = true
+      })
+      let committed: TldwConfig | null | undefined
+      try {
+        await this.storage.set("tldwConfig", persisted)
+        let readRevision: number
+        do {
+          readRevision = revision
+          committed = await this.storage.get<TldwConfig>("tldwConfig")
+          if (invalidated) throw createServicePromptScopeChangedError()
+          if (!committed || !connectionAuthoritiesMatch(committed, persisted)) {
+            this.config = committed || null
+            this.applyConfigState()
+            throw createServicePromptScopeChangedError()
+          }
+          // A delayed own notification may be older or newer than this read.
+          // Read again instead of treating the notification as authoritative.
+        } while (readRevision !== revision)
+        try {
+          assertCommitted?.(committed)
+        } catch (error) {
+          this.config = null
+          throw error
+        }
+        this.config = committed
+        this.applyConfigState()
+      } finally {
+        unwatch()
+      }
+      this.publishConfigUpdated(previousConfig, true)
+      this.publishConfigUpdated(committed)
+      return
+    }
     await this.storage.set("tldwConfig", persisted)
     this.config = persisted
     this.applyConfigState()
@@ -3545,13 +3657,20 @@ export class TldwApiClientBase {
     params: {
       batch_id: string
       limit?: number
+      offset?: number
     },
-    options?: { timeoutMs?: number }
+    options?: {
+      timeoutMs?: number
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
   ): Promise<any> {
     const query = this.buildQuery(params as Record<string, any>)
     return await bgRequest<any>({
       path: `/api/v1/media/ingest/jobs${query}`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
       timeoutMs: options?.timeoutMs
     })
   }
@@ -3649,14 +3768,16 @@ export class TldwApiClientBase {
   async updateMediaKeywords(
     mediaId: string | number,
     payload: { keywords: string[]; mode?: "add" | "remove" | "set" },
-    options?: { suppressBackendUnavailableEvent?: boolean }
+    options?: { suppressBackendUnavailableEvent?: boolean; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{ media_id: number; keywords: string[] }> {
     const id = encodeURIComponent(String(mediaId))
     return await bgRequest<{ media_id: number; keywords: string[] }>({
       path: `/api/v1/media/${id}/keywords`,
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
       body: payload,
+      ...requestScopeFields(options?.requestScope),
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
+      abortSignal: options?.signal,
       suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })
   }
@@ -3665,7 +3786,7 @@ export class TldwApiClientBase {
     media_ids: number[]
     keywords: string[]
     mode?: "add" | "remove" | "set"
-  }): Promise<{
+  }, options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }): Promise<{
     endpoint: "bulk" | "fallback"
     updated: number
     failed: number
@@ -3706,8 +3827,10 @@ export class TldwApiClientBase {
       const response = await bgRequest<any>({
         path: "/api/v1/media/bulk/keyword-update",
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: requestPayload
+        body: requestPayload,
+        ...requestScopeFields(options?.requestScope),
+        headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
+        abortSignal: options?.signal
       })
       const results = Array.isArray(response?.results)
         ? response.results.map((entry: any) => ({
@@ -3759,7 +3882,7 @@ export class TldwApiClientBase {
         const updated = await this.updateMediaKeywords(mediaId, {
           keywords,
           mode
-        })
+        }, options)
         return {
           media_id: mediaId,
           success: true,
@@ -3798,11 +3921,13 @@ export class TldwApiClientBase {
     }
   }
 
-  async deleteMedia(mediaId: string | number): Promise<void> {
+  async deleteMedia(mediaId: string | number, options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }): Promise<void> {
     const id = encodeURIComponent(String(mediaId))
     await bgRequest<void>({
       path: `/api/v1/media/${id}`,
-      method: "DELETE"
+      method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   }
 
@@ -3824,14 +3949,17 @@ export class TldwApiClientBase {
 
   async reprocessMedia(
     mediaId: string | number,
-    options?: Record<string, unknown>
+    options?: Record<string, unknown>,
+    requestOptions?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
     const id = encodeURIComponent(String(mediaId))
     return await bgRequest<any>({
       path: `/api/v1/media/${id}/reprocess`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: options || {}
+      body: options || {},
+      ...requestScopeFields(requestOptions?.requestScope),
+      headers: { ...requestScopeFields(requestOptions?.requestScope).headers, "Content-Type": "application/json" },
+      abortSignal: requestOptions?.signal
     })
   }
 
@@ -4450,18 +4578,12 @@ export class TldwApiClientBase {
     })
   }
 
-  async searchNotes(query: string): Promise<any> {
-    const normalized = query.trim()
-    if (!normalized) {
-      return await this.listNotes()
-    }
-    const queryString = this.buildQuery({
-      query: normalized
-    })
-    return await bgRequest<any>({
-      path: `/api/v1/notes/search/${queryString}`,
-      method: "GET"
-    })
+  async searchNotes(
+    query: string,
+    params?: { limit?: number; offset?: number },
+    options?: ScopedRequestOptions,
+  ): Promise<any> {
+    return collectionsMethods.searchNotes.call(this, query, params, options)
   }
   // Prompts Methods
   async getPrompts(): Promise<any> {
@@ -4942,6 +5064,8 @@ export class TldwApiClientBase {
         ...requestScopeFields(options.requestScope), abortSignal: options.signal
       })
     }
+    const cacheRevision = await this.getDomainCacheRevision()
+    this.assertDomainCacheRevision(cacheRevision)
     const forceRefresh = options?.forceRefresh === true
     if (!forceRefresh) {
       const cached = this.characterCache.get(cid)
@@ -4959,17 +5083,23 @@ export class TldwApiClientBase {
           "/api/v1/characters/{id}/"
         ])
         const path = this.fillPathParams(template, cid)
+        this.assertDomainCacheRevision(cacheRevision)
         const value = await bgRequest<any>({
           path,
-          method: 'GET'
+          method: 'GET',
+          configSnapshot: this.getDomainCacheConfigSnapshot(cacheRevision)
         })
+        await this.getDomainCacheRevision()
+        this.assertDomainCacheRevision(cacheRevision)
         this.characterCache.set(cid, {
           value,
           expiresAt: Date.now() + CHARACTER_CACHE_TTL_MS
         })
         return value
       } finally {
-        this.characterInFlight.delete(cid)
+        if (this.characterInFlight.get(cid) === request) {
+          this.characterInFlight.delete(cid)
+        }
       }
     })()
 
@@ -5616,13 +5746,16 @@ export class TldwApiClientBase {
 
   async listChatsWithMeta(
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal; scope?: ChatScope }
+    options?: { signal?: AbortSignal; scope?: ChatScope; requestScope?: ServicePromptRequestScope }
   ): Promise<{ chats: ServerChatSummary[]; total: number }> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
-      abortSignal: options?.signal
+      abortSignal: options?.signal,
+      headers: scopeFields.headers,
+      ...(scopeFields.servicePromptConfig ? { servicePromptConfig: scopeFields.servicePromptConfig } : {})
     })
 
     let list: any[] = []
@@ -5961,6 +6094,8 @@ export class TldwApiClientBase {
     })
     const cacheKey = this.getChatMessagesCacheKey(cid, query)
     const useSharedCache = !options?.fresh && !options?.requestScope
+    const cacheRevision = useSharedCache ? await this.getDomainCacheRevision() : 0
+    if (useSharedCache) this.assertDomainCacheRevision(cacheRevision)
     const cached = useSharedCache ? this.chatMessagesCache.get(cacheKey) : undefined
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value
@@ -5979,6 +6114,7 @@ export class TldwApiClientBase {
       const data = await bgRequest<any>({
         path: `/api/v1/chats/${cid}/messages${query}`,
         method: "GET",
+        ...(useSharedCache ? { configSnapshot: this.getDomainCacheConfigSnapshot(cacheRevision) } : {}),
         abortSignal: options?.signal,
         ...(scopeFields.servicePromptConfig ? {
           headers: scopeFields.headers,
@@ -6088,10 +6224,14 @@ export class TldwApiClientBase {
           pinned
         } as ServerChatMessage
       })
-      if (useSharedCache) this.chatMessagesCache.set(cacheKey, {
-        value: normalized,
-        expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
-      })
+      if (useSharedCache) {
+        await this.getDomainCacheRevision()
+        this.assertDomainCacheRevision(cacheRevision)
+        this.chatMessagesCache.set(cacheKey, {
+          value: normalized,
+          expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
+        })
+      }
       return normalized
     })()
 
@@ -6099,7 +6239,9 @@ export class TldwApiClientBase {
     try {
       return await request
     } finally {
-      if (useSharedCache) this.chatMessagesInFlight.delete(cacheKey)
+      if (useSharedCache && this.chatMessagesInFlight.get(cacheKey) === request) {
+        this.chatMessagesInFlight.delete(cacheKey)
+      }
     }
   }
 

@@ -54,7 +54,8 @@ async def test_save_uploaded_files_empty_file_cleanup_logs(tmp_media_dir, capsys
         assert errors[0]["status"] == "Error"
         # Ensure a warning about empty upload was logged and no crash occurred
         out = capsys.readouterr().out
-        assert "is empty. Skipping." in out
+        assert "File upload rejected: empty content" in out
+        assert "empty.txt" not in out
     finally:
         logger.remove(sink_id)
 

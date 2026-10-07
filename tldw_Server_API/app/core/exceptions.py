@@ -59,6 +59,52 @@ class BuddyConflictError(ValueError):
     """An optimistic Buddy resource version no longer matches stored state."""
 
 
+class VNAssetGenerationError(ValueError):
+    """A stable VN generation code with internal operation context."""
+
+    def __init__(self, code: str, *, retryable: bool = False, **context: Any) -> None:
+        """Keep the public ValueError string stable and context immutable."""
+        self.code = code
+        self.retryable = retryable
+        self.context = MappingProxyType(dict(context))
+        super().__init__(code)
+
+
+class JobsRetryAdmissionIndexError(RuntimeError):
+    """Safe Jobs retry-index coordination, definition or verification failure.
+
+    RuntimeError compatibility is retained. Native database failures are not
+    wrapped in this type; the helper preserves their original propagation.
+    """
+
+
+class VNLegacyActivityCursorError(RuntimeError):
+    """A stalled read-only Jobs cursor during VN legacy display reconciliation.
+
+    Retains RuntimeError compatibility and the constant safe cursor error code.
+    Native Jobs/database read failures are not wrapped in this domain type.
+    """
+
+
+class LegacyDisplayReconciliationError(RuntimeError):
+    """Safe VN display rollback error, not a generation or SDK retry outcome.
+
+    Construct with the original reconciliation Exception. The public message
+    is always ``VN legacy display reconciliation failed``; ``error_type`` and
+    ``error_traceback`` retain its class and traceback for internal frame-only
+    diagnostics. Traceback frames may retain sensitive locals/source: never
+    format or publish them, or the original chained exception. Construction
+    does not log or change generation disposition; the repository raises this
+    wrapper with ``from None`` and the worker logs only frame metadata.
+    """
+
+    def __init__(self, error: Exception) -> None:
+        """Retain no original message; callers must not format traceback source/locals."""
+        super().__init__("VN legacy display reconciliation failed")
+        self.error_type = type(error)
+        self.error_traceback = error.__traceback__
+
+
 class BuddyPublicationRevokedError(RuntimeError):
     """An accepted Buddy turn no longer has permission to publish messages."""
 
@@ -134,13 +180,11 @@ class TransactionPassthroughError(Exception):
     """Sanitized domain failure that may cross a rolled-back DB transaction."""
 
 
-class ApiKeyNotFoundError(TransactionPassthroughError, ValueError):
-    """An API key is missing, not owned by the caller, or no longer active.
+class APIKeyRotationRejected(ValueError, TransactionPassthroughError):
+    """Source-key validation failed without distinguishing absence from ownership."""
 
-    Raised inside AuthNZ transactions. Passthrough lets it survive the
-    transaction boundary (which otherwise sanitizes to ``TransactionError``);
-    subclassing ``ValueError`` keeps existing callers' 4xx mapping.
-    """
+    def __init__(self) -> None:
+        super().__init__("API key not found or unauthorized")
 
 
 class BuiltinCharacterSeedError(TransactionPassthroughError):
@@ -965,6 +1009,14 @@ def raise_detached_error(error: BaseException) -> NoReturn:
         detached.__context__ = None
         detached.__suppress_context__ = True
         raise
+
+
+class SchemaReadinessError(RuntimeError):
+    """A schema readiness check failed.
+
+    Messages are fixed operator-facing reasons, never row data, so transaction
+    boundaries that sanitize other failures pass this reason through.
+    """
 
 
 def exception_type_chain(error: BaseException, *, limit: int = 6) -> str:

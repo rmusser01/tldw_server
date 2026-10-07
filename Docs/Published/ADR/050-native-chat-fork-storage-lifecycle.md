@@ -5,7 +5,7 @@
 **Backfilled from:** `Docs/Design/2026-09-16-chatbook-chat-parity-review-closure.md`
 **Decision owner:** Requester-approved Chatbook parity design, TASK-13261
 **Related task:** TASK-13261.11
-**Related spec/plan:** `Docs/Design/2026-09-16-chatbook-chat-parity-review-closure.md`, `IMPLEMENTATION_PLAN_chatbook_h2_qodo_review_2026_09_23.md`
+**Related spec/plan:** `Docs/Design/2026-09-16-chatbook-chat-parity-review-closure.md`, `Docs/Plans/IMPLEMENTATION_PLAN_chatbook_h2_qodo_review_2026_09_23.md`
 
 ## Decision
 

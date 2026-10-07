@@ -146,12 +146,12 @@ TASK6_BACKGROUND_SPEC_NAMES = {
 }
 
 TASK7_SERVICE_TAIL_SPEC_NAMES = {
-    "admin_webhook_delivery_runtime_task",
     "automation_definitions_sched_task",
     "jobs_metrics_task",
     "loop_lag_task",
     "jobs_metrics_reconcile_task",
     "jobs_crypto_rotate_task",
+    "admin_webhook_delivery_runtime_task",
     "jobs_webhooks_task",
     "meetings_webhook_dlq_task",
     "workflows_dlq_task",

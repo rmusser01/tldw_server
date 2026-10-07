@@ -33,8 +33,15 @@ Examples
   # 4) Use workload trace file and capture query plans (SQLite)
   python Helper_Scripts/benchmarks/email_search_bench.py \
     --db-path .benchmarks/email_search_bench.sqlite \
-    --workload-trace-file Helper_Scripts/benchmarks/email_search_workload_trace.sample.json \
+    --workload-trace-file /tmp/synthetic_email_workload_trace.json \
     --capture-query-plans
+
+  # 5) PostgreSQL (configure an isolated TLDW_CONTENT_PG_* target first)
+  TLDW_CONTENT_DB_BACKEND=postgresql \
+    python Helper_Scripts/benchmarks/email_search_bench.py \
+    --backend postgresql --scope-user-id 42 \
+    --ensure-fixture --fixture-messages 10000 \
+    --out /tmp/email_search_postgresql.json
 """
 
 from __future__ import annotations
@@ -44,9 +51,11 @@ import json
 import os
 import platform
 import random
+import shlex
 import sqlite3
 import sys
 import time
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -65,6 +74,8 @@ for _parent in [_HELPERS_ROOT, *_HELPERS_ROOT.parents]:
 from common.repo_utils import ensure_repo_root
 
 ensure_repo_root()
+
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 
 try:
     from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
@@ -176,7 +187,7 @@ def _load_query_mix_from_workload_trace(
             count = 1
         if count < min_count_int:
             continue
-        name = str(row.get("name") or "").strip() or f"trace_query_{idx+1}"
+        name = str(row.get("name") or "").strip() or f"trace_query_{idx + 1}"
         notes = str(row.get("notes") or "").strip()
         existing = normalized.get(query)
         if existing is None or int(existing["count"]) < count:
@@ -202,7 +213,7 @@ def _load_query_mix_from_workload_trace(
         notes = f"{notes}; {count_note}".strip("; ").strip()
         cases.append(
             QueryCase(
-                name=str(row.get("name") or f"trace_{idx+1:02d}"),
+                name=str(row.get("name") or f"trace_{idx + 1:02d}"),
                 query=str(row["query"]),
                 notes=notes,
             )
@@ -251,6 +262,10 @@ def _fetch_fixture_profile(db: MediaDbLike, tenant_id: str) -> dict[str, Any]:
         )
         min_date = span_row.get("min_date") if span_row else None
         max_date = span_row.get("max_date") if span_row else None
+        if isinstance(min_date, datetime):
+            min_date = min_date.isoformat()
+        if isinstance(max_date, datetime):
+            max_date = max_date.isoformat()
 
         sender_row = db._fetchone_with_connection(  # noqa: SLF001
             conn,
@@ -303,7 +318,7 @@ def _fetch_fixture_profile(db: MediaDbLike, tenant_id: str) -> dict[str, Any]:
         subject_row = db._fetchone_with_connection(  # noqa: SLF001
             conn,
             (
-                "SELECT subject FROM email_messages "
+                "SELECT subject, from_text FROM email_messages "
                 "WHERE tenant_id = ? AND subject IS NOT NULL AND subject <> '' "
                 "ORDER BY id DESC LIMIT 1"
             ),
@@ -321,6 +336,7 @@ def _fetch_fixture_profile(db: MediaDbLike, tenant_id: str) -> dict[str, Any]:
         "top_recipient": top_recipient,
         "top_label": top_label,
         "sample_subject": sample_subject,
+        "sample_sender": str((subject_row or {}).get("from_text") or top_sender),
     }
 
 
@@ -340,7 +356,7 @@ def _build_default_query_mix(profile: dict[str, Any]) -> list[QueryCase]:
         midpoint = min_dt + (max_dt - min_dt) / 2
         after_date = midpoint.date().isoformat()
         before_date = midpoint.date().isoformat()
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         # Fallback to static date windows if profile lacks date span.
         after_date = "2025-01-01"
         before_date = "2030-01-01"
@@ -355,7 +371,7 @@ def _build_default_query_mix(profile: dict[str, Any]) -> list[QueryCase]:
         QueryCase(name="before_date", query=f"before:{before_date}", notes="Date upper bound"),
         QueryCase(
             name="mixed_text_and_negation",
-            query=f"{subject_token} -label:{top_label}",
+            query=f"{subject_token} -from:{profile.get('sample_sender') or top_sender}",
             notes="Free text + unary negation",
         ),
         QueryCase(
@@ -395,7 +411,7 @@ def _build_fixture(
         return profile_before
 
     rnd = random.Random(seed)  # nosec B311 - deterministic benchmark fixture generator, not cryptographic
-    label_names = [f"Label-{idx+1:02d}" for idx in range(max(1, label_cardinality))]
+    label_names = [f"Label-{idx + 1:02d}" for idx in range(max(1, label_cardinality))]
     subject_topics = [
         "Quarterly Report",
         "Budget Update",
@@ -506,6 +522,69 @@ def _build_fixture(
         profile_after.get("total_messages"),
     )
     return profile_after
+
+
+def _validate_negation_workload(
+    *,
+    db_path: Path,
+    client_id: str,
+    tenant_id: str,
+    queries: list[QueryCase],
+) -> dict[str, Any]:
+    """Compare the negation case with its positive baseline outside timed passes."""
+    cases = [case for case in queries if case.name == "mixed_text_and_negation"]
+    validation: dict[str, Any] = {
+        "name": "mixed_text_and_negation",
+        "query": cases[0].query if len(cases) == 1 else None,
+        "positive_query": None,
+        "positive_total_matches": None,
+        "negated_total_matches": None,
+        "meaningful": False,
+        "reason": None,
+    }
+    if len(cases) != 1:
+        validation["reason"] = "missing_case" if not cases else "ambiguous_case"
+        return validation
+
+    case = cases[0]
+    db = _open_media_db(db_path=db_path, client_id=client_id)
+    try:
+        groups = db._parse_email_operator_query(case.query)  # noqa: SLF001 - use search grammar
+        terms = [term for group in groups for term in group]
+        if not any(term["negated"] for term in terms):
+            validation["reason"] = "missing_negated_term"
+            return validation
+        if not any(term["kind"] == "text" and not term["negated"] for term in terms):
+            validation["reason"] = "missing_positive_free_text"
+            return validation
+
+        positive_groups: list[list[str]] = [[]]
+        for token in shlex.split(case.query):
+            token = token.strip()
+            if token.upper() == "OR":
+                positive_groups.append([])
+            elif token and not token.startswith("-"):
+                positive_groups[-1].append(token)
+        # A branch consisting only of negated terms becomes true after removal;
+        # OR with that branch makes the baseline the unrestricted mailbox.
+        positive_query = (
+            " OR ".join(shlex.join(group) for group in positive_groups)
+            if all(positive_groups) else ""
+        )
+        validation["positive_query"] = positive_query
+        _, positive_total = db.search_email_messages(query=positive_query, tenant_id=tenant_id, limit=1)
+        _, negated_total = db.search_email_messages(query=case.query, tenant_id=tenant_id, limit=1)
+        validation["positive_total_matches"] = int(positive_total)
+        validation["negated_total_matches"] = int(negated_total)
+        if negated_total <= 0:
+            validation["reason"] = "no_retained_matches"
+        elif negated_total >= positive_total:
+            validation["reason"] = "no_match_reduction"
+        else:
+            validation["meaningful"] = True
+        return validation
+    finally:
+        db.close_connection()
 
 
 def _run_query_once(
@@ -635,7 +714,11 @@ def _capture_sqlite_query_plan(
                     detail = str(row[3]) if len(row) > 3 else str(row)
                     details.append(detail)
                     detail_upper = detail.upper()
-                    if "USING INDEX" in detail_upper or "USING COVERING INDEX" in detail_upper or "USING AUTOMATIC INDEX" in detail_upper:
+                    if (
+                        "USING INDEX" in detail_upper
+                        or "USING COVERING INDEX" in detail_upper
+                        or "USING AUTOMATIC INDEX" in detail_upper
+                    ):
                         index_hits.append(detail)
                         uses_index = True
                         detail_parts = detail.replace(",", " ").split()
@@ -774,10 +857,22 @@ def _run_warm_pass(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Benchmark email operator search performance.")
     parser.add_argument(
+        "--backend",
+        choices=("sqlite", "postgresql"),
+        default="sqlite",
+        help="Expected content backend. PostgreSQL connection comes from TLDW_CONTENT_PG_* settings.",
+    )
+    parser.add_argument(
+        "--scope-user-id",
+        type=int,
+        default=None,
+        help="Positive user ID required for PostgreSQL RLS scope.",
+    )
+    parser.add_argument(
         "--db-path",
         type=Path,
         default=Path(".benchmarks/email_search_bench.sqlite"),
-        help="Path to Media DB (SQLite file).",
+        help="Path to Media DB (SQLite file); ignored for PostgreSQL.",
     )
     parser.add_argument("--client-id", type=str, default="email-bench", help="Media DB client_id context.")
     parser.add_argument("--tenant-id", type=str, default="bench-tenant", help="Email tenant scope to benchmark.")
@@ -786,6 +881,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Populate deterministic synthetic fixture up to --fixture-messages for --tenant-id.",
     )
+    parser.add_argument("--fixture-loader", choices=("ingestion", "bulk"), default="ingestion", help="Bulk requires an empty disposable synthetic target; never measures production ingestion.")
     parser.add_argument("--fixture-messages", type=int, default=10000, help="Target synthetic fixture size.")
     parser.add_argument("--attachment-ratio", type=float, default=0.25, help="Attachment ratio for fixture creation.")
     parser.add_argument("--label-cardinality", type=int, default=20, help="Distinct label count in fixture.")
@@ -850,17 +946,58 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    args = _build_parser().parse_args()
+    parser = _build_parser()
+    args = parser.parse_args()
+    if args.backend == "postgresql":
+        if args.scope_user_id is None or args.scope_user_id <= 0:
+            parser.error("--backend postgresql requires a positive --scope-user-id")
+        if args.client_id not in {"email-bench", str(args.scope_user_id)}:
+            parser.error("PostgreSQL --client-id must match --scope-user-id")
+        args.client_id = str(args.scope_user_id)
+        if args.tenant_id == "bench-tenant":
+            args.tenant_id = f"user:{args.scope_user_id}"
+    elif args.scope_user_id is not None:
+        parser.error("--scope-user-id is only used with --backend postgresql")
+
+    context = scoped_context(user_id=args.scope_user_id) if args.backend == "postgresql" else nullcontext()
+    with context:
+        return _run_benchmark(args)
+
+
+def _run_benchmark(args: argparse.Namespace) -> int:
+    """Run the fixture and query passes under the selected backend scope."""
     db_path: Path = args.db_path.expanduser().resolve()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    if args.backend == "sqlite":
+        db_path.parent.mkdir(parents=True, exist_ok=True)
 
     report_started = time.perf_counter()
     fixture_profile: dict[str, Any]
 
     db = _open_media_db(db_path=db_path, client_id=args.client_id)
     try:
+        actual_backend = str(getattr(db.backend_type, "name", "")).lower()
+        if actual_backend != args.backend:
+            logger.error(
+                "Email benchmark requested backend={} but opened backend={}",
+                args.backend,
+                actual_backend,
+            )
+            return 2
         if args.ensure_fixture:
-            fixture_profile = _build_fixture(
+            fixture_setup = None
+            if args.fixture_loader == "bulk":
+                from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_benchmark_fixture import (
+                    seed_email_benchmark_fixture,
+                )
+                fixture_setup = seed_email_benchmark_fixture(
+                    db, tenant_id=args.tenant_id, source_key=args.source_key, message_target=args.fixture_messages,
+                    attachment_ratio=args.attachment_ratio, label_cardinality=args.label_cardinality,
+                    sender_pool=args.sender_pool, recipient_pool=args.recipient_pool, seed=args.seed,
+                )
+                fixture_profile = _fetch_fixture_profile(db, args.tenant_id)
+                fixture_profile["fixture_setup"] = fixture_setup
+            else:
+                fixture_profile = _build_fixture(
                 db=db,
                 tenant_id=args.tenant_id,
                 source_key=args.source_key,
@@ -920,6 +1057,27 @@ def main() -> int:
         query_plan_statements_max=max(1, int(args.query_plan_statements_max)),
     )
 
+    negation_validation = _validate_negation_workload(
+        db_path=db_path,
+        client_id=args.client_id,
+        tenant_id=args.tenant_id,
+        queries=query_mix,
+    )
+
+    required_operator_names = (
+        "from_filter", "to_filter", "subject_filter", "label_filter", "has_attachment",
+        "after_date", "before_date", "relative_window", "mixed_text_and_negation", "explicit_or",
+    )
+    warm_cases = {row["name"]: row for row in warm["queries"]}
+    operator_coverage_met = all(
+        name in warm_cases and int(warm_cases[name]["total_matches"]) > 0 for name in required_operator_names
+    )
+    operator_latency_met = operator_coverage_met and all(
+        warm_cases[name]["latency"]["p50_ms"] <= 250.0 and warm_cases[name]["latency"]["p95_ms"] <= 900.0
+        for name in required_operator_names
+    )
+    mailbox_size_met = total_messages >= 1_000_000
+
     report = {
         "report_version": 1,
         "generated_at": _iso_utc_now(),
@@ -932,7 +1090,9 @@ def main() -> int:
             "cpu_count": os.cpu_count(),
         },
         "benchmark": {
-            "db_path": str(db_path),
+            "backend": actual_backend,
+            "db_path": str(db_path) if actual_backend == "sqlite" else None,
+            "scope_user_id": args.scope_user_id,
             "client_id": str(args.client_id),
             "tenant_id": str(args.tenant_id),
             "limit": int(max(1, args.limit)),
@@ -947,11 +1107,24 @@ def main() -> int:
         "query_mix": [asdict(case) for case in query_mix],
         "cold_pass": cold,
         "warm_pass": warm,
+        "negation_validation": negation_validation,
         "targets": {
             "nfr_p50_ms": 250.0,
             "nfr_p95_ms": 900.0,
             "warm_pass_met_p50": warm["summary"]["p50_ms"] <= 250.0,
             "warm_pass_met_p95": warm["summary"]["p95_ms"] <= 900.0,
+            "required_mailbox_messages": 1_000_000,
+            "mailbox_size_met": mailbox_size_met,
+            "operator_coverage_met": operator_coverage_met,
+            "operator_latency_met": operator_latency_met,
+            "meaningful_negation_met": negation_validation["meaningful"],
+            "nfr_performance_gate_met": (
+                mailbox_size_met and operator_coverage_met and negation_validation["meaningful"]
+                and warm["summary"]["p50_ms"] <= 250.0
+                and warm["summary"]["p95_ms"] <= 900.0
+            ),
+            "latency_gate_method": "aggregate_warm_pass_per_documented_protocol",
+            "per_operator_latency_is_diagnostic": True,
         },
     }
 

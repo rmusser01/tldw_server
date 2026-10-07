@@ -46,7 +46,7 @@ Docs/Plans/IMPLEMENTATION_PLAN_scoped_local_llm_egress_TASK_12972.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-15 initial investigation confirmed setup/runtime egress drift, unchecked raw local streaming, and missing runtime manual-model mappings. A 48-test focused baseline passed with 48 passed and 4 warnings.
 
 2026-07-15 first planning review defined exact-origin scope provenance, an authoritative metadata deny set, typed discovery outcomes, a readiness matrix, custom OpenAI coverage, and checked transport propagation. The planning-only commit changed Markdown artifacts; Bandit was deferred to implementation.
@@ -84,7 +84,7 @@ Stage 5 touched paths: apps/packages/ui/src/services/tldw/TldwModels.ts; apps/pa
 2026-07-15 PR #2743 review fixes verified locally. Implemented 11 actionable Qodo/CodeRabbit findings plus two small inherited chat endpoint lint defects; retained two evidence-based pushbacks where extraction had no second consumer and the requested LAN-only restriction contradicted the authorized exact-origin design. Final backend affected matrix passed 519/519 with 5 warnings. Scoped Ruff correctness checks passed. Bandit scanned 12,668 production Python LOC with 0 findings and 0 errors. The prior shared WebUI and browser-extension suites each passed 53/53 and full frontend TypeScript passed. Live llama.cpp UAT at 127.0.0.1:9099 passed checked synchronous chat (HTTP 200, choices present) and checked streaming chat (HTTP 200, 22 events, [DONE]); logical request URLs remained intact. PR is ready, not draft. Task remains In Progress until the review replies are posted, threads resolved, and refreshed CI is checked.
 
 2026-07-15 PR #2743 review completion: pushed ae78b864f9, replied to all 11 inline Qodo/CodeRabbit threads, resolved all 11 threads, and posted the two fixed outside-diff findings with verification evidence. CodeRabbit confirmed the addressed fixes and reports success. The PR remains ready (`isDraft=false`). Refreshed GitHub Actions checks are queued on the pushed head; no unresolved review thread remains at task finalization.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

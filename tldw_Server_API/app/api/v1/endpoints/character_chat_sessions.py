@@ -53,6 +53,7 @@ from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.endpoints.workspace_chat_startup_transport import WorkspaceStartupRoute
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
@@ -91,6 +92,14 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     PresetTokenInfo,
     PresetUpdate,
     PromptPreviewResponse,
+)
+from tldw_Server_API.app.api.v1.schemas.workspace_chat_startup_schemas import (
+    STARTUP_IDEMPOTENCY_KEY_PATTERN,
+    WorkspaceChatStartupRequest,
+)
+from tldw_Server_API.app.api.v1.utils.chat_message_images import (
+    format_message_content,
+    read_messages_with_images,
 )
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
@@ -204,6 +213,8 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     sanitized_provider_stream_exception,
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store import WorkspaceStartupError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -239,6 +250,7 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
     sse_data,
     sse_done,
 )
+from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
     PersonaExemplarPromptAssembly,
     assemble_persona_exemplar_prompt,
@@ -262,6 +274,7 @@ from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.common import parse_boolean
 from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
 from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
+from tldw_Server_API.app.core.Workspaces.chat_startup import start_workspace_chat
 
 from .llm_providers import get_configured_providers
 
@@ -4522,6 +4535,89 @@ def _inject_message_steering_instruction(
 # Chat Session Endpoints
 # ========================================================================
 
+async def create_workspace_chat_startup(
+    session_data: WorkspaceChatStartupRequest,
+    response: Response,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+    idempotency_key: str = Header(
+        alias="Idempotency-Key", min_length=1, max_length=128, pattern=f"^{STARTUP_IDEMPOTENCY_KEY_PATTERN}$",
+    ),
+) -> ChatSessionResponse:
+    """Accept or replay one committed Workspace chat without legacy/Sync/greeting effects.
+
+    Args:
+        session_data: Closed Workspace selection and metadata contract.
+        response: Receives 201 for acceptance or 200 and a replay header.
+        db: Authenticated owner's ChaCha store; startup owns its idle transaction.
+        current_user: Authenticated owner, not mutable writer/device attribution.
+        idempotency_key: Bounded retry key; only its owner-bound digest is retained.
+
+    Returns:
+        Current chat metadata projected after acceptance has committed.
+
+    Raises:
+        HTTPException: Authentication/rate-limit, input, current-access/Persona,
+            version/capacity/lifecycle, configuration or storage rejection.
+    """
+    rate_limiter = get_character_rate_limiter()
+    await rate_limiter.check_rate_limit(current_user.id, "chat_create")
+    try:
+        receipt_limit = int(os.getenv("WORKSPACE_CHAT_STARTUP_RECEIPT_LIMIT_PER_USER", "10000"))
+    except ValueError:
+        raise HTTPException(503, {"code": "workspace_chat_startup_configuration_invalid"}) from None
+    owner_id = str(current_user.id)
+
+    def start_and_project() -> tuple[ChatSessionResponse, bool]:
+        """Keep synchronous acceptance and post-commit reads on the same worker."""
+        result = start_workspace_chat(
+            db, owner_id=owner_id, request=session_data, idempotency_key=idempotency_key,
+            receipt_limit=receipt_limit, chat_limit=rate_limiter._limits.max_chats_per_user,
+            title_timestamp=datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"),
+        )
+        # Settle projection-only reads too: cached PostgreSQL handles must be
+        # idle before a later startup can own its acceptance transaction.
+        with db.transaction():
+            projected = _convert_db_conversation_to_response(
+                _attach_conversation_assistant_names(db, dict(result.conversation), owner_id),
+                resume_state=db.get_roleplay_resume_state(result.conversation["id"]), db=db, user_id=owner_id,
+            )
+        return projected, result.replayed
+
+    try:
+        projected, replayed = await run_in_threadpool(start_and_project)
+    except WorkspaceStartupError as error:
+        detail = {"code": error.code}
+        if error.reason is not None:
+            detail["reason"] = error.reason
+        raise HTTPException(error.status_code, detail) from None
+    except (CharactersRAGDBError, BackendDatabaseError) as error:
+        # Driver messages and traceback locals may contain private receipt inputs.
+        logger.error("Workspace chat startup database failure")
+        raise map_db_error_to_http(
+            error, default_detail="Workspace chat startup failed", input_detail="Invalid Workspace chat startup",
+            conflict_detail="Workspace chat startup conflict", log_error=False,
+        ) from error
+    response.status_code = 200 if replayed else 201
+    if replayed:
+        response.headers["Idempotency-Replayed"] = "true"
+    return projected
+
+
+router.add_api_route(
+    "/workspace-startup", create_workspace_chat_startup, methods=["POST"], response_model=ChatSessionResponse,
+    status_code=status.HTTP_201_CREATED, summary="Start a Workspace chat with strict retry semantics",
+    tags=["Chat Sessions"], dependencies=[Depends(require_expected_user)], route_class_override=WorkspaceStartupRoute,
+    responses={200: {
+        "description": "Matching accepted replay", "model": ChatSessionResponse,
+        "headers": {"Idempotency-Replayed": {"schema": {"type": "string", "enum": ["true"]}}},
+    }, 409: {"description": "Startup or replay rejected by current version, binding, admission or lifetime capacity"},
+    410: {"description": "The accepted conversation is deleted; the key remains consumed"},
+    413: {"description": "Raw startup body exceeds 65536 bytes"},
+    429: {"description": "Creation rate limit or Workspace live-chat quota exceeded"}},
+)
+
+
 @router.post("/", response_model=ChatSessionResponse, status_code=status.HTTP_201_CREATED,
              summary="Create a new chat session", tags=["Chat Sessions"],
              dependencies=[Depends(require_expected_user)])
@@ -5207,7 +5303,9 @@ async def get_chat_context(
         _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
 
         settings_row = db.get_conversation_settings(chat_id)
-        history_messages = db.get_messages_for_conversation(chat_id, limit=1000, offset=0) or []
+        history_messages, attachment_urls = await run_in_threadpool(
+            read_messages_with_images, db, chat_id, limit=1000, for_completions=True,
+        )
         history_messages = [m for m in history_messages if not m.get('deleted')]
         turn_context = _resolve_chat_turn_context(
             db=db,
@@ -5231,7 +5329,7 @@ async def get_chat_context(
                 participant_aliases,
             )
             content = _safe_replace_placeholders(m.get('content'), char_name, user_name)
-            formatted.append({"role": role, "content": content})
+            formatted.append({"role": role, "content": format_message_content(content, attachment_urls.get(m["id"], []), m.get("image_details"))})
 
         # If no messages, include first_message as an initial assistant message (with placeholders resolved)
         if not formatted and character.get('first_message'):
@@ -5328,8 +5426,15 @@ async def complete_chat_legacy(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred during completion") from e
 
 
+def _reject_session_workspace_scope(request: Request) -> None:
+    """Allow the global client form, rejecting unsupported or ambiguous scope."""
+    if request.query_params.getlist("scope_type") not in ([], ["global"]) or "workspace_id" in request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "session_scope_unsupported"})
+
+
 @router.post("/{chat_id}/completions", response_model=CharacterChatCompletionPrepResponse,
-             summary="Prepare messages for chat completion (rate-limited)", tags=["Chat Sessions"])
+             summary="Prepare messages for chat completion (rate-limited)", tags=["Chat Sessions"],
+             dependencies=[Depends(_reject_session_workspace_scope)])
 async def prepare_chat_completion(
     chat_id: str = Path(..., description="Chat session ID"),
     body: CharacterChatCompletionPrepRequest = None,
@@ -5348,6 +5453,9 @@ async def prepare_chat_completion(
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id)
 
+        if require_current_persona(db, owner_id=str(current_user.id), conversation=conversation) is not None:
+            raise HTTPException(status_code=409, detail={"code": "persona_session_generation_unsupported"})
+
         # Per-minute completion limiter (global per-user)
         rate_limiter = get_character_rate_limiter()
         await rate_limiter.check_chat_completion_rate(current_user.id)
@@ -5364,7 +5472,9 @@ async def prepare_chat_completion(
             owner_user_id=str(current_user.id),
         )
 
-        messages = db.get_messages_for_conversation(chat_id, limit=limit, offset=offset) or []
+        messages, attachment_urls = await run_in_threadpool(
+            read_messages_with_images, db, chat_id, limit=limit, offset=offset, for_completions=True,
+        )
         # Filter deleted
         messages = [m for m in messages if not m.get('deleted')]
         paginated = messages
@@ -5436,7 +5546,11 @@ async def prepare_chat_completion(
                     primary_character_name,
                     participant_aliases,
                 ),
-                "content": _safe_replace_placeholders(msg.get('content'), char_label, user_name)
+                "content": format_message_content(
+                    _safe_replace_placeholders(msg.get('content'), char_label, user_name),
+                    attachment_urls.get(msg["id"], []),
+                    msg.get("image_details"),
+                )
             })
 
         if body.append_user_message:
@@ -5741,6 +5855,7 @@ def _extract_directive_conflicts(text: str) -> list[dict[str, str]]:
     response_model_exclude_unset=True,
     summary="Preview assembled prompt with token budget breakdown",
     tags=["Chat Sessions"],
+    dependencies=[Depends(_reject_session_workspace_scope)],
 )
 async def prompt_assembly_preview(
     chat_id: str = Path(..., description="Chat session ID"),
@@ -5759,6 +5874,7 @@ async def prompt_assembly_preview(
 
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id)
+        require_current_persona(db, owner_id=str(current_user.id), conversation=conversation)
 
         user_name = conversation.get("user_name", "User")
         include_ctx = bool(body.include_character_context)
@@ -6071,6 +6187,7 @@ async def prompt_assembly_preview(
         },
     },
     tags=["Chat Sessions"],
+    dependencies=[Depends(_reject_session_workspace_scope)],
 )
 async def character_chat_completion(
     chat_id: str = Path(..., description="Chat session ID"),
@@ -6105,6 +6222,9 @@ async def character_chat_completion(
         # Validate and ownership
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id)
+
+        if require_current_persona(db, owner_id=str(current_user.id), conversation=conversation) is not None:
+            raise HTTPException(status_code=409, detail={"code": "persona_session_generation_unsupported"})
 
         # Prepare rate limiter
         rate_limiter = get_character_rate_limiter()
@@ -6186,7 +6306,9 @@ async def character_chat_completion(
             if _active_chat_sync_service(current_user, conversation_scope) is not None:
                 raise _chat_completion_persist_sync_unsupported_error()
 
-        messages = db.get_messages_for_conversation(chat_id, limit=limit, offset=offset) or []
+        messages, attachment_urls = await run_in_threadpool(
+            read_messages_with_images, db, chat_id, limit=limit, offset=offset, for_completions=True,
+        )
         messages = [m for m in messages if not m.get('deleted')]
         paginated = messages
         summary_content = ""
@@ -6233,7 +6355,11 @@ async def character_chat_completion(
                     primary_character_name,
                     participant_aliases,
                 ),
-                "content": _safe_replace_placeholders(msg.get('content'), char_label, user_name)
+                "content": format_message_content(
+                    _safe_replace_placeholders(msg.get('content'), char_label, user_name),
+                    attachment_urls.get(msg["id"], []),
+                    msg.get("image_details"),
+                )
             })
 
         # Optional appended user message
@@ -6621,7 +6747,7 @@ async def character_chat_completion(
                     raise_detached_error(
                         HTTPException(
                             status_code=provider_status_code,
-                            detail="Chat provider error",
+                            detail=provider_stream_error_payload(e),
                         )
                     )
                 except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
@@ -6812,7 +6938,7 @@ async def character_chat_completion(
             last_user = None
             for m in reversed(formatted):
                 if m.get("role") == "user":
-                    last_user = m.get("content")
+                    last_user = _extract_character_latest_user_turn_text([m])
                     break
             assistant_text = (last_user or "OK").strip()
             assistant_tool_calls = []
@@ -6936,7 +7062,9 @@ async def character_chat_completion(
                             "Character stream provider failure error_type={}",
                             type(exc).__name__,
                         )
-                        await stream.error("provider_error", "Chat provider error")
+                        payload = provider_stream_error_payload(exc)
+                        await stream.send_json(payload)
+                        await stream.done()
                     except Exception as exc:  # noqa: BLE001 - lazy adapter failures are terminal frames
                         stream_success_state["successful"] = False
                         logger.debug(
@@ -7029,7 +7157,7 @@ async def character_chat_completion(
                         "Character stream provider failure error_type={}",
                         type(exc).__name__,
                     )
-                    yield sse_data({'error': 'Chat provider error'})
+                    yield sse_data(provider_stream_error_payload(exc))
                 except Exception as exc:  # noqa: BLE001 - lazy adapter failures are terminal frames
                     stream_success_state["successful"] = False
                     logger.debug(
@@ -8568,7 +8696,7 @@ async def persist_streamed_assistant_message(
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=_build_persist_validation_degraded_detail(existing_id),
-                )
+                ) from None
             return CharacterChatStreamPersistResponse(
                 chat_id=chat_id,
                 assistant_message_id=existing_id,

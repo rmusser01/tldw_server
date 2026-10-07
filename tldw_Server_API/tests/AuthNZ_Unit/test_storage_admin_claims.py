@@ -49,7 +49,7 @@ def _build_app(principal: AuthPrincipal | None, *, fail_with_401: bool = False) 
 
 
 class _FakeStorageService:
-    async def set_user_quota(self, user_id: int, quota_mb: int) -> dict[str, Any]:
+    async def set_user_quota(self, user_id: int, quota_mb: int, *, updated_by: int | None = None) -> dict[str, Any]:
         return {
             "storage_quota_mb": quota_mb,
             "storage_used_mb": 100.0,

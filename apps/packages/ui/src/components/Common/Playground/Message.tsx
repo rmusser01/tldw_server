@@ -1063,7 +1063,8 @@ export const PlaygroundMessage = (props: Props) => {
       messageId: props.serverMessageId ?? null,
       query: props.feedbackQuery ?? null,
       sources: props.sources ?? [],
-      enabled: feedbackImplicitAvailable
+      // Temporary mode reads saved chats without passive server writes.
+      enabled: feedbackImplicitAvailable && !props.temporaryChat
     })
 
   useEffect(() => {

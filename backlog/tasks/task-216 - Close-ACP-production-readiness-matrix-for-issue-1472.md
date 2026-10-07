@@ -66,13 +66,13 @@ Close out GitHub issue #1472 after the ACP productionization child workstreams h
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Issue #1472 body and existing comments reviewed. TASK-207 covered the seed matrix; TASK-216 is the final closeout pass. The local runner path is tools/tldw-agent; ../tldw-agent is absent in this worktree, so docs should refer to the in-repo tools path for closeout commands.
 
 Final closeout evidence recorded in Docs/Development/ACP_Production_Readiness.md and posted to GitHub issue #1472: https://github.com/rmusser01/tldw_server/issues/1472#issuecomment-4414362913. Parent epic #1471 updated with the child workstream evidence map: https://github.com/rmusser01/tldw_server/issues/1471#issuecomment-4414364214. Verification run in this worktree: backend ACP/orchestration pytest 969 passed with 18 warnings; frontend ACP Vitest 3 files and 9 tests passed; targeted Agent Tasks Playwright E2E 1 passed; tools/tldw-agent verify-local-build passed; Bandit touched backend scope had results=[] and errors=[]; git diff --check clean before final Backlog metadata update. Remaining caveats are documented in the readiness matrix: live-backend E2E needs seeded backend/API key, downstream live-agent verification depends on installed binaries/API keys, sandbox backend verification is host-specific, and artifact retention/redaction policy should be finalized before release notes claim production retention behavior.
 
 Draft PR opened for ACP productionization readiness: https://github.com/rmusser01/tldw_server/pull/1495.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

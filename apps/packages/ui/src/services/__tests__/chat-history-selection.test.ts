@@ -30,6 +30,8 @@ vi.mock("@/db/dexie/history-selection", async (importOriginal) => ({
 }))
 vi.mock("@/db/dexie/helpers", () => ({ generateID: () => "new-id" }))
 import * as service from "../chat-history-selection"
+import { db } from "@/db/dexie/schema"
+import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
 import { selectionDigest } from "@/utils/history-selection"
 const owner = () => ({
   kind: "native" as const,
@@ -74,6 +76,63 @@ beforeEach(() => {
   calls.pending.mockResolvedValue("view")
   calls.capture.mockResolvedValue(capture())
 })
+
+it.each(["capture", "confirm", "admit", "settle"] as const)(
+  "rechecks an account-local owner lease when a held %s transaction starts",
+  async (operation) => {
+    let current = true
+    const local = {
+      kind: "local" as const,
+      profile_id: "profile",
+      owner_key: view.owner_key,
+      conversation_id: view.conversation_id,
+      validate_lease: () => current
+    }
+    const read = vi.spyOn(db.userSettings, "get").mockRejectedValue(new Error("private_read_started"))
+    // Use the real local transaction callback; only pause its storage boundary.
+    vi.spyOn(db, "transaction").mockImplementationOnce(async (_mode, _tables, run) => {
+      current = false
+      return (run as (tx: { abort(): void }) => Promise<never>)({ abort() {} })
+    })
+    const scope = { profile_id: "profile", client_session_id: "session" }
+    const intent = {
+      version: 1 as const,
+      projection_id: "projection",
+      owner_key: view.owner_key,
+      conversation_id: view.conversation_id,
+      source_digest: "source",
+      fences: { conversation: "1", history: "1", settings: "1" },
+      source_members: [],
+      ordered_path_ids: [],
+      cursor: view.cursor,
+      selection_revision: view.selection_revision
+    }
+    const input = { id: "input", history_id: "chat", role: "user", name: "User", content: "Input", createdAt: 1 }
+    const selection = service.finalizeHistorySelection(
+      local,
+      capture() as HistorySelectionCaptureV1,
+      service.prepareHistoryContext({}, () => true),
+      view
+    )
+    const admission = {
+      version: 1 as const,
+      owner_key: view.owner_key,
+      conversation_id: view.conversation_id,
+      input_message_id: "input",
+      input_message_revision: "1",
+      selection_digest: "selection"
+    }
+    const pending = operation === "capture"
+      ? service.captureHistorySnapshot(local, view, "send")
+      : operation === "confirm"
+        ? service.confirmLegacyHistoryProjection(local, scope, intent, view)
+        : operation === "admit"
+          ? service.appendSelectedUser(local, selection, input)
+          : service.settleAcceptedAssistant(local, admission, { ...input, role: "assistant" })
+    await expect(pending).rejects.toMatchObject({ code: "request_config_scope_changed" })
+    expect(read).not.toHaveBeenCalled()
+  }
+)
 describe("history owner service", () => {
   it("returns capture before composition and freezes the exact explicit payload", async () => {
     const native = owner()

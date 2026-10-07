@@ -39,9 +39,9 @@ Add failing adapter tests proving explicit `speed_factor` and non-default `reque
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added `_resolve_speed_factor()` to prefer explicit `extra_params.speed_factor` and otherwise translate non-default `TTSRequest.speed` into a `speed_factor` candidate kwarg. Standard, multilingual, and Turbo generation kwargs now include `speed_factor` only when requested; `_filter_generation_kwargs` still drops it for runtimes whose generate signature does not accept it.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -37,7 +37,7 @@ Load active persona visual packs in the buddy shell, render sprite-frame visuals
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red verification: `bunx vitest run src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/hooks/__tests__/usePersonaLiveVoiceController.test.tsx src/components/PersonaGarden/__tests__/LiveSessionPanel.test.tsx src/store/__tests__/persona-visual-runtime.test.ts src/routes/hooks/__tests__/usePersonaIncomingPayload.visuals.test.tsx` failed because `persona-visual-runtime` was missing, AssistantVoiceCard had no visual-state feedback row, and BuddyShellHost did not call visual-pack APIs or render SpriteFrameRenderer.
 
 Green verification: the same focused Vitest command passed, 5 files and 81 tests passed.
@@ -45,7 +45,7 @@ Green verification: the same focused Vitest command passed, 5 files and 81 tests
 Static check note: package-wide `tsc --noEmit` still has unrelated existing errors. A filtered rerun found no TypeScript errors referencing the touched persona visual, buddy shell, sidepanel, incoming-payload, runtime-store, or AssistantVoiceCard files after fixing the touched-file issues.
 
 Hygiene/security: `git diff --check` passed. Bandit is not applicable because this slice only touches TypeScript/React frontend files and markdown task tracking.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

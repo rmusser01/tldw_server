@@ -36,7 +36,7 @@ Add frontend type contracts, API client helpers, visual-state resolver, and spri
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Environment setup: initial `bunx vitest run src/components/Common/PersonaBuddy/__tests__/personaVisualState.test.ts src/components/Common/PersonaBuddy/__tests__/SpriteFrameRenderer.test.tsx` could not load local `vitest/config` because the workspace dependencies were not hydrated. Ran `bun install --frozen-lockfile` from `apps/`; lockfile was unchanged.
 
 Red verification after dependency hydration: `bunx vitest run src/components/Common/PersonaBuddy/__tests__/personaVisualState.test.ts src/components/Common/PersonaBuddy/__tests__/SpriteFrameRenderer.test.tsx` failed because `../personaVisualState` and `../SpriteFrameRenderer` did not exist.
@@ -46,7 +46,7 @@ Green verification: `bunx vitest run src/components/Common/PersonaBuddy/__tests_
 Static check note: full UI `tsc --noEmit` still reports pre-existing unrelated type errors across the package. A filtered rerun found no errors referencing the touched persona visual files after fixing the persona visual service payload typing.
 
 Hygiene/security: `git diff --check` passed. Bandit is not applicable because this slice only touches TypeScript/React frontend files and markdown task tracking.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

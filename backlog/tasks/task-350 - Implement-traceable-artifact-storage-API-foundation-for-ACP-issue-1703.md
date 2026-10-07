@@ -51,7 +51,7 @@ Implement the backend-owned storage/API foundation for traceable work-product ar
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Planning survey: existing workspace artifact endpoints live in tldw_Server_API/app/api/v1/endpoints/workspaces.py and schemas in workspace_schemas.py. Persistence is in CharactersRAGDB workspace_artifacts. File/output artifacts are export representations and should be referenced later rather than used as the durable work-product record for this slice.
 
 Baseline verification before implementation: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -q passed with 56 passed and 5 warnings in 60.37s.
@@ -73,7 +73,7 @@ PR #1711 review follow-up: added @pytest.mark.integration to test_workspace_arti
 PR #1711 Qodo follow-up: new unresolved review threads require typed redaction schema, backend-owned artifact/version IDs, fixed DDL migration SQL construction, and observable JSON decode failures. Reopening TASK-350 for focused review-fix work.
 
 PR #1711 Qodo follow-up verification: addressed four unresolved review threads by adding typed WorkspaceArtifactRedaction schema with strict support_safe/redacted booleans, removing client lineage/version IDs from create/update request schemas, enforcing backend-owned artifact_version_id/root/previous IDs in DB create/update, replacing interpolated artifact ALTER TABLE migration SQL with fixed DDL statements, and logging field-specific warnings for malformed workspace artifact JSON metadata. Red regressions failed before implementation and now pass. Verification: targeted Qodo regressions 4 passed; focused workspace DB/API suite 64 passed, 5 warnings; git diff --check passed; py_compile passed for ChaChaNotes_DB.py, workspace_schemas.py, and workspaces.py; Bandit passed with no errors/results in /tmp/bandit_acp_artifact_storage_api_1711_qodo_fixes.json.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

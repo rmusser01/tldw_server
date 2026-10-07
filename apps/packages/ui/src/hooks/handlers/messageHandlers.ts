@@ -174,7 +174,7 @@ export const createRegenerateLastMessage = ({
       messages: submitMessages,
       controller: newController,
       messageType: userMessageType,
-      regenerateFromMessage: lastAssistant,
+      regenerateFromMessage: submitExtras.serverChatIdOverride ? undefined : lastAssistant,
       ...submitExtras
     })
   }

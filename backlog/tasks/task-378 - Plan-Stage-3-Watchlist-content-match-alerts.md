@@ -38,9 +38,9 @@ Plan file: Docs/superpowers/plans/2026-05-15-first-class-watchlists-stage3-conte
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Validation: git diff --check passed. Plan grep confirmed TASK-378, Topic Monitoring boundary, watchlist_content_alert, Health issue copy, backend/frontend/docs/test/CDP tasks, and staged implementation checklist. Bandit skipped because this planning slice touched only Markdown and Backlog task metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

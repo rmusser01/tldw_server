@@ -155,6 +155,10 @@ class EvaluationMetric(BaseModel):
 
 class EvaluationSpec(BaseModel):
     """Evaluation specification"""
+    case_sensitive: bool = Field(
+        default=False,
+        description="Preserve letter case for exact_match and includes comparisons",
+    )
     # Optional sub_type for model_graded evaluations
     sub_type: Optional[Literal['summarization', 'rag', 'response_quality', 'rag_pipeline']] = Field(
         default=None,
@@ -970,9 +974,9 @@ class WebhookTestResponse(BaseModel):
 class RateLimitStatusResponse(BaseModel):
     """Rate limit status response"""
     tier: str
-    limits: dict[str, int]
+    limits: dict[str, Optional[int]]
     usage: dict[str, int]
-    remaining: dict[str, int]
+    remaining: dict[str, Optional[int]]
     reset_at: datetime
 
 

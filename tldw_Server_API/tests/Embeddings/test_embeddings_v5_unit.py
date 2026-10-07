@@ -26,6 +26,23 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPri
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.main import app
 
+# Restore immediately: the overrides above exist only to influence the import-time
+# side effects of the imports in this block. Under pytest-xdist every worker
+# collects (imports) this module even when none of its tests are scheduled onto
+# that worker, which runs the lines above but never instantiates the module-scoped
+# `cleanup_testing_env` fixture below (fixtures only run around actual test
+# execution) -- so its teardown never fires and these env vars would otherwise
+# leak into every other test for the rest of that worker's lifetime. The fixture
+# re-applies both overrides for the duration of this module's own tests.
+if _ORIG_TESTING is None:
+    os.environ.pop("TESTING", None)
+else:
+    os.environ["TESTING"] = _ORIG_TESTING
+if _ORIG_AUTO_DOWNLOAD_MODELS is None:
+    os.environ.pop("AUTO_DOWNLOAD_MODELS", None)
+else:
+    os.environ["AUTO_DOWNLOAD_MODELS"] = _ORIG_AUTO_DOWNLOAD_MODELS
+
 
 # Cleanup fixture to remove TESTING env var after tests
 @pytest.fixture(autouse=True, scope="module")

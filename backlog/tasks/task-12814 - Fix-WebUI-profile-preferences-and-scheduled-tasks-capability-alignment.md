@@ -31,13 +31,13 @@ Implement Stage 2 of the WebUI audit remediation roadmap: profile preferences mu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 2 task created after Stage 1 auth persistence commit 636853baea. Planned areas: tldw_Server_API/app/api/v1/endpoints/users.py, tldw_Server_API/app/core/UserProfiles/service.py, relevant UserProfile tests, scheduled-tasks router groups/services/routes/tests after investigation.
 
 Implemented as regression coverage after investigation showed current runtime behavior already satisfies the audited Stage 2 contracts. Added a direct profile preferences endpoint regression and a backend router-group regression for scheduled-tasks control-plane availability. Existing ScheduledTasksPage recovery coverage confirms that a missing OpenAPI path renders the capability-unavailable state without calling the list endpoint.
 
 Verification: `python -m pytest tldw_Server_API/tests/UserProfile/test_user_profile_read.py::test_user_profile_preferences_section_returns_success tldw_Server_API/tests/Notifications/test_scheduled_tasks_control_plane.py::test_scheduled_tasks_router_groups_expose_control_plane_route -q` passed 2 tests. `bun run test:run ../packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx -t "shows an unsupported-state message"` passed 1 focused test with 47 skipped in the file. `python -m compileall -q tldw_Server_API/tests/UserProfile/test_user_profile_read.py tldw_Server_API/tests/Notifications/test_scheduled_tasks_control_plane.py` passed. `git diff --check` passed. Bandit was run on the touched Python test files; new Stage 2 assertions are marked `# nosec B101`, while the scanner still reports 46 pre-existing B101 assert warnings in `test_user_profile_read.py`.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

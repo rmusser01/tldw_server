@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeam
 from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
     AuthnzUserProviderSecretsRepo,
 )
+from tldw_Server_API.app.core.UserProfiles.limits_precedence import LIMITS_PREFIX, most_generous_values
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import (
     OrgProfileOverridesRepo,
     TeamProfileOverridesRepo,
@@ -436,16 +437,17 @@ class UserProfileService:
         return org_ids, team_ids
 
     async def _build_quotas(self, user: dict[str, Any]) -> dict[str, Any]:
+        user_id = int(user.get("id"))
+        from tldw_Server_API.app.services.storage_quota_service import (
+            get_storage_service,
+            resolved_storage_quota_mb,
+        )
+
         quotas: dict[str, Any] = {
-            "storage_quota_mb": int(user.get("storage_quota_mb", 0) or 0),
+            "storage_quota_mb": await resolved_storage_quota_mb(user_id),
             "storage_used_mb": float(user.get("storage_used_mb", 0.0) or 0.0),
         }
-        user_id = int(user.get("id"))
         try:
-            from tldw_Server_API.app.services.storage_quota_service import (
-                get_storage_service,
-            )
-
             storage_service = await get_storage_service()
             storage_info = await storage_service.calculate_user_storage(
                 user_id=user_id,
@@ -453,8 +455,7 @@ class UserProfileService:
             )
             live_quota = storage_info.get("quota_mb")
             live_used = storage_info.get("total_mb")
-            if live_quota is not None:
-                quotas["storage_quota_mb"] = int(live_quota)
+            quotas["storage_quota_mb"] = live_quota
             if live_used is not None:
                 quotas["storage_used_mb"] = float(live_used)
         except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
@@ -462,9 +463,9 @@ class UserProfileService:
 
         try:
             from tldw_Server_API.app.core.Usage.audio_quota import (
-                active_streams_count,
                 get_daily_minutes_used,
                 get_limits_for_user,
+                get_monthly_minutes_used,
             )
 
             limits = await get_limits_for_user(user_id)
@@ -473,17 +474,24 @@ class UserProfileService:
             remaining = None
             if daily_limit is not None:
                 remaining = max(0.0, float(daily_limit) - float(used))
-            active_streams = await active_streams_count(user_id)
+            monthly_limit = limits.get("monthly_minutes")
+            monthly_used = await get_monthly_minutes_used(user_id)
+            monthly_remaining = None
+            if monthly_limit is not None:
+                monthly_remaining = max(0.0, float(monthly_limit) - float(monthly_used))
             quotas["audio"] = {
                 "daily_minutes_limit": daily_limit,
                 "daily_minutes_used": float(used),
                 "daily_minutes_remaining": remaining,
+                "monthly_minutes_limit": monthly_limit,
+                "monthly_minutes_used": float(monthly_used),
+                "monthly_minutes_remaining": monthly_remaining,
                 "concurrent_streams_limit": (
                     int(limits["concurrent_streams"])
                     if limits.get("concurrent_streams") is not None
                     else None
                 ),
-                "concurrent_streams_active": int(active_streams),
+                "concurrent_streams_active": None,
                 "concurrent_jobs_limit": (
                     int(limits["concurrent_jobs"])
                     if limits.get("concurrent_jobs") is not None
@@ -575,6 +583,8 @@ class UserProfileService:
 
         org_overrides: dict[str, dict[str, Any]] = {}
         team_overrides: dict[str, dict[str, Any]] = {}
+        org_rows: list[dict[str, Any]] = []
+        team_rows: list[dict[str, Any]] = []
         try:
             org_ids, team_ids = await self._get_membership_ids(user_id)
             if org_ids:
@@ -590,12 +600,21 @@ class UserProfileService:
         except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Org/team overrides unavailable for user {}: {}", user_id, exc)
 
+        team_limits = most_generous_values(team_rows)
+        org_limits = most_generous_values(org_rows)
+
         effective: dict[str, Any] = {}
         for entry in entries:
             key = str(entry.key)
             if key in overrides:
                 value = overrides.get(key)
                 source = "user"
+            elif key.startswith(LIMITS_PREFIX) and key in team_limits:
+                value = team_limits[key]
+                source = "team"
+            elif key.startswith(LIMITS_PREFIX) and key in org_limits:
+                value = org_limits[key]
+                source = "org"
             elif key in team_overrides:
                 value = team_overrides[key]["value"]
                 source = "team"

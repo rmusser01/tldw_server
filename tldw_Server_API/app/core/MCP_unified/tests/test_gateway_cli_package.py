@@ -2495,6 +2495,22 @@ def _parse_cli_timestamp(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def _run_cli_json(capsys: pytest.CaptureFixture[str], argv: list[str]) -> Any:
+    """Run a CLI command that must succeed and return its stdout JSON.
+
+    The CLI reports errors on stderr with a non-zero exit, so parsing stdout
+    first hides the real failure behind a JSONDecodeError on empty output.
+    """
+
+    exit_code = gateway_cli.main(argv)
+    captured = capsys.readouterr()
+    assert exit_code == 0, (
+        f"CLI {argv[0]} exited {exit_code}; "
+        f"stderr={captured.err!r}; stdout={captured.out!r}"
+    )
+    return json.loads(captured.out)
+
+
 def _write_gateway_config(
     tmp_path: Path,
     payload: dict[str, object],
@@ -2751,11 +2767,25 @@ def _seed_sqlite_tool_use_events(
     asyncio.run(_seed())
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "token_id", ["plain-token", "-leading-token", "--leading-token"]
+)
 def test_gateway_cli_approval_grant_lifecycle(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    token_id: str,
 ) -> None:
-    """Create, list, and revoke an approval grant through the CLI."""
+    """Create, list, and revoke an approval grant through the CLI.
+
+    Grant ids come from secrets.token_urlsafe, so about 1 in 64 starts with
+    "-". The ids are pinned so the dash-leading case runs every time instead
+    of flaking at that rate.
+    """
+    from mcp_unified.policy_grants import sqlite as grant_store
+
+    monkeypatch.setattr(grant_store.secrets, "token_urlsafe", lambda _bytes: token_id)
 
     config_path = tmp_path / "gateway.json"
     config_path.write_text(
@@ -2771,7 +2801,8 @@ def test_gateway_cli_approval_grant_lifecycle(
         encoding="utf-8",
     )
 
-    exit_code = gateway_cli.main(
+    created = _run_cli_json(
+        capsys,
         [
             "create-approval-grant",
             "--config",
@@ -2786,34 +2817,29 @@ def test_gateway_cli_approval_grant_lifecycle(
             "900",
             "--granted-by",
             "operator",
-        ]
+        ],
     )
-    created = json.loads(capsys.readouterr().out)
-    assert exit_code == 0
     grant_payload = created["grant"]
     assert grant_payload["value"] == "example.com"
     assert grant_payload["profile_id"] == "researcher"
     grant_id = grant_payload["grant_id"]
+    assert grant_id == token_id
 
-    exit_code = gateway_cli.main(
-        ["list-approval-grants", "--config", str(config_path)]
+    listed = _run_cli_json(
+        capsys, ["list-approval-grants", "--config", str(config_path)]
     )
-    listed = json.loads(capsys.readouterr().out)
-    assert exit_code == 0
     assert [grant["grant_id"] for grant in listed["grants"]] == [grant_id]
 
-    exit_code = gateway_cli.main(
-        ["revoke-approval-grant", grant_id, "--config", str(config_path)]
+    revoked = _run_cli_json(
+        capsys,
+        ["revoke-approval-grant", "--config", str(config_path), "--", grant_id],
     )
-    revoked = json.loads(capsys.readouterr().out)
-    assert exit_code == 0
     assert revoked["grant"]["grant_id"] == grant_id
 
-    exit_code = gateway_cli.main(
-        ["list-approval-grants", "--config", str(config_path)]
+    listed = _run_cli_json(
+        capsys, ["list-approval-grants", "--config", str(config_path)]
     )
-    assert exit_code == 0
-    assert json.loads(capsys.readouterr().out)["grants"] == []
+    assert listed["grants"] == []
 
 
 def test_gateway_cli_skill_approval_grant_lifecycle_canonicalizes_value(
@@ -2867,7 +2893,7 @@ def test_gateway_cli_skill_approval_grant_lifecycle_canonicalizes_value(
     assert listed["grants"] == [grant]
 
     exit_code = gateway_cli.main(
-        ["revoke-approval-grant", grant["grant_id"], "--config", str(config_path)]
+        ["revoke-approval-grant", "--config", str(config_path), "--", grant["grant_id"]]
     )
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -2918,11 +2944,20 @@ def test_gateway_cli_approval_grant_requires_persistent_store(
     assert payload["reason_code"] == "policy_grant_store_unavailable"
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "token_id", ["plain-token", "-leading-token", "--leading-token"]
+)
 def test_gateway_cli_path_grant_lifecycle(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    token_id: str,
 ) -> None:
-    """Create, list, and revoke a TTL path grant through the CLI."""
+    """Create, list, and revoke opaque path grant IDs through the CLI."""
+    from mcp_unified.policy_grants import sqlite as grant_store
+
+    monkeypatch.setattr(grant_store.secrets, "token_urlsafe", lambda _bytes: token_id)
 
     config_path = tmp_path / "gateway.json"
     config_path.write_text(
@@ -2938,7 +2973,8 @@ def test_gateway_cli_path_grant_lifecycle(
         encoding="utf-8",
     )
 
-    exit_code = gateway_cli.main(
+    created = _run_cli_json(
+        capsys,
         [
             "create-path-grant",
             "--config",
@@ -2953,34 +2989,31 @@ def test_gateway_cli_path_grant_lifecycle(
             "900",
             "--session-id",
             "session-1",
-        ]
+        ],
     )
-    created = json.loads(capsys.readouterr().out)
-    assert exit_code == 0
     grant_payload = created["grant"]
     assert grant_payload["grant_type"] == "path"
     assert grant_payload["value"] == "docs/scratch/sub"
     assert grant_payload["actions"] == ["read", "write"]
     grant_id = grant_payload["grant_id"]
 
-    exit_code = gateway_cli.main(
+    listed = _run_cli_json(
+        capsys,
         [
             "list-approval-grants",
             "--config",
             str(config_path),
             "--grant-type",
             "path",
-        ]
+        ],
     )
-    listed = json.loads(capsys.readouterr().out)
-    assert exit_code == 0
     assert [grant["grant_id"] for grant in listed["grants"]] == [grant_id]
 
-    exit_code = gateway_cli.main(
-        ["revoke-approval-grant", grant_id, "--config", str(config_path)]
+    revoked = _run_cli_json(
+        capsys,
+        ["revoke-approval-grant", "--config", str(config_path), "--", grant_id],
     )
-    assert exit_code == 0
-    capsys.readouterr()
+    assert revoked["grant"]["grant_id"] == grant_id
 
 
 def test_gateway_cli_path_grant_rejects_invalid_actions(

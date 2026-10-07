@@ -50,10 +50,7 @@ import type {
   WorkspaceSourceStatus,
   WorkspaceSourceStatusDetails
 } from "@/types/workspace"
-import {
-  buildKnowledgeQaSeedNote,
-  consumeResearchWorkspacePrefill
-} from "@/utils/research-workspace-prefill"
+import { useResearchWorkspacePrefill } from "@/utils/use-research-workspace-prefill"
 import { FEATURE_FLAGS, useFeatureFlag } from "@/hooks/useFeatureFlags"
 import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -129,6 +126,7 @@ import {
 } from "@/services/web-clipper/agent-task-handoff"
 import type { WorkspaceAgentTaskPrefill } from "./WorkspaceAgentTaskHandoffModal"
 import { isEditableTarget } from "@/utils/editable-target"
+import { restoreMigratedResearchWorkspace } from "./workspace-server-restore"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))
@@ -366,7 +364,7 @@ type WorkspaceNoteKeywordLike =
     }
 
 type WorkspaceNoteSearchItem = {
-  id?: number
+  id?: string | number
   title?: string
   content?: string
   version?: number
@@ -501,8 +499,8 @@ const buildWorkspaceNotesSearchPath = (workspaceTag: string): AllowedPath => {
   return `/api/v1/notes/search/?${params.toString()}` as AllowedPath
 }
 
-const buildWorkspaceNotePath = (noteId: number): AllowedPath =>
-  `/api/v1/notes/${noteId}` as AllowedPath
+const buildWorkspaceNotePath = (noteId: string | number): AllowedPath =>
+  `/api/v1/notes/${encodeURIComponent(String(noteId))}` as AllowedPath
 
 const isDesktopLayout = (): boolean => {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -1286,6 +1284,9 @@ const ResearchWorkspaceBody: React.FC = () => {
     image: null
   }
   const initializeWorkspace = useWorkspaceStore((s) => s.initializeWorkspace)
+  const restoreServerWorkspace = useWorkspaceStore((s) => s.restoreServerWorkspace)
+  const [workspaceRestoreError, setWorkspaceRestoreError] = React.useState(false)
+  const [workspaceRestoreAttempt, setWorkspaceRestoreAttempt] = React.useState(0)
   const createNewWorkspace = useWorkspaceStore((s) => s.createNewWorkspace)
   const addSources = useWorkspaceStore((s) => s.addSources)
   const workspaceTag = useWorkspaceStore((s) => s.workspaceTag)
@@ -2151,11 +2152,14 @@ const ResearchWorkspaceBody: React.FC = () => {
     try {
       const response = await tldwClient.getCurrentUserStorageQuota()
       const usedMb = Number(response?.storage_used_mb)
-      const quotaMb = Number(response?.storage_quota_mb)
+      const rawQuota = response?.storage_quota_mb
+      const quotaMb = typeof rawQuota === "number" ? rawQuota : null
       const accountUsedBytes =
         Number.isFinite(usedMb) && usedMb >= 0 ? usedMb * 1024 * 1024 : null
       const accountQuotaBytes =
-        Number.isFinite(quotaMb) && quotaMb > 0 ? quotaMb * 1024 * 1024 : null
+        quotaMb !== null && Number.isFinite(quotaMb) && quotaMb >= 0
+          ? quotaMb * 1024 * 1024
+          : null
       setWorkspaceStorageUsage((previousState) => ({
         ...previousState,
         accountUsedBytes,
@@ -2169,11 +2173,14 @@ const ResearchWorkspaceBody: React.FC = () => {
         })
         const quotas = (profile as { quotas?: Record<string, unknown> } | null)?.quotas
         const usedMb = Number(quotas?.storage_used_mb)
-        const quotaMb = Number(quotas?.storage_quota_mb)
+        const rawQuota = quotas?.storage_quota_mb
+        const quotaMb = typeof rawQuota === "number" ? rawQuota : null
         const accountUsedBytes =
           Number.isFinite(usedMb) && usedMb >= 0 ? usedMb * 1024 * 1024 : null
         const accountQuotaBytes =
-          Number.isFinite(quotaMb) && quotaMb > 0 ? quotaMb * 1024 * 1024 : null
+          quotaMb !== null && Number.isFinite(quotaMb) && quotaMb >= 0
+            ? quotaMb * 1024 * 1024
+            : null
         setWorkspaceStorageUsage((previousState) => ({
           ...previousState,
           accountUsedBytes,
@@ -2283,9 +2290,12 @@ const ResearchWorkspaceBody: React.FC = () => {
         })
         if (cancelled) return
 
-        const noteById = new Map<number, WorkspaceGlobalSearchNoteDocument>()
+        const noteById = new Map<string | number, WorkspaceGlobalSearchNoteDocument>()
         for (const note of pickNotesArray(response)) {
-          if (typeof note.id !== "number" || !Number.isFinite(note.id)) {
+          if (
+            !(typeof note.id === "string" && note.id.trim()) &&
+            !(typeof note.id === "number" && Number.isFinite(note.id))
+          ) {
             continue
           }
           noteById.set(note.id, {
@@ -2316,7 +2326,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     async (result: WorkspaceGlobalSearchResult) => {
       if (
         result.noteId != null &&
-        Number.isFinite(result.noteId) &&
+        (typeof result.noteId === "string" || Number.isFinite(result.noteId)) &&
         currentNote?.id !== result.noteId
       ) {
         try {
@@ -2746,8 +2756,22 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (workspaceId) return
 
     let cancelled = false
-    void Promise.resolve().then(() => {
+    const restoration = new AbortController()
+    void Promise.resolve().then(async () => {
       if (!cancelled && !currentWorkspaceIdRef.current) {
+        setWorkspaceRestoreError(false)
+        try {
+          const restored = await restoreMigratedResearchWorkspace({
+            signal: restoration.signal,
+            apply: snapshot => {
+              if (!cancelled && !currentWorkspaceIdRef.current) restoreServerWorkspace(snapshot)
+            }
+          })
+          if (restored || cancelled || currentWorkspaceIdRef.current) return
+        } catch {
+          if (!cancelled) setWorkspaceRestoreError(true)
+          return
+        }
         const initialStorageKeys =
           initialWorkspaceMigrationLocalStorageKeysRef.current ?? []
         const hadWorkspaceContentBeforeInitialization = initialStorageKeys.some(
@@ -2766,8 +2790,9 @@ const ResearchWorkspaceBody: React.FC = () => {
 
     return () => {
       cancelled = true
+      restoration.abort()
     }
-  }, [isStoreHydrated, workspaceId])
+  }, [isStoreHydrated, workspaceId, restoreServerWorkspace, workspaceRestoreAttempt])
 
   useEffect(() => {
     if (!statusGuardrailsEnabled) return
@@ -2830,60 +2855,10 @@ const ResearchWorkspaceBody: React.FC = () => {
     workspaceId
   ])
 
-  useEffect(() => {
-    if (!workspaceId) return
-
-    let isActive = true
-
-    const applyPrefill = async () => {
-      const payload = await consumeResearchWorkspacePrefill()
-      if (!payload || !isActive) return
-      if (payload.kind !== "knowledge_qa_thread") return
-
-      const sourceCandidates = payload.sources
-        .filter((source) => typeof source.mediaId === "number")
-        .map((source) => ({
-          mediaId: source.mediaId as number,
-          title: source.title,
-          type: source.type
-        }))
-
-      if (sourceCandidates.length > 0) {
-        addSources(sourceCandidates)
-
-        const stateAfterAdd = useWorkspaceStore.getState()
-        const prefillSourceIds = stateAfterAdd.sources
-          .filter((source) =>
-            sourceCandidates.some((candidate) => candidate.mediaId === source.mediaId)
-          )
-          .map((source) => source.id)
-        const mergedSelectedIds = new Set([
-          ...stateAfterAdd.selectedSourceIds,
-          ...prefillSourceIds
-        ])
-        if (mergedSelectedIds.size > 0) {
-          setSelectedSourceIds(Array.from(mergedSelectedIds))
-        }
-      }
-
-      const noteContent = buildKnowledgeQaSeedNote(payload)
-      if (noteContent.trim().length > 0) {
-        const titleBase =
-          payload.query.trim().length > 0 ? payload.query.trim() : "Knowledge QA import"
-        captureToCurrentNote({
-          title: `Knowledge QA: ${titleBase.slice(0, 80)}`,
-          content: noteContent,
-          mode: "append"
-        })
-      }
-    }
-
-    void applyPrefill()
-
-    return () => {
-      isActive = false
-    }
-  }, [addSources, captureToCurrentNote, setSelectedSourceIds, workspaceId])
+  const knowledgeImport = useResearchWorkspacePrefill(
+    workspaceId,
+    isStoreHydrated,
+  )
 
   useEffect(() => {
     if (!isStoreHydrated) return
@@ -3460,6 +3435,21 @@ const ResearchWorkspaceBody: React.FC = () => {
     return <ResearchWorkspaceSkeleton isMobile={isMobile} />
   }
 
+  if (!workspaceId && workspaceRestoreError) {
+    return <div role="alert" className="m-4 rounded-lg border border-warning/30 p-4">
+      <p>{t("playground:workspace.restoreFailed", "Unable to restore your Research Workspace. Check your connection and retry.")}</p>
+      <Button className="mt-2" onClick={() => setWorkspaceRestoreAttempt(attempt => attempt + 1)}>
+        {t("common:retry", "Retry")}
+      </Button>
+      <Button className="ml-2 mt-2" onClick={() => createNewWorkspace()}>
+        {t("playground:workspace.startNewAfterRestoreFailure", "Start new workspace")}
+      </Button>
+      <p className="mt-2 text-sm text-text-muted">
+        {t("playground:workspace.restoreRecoveryChoices", "You can retry restoring your saved workspace or start a separate workspace.")}
+      </p>
+    </div>
+  }
+
   const tutorialPromptBanner = showTutorialPrompt ? (
     <div className="mx-4 mt-2 flex flex-col gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm md:flex-row md:items-center md:justify-between">
       <div className="min-w-0">
@@ -3637,6 +3627,42 @@ const ResearchWorkspaceBody: React.FC = () => {
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,var(--surface-2),var(--bg)_45%)] text-text">
       {messageContextHolder}
+      {(knowledgeImport.attached > 0 ||
+        knowledgeImport.failed > 0 ||
+        knowledgeImport.importing ||
+        knowledgeImport.error) && (
+        <div
+          role="status"
+          className="border-b border-border bg-surface px-3 py-2 text-sm"
+        >
+          <p>
+            {t("playground:workspace.knowledgeImportCounts", {
+              defaultValue:
+                "Knowledge evidence: {{attached}} attached · {{pending}} pending · {{failed}} failed",
+              attached: knowledgeImport.attached,
+              pending: knowledgeImport.pending,
+              failed: knowledgeImport.failed,
+            })}
+          </p>
+          <p>
+            {t("playground:workspace.excerptSnapshotNotice", {
+              defaultValue:
+                "Note and web sources are retrieved-excerpt snapshots, not live or complete copies. Original references, excerpts, and answer qualifications are in the imported draft.",
+            })}
+          </p>
+          {knowledgeImport.error && <p role="alert">{knowledgeImport.error}</p>}
+          {(knowledgeImport.failed > 0 || knowledgeImport.error) && (
+            <Button
+              disabled={knowledgeImport.importing}
+              onClick={() => void knowledgeImport.retry()}
+            >
+              {t("playground:workspace.retryKnowledgeImports", {
+                defaultValue: "Retry unfinished imports",
+              })}
+            </Button>
+          )}
+        </div>
+      )}
       <a
         href="#workspace-main-content"
         onClick={(event) => focusSkipTarget(event, "chat")}

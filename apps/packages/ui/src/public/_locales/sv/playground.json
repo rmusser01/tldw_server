@@ -1468,5 +1468,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "Ignorera när mallar är aktiva"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "Konflikt vid medieöverföring"
+  },
+  "mediaHandoff_conflict": {
+    "message": "Det finns redan ett utkast i meddelandefältet. Infoga mediekällan, ersätt utkastet eller avbryt importen."
+  },
+  "mediaHandoff_insert": {
+    "message": "Infoga mediekälla"
+  },
+  "mediaHandoff_replace": {
+    "message": "Ersätt aktuellt utkast"
+  },
+  "mediaHandoff_cancel": {
+    "message": "Avbryt import"
   }
 }

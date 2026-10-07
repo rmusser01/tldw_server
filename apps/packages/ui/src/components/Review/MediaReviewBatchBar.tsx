@@ -1,4 +1,5 @@
 import React from "react"
+import { MediaKnowledgeActions } from "./MediaKnowledgeActions"
 import { Input, Button, Select } from "antd"
 import type { MediaReviewState, MediaReviewActions } from "@/components/Review/media-review-types"
 import type { MediaMultiBatchExportFormat } from "@/components/Review/media-multi-batch-actions"
@@ -38,6 +39,19 @@ export const MediaReviewBatchBar: React.FC<MediaReviewBatchBarProps> = ({ state,
           count: selectedIds.length
         })}
       </span>
+      <MediaKnowledgeActions
+        navigate={state.navigate}
+        key={selectedIds.join(",")}
+        selection
+        items={selectedIds.map(
+          (id) =>
+            state.details[String(id)] ??
+            state.selectedMetadata[String(id)] ??
+            state.allResults.find((item) => String(item.id) === String(id)) ?? {
+              id,
+            },
+        )}
+      />
       <Input
         data-testid="media-multi-batch-keywords"
         value={batchKeywordsDraft}

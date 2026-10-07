@@ -43,13 +43,13 @@ Route the ChatQueuePanel generic blocked fallback label through the canonical de
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation notes: Added RED coverage for the generic blocked fallback by mocking getDesignSystemState("blocked") to return a distinct label; the first focused run failed because ChatQueuePanel still rendered the hardcoded Blocked fallback. Updated ChatQueuePanel to use getDesignSystemState("blocked").label as the i18n fallback only when blockedReason is empty, preserving explicit blocked reasons. Removed canonical-state-label:src/components/Common/ChatQueuePanel.tsx:Blocked from the product-state baseline. Verification: focused ChatQueuePanel Vitest passed 5 tests; product-state guard Vitest passed 52 tests; bun run verify:design-system-state exited 0 with 510 baseline exceptions; git diff --check passed; repo-wide bunx tsc --noEmit --pretty false exited 2 on existing unrelated UI TypeScript debt, and rg found no touched-file/design-system matches in the tsc output. Bandit skipped because the touched scope is UI TypeScript, JSON, and Backlog markdown only.
 
 PR review follow-up: Qodo reported that the ChatQueuePanel test replaced the full @/design-system module with a minimal mock. Verified the repo uses a safer partial-mock pattern in PresentationStudioStatusBadge.design-system.test.tsx, so this review item is valid and will be addressed by spreading actual design-system exports while overriding only getDesignSystemState.
 
 PR review follow-up completed: changed ChatQueuePanel.test.tsx to partial-mock @/design-system by spreading importActual exports and overriding only getDesignSystemState. Verification after the review fix: ChatQueuePanel Vitest passed 5 tests; product-state guard Vitest passed 52 tests; bun run verify:design-system-state exited 0 with 510 baseline exceptions; git diff --check passed; repo-wide bunx tsc --noEmit --pretty false still exits 2 on existing unrelated UI TypeScript debt, and rg found no touched-file/design-system matches in the review-fix tsc output. Bandit remains skipped because this PR touches UI TypeScript, JSON, and Backlog markdown only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

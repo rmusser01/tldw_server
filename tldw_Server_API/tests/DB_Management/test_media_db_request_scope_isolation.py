@@ -9,6 +9,7 @@ from tldw_Server_API.app.core.DB_Management.backends import factory as backend_f
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     DatabaseConfig,
+    DatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.api import MediaDbFactory
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
@@ -671,3 +672,35 @@ def test_media_db_factory_close_skips_sqlite_release_for_postgres_backend(monkey
 
     assert released == []
     assert closed == ["closed"]
+
+
+def test_media_db_factory_close_after_central_retirement_keeps_runtime_guard(tmp_path) -> None:
+    path = str(tmp_path / "retired-factory.db")
+    factory = media_db_session.MediaDbFactory.for_sqlite_path(path, client_id="retired-owner")
+    backend = factory.backend
+    assert backend is not None
+    pool = backend.get_pool()
+    connection = pool.get_connection()
+    connection.execute("CREATE TABLE factory_marker(value TEXT)")
+    connection.execute("INSERT INTO factory_marker(value) VALUES (?)", ("Committed marker",))
+    connection.commit()
+
+    backend_factory.reset_managed_sqlite_backends(mode="hard", backends=[backend])
+    with pytest.raises(DatabaseError, match="retired"):
+        backend.get_pool()
+    assert pool.get_stats()["closed"] is True
+
+    factory.close()
+    factory.close()
+    assert factory.backend is None
+
+    replacement = media_db_session.MediaDbFactory.for_sqlite_path(path, client_id="replacement-owner")
+    replacement_backend = replacement.backend
+    try:
+        assert replacement_backend is not None
+        assert replacement_backend is not backend
+        row = replacement_backend.get_pool().get_connection().execute("SELECT value FROM factory_marker").fetchone()
+        assert row[0] == "Committed marker"
+    finally:
+        replacement.close()
+        backend_factory.reset_managed_sqlite_backends(mode="hard", backends=[replacement_backend])

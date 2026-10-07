@@ -28,7 +28,12 @@ import {
   updateLastUsedPrompt,
   updateChatHistoryCreatedAt
 } from "@/db/dexie/helpers"
-import { removeAcknowledgedServerMirrorMessage } from "@/db/dexie/server-chat-mirror"
+import {
+  linkServerChatMirror,
+  reconcileServerChatMirror,
+  removeAcknowledgedServerMirrorMessage,
+  serverChatMirrorOwnerKey
+} from "@/db/dexie/server-chat-mirror"
 import {
   rollbackScopedComparePersistence,
   runChatPersistenceTransaction
@@ -118,9 +123,12 @@ import {
 } from "@/hooks/chat/abort-turn-cleanup"
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
+import { hydrateTrackedCharacterForSend } from "@/hooks/chat/tracked-character-hydration"
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat"
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing"
 import { WEBUI_CHAT_SOURCE } from "@/utils/character-chat-session"
+import { useConnectionStore } from "@/store/connection"
+import { ConnectionPhase } from "@/types/connection"
 import { resolveVisualIdentityBindingWithCache } from "@/hooks/useVisualIdentityResolver"
 import {
   aggregateChatSubmitResults,
@@ -1292,7 +1300,8 @@ export const useChatActions = ({
 
   const buildChatModeParams = async (
     overrides: ChatModeOverrides = {},
-    snapshot?: ServicePromptSnapshot
+    snapshot?: ServicePromptSnapshot,
+    selectionSource?: Parameters<typeof normalChatMode>[6]["selectionSource"]
   ) => {
     const hasHistoryOverride = Object.prototype.hasOwnProperty.call(
       overrides,
@@ -1339,8 +1348,19 @@ export const useChatActions = ({
         ? overrides.webSearch
         : webSearch
 
-    return {
+    const params = {
       selectedModel: effectiveSelectedModel || "",
+      selectionSource: selectionSource ?? {
+        model: normalizeSelectedModel(overrides.selectedModel)
+          ? "explicit" as const
+          : "global" as const,
+        toolChoice:
+          overrides.toolChoice === "auto" ||
+          overrides.toolChoice === "required" ||
+          overrides.toolChoice === "none"
+            ? "explicit" as const
+            : "global" as const
+      },
       useOCR: resolvedUseOCR,
       selectedSystemPrompt: resolvedSelectedSystemPrompt,
       selectedKnowledge,
@@ -1371,6 +1391,31 @@ export const useChatActions = ({
       systemPromptAppendix,
       messageSteeringPrompts: resolvedMessageSteeringPrompts,
       ...overrides
+    }
+    // A mode may attempt rollback after its owner has signed out. Neither that
+    // rollback nor its final cleanup may publish into the replacement account.
+    return {
+      ...params,
+      setMessages: (next: Parameters<typeof setMessages>[0]) => {
+        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setMessages(next)
+      },
+      setHistory: (next: Parameters<typeof setHistory>[0]) => {
+        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setHistory(next)
+      },
+      setHistoryId: (...args: Parameters<typeof setHistoryId>) => {
+        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setHistoryId(...args)
+      },
+      setIsProcessing: (next: boolean) => {
+        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setIsProcessing(next)
+      },
+      setStreaming: (next: boolean) => {
+        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setStreaming(next)
+      },
+      setAbortController: (next: Parameters<typeof setAbortController>[0]) => {
+        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setAbortController(next)
+      },
+      releaseAbortControllerIfOwned: (turnSignal: AbortSignal) =>
+        !snapshot?.scopeInvalidatedSignal.aborted && params.releaseAbortControllerIfOwned(turnSignal)
     }
   }
 
@@ -1687,6 +1732,7 @@ export const useChatActions = ({
     character,
     messageSteering,
     serverChatIdOverride,
+    historyIdOverride,
     servicePromptSnapshot
   }: {
     message: string
@@ -1699,6 +1745,7 @@ export const useChatActions = ({
     regenerateFromMessage?: Message
     character?: Character | null
     serverChatIdOverride?: string | null
+    historyIdOverride?: string | null
     servicePromptSnapshot?: ServicePromptSnapshot
     messageSteering: {
       continueAsUser: boolean
@@ -1770,6 +1817,9 @@ export const useChatActions = ({
       if (fromHistory?.content) {
         return fromHistory.content.trim()
       }
+
+      // Existing turns own their transcript; only reuse a recorded greeting.
+      if (hasUserTurns) return ""
 
       if (selectedGreeting.length > 0) {
         return selectedGreeting
@@ -1999,7 +2049,7 @@ export const useChatActions = ({
               name: "You",
               message,
               sources: [],
-              images: [],
+              images: image ? [image] : [],
               createdAt,
               id: resolvedUserMessageId,
               parentMessageId: null
@@ -2453,6 +2503,8 @@ export const useChatActions = ({
             explicitCharacterName !== "Assistant"
           speakerCharacterName =
             activeCharacterMatchesChat &&
+            (directedSpeakerId === null || directedSpeakerId === undefined || directedSpeakerId === fallbackSpeakerId) &&
+            characterName.trim().toLowerCase() !== "assistant" &&
             (createdNewChat ||
               selectedCharacterMatchesActive ||
               selectedAssistantMatchesActive ||
@@ -2715,7 +2767,7 @@ export const useChatActions = ({
       }
 
       await saveMessageOnSuccess({
-        historyId,
+        historyId: historyIdOverride ?? historyId,
         isRegenerate,
         selectedModel: resolvedModel,
         modelId: resolvedModel,
@@ -2951,7 +3003,7 @@ export const useChatActions = ({
         conversationId: activeChatId,
         botMessage: assistantContent,
         history: historyBase,
-        historyId,
+        historyId: historyIdOverride ?? historyId,
         image,
         selectedModel: resolvedModel,
         modelId: resolvedModel,
@@ -3214,6 +3266,7 @@ export const useChatActions = ({
     requestOverrides,
     continueOutputTarget = "chat",
     serverChatIdOverride,
+    historyIdOverride,
     researchContext
   }: {
     message: string
@@ -3239,6 +3292,7 @@ export const useChatActions = ({
     requestOverrides?: ChatModeOverrides
     continueOutputTarget?: "chat" | "composer_input"
     serverChatIdOverride?: string | null
+    historyIdOverride?: string | null
     researchContext?: ChatResearchContext
   }): Promise<ChatSubmitResult> => {
     const historyOriginIsCurrent = historySelection?.fence()
@@ -3454,19 +3508,13 @@ export const useChatActions = ({
           ? historySelection
           : null
       )
-      const needsSavedMirrorScope = !temporaryChat && (
-        Boolean(requestOverrides?.serverChatId ?? serverChatIdOverride ?? serverChatId) ||
-        (!compareModeActive && (turnResolvedSendMode === "tracked_character" || turnResolvedSendMode === "tracked_persona"))
-      )
-      if (turnPromptIds.length > 0 || needsSavedNormalScope || needsSavedMirrorScope) {
+      // Every persisted turn needs an owner, including local Compare and image
+      // histories that have no server conversation or service prompt yet.
+      if (turnPromptIds.length > 0 || !temporaryChat) {
         const loadedSnapshot = await loadServicePromptSnapshot(turnPromptIds, {
           signal
         })
-        if (
-          compareModeActive &&
-          turnPromptIds.length === 1 &&
-          turnPromptIds[0] === "chat.web_search.answer"
-        ) {
+        if (compareModeActive) {
           compareServicePromptSnapshot = loadedSnapshot
         } else {
           turnServicePromptSnapshot = loadedSnapshot
@@ -3494,7 +3542,18 @@ export const useChatActions = ({
           dynamicUIRequest: turnDynamicUIRequest,
           userMetadataExtra: turnUserMetadataExtra
         },
-        turnServicePromptSnapshot ?? compareServicePromptSnapshot
+        turnServicePromptSnapshot ?? compareServicePromptSnapshot,
+        {
+          model: normalizeSelectedModel(requestOverrides?.selectedModel)
+            ? "explicit"
+            : "global",
+          toolChoice:
+            requestOverrides?.toolChoice === "auto" ||
+            requestOverrides?.toolChoice === "required" ||
+            requestOverrides?.toolChoice === "none"
+              ? "explicit"
+              : "global"
+        }
       )
       const baseMessages = chatHistory || messages
       const baseHistory = memory || history
@@ -3608,6 +3667,7 @@ export const useChatActions = ({
             "image-generation"
         const enhancedChatModeParams = {
           ...chatModeParamsWithRegen,
+          servicePromptSnapshot: turnServicePromptSnapshot,
           selectedModel: resolvedImageModelLabel,
           uploadedFiles: turnHasExplicitImageBackend ? [] : turnUploadedFiles,
           imageBackendOverride: turnHasExplicitImageBackend
@@ -3824,6 +3884,7 @@ export const useChatActions = ({
             }
             if (historySelection) {
               await sendNativeHistoryCharacter({
+                t,
                 controller: historySelection,
                 originIsCurrent: historyOriginIsCurrent!,
                 signal,
@@ -3869,6 +3930,19 @@ export const useChatActions = ({
               return { status: "submitted" }
             }
             markSteeringApplied()
+            const hydrationSignal = turnServicePromptSnapshot?.scopeSignal ?? signal
+            const hydratedCharacter = await hydrateTrackedCharacterForSend(
+              resolvedSelectedCharacter,
+              (id) => tldwClient.getCharacter(id, {
+                ...(scope ? { scope } : {}),
+                ...(turnServicePromptSnapshot
+                  ? { requestScope: turnServicePromptSnapshot.requestScope }
+                  : {}),
+                signal: hydrationSignal
+              })
+            )
+            throwIfServicePromptScopeInvalidated(turnServicePromptSnapshot)
+            hydrationSignal.throwIfAborted()
             const characterResult = await characterChatMode({
               message,
               image,
@@ -3878,7 +3952,8 @@ export const useChatActions = ({
               signal,
               model: resolvedModel,
               regenerateFromMessage,
-              character: resolvedSelectedCharacter,
+              character: hydratedCharacter,
+              historyIdOverride,
               messageSteering: messageSteeringForTurn,
               serverChatIdOverride,
               servicePromptSnapshot: turnServicePromptSnapshot
@@ -3915,18 +3990,6 @@ export const useChatActions = ({
           const scopedNormalModeParams = workspaceServerChat.chatId
             ? {
                 ...normalModeParams,
-                // A late local-save failure must not restore this turn's
-                // captured messages over a newly signed-in account's state.
-                setMessages: (next: Parameters<typeof setMessages>[0]) => {
-                  if (!turnServicePromptSnapshot?.scopeInvalidatedSignal.aborted) {
-                    setMessages(next)
-                  }
-                },
-                setHistory: (next: Parameters<typeof setHistory>[0]) => {
-                  if (!turnServicePromptSnapshot?.scopeInvalidatedSignal.aborted) {
-                    setHistory(next)
-                  }
-                },
                 historyId:
                   workspaceServerChat.historyId ?? normalModeParams.historyId,
                 serverChatId: workspaceServerChat.chatId,
@@ -3947,13 +4010,24 @@ export const useChatActions = ({
             signal,
             {
               ...scopedNormalModeParams,
+              setServerChatId,
+              scope,
               ownsAbortController: (turnSignal: AbortSignal) =>
                 activeAbortControllerRef.current?.signal === turnSignal,
               historySelection: normalHistorySelection
                 ? {
                     controller: normalHistorySelection,
                     originIsCurrent: historyOriginIsCurrent!,
-                    temporary: temporaryChat
+                    temporary: temporaryChat,
+                    createServerChat:
+                      resolvedSendMode === "plain" &&
+                      !image &&
+                      !baseMessages.length && !baseHistory.length &&
+                      !normalModeParams.webSearch && !normalModeParams.dynamicUIRequest &&
+                      useConnectionStore.getState().state.isConnected &&
+                      useConnectionStore.getState().state.phase === ConnectionPhase.CONNECTED &&
+                      useConnectionStore.getState().state.mode === "normal" &&
+                      !useConnectionStore.getState().state.offlineBypass
                   }
                 : undefined
             }
@@ -4085,7 +4159,7 @@ export const useChatActions = ({
                 compareServicePromptSnapshot.scopeSignal,
                 async () => {
                   const targetHistoryId = existingHistoryId ?? (
-                    await saveHistory(compareTitle!, false, "web-ui")
+                    await saveHistory(compareTitle!, false, "web-ui", undefined, undefined, compareServicePromptSnapshot.requestScope)
                   ).id
                   await saveSharedCompareMessage(targetHistoryId)
                   return targetHistoryId
@@ -4275,11 +4349,12 @@ export const useChatActions = ({
             }
           }
           if (requestScopeChanged) {
-            // Fan-out requests cannot share one database transaction. Restore
-            // the shared in-memory turn and compensate the local pre-branch
-            // commit after every branch has settled.
-            setMessages(baseMessages)
-            setHistory(baseHistory)
+            // Compensate the captured local turn, but never restore its UI over
+            // an account that replaced the request's owner.
+            if (!compareScopeInvalidated()) {
+              setMessages(baseMessages)
+              setHistory(baseHistory)
+            }
             if (!temporaryChat && activeHistoryId) {
               await rollbackScopedComparePersistence({
                 clusterId,
@@ -4297,10 +4372,11 @@ export const useChatActions = ({
             }
           }
           if (!requestScopeChanged) refreshHistoryFromMessages()
-          setIsProcessing(false)
-          setStreaming(false)
-          setAbortController(null)
-          activeAbortControllerRef.current = null
+          if (!compareScopeInvalidated() && releaseAbortControllerIfOwned(signal)) {
+            setIsProcessing(false)
+            setStreaming(false)
+            setAbortController(null)
+          }
           if (requestScopeChanged) {
             return chatSubmitSkipped("Request scope changed")
           }
@@ -4602,22 +4678,37 @@ export const useChatActions = ({
     notification
   )(messageId, comparison)
 
-  const createServerOnlyChatBranch = async (index: number): Promise<string | null> => {
+  const branchSourceRevision = usePlaygroundSessionStore.getState().restoreRevision
+  const createServerOnlyChatBranch = async (
+    index: number
+  ): Promise<{ chatId: string; historyId: string; messages: Message[] } | null> => {
     if (!serverChatId) return null
+    let owner: ServicePromptSnapshot | undefined
+    const isCurrent = () =>
+      usePlaygroundSessionStore.getState().restoreRevision === branchSourceRevision &&
+      owner !== undefined &&
+      !owner.scopeSignal.aborted &&
+      !owner.scopeInvalidatedSignal.aborted
     try {
-      await tldwClient.initialize().catch(() => null)
+      owner = await loadServicePromptSnapshot([])
+      if (!isCurrent()) return null
+      const requestOptions = {
+        ...(scope ? { scope: structuredClone(scope) } : {}),
+        signal: owner.scopeSignal,
+        requestScope: owner.requestScope
+      }
+      const prefix = structuredClone(excludeLocalRagDiagnostics(messages.slice(0, index + 1)))
+      const snapshot = buildHistoryFromMessages(prefix)
+      if (!prefix.length) throw new Error("Chat history is not ready to branch")
       let title = (serverChatTitle || "").trim()
       let characterId = serverChatCharacterId ?? selectedCharacter?.id ?? null
       let state = normalizeConversationState(serverChatState || "in-progress")
-      try {
-        const source = await tldwClient.getChat(serverChatId, scope ? { scope } : undefined)
-        const sourceCompat = source as typeof source & { conversation_state?: string }
-        title ||= (source?.title || "").trim()
-        characterId = source?.character_id ?? characterId
-        state = normalizeConversationState(source?.state ?? sourceCompat.conversation_state ?? state)
-      } catch {
-        // The active chat's selected character and metadata are sufficient.
-      }
+      const source = await tldwClient.getChat(serverChatId, requestOptions)
+      if (!isCurrent()) return null
+      const sourceCompat = source as typeof source & { conversation_state?: string }
+      title ||= (source?.title || "").trim()
+      characterId = source?.character_id ?? characterId
+      state = normalizeConversationState(source?.state ?? sourceCompat.conversation_state ?? state)
       if (characterId === null || characterId === undefined) throw new Error("Cannot branch server chat without character_id")
       const base = (title || (serverChatTopic || "").trim() || "Extension chat").slice(0, 60)
       const created = await tldwClient.createChat({
@@ -4629,19 +4720,61 @@ export const useChatActions = ({
         cluster_id: serverChatClusterId || undefined,
         source: serverChatSource || undefined,
         external_ref: serverChatExternalRef || undefined
-      }, scope ? { scope } : undefined)
+      }, requestOptions)
+      if (!isCurrent()) return null
       const createdCompat = created as typeof created & { chat_id?: string; conversation_state?: string }
       const chatId = String(created?.id ?? createdCompat.chat_id ?? "")
       if (!chatId) throw new Error("Failed to create server branch chat")
       invalidateServerChatHistory()
-      const prefix = history.slice(0, index + 1)
-      for (const row of prefix) {
-        if (!row.content?.trim()) continue
-        await tldwClient.addChatMessage(chatId, {
-          role: row.role === "system" || row.role === "assistant" ? row.role : "user",
-          content: row.content.trim()
-        }, scope ? { scope } : undefined)
+      const copiedMessages: Message[] = []
+      const copiedIds = new Map<string, string>()
+      for (const original of prefix) {
+        const role = original.role ?? (original.name === "System" ? "system" : original.isBot ? "assistant" : "user")
+        const content = original.message || ""
+        const image = original.images?.find(Boolean) || ""
+        const imageBase64 = image.includes(",") ? image.slice(image.indexOf(",") + 1) : image
+        if (!content.trim() && !imageBase64) continue
+        const parentId = original.parentMessageId ? copiedIds.get(original.parentMessageId) : undefined
+        const receipt = await tldwClient.addChatMessage(chatId, {
+          role,
+          ...(content ? { content } : {}),
+          ...(imageBase64 ? { image_base64: imageBase64 } : {}),
+          ...(parentId ? { parent_message_id: parentId } : {})
+        }, requestOptions)
+        if (!isCurrent()) return null
+        const id = receipt?.id != null ? String(receipt.id) : ""
+        if (!id) throw new Error("Missing copied message receipt")
+        if (original.id) copiedIds.set(original.id, id)
+        if (original.serverMessageId) copiedIds.set(original.serverMessageId, id)
+        copiedMessages.push({
+          ...original,
+          id,
+          serverMessageId: id,
+          serverMessageVersion: receipt.version,
+          parentMessageId: parentId ?? null,
+          variants: undefined,
+          activeVariantIndex: undefined
+        })
       }
+      const ownerKey = serverChatMirrorOwnerKey(owner)
+      const branchHistoryId = await linkServerChatMirror({
+        chatId,
+        title: String(created?.title ?? title),
+        ownerKey,
+        signal: owner.scopeInvalidatedSignal,
+        validate_lease: isCurrent
+      })
+      if (!isCurrent()) return null
+      await reconcileServerChatMirror({
+        historyId: branchHistoryId,
+        chatId,
+        ownerKey,
+        messages: copiedMessages,
+        localMessages: copiedMessages,
+        signal: owner.scopeInvalidatedSignal,
+        validate_lease: isCurrent
+      })
+      if (!isCurrent()) return null
       retireServerBranchRoute(chatId, characterId)
       setServerChatId(chatId)
       setServerChatState(normalizeConversationState(created?.state ?? createdCompat.conversation_state ?? "in-progress"))
@@ -4653,12 +4786,16 @@ export const useChatActions = ({
       setServerChatTitle(String(created?.title ?? serverChatTitle ?? ""))
       setServerChatCharacterId(created?.character_id ?? characterId)
       setServerChatMetaLoaded(true)
-      setMessages(messages.slice(0, index + 1))
-      setHistory(prefix)
-      return chatId
+      setHistoryId(branchHistoryId, { preserveServerChatId: true })
+      setMessages(copiedMessages)
+      setHistory(snapshot)
+      return { chatId, historyId: branchHistoryId, messages: copiedMessages }
     } catch {
+      if (!isCurrent()) return null
       notification.error({ message: "Branch failed", description: "Unable to create a branched server chat. Check your server connection and try again." })
       return null
+    } finally {
+      owner?.release()
     }
   }
 
@@ -4684,9 +4821,12 @@ export const useChatActions = ({
       if (decodeChatErrorPayload(lastAssistant.message) || getLocalRagDiagnosticUser(messages, lastAssistant)) return
       const index = nextMessages.length - 1
       if (index < 0) return
-      const chatId = await createServerOnlyChatBranch(index)
-      if (!chatId) throw new Error("Failed to create branch for regeneration")
-      return { submitExtras: { serverChatIdOverride: chatId } }
+      const branch = await createServerOnlyChatBranch(index)
+      if (!branch) throw new Error("Failed to create branch for regeneration")
+      return {
+        messages: branch.messages,
+        submitExtras: { serverChatIdOverride: branch.chatId, historyIdOverride: branch.historyId }
+      }
     }
   })
 

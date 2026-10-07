@@ -39,9 +39,9 @@ Task 5 implementation from Docs/superpowers/plans/2026-05-18-first-time-readines
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added verify_readiness_lanes with cheap chat and embeddings checks plus delegated speech verification. Added /api/v1/setup/readiness/verify and persisted last_verification in the setup readiness store. Verification results are sanitized before API response and persistence.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -2,7 +2,7 @@
  * Page Object for KnowledgeQA (RAG Search) workflow
  */
 import { type Page, type Locator, expect } from "@playwright/test"
-import { dispatchKeyboardShortcut, waitForAppShell, waitForConnection } from "../helpers"
+import { waitForAppShell, waitForConnection } from "../helpers"
 
 const escapeRegExp = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -149,30 +149,13 @@ export class KnowledgeQAPage {
   // ── Settings Panel ──────────────────────────────────────────────────
 
   async openSettings(): Promise<void> {
-    if (await this.getSettingsDialog().isVisible().catch(() => false)) {
-      return
-    }
-
-    const searchShellSettings = this.searchShell.getByRole("button", {
-      name: "Open settings"
-    })
-    if (await searchShellSettings.isVisible().catch(() => false)) {
-      await searchShellSettings.click()
-      return
-    }
-
-    const enableInSettings = this.page.getByRole("button", {
-      name: /Enable in Settings/i
-    })
-    if (await enableInSettings.isVisible().catch(() => false)) {
-      await enableInSettings.click()
-      return
-    }
-
-    const fallbackSettings = this.page.getByRole("button", {
-      name: "Open settings"
-    })
-    await fallbackSettings.last().click()
+    const dialog = this.getSettingsDialog()
+    if (await dialog.isVisible()) return
+    await this.searchShell.getByRole("button", {
+      name: "Open Knowledge QA settings",
+      exact: true,
+    }).click()
+    await expect(dialog).toBeVisible({ timeout: 20_000 })
   }
 
   async selectPreset(preset: "fast" | "balanced" | "thorough"): Promise<void> {
@@ -244,9 +227,7 @@ export class KnowledgeQAPage {
       sourceKind === "media" ? /Documents & Media/i : /^Notes\b/i
     await selector.getByRole("button", { name: tabPattern }).click()
 
-    const filter = selector.getByPlaceholder(
-      sourceKind === "media" ? /Filter docs by title/i : /Filter notes by title/i
-    )
+    const filter = selector.getByRole("textbox", { name: "Find documents or notes" })
     await expect(filter).toBeVisible({ timeout: 15_000 })
     await filter.fill(title)
 
@@ -256,11 +237,13 @@ export class KnowledgeQAPage {
     await expect(checkbox).toBeVisible({ timeout: 20_000 })
     await checkbox.check()
 
+    await selector.getByRole("button", { name: "Done", exact: true }).click()
+    await expect(selector).toBeHidden()
+
     await expect(scope.getByText(/Searching \d+ item/i).first()).toBeVisible({
       timeout: 10_000,
     })
 
-    await this.page.keyboard.press("Escape").catch(() => {})
     const closeScope = scope.getByRole("button", { name: "Close source scope" })
     if (await closeScope.isVisible().catch(() => false)) {
       await closeScope.click()
@@ -273,7 +256,7 @@ export class KnowledgeQAPage {
   async getFollowUpInput(): Promise<Locator> {
     const stickyInput = this.page.getByTestId("knowledge-followup-sticky")
     if (await stickyInput.isVisible().catch(() => false)) {
-      return stickyInput
+      return stickyInput.getByRole("textbox", { name: "Ask a follow-up question" })
     }
 
     return this.page.locator(
@@ -329,7 +312,12 @@ export class KnowledgeQAPage {
   // ── Keyboard Shortcuts ──────────────────────────────────────────────
 
   async pressNewSearch(): Promise<void> {
-    await dispatchKeyboardShortcut(this.page, { key: "k", ctrlKey: true })
+    const newSearch = this.page.getByRole("button", { name: "New search", exact: true })
+    if (await newSearch.isVisible().catch(() => false)) {
+      await newSearch.click()
+    } else {
+      await this.page.getByRole("button", { name: "Clear search", exact: true }).click()
+    }
   }
 
   async pressSlashToFocus(): Promise<void> {
@@ -371,6 +359,7 @@ export class KnowledgeQAPage {
 
   getEvidencePanel(): Locator {
     return this.page.getByRole("complementary", { name: /Evidence panel/i })
+      .or(this.page.getByRole("dialog", { name: "Evidence", exact: true }))
   }
 
   getCitationButtons(): Locator {

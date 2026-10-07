@@ -11,12 +11,11 @@
  */
 
 import type { Page } from '@playwright/test';
-import type { DiagnosticsData } from './smoke.setup';
+import type { DiagnosticsData, SmokeHardGateAllowlistRule } from './smoke.setup';
 import {
   test,
   expect,
   seedAuth,
-  SMOKE_HARD_GATE_ALLOWLIST,
   getCriticalIssues,
   classifySmokeIssues,
   validateSmokeHardGateAllowlist,
@@ -294,12 +293,34 @@ async function visitRouteWithTransientRetry(
 
   for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRY_ATTEMPTS; attempt += 1) {
     resetDiagnostics(diagnostics);
+    const manifestResponse = routePath === '/documentation'
+      ? page.waitForResponse(response => new URL(response.url()).pathname === '/api/documentation/manifest', { timeout: LOAD_TIMEOUT }).catch(() => null)
+      : null;
+    const contentResponse = routePath === '/documentation'
+      ? page.waitForResponse(response => new URL(response.url()).pathname === '/api/documentation/content', { timeout: LOAD_TIMEOUT }).catch(() => null)
+      : null;
     try {
       response = await page.goto(routePath, {
         waitUntil: 'domcontentloaded',
         timeout: LOAD_TIMEOUT,
       });
       await waitForAppShell(page, NETWORK_IDLE_TIMEOUT);
+      if (manifestResponse) {
+        const manifest = await manifestResponse;
+        expect(manifest, 'Documentation manifest response').not.toBeNull();
+        expect(manifest!.status(), 'Documentation manifest HTTP status').toBe(200);
+        const payload = await manifest!.json();
+        expect(payload.docsBySource.server).toEqual(expect.arrayContaining([
+          expect.objectContaining({ source: 'server', relativePath: 'API-related/AuthNZ-API-Guide.md' }),
+        ]));
+        const content = await contentResponse;
+        expect(content, 'Documentation content response').not.toBeNull();
+        expect(content!.status(), 'Documentation content HTTP status').toBe(200);
+        const document = await content!.json();
+        expect(document.content.trim(), 'Documentation content').not.toBe('');
+        await expect(page.locator('.prose').first()).toBeVisible();
+        await expect(page.locator('.prose').first()).not.toHaveText('');
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       const isNavigationTimeout = TRANSIENT_NAVIGATION_TIMEOUT_PATTERN.test(errorMessage);
@@ -402,12 +423,15 @@ test.describe('Smoke Tests - All Pages', () => {
   });
 
   test('hard-gate allowlist rejects invalid calendar expiry metadata', () => {
-    const baseRule = SMOKE_HARD_GATE_ALLOWLIST[0];
-    expect(baseRule).toBeDefined();
+    const baseRule: SmokeHardGateAllowlistRule = {
+      id: 'expiry-contract', scope: 'console', pattern: /fixture/,
+      rationale: 'Metadata validation fixture', owner: 'WebUI',
+      expiresOn: '2026-09-30', routes: ['/fixture'],
+    };
 
     const allowlistProblems = validateSmokeHardGateAllowlist([
       {
-        ...baseRule!,
+        ...baseRule,
         id: 'invalid-calendar-expiry',
         expiresOn: '2026-99-99',
       },
@@ -416,6 +440,58 @@ test.describe('Smoke Tests - All Pages', () => {
     expect(allowlistProblems).toContain(
       'invalid-calendar-expiry: expiresOn must be a valid YYYY-MM-DD date'
     );
+  });
+
+  test('hard-gate allowlist expires immediately after its UTC expiry day', () => {
+    const baseRule: SmokeHardGateAllowlistRule = {
+      id: 'expiry-contract', scope: 'console', pattern: /fixture/,
+      rationale: 'Metadata validation fixture', owner: 'WebUI',
+      expiresOn: '2026-09-30', routes: ['/fixture'],
+    };
+    const rule = {
+      ...baseRule,
+      id: 'utc-expiry-boundary',
+      expiresOn: '2026-09-30',
+    };
+
+    expect(
+      validateSmokeHardGateAllowlist([rule], new Date('2026-09-30T23:59:59.999Z'))
+    ).toEqual([]);
+    expect(
+      validateSmokeHardGateAllowlist([rule], new Date('2026-10-01T00:00:00.000Z'))
+    ).toEqual(['utc-expiry-boundary: expired on 2026-09-30']);
+  });
+
+  test('documentation navigation failure handles pending response waits', async ({ page, diagnostics }) => {
+    const originalGoto = page.goto;
+    page.goto = async () => {
+      throw new Error('page.goto: net::ERR_CONNECTION_REFUSED');
+    };
+    try {
+      await expect(visitRouteWithTransientRetry(page, diagnostics, '/documentation'))
+        .rejects.toThrow('net::ERR_CONNECTION_REFUSED');
+    } finally {
+      page.goto = originalGoto;
+      await page.close();
+    }
+  });
+
+  test('documentation smoke rejects a delayed manifest HTTP500', async ({ page, diagnostics }) => {
+    await page.route('**/api/documentation/manifest', async route => {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"delayed fixture failure"}' });
+    });
+    await expect(visitRouteWithTransientRetry(page, diagnostics, '/documentation'))
+      .rejects.toThrow('Documentation manifest');
+  });
+
+  test('documentation smoke rejects a delayed content HTTP500', async ({ page, diagnostics }) => {
+    await page.route('**/api/documentation/content?*', async route => {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"delayed fixture failure"}' });
+    });
+    await expect(visitRouteWithTransientRetry(page, diagnostics, '/documentation'))
+      .rejects.toThrow('Documentation content');
   });
 
   // Generate a test for each active page
@@ -736,10 +812,11 @@ test.describe('Smoke Tests - Wayfinding', () => {
 
   test('404 recovery controls keep predictable keyboard order', async ({ page, diagnostics }) => {
     test.setTimeout(ROUTE_TEST_TIMEOUT);
-    await page.goto(WAYFINDING_404_PATH, {
+    const response = await page.goto(WAYFINDING_404_PATH, {
       waitUntil: 'domcontentloaded',
       timeout: LOAD_TIMEOUT,
     });
+    expect(response?.status(), 'The deliberately missing document must return 404').toBe(404);
     await waitForAppShell(page, NETWORK_IDLE_TIMEOUT);
 
     const hasWayfindingPanel = (await page.getByTestId('not-found-recovery-panel').count()) > 0;
@@ -770,7 +847,15 @@ test.describe('Smoke Tests - Wayfinding', () => {
     await expect(page.getByTestId('not-found-open-research')).toBeFocused();
 
     const issues = getCriticalIssues(diagnostics);
-    const classifiedIssues = classifySmokeIssues(WAYFINDING_404_PATH, issues);
+    const classifiedIssues = classifySmokeIssues(WAYFINDING_404_PATH, {
+      ...issues,
+      consoleErrors: issues.consoleErrors.filter(
+        (entry) => !(
+          entry.location?.url === response?.url() &&
+          entry.text === 'Failed to load resource: the server responded with a status of 404 (Not Found)'
+        )
+      ),
+    });
     await assertNoRuntimeOverlay(page, issues, `wayfinding:${WAYFINDING_404_PATH}`);
     expect(
       issues.pageErrors,
@@ -842,7 +927,16 @@ test.describe('Smoke Tests - Route Error Boundaries', () => {
       }
 
       const issues = getCriticalIssues(diagnostics);
-      const classifiedIssues = classifySmokeIssues(target.path, issues);
+      const boundaryLog = `[RouteErrorBoundary:${target.routeId}] Error: Forced route boundary error for ${target.routeId}`;
+      expect(issues.consoleErrors.some(entry => entry.text.startsWith(`${boundaryLog}\n`))).toBe(true);
+      const unexpectedIssues = {
+        ...issues,
+        consoleErrors: issues.consoleErrors.filter(entry =>
+          !entry.text.startsWith(`${boundaryLog}\n`) &&
+          !entry.text.startsWith('The above error occurred in the <ForcedRouteErrorProbe> component:\n')
+        ),
+      };
+      const classifiedIssues = classifySmokeIssues(target.path, unexpectedIssues);
       await assertNoRuntimeOverlay(page, issues, `route-boundary:${fixturePath}`);
       assertWarningHardGate(target.path, classifiedIssues);
     });

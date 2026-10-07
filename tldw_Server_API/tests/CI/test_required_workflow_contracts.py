@@ -140,16 +140,26 @@ def test_coverage_required_is_path_conditional() -> None:
     assert "coverage-required" in jobs
 
 
-def test_conditional_required_lanes_run_after_successful_change_detection() -> None:
+def test_conditional_required_lanes_run_whenever_change_detection_ran() -> None:
+    """Not only when it succeeded: a failed `changes`, or a license wait that did not pass, used
+    to skip the required job, which GitHub counts as satisfied. The lane now runs and its first
+    steps fail it (TASK-13462, TASK-13502; truth table in test_merge_queue_gate_workflows.py)."""
     for workflow_path, job_name in (
         (".github/workflows/coverage-required.yml", "coverage-required"),
         (".github/workflows/e2e-required.yml", "e2e-required"),
     ):
         job = _load(workflow_path)["jobs"][job_name]
-        assert job["needs"] == ["changes"]
-        assert " ".join(job["if"].split()) == (
-            "always() && !cancelled() && needs.changes.result == 'success'"
-        )
+        assert job["needs"] == ["changes", "admission", "await_license"]
+        condition = " ".join(job["if"].split())
+        assert "needs.changes.result" not in condition
+        assert (
+            "github.event_name != 'workflow_run' && needs.await_license.result != 'skipped' && "
+            "needs.await_license.outputs.license_passed != 'true'"
+        ) in condition
+        assert [step["name"] for step in job["steps"][:2]] == [
+            "Require the license audit to have passed",
+            "Require change detection to have succeeded",
+        ]
 
 
 def test_coverage_required_installs_portaudio_for_pyaudio_builds() -> None:
@@ -619,13 +629,16 @@ def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
         "'s|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' || true"
         in linux_script
     )
-    assert "Acquire::http::Timeout=20" in linux_script
+    assert 'source "${{ github.action_path }}/../apt-bounded.sh"' in linux_script
+    assert 'apt_bounded update "${apt_opts[@]}"' in linux_script
+    # PortAudio installs on its own when FFmpeg is skipped.
+    assert 'if [ "${{ inputs.install-ffmpeg }}" = "true" ]; then\n  packages+=(ffmpeg)' in linux_script
     assert (
-        "sudo apt-get install -y --no-install-recommends ffmpeg portaudio19-dev python3-all-dev"
-        in linux_script
-    )
+        'if [ "${{ inputs.install-portaudio }}" = "true" ]; then\n'
+        "  packages+=(portaudio19-dev python3-all-dev)"
+    ) in linux_script
     assert (
-        "sudo apt-get install -y --no-install-recommends portaudio19-dev python3-all-dev"
+        'apt_bounded install -y --no-install-recommends "${apt_opts[@]}" "${packages[@]}"'
         in linux_script
     )
 
@@ -643,9 +656,21 @@ def test_wait_for_postgres_action_bounds_linux_client_install() -> None:
         "'s|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' || true"
         in install_script
     )
-    assert "Acquire::http::Timeout=20" in install_script
-    assert "Acquire::https::Timeout=20" in install_script
-    assert "sudo apt-get install -y --no-install-recommends postgresql-client" in install_script
+    assert 'source "${{ github.action_path }}/../apt-bounded.sh"' in install_script
+    assert 'apt_bounded update "${apt_opts[@]}"' in install_script
+    assert (
+        'apt_bounded install -y --no-install-recommends "${apt_opts[@]}" postgresql-client'
+        in install_script
+    )
+
+
+def test_apt_bounded_helper_sets_timeouts_and_wall_clock_bound() -> None:
+    helper = Path(".github/actions/apt-bounded.sh").read_text(encoding="utf-8")
+    assert "Acquire::http::Timeout=20" in helper
+    assert "Acquire::https::Timeout=20" in helper
+    assert 'apt_deadline=$((SECONDS + ${APT_TOTAL_SECONDS:-600}))' in helper
+    assert 'sudo timeout --kill-after=15s "$limit" apt-get "$@"' in helper
+    assert 'sudo timeout --kill-after=10s "$limit" dpkg --configure -a' in helper
 
 
 def test_full_suite_ffmpeg_setup_scopes_heavy_install_to_media_runtime_shards() -> None:
@@ -843,7 +868,11 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         }.issubset(shard_names)
         auth_db_shards = {
             "auth-core-root-property",
-            "auth-core-unit-a-l",
+            "auth-core-unit-admin-api",
+            "auth-core-unit-auth",
+            "auth-core-unit-authnz",
+            "auth-core-unit-b-d",
+            "auth-core-unit-e-l",
             "auth-core-unit-m-z",
             "auth-integration-admin-auth",
             "auth-integration-authnz",
@@ -855,7 +884,8 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "chacha-core-stores",
             "chacha-character-conversation",
             "chacha-content-persona",
-            "db-management-a-l",
+            "db-management-a-c",
+            "db-management-d-l",
             "db-privileges",
         }
         assert auth_db_shards.issubset(shard_names)
@@ -1036,7 +1066,9 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py",
@@ -1047,6 +1079,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py",
         }
         assert shard_path_sets["media-ingestion-new-unit-mediawiki"] == {
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py",
@@ -1063,7 +1096,6 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py",
-            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py",
@@ -1374,6 +1406,9 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_assistant_startup.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_api.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_transport.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py",
@@ -1827,6 +1862,83 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert set(covered_workflow_files) == workflow_files
 
 
+def test_db_management_partitions_cover_each_file_once() -> None:
+    """Bound the slow database shard without dropping or duplicating any test file."""
+    workflow = _load(".github/workflows/ci.yml")
+    root = Path("tldw_Server_API/tests/DB_Management")
+    files = {path.as_posix() for path in root.glob("test_[a-l]*.py")}
+    patterns = {
+        "db-management-a-c": (
+            "test_[a-b]*.py", "test_character_*.py", "test_chat_*.py",
+            "test_claims_*.py", "test_con*.py", "test_core_*.py",
+        ),
+        "db-management-d-l": ("test_[d-l]*.py",),
+    }
+    jobs = (
+        "full-suite-linux-312-shards",
+        "full-suite-linux-313-shards",
+        "full-suite-macos-312-shards",
+        "full-suite-windows-312-shards",
+        "full-suite-os-313-release-shards",
+    )
+    for job in jobs:
+        shards = {
+            shard["name"]: set(str(shard["paths"]).split())
+            for shard in workflow["jobs"][job]["strategy"]["matrix"]["shard"]
+        }
+        assert "db-management-a-l" not in shards
+        assert (root / "test_chacha_*.py").as_posix() in shards["chacha-core-stores"]
+        covered: list[str] = [
+            filename for filename in files
+            if any(fnmatch.fnmatch(filename, pattern) for pattern in shards["chacha-core-stores"])
+        ]
+        for name, globs in patterns.items():
+            expected = {(root / pattern).as_posix() for pattern in globs}
+            assert shards[name] == expected
+            covered.extend(
+                filename for filename in files
+                if any(fnmatch.fnmatch(filename, pattern) for pattern in expected)
+            )
+        assert len(covered) == len(set(covered))
+        assert set(covered) == files
+
+
+def test_auth_core_unit_partitions_cover_each_file_once() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    root = Path("tldw_Server_API/tests/AuthNZ/unit")
+    files = {str(path) for path in root.glob("test_[a-l]*.py")}
+    patterns = {
+        "auth-core-unit-admin-api": ("test_admin*.py", "test_alerting.py", "test_api*.py"),
+        "auth-core-unit-auth": ("test_auth_*.py",),
+        "auth-core-unit-authnz": ("test_authnz_*.py",),
+        "auth-core-unit-b-d": ("test_[b-d]*.py",),
+        "auth-core-unit-e-l": ("test_[e-l]*.py",),
+    }
+    jobs = (
+        "full-suite-linux-312-shards",
+        "full-suite-linux-313-shards",
+        "full-suite-macos-312-shards",
+        "full-suite-windows-312-shards",
+        "full-suite-os-313-release-shards",
+    )
+    for job in jobs:
+        shards = {
+            shard["name"]: set(str(shard["paths"]).split())
+            for shard in workflow["jobs"][job]["strategy"]["matrix"]["shard"]
+        }
+        assert "auth-core-unit-a-l" not in shards
+        covered: list[str] = []
+        for name, globs in patterns.items():
+            expected = {str(root / pattern) for pattern in globs}
+            assert shards[name] == expected
+            covered.extend(
+                filename for filename in files
+                if any(fnmatch.fnmatch(filename, pattern) for pattern in expected)
+            )
+        assert len(covered) == len(set(covered))
+        assert set(covered) == files
+
+
 def test_legacy_free_media_checks_run_on_dedicated_shard() -> None:
     workflow = _load(".github/workflows/ci.yml")
     legacy_free_steps = [
@@ -1881,3 +1993,126 @@ def test_full_suite_shards_fail_a_hung_test_instead_of_the_shard() -> None:
         for script in scripts:
             assert "-p pytest_timeout" in script, job_name
             assert "timeout_method=" in script, job_name
+
+
+def test_critical_e2e_installs_the_backend_playwright_browser(tmp_path) -> None:
+    """Execute the install step: both runtimes need their own Chromium revision."""
+    import os
+    import shutil
+    import subprocess  # nosec B404 - execute checked-in workflow steps in a temporary test directory
+
+    workflow = _load(".github/workflows/frontend-e2e-tiers.yml")
+    steps = workflow["jobs"]["critical"]["steps"]
+    browser_step = _get_step(steps, "Install Playwright browsers")
+    calls = tmp_path / "calls.txt"
+    for tool in ("python", "bunx"):
+        executable = tmp_path / tool
+        executable.write_text('#!/bin/sh\nprintf "%s|%s\\n" "${0##*/}" "$*" >> "$CALL_LOG"\n')
+        executable.chmod(0o700)
+    bash = shutil.which("bash")
+    assert bash is not None, "Workflow shell bash is required"
+    result = subprocess.run(  # nosec B603 - trusted repository YAML, isolated cwd and stubbed installers
+        [bash, "-e", "-c", browser_step["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}", "CALL_LOG": str(calls)},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    commands = calls.read_text().splitlines()
+    assert "python|-m playwright install --with-deps chromium" in commands
+    assert "bunx|playwright install --with-deps chromium" in commands
+    assert steps.index(browser_step) < steps.index(_get_step(steps, "Run critical E2E tests"))
+
+
+def test_critical_e2e_budget_preserves_other_policies_and_still_enforces_limits(tmp_path) -> None:
+    """Parallel browser journeys share one principal; their fixture budget stays finite."""
+    import asyncio
+    import os
+    import shutil
+    import subprocess  # nosec B404 - execute checked-in workflow steps in a temporary test directory
+
+    from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor, RGRequest
+
+    workflow = _load(".github/workflows/frontend-e2e-tiers.yml")["jobs"]["critical"]
+    step = _get_step(workflow["steps"], "Configure shared browser-test request budget")
+    source_path = Path("tldw_Server_API/Config_Files/resource_governor_policies.yaml")
+    source = _load(str(source_path))
+    copied = tmp_path / source_path
+    copied.parent.mkdir(parents=True)
+    copied.write_text(source_path.read_text())
+    output = tmp_path / workflow["env"]["RG_POLICY_PATH"]
+    bash = shutil.which("bash")
+    assert bash is not None, "Workflow shell bash is required"
+    subprocess.run(  # nosec B603 - trusted repository YAML writes only a temporary policy fixture
+        [bash, "-e", "-c", step["run"]], cwd=tmp_path,
+        env={**os.environ, "RG_POLICY_PATH": str(output)}, check=True,
+        capture_output=True, text=True,
+    )
+    configured = _load(str(output))
+
+    async def allowed_count(policies: dict, count: int) -> int:
+        governor = MemoryResourceGovernor(policies=policies, time_source=lambda: 0.0)
+        request = RGRequest(entity="user:1", categories={"requests": {"units": 1}}, tags={"policy_id": "character_chat.default"})
+        allowed = 0
+        for number in range(count):
+            decision, _ = await governor.reserve(request, op_id=str(number))
+            allowed += int(decision.allowed)
+        return allowed
+
+    assert asyncio.run(allowed_count(source["policies"], 601)) == 600
+    assert asyncio.run(allowed_count(configured["policies"], 1201)) == 1200
+    configured["policies"]["character_chat.default"]["requests"]["rpm"] = 300
+    assert configured == source
+    assert workflow["steps"].index(step) < workflow["steps"].index(_get_step(workflow["steps"], "Start backend server"))
+
+
+def test_required_backend_jobs_override_skipped_ancestor_status() -> None:
+    """An intentional admission skip must not suppress successful downstream gates."""
+    targets = {
+        ".github/workflows/ci.yml": (
+            "full-suite-linux-312-shards",
+            "full-suite-linux-313-shards", "full-suite-macos-312-shards",
+            "full-suite-windows-312-shards", "full-suite-os-313-release-shards",
+            "character-chat-rate-limits",
+        ),
+        ".github/workflows/jobs-suite.yml": ("jobs-postgres",),
+    }
+    for path, names in targets.items():
+        jobs = _load(path)["jobs"]
+        for name in names:
+            job = jobs[name]
+            condition = " ".join(str(job.get("if", "")).split())
+            assert "!cancelled()" in condition, (path, name)
+            dependencies = job["needs"]
+            if isinstance(dependencies, str):
+                dependencies = [dependencies]
+            for dependency in dependencies:
+                assert any(
+                    f"{reference}.result == 'success'" in condition
+                    for reference in (f"needs['{dependency}']", f"needs.{dependency}")
+                ), (path, name, dependency)
+
+
+def test_selected_full_suite_summaries_reject_unexecuted_shards(tmp_path: Path) -> None:
+    """Execute the real summary shell with successful, skipped and failed results."""
+    import shutil
+    import subprocess  # nosec B404 - run checked-in summary commands in an isolated directory
+
+    bash = shutil.which("bash")
+    assert bash is not None
+    jobs = _load(".github/workflows/ci.yml")["jobs"]
+    for name, job in jobs.items():
+        if not name.startswith("full-suite-") or not name.endswith("-summary"):
+            continue
+        shard = job["needs"][0]
+        script = job["steps"][0]["run"]
+        placeholder = "${{ needs['" + shard + "'].result }}"
+        assert placeholder in script
+        for result in ("success", "skipped", "failure", "cancelled"):
+            process = subprocess.run(  # nosec B603 - trusted workflow shell with fixed result values
+                [bash, "-c", script.replace(placeholder, result)],
+                cwd=tmp_path, capture_output=True, text=True, timeout=5, check=False,
+            )
+            assert (process.returncode == 0) is (result == "success"), (name, result, process.stdout)

@@ -43,7 +43,7 @@ Source: synthesis F34
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RATCHET LANDED: tldw_Server_API/tests/lint/test_core_to_api_import_boundary.py.
 
 Three tests, each PROVEN to fail rather than assumed to work:
@@ -62,7 +62,7 @@ Still open: the 20 true inversions themselves, particularly persistence.py where
 2026-09-23 reconciliation: AC1 met with a corrected number - tests/lint/test_core_to_api_import_boundary.py (commit 0dd37ea2bf) records CORE_TO_API_BASELINE of 105 files, not 106; the 106 was a grep overcount (a docstring in DB_Management/db_errors.py) and the AST scan is the correct figure. 3 passed on 2026-09-23. AC2 met - TRUE_INVERSION_BASELINE holds exactly 20 files, with its own test_no_new_true_inversions and test_baselines_only_shrink. Caveat: the ban works per file, so a new endpoints/API_Deps import added inside one of those 20 files is not caught. AC3 NOT met - Ingestion_Media_Processing/persistence.py still imports api.v1.endpoints.media (:2699, :4879), endpoints.media_embeddings (:2508) and API_Deps.validations_deps (:1887, :2709), and still resolves collaborators through the endpoints.media getattr seam. AC4 NOT met and its premise is wrong - chat_service.py:34, chat_history.py:29 and chat_helpers.py:13 still import DEFAULT_CHARACTER_NAME from API_Deps/ChaCha_Notes_DB_Deps.py:350 ('Helpful AI Assistant'), which is not the same as core Character_Chat/modules/character_utils.py:16 ('Character'). Just repointing the imports would change which character card gets looked up. The owner has to choose the value before the constant can move to core.
 
 2026-09-23: AC4 done (0eacb750fd) - owner chose 'Helpful AI Assistant'; DEFAULT_CHARACTER_NAME/DESCRIPTION now in core/Character_Chat/constants.py, API_Deps re-exports; chat_history left the core->api baseline, chat_history+chat_helpers left the true-inversion list (ratchet 3 passed). Distinct from character_utils.DEFAULT_CHARACTER_NAME ('Character'), which is the {{char}} placeholder. AC3 done (aaa444b83e) - persistence.add_media_orchestrate / process_document_like_item take file_validator, temp_dir_manager_cls, template_classifier, process_document_content as keyword args defaulting to core; no endpoints.media import or getattr seam remains; shared validator built in core (Upload_Sink.get_default_file_validator). Tests retargeted to the core modules. Media suites: identical failure sets vs HEAD. Remaining inversion in persistence.py: schedule_media_add_embeddings imports endpoints.media_embeddings (outside this AC). Bandit -ll: no findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -235,6 +235,7 @@ export type KnowledgeSourceHealth = {
 }
 
 export type KnowledgeSourceHealthState = {
+  personalContentError?: string | null
   bySource: Partial<Record<RagSettings["sources"][number], KnowledgeSourceHealth>>
   sources: KnowledgeSourceHealth[]
   loading: boolean
@@ -343,8 +344,8 @@ export type KnowledgeQAActions = {
   setExtensionFailureState: (state: ExtensionKnowledgeFailureState | null) => void
 
   // Thread actions
-  createNewThread: (title?: string) => Promise<string>
-  startNewTopic: () => Promise<string>
+  createNewThread: (title?: string) => Promise<string | null>
+  startNewTopic: () => Promise<string | null>
   selectThread: (threadId: string) => Promise<ThreadHydrationResult>
   selectSharedThread: (shareToken: string) => Promise<ThreadHydrationResult>
   askFollowUp: (question: string) => Promise<void>

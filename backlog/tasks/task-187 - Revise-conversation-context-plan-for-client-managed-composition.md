@@ -45,11 +45,11 @@ Update the approved Conversation Context design and implementation plan to refle
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: searched the revised spec and plan for backend-owned context-preview/source-of-truth wording, confirmed the remaining context-preview references are explicit negative guardrails, confirmed ASCII-only content, and ran git diff --check successfully.
 
 Bandit: not run because this task only revises design/planning markdown plus a Backlog task; no Python application code was touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

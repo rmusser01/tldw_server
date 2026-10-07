@@ -43,7 +43,7 @@ Implement the next bounded Chat/Playground migration slice from the design-syste
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after PR #1290 merged into dev at merge commit b0db36f1074e65c2db75a548c2fbabebc5ed66b3. Work is isolated in .worktrees/tldw-playground-banner-design-system on branch codex/tldw-playground-banner-design-system from origin/dev.
 
 Verification:
@@ -56,7 +56,7 @@ Verification:
 - `git diff --check` passed.
 - Bandit skipped: this is a frontend-only TypeScript/React migration with no Python touched scope.
 - PR review pass: CodeRabbit and Qodo both flagged the same accessibility issue in DocumentGeneratorDrawer. Added `role="status"` and `aria-live="polite"` to the non-urgent capability and missing-conversation Alert instances, plus regression assertions for both attributes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

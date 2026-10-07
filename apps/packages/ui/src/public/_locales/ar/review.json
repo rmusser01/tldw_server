@@ -780,7 +780,7 @@
     "message": "غير مصرح لك بالحفظ"
   },
   "mediaPage_spreadMode": {
-    "message": "مقارنة"
+    "message": "جنبًا إلى جنب"
   },
   "mediaPage_listMode": {
     "message": "تركيز"
@@ -789,13 +789,13 @@
     "message": "تكديس"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "عرض العناصر المحددة جنبًا إلى جنب للمقارنة"
+    "message": "ترتيب العناصر المحددة جنبًا إلى جنب"
   },
   "mediaPage_listModeTooltip": {
     "message": "عرض عنصر واحد في كل مرة مع التنقل"
   },
   "mediaPage_allModeTooltip": {
-    "message": "عرض جميع العناصر المحددة في قائمة قابلة للتمرير"
+    "message": "عرض نافذة القراءة الحالية في قائمة قابلة للتمرير"
   },
   "mediaPage_copyContentLabel": {
     "message": "نسخ المحتوى"
@@ -834,19 +834,19 @@
     "message": "حدد العناصر"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "انقر على العناصر في اللوحة اليسرى لإضافتها إلى العارض."
+    "message": "حدد بالمربعات ثم اختر قراءة المحدد. انقر أو اضغط Enter للمعاينة."
   },
   "mediaPage_firstUseStep2": {
     "message": "اختر عرضًا"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "استخدم \"مقارنة\" لعرض جنبًا إلى جنب، أو \"تركيز\" لعرض عنصر واحد في كل مرة، أو \"تكديس\" لعرض الكل."
+    "message": "جنبًا إلى جنب للتخطيط؛ التركيز لعنصر واحد؛ التكديس لنافذة القراءة الحالية. مقارنة المحتوى تقارن النص."
   },
   "mediaPage_firstUseStep3": {
     "message": "تنقل"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "استخدم أزرار السابق/التالي أو لوحة المفاتيح (Tab + Enter) للتنقل بين العناصر."
+    "message": "السابق/التالي أو j/k للتنقل في السياق النشط. Tab ثم Space لتحديد مربع."
   },
   "mediaPage_gotIt": {
     "message": "فهمت"
@@ -1327,5 +1327,11 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "Choose an analysis provider, then retry analysis."
+  },
+  "mediaPage_resultsHint": {
+    "message": "انقر أو اضغط Enter للمعاينة. Space على مربع الاختيار يحدد. Shift+نقر يحدد نطاقًا."
+  },
+  "mediaPage_viewerAll": {
+    "message": "نافذة القراءة (مكدسة)"
   }
 }

@@ -40,9 +40,9 @@ See Docs/superpowers/plans/2026-06-07-knowledge-first-run-empty-recovery-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a Knowledge QA ready-state recovery classifier that distinguishes no indexed sources, no selected sources, web-only search, backend unavailable, and ready states. Updated first-run copy to describe searching selected personal-library sources and inspecting citations. Added no-indexed add/index CTAs to existing Media/Notes surfaces, no-selected source selection CTAs, visible inline disabled-search explanations, server-capability-aware web fallback controls, and conditional no-results actions. Added WebUI and extension route specs for empty recovery states; runtime browser execution is documented as blocked by local Chromium/WXT issues.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

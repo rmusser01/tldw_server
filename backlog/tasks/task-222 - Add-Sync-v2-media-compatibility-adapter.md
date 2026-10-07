@@ -49,7 +49,7 @@ Implement Task 5 from the Chatbook sync engine implementation plan: add the Sync
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started implementation in worktree .worktrees/codex-sync-v2-schemas on branch codex/sync-v2-schemas. Using tests-first flow and keeping legacy /sync/send and /sync/get behavior unchanged.
 
 Implemented MediaCompatibilityAdapter with legacy Media/Keywords create-update-delete validation, MediaKeywords link-unlink validation, default Sync v2 media registry wiring, and legacy sync-log to SyncEnvelopeCreate conversion that keeps plaintext fields out of payload_clear for client_private_v1 payloads.
@@ -61,7 +61,7 @@ Review follow-up: fixing decoded dict payload support in legacy_media_sync_log_t
 Review fix implemented: legacy payload normalization now accepts decoded mapping payloads, JSON object strings, and empty/None payloads. Mapping payload hash and size are computed from canonical compact JSON with sorted keys; non-object JSON values and non-string/non-mapping payload values raise ValueError. Regression coverage added for MediaDatabase-style decoded dict payloads and non-object payload rejection.
 
 Review fix verification: pytest tldw_Server_API/tests/Sync/test_sync_v2_media_compat.py -q => 20 passed, 5 warnings. pytest tldw_Server_API/tests/Sync/test_sync_v2_media_compat.py tldw_Server_API/tests/MediaDB2/test_sync_server.py tldw_Server_API/tests/MediaDB2/test_sync_client.py -q => 62 passed, 5 warnings. Bandit media adapter scan => 0 findings, JSON at /tmp/bandit_sync_v2_media_payload_fix.json. git diff --check => passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

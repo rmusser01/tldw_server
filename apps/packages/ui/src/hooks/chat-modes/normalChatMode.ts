@@ -14,8 +14,10 @@ import {
 import type { HistoryTurnRecovery } from "@/db/dexie/types"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useMcpToolsStore } from "@/store/mcp-tools"
+import { resolveChatToolRequest } from "@/utils/chat-tools"
 import { systemPromptForNonRagOption } from "~/services/tldw-server"
 import {
+  useStoreMessageOption,
   type ChatHistory,
   type Message,
   type MessageMetadataExtra,
@@ -61,6 +63,8 @@ import {
   type ServicePromptSnapshot
 } from "@/services/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import type { ChatScope } from "@/types/chat-scope"
+import { WEBUI_CHAT_SOURCE } from "@/utils/character-chat-session"
 
 interface WebSearchPayload {
   query: string
@@ -154,10 +158,16 @@ type NormalChatModeParams = {
     controller: HistorySelectionController
     originIsCurrent: () => boolean
     temporary?: boolean
+    createServerChat?: boolean
   }
   historyTurn?: HistorySendTurn
 
   selectedModel: string
+  /** Resolved selector values still follow their global source unless explicitly overridden. */
+  selectionSource?: {
+    model: "global" | "explicit"
+    toolChoice: "global" | "explicit"
+  }
   useOCR: boolean
   selectedSystemPrompt: string
   currentChatModelSettings: any
@@ -185,6 +195,8 @@ type NormalChatModeParams = {
   discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
   serverChatId?: string | null
+  setServerChatId?: (id: string) => void
+  scope?: ChatScope
   setHistoryId: (id: string) => void
   uploadedFiles?: any[]
   actorSettings?: ActorSettings
@@ -642,12 +654,42 @@ const captureNormalHistoryTurn = async (
   if (!originIsCurrent()) throw new Error("stale_selection")
   let current = controller.getCurrent()
   if (!current.owner && current.status === "idle") {
+    const scope = params.scope ? { ...params.scope } : undefined
     let localId = params.historyId
-    if (!localId && !params.serverChatId) {
+    let serverId = params.serverChatId
+    let createdServerChat = false
+    const toolsState = useMcpToolsStore.getState()
+    const toolRequest = resolveChatToolRequest({
+      tools: toolsState.chatTools ?? toolsState.tools,
+      toolChoice: params.toolChoice ?? useStoreMessageOption.getState().toolChoice,
+      mcpHealthState: toolsState.healthState,
+      hasMcp: toolsState.healthState !== "unavailable"
+    })
+    if (!localId && !serverId && !current.view &&
+      params.historySelection!.createServerChat && !toolRequest.tools?.length) {
+      const requireCurrentCreation = () => {
+        if (!originIsCurrent() || signal.aborted || snapshot.scopeInvalidatedSignal.aborted)
+          throw new Error("stale_selection")
+      }
+      requireCurrentCreation()
+      const created = await tldwClient.createChat(
+        { title: message.trim().slice(0, 80) || "Untitled Chat", source: scope?.type === "workspace" ? undefined : WEBUI_CHAT_SOURCE },
+        { scope, signal, requestScope: snapshot.requestScope }
+      )
+      requireCurrentCreation()
+      if (typeof created?.id !== "string" || !created.id.trim())
+        throw new Error("native_history_creation_unacknowledged")
+      serverId = created.id
+      createdServerChat = true
+    }
+    if (!localId && !serverId) {
       const created = await saveHistory(
         message.trim().slice(0, 80) || "Untitled Chat",
         false,
-        "web-ui"
+        "web-ui",
+        undefined,
+        undefined,
+        snapshot.requestScope
       )
       // Creation may have succeeded after navigation. It remains its own local history.
       if (!originIsCurrent()) throw new Error("stale_selection")
@@ -655,31 +697,50 @@ const captureNormalHistoryTurn = async (
       params.setHistoryId(localId)
     }
     if (!originIsCurrent()) throw new Error("stale_selection")
-    const target = { historyId: localId, serverChatId: params.serverChatId }
-    let receipt: HistoryLoadReceipt | undefined
-    const loaded = await controller.loadConversation(target, null, (value) => {
-      receipt = value
-    })
-    current = controller.getCurrent()
-    if (
-      !loaded ||
-      !receipt ||
-      current.owner !== receipt.owner ||
-      current.view !== receipt.view
-    ) {
-      throw new Error("stale_selection")
+    let loadAdopted = false
+    let loadRejected = false
+    const target = {
+      historyId: localId, serverChatId: serverId, scope,
+      resetOnCancel: createdServerChat,
+      // Once adopted, the owner's lifetime is independent of this turn's Stop control.
+      ...(serverId ? { isCurrent: () => loadAdopted ||
+        (!loadRejected && !signal.aborted && !snapshot.scopeInvalidatedSignal.aborted) } : {})
     }
-    // A historyId-only bound mirror is resolved by the loader; no metadata reread.
-    // Explicit native targets and newly created local targets must still match.
-    const expectedId =
-      target.serverChatId || (!params.historyId ? localId : null)
-    const expectedKind = target.serverChatId ? "native" : "local"
-    if (
-      expectedId &&
-      (receipt.owner.kind !== expectedKind ||
-        receipt.owner.conversation_id !== expectedId)
-    ) {
-      throw new Error("owner_conversation_mismatch")
+    let receipt: HistoryLoadReceipt | undefined
+    let adoptionIsCurrent: (() => boolean) | undefined
+    try {
+      const loaded = await controller.loadConversation(target, null, (value) => {
+        receipt = value
+        adoptionIsCurrent = controller.fence()
+      })
+      current = controller.getCurrent()
+      if (
+        !loaded ||
+        !receipt ||
+        current.owner !== receipt.owner ||
+        current.view !== receipt.view ||
+        !adoptionIsCurrent?.() ||
+        (receipt.owner.kind === "native" &&
+          (signal.aborted || snapshot.scopeInvalidatedSignal.aborted || !receipt.owner.validate_lease()))
+      ) {
+        throw new Error("stale_selection")
+      }
+      // A historyId-only bound mirror is resolved by the loader; no metadata reread.
+      // Explicit native targets and newly created local targets must still match.
+      const expectedId =
+        target.serverChatId || (!params.historyId ? localId : null)
+      const expectedKind = target.serverChatId ? "native" : "local"
+      if (
+        expectedId &&
+        (receipt.owner.kind !== expectedKind ||
+          receipt.owner.conversation_id !== expectedId)
+      ) {
+        throw new Error("owner_conversation_mismatch")
+      }
+      loadAdopted = true
+      if (serverId) params.setServerChatId?.(serverId)
+    } finally {
+      loadRejected = !loadAdopted
     }
   }
   if (
@@ -692,6 +753,7 @@ const captureNormalHistoryTurn = async (
   ) {
     throw new Error(current.error || "history_selection_not_ready")
   }
+  if (current.owner.validate_lease?.() === false) throw new Error("stale_selection")
   const view = structuredClone(current.view)
   const bookmarkScope = { ...current.bookmarkScope }
   const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
@@ -704,12 +766,36 @@ const captureNormalHistoryTurn = async (
           validate_lease: authValid
         }
       : current.owner
-  const settings = useStoreChatModelSettings.getState()
-  const tools = useMcpToolsStore.getState()
+  // A Zustand publication replaces the store object even for loading flags or
+  // settings for another model. Bind the lease to dispatch inputs instead.
+  const dispatchSettings = () => {
+    const settings = useStoreChatModelSettings.getState()
+    const selection = useStoreMessageOption.getState()
+    const tools = useMcpToolsStore.getState()
+    const effectiveToolChoice = params.selectionSource?.toolChoice === "global"
+      ? selection.toolChoice
+      : params.toolChoice ?? selection.toolChoice
+    const toolRequest = resolveChatToolRequest({
+      tools: tools.chatTools ?? tools.tools,
+      toolChoice: effectiveToolChoice,
+      mcpHealthState: tools.healthState,
+      hasMcp: tools.healthState !== "unavailable"
+    })
+    return JSON.stringify({
+      settings: settings.getEffectiveSettings(),
+      settingsScope: settings.activeSettingsScope,
+      model: params.selectionSource?.model === "global"
+        ? selection.selectedModel
+        : params.selectedModel,
+      toolChoice: effectiveToolChoice,
+      tools: toolRequest.tools,
+      requestToolChoice: toolRequest.toolChoice
+    })
+  }
+  const capturedDispatchSettings = dispatchSettings()
   const validateLease = () =>
     authValid() &&
-    useStoreChatModelSettings.getState() === settings &&
-    useMcpToolsStore.getState() === tools
+    dispatchSettings() === capturedDispatchSettings
   const canUpdateView = () => {
     const now = controller.getCurrent().view
     return (

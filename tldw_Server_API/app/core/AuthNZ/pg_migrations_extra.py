@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_sharing_schema import (
 
 from .database import DatabasePool, get_db_pool
 from .exceptions import DatabaseError as AuthNZDatabaseError
+from .exceptions import TransactionError
 from .postgres_profile_version_schema import (
     ensure_postgres_profile_version_on_connection,
     ensure_postgres_user_timestamp_timezones_on_connection,
@@ -1969,6 +1970,7 @@ _CREATE_USAGE_TABLES = [
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS raw_usage_metadata_json TEXT", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_ts ON llm_usage_log(ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user ON llm_usage_log(user_id)", ()),
+    ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_provider_model ON llm_usage_log(provider, model)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_op_ts ON llm_usage_log(operation, ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_key_ts ON llm_usage_log(key_id, ts)", ()),
@@ -3592,6 +3594,10 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
             await ensure_postgres_profile_version_on_connection(conn)
             await repair_postgres_profile_candidate_timestamps(conn)
             await validate_postgres_profile_candidate_schema(conn)
+    except TransactionError as exc:
+        # Sanitized at the transaction boundary; it keeps only a readiness reason.
+        logger.warning("Failed to ensure PostgreSQL AuthNZ core tables: {}", exc)
+        return False
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.bind(exception_type=type(exc).__name__).warning(
             "Failed to ensure PostgreSQL AuthNZ core tables"
@@ -4107,6 +4113,53 @@ async def ensure_llm_provider_overrides_pg(pool: DatabasePool | None = None) -> 
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"Failed to ensure PostgreSQL llm_provider_overrides table: {exc}")
         return False
+
+async def ensure_storage_quota_overrides_backfill_pg(pool: DatabasePool) -> bool:
+    """Copy users.storage_quota_mb into limits.storage_quota_mb overrides once (spec 2 §8).
+
+    A marker row claimed in the same transaction makes it run once, so an override an
+    admin later deletes is never re-created from the stale column.
+    """
+    from tldw_Server_API.app.core.AuthNZ.storage_quota_backfill import (
+        PG_BACKFILL_MARKER,
+        STORAGE_QUOTA_KEY,
+        skip_values,
+    )
+
+    try:
+        async with pool.transaction() as conn:
+            await conn.execute(
+                "CREATE TABLE IF NOT EXISTS authnz_data_backfills ("
+                "name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())"
+            )
+            claimed = await conn.fetchval(
+                "INSERT INTO authnz_data_backfills (name) VALUES ($1) "
+                "ON CONFLICT (name) DO NOTHING RETURNING name",
+                PG_BACKFILL_MARKER,
+            )
+            if claimed is None:
+                return True
+            status = await conn.execute(
+                """
+                INSERT INTO user_config_overrides (user_id, key, value_json, created_at, updated_at)
+                SELECT id, $1, storage_quota_mb::text, NOW(), NOW()
+                FROM users
+                WHERE storage_quota_mb IS NOT NULL AND NOT (storage_quota_mb = ANY($2::int[]))
+                ON CONFLICT (user_id, key) DO NOTHING
+                """,
+                STORAGE_QUOTA_KEY,
+                skip_values(),
+            )
+        logger.info("Postgres storage quota backfill copied rows ({})", status)
+        return True
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error(
+            "Postgres storage quota backfill failed ({}): {}; it will retry at the next start",
+            type(exc).__name__,
+            exc,
+        )
+        return False
+
 
 async def ensure_usage_tables_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure usage and LLM usage tables exist for PostgreSQL backends.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from functools import lru_cache
 from typing import Any, Optional, Union
 
 from .base import BackendType
@@ -36,6 +37,7 @@ def normalise_params(params: ParamsType) -> tuple[Any, ...] | dict[str, Any] | N
     return (params,)
 
 
+@lru_cache(maxsize=512)
 def convert_sqlite_placeholders_to_postgres(query: str) -> str:
     """Convert SQLite positional placeholders (`?`) to PostgreSQL (`%s`)."""
     if "?" not in query:
@@ -616,6 +618,7 @@ def _replace_boolean_comparisons(query: str) -> str:
     return "".join(result)
 
 
+@lru_cache(maxsize=512)
 def transform_sqlite_query_for_postgres(
     query: str,
     *,
@@ -623,7 +626,7 @@ def transform_sqlite_query_for_postgres(
     replace_collate: bool = True,
     ensure_returning: bool = False,
 ) -> str:
-    """Apply common SQLite→Postgres rewrites expected across adapters."""
+    """Reuse bounded pure SQL rewrites; parameters and request scope are separate."""
     transformed = query
     if replace_insert:
         transformed = replace_insert_or_ignore(transformed)

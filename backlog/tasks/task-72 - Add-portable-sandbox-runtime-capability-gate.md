@@ -47,7 +47,7 @@ Add a narrow sandbox maintenance slice that verifies runtime capability/discover
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Scope is intentionally test/docs-first. Production changes should only happen if the red gate exposes a real contract gap.
 - RED: `python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -q` failed because `Docs/Sandbox/sandbox-runtime-capability-inventory.md` did not document the Portable Runtime Capability Gate.
 - GREEN: Added the inventory section; the focused gate passed with 3 tests.
@@ -63,7 +63,7 @@ Add a narrow sandbox maintenance slice that verifies runtime capability/discover
 - Review verification: `python -m ruff check tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py tldw_Server_API/app/core/Sandbox/run_status_taxonomy.py` passed.
 - Review verification: `python -m bandit -r tldw_Server_API/app/core/Sandbox/run_status_taxonomy.py -f json -o /tmp/bandit_sandbox_runtime_capability_gate_review.json` reported 0 findings.
 - Review verification: `git diff --check` passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

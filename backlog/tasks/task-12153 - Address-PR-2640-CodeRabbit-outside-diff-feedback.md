@@ -30,7 +30,7 @@ Fix CodeRabbit outside-diff review feedback on PR #2640: document multi-voice pr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented CodeRabbit outside-diff review fixes:
 - Documented multi_voice_tts provider config keys in the adapter docstring.
 - Removed the duplicate MultiVoiceTTSConfig.fallback_provider field, keeping fallback provider as an optional hint.
@@ -45,7 +45,7 @@ Verification:
 - python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -q -> 115 passed.
 - python -m bandit -r touched production files -f json -o /tmp/bandit_audio_workspace_pr_final.json -> 0 findings.
 - git diff --check -> clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

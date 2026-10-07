@@ -464,8 +464,10 @@ def check_environment():
         "auth_mode": settings.AUTH_MODE,
     }
 
-def generate_secure_keys(requested_keys: Optional[Iterable[str]] = None):
-    """Generate secure keys for configuration"""
+def generate_secure_keys(
+    requested_keys: Optional[Iterable[str]] = None, *, show_values: bool = False
+) -> dict[str, str]:
+    """Generate configuration keys; display values only for explicit manual setup."""
     print("\n🔑 Generating secure keys...")
 
     from tldw_Server_API.app.core.AuthNZ.api_key_crypto import (
@@ -496,16 +498,25 @@ def generate_secure_keys(requested_keys: Optional[Iterable[str]] = None):
     if requested is None or "MCP_API_KEY_SALT" in requested:
         keys["MCP_API_KEY_SALT"] = secrets.token_urlsafe(32)
 
-    print("\n📝 Generated keys (save these in your .env file):")
+    print("\n📝 Generated keys:")
     print("-" * 50)
     for key, value in keys.items():
-        print(f"{key}={value}")
+        print(f"{key}={value}" if show_values else key)
     print("-" * 50)
 
     return keys
 
+
+def _allow_unrepresentable_status_text() -> None:
+    """Keep console status messages writable under legacy output encodings."""
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        reconfigure(errors="backslashreplace")
+
+
 async def setup_database():
     """Setup database and run migrations"""
+    _allow_unrepresentable_status_text()
     print("\n🗄️  Setting up database...")
 
     settings = get_settings()
@@ -551,6 +562,7 @@ async def setup_database():
                 ensure_notification_permissions_pg,
                 ensure_org_provider_secrets_pg,
                 ensure_sharing_tables_pg,
+                ensure_storage_quota_overrides_backfill_pg,
                 ensure_usage_tables_pg,
                 ensure_user_provider_secrets_pg,
                 ensure_virtual_key_counters_pg,
@@ -561,6 +573,9 @@ async def setup_database():
             # Ensure core AuthNZ tables (audit_logs, sessions, registration_codes, RBAC, orgs/teams)
             if not await ensure_authnz_core_tables_pg(pool):
                 raise RuntimeError("Failed to ensure Postgres AuthNZ core tables")
+
+            if not await ensure_storage_quota_overrides_backfill_pg(pool):
+                logger.warning("Postgres storage quota backfill did not complete; it will retry at the next start")
 
             if not await ensure_sharing_tables_pg(pool):
                 raise RuntimeError("Failed to ensure Postgres sharing tables")
@@ -1175,6 +1190,7 @@ async def bootstrap_single_user_profile() -> bool:
     if settings.AUTH_MODE != "single_user":
         return True
 
+    _allow_unrepresentable_status_text()
     print("\n👤 Bootstrapping single-user profile (admin user + primary API key)...")
     logger.info("Bootstrapping single-user profile (admin user + primary API key)...")
 
@@ -1358,6 +1374,7 @@ async def start_services():
 
 async def main(*, non_interactive: bool = False, test_setup: bool = False):
     """Main initialization function"""
+    _allow_unrepresentable_status_text()
     print_banner()
 
     generated_keys_written = False
@@ -1412,7 +1429,7 @@ async def main(*, non_interactive: bool = False, test_setup: bool = False):
             non_interactive=non_interactive,
         )
         if should_generate:
-            generated = generate_secure_keys()
+            generated = generate_secure_keys(show_values=not non_interactive)
             env_path = env_status.get("env_path")
             if env_path:
                 should_write = _prompt_yes_no(
@@ -1536,6 +1553,6 @@ if __name__ == "__main__":
         print("\n\n⚠️  Initialization cancelled by user")
         sys.exit(0)
     except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as e:
-        print(f"\n❌ Initialization failed: {e}")
-        logger.exception("Initialization error")
+        print(f"\n❌ Initialization failed ({type(e).__name__})")
+        logger.error("Initialization error (error_type={})", type(e).__name__)
         sys.exit(1)

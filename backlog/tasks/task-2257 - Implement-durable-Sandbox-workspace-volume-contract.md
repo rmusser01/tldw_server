@@ -40,7 +40,6 @@ Task 3 from Docs/superpowers/plans/2026-06-04-canonical-workspaces-manager-proje
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red test evidence (2026-06-03):
 - `python -m pytest tldw_Server_API/tests/sandbox/test_workspace_volumes.py -q` fails during collection with `ImportError: cannot import name 'WorkspaceVolumeState'`.
@@ -54,7 +53,6 @@ Green/verification evidence (2026-06-03/04):
 
 Controller hardening review (2026-06-03): added red-first coverage for direct InMemory/SQLite workspace-volume store writes bypassing diagnostics and mount-path sanitization. Red evidence: `python -m pytest tldw_Server_API/tests/sandbox/test_workspace_volumes.py::test_store_direct_writes_bound_and_redact_workspace_volume_diagnostics -v` failed because a raw `/Users/...` mount path and secret-bearing diagnostics were persisted. Green evidence after fix: the same focused test passed; full focused slice `python -m pytest tldw_Server_API/tests/sandbox/test_workspace_volumes.py tldw_Server_API/tests/Workspaces/test_workspace_root_binding_service.py -v` passed with 38 tests and 3 warnings. Fresh controller checks: Bandit on touched backend modules wrote `/tmp/bandit_task_2257_controller.json` with exit 0, compileall exited 0, and `git diff --check` exited 0.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

@@ -35,13 +35,13 @@ Resolve the Qodo PR #1280 finding that the focused minimal Llama.cpp/messages la
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed PR #1280 Qodo reliability finding by moving unrelated eager endpoint isolation into test_iter_minimal_optional_router_specs_defers_llamacpp_messages_attr_lookup and using a test-local __import__ shim that returns fake routers for unrelated endpoint imports while leaving the target Llama.cpp/messages importlib path tracked for laziness.
 
 Verification passed: focused Llama.cpp/messages laziness test; full router groups; main router contract; OpenAPI contracts; git diff --check.
 
 Bandit skipped for this review fix because only test code and Backlog task metadata changed; no production source scope was touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

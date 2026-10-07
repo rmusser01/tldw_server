@@ -1308,9 +1308,7 @@ export function ContentViewer({
                     ) : modals.embeddedMediaUrl ? (
                       modals.mediaType === 'video' ? (
                         <video
-                          ref={(node) => {
-                            modals.mediaPlayerRef.current = node
-                          }}
+                          ref={modals.setMediaPlayerRef}
                           src={modals.embeddedMediaUrl}
                           controls
                           preload="metadata"
@@ -1319,9 +1317,7 @@ export function ContentViewer({
                         />
                       ) : (
                         <audio
-                          ref={(node) => {
-                            modals.mediaPlayerRef.current = node
-                          }}
+                          ref={modals.setMediaPlayerRef}
                           src={modals.embeddedMediaUrl}
                           controls
                           preload="metadata"

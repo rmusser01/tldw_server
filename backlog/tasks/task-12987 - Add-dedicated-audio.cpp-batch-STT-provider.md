@@ -42,7 +42,7 @@ Follow Docs/superpowers/plans/2026-07-25-audio-cpp-batch-stt-provider-implementa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-25: Human-approved external-server-only design is recorded in Docs/superpowers/specs/2026-07-25-audio-cpp-batch-stt-provider-design.md. Scope is WAV batch transcription, network-free planning, consent-gated discovery, unresolved weight identity, and no fallback, retry, download, conversion, or process supervision. Independent design review and re-review approved the hardened spec.
 
 The approved implementation plan is Docs/superpowers/plans/2026-07-25-audio-cpp-batch-stt-provider-implementation-plan.md. Independent plan review led to cross-event-loop single-flight cache semantics, raw-origin path validation, and complete declared PCM-payload validation. Plan re-review approved it. Execution uses subagent-driven TDD with spec and quality reviews per task.
@@ -80,7 +80,7 @@ Task 7 quality-review follow-up complete: direct audio.cpp planning now requires
 Task 8 complete after rebasing cleanly onto current origin/dev. Final feature matrix: 951 passed with 10 warnings. Adjacent changed tests: 240 passed, 1 optional environment skip. Documentation regressions: 46 passed. CLI help succeeded. Changed-file pre-commit hooks and git diff checks passed. Bandit reported zero findings across the full touched production scope; the final event-loop fix scan also reported zero findings across 1,384 LOC. Independent complete-diff review ran 1,023 focused tests and found one P2 event-loop issue. TDD demonstrated the blocking failure, commit 6954f0f107 offloaded audio.cpp endpoint transcription, and focused re-review approved it after 330 tests with compile, diff, and Bandit clean. The final focused test matrix remained 951 passed. A live smoke was intentionally skipped because no operator-managed audio.cpp server, exact model, authorized WAV, and explicit runtime consent were supplied. PR #2759 remains based on dev and requires the requesters own human-written Change summary before merge. Audio.cpp commits after rebase: 20d125679d, 9624acb036, 61e0c4935d, 9f0d99afd4, f301458f90, f3650520e6, c70b0ceb92, af40daddf8, 7d8226bbc7, 76ceb0617c, 7cd2e79906, 6954f0f107.
 
 Final PR refresh: dev advanced again to d710e5a5ee, so the branch was rebased a second time. One ci.yml conflict was an already-upstreamed ShellCheck annotation; resolution kept the newer dev workflow plus this PRs benchmark test-directory additions. Post-rebase feature verification remained 951 passed with 10 warnings, git diff --check passed, and the branch is 0 behind origin/dev. A 72-test CI workflow-contract sweep produced 70 passes and 2 failures; both failures reproduced unchanged in a detached origin/dev worktree and concern the newly upstreamed preflight-python-310 job, while its dedicated contract test passed. Actionlint was unavailable locally. Final current audio.cpp/closeout commits are 8f6639fdd8, 70d5fc2120, f85d6e4c35, 5e9b3b86a5, a125a05cc3, 5d1c8ae262, c626dd17ec, 408e7a4d11, d358d7c577, 7d669d5f79, 297c7dfc27, 7b171275ef, 515f52bfbf, and e3d823b839.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

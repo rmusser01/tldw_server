@@ -43,7 +43,7 @@ The global key handler on /chat intercepted a bare "?" before its editable-targe
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Guarded the "?" branch itself rather than hoisting a blanket early return above the handler body.
 
 The obvious fix, moving the existing editable-target return to the top of the handler, was rejected after checking what else sits above it. Cmd/Ctrl+F and the two Escape-to-close branches deliberately run while focus is inside an input. The composer is focused on page load, so an early return would have made in-thread search unreachable in the default state, and Escape would have stopped closing the thread-search bar from its own input. Both were verified as regressions before choosing the narrower fix. A modifier chord cannot be produced by ordinary typing, so intercepting it inside a text field is a product decision, not this bug.
@@ -57,4 +57,4 @@ Checked every other plain-character keyboard handler in the shared UI package. A
 Verified live against llama.cpp, backend and WebUI: "?" types in the composer, "?" outside an input still opens the panel, Cmd+F still opens thread search, Escape still closes it.
 
 Modified: Playground.tsx, playground-shortcuts.ts, __tests__/playground-shortcuts.test.ts
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

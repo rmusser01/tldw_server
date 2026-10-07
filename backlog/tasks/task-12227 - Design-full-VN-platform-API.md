@@ -51,11 +51,11 @@ Write the approved full VN platform API design spec for the character/persona CY
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/specs/2026-05-10-vn-platform-api-design.md with the canonical `/api/v1/vn/vn-*` API design. Self-review fix: changed end-to-end flow shorthand to canonical `/api/v1/vn/vn-*` paths and made model expansion from any authored scene explicit. Verification so far: referenced docs exist; git diff --check exits 0. Bandit is not applicable because the change is markdown/task metadata only.
 
 Self-review follow-up: hardened route migration wording so deprecated aliases are not part of the V1 target API, and required VN image/archive uploads to pass through existing upload validation, storage registration, and generated-file tracking.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -26,16 +26,17 @@ from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statement
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .base import (
-    ConstraintViolationError,
-    BackendFeatures,
     AuthorizationDeniedError,
+    BackendFeatures,
     BackendType,
     ConnectionPool,
+    ConstraintViolationError,
     DatabaseBackend,
     DatabaseConfig,
     DatabaseError,
     FTSQuery,
     QueryResult,
+    SavedViewNameUniqueConstraintError,
     TransientContentionError,
     UniqueConstraintError,
 )
@@ -627,11 +628,14 @@ class PostgreSQLBackend(DatabaseBackend):
 
         statements = [
             # Maintain both keys for compatibility across modules/tests
-            ("SELECT set_config('app.current_user_id', %s, false)", (user_id,)),
-            ("SELECT set_config('app.user_id', %s, false)", (user_id,)),
-            ("SELECT set_config('app.org_ids', %s, false)", (org_ids,)),
-            ("SELECT set_config('app.team_ids', %s, false)", (team_ids,)),
-            ("SELECT set_config('app.is_admin', %s, false)", (is_admin,)),
+            (
+                "SELECT set_config('app.current_user_id', %s, false), "
+                "set_config('app.user_id', %s, false), "
+                "set_config('app.org_ids', %s, false), "
+                "set_config('app.team_ids', %s, false), "
+                "set_config('app.is_admin', %s, false)",
+                (user_id, user_id, org_ids, team_ids, is_admin),
+            ),
         ]
 
         def _run_with_cursor(cur) -> None:
@@ -1071,6 +1075,7 @@ class PostgreSQLBackend(DatabaseBackend):
         query, params = self._prepare_query(query, params)
         redacted_failure = False
         unique_failure = False
+        saved_view_name_failure = False
         constraint_failure = False
         contention_failure = False
         authorization_failure = False
@@ -1147,6 +1152,10 @@ class PostgreSQLBackend(DatabaseBackend):
                 else None
             )
             unique_failure = _sqlstate == "23505"
+            saved_view_name_failure = unique_failure and (
+                getattr(getattr(e, "diag", None), "constraint_name", None)
+                == "uq_workspace_source_saved_views_owner_name"
+            )
             # SQLSTATE class 23 is integrity_constraint_violation: NOT NULL (23502),
             # FOREIGN KEY (23503), UNIQUE (23505), CHECK (23514) and friends. The CLASS
             # of failure only -- the driver exception is still never chained and the
@@ -1177,6 +1186,8 @@ class PostgreSQLBackend(DatabaseBackend):
                 self.get_pool().return_connection(conn)
 
         if redacted_failure:
+            if saved_view_name_failure:
+                raise SavedViewNameUniqueConstraintError("PostgreSQL query execution failed")
             if unique_failure:
                 raise UniqueConstraintError("PostgreSQL query execution failed")
             if authorization_failure:
@@ -1381,6 +1392,8 @@ class PostgreSQLBackend(DatabaseBackend):
             refresh_tsv_sql = f"""
                 UPDATE {source_table_ident}
                 SET {fts_column_ident} =
+                    to_tsvector('english', {columns_concat_set})
+                WHERE {fts_column_ident} IS DISTINCT FROM
                     to_tsvector('english', {columns_concat_set})
             """  # nosec B608
             cursor.execute(refresh_tsv_sql)

@@ -6,7 +6,6 @@ and which are unprotected. Useful for identifying coverage gaps.
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from loguru import logger
@@ -57,15 +56,31 @@ def audit_governor_coverage(
     protected: list[dict[str, str]] = []
     unprotected: list[dict[str, str]] = []
     middleware_installed = _has_rg_middleware(app)
-    route_map = _get_route_map(app)
+
+    from .policy_eval import DEFAULT_POLICY_ID
+    from .policy_resolver import get_policy_resolver
+
+    resolver = get_policy_resolver(app)
+    loader = getattr(getattr(app, "state", None), "rg_policy_loader", None)
+
+    def _defined(policy_id: str) -> bool:
+        if policy_id == DEFAULT_POLICY_ID:
+            return True  # a built-in default always backs it
+        try:
+            return bool(loader.get_policy(policy_id)) if loader is not None else False
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return False
 
     for r in routes:
+        policy_id = resolver.resolve(r["path"], r["method"]) if resolver else None
         if any(r["path"].startswith(p) for p in prefixes):
             unprotected.append(_public_route(r, reason="excluded_prefix"))
         elif not middleware_installed:
             unprotected.append(_public_route(r, reason="rg_middleware_missing"))
-        elif not _route_is_mapped(r, route_map):
+        elif policy_id is None:
             unprotected.append(_public_route(r, reason="route_unmapped"))
+        elif not _defined(policy_id):
+            unprotected.append(_public_route(r, reason="policy_undefined"))
         else:
             protected.append(_public_route(r))
 
@@ -110,42 +125,4 @@ def _has_rg_middleware(app: Any) -> bool:
                 return True
         except (AttributeError, TypeError, ValueError):
             continue
-    return False
-
-
-def _get_route_map(app: Any) -> dict[str, Any]:
-    """Read the current Resource Governor route map from app state."""
-    try:
-        loader = getattr(getattr(app, "state", None), "rg_policy_loader", None)
-        snap = loader.get_snapshot() if loader else None
-        route_map = getattr(snap, "route_map", {}) or {}
-        if isinstance(route_map, dict):
-            return route_map
-    except (AttributeError, RuntimeError, TypeError, ValueError):
-        return {}
-    return {}
-
-
-def _glob_matches(pattern: str, path: str) -> bool:
-    """Match a route path against the simple wildcard route-map syntax."""
-    pat = str(pattern)
-    if "*" in pat:
-        regex = re.escape(pat).replace("\\*", ".*")
-        if not pat.endswith("*"):
-            regex += "$"
-        return re.match(regex, path) is not None
-    return path == pat
-
-
-def _route_is_mapped(route: dict[str, Any], route_map: dict[str, Any]) -> bool:
-    """Return whether a route is covered by path or tag route-map entries."""
-    path = str(route.get("path") or "")
-    by_path = dict(route_map.get("by_path") or {})
-    for pattern, policy_id in by_path.items():
-        if policy_id and _glob_matches(str(pattern), path):
-            return True
-    by_tag = dict(route_map.get("by_tag") or {})
-    for tag in list(route.get("tags") or []):
-        if by_tag.get(str(tag)):
-            return True
     return False

@@ -8,6 +8,7 @@ BACKEND_GLOBS = [
     "Helper_Scripts/ci/emit_ci_gate_flags.py",
     "Helper_Scripts/ci/path_classifier.py",
     "Helper_Scripts/ci/vitest_base_ratchet.py",
+    "tools/backlog-py/**",
     "pyproject.toml",
     "uv.lock",
     ".github/actions/**",

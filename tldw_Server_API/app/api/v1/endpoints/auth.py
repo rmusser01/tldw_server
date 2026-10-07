@@ -164,6 +164,7 @@ from tldw_Server_API.app.services.auth_service import (
     verify_user_email_once as _svc_verify_user_email_once,
 )
 from tldw_Server_API.app.services.registration_service import RegistrationService
+from tldw_Server_API.app.services.storage_quota_service import resolved_storage_quota_mb
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
@@ -1073,6 +1074,11 @@ def _auth_rg_policy_defined(request: Request, policy_id: str, governor: Any) -> 
 
 
 async def _get_auth_endpoint_rg_governor(request: Request) -> Optional[Any]:
+    from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
+    if not bool(_rg_enabled_flag(True)):
+        return None
+
     try:
         app = request.app
         state = getattr(app, "state", None)
@@ -1123,6 +1129,20 @@ async def _reserve_auth_rg_requests(
     _ = fail_open  # Compatibility parameter; legacy fallback limiter is retired.
 
     rg_entity = entity or f"ip:{_auth_request_client_ip(request)}"
+
+    # Skip only when ingress already charged this exact entity to this policy.
+    # rg_ingress_entity is set only after an allowed ingress reservation, so a fail-open
+    # ingress never skips. Any other ingress entity must not stand in for this one: a
+    # user:/api_key: bucket is per account, so a caller rotating several valid accounts
+    # would get a fresh bucket each time and evade the per-IP limit on entity-scoped
+    # sensitive policies; a tenant: bucket is shared by the tenant, not one IP. When AuthNZ
+    # and RG derive different IPs (TASK-13144) the request is charged twice, never zero.
+    # Reservations keyed on some other entity (a per-email throttle, or the per-user MFA
+    # limit when ingress charged the IP) still apply.
+    state = getattr(request, "state", None)
+    ingress_entity = getattr(state, "rg_ingress_entity", None)
+    if getattr(state, "rg_policy_id", None) == policy_id and ingress_entity and rg_entity == ingress_entity:
+        return True, None
 
     governor = await _get_auth_endpoint_rg_governor(request)
     if governor is None:
@@ -3043,7 +3063,7 @@ async def request_admin_reauth(
 async def verify_magic_link(
     data: MagicLinkVerifyRequest,
     request: Request,
-    db=Depends(get_db_transaction),
+    db=Depends(get_login_db_connection),
     jwt_service: JWTService = Depends(get_jwt_service_dep),
     session_manager: SessionManager = Depends(get_session_manager_dep),
     registration_service: RegistrationService = Depends(get_registration_service_dep),
@@ -3969,7 +3989,7 @@ async def get_current_user_info(
         is_verified=bool(_current_user_value(current_user, "is_verified", True)),
         created_at=_current_user_value(current_user, "created_at", datetime.utcnow()),
         last_login=_current_user_value(current_user, "last_login"),
-        storage_quota_mb=_current_user_value(current_user, "storage_quota_mb", 1000),
+        storage_quota_mb=await resolved_storage_quota_mb(user_id),
         storage_used_mb=_current_user_value(current_user, "storage_used_mb", 0.0),
     )
 

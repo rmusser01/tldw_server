@@ -11,6 +11,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import count_recent_job_admissions
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
     AdmissionResult,
@@ -228,11 +229,9 @@ def _quota_rejection(
             )
 
     if submits_per_minute_quota:
-        cur.execute(
-            "SELECT COUNT(*) AS c FROM jobs WHERE domain=%s AND owner_user_id=%s AND created_at >= (%s - interval '60 seconds')",
-            (command.domain, command.owner_user_id, now),
-        )
-        if _count_from_row(cur.fetchone()) >= submits_per_minute_quota:
+        if count_recent_job_admissions(
+            cur, backend="postgres", domain=command.domain, owner_user_id=command.owner_user_id, now=now,
+        ) >= submits_per_minute_quota:
             return AdmissionResult.rejected(
                 AdmissionRejectionReason.QUOTA_EXCEEDED,
                 message=_SUBMITS_PER_MINUTE_MESSAGE,

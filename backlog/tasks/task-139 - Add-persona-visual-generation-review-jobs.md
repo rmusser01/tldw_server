@@ -39,13 +39,13 @@ Implement Task 9 from Docs/superpowers/plans/2026-05-08-persona-visual-packs-imp
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented persona visual generation Jobs helpers, worker, optional startup registration, API job/candidate endpoints, review-gated candidate merge behavior, and Persona Garden generation/review controls.
 
 Verification: backend focused pytest for persona visual jobs/API/startup passed 14 tests; existing startup optional worker pytest passed 11 tests; VisualPackEditor vitest passed 4 tests; touched-file TypeScript filter produced no diagnostics; git diff --check passed; Bandit JSON report at /tmp/bandit_persona_visual_jobs.json had results [].
 
 Added generated candidate detail endpoint and assertion after the first verification pass so the API surface matches the accepted list/detail/review plan text.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

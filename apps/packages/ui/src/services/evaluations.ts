@@ -73,8 +73,8 @@ export type EvaluationRateLimitStatus = {
   tier: string
   limits: {
     evaluations_per_minute: number
-    evaluations_per_day: number
-    tokens_per_day: number
+    evaluations_per_day: number | null
+    tokens_per_day: number | null
     cost_per_day: number
     cost_per_month: number
   }
@@ -85,8 +85,8 @@ export type EvaluationRateLimitStatus = {
     cost_month: number
   }
   remaining: {
-    daily_evaluations: number
-    daily_tokens: number
+    daily_evaluations: number | null
+    daily_tokens: number | null
     daily_cost: number
     monthly_cost: number
   }
@@ -403,7 +403,7 @@ export async function listEvaluations(params?: {
   if (params?.eval_type) query.set("eval_type", params.eval_type)
 
   const path =
-    "/api/v1/evaluations" + (query.toString() ? `?${query.toString()}` : "")
+    "/api/v1/evaluations/" + (query.toString() ? `?${query.toString()}` : "")
 
   return await apiSend<EvaluationListResponse>({
     path: path as any,
@@ -536,7 +536,7 @@ export async function createEvaluation(
   options?: { idempotencyKey?: string }
 ) {
   return await apiSend({
-    path: "/api/v1/evaluations" as any,
+    path: "/api/v1/evaluations/" as any,
     method: "POST",
     headers: withIdempotency(options?.idempotencyKey),
     body: payload

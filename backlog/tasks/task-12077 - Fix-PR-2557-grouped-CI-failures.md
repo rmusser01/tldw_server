@@ -34,13 +34,9 @@ Fix the grouped failing CI checks on PR #2557 after shard coverage was repaired.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Follow-up Windows platform-infrastructure-metrics failure: test_expired_probe_lease_allows_later_acquisition used a 0.05s wall-clock lease and then immediately counted active leases. The store intentionally deletes expired probe leases before counting, so on Windows CI the lease could expire before the count. Fixed the test by patching the Circuit_Breaker_Registry_DB module clock and advancing it deterministically instead of sleeping. Validation: affected lease tests passed (4 passed); full circuit breaker module passed (78 passed); platform-services-main-routing shard path set passed locally on Python 3.11 (313 passed in 2:59); pre-commit on touched files passed; git diff --check passed; Bandit with B101 skipped passed, while raw Bandit only reported existing pytest assert baseline B101 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

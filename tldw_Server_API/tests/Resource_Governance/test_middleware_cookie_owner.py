@@ -63,19 +63,24 @@ def governed_cookie_app(monkeypatch: pytest.MonkeyPatch) -> GovernedCookieApp:
 
 async def test_cookie_sessions_share_owner_quota_and_cached_auth(governed_cookie_app: GovernedCookieApp) -> None:
     app, validations, governor = governed_cookie_app
+    # character_chat.default is now rpm=300/burst=2.0 (capacity 600) per the
+    # safety-net defaults (spec §3), so exhausting the per-user bucket takes
+    # 600 requests instead of 60.
     with TestClient(app) as client:
-        for index in range(60):
+        for index in range(600):
             response = client.get(
                 "/api/v1/persona/profiles", headers={"Cookie": f"custom_session=session-{'a' if index % 2 else 'b'}"}
             )
             assert response.status_code == 200
         denied = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-b"})
     assert denied.status_code == 429
-    assert len(validations) == 61  # Canonical endpoint resolver reused the request cache.
+    # Each allowed request validates once: ingress on an identity-cache miss (the route
+    # reuses its request-state AuthContext), the route itself on a hit. The 429 costs none.
+    assert len(validations) == 600
     owner_quota = await governor.peek_with_policy("user:1", ["requests"], "character_chat.default")
     other_owner_quota = await governor.peek_with_policy("user:2", ["requests"], "character_chat.default")
     assert owner_quota["requests"]["remaining"] == 0
-    assert other_owner_quota["requests"]["remaining"] == 60
+    assert other_owner_quota["requests"]["remaining"] == 600
 
 
 async def test_invalid_cookie_returns_canonical_auth_failure(governed_cookie_app: GovernedCookieApp) -> None:
@@ -85,26 +90,45 @@ async def test_invalid_cookie_returns_canonical_auth_failure(governed_cookie_app
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
     assert response.json()["detail"] == "Not authenticated (provide Bearer token or X-API-KEY)"
-    assert validations == ["invalid"]
+    # The middleware itself never answers 401 (ADR-056 / spec §2): it makes a best-effort
+    # attempt to resolve the principal for ingress charging, and on failure falls back to
+    # the IP entity and forwards to the route, whose own Depends(get_auth_principal)
+    # re-validates the same cookie (a failure never reaches request state; ingress's
+    # identity cache is its own) and returns the canonical 401. Hence two checks.
+    assert validations == ["invalid", "invalid"]
     owner_quota = await governor.peek_with_policy("user:1", ["requests"], "character_chat.default")
-    assert owner_quota["requests"]["remaining"] == 60
+    # capacity is rpm=300 * burst=2.0 = 600 under the safety-net defaults (spec §3).
+    assert owner_quota["requests"]["remaining"] == 600
+    ip_quota = await governor.peek_with_policy("ip:unknown", ["requests"], "character_chat.default")
+    # The invalid cookie never resolves a principal, so ingress charges the anonymous
+    # IP bucket instead of the (uninvolved) owner's quota.
+    assert ip_quota["requests"]["remaining"] == 599
 
 
 @pytest.mark.parametrize(
-    "headers",
+    "headers,expected_validations",
     [
-        {},
-        {"Cookie": "unrelated=session-a"},
-        {"Cookie": "custom_session=session-a", "Authorization": ""},
-        {"Cookie": "custom_session=session-a", "X-API-KEY": ""},
+        # No credentials at all: RG admits the anonymous entity (safety-net scope-mismatch
+        # fix, spec §4), so the request now reaches the real auth dependency, which falls
+        # back to (and exhausts) the cookie check before failing closed with 401.
+        ({}, [None]),
+        ({"Cookie": "unrelated=session-a"}, [None]),
+        # Explicit headers, even empty ones, still take precedence over cookies: the
+        # resolver never attempts cookie validation in these two cases.
+        ({"Cookie": "custom_session=session-a", "Authorization": ""}, []),
+        ({"Cookie": "custom_session=session-a", "X-API-KEY": ""}, []),
     ],
 )
-def test_cookie_preflight_preserves_absence_and_explicit_header_precedence(governed_cookie_app, headers):
+def test_cookie_preflight_preserves_absence_and_explicit_header_precedence(governed_cookie_app, headers, expected_validations):
     app, validations, _ = governed_cookie_app
     with TestClient(app) as client:
         response = client.get("/api/v1/persona/profiles", headers=headers)
-    assert response.status_code == 429
-    assert not validations
+    # Was 429: an anonymous entity kind (ip) not listed in character_chat.default's
+    # scopes used to get no bucket at all and so was denied forever. Safety-net fix
+    # (spec §4, scope mismatch) now charges it its own per-entity bucket, admitting it
+    # into the real auth dependency, which correctly reports 401 (no credentials).
+    assert response.status_code == 401
+    assert validations == expected_validations
 
 
 def test_ungoverned_cookie_does_not_trigger_authentication(governed_cookie_app):
@@ -115,28 +139,44 @@ def test_ungoverned_cookie_does_not_trigger_authentication(governed_cookie_app):
     assert not validations
 
 
-def test_cookie_preflight_does_not_apply_in_multi_user_mode(governed_cookie_app):
+def test_cookie_preflight_charges_the_owner_in_multi_user_mode_too(governed_cookie_app):
     app, validations, _ = governed_cookie_app
     resolver.get_settings().AUTH_MODE = "multi_user"
     with TestClient(app) as client:
         response = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-a"})
-    assert response.status_code == 429
-    assert not validations
+    # Ingress identity resolution (ADR-056 / spec §2) is no longer gated to single-user
+    # mode: RGSimpleMiddleware._principal_entity resolves the session cookie via
+    # get_auth_principal in any AUTH_MODE, caching the AuthContext on request.state.
+    # The route's own Depends(get_auth_principal) then reuses that cached context
+    # instead of re-validating, so the cookie is only checked once even though both
+    # ingress and the route reference the same dependency.
+    assert response.status_code == 200
+    assert response.json() == {"user_id": 1}
+    assert validations == ["session-a"]
 
 
-async def test_cookie_preflight_does_not_fail_open_on_resolver_failure(
+async def test_cookie_preflight_resolver_failure_falls_back_to_ip(
     governed_cookie_app: GovernedCookieApp, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Ingress identity resolution is best-effort (ADR-056 / spec §2): it never blocks
+    the request. A broken resolver charges the anonymous IP bucket instead of the
+    owner's quota, and the route's own auth still runs (and here still succeeds,
+    since the route's Depends captured the real, unpatched get_auth_principal).
+    """
     app, _, governor = governed_cookie_app
 
     async def unavailable(request: Request) -> None:
         raise RuntimeError("auth unavailable")
 
     monkeypatch.setattr(resolver, "get_auth_principal", unavailable)
-    with TestClient(app) as client, pytest.raises(RuntimeError, match="auth unavailable"):
-        client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-a"})
+    with TestClient(app) as client:
+        response = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-a"})
+    assert response.status_code == 200
     owner_quota = await governor.peek_with_policy("user:1", ["requests"], "character_chat.default")
-    assert owner_quota["requests"]["remaining"] == 60
+    # capacity is rpm=300 * burst=2.0 = 600 under the safety-net defaults (spec §3).
+    assert owner_quota["requests"]["remaining"] == 600
+    ip_quota = await governor.peek_with_policy("ip:unknown", ["requests"], "character_chat.default")
+    assert ip_quota["requests"]["remaining"] == 599
 
 
 def test_valid_cookie_does_not_bypass_missing_policy(governed_cookie_app):
@@ -144,9 +184,14 @@ def test_valid_cookie_does_not_bypass_missing_policy(governed_cookie_app):
     app.state.rg_policy_loader.get_policy = lambda _: {}
     with TestClient(app) as client:
         response = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-a"})
-    assert response.status_code == 429
-    assert not validations
-    assert response.json()["policy_id"] == "character_chat.default"
+    # Was 429 with the error body's policy_id echoing "character_chat.default": an
+    # unresolvable policy (the loader here returns {} for every id, including the
+    # "default" fallback) used to deny forever. Safety-net fix (spec §4, unknown
+    # policy) falls back further to the compiled-in BUILTIN_DEFAULT_POLICY, which
+    # admits the request; the valid cookie is then authenticated normally.
+    assert response.status_code == 200
+    assert response.json() == {"user_id": 1}
+    assert validations == ["session-a"]
 
 
 @pytest.mark.parametrize("scopes", [["global", "ip"], ["user", "api_key", "ip"], ["entity"]])
@@ -162,7 +207,11 @@ def test_anonymous_policy_preserves_invalid_cookie_endpoint_behavior(governed_co
     with TestClient(app) as client:
         response = client.get("/api/v1/persona/public", headers={"Cookie": "custom_session=invalid"})
     assert response.status_code == 200
-    assert not validations
+    # Ingress identity resolution (ADR-056 / spec §2) no longer depends on the policy's
+    # scopes: it always makes a best-effort attempt to resolve the principal when a
+    # session cookie is present, even though this anonymous-friendly policy does not
+    # require an owner bucket. The failed attempt still falls back to charging the IP.
+    assert validations == ["invalid"]
 
 
 @pytest.mark.parametrize(
@@ -189,4 +238,8 @@ def test_stale_cookie_health_and_idempotent_logout_keep_anonymous_admission(
         response = client.request(method, path, headers={"Cookie": "custom_session=stale"})
     assert response.status_code == 200
     assert response.json() == payload
-    assert not validations
+    # Ingress identity resolution (ADR-056 / spec §2) always makes a best-effort attempt
+    # to resolve the principal when a session cookie is present, even for policies that
+    # admit anonymous traffic; the stale cookie fails validation and ingress falls back
+    # to charging the IP entity.
+    assert validations == ["stale"]

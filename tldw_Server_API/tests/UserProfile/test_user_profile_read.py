@@ -117,7 +117,9 @@ def test_user_profile_quota_extensions(auth_headers) -> None:
         payload = resp.json()
 
     quotas = payload.get("quotas", {})
-    assert "storage_quota_mb" in quotas
+    # No limits.storage_quota_mb override is set, so it resolves to null; /me/profile is
+    # response_model_exclude_none=True, so a null field is an absent key, not {"...": null}.
+    assert quotas.get("storage_quota_mb") is None
     assert "audio" in quotas
     assert "evaluations" in quotas
     assert "prompt_studio" in quotas

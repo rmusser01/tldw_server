@@ -73,9 +73,6 @@ class TestPropositionEvaluationEndpoint:
         for key in [
             "X-RateLimit-Tier",
             "X-RateLimit-PerMinute-Limit",
-            "X-RateLimit-Daily-Limit",
-            "X-RateLimit-Daily-Remaining",
-            "X-RateLimit-Tokens-Remaining",
             "X-RateLimit-Reset",
         ]:
             assert key in headers, f"Missing header: {key}"

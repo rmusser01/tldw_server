@@ -47,7 +47,7 @@ Finish the current local-loading-state migration queue by routing the DocumentWo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red path: focused sidebar tests failed before implementation because neither loading branch rendered data-ds-component="LoadingState". Implementation replaced the local Skeleton wrappers with SharedLoadingState in both sidebar tabs.
 
 Verification: focused sidebar Vitest passed (2 files, 4 tests); product-state guard Vitest passed (42 tests); bun run verify:design-system-state passed with 516 allowed legacy exceptions and no local-loading-state bucket; git diff --check passed. Bandit was not run because the touched implementation scope is TypeScript/TSX, JSON, and Backlog metadata with no Python files.
@@ -55,7 +55,7 @@ Verification: focused sidebar Vitest passed (2 files, 4 tests); product-state gu
 PR review follow-up: Gemini flagged that a single shared LoadingState collapsed the original per-item loading structure in QuickInsightsTab and ReferencesTab. CodeRabbit flagged hardcoded store teardown in the QuickInsights loading-state test. Reopening this task to address those comments on the same PR branch.
 
 Review fix verification: focused sidebar Vitest passed (2 files, 4 tests); product-state guard Vitest passed (42 tests); bun run verify:design-system-state passed after refreshing the ReferencesTab Empty baseline id; git diff --check passed. Bandit remains not applicable because no Python files are touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

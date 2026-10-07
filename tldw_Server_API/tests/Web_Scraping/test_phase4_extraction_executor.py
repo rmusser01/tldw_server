@@ -732,10 +732,9 @@ async def test_process_cleanup_during_reload_cannot_install_a_replacement(
         assert manager.state is ManagerState.RELOADING
 
         cleanup_task = asyncio.create_task(asyncio.to_thread(manager.close_at_exit))
-        for _ in range(100):
-            if manager.state is ManagerState.SHUTDOWN:
-                break
-            await asyncio.sleep(0.01)
+        async with asyncio.timeout(1.0):
+            while manager.state is not ManagerState.SHUTDOWN:
+                await asyncio.sleep(0.01)
         assert manager.state is ManagerState.SHUTDOWN
         release.set()
         await running

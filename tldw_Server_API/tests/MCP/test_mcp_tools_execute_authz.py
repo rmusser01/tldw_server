@@ -14,6 +14,8 @@ from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
+_FIXTURE_HASH = "dummyhash"
+
 client = TestClient(app)
 
 

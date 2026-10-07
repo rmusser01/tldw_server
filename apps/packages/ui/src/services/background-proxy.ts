@@ -61,6 +61,7 @@ import {
   servicePromptTargetsMatch
 } from "@/services/tldw/service-prompt-scope-error"
 import { deriveScopedUserId } from "@/utils/media-navigation-scope"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
 
 const ERROR_LOG_THROTTLE_MS = 15_000
 const RATE_LIMIT_LOG_THROTTLE_MS = 60_000
@@ -386,8 +387,10 @@ const shouldNotifyBackendUnavailable = (entry: {
   method: string
   path: string
   status?: number
+  code?: string
   error?: string
 }): boolean => {
+  if (entry.code === "RESPONSE_TOO_LARGE") return false
   const path = String(entry.path || "")
   // Restrict notifications to API requests only.
   if (!path.includes("/api/")) return false
@@ -461,6 +464,7 @@ export interface BgRequestInit<
   noAuth?: boolean
   timeoutMs?: number
   abortSignal?: AbortSignal
+  maxResponseBytes?: number
   responseType?: "json" | "text" | "arrayBuffer"
   returnResponse?: boolean
   preferDirect?: boolean
@@ -982,6 +986,7 @@ async function bgRequestImpl<
     timeoutMs,
     abortSignal,
     responseType,
+    maxResponseBytes,
     returnResponse,
     preferDirect = false,
     suppressBackendUnavailableEvent = false,
@@ -1068,7 +1073,7 @@ async function bgRequestImpl<
   const shouldBypassBackground =
     responseType === "arrayBuffer" &&
     typeof path === "string" &&
-    (path.includes("/api/v1/audio/") ||
+    (maxResponseBytes !== undefined || path.includes("/api/v1/audio/") ||
       isAudioStudioArtifactMediaPath(path))
   const isArrayBufferLike = (value: unknown): boolean => {
     if (!value) return false
@@ -1113,6 +1118,7 @@ async function bgRequestImpl<
         method: String(method),
         path: String(path),
         status: resp?.status,
+        code: resp?.code,
         error: rawMessage
       })
     const scopedError =
@@ -1224,7 +1230,8 @@ async function bgRequestImpl<
         noAuth: resolvedNoAuth,
         timeoutMs,
         abortSignal,
-        responseType
+        responseType,
+        maxResponseBytes
       },
       createDirectRuntime(storage, servicePromptConfig, configSnapshot)
     )
@@ -1278,7 +1285,8 @@ async function bgRequestImpl<
         noAuth: resolvedNoAuth,
         timeoutMs,
         abortSignal,
-        responseType
+        responseType,
+        maxResponseBytes
       },
       createDirectRuntime(storage, servicePromptConfig, configSnapshot)
     )
@@ -1295,6 +1303,43 @@ async function bgRequestImpl<
   // If extension messaging is available, use it (extension context)
   try {
     if (hasRuntimeMessage) {
+      const expectedConnectionAuthority = configSnapshot !== undefined
+        ? deriveConnectionAuthorityId(configSnapshot)
+        : undefined
+      let expectedConnectionEpoch: string | undefined
+      if (expectedConnectionAuthority) {
+        // Bind the checked authority to this worker lifetime/account epoch.
+        let checkTimeout: ReturnType<typeof setTimeout> | undefined
+        let onCheckAbort: (() => void) | undefined
+        try {
+          if (abortSignal?.aborted) throw createAbortError()
+          const checked = await new Promise<{ ok?: boolean; epoch?: unknown } | null>((resolve, reject) => {
+            onCheckAbort = () => reject(createAbortError())
+            abortSignal?.addEventListener("abort", onCheckAbort, { once: true })
+            if (abortSignal?.aborted) {
+              onCheckAbort()
+              return
+            }
+            checkTimeout = setTimeout(() => reject(markNoFallbackError(
+              new Error("Extension messaging timeout"), { timeout: true }
+            )), runtimeMessageTimeoutMs)
+            browser.runtime.sendMessage({
+              type: "tldw:connection-authority",
+              payload: { expectedConnectionAuthority }
+            }).then(resolve, reject)
+          })
+          if (abortSignal?.aborted) throw createAbortError()
+          if (!checked?.ok || typeof checked?.epoch !== "string") {
+            throw createServicePromptScopeChangedError()
+          }
+          expectedConnectionEpoch = checked.epoch
+        } catch (error) {
+          throw markNoFallbackError(error)
+        } finally {
+          if (checkTimeout !== undefined) clearTimeout(checkTimeout)
+          if (onCheckAbort) abortSignal?.removeEventListener("abort", onCheckAbort)
+        }
+      }
       const requestId =
         servicePromptConfig && abortSignal
           ? createRuntimeRequestId()
@@ -1310,6 +1355,10 @@ async function bgRequestImpl<
           timeoutMs,
           responseType,
           servicePromptConfig,
+          ...(expectedConnectionAuthority ? {
+            expectedConnectionAuthority,
+            expectedConnectionEpoch
+          } : {}),
           ...(requestId ? { requestId } : {})
         }
       }
@@ -1399,6 +1448,8 @@ async function bgRequestImpl<
       return await resolveArrayBufferResponse(resp as RuntimeResponsePayload)
     }
   } catch (e) {
+    // Direct transport cannot preserve a checked extension worker epoch.
+    if (configSnapshot !== undefined) throw e
     if (isNoFallbackError(e)) {
       if (
         isExtensionTimeoutError(e) &&
@@ -1433,7 +1484,8 @@ async function bgRequestImpl<
       noAuth: resolvedNoAuth,
       timeoutMs,
       abortSignal,
-      responseType
+      responseType,
+      maxResponseBytes
     },
     createDirectRuntime(
       storage,

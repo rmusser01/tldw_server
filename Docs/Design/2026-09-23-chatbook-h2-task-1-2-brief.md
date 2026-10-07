@@ -23,4 +23,4 @@ Implement the plan's Task 1.2 store/migration/deletion surfaces, including nativ
 3. Add workspace-close and residual-protected-row barriers, including admission-before-close and close-before-admission. Re-run the two existing saved-view deletion concurrency suites with their original waiting and error assertions.
 4. Run the new suites and affected H1 migration/history tests, compile/Ruff and touched Python Bandit. Obtain independent P1/P2 review and fix all findings before the Task 1.2 commit.
 
-The interface names and complete cases remain authoritative in `IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md` Task 1.2 and `Docs/Design/2026-09-18-chatbook-h2-native-fork-design.md`; this brief adds the refreshed source/migration constraints and does not narrow those acceptance criteria.
+The interface names and complete cases remain authoritative in `Docs/Plans/IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md` Task 1.2 and `Docs/Design/2026-09-18-chatbook-h2-native-fork-design.md`; this brief adds the refreshed source/migration constraints and does not narrow those acceptance criteria.

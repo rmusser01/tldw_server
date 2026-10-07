@@ -1,6 +1,7 @@
 """Keep duplicate-deck conflicts recognizable without exposing driver diagnostics."""
 
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints import flashcards
+from tldw_Server_API.app.core.DB_Management.backends import base as backend_errors
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     DatabaseConfig,
@@ -106,17 +108,34 @@ def test_real_postgres_unique_failure_retains_only_a_safe_category(pg_database_c
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("category", ["unique", "check", "foreign-runtime"])
+@pytest.mark.parametrize(
+    "category",
+    ["unique", "saved-view-name", "other-unique", "private-unique", "check", "foreign-runtime"],
+)
 @pytest.mark.parametrize("rollback_fails", [False, True])
 def test_redacted_category_does_not_keep_driver_or_rollback_payload(category, rollback_fails):
     psycopg = pytest.importorskip("psycopg")
-    if category == "unique":
+    if category in {"saved-view-name", "other-unique", "private-unique"}:
+        constraint_name = {
+            "saved-view-name": "uq_workspace_source_saved_views_owner_name",
+            "other-unique": "workspace_source_saved_views_pkey",
+            "private-unique": "PRIVATE_CONSTRAINT_NAME",
+        }[category]
+
+        class NamedUniqueViolation(psycopg.errors.UniqueViolation):
+            @property
+            def diag(self):
+                return SimpleNamespace(constraint_name=constraint_name)
+
+        failure = NamedUniqueViolation("PRIVATE_DRIVER_DETAIL")
+    elif category == "unique":
         failure = psycopg.errors.UniqueViolation("PRIVATE_DRIVER_DETAIL")
     elif category == "check":
         failure = psycopg.errors.CheckViolation("PRIVATE_DRIVER_DETAIL")
     else:
         failure = RuntimeError("PRIVATE_DRIVER_DETAIL")
         failure.sqlstate = "23505"
+        failure.diag = SimpleNamespace(constraint_name="uq_workspace_source_saved_views_owner_name")
 
     class Connection:
         def __init__(self):
@@ -156,7 +175,20 @@ def test_redacted_category_does_not_keep_driver_or_rollback_payload(category, ro
     finally:
         logger.remove(sink)
     error = raised.value
-    assert CharactersRAGDB._is_unique_violation(None, error) is (category == "unique")
+    assert CharactersRAGDB._is_unique_violation(None, error) is (
+        category in {"unique", "saved-view-name", "other-unique", "private-unique"}
+    )
+    assert CharactersRAGDB._is_workspace_source_saved_view_postgres_unique_error(error) is (
+        category == "saved-view-name"
+    )
+    if category == "saved-view-name":
+        assert type(error) is backend_errors.SavedViewNameUniqueConstraintError
+    elif category in {"unique", "other-unique", "private-unique"}:
+        assert type(error) is backend_errors.UniqueConstraintError
+    elif category == "check":
+        assert type(error) is backend_errors.ConstraintViolationError
+    else:
+        assert type(error) is DatabaseError
     assert str(error) == "PostgreSQL query execution failed"
     assert error.__cause__ is None
     assert error.__context__ is None
@@ -170,3 +202,24 @@ def test_redacted_category_does_not_keep_driver_or_rollback_payload(category, ro
 def test_unique_classifier_preserves_sqlite_and_generic_error_compatibility():
     assert CharactersRAGDB._is_unique_violation(None, sqlite3.IntegrityError("UNIQUE constraint failed: decks.name"))
     assert not CharactersRAGDB._is_unique_violation(None, DatabaseError("PostgreSQL query execution failed"))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("sqlstate", "constraint_name", "expected"),
+    [
+        ("23505", "uq_workspace_source_saved_views_owner_name", True),
+        ("23505", "workspace_source_saved_views_pkey", False),
+        ("23505", None, False),
+        ("23514", "uq_workspace_source_saved_views_owner_name", False),
+    ],
+)
+def test_saved_view_named_unique_legacy_classifier_remains_precise(sqlstate, constraint_name, expected):
+    driver_error = Exception("legacy fixture failure")
+    driver_error.sqlstate = sqlstate
+    driver_error.diag = SimpleNamespace(constraint_name=constraint_name)
+    wrapped = DatabaseError("legacy wrapper")
+    wrapped.__cause__ = driver_error
+
+    assert CharactersRAGDB._is_workspace_source_saved_view_postgres_unique_error(driver_error) is expected
+    assert CharactersRAGDB._is_workspace_source_saved_view_postgres_unique_error(wrapped) is expected

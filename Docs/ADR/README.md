@@ -87,5 +87,11 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-053](053-rag-cross-source-fusion.md) | Accepted | Multi-source RAG results are ordered by reciprocal rank fusion rescaled to (0,1]; single-source retrieval is unchanged. |
 | [ADR-054](054-chatops-shared-shell.md) | Accepted | Discord and Slack share one ChatOps shell under endpoints/_chatops/; only the signature algorithm and command parser stay per-protocol. |
 | [ADR-055](055-prompt-studio-db-single-implementation.md) | Accepted | One backend-neutral Prompt Studio DB implementation, moved aggregate by aggregate behind a parity harness. |
+| [ADR-056](056-resource-governor-safety-net.md) | Accepted | Resource Governor ingress is a per-entity safety net: one policy resolver (path, then tag, then a catch-all default), the validated principal (never the proxy) is charged, `global` buckets survive only for email-sending auth endpoints, no configuration can produce a permanent 429, and one switch disables enforcement everywhere. |
+| [ADR-057](057-workspace-chat-strict-startup-receipts.md) | Proposed | Retain bounded owner-bound strict Workspace startup receipts with atomic acceptance and permanent binding invalidation. |
+| [ADR-058](058-jobs-completion-row-identity.md) | Accepted | Bind Jobs completion and bookkeeping to locked row identity with optional caller UUID preconditions. |
+| [ADR-059](059-backlog-py-task-editor-cutover.md) | Accepted | Create and edit backlog task files only with backlog-py, not the Node Backlog.md CLI or MCP; ADR-002's task requirement is unchanged. |
+| [ADR-063](063-in-repo-merge-queue.md) | Proposed | PRs merge into dev one at a time through an in-repo queue: only the armed PR at the front is rebased and re-tested; switched by the MERGE_QUEUE variable and shipped off. |
+| [ADR-064](064-usage-quotas-per-user-limits.md) | Accepted | Usage quotas are per-user UserProfiles `limits.*` values, off by default (`USAGE_QUOTAS_ENABLED`), resolved from the user's own value, then the most generous team value, then the most generous org value; none is set by default. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

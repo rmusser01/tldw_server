@@ -5,51 +5,37 @@
 
 schema_version: 1
 
-hot_reload:
-  enabled: true
-  interval_sec: 5  # watcher/TTL interval for file store
-
-metadata:
-  description: Default example policies for tldw_server Resource Governor
-  owner: core-platform
-  version: 1
-
-# Global defaults applied when a policy omits a field.
-defaults:
-  fail_mode: fail_closed  # can be overridden per policy
-  algorithm:
-    requests: token_bucket   # token_bucket | sliding_window
-    tokens: token_bucket     # preferred for model tokens
-  scopes_order: [global, tenant, user, api_key, conversation, client, ip, service, entity]
-
 # Policy templates (anchors) for quick customization.
 templates:
   core: &core_policy
-    requests: { rpm: 120, burst: 1.2 }
-    scopes: [global, user, api_key, ip]
+    requests: { rpm: 600, burst: 2.0 }
+    scopes: [user, api_key, ip]
     fail_mode: fallback_memory
   mcp_base: &mcp_base
-    requests: { rpm: 60, burst: 1.0 }
-    scopes: [global, user, client, api_key]
+    requests: { rpm: 300, burst: 2.0 }
+    scopes: [user, client, api_key]
     fail_mode: fallback_memory  # acceptable local over-admission during outages
 
 policies:
   # Core defaults for endpoints without explicit module-level policies.
   core.default: *core_policy
 
+  # Safety net for every /api/ route no path or tag maps (see ADR-056).
+  default: *core_policy
+
   # Cheap health/readiness probes should not spend the same bucket as
   # interactive app routes. The WebUI polls these while users work.
   health.default:
     requests: { rpm: 6000, burst: 1.0 }
-    scopes: [global, ip]
+    scopes: [ip]
     fail_mode: fallback_memory
 
   # Chat API: per-user and per-conversation controls
   chat.default:
-    requests: { rpm: 120, burst: 2.0 }
-    tokens:   { per_min: 60000, burst: 1.5 }
+    requests: { rpm: 300, burst: 2.0 }
+    tokens:   { per_min: 1000000, burst: 1.5 }
     # Include api_key so ingress enforcement works before auth deps resolve user_id.
-    scopes: [global, user, api_key, conversation]
+    scopes: [user, api_key, conversation]
     fail_mode: fail_closed
 
   # MCP ingestion/read paths
@@ -61,11 +47,11 @@ policies:
 
   mcp.read:
     <<: *mcp_base
-    requests: { rpm: 120, burst: 1.0 }  # Higher limit for read ops
+    requests: { rpm: 600, burst: 2.0 }  # Higher limit for read ops
 
   mcp.search:
     <<: *mcp_base
-    requests: { rpm: 60, burst: 1.0 }
+    requests: { rpm: 600, burst: 2.0 }
 
   mcp.rag_generation:
     requests: { rpm: 30, burst: 1.0 }
@@ -75,10 +61,13 @@ policies:
   # AuthNZ guardrails (login, reset-password, etc.)
   # Applied by RG ingress via /api/v1/auth* route_map entries.
   authnz.default:
-    requests: { rpm: 60, burst: 1.0 }
-    scopes: [global, entity]
+    requests: { rpm: 300, burst: 2.0 }
+    scopes: [entity]
 
   # AuthNZ sensitive endpoint policies (endpoint-level + ingress mapping).
+  # forgot_password / resend_verification / magic_link.request keep a
+  # server-wide bucket: they send email, so per-entity scoping alone would
+  # not stop a spray across many addresses (see spec §3).
   authnz.forgot_password:
     requests: { rpm: 10, burst: 1.0 }
     scopes: [global, entity]
@@ -86,7 +75,7 @@ policies:
   authnz.reset_password:
     # Equivalent to ~20 attempts/5 minutes with burst allowance.
     requests: { rpm: 4, burst: 5.0 }
-    scopes: [global, entity]
+    scopes: [entity]
 
   authnz.resend_verification:
     requests: { rpm: 10, burst: 1.0 }
@@ -103,15 +92,15 @@ policies:
 
   authnz.mfa.verify:
     requests: { rpm: 10, burst: 1.0 }
-    scopes: [global, entity]
+    scopes: [entity]
 
   authnz.mfa.login:
     requests: { rpm: 10, burst: 1.0 }
-    scopes: [global, entity]
+    scopes: [entity]
 
   # Embeddings service (OpenAI-compatible)
   embeddings.default:
-    requests: { rpm: 60, burst: 1.2 }
+    requests: { rpm: 300, burst: 2.0 }
     scopes: [user, api_key]
 
   # Embeddings server (worker / internal service)
@@ -120,65 +109,63 @@ policies:
     scopes: [service]
     fail_mode: fallback_memory
 
-  # Audio: concurrency via streams + durable minutes cap
+  # Audio: request-rate safety net only.
   audio.default:
     # Allow reasonable request rate so informational GETs (status/limits)
-    # are not denied by middleware. Concurrency/minutes are enforced separately.
+    # are not denied by middleware. Per-user audio minutes and queued-job
+    # concurrency are UserProfiles limits.* values (spec 2).
     requests: { rpm: 300, burst: 2.0 }
-    streams: { max_concurrent: 2, ttl_sec: 90 }
-    jobs:    { max_concurrent: 2, ttl_sec: 600 }
-    minutes: { daily_cap: 120, rounding: ceil }
     scopes: [user, api_key, ip]
     fail_mode: fail_closed
 
   # Character Chat / Characters module (legacy per-user limiter compat)
   character_chat.default:
-    requests: { rpm: 60, burst: 1.0 }
+    requests: { rpm: 300, burst: 2.0 }
     scopes: [user, api_key]
 
   # Evaluations module
   evals.default:
     # Ingress middleware enforces `requests` for `/api/v1/evaluations/*`.
-    # The Evaluations module reserves `evaluations` (+ optional `tokens`) at
-    # endpoint-level to enforce durable caps via `ResourceDailyLedger`.
-    requests: { rpm: 30, burst: 1.0 }
-    evaluations: { daily_cap: 500 }
-    tokens: { per_min: 1000000, burst: 1.0, daily_cap: 500000 }
+    # The Evaluations module reserves `evaluations` (+ optional `tokens`) for
+    # per-minute rates; per-user daily caps are UserProfiles `limits.*` keys
+    # (spec 2).
+    requests: { rpm: 120, burst: 2.0 }
+    tokens: { per_min: 1000000, burst: 1.0 }
     scopes: [user, api_key]
 
   # Evaluations tier policies (used by the evaluations module)
   evals.free:
-    evaluations: { per_min: 10, burst: 1.5, daily_cap: 100 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 100000 }
+    evaluations: { per_min: 10, burst: 1.5 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
   evals.basic:
-    evaluations: { per_min: 30, burst: 1.33, daily_cap: 1000 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 1000000 }
+    evaluations: { per_min: 30, burst: 1.33 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
   evals.premium:
-    evaluations: { per_min: 100, burst: 1.25, daily_cap: 10000 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 10000000 }
+    evaluations: { per_min: 100, burst: 1.25 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
   evals.enterprise:
-    evaluations: { per_min: 500, burst: 1.2, daily_cap: 100000 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 100000000 }
+    evaluations: { per_min: 500, burst: 1.2 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
 
   evals.free.batch:
-    evaluations: { per_min: 2, burst: 3.5, daily_cap: 100 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 100000 }
+    evaluations: { per_min: 2, burst: 3.5 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
   evals.basic.batch:
-    evaluations: { per_min: 5, burst: 3.0, daily_cap: 1000 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 1000000 }
+    evaluations: { per_min: 5, burst: 3.0 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
   evals.premium.batch:
-    evaluations: { per_min: 20, burst: 2.25, daily_cap: 10000 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 10000000 }
+    evaluations: { per_min: 20, burst: 2.25 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
   evals.enterprise.batch:
-    evaluations: { per_min: 100, burst: 2.0, daily_cap: 100000 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 100000000 }
+    evaluations: { per_min: 100, burst: 2.0 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
 
   # Web scraping service (internal service scope).
@@ -198,17 +185,15 @@ policies:
   # fan‑out across third‑party search/content providers. Tokens are not
   # accounted here; upstream provider quotas remain the primary guardrail.
   research.default:
-    requests: { rpm: 30, burst: 1.0 }
+    requests: { rpm: 120, burst: 2.0 }
     scopes: [user, api_key]
 
   # Workflows (ad-hoc runs, schedules, admin).
-  # Ingress limits bound request rate, while `workflows_runs.daily_cap`
-  # integrates with the Workflows daily ledger/RG helpers to enforce a
-  # durable per-user daily runs cap. The default cap (1000) aligns with
-  # the WORKFLOWS_QUOTA_DAILY_PER_USER env fallback used by the API.
+  # This block bounds request rate only. The durable per-user daily runs
+  # cap is `limits.workflows_runs_per_day` (spec 2), enforced by
+  # quota_checks.workflows_runs_decision, not by this RG policy.
   workflows.default:
-    requests: { rpm: 60, burst: 1.0 }
-    workflows_runs: { daily_cap: 1000 }
+    requests: { rpm: 300, burst: 2.0 }
     scopes: [user, api_key]
 
   # Prompt Studio API (projects/prompts/tests/optimization).
@@ -225,7 +210,7 @@ policies:
   # 120 rpm default is tuned for interactive usage and small teams; scale
   # out by overriding in DB-backed policy stores for larger deployments.
   rag.default:
-    requests: { rpm: 120, burst: 1.2 }
+    requests: { rpm: 300, burst: 2.0 }
     scopes: [user, api_key]
 
   # Media ingestion/processing endpoints.
@@ -235,8 +220,6 @@ policies:
   # concurrent ingestion workflows in development.
   media.default:
     requests: { rpm: 600, burst: 1.2 }
-    jobs: { max_concurrent: 2, ttl_sec: 1800 }
-    ingestion_bytes: { daily_cap: 2147483648 }
     scopes: [user, api_key]
 
   # Media access endpoints (listing, item retrieval, file download).
@@ -289,99 +272,23 @@ policies:
   # for interactive usage (60 rpm) without enabling bulk abuse. Include `ip`
   # in scope to add a per-client throttle when API keys are shared.
   watchlists.default:
-    requests: { rpm: 60, burst: 1.0 }
+    requests: { rpm: 300, burst: 2.0 }
     scopes: [user, api_key, ip]
 
 # Route/tag mapping helpers. Middleware may use these to resolve policy_id.
 route_map:
-  by_route:
-    audio-realtime: audio.default
+  # by_path wins over by_tag, so list a tag only if it governs a route no by_path
+  # entry matches (Helper_Scripts/ci/rg_route_map_lint.py reports shadowed tags).
   by_tag:
     health: health.default
-    authentication: authnz.default
-    auth: authnz.default
-    users: core.default
     organizations: core.default
     org-team-keys: core.default
-    invites: core.default
-    privileges: core.default
-    admin: core.default
-    jobs: core.default
-    audit: core.default
-    billing: core.default
-    outputs-templates: core.default
-    outputs: core.default
-    reading: core.default
-    reading-highlights: core.default
-    items: core.default
-    kanban: core.default
-    flashcards: flashcards.default
-    quizzes: quizzes.default
-    moderation: core.default
-    authnz-debug: core.default
-    sandbox: core.default
-    setup: core.default
-    subscriptions-deprecated: core.default
-    chunking: core.default
-    chunking-templates: core.default
-    connectors: core.default
-    ocr: core.default
-    vlm: core.default
-    media: media.access
-    media-embeddings: embeddings.default
-    audio: audio.default
-    audio-websocket: audio.default
-    audio-ws: audio.default
-    audio-jobs: audio.default
-    web-scraping: web_scraping.default
-    research: research.default
-    paper-search: research.default
-    chat: chat.default
-    chat-dictionaries: chat.default
-    chat-documents: chat.default
-    characters: character_chat.default
-    character-chat-sessions: character_chat.default
-    character-messages: character_chat.default
-    persona: character_chat.default
-    rag-health: rag.default
-    rag-unified: rag.default
-    feedback: evals.default
-    evaluations: evals.default
-    benchmarks: evals.default
-    embeddings: embeddings.default
-    vector-stores: embeddings.default
-    claims: core.default
-    prompt-studio: prompt_studio.default
-    prompts: prompt_studio.default
-    notes: core.default
-    skills: core.default
     writing: core.default
-    notes-graph: core.default
-    personalization: core.default
-    chatbooks: core.default
-    tools: core.default
-    metrics: core.default
-    monitoring: core.default
-    config: core.default
-    sync: core.default
-    llm: core.default
     llamacpp: core.default
-    mcp-unified: mcp.default
-    mcp-catalogs: mcp.default
     mcp-catalogs-scope: mcp.default
-    mcp.ingestion: mcp.ingestion
-    embeddings_server: embeddings_server.default
-    character_chat: character_chat.default
-    web_scraping: web_scraping.default
-    workflows: workflows.default
-    rag: rag.default
-    watchlists: watchlists.default
     resource-governor: core.default
-    audio-realtime: audio.default
   by_path:
     "/health": health.default
-    "/healthz": health.default
-    "/readyz": health.default
     "/metrics": core.default
     "/setup*": core.default
     "/v1/rerank": core.default
@@ -410,11 +317,9 @@ route_map:
     "/api/v1/chats*": character_chat.default
     "/api/v1/messages*": character_chat.default
     "/api/v1/characters*": character_chat.default
-    "/api/v1/dictionaries*": chat.default
-    "/api/v1/documents*": chat.default
     "/api/v1/chat/*": chat.default
     "/api/v1/embeddings*": embeddings.default
-    "/api/v1/vector-stores*": embeddings.default
+    "/api/v1/vector_stores*": embeddings.default
     "/v1/realtime": audio.default
     "/api/v1/audio*": audio.default
     "/api/v1/evaluations*": evals.default
@@ -436,7 +341,6 @@ route_map:
     "/api/v1/media*": media.access
     "/api/v1/watchlists/*": watchlists.default
     "/api/v1/watchlists*": watchlists.default
-    "/api/v1/subscriptions*": core.default
     "/api/v1/billing*": core.default
     "/api/v1/auth/forgot-password": authnz.forgot_password
     "/api/v1/auth/reset-password": authnz.reset_password
@@ -444,7 +348,7 @@ route_map:
     "/api/v1/auth/magic-link/request": authnz.magic_link.request
     "/api/v1/auth/mfa/verify": authnz.mfa.verify
     "/api/v1/auth/mfa/login": authnz.mfa.login
-    "/api/v1/auth*": authnz.default
+    "/api/v1/auth/*": authnz.default
     "/api/v1/authnz*": core.default
     "/api/v1/users*": core.default
     "/api/v1/orgs*": core.default

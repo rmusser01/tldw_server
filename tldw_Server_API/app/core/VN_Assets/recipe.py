@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
+from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.VN_Assets.prompts import build_prompt_preview
 
 RECIPE_VERSION = 1
@@ -161,6 +162,7 @@ def build_authored_recipe(
 
     Raises:
         ValueError: The character or a configured world book is unavailable.
+        VNAssetGenerationError: Configured context could not be read safely.
     """
     character = repo.get_character(int(pack["primary_character_id"]))
     if character is None:
@@ -227,17 +229,22 @@ def _world_book_entries(repo: VNAssetPacksRepository, pack: Mapping[str, Any]) -
         return []
     from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 
-    books = WorldBookService(repo.db)
     entries: list[Any] = []
     try:
+        books = WorldBookService(repo.db)
         for raw_id in ids:
             book_id = int(raw_id)
             if books.get_world_book(world_book_id=book_id) is None:
-                raise ValueError("vn_asset_world_book_unavailable")
+                break
             entries.extend(books.get_entries(world_book_id=book_id, enabled_only=True))
-    except Exception as exc:
-        raise ValueError("vn_asset_world_book_unavailable") from exc
-    return entries
+        else:
+            return entries
+    except Exception:  # noqa: BLE001 - sanitize any configured-context outage without freezing partial prompts
+        raise VNAssetGenerationError(
+            "vn_asset_world_book_context_unavailable", retryable=True,
+            pack_id=pack.get("id"), operation="read_world_book_context",
+        ) from None
+    raise ValueError("vn_asset_world_book_unavailable")
 
 
 def _json_object(value: Any) -> dict[str, Any]:

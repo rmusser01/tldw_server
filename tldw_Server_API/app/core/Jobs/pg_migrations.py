@@ -10,6 +10,7 @@ import contextlib
 import os
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import ensure_retry_admission_index
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 
 from .migrations import (
@@ -143,15 +144,15 @@ def _pg_archive_index_matches(
                index_state.indisunique AS is_unique,
                index_state.indnatts AS total_attributes,
                ARRAY(
-                 -- pg_get_indexdef(index, column) omits sort order, which lives in
-                 -- indoption (bit 1 = DESC); without it "archived_at DESC" never
-                 -- matched the contract and Slides coordination stayed unavailable.
                  SELECT pg_get_indexdef(index_state.indexrelid, position, TRUE)
-                        || CASE WHEN (index_state.indoption[position - 1] & 1) = 1
-                                THEN ' DESC' ELSE '' END
                  FROM generate_series(1, index_state.indnkeyatts) AS positions(position)
                  ORDER BY position
                ) AS key_columns,
+               ARRAY(
+                 SELECT index_state.indoption[position - 1]::integer
+                 FROM generate_series(1, index_state.indnkeyatts) AS positions(position)
+                 ORDER BY position
+               ) AS key_options,
                pg_get_expr(index_state.indpred, index_state.indrelid, TRUE) AS predicate
         FROM pg_class AS index_class
         JOIN pg_index AS index_state ON index_state.indexrelid=index_class.oid
@@ -172,15 +173,20 @@ def _pg_archive_index_matches(
         is_unique = row["is_unique"]
         total_attributes = row["total_attributes"]
         actual_columns = row["key_columns"]
+        actual_options = row["key_options"]
         actual_predicate = row["predicate"]
     else:
-        is_valid, is_ready, is_unique, total_attributes, actual_columns, actual_predicate = row
+        is_valid, is_ready, is_unique, total_attributes, actual_columns, actual_options, actual_predicate = row
+    expected_names = tuple(column.removesuffix(" desc") for column in columns)
+    # Canonical DESC combines PostgreSQL's DESC (1) and NULLS FIRST (2) bits.
+    expected_options = tuple(3 if column.endswith(" desc") else 0 for column in columns)
     return (
         bool(is_valid)
         and bool(is_ready)
         and bool(is_unique) is unique
         and int(total_attributes) == len(columns)
-        and tuple(_normalize_pg_index_expression(item) for item in (actual_columns or ())) == columns
+        and tuple(_normalize_pg_index_expression(item) for item in (actual_columns or ())) == expected_names
+        and tuple(int(option) for option in (actual_options or ())) == expected_options
         and _normalize_pg_index_expression(actual_predicate) == predicate
     )
 
@@ -1405,7 +1411,7 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
         """
         UPDATE slides_standalone_reconciliation
         SET diagnostic_code=%s, diagnostic_count=%s,
-            diagnostic_at=CASE WHEN %s::text IS NULL THEN NULL ELSE NOW() END
+            diagnostic_at=CASE WHEN CAST(%s AS TEXT) IS NULL THEN NULL ELSE NOW() END
         WHERE singleton_id=1
         """,
         (diagnostic_code, diagnostic_count, diagnostic_code),
@@ -1620,12 +1626,15 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 audit_cur.execute("RELEASE SAVEPOINT slides_generation_audit")
         # Create hot-path indexes concurrently (outside transaction) when possible
         archive_batch_read_indexes_verified = False
+        retry_admission_index_verified = False
         try:
             with psycopg.connect(_dsn, autocommit=True) as c2:
                 with c2.cursor() as k:
                     _configure_pg_archive_migration_session(k, local=False)
                     _ensure_pg_archive_batch_read_indexes(k)
                     archive_batch_read_indexes_verified = True
+                    ensure_retry_admission_index(k, backend="postgres")
+                    retry_admission_index_verified = True
                     for index_name, (unique, columns, predicate) in _SLIDES_ARCHIVE_INDEXES_PG.items():
                         if _pg_archive_index_matches(
                             k,
@@ -1695,6 +1704,10 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     raise
                 raise RuntimeError(
                     "PostgreSQL Jobs archive batch-read index migration failed"
+                ) from exc
+            if not retry_admission_index_verified:
+                raise RuntimeError(
+                    "PostgreSQL Jobs retry-admission index migration failed"
                 ) from exc
             if isinstance(exc, psycopg.Error):
                 # Optional standalone index/readiness setup must not break

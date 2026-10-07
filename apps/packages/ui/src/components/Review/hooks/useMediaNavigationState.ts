@@ -81,6 +81,10 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
     [location.search]
   )
 
+  // Effects below schedule hydration; do not clear its URL in that same render.
+  const permalinkNeedsHydration =
+    permalinkMediaId != null && hydratedPermalinkRef.current !== permalinkMediaId
+
   const selectedIndex = displayResults.findIndex((r) => r.id === selected?.id)
   const hasPrevious = selectedIndex > 0
   const hasNext = selectedIndex >= 0 && selectedIndex < displayResults.length - 1
@@ -449,8 +453,8 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
   }, [selectedMediaPermalinkId])
 
   useEffect(() => {
+    if (permalinkNeedsHydration) return
     if (
-      selectedMediaPermalinkId == null &&
       pendingInitialMediaIdSource === 'url' &&
       pendingInitialMediaId
     ) {
@@ -476,6 +480,7 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
     navigate,
     pendingInitialMediaId,
     pendingInitialMediaIdSource,
+    permalinkNeedsHydration,
     selectedMediaPermalinkId
   ])
 

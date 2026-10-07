@@ -34,9 +34,9 @@ Address the live Qodo follow-up review comments on PR #1719. Scope: add missing 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed valid Qodo follow-ups by adding AsyncIterator return annotations for transaction context managers, adding a _result_row_count docstring, and adding cleanup-supporting migration indexes for archived workspaces, expired/revoked actors and sessions, and inactive revoked preview handles. Verified raw-SQL comment against AuthNZ repo patterns: AuthNZ repos are the persistence abstraction for this database and existing repo modules use db_pool.execute/fetch* throughout; cleanup SQL remains parameterized and transaction-bound, so moving it to DB_Management would be inconsistent and broader than the PR.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

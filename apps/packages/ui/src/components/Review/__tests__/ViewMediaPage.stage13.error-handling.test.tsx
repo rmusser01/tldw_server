@@ -1,3 +1,4 @@
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({ useQuickIngestAuthority: () => 'verified-fixture', quickIngestAuthority: { capture: () => ({ authorityKey: 'verified-fixture', requestScope: { config: { serverUrl: 'http://localhost:8000', authMode: 'multi-user' }, userId: 'fixture' }, isCurrent: () => true }) } }))
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +7,7 @@ import axe from 'axe-core'
 import ViewMediaPage from '../ViewMediaPage'
 
 const mocks = vi.hoisted(() => ({
+  queryClient: { removeQueries: vi.fn() },
   queryData: [] as Array<any>,
   detailSequencesById: {} as Record<string, Array<{ ok: boolean; value: any }>>,
   refetch: vi.fn(),
@@ -35,6 +37,7 @@ vi.mock('react-i18next', () => ({
 }))
 
 vi.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => mocks.queryClient,
   useQuery: () => ({
     data: mocks.queryData,
     refetch: mocks.refetch,

@@ -31,9 +31,10 @@ const shouldAbort = (
 
 const throwIfAborted = (
   signal?: AbortSignal,
-  shouldAbortForScopeChange?: () => boolean
+  shouldAbortForScopeChange?: () => boolean,
+  validateLease?: () => boolean
 ): void => {
-  if (!shouldAbort(signal, shouldAbortForScopeChange)) return
+  if (!shouldAbort(signal, shouldAbortForScopeChange) && validateLease?.() !== false) return
   const error = new Error("Request scope changed")
   error.name = "AbortError"
   throw error
@@ -42,9 +43,10 @@ const throwIfAborted = (
 export const runChatPersistenceTransaction = async <T>(
   signal: AbortSignal | undefined,
   operation: () => Promise<T>,
-  shouldAbortForScopeChange?: () => boolean
+  shouldAbortForScopeChange?: () => boolean,
+  validateLease?: () => boolean
 ): Promise<T> => {
-  throwIfAborted(signal, shouldAbortForScopeChange)
+  throwIfAborted(signal, shouldAbortForScopeChange, validateLease)
   let activeTransaction: { abort: () => void } | undefined
   const abort = () => {
     if (!shouldAbort(signal, shouldAbortForScopeChange)) return
@@ -61,13 +63,13 @@ export const runChatPersistenceTransaction = async <T>(
       [db.chatHistories, db.messages, db.modelNickname, db.sessionFiles],
       async (transaction) => {
         activeTransaction = transaction
-        throwIfAborted(signal, shouldAbortForScopeChange)
+        throwIfAborted(signal, shouldAbortForScopeChange, validateLease)
         const operationResult = await operation()
-        throwIfAborted(signal, shouldAbortForScopeChange)
+        throwIfAborted(signal, shouldAbortForScopeChange, validateLease)
         return operationResult
       }
     )
-    throwIfAborted(signal, shouldAbortForScopeChange)
+    throwIfAborted(signal, shouldAbortForScopeChange, validateLease)
     return result
   } finally {
     signal?.removeEventListener("abort", abort)

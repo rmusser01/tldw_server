@@ -780,7 +780,7 @@
     "message": "保存する権限がありません"
   },
   "mediaPage_spreadMode": {
-    "message": "比較"
+    "message": "並列レイアウト"
   },
   "mediaPage_listMode": {
     "message": "フォーカス"
@@ -789,13 +789,13 @@
     "message": "スタック"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "選択した項目を並べて比較表示"
+    "message": "選択した項目を並べて表示"
   },
   "mediaPage_listModeTooltip": {
     "message": "ナビゲーションで1件ずつ表示"
   },
   "mediaPage_allModeTooltip": {
-    "message": "選択した項目をスクロール可能な一覧で表示"
+    "message": "現在の閲覧範囲をスクロール可能なスタックで表示"
   },
   "mediaPage_copyContentLabel": {
     "message": "コンテンツをコピー"
@@ -834,19 +834,19 @@
     "message": "項目を選択"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "左側のパネルで項目をクリックしてビューアに追加します。"
+    "message": "チェックボックスで選択し、選択項目を読むを押します。クリックまたは Enter でプレビュー。"
   },
   "mediaPage_firstUseStep2": {
     "message": "表示を選択"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "「比較」は並べて表示、「フォーカス」は1件ずつ、「スタック」はすべて表示します。"
+    "message": "並列は配置、フォーカスは単一項目、スタックは現在の閲覧範囲です。内容比較はテキストを比較します。"
   },
   "mediaPage_firstUseStep3": {
     "message": "移動"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "前へ/次へボタンまたはキーボード (Tab + Enter) で項目を移動します。"
+    "message": "前へ/次へまたは j/k で現在のプレビューや選択集合を移動。Tab と Space でチェックボックスを選択。"
   },
   "mediaPage_gotIt": {
     "message": "了解"
@@ -1327,5 +1327,11 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "分析プロバイダーを選択してから、分析を再試行してください。"
+  },
+  "mediaPage_resultsHint": {
+    "message": "クリックまたは Enter でプレビュー。チェックボックス上の Space で選択。Shift+クリックで範囲選択。"
+  },
+  "mediaPage_viewerAll": {
+    "message": "閲覧範囲（スタック）"
   }
 }

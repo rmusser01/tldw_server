@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Web_Scraping.preflight import (
     ProbeUnavailable,
 )
 from tldw_Server_API.app.core.Web_Scraping.preflight.asyncio_compat import timeout as asyncio_timeout
+from tldw_Server_API.app.core.Web_Scraping.preflight.context import _CleanupEntry
 from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
 from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
     FakeBrowserContext,
@@ -115,6 +116,146 @@ async def test_asyncio_timeout_compatibility_uses_async_timeout_when_stdlib_is_a
 
     assert created == [0.25]
     assert context.expired() is False
+
+
+def _legacy_reschedule_context(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Any]:
+    compat = _asyncio_compat_module()
+
+    class LegacyTimeout:
+        deadlines: list[float]
+        update_error: Exception | None = None
+
+        def __init__(self) -> None:
+            self.deadlines = []
+
+        @property
+        def expired(self) -> bool:
+            return False
+
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def update(self, deadline: float) -> None:
+            if self.update_error is not None:
+                raise self.update_error
+            self.deadlines.append(deadline)
+
+    legacy = LegacyTimeout()
+    legacy_module = types.ModuleType("async_timeout")
+    legacy_module.timeout = lambda _delay: legacy
+    monkeypatch.delattr(compat.asyncio, "timeout", raising=False)
+    monkeypatch.setitem(sys.modules, "async_timeout", legacy_module)
+    return compat.timeout(None), legacy
+
+
+@pytest.mark.asyncio
+async def test_asyncio_timeout_reschedule_native_cancels_wait_and_marks_expired() -> None:
+    context = asyncio_timeout(None)
+    cancelled = asyncio.Event()
+
+    async with asyncio_timeout(1.0):
+        with pytest.raises(TimeoutError):
+            async with context as entered:
+                assert entered is context
+                context.reschedule(asyncio.get_running_loop().time())
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+
+    assert cancelled.is_set()
+    assert context.expired() is True
+
+
+@pytest.mark.asyncio
+async def test_asyncio_timeout_reschedule_native_future_deadline_does_not_expire() -> None:
+    context = asyncio_timeout(None)
+    async with context:
+        context.reschedule(asyncio.get_running_loop().time() + 1.0)
+        await asyncio.sleep(0)
+
+    assert context.expired() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["not_entered", "exited", "expired"])
+async def test_asyncio_timeout_reschedule_preserves_native_state_errors(state: str) -> None:
+    context = asyncio_timeout(None)
+    if state == "exited":
+        async with context:
+            pass
+    elif state == "expired":
+        async with asyncio_timeout(1.0):
+            with pytest.raises(TimeoutError):
+                async with context:
+                    context.reschedule(asyncio.get_running_loop().time())
+                    await asyncio.Event().wait()
+
+    with pytest.raises(RuntimeError):
+        context.reschedule(asyncio.get_running_loop().time())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("deadline", [0.0, -1.0, 123456.25])
+async def test_asyncio_timeout_reschedule_legacy_forwards_absolute_deadline_to_update(
+    monkeypatch: pytest.MonkeyPatch,
+    deadline: float,
+) -> None:
+    context, legacy = _legacy_reschedule_context(monkeypatch)
+
+    async with context as entered:
+        assert entered is context
+        context.reschedule(deadline)
+
+    assert legacy.deadlines == [deadline]
+    assert context.expired() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [RuntimeError("legacy state error"), ValueError("legacy update error")])
+async def test_asyncio_timeout_reschedule_preserves_legacy_update_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    context, legacy = _legacy_reschedule_context(monkeypatch)
+    legacy.update_error = error
+
+    async with context:
+        with pytest.raises(type(error)) as caught:
+            context.reschedule(asyncio.get_running_loop().time())
+
+    assert caught.value is error
+    assert legacy.deadlines == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize(
+    ("deadline", "error"),
+    [(None, TypeError), (float("nan"), ValueError), (float("inf"), ValueError), (float("-inf"), ValueError)],
+)
+async def test_asyncio_timeout_reschedule_requires_finite_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    legacy: bool,
+    deadline: Any,
+    error: type[Exception],
+) -> None:
+    if legacy:
+        context, native = _legacy_reschedule_context(monkeypatch)
+    else:
+        context = asyncio_timeout(None)
+
+    async with context:
+        with pytest.raises(error):
+            context.reschedule(deadline)
+
+    assert context.expired() is False
+    if legacy:
+        assert native.deadlines == []
 
 
 @pytest.mark.asyncio
@@ -1076,9 +1217,33 @@ async def test_exhausted_deadline_reserves_once_but_prevents_launch() -> None:
         "new_page",
     ],
 )
-async def test_each_startup_await_is_bounded_by_the_shared_deadline(stage: str) -> None:
-    controls = _live_controls(deadline_s=0.02)
+async def test_each_startup_await_is_bounded_by_the_shared_deadline(
+    stage: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _assert_selected_startup_deadline(stage, monkeypatch)
+
+
+async def _assert_selected_startup_deadline(stage: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = FakeClock(1.0)
+    controls = _controls(deadline=2.0, clock=clock)
     launcher = FakePlaywrightLauncher(block_at=stage)
+    native_timeouts = []
+
+    def observed_timeout(delay):
+        assert delay == 1.0
+        # Arm the real native timeout only once the selected operation is waiting.
+        timeout = asyncio_timeout(None)
+        native_timeouts.append(timeout)
+        return timeout
+
+    monkeypatch.setattr(_adapter_module(), "_asyncio_timeout", observed_timeout)
+
+    async def expire_selected_stage():
+        await launcher.startup_gate.started.wait()
+        assert native_timeouts, "selected startup await must have a deadline context"
+        clock.advance(1.0)
+        native_timeouts[-1].reschedule(asyncio.get_running_loop().time())
+
     probe = _probe(
         controls=controls,
         guard=FakeProbeEgressGuard([]),
@@ -1086,14 +1251,45 @@ async def test_each_startup_await_is_bounded_by_the_shared_deadline(stage: str) 
     )
     options = BrowserProbeOptions(init_scripts=("window.test = true",))
 
-    with pytest.raises(PreflightDeadlineExceeded):
-        async with asyncio_timeout(0.2):
-            async with probe.open_page(options):
-                pytest.fail("page must not be created")
+    expiry = asyncio.create_task(expire_selected_stage())
+    try:
+        async with asyncio_timeout(2.0):
+            with pytest.raises(PreflightDeadlineExceeded):
+                async with probe.open_page(options):
+                    pytest.fail("page must not be created")
+    finally:
+        if not expiry.done():
+            expiry.cancel()
+        try:
+            await expiry
+        except asyncio.CancelledError:
+            pass
+        await controls.close(grace_s=0.02)
 
     assert launcher.startup_gate.started.is_set()
+    assert native_timeouts[-1].expired()
+    assert controls.remaining_seconds() == 0.0
     assert controls.consumed.browsers == 1
-    await controls.close(grace_s=0.02)
+    assert launcher.playwright.stop_calls == (0 if stage == "launcher_start" else 1)
+    assert launcher.browser.close_calls == (0 if stage in {"launcher_start", "launch_browser"} else 1)
+    assert all(context.close_calls == 1 for context in launcher.browser.contexts)
+
+
+@pytest.mark.asyncio
+async def test_selected_startup_deadline_survives_slow_earlier_setup(monkeypatch) -> None:
+    """Earlier setup exceeding the old 20ms budget must not hide the selected await."""
+    original_start = FakePlaywrightLauncher.start
+    setup_finished = asyncio.Event()
+
+    async def slow_start(self):
+        await asyncio.sleep(0.04)
+        result = await original_start(self)
+        setup_finished.set()
+        return result
+
+    monkeypatch.setattr(FakePlaywrightLauncher, "start", slow_start)
+    await _assert_selected_startup_deadline("init_script", monkeypatch)
+    assert setup_finished.is_set()
 
 
 @pytest.mark.asyncio
@@ -1602,7 +1798,9 @@ async def test_analyzer_time_does_not_consume_shared_cleanup_budget(
     started_at = asyncio.get_running_loop().time()
     async with probe.open_page(BrowserProbeOptions()):
         pass
+    analyzer_started_at = asyncio.get_running_loop().time()
     await asyncio.sleep(analyzer_delay_s)
+    analyzer_elapsed_s = asyncio.get_running_loop().time() - analyzer_started_at
     async with probe.open_page(BrowserProbeOptions()):
         pass
     elapsed_s = asyncio.get_running_loop().time() - started_at
@@ -1613,7 +1811,7 @@ async def test_analyzer_time_does_not_consume_shared_cleanup_budget(
     assert [page.close_cancellations for page in pages] == [0, 0]
     assert [page.results.get("close_complete") for page in pages] == [True, True]
     assert [page.force_close_calls for page in pages] == [0, 0]
-    assert elapsed_s - analyzer_delay_s < grace_s
+    assert elapsed_s - analyzer_elapsed_s < grace_s
 
 
 @pytest.mark.asyncio
@@ -1858,3 +2056,116 @@ async def test_guard_and_cleanup_logs_never_include_urls_or_raw_errors() -> None
     assert "secret.example" not in rendered
     assert "token=raw" not in rendered
     assert "RuntimeError" not in rendered
+
+
+class _ControlledBrowserClose:
+    """Expose native close completion independently of its shielded waiter."""
+
+    def __init__(self, outcome: str, *, force_available: bool) -> None:
+        self.outcome = outcome
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.native_calls: list[str] = []
+        self.force_calls = 0
+        self.closed = False
+        if not force_available:
+            self.force_close = None
+
+    async def _native_close(self, method: str) -> None:
+        self.native_calls.append(method)
+        self.started.set()
+        await self.release.wait()
+        if self.outcome == "failed":
+            raise RuntimeError("controlled native close failure")
+        self.closed = True
+
+    async def close(self) -> None:
+        await self._native_close("close")
+
+    async def stop(self) -> None:
+        await self._native_close("stop")
+
+    async def force_close(self) -> None:
+        self.force_calls += 1
+        self.release.set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["page", "context", "browser", "playwright"])
+@pytest.mark.parametrize("outcome", ["succeeded", "failed", "cancelled", "pending", "absent"])
+@pytest.mark.parametrize("force_available", [True, False], ids=["force-method", "native-only"])
+async def test_browser_force_cleanup_checks_native_operation_before_forcing(
+    kind: str,
+    outcome: str,
+    force_available: bool,
+) -> None:
+    resource = _ControlledBrowserClose(outcome, force_available=force_available)
+    handle = _required("_cleanup_handle")(resource, kind=kind)
+    controls = _controls()
+    entry = _CleanupEntry(handle=handle)
+    operation: asyncio.Task[None] | None = None
+    graceful: asyncio.Task[None] | None = None
+    loop = asyncio.get_running_loop()
+    warnings: list[str] = []
+    sink = logger.add(warnings.append, level="WARNING", format="{message}")
+    try:
+        if outcome != "absent":
+            graceful = asyncio.create_task(controls._graceful_cleanup((entry,)))
+            await resource.started.wait()
+            operation = handle._operation_task
+            assert operation is not None
+            if outcome in {"succeeded", "failed"}:
+                # Queue native completion before cancellation, so the shield's
+                # continuation cannot mark the entry before the force sweep.
+                resource.release.set()
+            elif outcome == "cancelled":
+                operation.cancel()
+            loop.call_soon(graceful.cancel)
+            await asyncio.gather(graceful, return_exceptions=True)
+            assert graceful.cancelled()
+            if outcome == "succeeded":
+                assert operation.done() and not operation.cancelled()
+                assert operation.exception() is None
+                assert resource.closed
+            elif outcome == "failed":
+                assert isinstance(operation.exception(), RuntimeError)
+            elif outcome == "cancelled":
+                assert operation.cancelled()
+            else:
+                assert not operation.done()
+        assert not entry.graceful_complete
+
+        force_tasks = controls._start_force_cleanup((entry,))
+        if not force_available and outcome in {"pending", "absent"}:
+            loop.call_soon(resource.release.set)
+        force_results = await asyncio.gather(*force_tasks, return_exceptions=True)
+        if not force_available and outcome == "cancelled":
+            assert len(force_results) == 1
+            assert isinstance(force_results[0], asyncio.CancelledError)
+        else:
+            assert force_results == [None]
+        await handle.force_close()
+        await handle.close()
+        expected_warnings = ["Preflight cleanup failed for _BrowserCleanupHandle."] if (
+            not force_available and outcome == "failed"
+        ) else []
+        assert [message.strip() for message in warnings] == expected_warnings
+
+        expected_force_calls = int(force_available and outcome != "succeeded")
+        assert resource.force_calls == expected_force_calls
+        expected_native_calls = [] if force_available and outcome == "absent" else [
+            "stop" if kind == "playwright" else "close"
+        ]
+        assert resource.native_calls == expected_native_calls
+        assert controls._start_force_cleanup((entry,)) == set()
+        if operation is not None:
+            assert handle._operation_task is operation
+    finally:
+        logger.remove(sink)
+        resource.release.set()
+        if graceful is not None and not graceful.done():
+            graceful.cancel()
+            await asyncio.gather(graceful, return_exceptions=True)
+        native = handle._operation_task
+        if native is not None:
+            await asyncio.gather(native, return_exceptions=True)

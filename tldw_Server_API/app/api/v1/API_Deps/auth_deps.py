@@ -76,6 +76,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
     authenticate_api_key_user,
     get_request_user,
     get_single_user_instance,
+    record_pending_api_key_usage,
     verify_jwt_and_fetch_user,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
@@ -400,7 +401,7 @@ def _activate_scope_context(
 
 
 async def get_login_db_connection() -> AsyncGenerator[Any, None]:
-    """Yield a statement-autocommit connection for login and token refresh.
+    """Yield a statement-autocommit connection for sign-in and token refresh.
 
     Lockout and session services use separate database connections. A
     SQLite ``BEGIN IMMEDIATE`` around the whole request would block those
@@ -1053,6 +1054,7 @@ async def get_current_user(
                         "Fast-path: unable to (re)establish content scope context: {}",
                         exc,
                     )
+                await record_pending_api_key_usage(request)
                 return safe_user
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
         # Fall through to standard auth behavior if any issue occurs
@@ -1976,11 +1978,6 @@ def _rg_enabled_for_request(request: Request) -> bool:
     return bool(state is not None and getattr(state, "rg_policy_id", None))
 
 
-def _rg_enabled_flag() -> bool:
-    raw = os.getenv("RG_ENABLED", "")
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _log_auth_deps_rg_diagnostics_only_shim(
     *,
     dependency: str,
@@ -2117,10 +2114,24 @@ async def _enforce_auth_deps_ingress_guard(
     fallback_limit_default: int,
     fallback_window_default: float,
     limit_exceeded_detail: str,
+    honor_rg_switch: bool = False,
 ) -> None:
-    """Apply fail-closed ingress fallback limits when RG policy metadata is absent."""
+    """Apply fail-closed ingress fallback limits when RG policy metadata is absent.
+
+    ``honor_rg_switch`` makes this fallback part of the single-switch rule: when
+    True and Resource Governor is globally disabled (``RG_ENABLED``/config.txt),
+    this fallback does not enforce either, so turning RG off is honest end to end.
+    ``check_auth_rate_limit`` passes False deliberately -- its 30/min auth-endpoint
+    floor is a brute-force guard, not RG enforcement, and stays on regardless.
+    """
     if _rg_enabled_for_request(request):
         return
+
+    if honor_rg_switch:
+        from tldw_Server_API.app.core.config import rg_enabled
+
+        if not rg_enabled(True):
+            return
 
     principal = _auth_deps_request_principal(request)
     if is_single_user_principal(principal):
@@ -2164,7 +2175,11 @@ async def _enforce_auth_deps_ingress_guard(
 
 
 async def check_rate_limit(request: Request, rate_limiter=None) -> None:
-    """General ingress rate-limit guard with fail-closed fallback enforcement."""
+    """General ingress rate-limit guard with fail-closed fallback enforcement.
+
+    Honors the RG single switch: with RG_ENABLED=false this fallback does not
+    enforce either (see ``_enforce_auth_deps_ingress_guard``'s ``honor_rg_switch``).
+    """
     _ = rate_limiter
     endpoint = request.url.path if getattr(request, "url", None) else "unknown"
     await _enforce_auth_deps_ingress_guard(
@@ -2176,11 +2191,17 @@ async def check_rate_limit(request: Request, rate_limiter=None) -> None:
         fallback_limit_default=120,
         fallback_window_default=60.0,
         limit_exceeded_detail=f"Rate limit exceeded for endpoint: {endpoint}",
+        honor_rg_switch=True,
     )
 
 
 async def check_auth_rate_limit(request: Request, rate_limiter=None) -> None:
-    """Auth endpoint ingress rate-limit guard with fail-closed fallback enforcement."""
+    """Auth endpoint ingress rate-limit guard with fail-closed fallback enforcement.
+
+    Deliberately does *not* honor the RG single switch: this is the brute-force
+    floor for auth endpoints, not Resource Governor enforcement, and stays on
+    even when RG_ENABLED=false.
+    """
     _ = rate_limiter
     endpoint = request.url.path if getattr(request, "url", None) else "auth"
     await _enforce_auth_deps_ingress_guard(

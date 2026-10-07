@@ -31,7 +31,7 @@ Validate and address current-code Chat module review findings for streaming mode
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR #2437 follow-up:
 - Rebased codex/chat-core-review-fixes-9925 onto latest fetched origin/dev.
 - Addressed validated review comments: command-router ambiguous AuthNZ mode now fails closed; get_prompt_config handles tuple rows; legacy prompt saves validate before writing and replace affected prompt rows atomically; bulk_generate offloads synchronous generation via asyncio.to_thread; explicit bulk_generate overrides are covered; newly added test helpers/cases have type hints.
@@ -43,7 +43,7 @@ Verification after review fixes:
 - python compile check for touched production/test files -> exit 0, no warnings
 - bandit touched production files -> 0 findings
 Known skip/blocker: broader Chat collection without confcutdir can import full app via Chat parent fixtures and has previously hit an unrelated Collections.utils truncate_text_hard import issue.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

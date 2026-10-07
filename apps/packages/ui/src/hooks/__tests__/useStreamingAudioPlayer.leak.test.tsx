@@ -44,6 +44,23 @@ describe("useStreamingAudioPlayer stream->buffer fallback", () => {
     vi.unstubAllGlobals()
   })
 
+  it.each(["stop", "unmount"] as const)("ignores late audio chunks and completion after %s", (retire) => {
+    const createUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:retired")
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    vi.stubGlobal("Audio", RejectingAudio)
+    const { result, unmount } = renderHook(() => useStreamingAudioPlayer())
+    act(() => result.current.start("mp3", false))
+    const player = result.current
+    if (retire === "unmount") unmount()
+    else act(() => player.stop())
+    act(() => {
+      player.append(new Uint8Array([1, 2, 3]))
+      player.finish()
+    })
+    expect(player.getBufferedBlob()).toBeNull()
+    expect(createUrl).not.toHaveBeenCalled()
+  })
+
   it.each([true, false])("settles a rejected play promise when streaming=%s", async (streaming) => {
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:audio")
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})

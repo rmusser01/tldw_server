@@ -32,7 +32,7 @@ Address validated review findings in Telegram core/runtime code: scope-bind pair
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Backlog MCP tools were not exposed in this session. The Backlog CLI was available, but `search`, `list`, `view`, and `task create` hung repeatedly, including with browser-opening disabled. The user approved direct task-file creation as the temporary fallback.
 
 Implemented:
@@ -58,7 +58,7 @@ PR review/rebase follow-up:
 
 Local verification caveat:
 - Full `tldw_Server_API/tests/Telegram/test_telegram_linking_and_policy.py` failed against the default workspace SQLite AuthNZ database before policy assertions in the admin bot seeding helper because the existing `org_provider_secrets` table lacks the `created_by` column (`sqlite3.OperationalError: table org_provider_secrets has no column named created_by`). The same suite passed against a fresh temporary AuthNZ database, so this is local schema drift rather than a Telegram runtime/session regression.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

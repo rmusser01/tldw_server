@@ -34,7 +34,7 @@ const form = {
   setFieldValue: vi.fn((key: string, value: unknown) => {
     formValues[key] = value
   }),
-  validateFields: vi.fn().mockResolvedValue({})
+  validateFields: vi.fn(async (fields?: string[]) => Object.fromEntries(Object.entries(formValues).filter(([key]) => !fields || fields.includes(key))))
 }
 
 const configuredClient = (config: Partial<TldwConfig>) => {
@@ -44,9 +44,9 @@ const configuredClient = (config: Partial<TldwConfig>) => {
 
 vi.mock("antd", () => {
   const Form = Object.assign(
-    ({ children, onValuesChange, onFinish }: {
-      children?: React.ReactNode; onValuesChange?: () => void; onFinish?: (values: Record<string, unknown>) => void
-    }) => <form onChange={() => onValuesChange?.()} onSubmit={(event) => {
+    ({ children, onValuesChange, onFinish, component }: {
+      component?: false; children?: React.ReactNode; onValuesChange?: (changed: Record<string, unknown>) => void; onFinish?: (values: Record<string, unknown>) => void
+    }) => component === false ? <div onChange={() => onValuesChange?.(form.getFieldsValue())}>{children}</div> : <form onChange={() => onValuesChange?.(form.getFieldsValue())} onSubmit={(event) => {
       event.preventDefault()
       onFinish?.(form.getFieldsValue())
     }}>{children}</form>,
@@ -71,9 +71,12 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router-dom", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-router-dom")>(),
   Link: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-  useNavigate: () => vi.fn()
+  useNavigate: () => vi.fn(),
+  useBlocker: () => ({ state: "unblocked", proceed: undefined, reset: undefined }),
+  unstable_usePrompt: vi.fn()
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({

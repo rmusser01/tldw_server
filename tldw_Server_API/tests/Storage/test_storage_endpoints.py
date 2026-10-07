@@ -14,13 +14,14 @@ from importlib import import_module
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from datetime import datetime, timezone
 
 from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoints
 from tldw_Server_API.app.api.v1.endpoints import storage_admin_quotas
 from tldw_Server_API.app.api.v1.endpoints import storage_download
-from tldw_Server_API.app.api.v1.schemas.storage_schemas import SetQuotaRequest
+from tldw_Server_API.app.api.v1.schemas.storage_schemas import SetUserQuotaRequest
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
 
 
@@ -222,6 +223,81 @@ class TestUsageEndpoint:
         assert response.json()["quota_used_mb"] == 0.0
 
     @pytest.mark.unit
+    def test_usage_route_zero_quota_is_blocked_not_unlimited(
+        self,
+        mock_storage_service,
+        mock_user,
+        monkeypatch,
+    ):
+        """A limits.storage_quota_mb of 0 reports as blocked (hard limit), never unlimited."""
+        mock_storage_service.get_user_generated_files_usage = AsyncMock(
+            return_value={
+                "total_bytes": 0,
+                "total_mb": 0.0,
+                "by_category": {},
+                "trash_bytes": 0,
+                "trash_mb": 0.0,
+                "quota_mb": 0,
+                "quota_used_mb": 0.0,
+            }
+        )
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            response = client.get("/api/v1/storage/usage")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["quota_mb"] == 0
+        assert payload["available_mb"] == 0
+        assert payload["at_hard_limit"] is True
+        assert payload["at_soft_limit"] is True
+        assert payload["warning"] == "Storage quota exceeded - delete files to continue"
+
+    @pytest.mark.unit
+    def test_usage_route_none_quota_is_unlimited(
+        self,
+        mock_storage_service,
+        mock_user,
+        monkeypatch,
+    ):
+        """No limits.storage_quota_mb override reports null quota fields, not zero."""
+        mock_storage_service.get_user_generated_files_usage = AsyncMock(
+            return_value={
+                "total_bytes": 850 * 1024 * 1024,
+                "total_mb": 850.0,
+                "by_category": {},
+                "trash_bytes": 0,
+                "trash_mb": 0.0,
+                "quota_mb": None,
+                "quota_used_mb": 850.0,
+            }
+        )
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            response = client.get("/api/v1/storage/usage")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["quota_mb"] is None
+        assert payload["available_mb"] is None
+        assert payload["usage_percentage"] is None
+        assert payload["at_soft_limit"] is False
+        assert payload["at_hard_limit"] is False
+        assert payload["warning"] is None
+
+    @pytest.mark.unit
     def test_usage_breakdown_route_returns_folder_totals(
         self,
         mock_storage_service,
@@ -302,6 +378,39 @@ class TestUsageEndpoint:
         assert payload["total_mb"] == 200.0
         assert payload["available_mb"] == 650.0
         assert payload["usage_percentage"] == 35.0
+
+    def test_usage_breakdown_route_zero_quota_is_fully_used(
+        self,
+        mock_storage_service,
+        mock_user,
+        monkeypatch,
+    ):
+        """A quota of 0 reads as 100% used with nothing available, like the usage route."""
+        mock_storage_service.get_user_generated_files_usage = AsyncMock(
+            return_value={
+                "total_bytes": 0,
+                "total_mb": 0.0,
+                "by_category": {},
+                "quota_mb": 0,
+                "quota_used_mb": 0.0,
+            }
+        )
+        mock_storage_service.get_user_folders = AsyncMock(return_value=[])
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            response = client.get("/api/v1/storage/usage/breakdown")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["quota_mb"] == 0
+        assert payload["available_mb"] == 0.0
+        assert payload["usage_percentage"] == 100.0
 
 
 class TestTrashEndpoint:
@@ -1009,8 +1118,8 @@ class TestAdminQuotaEndpoints:
         """Test admin user quota failures do not leak backend details."""
 
         class _BrokenStorageService:
-            async def set_user_quota(self, user_id, quota_mb):
-                _ = (user_id, quota_mb)
+            async def set_user_quota(self, user_id, quota_mb, *, updated_by=None):
+                _ = (user_id, quota_mb, updated_by)
                 raise StorageError("storage backend exploded")
 
         async def _get_broken_service():
@@ -1021,8 +1130,8 @@ class TestAdminQuotaEndpoints:
         with pytest.raises(HTTPException) as exc_info:
             await storage_endpoints.set_user_quota(
                 user_id=1,
-                request=SetQuotaRequest(quota_mb=1000),
-                _principal=object(),
+                request=SetUserQuotaRequest(quota_mb=1000),
+                principal=SimpleNamespace(user_id=1),
             )
 
         assert exc_info.value.status_code == 500

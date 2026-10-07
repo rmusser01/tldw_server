@@ -10,6 +10,7 @@ type Props = {
   voice: string
   backend?: string
   allowFallback?: boolean
+  previewDisabledReason?: string | null
   onProviderChange: (value: string) => void
   onModelChange: (value: string) => void
   onVoiceChange: (value: string) => void
@@ -93,6 +94,7 @@ export const TtsVoiceTab: React.FC<Props> = (props) => {
               provider={props.provider}
               backend={props.backend}
               allowFallback={props.allowFallback}
+              disabledReason={props.previewDisabledReason}
             />
           </div>
         )}

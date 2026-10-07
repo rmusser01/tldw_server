@@ -51,7 +51,7 @@ Implement Task 6 from the Chatbook sync engine implementation plan: add first-pa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review-fix pass started for Task 6 on branch codex/sync-v2-schemas. Blocking items: accept linear edits/deletes based on current head, preserve stale/concurrent conflicts, and keep old-shape SyncDomainAdapter implementations compatible with service context handling.
 
 Review-fix pass completed for blocking Task 6 findings. Added head-version lineage handling so linear encrypted note edits and delete/update transitions based on the current accepted head are accepted, while stale/no-base divergent edits and deletes still conflict. Restored adapter protocol compatibility by keeping the protocol minimum at evaluate_envelope(envelope, *, dataset) and detecting context support in SyncV2Service before passing SyncAdapterContext. Verification: Sync adapter/service/endpoint tests 71 passed; ChaCha note/message/workspace tests 37 passed; Bandit on touched production files exited 0 with no findings; git diff --check exited 0.
@@ -59,7 +59,7 @@ Review-fix pass completed for blocking Task 6 findings. Added head-version linea
 Reopened for remaining Task 6 quality findings on codex/sync-v2-schemas. Plan: add regression tests for note content lineage across metadata-only heads and dependency matching without entity identity; verify they fail; patch note content conflict handling to compare encrypted content edits against the latest prior content-bearing head while preserving metadata-safe merge behavior; tighten version-token dependency matching so it requires entity_id/stable_key while keeping direct identifiers standalone; run focused Sync/ChaCha pytest suites, Bandit on touched production files, git diff --check, update this task, and commit.
 
 Final quality pass completed. Added note regressions for content v1 plus metadata-only v2 followed by content v2 based on content v1, and for stale content after a metadata-only head. Added lineage helper coverage proving version-only dependencies do not reference the head, entity_id/stable_key plus version do, and direct server_sequence/client_envelope_id/envelope_id/base_envelope_id references still stand alone. Updated NotesDomainAdapter to compare encrypted content edits with the latest content-bearing note head, and tightened dependency entity matching for version tokens. Verification: Sync adapter/service/endpoint tests 75 passed; ChaCha note/message/workspace tests 37 passed; Bandit on touched production files exited 0 with no findings; git diff --check exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

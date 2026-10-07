@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 
 import pytest
-pytestmark = pytest.mark.rate_limit
+pytestmark = [pytest.mark.rate_limit, pytest.mark.unit]
 
 from tldw_Server_API.app.core.Resource_Governance import RedisResourceGovernor, RGRequest
 from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import ResourceDailyLedger, LedgerEntry
@@ -118,19 +118,26 @@ async def test_tokens_lua_script_retry_after():
 
 
 @pytest.mark.asyncio
-async def test_tokens_oversized_single_reservation_is_denied():
+async def test_tokens_oversized_single_reservation_is_admitted_clamped_to_capacity():
+    # A reservation larger than bucket capacity is clamped and admitted rather
+    # than denied forever (safety-net rule, spec §4).
     class _Loader:
         def get_policy(self, pid):
             return {"tokens": {"per_min": 2, "burst": 1.0}, "scopes": ["global", "user"]}
 
+    from tldw_Server_API.app.core.Infrastructure.redis_factory import InMemoryAsyncRedis
+
     ft = FakeTime(0.0)
     rg = RedisResourceGovernor(policy_loader=_Loader(), time_source=ft, ns="rg_t_tokens_oversized")
+    # Inject the in-process stub so this test never reaches a real Redis on :6379
+    # (the fixed op_id would otherwise replay a cached decision from a prior run).
+    rg._client = InMemoryAsyncRedis()
     req = RGRequest(entity="user:oversized", categories={"tokens": {"units": 3}}, tags={"policy_id": "ptok_big"})
 
     decision, handle_id = await rg.reserve(req, op_id="oversized-1")
 
-    assert decision.allowed is False
-    assert handle_id is None
+    assert decision.allowed is True
+    assert handle_id is not None
     assert decision.details["categories"]["tokens"]["limit"] == 2
 
 
@@ -526,3 +533,57 @@ async def test_tokens_refund_allows_additional_within_window():
     await rg.refund(h1, deltas={"tokens": 1})
     d3, h3 = await rg.reserve(RGRequest(entity=e, categories={"tokens": {"units": 1}}, tags={"policy_id": "pref"}))
     assert d3.allowed and h3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("policy", "category", "window"),
+    [
+        ({"requests": {"rpm": 5}}, "requests", 60),
+        ({"tokens": {"per_min": 100}}, "tokens", 60),
+        # rpm < 1 holds floor(0.3 * 10) = 3 requests per 60 * 3 / 0.3 = 600 s.
+        ({"requests": {"rpm": 0.3, "burst": 10}}, "requests", 600),
+    ],
+)
+async def test_window_keys_expire_after_their_window_on_stub(policy, category, window):
+    # An idle entity's window keys must expire, never before their window ends (TASK-13430).
+    from tldw_Server_API.app.core.Infrastructure.redis_factory import InMemoryAsyncRedis
+    from tldw_Server_API.app.core.Resource_Governance.governor_redis import _WINDOW_TTL_MARGIN_S
+
+    class _Loader:
+        def get_policy(self, pid):
+            return {**policy, "scopes": ["global", "user"]}
+
+    ns = "rg_t_win_ttl"
+    rg = RedisResourceGovernor(policy_loader=_Loader(), ns=ns)
+    rg._client = InMemoryAsyncRedis()
+    req = RGRequest(entity="user:idle", categories={category: {"units": 1}}, tags={"policy_id": "pttl"})
+
+    decision, handle_id = await rg.reserve(req)
+    assert decision.allowed and handle_id
+
+    keys = await rg._client.keys(f"{ns}:win:*")
+    assert len(keys) == 2  # global and user scope
+    for key in keys:
+        assert window <= await rg._client.ttl(key) <= window + _WINDOW_TTL_MARGIN_S
+
+
+@pytest.mark.asyncio
+async def test_tokens_lua_add_sets_window_ttl_on_stub():
+    # The stub reimplements the tokens Lua script, so it must mirror its EXPIRE.
+    import time
+
+    from tldw_Server_API.app.core.Infrastructure.redis_factory import InMemoryAsyncRedis
+    from tldw_Server_API.app.core.Resource_Governance.governor_redis import _window_ttl
+
+    class _Loader:
+        def get_policy(self, pid):
+            return {}
+
+    rg = RedisResourceGovernor(policy_loader=_Loader(), ns="rg_t_tokens_lua_ttl")
+    rg._client = InMemoryAsyncRedis()
+    key = "rg_t_tokens_lua_ttl:win:p:tokens:user:1"
+
+    sha = await rg._ensure_tokens_lua()
+    assert await rg._client.evalsha(sha, 1, key, 10, 60, time.time(), _window_ttl(60)) == [1, 0]
+    assert 60 <= await rg._client.ttl(key) <= _window_ttl(60)

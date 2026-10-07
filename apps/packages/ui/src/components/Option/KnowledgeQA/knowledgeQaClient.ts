@@ -1,6 +1,6 @@
 import { tldwClient, type ScopedRequestOptions } from "@/services/tldw/TldwApiClient"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
-import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { createServicePromptScopeChangedError, isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { submitExplicitFeedback, type ExplicitFeedbackRequest } from "@/services/feedback"
 
 /** Keep every step of a QA operation on the owner that started it. */
@@ -26,13 +26,26 @@ export function createKnowledgeQaClient(snapshot: ServicePromptSnapshot | null, 
   return {
     initialize: () => run(async () => undefined),
     fetchWithAuth: (path: Parameters<typeof tldwClient.fetchWithAuth>[0], init?: Parameters<typeof tldwClient.fetchWithAuth>[1]) =>
-      run(() => tldwClient.fetchWithAuth(path, { ...init, ...options(init?.signal) })),
+      run(async () => {
+        const response = await tldwClient.fetchWithAuth(path, { ...init, ...options(init?.signal) })
+        // This API returns non-OK responses; scope denial must still cancel the
+        // operation before optional metadata fallbacks can continue it.
+        if (!response.ok && isRequestConfigScopeChangedError({ status: response.status, details: response.data })) {
+          throw createServicePromptScopeChangedError()
+        }
+        return response
+      }),
     searchCharacters: (query: string, params?: Record<string, unknown>) => run(() => tldwClient.searchCharacters(query, params, options())),
     listCharacters: (params?: Record<string, unknown>) => run(() => tldwClient.listCharacters(params, options())),
     createChat: (payload: Record<string, unknown>) => run(() => tldwClient.createChat(payload, options())),
     getChat: (id: string) => run(() => tldwClient.getChat(id, options())),
     deleteChat: (id: string) => run(() => tldwClient.deleteChat(id, options())),
-    addChatMessage: (id: string, payload: Record<string, unknown>) => run(() => tldwClient.addChatMessage(id, payload, options())),
+    addChatMessage: (id: string, payload: Record<string, unknown>) =>
+      run(() => tldwClient.addChatMessage(id, payload, options())),
+    listMedia: (params: Record<string, unknown>) =>
+      run(() => tldwClient.listMedia(params, options())),
+    listNotes: (params: Record<string, unknown>) =>
+      run(() => tldwClient.listNotes(params, options())),
     ragSourceHealth: () => run(() => tldwClient.ragSourceHealth(options())),
     ragSearch: (query: string, settings?: Record<string, unknown> & { signal?: AbortSignal }) => run(() => tldwClient.ragSearch(query, { ...settings, ...options(settings?.signal) })),
     ragSearchStream: typeof tldwClient.ragSearchStream === "function" ? async function* (query: string, settings?: Record<string, unknown> & { signal?: AbortSignal }) {

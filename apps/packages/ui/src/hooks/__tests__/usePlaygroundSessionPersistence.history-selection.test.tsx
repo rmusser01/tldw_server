@@ -35,6 +35,8 @@ vi.mock("@/db/dexie/history-selection", () => ({
     owner_key: "local-owner",
     conversation_id: id
   }),
+  loadHistoryTurnRecoveries: async () => [],
+  dismissHistoryTurnRecovery: async () => {},
   loadHistoryBookmark: async (scope: any, owner: any) =>
     mocks.bookmarks.get(bookmarkKey(scope, owner)) || null,
   saveHistoryBookmark: async (scope: any, view: any) =>
@@ -63,6 +65,7 @@ vi.mock("@/services/chat-history-selection", () => ({
   confirmLegacyHistoryProjection: (...args: any[]) => mocks.confirm(...args)
 }))
 vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => ({ requestScope: {}, scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal, release: vi.fn() }),
   resolveServicePromptScope: async () => ({ scopeKey: "current" }),
   subscribeToServicePromptConfigChanges: (listener: () => void) => { mocks.configChanged = listener; return () => {} }
 }))
@@ -166,6 +169,54 @@ const mount = () =>
       <ColdSession />
     </HistorySelectionProvider>
   )
+
+it.each(["unowned-local", "profile-fork", "other-native"])(
+  "does not restore private cache settings from a mixed %s/native locator",
+  async (kind) => {
+    const details = { id: "cache", ...(kind === "profile-fork"
+      ? { local_owner_key: "local-owner" }
+      : kind === "other-native" ? { server_chat_id: "native-other" } : {}) }
+    mocks.details.mockResolvedValue(details)
+    mocks.chatData.mockResolvedValue({
+      historyInfo: { ...details, last_used_prompt: { prompt_content: "private cache prompt" } },
+      messages: [{ id: "private", role: "assistant", content: "Private cache row" }]
+    })
+    usePlaygroundSessionStore.getState().saveSession({ historyId: "cache", serverChatId: "native-A", scopeKey: "current" })
+    mount()
+    await waitFor(() => expect(outcome).toBe("restored"))
+    expect(controller.error).toBe("owner_conversation_mismatch")
+    expect(mocks.capture).not.toHaveBeenCalled()
+    expect(mocks.setPrompt).not.toHaveBeenCalledWith("private cache prompt")
+    expect(screen.getByTestId("transcript")).toBeEmptyDOMElement()
+  }
+)
+
+it.each(["account-local", "profile-fork", "native"])(
+  "does not publish a held %s tab restore capture after restore cancellation",
+  async (kind) => {
+    const ref = kind === "native"
+      ? { ...reference, owner_key: "native-current", owner_kind: "native", conversation_id: "native-A" }
+      : reference
+    seedBookmark(ref)
+    if (kind === "account-local") mocks.details.mockResolvedValue({ id: "local-A", server_scope_key: "verified-current" })
+    usePlaygroundSessionStore.getState().saveSession({
+      ...(kind === "native" ? { serverChatId: "native-A" } : { historyId: "local-A" }),
+      historySelectionReference: ref,
+      scopeKey: "current"
+    })
+    const capture = mocks.capture.getMockImplementation()!
+    let finish!: () => void
+    const gate = new Promise<void>((resolve) => { finish = resolve })
+    mocks.capture.mockImplementationOnce(async (...args) => { await gate; return capture(...args) })
+    mount()
+    await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+    await act(async () => { usePlaygroundSessionStore.getState().clearSession(); finish() })
+    await waitFor(() => expect(outcome).toBe("cancelled"))
+    expect(controller.getCurrent().capture).toBeNull()
+    expect(screen.getByTestId("transcript")).toBeEmptyDOMElement()
+    expect(mocks.setPrompt).not.toHaveBeenCalledWith("A prompt")
+  }
+)
 function seedBookmark(ref = reference) {
   const view = {
     owner_key: ref.owner_key,
@@ -188,12 +239,13 @@ beforeEach(() => {
   mocks.bookmarks.clear()
   outcome = undefined
   mocks.profile.mockResolvedValue("profile")
-  mocks.details.mockResolvedValue(null)
+  mocks.details.mockImplementation(async (id: string) => ({ id, local_owner_key: "local-owner" }))
   mocks.files.mockResolvedValue([])
   mocks.link.mockResolvedValue("mirror")
   mocks.chatData.mockResolvedValue({
     historyInfo: {
       id: "local-A",
+      local_owner_key: "local-owner",
       last_used_prompt: { prompt_content: "A prompt" }
     },
     messages: []
@@ -307,7 +359,7 @@ it("validates a matching native bookmark even when the shared remote scope chang
   expect(mocks.recent).not.toHaveBeenCalled()
   expect(useStoreMessageOption.getState().serverChatId).toBeNull()
 })
-it("restores a cold unbound mirror read-only and binds it with its retained local locator", async () => {
+it("retains a cold unbound mirror locator without publishing unverified rows and binds only explicitly", async () => {
   mocks.details.mockResolvedValue({
     id: "mirror",
     server_chat_id: "native-A",
@@ -330,9 +382,7 @@ it("restores a cold unbound mirror read-only and binds it with its retained loca
   })
   mount()
   await screen.findByRole("button", { name: "Connect this conversation" })
-  expect(screen.getByTestId("transcript")).toHaveTextContent(
-    "Readable legacy transcript"
-  )
+  expect(screen.getByTestId("transcript")).toBeEmptyDOMElement()
   expect(useStoreMessageOption.getState().historyId).toBe("mirror")
   expect(useStoreMessageOption.getState().serverChatId).toBeNull()
   expect(mocks.capture).not.toHaveBeenCalled()
@@ -436,5 +486,29 @@ it.each(["success", "error"])("automatic restore after readiness cycling retains
   expect(controller.getCurrent().capture).toBeNull()
   await act(async () => { await controller.loadConversation({ serverChatId: "native-A" }) })
   expect(controller.getCurrent().capture).not.toBeNull()
+  expect(controller.error).toBeNull()
+})
+
+it("requires an explicit reopen of an invalidated stamped-local account lease after readiness cycling", async () => {
+  seedBookmark()
+  mocks.details.mockResolvedValue({ id: "local-A", server_scope_key: "verified-current" })
+  usePlaygroundSessionStore.getState().saveSession({ historyId: "local-A", historySelectionReference: reference, scopeKey: "current" })
+  const mounted = mount()
+  await waitFor(() => expect(outcome).toBe("restored"))
+  expect(controller.capture).not.toBeNull()
+  act(() => { mocks.configChanged!() })
+  expect(controller.error).toBe("request_config_scope_changed")
+  expect(controller.getCurrent().capture).toBeNull()
+  const captures = mocks.capture.mock.calls.length
+  mocks.assistantLoading = true
+  mounted.rerender(<HistorySelectionProvider storageKey="cold-h1"><ColdSession /></HistorySelectionProvider>)
+  await waitFor(() => expect(sessionReady).toBe(false))
+  mocks.assistantLoading = false
+  mounted.rerender(<HistorySelectionProvider storageKey="cold-h1"><ColdSession /></HistorySelectionProvider>)
+  await waitFor(() => expect(sessionReady).toBe(true))
+  await act(async () => { expect(await restoreAgain()).toBe("cancelled") })
+  expect(mocks.capture).toHaveBeenCalledTimes(captures)
+  await act(async () => { await controller.loadConversation({ historyId: "local-A" }) })
+  expect(controller.capture).not.toBeNull()
   expect(controller.error).toBeNull()
 })

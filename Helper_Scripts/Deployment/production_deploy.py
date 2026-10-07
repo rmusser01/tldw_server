@@ -19,6 +19,7 @@ from Helper_Scripts.Deployment.production_artifacts import (
     ArtifactRecord,
     DeploymentManifest,
     load_verified_manifest,
+    require_posix_owner_only,
     sha256_file,
     verify_tar_archive,
     write_manifest,
@@ -302,6 +303,15 @@ class DeploymentError(RuntimeError):
     """Sanitized deployment gate failure suitable for operator output."""
 
 
+def _require_posix_deployment_host() -> None:
+    """Fail before any deployment commands or private artifact creation."""
+
+    try:
+        require_posix_owner_only()
+    except ValueError as exc:
+        raise DeploymentError(str(exc)) from exc
+
+
 def default_command_runner(
     argv: Sequence[str],
     env: Mapping[str, str] | None,
@@ -332,6 +342,7 @@ def default_streaming_command_runner(
 ) -> CommandResult:
     """Run one explicit argv while streaming stdout to a private new file."""
 
+    _require_posix_deployment_host()
     descriptor = -1
     created = False
     success = False
@@ -510,6 +521,7 @@ def _render_and_validate(
 def _write_private_bytes(path: Path, data: bytes, label: str) -> None:
     """Persist a nonempty command artifact with owner-only permissions."""
 
+    _require_posix_deployment_host()
     if not data:
         raise DeploymentError(f"{label} gate produced an empty artifact")
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -643,6 +655,7 @@ def deploy(
 ) -> DeploymentManifest:
     """Back up current state and start the target only after every gate passes."""
 
+    _require_posix_deployment_host()
     _preflight(config)
     env = _command_env(config)
     _render_and_validate(config, runner, env, config.values)
@@ -865,6 +878,7 @@ def rollback(
 ) -> None:
     """Restore a verified backup set before starting its matching prior image."""
 
+    _require_posix_deployment_host()
     _preflight(config)
     try:
         manifest = load_verified_manifest(manifest_path)

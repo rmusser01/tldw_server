@@ -75,6 +75,7 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
+from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
 from tldw_Server_API.app.core.UserProfiles.contracts import (
@@ -88,7 +89,11 @@ from tldw_Server_API.app.core.UserProfiles.response_mappers import (
 )
 from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import load_user_profile_catalog
-from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
+from tldw_Server_API.app.services.storage_quota_service import (
+    StorageQuotaService,
+    quota_view,
+    with_resolved_storage_quota,
+)
 
 _USERS_AUDIT_EXCEPTIONS = (
     AttributeError,
@@ -263,7 +268,7 @@ async def _resolve_user_context(
         "role": _principal_primary_role(principal),
         "is_active": True,
         "is_verified": True,
-        "storage_quota_mb": 5120,
+        "storage_quota_mb": None,
         "storage_used_mb": 0.0,
         "created_at": datetime.utcnow(),
         "last_login": None,
@@ -276,7 +281,7 @@ async def _resolve_user_context(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     user_dict = dict(user)
     user_dict.pop("password_hash", None)
-    return {**fallback, **user_dict}
+    return await with_resolved_storage_quota({**fallback, **user_dict})
 
 
 async def _require_principal_active_verified(
@@ -569,7 +574,7 @@ async def get_current_user_profile(
         is_verified=user_context.get("is_verified", False),
         created_at=user_context.get("created_at", datetime.utcnow()),
         last_login=user_context.get("last_login"),
-        storage_quota_mb=user_context.get("storage_quota_mb", 5120),
+        storage_quota_mb=user_context.get("storage_quota_mb"),
         storage_used_mb=user_context.get("storage_used_mb", 0.0),
     )
 
@@ -645,7 +650,7 @@ async def update_user_profile(
             is_verified=user_context.get("is_verified", False),
             created_at=user_context.get("created_at", datetime.utcnow()),
             last_login=user_context.get("last_login"),
-            storage_quota_mb=user_context.get("storage_quota_mb", 5120),
+            storage_quota_mb=user_context.get("storage_quota_mb"),
             storage_used_mb=user_context.get("storage_used_mb", 0.0),
         )
 
@@ -870,6 +875,8 @@ async def rotate_api_key(
             actor_kind=principal.kind,
             actor_roles=list(principal.roles or []),
         )
+    except APIKeyRotationRejected as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found") from exc
     except MandatoryAuditWriteError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1041,15 +1048,16 @@ async def get_storage_quota(
                 principal,
                 allow_missing=is_single_user_principal(principal),
             )
-        quota = float(user_context.get("storage_quota_mb", 5120))
+        quota = user_context.get("storage_quota_mb")
         used = float(user_context.get("storage_used_mb", 0.0))
+        view = quota_view(used, quota)
         # Return from database values if calculation fails
         return StorageQuotaResponse(
             user_id=int(user_context["id"]),
             storage_used_mb=used,
             storage_quota_mb=quota,
-            available_mb=max(0, quota - used),
-            usage_percentage=round((used / quota * 100) if quota > 0 else 0, 1),
+            available_mb=view["available_mb"],
+            usage_percentage=view["usage_percentage"],
         )
 
 

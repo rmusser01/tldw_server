@@ -33,7 +33,7 @@ Move the remaining minimal-test monitoring router factory onto the shared lazy o
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red/green evidence: focused selector tldw_Server_API/tests/Services/test_router_groups_contract.py -k 'minimal_optional_router_specs and monitoring' failed before production changes with 5 expected failures plus 1 pass, then passed after the ImportedRouterSpec change with 6 passed, 135 deselected.
 
 Validation: router group contracts passed with 141 passed; main router contracts passed with 6 passed; OpenAPI contracts passed with 69 passed; Bandit on tldw_Server_API/app/api/v1/router_groups/minimal.py reported 0 results and 0 errors; git diff --check was clean.
@@ -41,7 +41,7 @@ Validation: router group contracts passed with 141 passed; main router contracts
 Docs: no user-facing documentation update was needed for this internal router registration cleanup. Known skips/blockers: none.
 
 Post self-review validation after loosening the skip-log assertion: focused monitoring selector passed with 6 passed, 135 deselected; git diff --check remained clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

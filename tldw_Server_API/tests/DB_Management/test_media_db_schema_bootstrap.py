@@ -219,7 +219,7 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         _ensure_postgres_source_hash_column=lambda value: calls.append(("source_hash", value)),
         _ensure_postgres_claims_extensions=lambda value: calls.append(("claims_extensions", value)),
         _ensure_postgres_email_schema=lambda value: calls.append(("email_schema", value)),
-        _sync_postgres_sequences=lambda value: calls.append(("sequence_sync", value)),
+        _sync_postgres_sequences=lambda value: pytest.fail("routine bootstrap must not rewind RLS-scoped sequences"),
     )
 
     monkeypatch.setattr(
@@ -256,7 +256,6 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         ("source_hash", conn),
         ("claims_extensions", conn),
         ("email_schema", conn),
-        ("sequence_sync", conn),
         ("policies", db, conn),
     ]
 
@@ -1863,24 +1862,30 @@ def test_email_schema_structures_ensure_sqlite_email_schema_executes_scripts_in_
     assert missing_fts_conn.scripts == [
         "email schema sql",
         "email indexes sql",
+        email_schema_structures_module._EMAIL_SEARCH_LOOKUP_INDEXES,
         "email fts sql",
     ]
     assert existing_fts_conn.scripts == [
         "email schema sql",
         "email indexes sql",
+        email_schema_structures_module._EMAIL_SEARCH_LOOKUP_INDEXES,
         "email fts sql",
     ]
     assert missing_fts_conn.queries == [
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='email_fts' LIMIT 1",
+        "CREATE INDEX IF NOT EXISTS idx_email_message_count_cover "
+        "ON email_messages(tenant_id, internal_date, id, media_id, has_attachments, subject)",
         "INSERT INTO email_fts(email_fts) VALUES ('rebuild')",
     ]
     assert existing_fts_conn.queries == [
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='email_fts' LIMIT 1",
+        "CREATE INDEX IF NOT EXISTS idx_email_message_count_cover "
+        "ON email_messages(tenant_id, internal_date, id, media_id, has_attachments, subject)",
     ]
 
 
 @pytest.mark.unit
-def test_email_schema_structures_ensure_postgres_email_schema_executes_converted_statements_in_order_and_tolerates_failures() -> None:
+def test_email_schema_structures_ensure_postgres_email_schema_executes_converted_statements_in_order_and_tolerates_failures(monkeypatch) -> None:
     module_name = "tldw_Server_API.app.core.DB_Management.media_db.schema.email_schema_structures"
     try:
         email_schema_structures_module = importlib.import_module(module_name)
@@ -1901,10 +1906,11 @@ def test_email_schema_structures_ensure_postgres_email_schema_executes_converted
                 "CREATE TABLE email_sources (...)",
                 "CREATE TABLE email_messages (...)",
             ]
-        if sql == "email indexes sql":
+        if sql == "email indexes sql" + email_schema_structures_module._EMAIL_SEARCH_LOOKUP_INDEXES:
             return [
                 "CREATE INDEX idx_email_messages_tenant_date_id",
                 "CREATE INDEX idx_email_messages_labels_gin",
+                "CREATE INDEX lookup_indexes",
             ]
         raise AssertionError(f"unexpected sql blob {sql!r}")
 
@@ -1916,6 +1922,10 @@ def test_email_schema_structures_ensure_postgres_email_schema_executes_converted
         backend=FakeBackend(),
     )
 
+    monkeypatch.setattr(
+        email_schema_structures_module, "_ensure_postgres_email_search_acceleration",
+        lambda _db, connection: calls.append(("optional search acceleration", connection)),
+    )
     email_schema_structures_module.ensure_postgres_email_schema(db, conn)
 
     assert calls == [
@@ -1923,6 +1933,10 @@ def test_email_schema_structures_ensure_postgres_email_schema_executes_converted
         ("CREATE TABLE email_messages (...)", conn),
         ("CREATE INDEX idx_email_messages_tenant_date_id", conn),
         ("CREATE INDEX idx_email_messages_labels_gin", conn),
+        ("CREATE INDEX lookup_indexes", conn),
+        ("CREATE INDEX IF NOT EXISTS idx_email_message_count_cover "
+         "ON email_messages(tenant_id, internal_date, id, media_id, has_attachments)", conn),
+        ("optional search acceleration", conn),
     ]
 
 

@@ -1,3 +1,4 @@
+import { getEligibleQueueItems } from "./queue-items"
 import React, {
   createContext,
   useCallback,
@@ -147,11 +148,7 @@ const mergeCurrentPresetConfig = (
 }
 
 const buildInitialProgress = (items: WizardQueueItem[]): ItemProgress[] =>
-  items
-    .filter(
-      (item) =>
-        item.validation.valid && item.conferenceOverride?.selected !== false
-    )
+  getEligibleQueueItems(items)
     .map((item) => ({
       id: item.id,
       status: "queued" as const,
@@ -291,7 +288,13 @@ const reducer = (
         selectedPreset: action.preset,
         customBasePreset: action.preset,
         customOptions: {},
-        presetConfig: presetMap[action.preset],
+        presetConfig: {
+          ...presetMap[action.preset],
+          common: {
+            ...presetMap[action.preset].common,
+            overwrite_existing: state.presetConfig.common.overwrite_existing,
+          },
+        },
       }
     }
 
@@ -343,7 +346,6 @@ const reducer = (
           elapsed: 0,
           estimatedRemaining: 0,
         },
-        results: [],
       }
     }
 
