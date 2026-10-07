@@ -1122,6 +1122,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
 
   const duplicateSelectedNote = React.useCallback(async () => {
     if (editorDisabled) return
+    if (ed.selectedId != null && !(await ed.confirmDiscardIfDirty())) return
     const hasDraft = ed.title.trim().length > 0 || ed.content.trim().length > 0
     if (!hasDraft) {
       message.warning('Add a title or content before duplicating.')
@@ -1132,12 +1133,14 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     if (isMobileViewport) setMobileSidebarOpen(false)
     const baseTitle = ed.title.trim() || (ed.selectedId != null ? `Note ${ed.selectedId}` : 'Untitled note')
     const duplicateTitle = /\(copy\)$/i.test(baseTitle) ? baseTitle : `${baseTitle} (Copy)`
+    const duplicateLanguage = ed.contentLanguage
     const duplicateContent = ed.content
     const duplicateKeywords = [...kw.editorKeywords]
 
     startDraftSession()
     ed.setTitle(duplicateTitle)
     ed.setContent(duplicateContent)
+    if (duplicateLanguage !== undefined) ed.setContentLanguage(duplicateLanguage)
     kw.setEditorKeywords(duplicateKeywords)
     ed.setIsDirty(true)
     ed.setSaveIndicator('dirty')
@@ -1147,6 +1150,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     }, 0)
   }, [
     ed.content,
+    ed.contentLanguage,
+    ed.confirmDiscardIfDirty,
+    ed.setContentLanguage,
     ed.selectedId,
     ed.setContent,
     ed.setIsDirty,
@@ -1662,6 +1668,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
 
   const applyMarkdownToolbarAction = React.useCallback(
     (action: MarkdownToolbarAction) => {
+      if (!ed.markdownAllowed) return
       if (editorDisabled) return
       if (ed.editorInputMode === 'wysiwyg') {
         const richEditor = ed.richEditorRef.current
@@ -1892,6 +1899,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
 
   // WYSIWYG handlers
   const enterWysiwygMode = React.useCallback(() => {
+    if (!ed.markdownAllowed) return
     ed.markdownBeforeWysiwygRef.current = ed.content
     ed.replaceWysiwygHtml(markdownToWysiwygHtml(ed.content))
     ed.setWysiwygSessionDirty(false)
@@ -1900,6 +1908,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [ed])
 
   const exitWysiwygMode = React.useCallback(() => {
+    if (!ed.markdownAllowed) return
     const originalMarkdown = ed.markdownBeforeWysiwygRef.current
     if (!ed.wysiwygSessionDirty && originalMarkdown != null && originalMarkdown !== ed.content) {
       ed.setContent(originalMarkdown)
@@ -1931,6 +1940,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   // and update the Markdown, leaving the DOM (and the caret) alone (NE-01).
   const handleWysiwygInput = React.useCallback(
     (event: React.FormEvent<HTMLDivElement>) => {
+      if (!ed.markdownAllowed) return
       const nextHtml = event.currentTarget.innerHTML
       ed.recordWysiwygEditorHtml(nextHtml)
       ed.setWysiwygSessionDirty(true)
@@ -1942,6 +1952,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   )
 
   const handleWysiwygPaste = React.useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
+    if (!ed.markdownAllowed) return
     if (editorDisabled) return
     const plain = event.clipboardData.getData('text/plain')
     if (!plain) return
@@ -1949,7 +1960,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     if (typeof document !== 'undefined' && typeof document.execCommand === 'function') {
       document.execCommand('insertText', false, plain)
     }
-  }, [editorDisabled])
+  }, [ed.markdownAllowed, editorDisabled])
 
   // TOC jump
   const handleTocJump = React.useCallback(
@@ -2131,7 +2142,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       if (!detailReloaded) {
         ed.setTitle(String(refreshed.note.title || ''))
         ed.setContent(String(refreshed.note.content || ''))
-        ed.replaceWysiwygHtml(markdownToWysiwygHtml(String(refreshed.note.content || '')))
+        if (ed.markdownAllowed) ed.replaceWysiwygHtml(markdownToWysiwygHtml(String(refreshed.note.content || '')))
         ed.setIsDirty(false)
       }
       setSelectedStudioState(refreshed)

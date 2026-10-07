@@ -256,6 +256,25 @@ describe('NotesManagerPage stage 41 offline drafting and sync', () => {
     })
   })
 
+  it('duplicates recovered structured source and language through the real page action', async () => {
+    mockOnlineState.value = false
+    window.localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify({ 'draft:new': {
+      key: 'draft:new', noteId: null, baseVersion: null, title: 'Source',
+      content: '<>&\n雪', content_language: 'yaml', revision: 3, draftVersion: 2,
+      keywords: [], metadata: null, backlinkConversationId: null, backlinkMessageId: null,
+      updatedAt: new Date().toISOString(), syncState: 'queued', lastError: null
+    } }))
+    renderPage()
+    await waitFor(() => expect(screen.getByPlaceholderText('Title')).toHaveValue('Source'))
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+    fireEvent.click(await screen.findByText('Duplicate'))
+    await waitFor(() => expect(screen.getByPlaceholderText('Title')).toHaveValue('Source (Copy)'))
+    fireEvent.click(screen.getByTestId('notes-save-button'))
+    await waitFor(() => expect(JSON.parse(window.localStorage.getItem(OFFLINE_QUEUE_KEY) || '{}')['draft:new']).toMatchObject({
+      content: '<>&\n雪', content_language: 'yaml', title: 'Source (Copy)'
+    }))
+  })
+
   it('queues an offline save locally without hitting create/update endpoints', async () => {
     mockOnlineState.value = false
     renderPage()

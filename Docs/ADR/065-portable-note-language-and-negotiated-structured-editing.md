@@ -141,3 +141,12 @@ admission condition; absent-row creation and wire/hash shapes are unchanged.
 ### Immutable publication origin scope (F4)
 
 Existing local publication-intent payloads carry the exact originating principal and workspace, including explicit null. Drain compares both before copying source into a scoped outbox. Missing historical proof remains pending; an active profile cannot supply historical authority. This local metadata never enters wire payloads and adds no schema or transport.
+
+### Scoped offline drafts (F5)
+
+The existing authority-scoped browser offline queue remains the only draft storage
+owner. Version-2 entries capture exact source, optional language (legacy absence
+means unknown), and a draft revision. Unknown/structured modes cannot enter
+Markdown conversion. A captured complete language-capable acknowledgement removes
+only its matching draft; rejected and empty drafts remain local. Storage failures
+fence navigation instead of reporting a saved draft. This adopts no new editor.

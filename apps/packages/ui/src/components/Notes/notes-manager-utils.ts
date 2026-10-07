@@ -480,6 +480,9 @@ export type MarkdownToolbarAction = 'bold' | 'italic' | 'heading' | 'list' | 'li
 export type OfflineDraftSyncState = 'queued' | 'syncing' | 'conflict' | 'error'
 export type OfflineDraftEntry = {
   pendingWrite?: { operation?: 'restore'; key: string; body: Record<string, unknown>; expectedVersion: number | null; previousTitle?: string | null }
+  draftVersion?: 2
+  revision?: number
+  content_language?: string | null
   key: string
   noteId: string | null
   baseVersion: number | null
@@ -535,6 +538,9 @@ export const normalizeOfflineDraftQueue = (rawValue: unknown): Record<string, Of
           /^sha256:[a-f0-9]{64}$/.test(draft.pendingWrite.body.expected_provenance_hash) && Number.isSafeInteger(draft.pendingWrite.expectedVersion))) &&
         (draft.pendingWrite.expectedVersion === null || Number.isSafeInteger(draft.pendingWrite.expectedVersion))
         ? { pendingWrite: draft.pendingWrite } : {}),
+      draftVersion: 2,
+      revision: Number.isSafeInteger(draft.revision) && draft.revision >= 0 ? draft.revision : 0,
+      ...(draft.content_language === null || (typeof draft.content_language === "string" && draft.content_language.length > 0 && draft.content_language.length <= 100) ? { content_language: draft.content_language } : {}),
       key: normalizedKey,
       noteId: draft.noteId != null ? String(draft.noteId) : null,
       baseVersion:
