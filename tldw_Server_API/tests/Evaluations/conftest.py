@@ -679,7 +679,7 @@ def override_unified_service(temp_db_path, monkeypatch):
     router_module._evaluation_service = None
     try:
         cache = getattr(service_module, "_service_instances_by_user")
-        cache.pop(_test_user_id, None)
+        cache.clear()
     except Exception:
         _ = None
     service_module._service_instance = None

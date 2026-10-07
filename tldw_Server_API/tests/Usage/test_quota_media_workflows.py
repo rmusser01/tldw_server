@@ -190,3 +190,26 @@ async def test_scheduler_refuses_a_run_past_the_allowance(quota: dict, monkeypat
     with pytest.raises(RuntimeError, match="Daily workflow run quota"):
         await sched.workflow_run({"user_id": 7, "workflow_id": 1, "definition_snapshot": {}})
     assert created == []
+
+
+def test_rate_limit_headers_shape() -> None:
+    """The shared helper returns the RFC-style and legacy headers, clamped at 0 remaining."""
+    import time
+
+    headers = quota_checks.rate_limit_headers(limit=5, remaining=-2, reset_seconds=30)
+    assert headers["RateLimit-Limit"] == headers["X-RateLimit-Limit"] == "5"
+    assert headers["RateLimit-Remaining"] == headers["X-RateLimit-Remaining"] == "0"
+    assert headers["RateLimit-Reset"] == headers["Retry-After"] == "30"
+    assert abs(int(headers["X-RateLimit-Reset"]) - (int(time.time()) + 30)) <= 2
+
+
+async def test_media_bytes_429_carries_rate_limit_headers(quota: dict) -> None:
+    """A refused upload sends X-RateLimit-* in MB alongside Retry-After."""
+    quota["limits"]["limits.media_ingest_mb_per_day"] = 10
+    quota["used"] = 8 * MB
+    with pytest.raises(HTTPException) as exc:
+        await persistence._enforce_and_record_media_bytes(7, 3 * MB)
+    headers = exc.value.headers
+    assert headers["X-RateLimit-Limit"] == "10"
+    assert headers["X-RateLimit-Remaining"] == "2"
+    assert int(headers["Retry-After"]) >= 1

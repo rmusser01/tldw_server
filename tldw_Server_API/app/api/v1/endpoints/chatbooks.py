@@ -555,19 +555,6 @@ async def create_chatbook(
         if not valid:
             raise HTTPException(status_code=400, detail=error)
 
-        # Initialize quota manager (DB-backed)
-        quota_manager = QuotaManager(str(user.id), getattr(user, "tier", "free"), db=service.db)
-
-        # Check export quota
-        allowed, message = await quota_manager.check_export_quota()
-        if not allowed:
-            raise HTTPException(status_code=429, detail=message)
-
-        # Check concurrent jobs quota
-        allowed, message = await quota_manager.check_concurrent_jobs()
-        if not allowed:
-            raise HTTPException(status_code=429, detail=message)
-
         # Convert explicit allowlists to core ContentType enums. None/{} is full-account mode.
         content_selections = None
         if request_data.content_selections:
@@ -859,18 +846,7 @@ async def import_chatbook(
                 detail="selected_openwebui_user_id is required for OpenWebUI DB imports",
             )
 
-        # Initialize quota manager (DB-backed)
         quota_manager = QuotaManager(str(user.id), getattr(user, "tier", "free"), db=service.db)
-
-        # Check import quota
-        allowed, message = await quota_manager.check_import_quota()
-        if not allowed:
-            raise HTTPException(status_code=429, detail=message)
-
-        # Check concurrent jobs quota
-        allowed, message = await quota_manager.check_concurrent_jobs()
-        if not allowed:
-            raise HTTPException(status_code=429, detail=message)
 
         if (
             import_request.source_format
@@ -1153,9 +1129,6 @@ async def preview_chatbook(
         allowed, message = await quota_manager.check_file_size(file_size)
         if not allowed:
             raise HTTPException(status_code=413, detail=message)
-
-        if file_size > 100 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="File too large. Maximum size is 100MB for preview")
 
         # Save uploaded file to secure temp location with sanitized name
         temp_dir = _setup_secure_temp_directory(str(user.id))

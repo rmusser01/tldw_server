@@ -463,9 +463,9 @@ class UserProfileService:
 
         try:
             from tldw_Server_API.app.core.Usage.audio_quota import (
-                active_streams_count,
                 get_daily_minutes_used,
                 get_limits_for_user,
+                get_monthly_minutes_used,
             )
 
             limits = await get_limits_for_user(user_id)
@@ -474,17 +474,24 @@ class UserProfileService:
             remaining = None
             if daily_limit is not None:
                 remaining = max(0.0, float(daily_limit) - float(used))
-            active_streams = await active_streams_count(user_id)
+            monthly_limit = limits.get("monthly_minutes")
+            monthly_used = await get_monthly_minutes_used(user_id)
+            monthly_remaining = None
+            if monthly_limit is not None:
+                monthly_remaining = max(0.0, float(monthly_limit) - float(monthly_used))
             quotas["audio"] = {
                 "daily_minutes_limit": daily_limit,
                 "daily_minutes_used": float(used),
                 "daily_minutes_remaining": remaining,
+                "monthly_minutes_limit": monthly_limit,
+                "monthly_minutes_used": float(monthly_used),
+                "monthly_minutes_remaining": monthly_remaining,
                 "concurrent_streams_limit": (
                     int(limits["concurrent_streams"])
                     if limits.get("concurrent_streams") is not None
                     else None
                 ),
-                "concurrent_streams_active": int(active_streams),
+                "concurrent_streams_active": None,
                 "concurrent_jobs_limit": (
                     int(limits["concurrent_jobs"])
                     if limits.get("concurrent_jobs") is not None

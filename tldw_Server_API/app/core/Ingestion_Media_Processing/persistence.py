@@ -323,7 +323,7 @@ async def _enforce_and_record_media_bytes(user_id: Any, total_uploaded_bytes: in
         occurred_at=datetime.now(timezone.utc),
     )
     try:
-        allowed, _remaining = await ledger.add_if_within_daily_cap(entry, daily_cap_bytes)
+        allowed, remaining_bytes = await ledger.add_if_within_daily_cap(entry, daily_cap_bytes)
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Media ingestion budget: atomic ledger check failed; failing open: {}", exc)
         return
@@ -331,7 +331,11 @@ async def _enforce_and_record_media_bytes(user_id: Any, total_uploaded_bytes: in
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Daily ingestion size budget exceeded.",
-            headers={"Retry-After": str(quota_checks.seconds_until_utc_midnight())},
+            headers=quota_checks.rate_limit_headers(
+                limit=int(round(float(limit_mb))),
+                remaining=int(max(0, remaining_bytes or 0) // (1024 * 1024)),
+                reset_seconds=quota_checks.seconds_until_utc_midnight(),
+            ),
         )
 
 

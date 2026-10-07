@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.UserProfiles.limits_precedence import effective_limits
 
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+
 _CACHE_TTL_SECONDS = 60.0
 _CACHE_MAX_USERS = 4096
 _cache: dict[int, tuple[float, dict[str, int | float]]] = {}
 
 
-async def _load_limits(user_id: int) -> dict[str, int | float]:
+async def _load_limits(user_id: int, *, db_pool: DatabasePool | None = None) -> dict[str, int | float]:
     """Read the user's, their active teams' and active orgs' overrides and apply precedence."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
@@ -24,7 +28,7 @@ async def _load_limits(user_id: int) -> dict[str, int | float]:
         UserProfileOverridesRepo,
     )
 
-    pool = await get_db_pool()
+    pool = db_pool if db_pool is not None else await get_db_pool()
     user_repo = UserProfileOverridesRepo(pool)
     await user_repo.ensure_tables()
     user_rows = await user_repo.list_overrides_for_user(user_id)
@@ -57,12 +61,15 @@ async def _load_limits(user_id: int) -> dict[str, int | float]:
     return effective_limits(user_rows, team_rows, org_rows)
 
 
-async def user_quota(user_id: int | None, key: str) -> int | float | None:
+async def user_quota(
+    user_id: int | None, key: str, *, db_pool: DatabasePool | None = None,
+) -> int | float | None:
     """The user's effective ``limits.<name>`` value, or None for unlimited.
 
     None when usage quotas are off, the user is unknown, nothing is set at any
     level, or the lookup fails (fail open, logged). Cached per user for 60 s;
     other workers see a change within that window.
+    A transaction-bound pool keeps cold reads on the caller's owning connection.
     """
     if user_id is None or not usage_quotas_enabled():
         return None
@@ -71,7 +78,14 @@ async def user_quota(user_id: int | None, key: str) -> int | float | None:
     if hit is not None and hit[0] > now:
         return hit[1].get(key)
     try:
-        limits = await _load_limits(user_id)
+        if db_pool is None:
+            limits = await _load_limits(user_id)
+        elif getattr(db_pool, "pool", None) is not None:
+            # Roll back failed PostgreSQL reads before the fail-open catch, not caller work.
+            async with db_pool.acquire() as conn, conn.transaction():
+                limits = await _load_limits(user_id, db_pool=db_pool)
+        else:
+            limits = await _load_limits(user_id, db_pool=db_pool)
     except Exception:  # noqa: BLE001 - a quota lookup failure must not block requests (spec 2 §2)
         logger.opt(exception=True).warning("Usage quota lookup failed for user {}; treating as unlimited", user_id)
         return None

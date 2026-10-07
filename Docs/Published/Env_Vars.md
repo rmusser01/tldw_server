@@ -325,6 +325,10 @@ Usage quotas are per-user budgets, **off by default**: a stock install, single-u
 - Billing-plan limits additionally need a billing repository (hosted product only); without one, billing checks never run. A wired repository with the switch off logs a warning once, at startup.
 - Operators on `RG_POLICY_STORE=db` whose stored `evals.*` policies carry a `daily_cap` keep that cap until they remove it from the stored policy; evaluation daily caps now come from `limits.evaluations_per_day` / `limits.evaluation_tokens_per_day`.
 - `WORKFLOWS_DISABLE_QUOTAS` and `CHATBOOKS_DISABLE_QUOTAS` (`true|1`): per-module escape hatches that turn off the workflows and chatbooks quota checks respectively, even with the master switch (`USAGE_QUOTAS_ENABLED`) on. `WORKFLOWS_DISABLE_QUOTAS` is read inside `quota_checks.workflows_runs_decision`, so it covers both the `/workflows` endpoint's daily-cap check and the scheduler's direct call for scheduled runs. `CHATBOOKS_DISABLE_QUOTAS` is read by `Chatbooks.quota_manager.QuotaManager`, covering exports/day, imports/day, and concurrent-jobs admission.
+- Deprecated, no longer set any limit:
+  - `AUDIO_TIER_LIMITS_JSON` and `[Audio-Quota] {tier}_*` (`free_daily_minutes`, `standard_concurrent_jobs`, and so on): setting either logs a warning once and changes nothing. Audio limits are `limits.audio_daily_minutes`, `limits.transcription_minutes_per_month` and `limits.audio_concurrent_jobs`. The other `[Audio-Quota]` keys (`failopen_cap_minutes`, `stream_ttl_seconds`, `job_ttl_seconds`) are not tier settings and are still read. The audio tier admin routes (`GET`/`PUT /api/v1/audio/jobs/admin/tiers/{user_id}`) are marked deprecated and no longer affect any limit.
+  - `DEFAULT_STORAGE_QUOTA_MB` (`>= 0`): setting it logs a deprecation warning and sets no one's quota. Only the one-time storage quota migration still reads it, to skip the old default. Use `limits.storage_quota_mb`.
+- Operator guide: `Docs/Operations/Usage_Quotas.md`.
 
 ## Resource Governor (Unified Rate Limiting)
 

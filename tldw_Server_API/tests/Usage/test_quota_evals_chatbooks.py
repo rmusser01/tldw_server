@@ -157,7 +157,7 @@ def test_evaluations_endpoint_daily_cap_fires_for_the_authenticated_user(tmp_pat
 
     from tldw_Server_API.app.api.v1.endpoints.evaluations import evaluations_unified
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-    from tldw_Server_API.app.core.Usage import quota_resolver
+    from tldw_Server_API.app.core.Evaluations import user_rate_limiter
 
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
     monkeypatch.setenv("RG_ENABLED", "0")
@@ -193,7 +193,7 @@ def test_evaluations_endpoint_daily_cap_fires_for_the_authenticated_user(tmp_pat
             return 1
         return None
 
-    monkeypatch.setattr(quota_resolver, "user_quota", _fake_user_quota)
+    monkeypatch.setattr(user_rate_limiter, "user_quota", _fake_user_quota)
 
     app = FastAPI()
     app.include_router(evaluations_unified.router, prefix="/api/v1")

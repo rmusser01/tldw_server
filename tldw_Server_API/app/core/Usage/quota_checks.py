@@ -7,6 +7,7 @@ unlimited users cost no query. Sites raise their own existing errors.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -57,6 +58,21 @@ async def check_usage(
         )
         return UNLIMITED
     return QuotaDecision(allowed=used + float(requested) <= float(limit), limit=limit, used=used)
+
+
+def rate_limit_headers(limit: int, remaining: int, reset_seconds: int) -> dict[str, str]:
+    """RFC-style RateLimit-* (reset as delta seconds) plus legacy X-RateLimit-* (reset as epoch)."""
+    delta = max(0, int(reset_seconds))
+    left = str(max(0, int(remaining)))
+    return {
+        "RateLimit-Limit": str(int(limit)),
+        "RateLimit-Remaining": left,
+        "RateLimit-Reset": str(delta),
+        "Retry-After": str(delta),
+        "X-RateLimit-Limit": str(int(limit)),
+        "X-RateLimit-Remaining": left,
+        "X-RateLimit-Reset": str(int(time.time()) + delta),
+    }
 
 
 def seconds_until_utc_midnight() -> int:

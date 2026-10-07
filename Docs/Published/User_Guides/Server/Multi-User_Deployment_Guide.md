@@ -269,7 +269,8 @@ REFRESH_TOKEN_EXPIRE_DAYS=30
 ENABLE_REGISTRATION=false  # Set to true for open registration
 REQUIRE_REGISTRATION_CODE=true
 DEFAULT_USER_ROLE=user
-DEFAULT_STORAGE_QUOTA_MB=5120
+# DEFAULT_STORAGE_QUOTA_MB is deprecated: it sets no one's quota (setting it logs a warning).
+# Per-user storage quotas are limits.storage_quota_mb values; see Docs/Operations/Usage_Quotas.md
 
 # Rate Limiting
 AUTH_RATE_LIMIT=5/minute
