@@ -14,6 +14,7 @@ module.exports = {
         surface2: "rgb(var(--color-surface-2) / <alpha-value>)",
         elevated: "rgb(var(--color-elevated) / <alpha-value>)",
         primary: "rgb(var(--color-primary) / <alpha-value>)",
+        "primary-foreground": "rgb(var(--color-primary-foreground) / <alpha-value>)",
         primaryStrong: "rgb(var(--color-primary-strong) / <alpha-value>)",
         accent: "rgb(var(--color-accent) / <alpha-value>)",
         success: "rgb(var(--color-success) / <alpha-value>)",

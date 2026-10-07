@@ -1,3 +1,4 @@
+import { contrastRatio } from "./contrast"
 import type { ThemeColorTokens, ThemeDefinition } from "./types"
 
 // ---------------------------------------------------------------------------
@@ -33,6 +34,7 @@ const TOKEN_TO_CSS_VAR: Record<keyof Pick<ThemeColorTokens,
 const ALL_CSS_VARS: string[] = [
   // Colors
   ...Object.values(TOKEN_TO_CSS_VAR),
+  "--color-primary-foreground",
   // Shadows
   "--shadow-sm",
   "--shadow-md",
@@ -97,6 +99,13 @@ export function applyThemeTokens(tokens: ThemeColorTokens, theme: ThemeDefinitio
   for (const [key, cssVar] of Object.entries(TOKEN_TO_CSS_VAR)) {
     style.setProperty(cssVar, tokens[key as keyof ThemeColorTokens] as string)
   }
+
+  style.setProperty(
+    "--color-primary-foreground",
+    contrastRatio("0 0 0", tokens.primary) >= contrastRatio("255 255 255", tokens.primary)
+      ? "0 0 0"
+      : "255 255 255"
+  )
 
   // --- Shadows (raw CSS values) ---
   style.setProperty("--shadow-sm", tokens.shadowSm)
