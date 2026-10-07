@@ -146,13 +146,15 @@ const confirmed = await confirmWebCaptureAcceptance(body, options, assertCurrent
 
 **Files:**
 - Modify shared `components/Option/ResearchWorkspace/SourcesPane/index.tsx`, `ResearchWorkspace/index.tsx`, `ResearchWorkspace/ChatPane/index.tsx` (the actual scoped Ask submit/full-source path) and owning tests.
+- Follow the real dispatch boundary through existing `hooks/chat/useChatActions.ts` and `hooks/handlers/messageHandlers.ts` plus meaningful owning action tests: propagate capture retirement through asynchronous preparation and check immediately before actual request. Preserve ordinary callers; reuse existing abort/scope primitives, no new framework.
 - Create focused `SourcesPane/WebArticleCaptureModal.tsx` and `utils/use-research-web-capture.ts` only to keep the large existing components manageable.
 - Modify existing Workspace store/checkpoints, `workspace-server-restore.ts`, research prefill/import/export/provenance utilities only as required for capture pins and immutable pending body recovery. Preserve strict Notes v1.
 - Update English shared locale source strings and regenerate existing locale artifacts normally.
 
 **Interfaces:**
 - Consumes Task3 clients/helpers and optional `WorkspaceSource.webCapture`.
-- Existing source selection/store APIs remain authoritative. Capture UI retirement observes owner/origin/workspace/source membership and aborts pending reads; pending accepted body stays in the existing owner-bound Workspace storage, retried only under original scope.
+- Explicit cited-message Save-to-Notes may use optional local WorkspaceNote.pendingKnowledgeProvenance and existing strict-v1 knowledgeNoteWriteFields replacement, preserving canonical optimistic head, original references and deleted/unsupported guards. No wire/schema/origin inference.
+- Existing source selection/store APIs remain authoritative. Capture UI retirement observes owner/origin/workspace/source membership and aborts pending reads; pending accepted body uses existing research-workspace-prefill safe-storage, public owner keys and serialized checkpoints in an adjacent capture record under the same owner key family, retried only under original scope. No fabricated knowledge_qa_thread is created for capture-only recovery; ordinary handoffs cannot replace capture records. Global Zustand snapshots retain display pins, never accepted-body recovery authority.
 - Modal uses existing Ant Design Modal, explicit `Capture article`, `Save capture`, `Refresh capture`, `Retry capture`, `Cancel` and a text expand action. No remote fetch in effects on mount/import/selection/reopen/Ask.
 - Saved labels are `Extracted article snapshot`, capture time and `Source snapshot: Media version N`; prior web results `Retrieved excerpt`. Refresh creates a new source; unchanged digest shows `Text unchanged`. Changed current head shows `Snapshot changed outside refresh` and cannot participate in Ask.
 
@@ -162,12 +164,12 @@ assertCurrent()
 // Continue the existing scoped Ask only after this owned-head check succeeds.
 ```
 
-- [ ] Read all shared Ask entry points and exact owner/workspace/checkpoint/restore/export paths; preserve each existing reference and manual selection.
-- [ ] Repair the pre-existing SourcesPane.stage2 test fixture using the complete current source-list-view defaults: baseline has 33 passed and one TypeError from omitted lifecycleStateFilters at source-list-view.ts:157. Preserve assertions and production filter contract.
-- [ ] Write RED tests for explicit capture network boundary, preview cancel, full accepted text/extra Note disclosure, save-confirm sequencing, changed/unchanged refresh identity preservation, frozen partial retry, rapid duplicates, manual selection during readback, source deletion, origin/account/workspace switch, component retirement, reopen/export pin retention, stale-head Ask exclusion and original evidence coexistence.
-- [ ] Implement focused accessible modal/hook and shared SourcesPane actions with Task3 helpers. Freeze pending acceptance before mutation and retain recoverable readback failures. Confirm before adding/selecting; do not overwrite intervening manual selection. Persist under original owner before retired response is discarded.
-- [ ] Wire exact version preview and source provenance using existing Notes v1 fields when a later sourced Note explicitly references capture; keep original references alongside and do not restore removed provenance implicitly.
-- [ ] Run focused then owning suites GREEN, both client typechecks, scoped lint/locales/hooks/self-review and commit. Report every Ask call site covered and any qualified historical-RAG limitations.
+- [x] Read all shared Ask entry points and exact owner/workspace/checkpoint/restore/export paths; preserve each existing reference and manual selection.
+- [x] Repair the pre-existing SourcesPane.stage2 test fixture using the complete current source-list-view defaults: baseline has 33 passed and one TypeError from omitted lifecycleStateFilters at source-list-view.ts:157. Preserve assertions and production filter contract.
+- [x] Write RED tests for explicit capture network boundary, preview cancel, full accepted text/extra Note disclosure, save-confirm sequencing, changed/unchanged refresh identity preservation, frozen partial retry, rapid duplicates, manual selection during readback, source deletion, origin/account/workspace switch, component retirement, reopen/export pin retention, stale-head Ask exclusion and original evidence coexistence.
+- [x] Implement focused accessible modal/hook and shared SourcesPane actions with Task3 helpers. Freeze pending acceptance before mutation and retain recoverable readback failures. Confirm before adding/selecting; do not overwrite intervening manual selection. Persist under original owner before retired response is discarded.
+- [x] Wire exact version preview and source provenance using existing Notes v1 fields when a later sourced Note explicitly references capture; keep original references alongside and do not restore removed provenance implicitly.
+- [x] Run focused and owning suites, both client typechecks, scoped lint/locales/hooks/self-review and commit. Record baseline/timing failures without a broad-green claim; report every actual Ask call site covered, unsupported edited-send behavior, and qualified historical-RAG limitations. Focused fix1 tests116/116; owning broad1182/1193 with qualified failures; independent six-finding re-review passed.
 
 ### Task 5: Clarify Notes editing-state wording and qualify panel analysis
 
