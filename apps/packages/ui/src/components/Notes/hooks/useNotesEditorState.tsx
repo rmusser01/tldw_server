@@ -103,7 +103,7 @@ import { createNotesGraphAuthorityScope } from './useNotesGraphAuthorityScope'
 import type { NoteRenamedEvent } from './useNotesWikilinkRename'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
-type NotesOwnedRequestOptions = {
+export type NotesOwnedRequestOptions = {
   servicePromptConfig: ServicePromptTargetConfig
   abortSignal: AbortSignal
   headers: Record<string, string>
@@ -213,7 +213,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     t,
     listMode,
     setListMode,
-    data,
     refetch,
     setPage,
     setQuery,
@@ -1243,82 +1242,116 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     )
   }, [])
 
-  const reloadSelectedNoteAfterConflict = React.useCallback(async () => {
-    if (selectedId == null) return
-    const ok = await confirmDanger({
-      title: t('option:notesSearch.reloadConflictTitle', {
-        defaultValue: 'Reload server version?'
-      }),
-      content: t('option:notesSearch.reloadConflictContent', {
-        defaultValue:
-          'Reloading replaces the current editor contents with the server version. Your unsaved local edits will be discarded.'
-      }),
-      okText: t('option:notesSearch.reloadConflictAction', {
-        defaultValue: 'Reload server version'
-      }),
-      cancelText: t('option:notesSearch.keepEditingAction', {
-        defaultValue: 'Keep editing'
-      })
-    })
-    if (!ok) return
-    dropOfflineDraftNow(offlineDraftKeyFor(selectedId))
-    await loadDetail(selectedId)
-  }, [confirmDanger, dropOfflineDraftNow, loadDetail, selectedId, t])
+  /** Load the server copy; the local text goes to the clipboard first. */
+  const takeTheirVersion = React.useCallback(async ({ copyCleanDraft = true }: { copyCleanDraft?: boolean } = {}): Promise<boolean> => {
+    const noteId = selectedIdRef.current
+    if (noteId == null) return false
+    clearAutosaveTimeout()
+    const hasLocalDraft = isDirtyRef.current || saveStateRef.current.status === 'conflict'
+    const shouldCopy = copyCleanDraft || hasLocalDraft
+    const local = editRevisionRef.current
+    const requestEpoch = authorityEpochRef.current
+    const requestAuthorityScope = authorityScope
+    const capturedConfig = connectionConfig ? { ...connectionConfig } : null
+    let selectionEpoch = noteSelectionEpochRef.current
+    const controller = new AbortController()
+    authorityRequestsRef.current.add(controller)
+    const isCurrent = () => !controller.signal.aborted && authorityEpochRef.current === requestEpoch &&
+      authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === selectionEpoch &&
+      String(selectedIdRef.current) === String(noteId)
+    const hasOriginalDraft = () => isCurrent() && editRevisionRef.current.revision === local.revision
+    try {
+      let copied = false
+      if (shouldCopy) {
+        // Must run before any other await (see writeClipboardText).
+        copied = await writeClipboardText(
+          buildSingleNoteCopyText(
+            { id: noteId, title: local.title, content: local.content, keywords: local.editorKeywords },
+            'markdown'
+          )
+        )
+        if (!hasOriginalDraft()) return false
+        if (!copied) {
+          const ok = await confirmDanger({
+            title: t('option:notesSearch.useTheirVersionTitle', { defaultValue: 'Use their version?' }),
+            content: t('option:notesSearch.useTheirVersionNoCopy', {
+              defaultValue: 'Your text could not be copied to the clipboard. Using their version discards your edits.'
+            }),
+            okText: t('option:notesSearch.useTheirVersion', { defaultValue: 'Use their version' }),
+            cancelText: t('option:notesSearch.keepEditingAction', { defaultValue: 'Keep editing' })
+          })
+          if (!ok || !hasOriginalDraft()) return false
+        }
+      }
+      if (!requestAuthorityScope || !capturedConfig) return false
+      const user = await tldwAuth.getCurrentUser()
+      if (!hasOriginalDraft() || !user?.is_active || user.id == null ||
+          createNotesGraphAuthorityScope(capturedConfig.serverUrl, user.id) !== requestAuthorityScope) return false
+      const ownedRequest: NotesOwnedRequestOptions = {
+        servicePromptConfig: {
+          serverUrl: capturedConfig.serverUrl,
+          authMode: capturedConfig.authMode,
+          authSource: capturedConfig.authSource,
+          orgId: capturedConfig.orgId,
+          expectedUserId: user.id,
+          expectedSingleUserApiKeyScope: capturedConfig.authMode === 'single-user'
+            ? deriveSingleUserApiKeyCredentialScope('single-user', capturedConfig.apiKey) : undefined
+        },
+        headers: { 'X-TLDW-Expected-User-ID': String(user.id) },
+        abortSignal: controller.signal
+      }
+      dropOfflineDraftNow(offlineDraftKeyFor(noteId))
+      selectionEpoch += 1
+      const loaded = await loadDetail(noteId, ownedRequest, local.revision)
+      if (!loaded || !isCurrent()) return false
+      void refetch()
+      if (shouldCopy) {
+        message.info({
+          content: copied
+            ? t('option:notesSearch.reloadConflictCopied', {
+                defaultValue: 'Loaded the latest version from the server. Your unsaved edits were copied to the clipboard.'
+              })
+            : t('option:notesSearch.loadedTheirVersion', { defaultValue: 'Loaded the latest version from the server.' }),
+          duration: 8
+        })
+      }
+      return true
+    } catch {
+      return false
+    } finally {
+      if (authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === selectionEpoch) setLoadingDetail(false)
+      authorityRequestsRef.current.delete(controller)
+    }
+  }, [authorityScope, clearAutosaveTimeout, confirmDanger, connectionConfig, dropOfflineDraftNow, loadDetail, message, refetch, setLoadingDetail, t])
 
-  // "Reload notes" from the conflict toast. The editor's base version must
-  // never move without the content it belongs to: if it did, the next autosave
-  // would send the stale text with the new version and overwrite the other
-  // tab's change (NS-N1). The toast keeps an old copy of this callback, so the
-  // live editor state is read from refs.
+  const reloadSelectedNoteAfterConflict = takeTheirVersion
+
+  // Compatibility entry point for conflict toasts and callers reloading another note.
   const reloadNotes = React.useCallback(async (noteId?: string | number | null) => {
     const currentId = selectedIdRef.current
     const target = noteId ?? currentId
-    if (target == null || currentId == null || String(target) !== String(currentId)) {
-      // The conflict was on another note: refresh the list, leave the editor alone.
-      await refetch()
+    if (target != null && currentId != null && String(target) === String(currentId)) {
+      await takeTheirVersion({ copyCleanDraft: false })
       return
     }
-    clearAutosaveTimeout()
-    // A conflicting draft restored from this device is local text too.
-    const hadLocalEdits = isDirtyRef.current || saveStateRef.current.status === 'conflict'
-    if (hadLocalEdits) {
-      // Keep the unsaved text recoverable before the server copy replaces it.
-      // This must run before any other await (see writeClipboardText).
-      const local = editRevisionRef.current
-      const copied = await writeClipboardText(
-        buildSingleNoteCopyText(
-          { id: currentId, title: local.title, content: local.content, keywords: local.editorKeywords },
-          'markdown'
-        )
-      )
-      if (!copied) {
-        message.warning(
-          t('option:notesSearch.reloadConflictCopyFailed', {
-            defaultValue: 'Could not copy your unsaved edits to the clipboard.'
-          })
-        )
-        // Fall back to the explicit "your edits will be discarded" confirm.
-        await reloadSelectedNoteAfterConflict()
-        await refetch()
-        return
-      }
-    }
-    // The local text is on the clipboard; a queued copy must not come back over the server's.
-    dropOfflineDraftNow(offlineDraftKeyFor(target))
-    const loaded = await loadDetail(target)
-    await refetch()
-    if (loaded && hadLocalEdits) {
-      message.info({
-        content: t('option:notesSearch.reloadConflictCopied', {
-          defaultValue:
-            'Loaded the latest version from the server. Your unsaved edits were copied to the clipboard.'
-        }),
-        duration: 8
-      })
-    }
-  }, [clearAutosaveTimeout, dropOfflineDraftNow, loadDetail, message, refetch, reloadSelectedNoteAfterConflict, t])
+    const epoch = authorityEpochRef.current
+    const scope = authorityScope
+    const capturedRefetch = refetch
+    if (!scope || authorityEpochRef.current !== epoch || authorityScopeRef.current !== scope) return
+    // This captured list refresh already fences its owner's generation.
+    await capturedRefetch()
+  }, [authorityScope, refetch, takeTheirVersion])
 
   const handleVersionConflict = React.useCallback((noteId?: string | number | null) => {
+    const epoch = authorityEpochRef.current
+    const scope = authorityScopeRef.current
+    const selection = noteSelectionEpochRef.current
+    const selectedNoteId = selectedIdRef.current
+    const reload = () => {
+      if (authorityEpochRef.current !== epoch || authorityScopeRef.current !== scope ||
+          noteSelectionEpochRef.current !== selection || String(selectedIdRef.current) !== String(selectedNoteId)) return
+      void reloadNotes(noteId)
+    }
     message.error({
       content: (
         <span
@@ -1330,7 +1363,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           onKeyDown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault()
-              void reloadNotes(noteId)
+              reload()
             }
           }}
         >
@@ -1338,7 +1371,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           <Button
             type="link"
             size="small"
-            onClick={() => void reloadNotes(noteId)}
+            onClick={reload}
             aria-label="Reload notes"
           >
             Reload notes
@@ -3018,88 +3051,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     return saveNoteRef.current({ showSuccessMessage: true, trigger: 'keep-mine' })
   }, [clearAutosaveTimeout])
 
-  /** Load the server copy; the local text goes to the clipboard first. */
-  const takeTheirVersion = React.useCallback(async (): Promise<boolean> => {
-    const noteId = selectedIdRef.current
-    if (noteId == null) return false
-    clearAutosaveTimeout()
-    const local = editRevisionRef.current
-    const requestEpoch = authorityEpochRef.current
-    const requestAuthorityScope = authorityScope
-    const capturedConfig = connectionConfig ? { ...connectionConfig } : null
-    let selectionEpoch = noteSelectionEpochRef.current
-    const controller = new AbortController()
-    authorityRequestsRef.current.add(controller)
-    const isCurrent = () => !controller.signal.aborted && authorityEpochRef.current === requestEpoch &&
-      authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === selectionEpoch &&
-      String(selectedIdRef.current) === String(noteId)
-    const hasOriginalDraft = () => isCurrent() && editRevisionRef.current.revision === local.revision
-    try {
-      // Must run before any other await (see writeClipboardText).
-      const copied = await writeClipboardText(
-        buildSingleNoteCopyText(
-          { id: noteId, title: local.title, content: local.content, keywords: local.editorKeywords },
-          'markdown'
-        )
-      )
-      if (!hasOriginalDraft()) return false
-      if (!copied) {
-        const ok = await confirmDanger({
-          title: t('option:notesSearch.useTheirVersionTitle', { defaultValue: 'Use their version?' }),
-          content: t('option:notesSearch.useTheirVersionNoCopy', {
-            defaultValue: 'Your text could not be copied to the clipboard. Using their version discards your edits.'
-          }),
-          okText: t('option:notesSearch.useTheirVersion', { defaultValue: 'Use their version' }),
-          cancelText: t('option:notesSearch.keepEditingAction', { defaultValue: 'Keep editing' })
-        })
-        if (!ok || !hasOriginalDraft()) return false
-      }
-      if (!requestAuthorityScope || !capturedConfig) return false
-      const user = await tldwAuth.getCurrentUser()
-      if (!hasOriginalDraft() || !user?.is_active || user.id == null ||
-          createNotesGraphAuthorityScope(capturedConfig.serverUrl, user.id) !== requestAuthorityScope) return false
-      const ownedRequest: NotesOwnedRequestOptions = {
-        servicePromptConfig: {
-          serverUrl: capturedConfig.serverUrl,
-          authMode: capturedConfig.authMode,
-          authSource: capturedConfig.authSource,
-          orgId: capturedConfig.orgId,
-          expectedUserId: user.id,
-          expectedSingleUserApiKeyScope: capturedConfig.authMode === 'single-user'
-            ? deriveSingleUserApiKeyCredentialScope('single-user', capturedConfig.apiKey) : undefined
-        },
-        headers: { 'X-TLDW-Expected-User-ID': String(user.id) },
-        abortSignal: controller.signal
-      }
-      dropOfflineDraftNow(offlineDraftKeyFor(noteId))
-      selectionEpoch += 1
-      const loaded = await loadDetail(noteId, ownedRequest, local.revision)
-      if (!loaded || !isCurrent()) return false
-      void refetch()
-      message.info({
-        content: copied
-          ? t('option:notesSearch.reloadConflictCopied', {
-              defaultValue: 'Loaded the latest version from the server. Your unsaved edits were copied to the clipboard.'
-            })
-          : t('option:notesSearch.loadedTheirVersion', { defaultValue: 'Loaded the latest version from the server.' }),
-        duration: 8
-      })
-      return true
-    } catch {
-      return false
-    } finally {
-      if (authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === selectionEpoch) setLoadingDetail(false)
-      authorityRequestsRef.current.delete(controller)
-    }
-  }, [authorityScope, clearAutosaveTimeout, confirmDanger, connectionConfig, dropOfflineDraftNow, loadDetail, message, refetch, setLoadingDetail, t])
+
 
   /** "Reload" for a newer server copy when there is nothing local to lose. */
   const loadLatestVersion = React.useCallback(async (): Promise<boolean> => {
-    const noteId = selectedIdRef.current
-    if (noteId == null) return false
-    if (isDirtyRef.current) return takeTheirVersion()
-    return loadDetail(noteId)
-  }, [loadDetail, takeTheirVersion])
+    return takeTheirVersion({ copyCleanDraft: false })
+  }, [takeTheirVersion])
 
   const retrySave = React.useCallback(
     () => saveNoteRef.current?.({ showSuccessMessage: true, trigger: 'retry' }) ?? Promise.resolve(false),
@@ -3305,28 +3262,32 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     toggleNotePinned,
     isVersionConflictError,
     handleVersionConflict,
-    getExpectedVersionForNoteId: React.useCallback(
-      async (noteId: string): Promise<number | null> => {
-        if (selectedId != null && String(selectedId) === noteId && selectedVersion != null) {
-          return selectedVersion
-        }
-        if (Array.isArray(data)) {
-          const match = data.find((note) => String(note.id) === noteId)
-          if (typeof match?.version === 'number' && Number.isFinite(match.version)) {
-            return match.version
+    // Page mutations share the editor's existing owner and draft lifetimes.
+    captureNoteMutation: React.useCallback(() => {
+      const epoch = authorityEpochRef.current
+      const scope = authorityScopeRef.current
+      const config = connectionConfigRef.current ? { ...connectionConfigRef.current } : null
+      let selection = noteSelectionEpochRef.current
+      let revision = editRevisionRef.current.revision
+      const dirtyRevision = dirtyRevisionRef.current
+      const isOwnerCurrent = () => authorityEpochRef.current === epoch && authorityScopeRef.current === scope
+      return {
+        scope, config,
+        get editRevision() { return revision },
+        isOwnerCurrent,
+        isEditorCurrent: () => isOwnerCurrent() && noteSelectionEpochRef.current === selection &&
+          editRevisionRef.current.revision === revision && dirtyRevisionRef.current === dirtyRevision,
+        acceptSavedDraft: () => {
+          if (isOwnerCurrent() && dirtyRevisionRef.current === dirtyRevision) {
+            selection = noteSelectionEpochRef.current
+            revision = editRevisionRef.current.revision
           }
-        }
-        try {
-          const detail = await bgRequest<any>({
-            path: noteResourcePath(noteId),
-            method: 'GET' as any
-          })
-          return toNoteVersion(detail)
-        } catch {
-          return null
-        }
-      },
-      [data, selectedId, selectedVersion]
-    ),
+        },
+        register: (controller: AbortController) => {
+          authorityRequestsRef.current.add(controller)
+          return () => { authorityRequestsRef.current.delete(controller) }
+        },
+      }
+    }, []),
   }
 }

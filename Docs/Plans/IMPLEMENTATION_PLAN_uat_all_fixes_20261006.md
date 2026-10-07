@@ -226,3 +226,105 @@ Six-fixture unit committed locally c2fb68def53840ee0a77e4d6ab73b96358c5fdc1 pare
 - Dirty-only fixture correction failed1/65excluded (natural1/1.551540s); prior advice is superseded. Newly covered freshness effect observes server3/local2 after cancellation and restores conflict. Final reviewed oracle retains every draft/identity/version/head field, requires conflict/remoteVersion3/savingfalse, and quiet no-write behavior. One third corrected-target check remains; STOP if it fails. No source change or Web run yet.
 
 - Notes source qualification COMPLETE: owned conflict choices, uncertainty replay and queue preservation; UI175earlier+corrected1 (not full176greenrun), first Web9=176passed. Whole UI/Web compiler natural0/65.925s and44.479s, empty output,8192MB/nonincremental/noemit/600cap/source unchanged. Parse/diff/ESLint no new findings; TS-only Bandit N/A. Independent production/spec/final fixture review CLEAR. Sourcea82cec5d, fixture618b80e2, two-path diff f8abbaab. Three qualification outcomes consumed; no unchanged replay or runtime/UAT acceptance. Broader Stage2 stays In Progress.
+
+
+### Notes bulk Add tags, Undo and Delete ownership
+
+- Declared before edits at local408ebc7. Bind prompts, fresh version reads, writes, Undo and refresh to the original account/server/authority lifetime; away-and-return and unmount invalidate permanently. The Delete sibling is a new source finding and requires a real causal regression before fixing. Preserve bulk selection, tag/version CAS, partial success, current newer drafts and the existing notification error contract.
+- Test-only RED first, independent new-test review, then one minimal shared production correction using existing owned request/list/detail boundaries. Qualify genuinely affected Add tags/actions/selection and related ownership suites in UI/Web, proper lint/parse and whole configured typing at unchanged budgets. Independent actual/staged reviews, normal hooks and local commit follow. TypeScript-only Bandit N/A; ADR required:no new architectural decision.
+- Previous408ebc7 Notes qualification remains carried forward without unchanged replay. All43 actual UAT/native/installer, canonical baseline/drift/publication/merge remain open. Automation stays PAUSED; approvals remain granted with no pending question.
+
+- Before test edits, caller tracing added individual Delete, Restore and delete Undo to the same ownership unit: neighbor/detail/version/restore reads and side effects share the unfenced boundary. Each newly identified sibling receives causal coverage; reuse one private owned operation/request pattern. Existing presentational list seam is explicit and real list-selection coverage remains separate. No real browser/UAT acceptance follows.
+
+
+### Notes Sync monotonic product versions and durable projection receipts
+
+**Goal**: Prevent old Note optimistic tokens becoming valid again and make accepted projection replay preserve later product edits.
+**Success Criteria**: Unchanged Sync revision/base/cursor/hash contracts; independent strictly advancing product tokens; exact receipts atomic with product, graph and paired provenance; no public/internal receipt collision; trusted fresh acceptance marker; safe explicit legacy recovery; stale wikilink append/product writes rejected.
+**Tests**: Unequal counter directions and later ordinary writes; legitimate/current versus stale tokens; Rewrite/Undo stale races; product-commit/checkpoint fault; later local edit and exact replay; paired writes/tombstones/bootstrap/ingestion; client marker override, single/group retry identity, identical payload/time distinct envelopes; owner/RLS and existing SQLite/official PostgreSQL consumers.
+**Status**: Design complete; implementation not started.
+
+- ADR required: yes. New ADR-066 records the product projection receipt rule, preserves prior ADR-034 batch/fence/CAS rationale by reference and narrows its ambiguous legacy replay exception. ADR-031 and ADR-065 remain governing Notes capability and independent provenance contracts.
+- Reuse the current receipt table and owner transaction. Product token allocation happens under its real write lock. Raw internal keys have a fixed prefix outside public64hex outputs. Stamp protocol metadata only at fresh accepted Notes insertion; retain old idempotent rows. Request/group hashes ignore only that server field while receipt fingerprints bind it.
+- Applied legacy checkpoints remain authoritative. Unmarked pending/failed application cannot be inferred from bytes/time; retain it and require explicit recovery. No automatic receipt fabrication or product overwrite. Correct provenance/organization equality dependencies; retain child, task and moodboard Sync anchors.
+- Test-only causal red, minimal reviewed green, affected supported SQLite/officialPG checks, compile/lint/scoped baseline-current Bandit, independent actual/staged review and normal local commit. No source/test execution yet; all43 actual UAT/native/installer/publication gates remain open.
+- Independent incoming RAG5 modules:32passed33warnings/1.82pytest4.588outer/natural0, no timeout at408ebc7; exact test files unchanged. No full stderr or real provider/UAT qualification claim.
+
+
+### Notes mutator RED and additional same-owner publication cases
+
+- First unchanged-production causal batch: 26 intended assertion failures,3passes,8oldcases deselected,13.872390s outer/natural1/no timeout or setup failure. All26 full failure bodies recovered without replay; downstream assertions after first failure are not qualified. Absent reporter error/unhandled fields remain unavailable. The account-change tag Undo pass is incidental CAS, not ownership evidence.
+- Before GREEN, add two actual applied delayed-ACK cases for individual Delete and direct Restore: choose Beta and type a newer draft while the request is pending; after acknowledgment retain that identity/content. Current-owner scoped refresh/toast may proceed. Strengthen account-change tag Undo to forbid foreign-owner GET before rejection.
+- Independent three-case delta review precedes a second causal batch limited to those new/changed cases. Carry the prior26 failures forward; no unchanged29 replay. Production remains unchanged and the30s/600s caps remain. Real43 UAT/native/installer acceptance stays open; approval granted/no pending question; automation PAUSED.
+
+
+### Notes mutator second causal RED
+
+- Reviewed three-case batch only:39registered/3selected/3assertion failures/36excluded,6.826523958s outer/natural1/no timeout/setup failure/empty stderr. AccountUndo performs forbidden extraGET after rejection; delayed singleDelete/directRestore ACKs each lose laterBetaidentity. Downstream content assertions after first failure remain unexecuted; complete originalfailure bodies retained, reporter unhandled/error fields unavailable. Production/fixture hashes unchanged.
+- Original26 causal failures carry forward without unchanged29 replay. Root review of one shared existing Notes operation/request GREEN outline is next. Baseline source-only3353-file materialization verified at exact1bd; candidate HEAD/index/refs/common config/protected diff unchanged and no import/export/profile yet. All43 actual acceptance remains open; no pending approval; automation PAUSED.
+
+
+### Notes mutator minimal GREEN scope
+
+- Independent design review CLEAR. Reuse existing editor authority/controller and selection/edit epochs through one private captureNoteMutation(controller) accessor; remove sole-used unscoped version fallback. Page shared operation freezes original config/authority before awaits, validates active principal before reads and scopes all siblings and retained callbacks. Retained Undo validates original immutable owner token before new controller/read; post-GET dirty recheck; staleUndo throws, ordinary staleactions quiet. Finally cleanup everywhere.
+- Captured list.refetch owns generation. Check monotonic original selection/edit immediately before reset or owned loadDetail, and pass capturedrevision. Legitimate onSaved adjustment uses existing confirmDiscardIfDirty callback with original authority/newer-edit protection; never recapture after prompt. Two production files/no new framework/dependency or ADR decision. Root authorizes minimal GREEN following both causal batches; all43 real acceptance remains open.
+
+
+### Canonical baseline required static directory
+
+- Source-only baseline attempt1 failed natural1/1.601s at unchanged main.py2586: required app/static directory absent. No schema/wholecomparison/hash accepted. stdout0/stderr39288 captured in original memory but no longer retained; recorded exact missing-directory cause only, not full retainedstderrreview. Sources/generators/candidateartifact/HEADindexrefs unchanged.
+- Root source review confirms unconditional staticmount, optional localSwagger/docs serving and no schema necessity to copy assets. Restore only empty required directory structure, then ONE follow-up normalexport with same600cap/privateprofile/sourcebindings. No source/route/importshim/install/assetcopy or reducedrouter acceptance; wholeJSONdifferences must be explained. Schemaqualification excludes assetserving/UAT. All43approval granted/no pending question; automationPAUSED.
+
+
+### Notes DELETE409 retained Reload and existing fixture authority
+
+- Actual source review found the inherited conflict Reload callback can discard newer drafts or read under replacement ownership. Before edits, extend this unit with late-409 publication and retained/awaited Reload ownership regressions; preserve current legitimate reload and list-only other-note behavior. Reuse existing qualified owned Use theirs/loadLatestVersion path and remove unscoped reload duplication where possible. One new causal subset before production repair; unchanged earlier RED controls excluded.
+- Stage32/33 require real canonical config and active user seams plus real authority-scope export. Test-only adaptation preserves all5 original bodies/assertions/responses. Independent spec/delta review precedes qualification; no test-result substitution. Unchanged30s/600caps, TypeScript-only Bandit N/A and no new ADR. All43 approval granted/no pending question; automation PAUSED.
+
+
+### Shared clean Reload and baseline production-resource prerequisite
+
+- Before edits, include clean loadLatestVersion in the same captured owner/editor Reload boundary. Retain clean no-clipboard/no-discard semantics; new delayed auth/detail causal cases precede shared correction. Earlier unchanged RED excluded. No new framework or ADR.
+- Baseline export attempt2 natural1/10.366s at bundled Persona starter PNG import, no schema or comparison. Required empty static directory remains empty; no third export/asset copy/shim/route reduction. Assess exact committed production-resource metadata closure only; proof/model/shared-cache content remains protected. Approval granted/no question; automation PAUSED.
+
+
+### Canonical baseline packaged Persona resource closure
+
+- Source review confirms eagerly required production resources explicitly declared by package-data. Necessary normal checkout under all43 authorization includes136starterPNGs plus pixel-migu manifest.json (137files/610376bytes), exact1bd. Exclude PROVENANCE, foreignproof, models and sharedcache; no fake bytes/source/routes.
+- Preserve3353originalsource/generators/candidateartifact/HEADindexrefs/commonconfig/protectedWIP; only baseline private sparse metadata/index may change. Finish immediate-reader review then ONE third600cap normal full export/wholecomparison. Failure exhausts this baseline unit, no fourth retry. No resource-serving/UAT qualification; approval granted/no question, automation PAUSED.
+
+
+### Canonical route-profile mismatch and unaffected RAG adapter checks
+
+- Third baselineexport natural0/19.060s emitted reduced1970paths3119schemas; candidate2113/3267. Complete9040leafdiff classification onlypaths/components; omitted8configuredrouterfamilies, Notes task schema namespace/ref changes, and3owned common descriptions. Publicminimalprofile incorrectly omitted exactcommittedenable list; stable_only=false alone insufficient. Fullrouteparity unqualified,3attempt unit STOP/nofourthexport/profileedit. Concrete exactpublicroute correction remains proposal; no reducedrouter acceptance.
+- Original3353source/137productionresource/generators/candidateartifact/HEADindexrefs/commonconfig/protectedWIP preserved; no proof/model/cache recovery or runtime/UAT qualification.
+- New incoming RAG adapter guard module3passed32warnings/0.59pytest3.720outer/natural0/notimeout/sourceunchanged; fulloriginalstdout/stderr recovered. Fakeadapter/rawSQL guard scope only, no realproviderUAT. Earlier32RAG passes excluded from replay.
+- Frozen17new Notes Reload/Delete409/Save-positive cases + narrowstage32/33 fixtures reviewedCLEAR; ONEnewRED authorized with old41 excluded. Approval granted/no question; automationPAUSED.
+
+
+### Shared Reload causal RED and minimal GREEN
+
+- ONEnewRED58registered17selected16assertionfail1positivepass41excluded/natural1/6.372343833outer/empty stderr/notimeout/setupfailure. All16completeoriginalarrays recovered; reporter unhandled/error/retry/repeat unavailable. Allsource/fixtureguards unchanged. RealSave→Add positive passes; missingrequest/auth andstaleGET/refetch/toast/queue failures are distinct from alreadyguardedcleandetail editorpreservation.
+- Rootauthorizes reviewed smallest sharedGREEN: move takeTheirVersion earlier, copyCleanDraft option preserves explicitUseTheirs/dirtycopy and cleanquietReload; remove duplicateunscopedreloadSelected; selectedcompatReload/loadLatestdelegate; retainedtoastvalidatesoriginalowner/selection forbutton+keyboard while capturingdraftatclick; lateDELETE409requiresoriginaleditorcurrent. Othernote currentownerlistrefresh retained. No newownershipframework/ADR.
+- FirstGREEN7affectedUI/Web suites expected69each, properwholetyping/static/source+stagedreview/hooks/localcommit; no unchangedoldRED replay, testbudgetchange or realUATacceptance. AutomationPAUSED/approvalgranted/no question.
+
+
+### Notes mutations and shared Reload first GREEN
+
+- UI69/69 and WebUI69/69 across7actualfiles, first complete affected runs, natural0/19.596191791s and18.167658959s, unchanged600outer and configured case bounds. Source/fixture hashes and HEAD408 unchanged. Original full reports retained; no failures, jsdom navigation advisory identical. Missing error/unhandled/retry/repeat fields unavailable.
+- Root and independent actual Reload review CLEAR; all earlier mutator review retained. Parse/diffcheck clear; proper ESLint noerrors/noaddedwarnings, TS-only Bandit N/A. Wholeconfiguredtyping and finalactual/stagedreview/hooks/localcommit pending. Real43 UAT remains open.
+- Newly confirmed task-checkbox delayed-response ownership gap in Notes hook and Dock is a separate next repair unit; no source/test edits for it yet. AutomationPAUSED; no pendingapprovalquestion.
+
+
+### Whole Notes typing and selector correction
+
+- UI wholeconfiguredtyping natural2/60.771137458outer with8complete newfixture diagnostics:7TS2769 bulkAdd and1TS2353 conflictReload; exact:true is unsupported ByRoleOptions. Stderr empty; no production type diagnostic. Webunchanged check currently pending.
+- Beforeedit declared correction removesONLY8 ignored exact:true properties from string-name rolequeries, keepingexacttargetmatching after installed-source verification. Alltestbodies/assertions/guards retained. No first69UI/Web replay; correctedwholetyping/static/finalreview/hooks required.
+
+
+### Notes mutation and Reload qualification
+
+- Both first affected client runs passed all 69 cases across seven files. UI took 19.596s; WebUI took 18.168s. The original bounds and all source hashes stayed fixed. The same jsdom navigation advisory was disclosed.
+- Whole UI typing passed after the eight ignored selector-option removals (60.794s, empty output). WebUI typing passed on unchanged production (37.632s, empty output); the complete resolved compiler inventory excludes the two edited fixtures. Exact name matching, all other bytes and semantic AST nodes are preserved, independently reviewed. No test suites or unchanged Web typing were replayed.
+- Parse/diff checks pass; proper ESLint has no errors or new warnings. TS-only Bandit is not applicable. Source/spec reviews carry forward; final eight-path actual/staged review and normal hooks/local commit follow.
+- This source unit is complete once committed. Broader Stage 2 remains In Progress: checkbox ownership, Sync projection, Playground, canonical parity and real UAT/native/installer acceptance remain open. Automation stays PAUSED; approvals are granted.
