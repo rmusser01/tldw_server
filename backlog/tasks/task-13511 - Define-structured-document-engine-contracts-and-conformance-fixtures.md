@@ -1,7 +1,7 @@
 ---
 id: TASK-13511
 title: Define structured document engine contracts and conformance fixtures
-status: In Progress
+status: Done
 created_date: 2026-10-07 02:14
 assignee:
 - '@codex'
@@ -10,7 +10,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-engines.md
-updated_date: 2026-10-07 02:26
+updated_date: 2026-10-07 02:32
 ---
 
 ## Description
@@ -42,6 +42,7 @@ Reason: pure engine contracts implement the approved design; this task does not 
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented immutable wire contracts and request-aware result construction, rejecting invalid scalar ranges, incomplete/unqualified formatting, excerpt success, nonformatted replacements and mismatched check identities. Added 37 shared language fixtures and pure contract tests/factories. YAML unsupported fixtures remain grammar-valid with unsupported diagnostics, distinct from malformed syntax. Fixture SHA-256: fcf516e4c0bb8ff7a19748a4d5f7deb8a30ad0078ea0ce2af0e1e81af50fb0d7; copies verified byte-identical and hash pinned in both tests. 18 Vitest tests; scoped strict TypeScript check and Prettier pass. Bandit not applicable: touched production code is TypeScript. No parser or UI wiring. Self-review complete; independent review pending. Governing ADR: Docs/ADR/031-notes-capability-sync-domains.md; cross-app ADR-194; no new decision. Later engines/workers must use request-aware constructors for excerpt/source-bound guarantees.
+Independent E1 review: spec compliant and task quality approved; no blocking findings. Existing frontend typecheck (bun run typecheck from apps/tldw-frontend) also passed with exit 0. Request-aware construction is a required downstream engine/worker integration boundary. Existing optional PyAudio and Node ExperimentalWarning noise is recorded as inherited environment debt.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
