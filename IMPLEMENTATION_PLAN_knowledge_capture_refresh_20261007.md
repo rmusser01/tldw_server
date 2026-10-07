@@ -72,13 +72,14 @@ request = IngestWebContentRequest(
 **Goal:** Save verified capture descriptors and preview exact historical versions.
 **Success Criteria:** Mismatched capture text rejected; old active version remains previewable without current chunks; unavailable pin cannot resolve latest.
 **Tests:** WebClipper service/API/Sync/tenancy, Workspace preview/core/API and Media versions.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 2: Descriptor validation and pinned source preview
 
 **Files:**
 - Modify `app/core/WebClipper/schemas.py`, `service.py`, `app/core/Workspaces/source_preview.py`, `app/api/v1/schemas/workspace_schemas.py`, `app/api/v1/endpoints/workspaces.py` (under `tldw_Server_API`).
 - Test existing Notes_NEW WebClipper unit/integration tests, ChaChaNotesDB WebClipper/official PostgreSQL tenancy tests, Workspaces preview/core/API tests and Media version reads.
+- Owning compatibility expansion: existing `app/core/DB_Management/ChaChaNotes_DB.py` native boolean binding and specific primary-key conflict handling for canonical source promotion/selection/retry, proven by official PostgreSQL RED. Verify SQLite/PostgreSQL insert, duplicate first-source retention, single/batch selection, optimistic versions and foreign ownership. Preserve foreign-key/deletion semantics; normalize backend failures in existing partial-save handling where needed. No schema change or new abstraction.
 
 **Interfaces:**
 - Existing WebClipper request shape unchanged. Reserved descriptor validation only when `capture_metadata.web_capture_v1` present; `mode`, bounded public URL, UTC timestamp, lowercase SHA256 and nullable UUID refresh parent only. Recompute hash from the exact trimmed `full_extract` used for promotion, reject disagreement before persistence.
@@ -94,17 +95,17 @@ assert preview["document_version_number"] == 1
 assert all(item["kind"] != "chunk" for item in preview["snippets"])
 ```
 
-- [ ] Read WebClipper promotion/receipts and existing exact version DB abstractions/callers; identify exact saved metadata path and version response shape.
-- [ ] Add and run RED tests for malformed/credential URLs, timestamp/hash/descriptor bounds, full text beyond Note budget, mismatch-before-save, exact retry without duplicates, refreshed identity preserving old sources, partial promotion, removed workspace and foreign owner.
-- [ ] Add and run RED preview tests for newer head with old pin, deleted/missing pin, suppression of latest chunks and unauthorized membership.
-- [ ] Implement reserved validation via existing Pydantic models/validators and service digest guard. Reuse Media DB version abstraction; preserve unpinned behavior and shared Workspace context projection compatibility.
-- [ ] Run owning suites GREEN; use official PostgreSQL fixture availability (never homemade DB setup); scoped lint/Bandit/hooks/self-review and commit. Report contracts and evidence for Task3.
+- [x] Read WebClipper promotion/receipts and existing exact version DB abstractions/callers; identify exact saved metadata path and version response shape.
+- [x] Add and run RED tests for malformed/credential URLs, timestamp/hash/descriptor bounds, full text beyond Note budget, mismatch-before-save, exact retry without duplicates, refreshed identity preserving old sources, partial promotion, removed workspace and foreign owner.
+- [x] Add and run RED preview tests for newer head with old pin, deleted/missing pin, suppression of latest chunks and unauthorized membership.
+- [x] Implement reserved validation via existing Pydantic models/validators and service digest guard. Reuse Media DB version abstraction; preserve unpinned behavior and shared Workspace context projection compatibility.
+- [x] Run owning suites GREEN; use official PostgreSQL fixture availability (never homemade DB setup); scoped lint/Bandit/hooks/self-review and commit. Report contracts and evidence for Task3.
 
 ## Stage 3: Shared scoped capture orchestration
 **Goal:** Small shared client and acceptance helpers retain immutable identity and resolve real version pins.
 **Success Criteria:** Same pending body retries; exact version/digest readback gates confirmation; requests stay owner-bound and abortable.
 **Tests:** Shared client and narrow capture helper tests.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 3: Scoped clients and capture acceptance helpers
 
