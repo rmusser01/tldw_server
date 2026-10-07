@@ -787,7 +787,7 @@ describe('MediaReviewPage active reading context', () => {
       id: 99, title: 'Example Domain', type: 'html'
     })
     act(() => result.current.state.setSelectedIds([99]))
-    await act(async () => { await result.current.actions.handleBatchExport('json') })
+    await act(async () => { await result.current.actions.handleBatchExport() })
     const blob = mocks.downloadBlob.mock.calls[0][0] as Blob
     const exported = JSON.parse(await new Promise<string>(resolve => {
       const reader = new FileReader()

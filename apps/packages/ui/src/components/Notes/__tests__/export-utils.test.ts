@@ -311,7 +311,7 @@ describe("notes export utils", () => {
 })
 
 it("exports canonical history after the editor strips its portable marker", () => {
-  const history = { origin: "knowledge_qa", question: "Original question" }
+  const history = { origin: "knowledge_qa" as const, question: "Original question" }
   const note = { id: "n", title: "T", content: "Edited answer", keywords: [],
     knowledge_provenance_state: "active" as const, knowledge_provenance: history,
     knowledge_provenance_version: 2, knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,

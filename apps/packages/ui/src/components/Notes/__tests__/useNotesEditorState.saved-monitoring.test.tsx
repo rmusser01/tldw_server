@@ -1,4 +1,5 @@
 import type { BgRequestInit } from "@/services/background-proxy"
+import type { KnowledgeNoteHead } from "@/utils/knowledge-note-provenance"
 import React from 'react'
 import { Modal } from 'antd'
 import type { TldwConfig } from '@/services/tldw/TldwApiClient'
@@ -69,7 +70,13 @@ import {
 import { createNotesGraphAuthorityScope } from '../hooks/useNotesGraphAuthorityScope'
 import { useConnectionStore } from '@/store/connection'
 
-const note = (id = 'one', overrides = {}) => ({
+const note = (id = 'one', overrides = {}): KnowledgeNoteHead & {
+  id: string
+  title: string
+  content: string
+  version: number
+  last_modified: string
+} => ({
   id,
   title: `Note ${id}`,
   content: `Body ${id}`,
@@ -988,7 +995,7 @@ describe('Notes saved-state hydration and optional monitoring', () => {
   })
   it('restores retained history explicitly while preserving edits and advancing both heads', async () => {
     const gate = deferred<ReturnType<typeof note>>()
-    const history = { origin: 'knowledge_qa', question: 'Original question' }
+    const history = { origin: 'knowledge_qa' as const, question: 'Original question' }
     const removed = note('one', { knowledge_provenance_state: 'deleted', knowledge_provenance_version: 4, knowledge_provenance_hash: `sha256:${'a'.repeat(64)}`, knowledge_provenance: null })
     mocks.request.mockImplementation(request => request.path.endsWith('/provenance/restore') ? gate.promise : Promise.resolve(removed))
     const view = renderEditor()
@@ -1279,7 +1286,7 @@ describe('Notes saved-state hydration and optional monitoring', () => {
   })
 
   it('refreshes the exact owned history head after enrollment conflict and deliberately retries the preserved draft', async () => {
-    const history = { origin: 'knowledge_qa', question: 'Q' }
+    const history = { origin: 'knowledge_qa' as const, question: 'Q' }
     let current = note('one', { content: `Body\n\n<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`, knowledge_provenance_state: 'absent', knowledge_provenance_version: 0 })
     const writes: BgRequestInit[] = []
     mocks.request.mockImplementation(async request => {

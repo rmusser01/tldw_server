@@ -1443,7 +1443,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.useActualReviewStep = true
     const file = new NodeFile(["text"], "broken.pdf", { type: "application/pdf" }) as unknown as File
     useQuickIngestSessionStore.getState().createDraftSession({
-      ...createEmptyQuickIngestSession(), currentStep: 5, highestStep: 5, lifecycle: "partial_failure",
+      ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "partial_failure",
       queueItems: [
         { id: "saved-url", kind: "url", url: "https://example.com/", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } },
         { id: "duplicate-url", kind: "url", url: "https://example.com/", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } },

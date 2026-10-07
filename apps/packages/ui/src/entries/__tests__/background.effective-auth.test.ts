@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+const runtimeSendMessage = vi.hoisted(() => vi.fn(async () => ({ handled: true })))
+
 const connectListeners = new Set<(port: any) => void>()
 const runtimeMessageListeners = new Set<(
   message: unknown,
@@ -64,7 +66,7 @@ vi.mock("wxt/browser", () => ({
     runtime: {
       id: "extension-id",
       getURL: (path: string) => `chrome-extension://extension-id${path}`,
-      sendMessage: vi.fn(async () => ({ handled: true })),
+      sendMessage: runtimeSendMessage,
       onConnect: {
         addListener: (listener: (port: any) => void) => connectListeners.add(listener)
       },
@@ -162,7 +164,22 @@ import background from "@/entries/background"
 import { deriveConnectionAuthorityId, deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
-import { browser } from "wxt/browser"
+import { browser, type Browser } from "wxt/browser"
+
+const contextMenuTab: Browser.tabs.Tab = {
+  id: 8,
+  index: 0,
+  pinned: false,
+  highlighted: true,
+  windowId: 1,
+  active: true,
+  frozen: false,
+  incognito: false,
+  selected: true,
+  discarded: false,
+  autoDiscardable: true,
+  groupId: -1
+}
 
 const WORKER_API_KEY_SCOPE = deriveSingleUserApiKeyCredentialScope(
   "single-user",
@@ -230,7 +247,7 @@ describe("background effective extension auth", () => {
         sidePanel: { setOptions: vi.fn().mockResolvedValue(undefined), open },
         notifications: { create: vi.fn() },
       })
-      vi.mocked(browser.runtime.sendMessage)
+      runtimeSendMessage
         .mockClear()
         .mockResolvedValue({ handled: true })
       const calls = vi.mocked(browser.contextMenus.onClicked.addListener).mock
@@ -240,10 +257,11 @@ describe("background effective extension auth", () => {
       await onClick(
         {
           menuItemId,
+          editable: false,
           selectionText: "Selected source",
           pageUrl: "https://example.com/story",
         },
-        { id: 8, title: "Story" },
+        { ...contextMenuTab, title: "Story" },
       )
 
       expect(open).toHaveBeenCalledWith({ tabId: 8 })
@@ -268,8 +286,8 @@ describe("background effective extension auth", () => {
       .calls
 
     await calls[calls.length - 1][0](
-      { menuItemId: "save-to-notes-pa", selectionText: "Selected source" },
-      { id: 8 },
+      { menuItemId: "save-to-notes-pa", editable: false, selectionText: "Selected source" },
+      contextMenuTab,
     )
 
     expect(open).toHaveBeenCalledTimes(1)
