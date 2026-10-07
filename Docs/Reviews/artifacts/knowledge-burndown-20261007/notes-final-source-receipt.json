@@ -1,0 +1,79 @@
+[
+  {
+    "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage14.sorting-pagination.test.tsx",
+    "sha256": "05753ed4e8d9e755cb9bd22f21fc578667da2d30850e083a9d38791176aa2704",
+    "baselineWarnings": 0,
+    "currentWarnings": 0,
+    "currentErrors": 0
+  },
+  {
+    "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage17.scalability-hint.test.tsx",
+    "sha256": "34a2d8549c66eb33f3edd229f14e31437abe7264e9903b035f90bcbde9e2a8fb",
+    "baselineWarnings": 0,
+    "currentWarnings": 0,
+    "currentErrors": 0
+  },
+  {
+    "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage19.accessibility-skip-links.test.tsx",
+    "sha256": "63299414722c4a295b177f45696ca0e158855790eb0f4a22467147595e215839",
+    "baselineWarnings": 0,
+    "currentWarnings": 0,
+    "currentErrors": 0
+  },
+  {
+    "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage20.accessibility-shortcuts.test.tsx",
+    "sha256": "8e77953dda22e6061a3799cb5b085922f26dcc1a2b46aff727c6cc544d9dfbf4",
+    "baselineWarnings": 0,
+    "currentWarnings": 0,
+    "currentErrors": 0
+  },
+  {
+    "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage22.accessibility-regression.test.tsx",
+    "sha256": "4bb2fcf031deb93fd40e2b582d2a6220f3815cbec26370162ac6d5cf580d1027",
+    "baselineWarnings": 2,
+    "currentWarnings": 0,
+    "currentErrors": 0
+  },
+  {
+    "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx",
+    "sha256": "070521913da6de196b881d84a8e59de3dfa77f2368801959c07b1727b7a23733",
+    "baselineWarnings": 0,
+    "currentWarnings": 0,
+    "currentErrors": 0
+  },
+  {
+    "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage33.link-aware-delete-warning.test.tsx",
+    "sha256": "6a60dcddd142ab2c0b043080c3010766798adcae644cfcee5d50cca92b52d3bb",
+    "baselineWarnings": 2,
+    "currentWarnings": 0,
+    "currentErrors": 0
+  },
+  {
+    "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage45.notes-studio-export.test.tsx",
+    "sha256": "2970aa9046cdc799d306a2ebb75fa224990f33cbe578db5e60a9ca2429a11e5c",
+    "baselineWarnings": 7,
+    "currentWarnings": 0,
+    "currentErrors": 0
+  },
+  {
+    "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage5.graph-panels.test.tsx",
+    "sha256": "90522155a07e1e1981438f22f774af636350135a32d7e741433756a876bb93c3",
+    "baselineWarnings": 1,
+    "currentWarnings": 0,
+    "currentErrors": 0
+  },
+  {
+    "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.task-backed-todos.test.tsx",
+    "sha256": "ce772533f0d9fd3bfffa239e11674ec3efe2e630aec2a4295e367305c6894eb5",
+    "baselineWarnings": 1,
+    "currentWarnings": 0,
+    "currentErrors": 0
+  },
+  {
+    "path": "apps/packages/ui/src/components/Notes/__tests__/notes-tags-terminology.locale-contract.test.ts",
+    "sha256": "263fad97ef61cee441243aac08535d62e5daa3454e95c23ee78207cbe1441caa",
+    "baselineWarnings": 0,
+    "currentWarnings": 0,
+    "currentErrors": 0
+  }
+]

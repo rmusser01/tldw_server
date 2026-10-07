@@ -94,5 +94,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-063](063-in-repo-merge-queue.md) | Proposed | PRs merge into dev one at a time through an in-repo queue: only the armed PR at the front is rebased and re-tested; switched by the MERGE_QUEUE variable and shipped off. |
 | [ADR-064](064-usage-quotas-per-user-limits.md) | Accepted | Usage quotas are per-user UserProfiles `limits.*` values, off by default (`USAGE_QUOTAS_ENABLED`), resolved from the user's own value, then the most generous team value, then the most generous org value; none is set by default. |
 | [ADR-065](065-independent-notes-knowledge-provenance.md) | Accepted | Preserve Knowledge provenance as an owner-scoped independent Notes/Sync capability, separate from editable Markdown. |
+| [ADR-066](066-explicit-web-capture-and-refresh-snapshots.md) | Proposed | Require explicit accepted public-web capture and fresh refresh snapshots through existing WebClipper and canonical Media versions, retaining prior evidence. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

@@ -1,0 +1,36 @@
+{
+  "body": "Skip to main content\ntldw Assistant\nSearch\n⌘K\n?\nSkip to search\nSources: Notes\n• Specific: 1 note\nCustom\nWeb\nAI: gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\nAvailable services: 8 of 8 · Stored personal items: 1 · Searchable personal items: unknown\n\nAsk questions about your documents and get AI-powered answers with citations from your knowledge base.\n\nAsk\nPress / to focus, Cmd/Ctrl+K opens the command palette\nNew search\nExport\nSearch complete. 1 source found.\n\nConversation • 2 turns\n\nUsing context from turn 1.\n\nPrevious turn\n\nQ: When is the Vega native capture inspection scheduled?\n\nA: The research note says a short first-run wizard can reduce setup abandonment. Deterministic evidence makes onboarding regressions easier to...\n\nConversation Thread (1 prior turn)\nQuestion 1\nOct 7, 10:21 AM\n1 source\n\nWhen is the Vega native capture inspection scheduled?\n\nThe research note says a short first-run wizard can reduce setup abandonment. Deterministic evidence makes onboarding regressions easier to diagnose.\n\nReuse Question\nAsk a different follow-up\nCompare to current answer\nCompare answers\nCompare to current answer\nCompare turns\nAI Answer\nAnswer status: Cited answer\n1 citation\nSummarize\nShow more\nCopy answer\nContinue in Research Workspace\nSearched Notes. 1 source returned, 1 cited.\nWeb fallback disabled.\nAI model: custom_openai_api / gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf.\nSelected sources look ready.\nTrust: Cited answer.\n\nThis answer includes inline citation buttons. Press Tab to move between citation controls and source links.\n\nThe Vega native capture inspection is scheduled for 24 November 2026 [1].\n\nSources:\n[1]\nWas this answer helpful?\nHelpful\nNeeds work\nNew Topic\n\nFollow-up questions maintain context. Click \"New Topic\" to start fresh.\n\nEvidence\nHelp & Documentation\nEvidence\n1 sources • 1 citations\nEvidence updated. 1 source and 1 citation.\nSources\nDetails\n\nUse each source card to inspect excerpts, unavailable reasons, citations, and supported source links.\n\nSources (1)\nShow filters\nShowing 1 of 1 sources\nJump: 1-9 • Tab cycles\n?\n1\nVega native capture fixture\nRelevance not measured\nNote\nCited\nUsed in answer:\nS1\n\n# Vega native capture fixture\n\nSource:\nTitle: Vega native capture fixture\nURL: http://127.0.0.1:19135/article\nCapture date: 2026-10-07T16:11:03.618Z\nClip type: article\n\n# Vega gree...\n\nShow more\nView\nCopy citation\nYes\nNo",
+  "requests": [
+    {
+      "path": "/api/v1/rag/search/stream",
+      "query": "When is the Vega native capture inspection scheduled?",
+      "sources": [
+        "notes"
+      ],
+      "includeNoteIds": [
+        "5d0d9205-008f-4307-8775-f0362d82c2a7"
+      ],
+      "webFallback": false
+    }
+  ],
+  "responses": [
+    {
+      "path": "/api/v1/rag/search/stream",
+      "status": 200
+    }
+  ],
+  "generation": [
+    {
+      "provider": "custom_openai_api",
+      "model": "gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+      "sources": [
+        "notes"
+      ],
+      "includeNoteIds": [
+        "5d0d9205-008f-4307-8775-f0362d82c2a7"
+      ]
+    }
+  ],
+  "errors": [],
+  "qualification": "Controlled embedding fixture with real local answer generation; not a general retrieval-quality benchmark"
+}

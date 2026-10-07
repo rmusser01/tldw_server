@@ -8,6 +8,7 @@ import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { Playground } from "@/components/Option/Playground/Playground"
 import { selectedAssistantStorage } from "@/utils/selected-assistant-storage"
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 
 const {
   mockBgRequest,
@@ -144,11 +145,22 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 
-vi.mock("@/hooks/useMessageOption", () => ({ useMessageOption: () => ({
-  ...useStoreMessageOption(), selectedAssistant: chatAuthority.selection,
-  selectedCharacter: chatAuthority.selection?.kind === "character" ? { id: chatAuthority.selection.id, name: chatAuthority.selection.name } : null,
-  setSelectedAssistant: chatAuthority.setSelection, setSelectedCharacter: vi.fn(), onSubmit: vi.fn(), regenerateLastMessage: vi.fn()
-}) }))
+vi.mock("@/hooks/useMessageOption", () => ({ useMessageOption: () => {
+  const state = useStoreMessageOption()
+  return {
+    ...state, selectedAssistant: chatAuthority.selection,
+    effectiveAssistantState: resolveEffectiveAssistantState({
+      tracked: {
+        assistantKind: state.serverChatAssistantKind,
+        assistantId: state.serverChatAssistantId,
+        characterId: state.serverChatCharacterId
+      },
+      draftSelection: chatAuthority.selection
+    }),
+    selectedCharacter: chatAuthority.selection?.kind === "character" ? { id: chatAuthority.selection.id, name: chatAuthority.selection.name } : null,
+    setSelectedAssistant: chatAuthority.setSelection, setSelectedCharacter: vi.fn(), onSubmit: vi.fn(), regenerateLastMessage: vi.fn()
+  }
+} }))
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({ PlaygroundForm: ({ characterWorkflowActive, characterChatSendBlocker }: { characterWorkflowActive?: boolean; characterChatSendBlocker?: unknown }) => <div data-testid="loaded-chat-composer" data-character-workflow={String(characterWorkflowActive)} data-character-blocked={String(Boolean(characterChatSendBlocker))} /> }))
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({ PlaygroundChat: () => <div data-testid="loaded-chat-body">{useStoreMessageOption(state => state.messages).map(row => <p key={row.id}>{row.message}</p>)}</div> }))
 vi.mock("@/components/Option/Playground/CharacterChatSessionsPanel", () => ({ CharacterChatSessionsPanel: () => null }))

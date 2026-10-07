@@ -52,8 +52,12 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 let qa: ReturnType<typeof useKnowledgeQA>
 let navigate: ReturnType<typeof useNavigate>
 function Probe() {
-  qa = useKnowledgeQA()
-  navigate = useNavigate()
+  const context = useKnowledgeQA()
+  const routeNavigate = useNavigate()
+  React.useEffect(() => {
+    qa = context
+    navigate = routeNavigate
+  }, [context, routeNavigate])
   return null
 }
 function mount(path = "/knowledge") {
@@ -76,6 +80,54 @@ beforeEach(() => {
   search.run.mockResolvedValue({ results: [], answer: "Old answer" })
 })
 describe("Knowledge QA source intent", () => {
+  it.each([
+    { setting: "sources", value: ["notes"], select: () => qa.updateSetting("sources", ["notes"]) },
+    { setting: "include_media_ids", value: [7], select: () => qa.updateSetting("include_media_ids", [7]) },
+    { setting: "include_note_ids", value: ["note-7"], select: () => qa.updateSetting("include_note_ids", ["note-7"]) },
+  ])("keeps the initial state when selecting $setting before asking", async ({ setting, value, select }) => {
+    mount()
+    await waitFor(() => expect(qa.settings.enable_web_fallback).toBe(false))
+
+    act(select)
+
+    expect(qa.settings).toMatchObject({ [setting]: value })
+    expect(qa).toMatchObject({
+      query: "",
+      resultQuery: null,
+      hasSearched: false,
+      isSearching: false,
+      error: null,
+      queryStage: "idle",
+      currentThreadId: null,
+      messages: [],
+    })
+    expect(search.run).not.toHaveBeenCalled()
+  })
+
+  it("retains completed zero-results after changing sources and clearing the question", async () => {
+    search.run.mockResolvedValueOnce({ results: [], answer: null })
+    mount()
+    await waitFor(() => expect(qa.settings.enable_web_fallback).toBe(false))
+    act(() => qa.setQuery("A question with no matching sources"))
+    await act(async () => qa.search())
+    expect(qa.queryStage).toBe("complete")
+
+    act(() => {
+      qa.setQuery("")
+      qa.updateSetting("include_note_ids", ["note-7"])
+    })
+
+    expect(qa).toMatchObject({
+      query: "",
+      resultQuery: "A question with no matching sources",
+      hasSearched: true,
+      results: [],
+      answer: null,
+      error: null,
+    })
+    expect(search.run).toHaveBeenCalledTimes(1)
+  })
+
   it.each(["fast", "balanced", "thorough", "custom"] as const)(
     "retains exact sources and the answer model when choosing %s",
     async (preset) => {
