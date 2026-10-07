@@ -68,3 +68,15 @@ Protected publication must use the full old remote head as the expected lease.
 Changed-head independent and CodeRabbit reviews, live required CI and a
 verified normal merge remain pending. Qodo is set aside as explicitly
 authorized. Stage 3 stays In Progress; no runtime or fresh Bandit claim is made.
+
+## Current Association Clarification (2026-10-06)
+
+The protected rebase was published as bec37dee6cb8dbcc7ede7d5c4f3776f2df8357cc.
+Independent reviewer Russell found no actionable findings in the entire
+latest-dev..published-head diff. CodeRabbit's completed exact-head full review
+identified one minor current-association ambiguity (4202679948) in the PR3016
+plan's Current State. Add TASK-13518 as current tracking while keeping the
+original TASK-13369 approval attribution and every other historical line.
+This is a documentation clarification, not a runtime bug or new product-test
+result. Applicable documentation checks and changed-head reviews/CI must
+qualify this correction before normal merge; Stage 3 remains In Progress.
