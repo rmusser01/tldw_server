@@ -1,4 +1,6 @@
 import { knowledgeNoteWriteFields, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { captureNotesLanguageRequestScope, type NotesLanguageCapability } from "@/services/note-language-capability"
 import { requestScopeFields } from "./service-prompts"
 import type { ScopedRequestOptions } from "../TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
@@ -40,6 +42,8 @@ import {
 } from "../collections-normalizers"
 
 export interface TldwApiClientCore {
+  getConfig(): Promise<import("../TldwApiClient").TldwConfig | null>
+  getNotesLanguageCapability(options?: ScopedRequestOptions): Promise<NotesLanguageCapability>
   resolveApiPath(key: string, candidates: string[]): Promise<string>
   fillPathParams(template: string, values: string | string[]): string
   ensureConfigForRequest(requireAuth: boolean): Promise<any>
@@ -72,9 +76,20 @@ export type PromptPayload = {
 export const collectionsMethods = {
   // ── Notes ──
 
-  async createNote(content: string, metadata?: any, options?: ScopedRequestOptions): Promise<any> {
+  async createNote(this: TldwApiClientCore, content: string, metadata?: any, options?: ScopedRequestOptions): Promise<any> {
+    let changed = false
+    const unwatch = watchChatAccountChanges(invalidated => { changed ||= invalidated })
+    try {
+    if (metadata && Object.prototype.hasOwnProperty.call(metadata, "content_language")) {
+      const requestScope = options?.requestScope ?? captureNotesLanguageRequestScope(await this.getConfig())
+      options = { ...options, requestScope }
+      if (changed) throw Object.assign(new Error("Note account changed."), { code: "scope_changed" })
+      const capability = await this.getNotesLanguageCapability(options)
+      if (!capability.available) throw Object.assign(new Error("Note language remains pending until this server supports it."), { code: capability.reason })
+    }
+    if (changed) throw Object.assign(new Error("Note account changed."), { code: "scope_changed" })
     const scopeFields = requestScopeFields(options?.requestScope)
-    return await bgRequest<any>({
+    const response = await bgRequest<any>({
       ...scopeFields,
       ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: "/api/v1/notes/",
@@ -82,6 +97,11 @@ export const collectionsMethods = {
       headers: { "Content-Type": "application/json", ...scopeFields.headers, ...(options?.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}) },
       body: { ...metadata, content: retainKnowledgeNoteProvenance(content, metadata), ...knowledgeNoteWriteFields(content, metadata, { create: true }) }
     })
+    if (changed) throw Object.assign(new Error("Note account changed."), { code: "scope_changed" })
+    return response
+    } finally {
+      unwatch()
+    }
   },
 
   async listNotes(

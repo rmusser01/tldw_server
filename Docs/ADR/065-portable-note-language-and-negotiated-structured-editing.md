@@ -137,3 +137,7 @@ filters that history as successful delivery. Preserved language in shared
 capture is conditioned on the version of the canonical row actually read even
 when the caller omitted its optimistic version. This remains a process-local
 admission condition; absent-row creation and wire/hash shapes are unchanged.
+
+### Immutable publication origin scope (F4)
+
+Existing local publication-intent payloads carry the exact originating principal and workspace, including explicit null. Drain compares both before copying source into a scoped outbox. Missing historical proof remains pending; an active profile cannot supply historical authority. This local metadata never enters wire payloads and adds no schema or transport.

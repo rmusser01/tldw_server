@@ -1,5 +1,6 @@
 import { knowledgeNoteWriteFields, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { BoundedTtlCache } from "./bounded-ttl-cache"
+import { captureNotesLanguageRequestScope, decodeNotesLanguageCapability, type NotesLanguageCapability } from "@/services/note-language-capability"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import type { ChatScope } from "@/types/chat-scope"
 import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
@@ -4560,9 +4561,40 @@ export class TldwApiClientBase {
   }
 
   // Notes Methods
+  async getNotesLanguageCapability(options?: ScopedRequestOptions): Promise<NotesLanguageCapability> {
+    // Probe every time: no stale capability survives reconnect/version/account changes.
+    let changed = false
+    const unwatch = watchChatAccountChanges(invalidated => { changed ||= invalidated })
+    try {
+      const response = await bgRequest<unknown>({
+        ...requestScopeFields(options?.requestScope),
+        ...(options?.signal ? { abortSignal: options.signal } : {}),
+        path: "/api/v1/notes/capabilities",
+        method: "GET"
+      })
+      return changed ? { available: false, reason: "scope_changed" } : decodeNotesLanguageCapability(response)
+    } catch (error) {
+      const status = (error as { status?: number } | null)?.status
+      return { available: false, reason: changed ? "scope_changed" : status === 404 ? "unsupported_server" : status === 401 || status === 403 ? "authentication_required" : "transport_unavailable" }
+    } finally {
+      unwatch()
+    }
+  }
+
   async createNote(content: string, metadata?: any, options?: ScopedRequestOptions): Promise<any> {
+    let changed = false
+    const unwatch = watchChatAccountChanges(invalidated => { changed ||= invalidated })
+    try {
+    if (metadata && Object.prototype.hasOwnProperty.call(metadata, "content_language")) {
+      const requestScope = options?.requestScope ?? captureNotesLanguageRequestScope(await this.getConfig())
+      options = { ...options, requestScope }
+      if (changed) throw Object.assign(new Error("Note account changed."), { code: "scope_changed" })
+      const capability = await this.getNotesLanguageCapability(options)
+      if (!capability.available) throw Object.assign(new Error("Note language remains pending until this server supports it."), { code: capability.reason })
+    }
+    if (changed) throw Object.assign(new Error("Note account changed."), { code: "scope_changed" })
     const scopeFields = requestScopeFields(options?.requestScope)
-    return await bgRequest<any>({
+    const response = await bgRequest<any>({
       ...scopeFields,
       ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: '/api/v1/notes/',
@@ -4570,6 +4602,11 @@ export class TldwApiClientBase {
       headers: { 'Content-Type': 'application/json', ...scopeFields.headers, ...(options?.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}) },
       body: { ...metadata, content: retainKnowledgeNoteProvenance(content, metadata), ...knowledgeNoteWriteFields(content, metadata, { create: true }) }
     })
+    if (changed) throw Object.assign(new Error("Note account changed."), { code: "scope_changed" })
+    return response
+    } finally {
+      unwatch()
+    }
   }
 
   async listNoteFolders(): Promise<{

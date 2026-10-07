@@ -114,3 +114,74 @@ describe("TldwApiClient notes methods", () => {
     )
   })
 })
+
+describe("Notes language negotiation", () => {
+  beforeEach(() => vi.resetAllMocks())
+  it("requires an explicit advertised language capability", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({})
+    const client = new TldwApiClient()
+    expect(await client.getNotesLanguageCapability()).toEqual({ available: false, reason: "unsupported_server" })
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/notes/capabilities", method: "GET" }))
+    mocks.bgRequest.mockResolvedValueOnce({ id: "n1", content: "{}" })
+    await client.createNote("{}", { title: "Config" })
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith(expect.objectContaining({ body: { content: "{}", title: "Config" } }))
+  })
+  it("accepts explicit support and rechecks after reconnect", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({ content_language: true }).mockResolvedValueOnce({ content_language: false })
+    const client = new TldwApiClient()
+    expect(await client.getNotesLanguageCapability()).toEqual({ available: true, reason: null })
+    expect(await client.getNotesLanguageCapability()).toEqual({ available: false, reason: "unsupported_server" })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+  })
+  it.each([[404, "unsupported_server"], [401, "authentication_required"], [503, "transport_unavailable"]])("bounds HTTP %s failures", async (status, reason) => {
+    mocks.bgRequest.mockRejectedValueOnce({ status })
+    expect(await new TldwApiClient().getNotesLanguageCapability()).toEqual({ available: false, reason })
+  })
+  it("keeps transport failures unavailable", async () => {
+    mocks.bgRequest.mockRejectedValueOnce(new Error("private error"))
+    expect(await new TldwApiClient().getNotesLanguageCapability()).toEqual({ available: false, reason: "transport_unavailable" })
+  })
+  it("pins capability and publication to the supplied profile", async () => {
+    const requestScope = { config: { serverUrl: "https://a.example", authMode: "multi-user" as const, accessToken: "token-a" }, userId: "user-a" }
+    mocks.bgRequest.mockResolvedValueOnce({ content_language: true }).mockResolvedValueOnce({ id: "n1", content_language: "Future/Mode" })
+    await new TldwApiClient().createNote("{}", { title: "Config", content_language: "Future/Mode" }, { requestScope })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+    expect(mocks.bgRequest.mock.calls[0][0].servicePromptConfig).toEqual({ ...requestScope.config, expectedUserId: "user-a" })
+    expect(mocks.bgRequest.mock.calls[1][0].servicePromptConfig).toEqual({ ...requestScope.config, expectedUserId: "user-a" })
+    expect(mocks.bgRequest.mock.calls[1][0].body.content_language).toBe("Future/Mode")
+  })
+  it("does not publish language when the capability disappears", async () => {
+    mocks.bgRequest.mockResolvedValue({})
+    await expect(new TldwApiClient().createNote("{}", { title: "Config", content_language: null })).rejects.toMatchObject({ code: "unsupported_server" })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+})
+
+it("rejects an in-flight profile switch before publishing metadata", async () => {
+  vi.resetAllMocks()
+  mocks.bgRequest.mockImplementationOnce(async () => {
+    window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+    return { content_language: true }
+  })
+  await expect(new TldwApiClient().createNote("{}", { title: "Config", content_language: "json" })).rejects.toMatchObject({ code: "scope_changed" })
+  expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+})
+
+it("does not acknowledge a save after its account changes", async () => {
+  vi.resetAllMocks()
+  mocks.bgRequest.mockResolvedValueOnce({ content_language: true }).mockImplementationOnce(async () => {
+    window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+    return { id: "n1", content_language: "json" }
+  })
+  await expect(new TldwApiClient().createNote("{}", { title: "Config", content_language: "json" })).rejects.toMatchObject({ code: "scope_changed" })
+})
+
+it("captures the ambient profile once for probe and publication", async () => {
+  vi.resetAllMocks()
+  const client = new TldwApiClient()
+  vi.spyOn(client, "getConfig").mockResolvedValue({ serverUrl: "https://a.example", authMode: "multi-user", refreshToken: "refresh-a" })
+  mocks.bgRequest.mockResolvedValueOnce({ content_language: true }).mockResolvedValueOnce({ id: "n1", content_language: "json" })
+  await client.createNote("{}", { title: "Config", content_language: "json" })
+  expect(mocks.bgRequest.mock.calls[0][0].servicePromptConfig).toMatchObject({ serverUrl: "https://a.example", expectedRefreshToken: "refresh-a" })
+  expect(mocks.bgRequest.mock.calls[1][0].servicePromptConfig).toEqual(mocks.bgRequest.mock.calls[0][0].servicePromptConfig)
+})
