@@ -1,4 +1,5 @@
 import React from 'react'
+import type { BgRequestInit } from '@/services/background-proxy'
 import { act, cleanup, fireEvent, renderHook, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -7,6 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // NS-05, NS-02, NS-06). These tests run it against a small versioned server.
 
 const mocks = vi.hoisted(() => ({
+  userId: 7,
+  serverUrl: 'https://notes.test',
+  currentUser: vi.fn(),
   request: vi.fn(),
   refetch: vi.fn(),
   confirmDanger: vi.fn(),
@@ -20,10 +24,10 @@ vi.mock('@/services/notes-tasks', () => ({
   setNoteTaskStatus: vi.fn()
 }))
 vi.mock('@/services/tldw/TldwAuth', () => ({
-  tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 7, is_active: true })) }
+  tldwAuth: { getCurrentUser: mocks.currentUser }
 }))
 vi.mock('@/hooks/useCallerCapabilities', () => {
-  const capabilities = { monitoringAlerts: 'denied', userId: 7, refreshAfterForbidden: vi.fn(async () => undefined) }
+  const capabilities = { monitoringAlerts: 'denied', get userId() { return mocks.userId }, refreshAfterForbidden: vi.fn(async () => undefined) }
   return { useCallerCapabilities: () => capabilities }
 })
 vi.mock('@/services/settings/registry', async (importOriginal) => ({
@@ -45,7 +49,7 @@ type StoredNote = {
   last_modified: string
   metadata: Record<string, unknown>
 }
-type RequestInit = {
+type RequestInit = Pick<BgRequestInit, 'servicePromptConfig' | 'abortSignal'> & {
   path: string
   method?: string
   headers?: Record<string, string>
@@ -158,7 +162,15 @@ const renderEditor = ({ unstableT = false }: { unstableT?: boolean } = {}) => {
       const [keywords, setKeywords] = React.useState<string[]>([])
       // Some page suites mock `t` as a new function on every render.
       const t: UseNotesEditorStateDeps['t'] = unstableT ? (key, options) => translate(key, options) : deps.t
-      return useNotesEditorState({ ...deps, t, editorKeywords: keywords, setEditorKeywords: setKeywords })
+      return useNotesEditorState({
+        ...deps, t, editorKeywords: keywords, setEditorKeywords: setKeywords,
+        authorityScope: createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId),
+        connectionConfig: {
+          ...deps.connectionConfig,
+          serverUrl: mocks.serverUrl,
+          accessToken: `test.${btoa(JSON.stringify({ sub: String(mocks.userId) }))}.signature`
+        } as UseNotesEditorStateDeps['connectionConfig']
+      })
     },
     { wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider> }
   )
@@ -187,6 +199,9 @@ const readQueue = () => JSON.parse(localStorage.getItem(QUEUE_KEY) || '{}') as R
 describe('Notes editor save state machine', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.userId = 7
+    mocks.serverUrl = SERVER_URL
+    mocks.currentUser.mockImplementation(async () => ({ id: mocks.userId, is_active: true }))
     localStorage.clear()
     server.notes.clear()
     server.failures = []
@@ -584,4 +599,311 @@ describe('Notes editor save state machine', () => {
 
     expect(readQueue()['note:one']).toMatchObject({ content: 'Unsaved when the page unmounted', syncState: 'queued' })
   })
+
+  describe('Notes conflict choice ownership', () => {
+    function deferred() {
+      let resolve!: () => void
+      const promise = new Promise<void>((done) => { resolve = done })
+      return { promise, resolve }
+    }
+    const changes = [
+      'selection', 'selection-return', 'account', 'account-return',
+      'server', 'server-return', 'edit', 'unmount'
+    ] as const
+    const state = (view: EditorView) => ({
+      selectedId: view.result.current.selectedId,
+      title: view.result.current.title,
+      content: view.result.current.content,
+      selectedVersion: view.result.current.selectedVersion,
+      originalMetadata: view.result.current.originalMetadata,
+      isDirty: view.result.current.isDirty,
+      saveIndicator: view.result.current.saveIndicator
+    })
+    const prepareConflict = async () => {
+      server.notes.set('two', {
+        id: 'two', title: 'Other note', content: 'Other body', version: 3,
+        last_modified: '2026-10-03T11:00:00Z', metadata: { keywords: [] }
+      })
+      const view = renderEditor()
+      await openNote(view)
+      edit(view, 'My conflict draft')
+      editElsewhere('one', 'Their concurrent body')
+      await act(async () => { await view.result.current.saveNote({ showSuccessMessage: false }) })
+      expect(view.result.current.saveIndicator).toBe('conflict')
+      mocks.refetch.mockClear()
+      for (const message of Object.values(mocks.messages)) message.mockClear()
+      return view
+    }
+    const changeContext = async (view: EditorView, change: typeof changes[number]) => {
+      if (change.startsWith('selection')) {
+        await openNote(view, 'two')
+        if (change === 'selection-return') await openNote(view)
+        edit(view, 'Replacement selected draft')
+      } else if (change.startsWith('account') || change.startsWith('server')) {
+        const changeOwner = (away: boolean) => {
+          act(() => {
+            if (change.startsWith('account')) mocks.userId = away ? 8 : 7
+            else mocks.serverUrl = away ? 'https://other-notes.test' : SERVER_URL
+            view.rerender()
+            window.dispatchEvent(change.startsWith('account')
+              ? new Event('tldw:auth-principal-changed')
+              : new CustomEvent('tldw:config-updated', { detail: { authorityChanged: true } }))
+          })
+        }
+        changeOwner(true)
+        if (change.endsWith('-return')) changeOwner(false)
+        await openNote(view)
+        edit(view, 'Replacement owner draft')
+      } else if (change === 'edit') edit(view, 'Newer human edit')
+      else view.unmount()
+      await act(async () => {})
+    }
+    const gateDetail = (fail = false) => {
+      const gate = deferred()
+      const reads: RequestInit[] = []
+      const remote = { ...server.notes.get('one')! }
+      mocks.request.mockImplementation(async (request: RequestInit) => {
+        if (String(request.method || 'GET').toUpperCase() === 'GET' && request.path === '/api/v1/notes/one' && reads.length === 0) {
+          reads.push(request)
+          await gate.promise
+          if (fail) throw new Error('Original detail read failed')
+          return remote
+        }
+        return respond(request)
+      })
+      return { gate, reads }
+    }
+    const finish = async (gate: ReturnType<typeof deferred>, pending: Promise<boolean>) => {
+      let result!: boolean
+      await act(async () => { gate.resolve(); result = await pending })
+      return result
+    }
+    const expectOwned = (request: RequestInit) => {
+      expect(request).toMatchObject({
+        servicePromptConfig: { serverUrl: SERVER_URL, expectedUserId: 7 },
+        headers: { 'X-TLDW-Expected-User-ID': '7' },
+        abortSignal: expect.any(AbortSignal)
+      })
+    }
+
+    it.each(changes)('cancels Keep mine after %s during its fresh-version read', async (change) => {
+      const view = await prepareConflict()
+      const read = gateDetail()
+      let pending!: Promise<boolean>
+      act(() => { pending = view.result.current.keepMyVersion() })
+      await waitFor(() => expect(read.reads).toHaveLength(1))
+      await changeContext(view, change)
+      const replacement = state(view)
+      const putsBefore = writes('PUT').length
+      const succeeded = await finish(read.gate, pending)
+      expect(succeeded).toBe(false)
+      expect(writes('PUT')).toHaveLength(putsBefore)
+      const current = state(view)
+      expect(current.selectedId).toBe(replacement.selectedId)
+      expect(current.title).toBe(replacement.title)
+      expect(current.content).toBe(replacement.content)
+      expect(current.selectedVersion).toBe(replacement.selectedVersion)
+      expect(current.originalMetadata).toEqual(replacement.originalMetadata)
+      expect(current.isDirty).toBe(replacement.isDirty)
+      if (change === 'edit') {
+        await waitFor(() => expect(view.result.current.remoteVersionInfo?.version).toBe(3))
+        expect(view.result.current.saveIndicator).toBe('conflict')
+        expect(view.result.current.saving).toBe(false)
+      } else expect(current.saveIndicator).toBe(replacement.saveIndicator)
+      expect(mocks.messages.success).not.toHaveBeenCalled()
+      expect(mocks.messages.error).not.toHaveBeenCalled()
+    })
+
+    it('uses the original scoped fresh version for a legitimate Keep mine overwrite', async () => {
+      const view = await prepareConflict()
+      editElsewhere('one', 'Their even newer body')
+      const read = gateDetail()
+      let pending!: Promise<boolean>
+      act(() => { pending = view.result.current.keepMyVersion() })
+      await waitFor(() => expect(read.reads).toHaveLength(1))
+      expect(await finish(read.gate, pending)).toBe(true)
+      expectOwned(read.reads[0])
+      expect(writes('PUT').at(-1)).toMatchObject({ path: '/api/v1/notes/one', headers: { 'expected-version': '4' } })
+      expectOwned(writes('PUT').at(-1)!)
+      expect(server.notes.get('one')).toMatchObject({ content: 'My conflict draft', version: 5 })
+      expect(view.result.current.saveIndicator).toBe('saved')
+      expect(view.result.current.isDirty).toBe(false)
+    })
+
+    it('keeps the local draft when clipboard copying fails and discard is declined', async () => {
+      const view = await prepareConflict()
+      const replacement = state(view)
+      const before = mocks.request.mock.calls.length
+      vi.mocked(navigator.clipboard.writeText).mockRejectedValue(new Error('Clipboard unavailable'))
+      mocks.confirmDanger.mockResolvedValue(false)
+      let result!: boolean
+      await act(async () => { result = await view.result.current.takeTheirVersion() })
+      expect(result).toBe(false)
+      expect(mocks.confirmDanger).toHaveBeenCalledTimes(1)
+      expect(mocks.request.mock.calls.slice(before)).toEqual([])
+      expect(state(view)).toEqual(replacement)
+      expect(mocks.refetch).not.toHaveBeenCalled()
+      expect(mocks.messages.info).not.toHaveBeenCalled()
+    })
+
+    it.each(['clipboard', 'dialog'].flatMap((boundary) => changes.map((change) => [boundary, change] as const)))('cancels Use theirs after %s waits and %s replaces its owner/draft', async (boundary, change) => {
+      const view = await prepareConflict()
+      const gate = deferred()
+      if (boundary === 'clipboard') vi.mocked(navigator.clipboard.writeText).mockImplementation(async () => { await gate.promise })
+      else {
+        vi.mocked(navigator.clipboard.writeText).mockRejectedValue(new Error('Clipboard unavailable'))
+        mocks.confirmDanger.mockImplementation(async () => { await gate.promise; return true })
+      }
+      let pending!: Promise<boolean>
+      act(() => { pending = view.result.current.takeTheirVersion() })
+      await waitFor(() => expect(boundary === 'clipboard' ? navigator.clipboard.writeText : mocks.confirmDanger).toHaveBeenCalledTimes(1))
+      await changeContext(view, change)
+      const replacement = state(view)
+      const before = mocks.request.mock.calls.length
+      const succeeded = await finish(gate, pending)
+      expect(succeeded).toBe(false)
+      expect(mocks.request.mock.calls.slice(before).filter(([request]) => request.path === '/api/v1/notes/one')).toEqual([])
+      expect(state(view)).toEqual(replacement)
+      expect(mocks.refetch).not.toHaveBeenCalled()
+      expect(mocks.messages.info).not.toHaveBeenCalled()
+      expect(mocks.messages.error).not.toHaveBeenCalled()
+    })
+
+    it.each(['success', 'failure'].flatMap((outcome) => changes.map((change) => [outcome, change] as const)))('discards Use theirs detail %s after %s without a stale toast', async (outcome, change) => {
+      const view = await prepareConflict()
+      const read = gateDetail(outcome === 'failure')
+      let pending!: Promise<boolean>
+      act(() => { pending = view.result.current.takeTheirVersion() })
+      await waitFor(() => expect(read.reads).toHaveLength(1))
+      await changeContext(view, change)
+      const replacement = state(view)
+      const succeeded = await finish(read.gate, pending)
+      expect(succeeded).toBe(false)
+      expect(state(view)).toEqual(replacement)
+      expect(mocks.messages.error).not.toHaveBeenCalled()
+      expect(mocks.messages.info).not.toHaveBeenCalled()
+      expect(mocks.refetch).not.toHaveBeenCalled()
+    })
+
+    it('loads their complete scoped version and reports success after its own selection increment', async () => {
+      const view = await prepareConflict()
+      const read = gateDetail()
+      let pending!: Promise<boolean>
+      act(() => { pending = view.result.current.takeTheirVersion() })
+      await waitFor(() => expect(read.reads).toHaveLength(1))
+      expect(await finish(read.gate, pending)).toBe(true)
+      expectOwned(read.reads[0])
+      expect(state(view)).toMatchObject({ selectedId: 'one', content: 'Their concurrent body', selectedVersion: 3, isDirty: false, saveIndicator: 'saved' })
+      expect(mocks.refetch).toHaveBeenCalledTimes(1)
+      expect(mocks.messages.info).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('copied to the clipboard') }))
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('My conflict draft'))
+    })
+
+    describe('Notes conflict choice queue and receipt ownership', () => {
+      it.each(['clipboard', 'dialog'] as const)('preserves a confirmed newer offline draft while Use theirs waits for %s', async (boundary) => {
+        const view = await prepareConflict()
+        const gate = deferred()
+        if (boundary === 'clipboard') vi.mocked(navigator.clipboard.writeText).mockImplementation(async () => { await gate.promise })
+        else {
+          vi.mocked(navigator.clipboard.writeText).mockRejectedValue(new Error('Clipboard unavailable'))
+          mocks.confirmDanger.mockImplementation(async () => { await gate.promise; return true })
+        }
+        let pending!: Promise<boolean>
+        act(() => { pending = view.result.current.takeTheirVersion() })
+        await waitFor(() => expect(boundary === 'clipboard' ? navigator.clipboard.writeText : mocks.confirmDanger).toHaveBeenCalledTimes(1))
+        Object.defineProperty(navigator, 'onLine', { configurable: true, value: false })
+        try {
+          edit(view, 'Newer queued body')
+          let queued = false
+          await act(async () => { queued = await view.result.current.saveNote({ showSuccessMessage: false, trigger: 'keep-mine' }) })
+          expect(queued).toBe(true)
+          const confirmed = view.result.current.offlineDraftQueue['note:one']
+          expect(confirmed).toMatchObject({ content: 'Newer queued body', syncState: 'queued' })
+          expect(readQueue()['note:one']).toEqual(confirmed)
+          const replacement = state(view)
+          const result = await finish(gate, pending)
+          expect(Object.hasOwn(view.result.current.offlineDraftQueue, 'note:one')).toBe(true)
+          expect(view.result.current.offlineDraftQueue['note:one']).toEqual(confirmed)
+          expect(readQueue()['note:one']).toEqual(confirmed)
+          expect(result).toBe(false)
+          expect(state(view)).toEqual(replacement)
+          expect(mocks.refetch).not.toHaveBeenCalled()
+          expect(mocks.messages.info).not.toHaveBeenCalled()
+        } finally {
+          view.unmount()
+          Reflect.deleteProperty(navigator, 'onLine')
+        }
+      })
+
+      it('replays the uncertain Keep mine receipt without changing its key, body, or version base', async () => {
+        const view = await prepareConflict()
+        const receipts = new Map<string, { note: StoredNote; body: string; version: string | undefined }>()
+        let loseAcknowledgment = true
+        mocks.request.mockImplementation(async (request: RequestInit) => {
+          if (request.method !== 'PUT') return respond(request)
+          const key = request.headers?.['Idempotency-Key'] || ''
+          const receipt = receipts.get(key)
+          if (receipt) {
+            if (receipt.body !== JSON.stringify(request.body) || receipt.version !== request.headers?.['expected-version'])
+              throw Object.assign(new Error('Idempotency receipt payload mismatch'), { status: 409 })
+            return { ...receipt.note }
+          }
+          const acknowledged = await respond(request) as StoredNote
+          receipts.set(key, { note: acknowledged, body: JSON.stringify(request.body), version: request.headers?.['expected-version'] })
+          if (loseAcknowledgment) {
+            loseAcknowledgment = false
+            throw new TypeError('Response lost after the server committed Keep mine')
+          }
+          return acknowledged
+        })
+        let first = true
+        await act(async () => { first = await view.result.current.keepMyVersion() })
+        expect(first).toBe(false)
+        const original = writes('PUT').at(-1)!
+        expect(original.headers?.['Idempotency-Key']).toBeTruthy()
+        expect(original.headers?.['expected-version']).toBe('3')
+        expect(server.notes.get('one')).toMatchObject({ content: 'My conflict draft', version: 4 })
+        edit(view, 'Newer text while the receipt is uncertain')
+        let replayed = false
+        await act(async () => { replayed = await view.result.current.keepMyVersion() })
+        expect(replayed).toBe(true)
+        const replay = writes('PUT').at(-1)!
+        expect(replay.headers?.['Idempotency-Key']).toBe(original.headers?.['Idempotency-Key'])
+        expect(replay.headers?.['expected-version']).toBe(original.headers?.['expected-version'])
+        expect(replay.body).toEqual(original.body)
+        expect(server.notes.get('one')).toMatchObject({ content: 'My conflict draft', version: 4 })
+        expect(state(view)).toMatchObject({ content: 'Newer text while the receipt is uncertain', selectedVersion: 4, isDirty: true, saveIndicator: 'dirty' })
+      })
+
+      it.each(['edit', 'account-return', 'unmount'] as const)('rejects a captured Use theirs auth result after %s', async (change) => {
+        const view = await prepareConflict()
+        let releaseUser!: () => void
+        const user = new Promise<{ id: number; is_active: boolean }>((resolve) => {
+          releaseUser = () => resolve({ id: 7, is_active: true })
+        })
+        mocks.currentUser.mockClear()
+        mocks.currentUser.mockImplementation(() => user)
+        let pending!: Promise<boolean>
+        await act(async () => {
+          pending = view.result.current.takeTheirVersion()
+          await Promise.resolve()
+          await Promise.resolve()
+        })
+        // Do not wait for an auth call the unchanged implementation never makes.
+        const authCallsBeforeChange = mocks.currentUser.mock.calls.length
+        await changeContext(view, change)
+        const replacement = state(view)
+        let result!: boolean
+        await act(async () => { releaseUser(); result = await pending })
+        expect(authCallsBeforeChange).toBe(1)
+        expect(result).toBe(false)
+        expect(state(view)).toEqual(replacement)
+        expect(mocks.refetch).not.toHaveBeenCalled()
+        expect(mocks.messages.info).not.toHaveBeenCalled()
+        expect(mocks.messages.error).not.toHaveBeenCalled()
+      })
+    })
+
+  })
+
 })

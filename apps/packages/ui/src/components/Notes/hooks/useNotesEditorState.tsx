@@ -878,7 +878,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       await refreshTaskStateForNote(id, ownedRequest)
       return isCurrent()
     } catch {
-      if (isCurrent()) message.error('Failed to load note')
+      if (isCurrent() && editRevisionRef.current.revision === editRevision) message.error('Failed to load note')
       return false
     } finally {
       if (pendingSelectionEpochRef.current === noteEpoch) pendingSelectionEpochRef.current = null
@@ -1803,8 +1803,11 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           }
           return true
         } else {
+          const pendingUpdate = pendingWriteRef.current
+          const replayingUpdate = pendingUpdate?.authority === requestEpoch && pendingUpdate.selection === requestNoteEpoch &&
+            pendingUpdate.request.path === noteResourcePath(noteId) && pendingUpdate.request.method === 'PUT'
           let expectedVersion = baseVersion
-          if (expectedVersion == null) {
+          if (expectedVersion == null || (trigger === 'keep-mine' && !replayingUpdate)) {
             const latest = await request({
               path: noteResourcePath(noteId),
               method: 'GET'
@@ -1814,7 +1817,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           if (expectedVersion == null) {
             throw Object.assign(new Error('Missing version; reload and try again'), { status: 428 })
           }
-          const pendingUpdate = pendingWriteRef.current
+          if (trigger === 'keep-mine' && !replayingUpdate && hasNewerEdits()) {
+            throw new DOMException('Note edits changed', 'AbortError')
+          }
           const previousSavedTitle = pendingUpdate?.authority === requestEpoch && pendingUpdate.selection === requestNoteEpoch &&
             pendingUpdate.request.path === noteResourcePath(noteId) ? pendingUpdate.previousTitle : (
             savedTitleRef.current?.noteId === String(noteId) ? savedTitleRef.current.title : null)
@@ -3008,27 +3013,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   /** Explicit overwrite: save over the server's latest version, never a stale one. */
   const keepMyVersion = React.useCallback(async (): Promise<boolean> => {
-    const noteId = selectedIdRef.current
-    if (noteId == null || !saveNoteRef.current) return false
+    if (selectedIdRef.current == null || !saveNoteRef.current) return false
     clearAutosaveTimeout()
-    let serverVersion: number | null = null
-    try {
-      serverVersion = toNoteVersion(
-        await bgRequest<NotesWriteResponse>({ path: noteResourcePath(noteId), method: 'GET' })
-      )
-    } catch {
-      serverVersion = null
-    }
-    if (serverVersion == null) {
-      message.error(
-        t('option:notesSearch.keepMineLoadFailed', {
-          defaultValue: 'Could not read the latest server version. Check the connection and try again.'
-        })
-      )
-      return false
-    }
-    return saveNoteRef.current({ showSuccessMessage: true, trigger: 'keep-mine', expectedVersion: serverVersion })
-  }, [clearAutosaveTimeout, message, t])
+    return saveNoteRef.current({ showSuccessMessage: true, trigger: 'keep-mine' })
+  }, [clearAutosaveTimeout])
 
   /** Load the server copy; the local text goes to the clipboard first. */
   const takeTheirVersion = React.useCallback(async (): Promise<boolean> => {
@@ -3036,27 +3024,57 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (noteId == null) return false
     clearAutosaveTimeout()
     const local = editRevisionRef.current
-    // Must run before any other await (see writeClipboardText).
-    const copied = await writeClipboardText(
-      buildSingleNoteCopyText(
-        { id: noteId, title: local.title, content: local.content, keywords: local.editorKeywords },
-        'markdown'
+    const requestEpoch = authorityEpochRef.current
+    const requestAuthorityScope = authorityScope
+    const capturedConfig = connectionConfig ? { ...connectionConfig } : null
+    let selectionEpoch = noteSelectionEpochRef.current
+    const controller = new AbortController()
+    authorityRequestsRef.current.add(controller)
+    const isCurrent = () => !controller.signal.aborted && authorityEpochRef.current === requestEpoch &&
+      authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === selectionEpoch &&
+      String(selectedIdRef.current) === String(noteId)
+    const hasOriginalDraft = () => isCurrent() && editRevisionRef.current.revision === local.revision
+    try {
+      // Must run before any other await (see writeClipboardText).
+      const copied = await writeClipboardText(
+        buildSingleNoteCopyText(
+          { id: noteId, title: local.title, content: local.content, keywords: local.editorKeywords },
+          'markdown'
+        )
       )
-    )
-    if (!copied) {
-      const ok = await confirmDanger({
-        title: t('option:notesSearch.useTheirVersionTitle', { defaultValue: 'Use their version?' }),
-        content: t('option:notesSearch.useTheirVersionNoCopy', {
-          defaultValue: 'Your text could not be copied to the clipboard. Using their version discards your edits.'
-        }),
-        okText: t('option:notesSearch.useTheirVersion', { defaultValue: 'Use their version' }),
-        cancelText: t('option:notesSearch.keepEditingAction', { defaultValue: 'Keep editing' })
-      })
-      if (!ok) return false
-    }
-    dropOfflineDraftNow(offlineDraftKeyFor(noteId))
-    const loaded = await loadDetail(noteId)
-    if (loaded) {
+      if (!hasOriginalDraft()) return false
+      if (!copied) {
+        const ok = await confirmDanger({
+          title: t('option:notesSearch.useTheirVersionTitle', { defaultValue: 'Use their version?' }),
+          content: t('option:notesSearch.useTheirVersionNoCopy', {
+            defaultValue: 'Your text could not be copied to the clipboard. Using their version discards your edits.'
+          }),
+          okText: t('option:notesSearch.useTheirVersion', { defaultValue: 'Use their version' }),
+          cancelText: t('option:notesSearch.keepEditingAction', { defaultValue: 'Keep editing' })
+        })
+        if (!ok || !hasOriginalDraft()) return false
+      }
+      if (!requestAuthorityScope || !capturedConfig) return false
+      const user = await tldwAuth.getCurrentUser()
+      if (!hasOriginalDraft() || !user?.is_active || user.id == null ||
+          createNotesGraphAuthorityScope(capturedConfig.serverUrl, user.id) !== requestAuthorityScope) return false
+      const ownedRequest: NotesOwnedRequestOptions = {
+        servicePromptConfig: {
+          serverUrl: capturedConfig.serverUrl,
+          authMode: capturedConfig.authMode,
+          authSource: capturedConfig.authSource,
+          orgId: capturedConfig.orgId,
+          expectedUserId: user.id,
+          expectedSingleUserApiKeyScope: capturedConfig.authMode === 'single-user'
+            ? deriveSingleUserApiKeyCredentialScope('single-user', capturedConfig.apiKey) : undefined
+        },
+        headers: { 'X-TLDW-Expected-User-ID': String(user.id) },
+        abortSignal: controller.signal
+      }
+      dropOfflineDraftNow(offlineDraftKeyFor(noteId))
+      selectionEpoch += 1
+      const loaded = await loadDetail(noteId, ownedRequest, local.revision)
+      if (!loaded || !isCurrent()) return false
       void refetch()
       message.info({
         content: copied
@@ -3066,9 +3084,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           : t('option:notesSearch.loadedTheirVersion', { defaultValue: 'Loaded the latest version from the server.' }),
         duration: 8
       })
+      return true
+    } catch {
+      return false
+    } finally {
+      if (authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === selectionEpoch) setLoadingDetail(false)
+      authorityRequestsRef.current.delete(controller)
     }
-    return loaded
-  }, [clearAutosaveTimeout, confirmDanger, dropOfflineDraftNow, loadDetail, message, refetch, t])
+  }, [authorityScope, clearAutosaveTimeout, confirmDanger, connectionConfig, dropOfflineDraftNow, loadDetail, message, refetch, setLoadingDetail, t])
 
   /** "Reload" for a newer server copy when there is nothing local to lose. */
   const loadLatestVersion = React.useCallback(async (): Promise<boolean> => {
