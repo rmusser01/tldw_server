@@ -219,7 +219,7 @@ export type State = {
   setRagPinnedResults: (results: RagPinnedResult[]) => void
   // Server-backed character chat id
   serverChatId: string | null
-  setServerChatId: (id: string | null) => void
+  setServerChatId: (id: string | null, options?: { preserveTemporaryChat?: boolean }) => void
   serverChatTitle: string | null
   setServerChatTitle: (title: string | null) => void
   serverChatCharacterId: string | number | null

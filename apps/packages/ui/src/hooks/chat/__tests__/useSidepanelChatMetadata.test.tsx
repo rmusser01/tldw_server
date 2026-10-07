@@ -232,9 +232,12 @@ describe("saved sidepanel conversation readiness", () => {
 })
 
 describe("real-store queued Persona creation", () => {
-  it.each(["none", "foreign", "ABA", "account", "tab", "unmount"])("owns only its own promotion after %s", async boundary => {
+  it.each([false, true].flatMap(temporaryChat =>
+    ["none", "foreign", "ABA", "account", "tab", "unmount"].map(boundary => [temporaryChat, boundary] as const)
+  ))("owns only its own promotion (temporary=%s) after %s", async (temporaryChat, boundary) => {
     const { ensurePersonaServerChat } = await import("../personaServerChat")
     const { useSidepanelChatTabsStore } = await import("@/store/sidepanel-chat-tabs")
+    useStoreMessageOption.setState({ temporaryChat })
     useStoreMessageOption.getState().setServerChatId(null)
     useStoreMessageOption.getState().setHistoryId(null)
     const hook = renderHook(() => useSidepanelChatMetadata(io.selection))
@@ -249,7 +252,7 @@ describe("real-store queued Persona creation", () => {
       createChat: async () => creation.promise,
       ensureServerChatHistoryId: async () => state.historyId,
       invalidateServerChatHistory: invalidate,
-      setServerChatId: id => guard.publishServerChatId(id, state.setServerChatId)
+      setServerChatId: (id, options) => guard.publishServerChatId(id, value => state.setServerChatId(value, options))
     }).then(value => { guard(); return { ok: true, value } }, error => ({ ok: false, error }))
     if (boundary === "unmount") hook.unmount()
     await act(async () => {
@@ -265,7 +268,7 @@ describe("real-store queued Persona creation", () => {
     if (boundary === "none") {
       expect(outcome).toMatchObject({ ok: true, value: { chatId: "created-persona" } })
       expect(useStoreMessageOption.getState()).toMatchObject({
-        serverChatId: "created-persona", serverChatMetaLoaded: true, serverChatAssistantKind: "persona", serverChatAssistantId: "p1"
+        serverChatId: "created-persona", temporaryChat, serverChatMetaLoaded: true, serverChatAssistantKind: "persona", serverChatAssistantId: "p1"
       })
       expect(completion()).toBe(true)
       expect(() => guard()).not.toThrow()

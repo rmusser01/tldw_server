@@ -281,7 +281,7 @@ describe("createCharacterChatMode contract", () => {
       }),
       { scope }
     )
-    expect(setters.setServerChatId).toHaveBeenCalledWith("chat-77")
+    expect(setters.setServerChatId).toHaveBeenCalledWith("chat-77", { preserveTemporaryChat: false })
     expect(setters.setServerChatCharacterId).toHaveBeenCalledWith(42)
   })
 

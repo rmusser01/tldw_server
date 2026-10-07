@@ -1503,8 +1503,10 @@ export const useMessage = () => {
         }
         chatId = normalizedId;
         createdNewChat = true;
-        if (queuedGuard) queuedGuard.publishServerChatId(normalizedId, setServerChatId);
-        else setServerChatId(normalizedId);
+        const publishCreatedChatId = (id: string | null) =>
+          setServerChatId(id, { preserveTemporaryChat: temporaryChat });
+        if (queuedGuard) queuedGuard.publishServerChatId(normalizedId, publishCreatedChatId);
+        else publishCreatedChatId(normalizedId);
         setServerChatTitle(String((created as any)?.title || ""));
         setServerChatCharacterId(
           (created as any)?.character_id ?? activeCharacter?.id ?? null,
@@ -2878,7 +2880,7 @@ export const useMessage = () => {
               ensureServerChatHistoryId: async () => historyId,
               invalidateServerChatHistory,
               setServerChatId: assertQueuedDispatchCurrent
-                ? (id) => assertQueuedDispatchCurrent.publishServerChatId(id, setServerChatId)
+                ? (id, options) => assertQueuedDispatchCurrent.publishServerChatId(id, value => setServerChatId(value, options))
                 : setServerChatId,
               setServerChatTitle,
               setServerChatCharacterId,

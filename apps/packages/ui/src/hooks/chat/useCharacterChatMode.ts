@@ -346,7 +346,7 @@ export type CharacterChatModeDeps = {
   setIsProcessing: (isProcessing: boolean) => void;
   setStreaming: (streaming: boolean) => void;
   setAbortController: (controller: AbortController | null) => void;
-  setServerChatId: (id: string | null) => void;
+  setServerChatId: import("@/store/option/types").State["setServerChatId"];
   setServerChatTitle: (title: string | null) => void;
   setServerChatCharacterId: (id: string | number | null) => void;
   setServerChatMetaLoaded: (loaded: boolean) => void;
@@ -804,7 +804,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         }
         chatId = normalizedId;
         createdNewChat = true;
-        setServerChatId(normalizedId);
+        setServerChatId(normalizedId, { preserveTemporaryChat: temporaryChat });
         const createdTitle =
           created && typeof created === "object"
             ? String(created.title ?? "")
