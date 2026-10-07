@@ -196,6 +196,7 @@ describe("background effective extension auth", () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
     if (windowDescriptor) {
@@ -203,6 +204,69 @@ describe("background effective extension auth", () => {
     } else {
       delete (globalThis as any).window
     }
+  })
+
+  it.each([
+    ["save-to-notes-pa", "save-to-notes"],
+    ["save-to-companion-pa", "save-to-companion"],
+    ["narrate-selection-pa", "narrate-selection"],
+  ])(
+    "opens %s during its menu gesture before delayed delivery",
+    async (menuItemId, type) => {
+      vi.useFakeTimers()
+      const open = vi.fn().mockResolvedValue(undefined)
+      vi.stubGlobal("chrome", {
+        sidePanel: { setOptions: vi.fn().mockResolvedValue(undefined), open },
+        notifications: { create: vi.fn() },
+      })
+      vi.mocked(browser.runtime.sendMessage)
+        .mockClear()
+        .mockResolvedValue({ handled: true })
+      const calls = vi.mocked(browser.contextMenus.onClicked.addListener).mock
+        .calls
+      const onClick = calls[calls.length - 1][0]
+
+      await onClick(
+        {
+          menuItemId,
+          selectionText: "Selected source",
+          pageUrl: "https://example.com/story",
+        },
+        { id: 8, title: "Story" },
+      )
+
+      expect(open).toHaveBeenCalledWith({ tabId: 8 })
+      expect(browser.runtime.sendMessage).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(browser.runtime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type, text: "Selected source" }),
+      )
+    },
+  )
+
+  it("handles sidebar denial before the delayed Notes delivery without an unhandled rejection", async () => {
+    vi.useFakeTimers()
+    const open = vi.fn().mockRejectedValue(new Error("gesture required"))
+    const notify = vi.fn()
+    vi.stubGlobal("chrome", {
+      sidePanel: { open },
+      notifications: { create: notify },
+    })
+    vi.mocked(browser.runtime.sendMessage).mockClear()
+    const calls = vi.mocked(browser.contextMenus.onClicked.addListener).mock
+      .calls
+
+    await calls[calls.length - 1][0](
+      { menuItemId: "save-to-notes-pa", selectionText: "Selected source" },
+      { id: 8 },
+    )
+
+    expect(open).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(browser.runtime.sendMessage).not.toHaveBeenCalled()
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "contextSaveToNotesDeliveryFailed" }),
+    )
   })
 
   it("registers runtime messaging when the optional commands API is unavailable", async () => {

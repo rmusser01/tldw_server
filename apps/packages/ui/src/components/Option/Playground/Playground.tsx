@@ -94,7 +94,6 @@ import {
 import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
 import { useTranslation } from "react-i18next";
 import { useStoreMessageOption, type Message } from "@/store/option";
-import type { UploadedFile } from "@/db/dexie/types";
 import { useArtifactsStore } from "@/store/artifacts";
 import { DEGRADED_STATE_LABEL, READY_STATE_LABEL } from "@/design-system";
 import { useSetting } from "@/hooks/useSetting";
@@ -320,45 +319,6 @@ const COCKPIT_MCP_SETTINGS_TRIGGER_SELECTOR =
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-const isUploadedFileDraft = (value: unknown): value is UploadedFile =>
-  isRecord(value) &&
-  typeof value.id === "string" &&
-  typeof value.filename === "string" &&
-  typeof value.type === "string" &&
-  typeof value.content === "string" &&
-  typeof value.size === "number" &&
-  typeof value.uploadedAt === "number" &&
-  typeof value.processed === "boolean";
-
-const normalizeSidepanelDocumentDraftFiles = (
-  payload: unknown,
-): UploadedFile[] => {
-  if (!isRecord(payload) || !Array.isArray(payload.files)) {
-    return [];
-  }
-  const invalidCount = payload.files.filter(
-    (file) => !isUploadedFileDraft(file),
-  ).length;
-  if (invalidCount > 0) {
-    console.warn(
-      "[Playground] Ignored invalid sidepanel document draft file entries",
-      { invalidCount },
-    );
-  }
-  return payload.files.filter(isUploadedFileDraft);
-};
-
-const mergeUploadedFilesById = (
-  existing: UploadedFile[],
-  incoming: UploadedFile[],
-): UploadedFile[] => {
-  const byId = new Map(existing.map((file) => [file.id, file]));
-  for (const file of incoming) {
-    byId.set(file.id, file);
-  }
-  return Array.from(byId.values());
-};
-
 const getRecordString = (value: unknown, keys: string[]): string | null => {
   if (!isRecord(value)) return null;
   for (const key of keys) {
@@ -510,12 +470,6 @@ const PlaygroundContent = () => {
     setServerChatId,
     contextFiles,
     setContextFiles,
-    chatMode,
-    setChatMode,
-    setWebSearch,
-    setTemporaryChat,
-    useOCR,
-    setUseOCR,
     createChatBranch,
     streaming,
     isProcessing,
@@ -533,8 +487,6 @@ const PlaygroundContent = () => {
     setSelectedKnowledge,
     ragMediaIds,
     setRagMediaIds,
-    fileRetrievalEnabled,
-    setFileRetrievalEnabled,
     stopStreamingRequest,
     regenerateLastMessage,
     effectiveAssistantState,
@@ -567,9 +519,6 @@ const PlaygroundContent = () => {
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [replyInFlight]);
-  const setUploadedFiles = useStoreMessageOption(
-    (state) => state.setUploadedFiles,
-  );
   const {
     systemPrompt,
     setSystemPrompt,
@@ -687,7 +636,6 @@ const PlaygroundContent = () => {
   const initializePlaygroundCallbackRef = React.useRef<
     (signal: AbortSignal) => Promise<void>
   >(async () => {});
-  const sidepanelHandoffAppliedRef = React.useRef(false);
   const settingsReturnAppliedRef = React.useRef(false);
   const routeCharacterIntentAppliedRef = React.useRef<string | null>(null);
   const routeCharacterIntentInFlightRef = React.useRef<string | null>(null);
@@ -761,7 +709,6 @@ const PlaygroundContent = () => {
         serverChatId: null as string | null,
         researchReturnRunId: null as string | null,
         sidepanelHandoff: null,
-        sidepanelHandoffUrl: null,
       };
     }
     const params = new URLSearchParams(window.location.search);
@@ -776,7 +723,6 @@ const PlaygroundContent = () => {
       serverChatId: returnServerChatId,
       researchReturnRunId,
       sidepanelHandoff,
-      sidepanelHandoffUrl: window.location.href,
     };
   }, []);
   const returnHistoryIdFromSettings = settingsReturnContext.historyId;
@@ -784,7 +730,6 @@ const PlaygroundContent = () => {
   const returnResearchRunIdFromSettings =
     settingsReturnContext.researchReturnRunId;
   const sidepanelChatHandoff = settingsReturnContext.sidepanelHandoff;
-  const sidepanelHandoffUrl = settingsReturnContext.sidepanelHandoffUrl;
   const shouldRestorePersistedSessionOnInit =
     shouldRestorePersistedPlaygroundSession({
       hasPersistedSession,
@@ -2047,194 +1992,6 @@ const PlaygroundContent = () => {
     serverChatId,
     setServerChatId,
     dismissedReturnedResearchRunId,
-  ]);
-
-  React.useEffect(() => {
-    if (
-      !sidepanelChatHandoff ||
-      sidepanelHandoffAppliedRef.current
-    ) {
-      return;
-    }
-    sidepanelHandoffAppliedRef.current = true;
-    usePlaygroundSessionStore.getState().cancelPendingRestore();
-
-    let cancelled = false;
-    const applySidepanelHandoff = async () => {
-      // Fragment reference hints carry no origin/account/server ownership.
-      // History is selected explicitly through the destination's owned loader.
-      if (cancelled) return;
-      if (
-        sidepanelChatHandoff.selectedModel &&
-        sidepanelChatHandoff.selectedModel !== selectedModel
-      ) {
-        setSelectedModel(sidepanelChatHandoff.selectedModel);
-      }
-      if (
-        Object.prototype.hasOwnProperty.call(
-          sidepanelChatHandoff,
-          "selectedSystemPrompt",
-        )
-      ) {
-        const nextSystemPrompt =
-          sidepanelChatHandoff.selectedSystemPrompt ?? null;
-        if (nextSystemPrompt !== selectedSystemPrompt) {
-          setSelectedSystemPrompt(nextSystemPrompt);
-        }
-      }
-      if (
-        Object.prototype.hasOwnProperty.call(
-          sidepanelChatHandoff,
-          "selectedQuickPrompt",
-        )
-      ) {
-        const nextQuickPrompt = sidepanelChatHandoff.selectedQuickPrompt ?? null;
-        if (nextQuickPrompt !== selectedQuickPrompt) {
-          setSelectedQuickPrompt(nextQuickPrompt);
-        }
-      }
-      if (
-        sidepanelChatHandoff.chatMode &&
-        sidepanelChatHandoff.chatMode !== chatMode
-      ) {
-        setChatMode(sidepanelChatHandoff.chatMode);
-      }
-      if (
-        typeof sidepanelChatHandoff.webSearch === "boolean" &&
-        sidepanelChatHandoff.webSearch !== webSearch
-      ) {
-        setWebSearch(sidepanelChatHandoff.webSearch);
-      }
-      if (
-        sidepanelChatHandoff.toolChoice &&
-        sidepanelChatHandoff.toolChoice !== toolChoice
-      ) {
-        setToolChoice(sidepanelChatHandoff.toolChoice);
-      }
-      if (
-        typeof sidepanelChatHandoff.temporaryChat === "boolean" &&
-        sidepanelChatHandoff.temporaryChat !== temporaryChat
-      ) {
-        setTemporaryChat(sidepanelChatHandoff.temporaryChat);
-      }
-      if (
-        typeof sidepanelChatHandoff.useOCR === "boolean" &&
-        sidepanelChatHandoff.useOCR !== useOCR
-      ) {
-        setUseOCR(sidepanelChatHandoff.useOCR);
-      }
-      if (sidepanelChatHandoff.chatDocumentDraftId) {
-        try {
-          const documentDraft = await tldwClient.getDocumentUploadDraft(
-            sidepanelChatHandoff.chatDocumentDraftId,
-          );
-          if (cancelled) return;
-          const draftFiles = normalizeSidepanelDocumentDraftFiles(
-            documentDraft.payload,
-          );
-          if (draftFiles.length > 0) {
-            const currentState = useStoreMessageOption.getState();
-            const nextUploadedFiles = mergeUploadedFilesById(
-              currentState.uploadedFiles,
-              draftFiles,
-            );
-            const draftContextFiles = draftFiles.filter(
-              (file) => file.processingMode !== "ingest_to_library",
-            );
-            setUploadedFiles(nextUploadedFiles);
-            setContextFiles(
-              mergeUploadedFilesById(
-                currentState.contextFiles,
-                draftContextFiles,
-              ),
-            );
-          }
-          await tldwClient
-            .deleteDocumentUploadDraft(sidepanelChatHandoff.chatDocumentDraftId)
-            .catch((error) => {
-              console.warn(
-                "[Playground] Failed to delete imported document draft",
-                error,
-              );
-            });
-        } catch (error) {
-          console.warn(
-            "[Playground] Failed to import sidepanel document draft",
-            error,
-          );
-        }
-      }
-      if (
-        Object.prototype.hasOwnProperty.call(
-          sidepanelChatHandoff,
-          "ragMediaIds",
-        )
-      ) {
-        const nextRagMediaIds =
-          Array.isArray(sidepanelChatHandoff.ragMediaIds) &&
-          sidepanelChatHandoff.ragMediaIds.length > 0
-            ? sidepanelChatHandoff.ragMediaIds
-            : null;
-        setRagMediaIds(nextRagMediaIds);
-      }
-      if (
-        typeof sidepanelChatHandoff.fileRetrievalEnabled === "boolean" &&
-        sidepanelChatHandoff.fileRetrievalEnabled !== fileRetrievalEnabled
-      ) {
-        setFileRetrievalEnabled(sidepanelChatHandoff.fileRetrievalEnabled);
-      }
-
-      // The actual hydrated composer owns draft review and matching route cleanup.
-      if (typeof sidepanelChatHandoff.draft === "string") return;
-
-      if (!cancelled && typeof window !== "undefined" && sidepanelHandoffUrl) {
-        const sourceUrl = new URL(sidepanelHandoffUrl);
-        const sourceHash = new URLSearchParams(sourceUrl.hash.slice(1));
-        const url = new URL(window.location.href);
-        const hashParams = new URLSearchParams(url.hash.slice(1));
-        if (sourceHash.has(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM)) {
-          if (hashParams.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM) !== sourceHash.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM)) return;
-          hashParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
-        } else {
-          if (hashParams.has(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM) || url.searchParams.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM) !== sourceUrl.searchParams.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM)) return;
-          url.searchParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
-        }
-        const nextQuery = url.searchParams.toString();
-        const nextHash = hashParams.toString();
-        const nextPath = `${url.pathname}${nextQuery ? `?${nextQuery}` : ""}${nextHash ? `#${nextHash}` : ""}`;
-        window.history.replaceState(window.history.state, "", nextPath);
-      }
-    };
-
-    void applySidepanelHandoff();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    chatMode,
-    selectedModel,
-    selectedQuickPrompt,
-    selectedSystemPrompt,
-    setChatMode,
-    setContextFiles,
-    setFileRetrievalEnabled,
-    setRagMediaIds,
-    setSelectedModel,
-    setSelectedQuickPrompt,
-    setSelectedSystemPrompt,
-    setTemporaryChat,
-    setToolChoice,
-    setUploadedFiles,
-    setUseOCR,
-    setWebSearch,
-    sidepanelChatHandoff,
-    sidepanelHandoffUrl,
-    temporaryChat,
-    toolChoice,
-    useOCR,
-    webSearch,
-    fileRetrievalEnabled,
   ]);
 
   const pendingTimelineActionRef = React.useRef<TimelineActionDetail | null>(
@@ -3899,12 +3656,6 @@ const PlaygroundContent = () => {
             data-testid="playground-chat-shell"
             className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
           >
-            {sidepanelChatHandoff && (sidepanelChatHandoff.historyId || sidepanelChatHandoff.serverChatId) && (
-              <div role="status" data-testid="sidepanel-handoff-history-unconfirmed" className="mx-3 mt-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text">
-                <p className="font-medium">{t("playground:sidepanelHandoff.historyNotTransferred", "History was not transferred")}</p>
-                <p className="text-text-muted">{t("playground:sidepanelHandoff.chooseDestinationHistory", "This copy does not identify the source account and server. Open the Chats sidebar and choose a conversation available here before continuing its history.")}</p>
-              </div>
-            )}
             {!focusModeActive && parentMeta?.parentHistoryId && (
               <div className="flex w-full justify-center px-5 pt-2">
                 <div className="inline-flex flex-wrap items-center justify-center gap-2">

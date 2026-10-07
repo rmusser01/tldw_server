@@ -1525,6 +1525,20 @@
     "readFailed": "The copy could not be checked. Your draft remains here. Try Insert or Replace again.",
     "unavailableCopyDescription": "The copy expired or could not be read. Your destination draft remains here. Copy again from the sidepanel to try again.",
     "conflictDescription": "Review the copied draft below. Insert it, replace your current draft, or cancel the import.",
-    "copiedDraft": "Copied draft"
+    "copiedDraft": "Copied draft",
+    "skippedSettings": "Settings",
+    "skippedHistory": "Conversation history",
+    "skippedAttachments": "Attachments and retrieval sources",
+    "notImported": "Not imported",
+    "chooseHere": "Choose these in the destination chat.",
+    "draftImported": "Draft text imported.",
+    "noTextTitle": "Copy contains no draft text",
+    "noTextDescription": "Your draft remains here. Dismiss this copy, then choose the settings or attachments you need.",
+    "dismissCopy": "Dismiss copy",
+    "dismissReceipt": "Dismiss notice"
+  },
+  "imageGeneration": {
+    "settingsLoadFailedTitle": "Image settings unavailable",
+    "settingsLoadFailedBody": "Could not load saved image settings. Your current settings were kept."
   }
 }

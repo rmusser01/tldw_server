@@ -64,6 +64,7 @@ SUPPORTED_DOMAINS = (
     + MEDIA_DOMAINS
     + list(NOTES_ORGANIZATION_DOMAINS)
     + NOTES_LINK_DOMAINS
+    + ["notes.provenance"]
     + PERSONAL_CONTEXT_DOMAINS
 )
 
@@ -211,6 +212,7 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
         "notes.folder": ["upsert", "tombstone"],
         "notes.folder_link": ["upsert", "tombstone"],
         "notes.link": ["upsert", "tombstone"],
+        "notes.provenance": ["upsert", "tombstone"],
         "personal_context.manifest": ["upsert"],
         "personal_context.scope": ["upsert"],
         "personal_context.record": ["upsert", "tombstone"],
@@ -2347,3 +2349,16 @@ def test_blob_id_ack_endpoint_keeps_legacy_and_v2_inputs_distinct() -> None:
     assert "SyncDeviceBlobIdAckCreate" in acknowledgment_block
     assert "blob_id=ack.blob_id" in acknowledgment_block
     assert "blob_id=ack.attachment_id" not in acknowledgment_block
+
+
+@pytest.mark.parametrize(
+    "domains",
+    [
+        ["notes.note", "notes.provenance"],
+        ["notes.note", "notes.provenance", "notes.task", "notes.task_activity"],
+    ],
+)
+def test_capabilities_preserve_provenance_and_selected_task_domains(domains):
+    """Known provenance must not trigger the legacy default-domain fallback."""
+    capabilities = SyncCapabilitiesResponse.model_validate({"supported_domains": domains})
+    assert capabilities.domains == domains

@@ -11,7 +11,10 @@ import {
 import { decodeSidepanelChatWebUiHandoff, isEncodedSidepanelChatWebUiHandoff } from "@/services/tldw/sidepanel-chat-webui-handoff"
 
 type HandoffRoute = { id: string; field: "search" | "hash"; webUi: boolean }
-type HandoffDraft = Pick<SidepanelChatHandoffPackage, "id" | "draft" | "pageContext">
+type HandoffDraft = Pick<SidepanelChatHandoffPackage, "id" | "draft" | "pageContext"> & {
+  hasText?: boolean
+  skippedParts?: Array<"settings" | "history" | "attachments">
+}
 
 const routeParams = (value: string) => new URLSearchParams(value.replace(/^[?#]/, ""))
 const getHandoffRoute = (location: { search: string; hash: string }): HandoffRoute | null => {
@@ -26,7 +29,13 @@ const matchesHandoffRoute = (location: { search: string; hash: string }, route: 
 const readHandoffDraft = async (route: HandoffRoute, strict = false): Promise<HandoffDraft | null> => {
   if (!route.webUi) return readSidepanelChatHandoff(route.id, { throwOnReadError: strict })
   const payload = decodeSidepanelChatWebUiHandoff(route.id)
-  return typeof payload?.draft === "string" ? { id: route.id, draft: { text: payload.draft } } : null
+  if (!payload) return null
+  const has = (fields: Array<keyof typeof payload>) => fields.some(field => Object.prototype.hasOwnProperty.call(payload, field))
+  const skippedParts: NonNullable<HandoffDraft["skippedParts"]> = []
+  if (has(["selectedModel", "selectedSystemPrompt", "selectedQuickPrompt", "chatMode", "webSearch", "toolChoice", "temporaryChat", "useOCR"])) skippedParts.push("settings")
+  if (has(["historyId", "serverChatId", "title"])) skippedParts.push("history")
+  if (has(["chatDocumentDraftId", "ragMediaIds", "fileRetrievalEnabled"])) skippedParts.push("attachments")
+  return { id: route.id, draft: { text: payload.draft ?? "" }, hasText: typeof payload.draft === "string", skippedParts }
 }
 
 type SetMessageValue = (
@@ -78,6 +87,15 @@ export function useSidepanelChatHandoffImport({
     React.useState<SidepanelChatHandoffConflict | null>(null)
   const [importPending, setImportPending] = React.useState(false)
   const [conflictFeedback, setConflictFeedback] = React.useState<string | null>(null)
+  const [importReceipt, setImportReceipt] = React.useState<{ description: string } | null>(null)
+  const skippedFeedbackFor = React.useCallback((handoff: HandoffDraft) => {
+    if (!handoff.skippedParts?.length) return null
+    const labels = handoff.skippedParts.map(part => part === "settings"
+      ? t("playground:sidepanelHandoff.skippedSettings", "Settings")
+      : part === "history" ? t("playground:sidepanelHandoff.skippedHistory", "Conversation history")
+        : t("playground:sidepanelHandoff.skippedAttachments", "Attachments and retrieval sources"))
+    return `${t("playground:sidepanelHandoff.notImported", "Not imported")}: ${labels.join(", ")}. ${t("playground:sidepanelHandoff.chooseHere", "Choose these in the destination chat.")}`
+  }, [t])
   const pendingChoiceRef = React.useRef<{ location: typeof location; draft: string; revision: number; isOwned: () => boolean } | null>(null)
   const previousLocationRef = React.useRef(location)
   const locationRef = React.useRef(location)
@@ -103,11 +121,13 @@ export function useSidepanelChatHandoffImport({
   React.useLayoutEffect(() => {
     retireConflict()
     setImportedContext(null)
+    setImportReceipt(null)
   }, [destinationKey, ready, retireConflict])
 
   React.useLayoutEffect(() => {
     const previous = previousLocationRef.current
     previousLocationRef.current = location
+    if (location.pathname !== "/chat") setImportReceipt(null)
     const revealedId = routeParams(location.search).get("handoff")
     // Resolving one copy must not implicitly apply a different, previously hidden copy.
     if (revealedId && routeParams(previous.hash).has("handoff") && !routeParams(location.hash).has("handoff") &&
@@ -158,9 +178,10 @@ export function useSidepanelChatHandoffImport({
       nextDraft: string,
       options: { isOwned: () => boolean },
     ) => {
-      if (!readyRef.current || !options.isOwned() || !matchesHandoffRoute(locationRef.current, route)) return
+      if (handoff.hasText === false || !readyRef.current || !options.isOwned() || !matchesHandoffRoute(locationRef.current, route)) return
       setMessageValue(nextDraft, { collapseLarge: true })
       setImportedContext(handoff.pageContext ?? null)
+      setImportReceipt({ description: [t("playground:sidepanelHandoff.draftImported", "Draft text imported."), skippedFeedbackFor(handoff)].filter(Boolean).join(" ") })
       setConflict(null)
       conflictOwnerRef.current = null
       cleanRouteHandoff(route)
@@ -169,7 +190,7 @@ export function useSidepanelChatHandoffImport({
         if (!route.webUi && options.isOwned()) consumeQuietly(handoff.id, options.isOwned)
       })
     },
-    [cleanRouteHandoff, consumeQuietly, destinationKey, setMessageValue],
+    [cleanRouteHandoff, consumeQuietly, destinationKey, setMessageValue, skippedFeedbackFor, t],
   )
 
   React.useEffect(() => {
@@ -177,11 +198,9 @@ export function useSidepanelChatHandoffImport({
     const handoffId = route?.id
     const previous = handoffId ? handledHandoffIdsRef.current.get(handoffId) : undefined
     if (!ready || location.pathname !== "/chat" || !route || !handoffId || (previous?.destinationKey === destinationKey && previous.settled && (!conflictOwnerRef.current || conflictOwnerRef.current.isOwned()))) return
-    // A valid settings-only fragment is handled by the page, not local storage.
-    const fragmentPayload = route.webUi ? decodeSidepanelChatWebUiHandoff(route.id) : null
-    if (fragmentPayload && typeof fragmentPayload.draft !== "string") return
     const isOwned = captureGuard()
     if (!isOwned()) return
+    setImportReceipt(null)
     if (conflictOwnerRef.current && !conflictOwnerRef.current.isOwned()) retireConflict()
     const attempt = { destinationKey, settled: false, review: route.webUi || previous?.review === true || (previous !== undefined && previous.destinationKey !== destinationKey) }
     handledHandoffIdsRef.current.set(handoffId, attempt)
@@ -225,7 +244,7 @@ export function useSidepanelChatHandoffImport({
     matchesHandoffRoute(locationRef.current, conflict.route), [conflict])
 
   const acceptHandoffDraft = React.useCallback(async (action: "insert" | "replace") => {
-    if (!isConflictCurrent() || !conflict || pendingChoiceRef.current) return
+    if (!isConflictCurrent() || !conflict || conflict.handoff.hasText === false || pendingChoiceRef.current) return
     const attempt = { location: locationRef.current, draft: draftValueRef.current, revision: getDraftRevision(), isOwned: captureGuard() }
     if (!attempt.isOwned()) return
     pendingChoiceRef.current = attempt
@@ -289,7 +308,14 @@ export function useSidepanelChatHandoffImport({
     if (!conflict.route.webUi) consumeQuietly(conflict.handoff.id, isOwned)
   }, [cleanRouteHandoff, conflict, consumeQuietly, destinationKey, isConflictCurrent])
 
+  const dismissImportReceipt = React.useCallback(() => {
+    setImportReceipt(current => current === importReceipt ? null : current)
+  }, [importReceipt])
+
   return {
+    importReceipt,
+    dismissImportReceipt,
+    skippedFeedback: conflict ? skippedFeedbackFor(conflict.handoff) : null,
     importedContext,
     removeImportedContext,
     conflict,

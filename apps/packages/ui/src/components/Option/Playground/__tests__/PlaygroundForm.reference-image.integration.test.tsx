@@ -251,7 +251,7 @@ describe("PlaygroundImageGenModal reference image picker", () => {
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     )
 
-    const sendMessage = vi.fn(async () => null)
+    const sendMessage = vi.fn(async () => ({ status: "submitted" as const }))
     const notificationApi = {
       error: vi.fn(),
       success: vi.fn()

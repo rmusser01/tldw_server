@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.backends.fts_translator import MAX_FTS_QUERY_LENGTH
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     _CHACHA_NONCRITICAL_EXCEPTIONS,
     _SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES,
@@ -475,6 +477,7 @@ class NoteStore:
                         entity="notes",
                         entity_id=normalized_note_id,
                     )
+                self._tombstone_provenance(normalized_note_id, transaction_conn)
                 self._db._invalidate_note_clipper_sidecars(normalized_note_id, conn=transaction_conn, deleted=True)
                 self._db.note_graph_projection_store.mark_lifecycle(
                     note_id=normalized_note_id,
@@ -2282,6 +2285,18 @@ class NoteStore:
     # Note deletion and restoration
     # ------------------------------------------------------------------
 
+    def _tombstone_provenance(self, note_id: str, conn: Any) -> None:
+        """Retain independent evidence when any shared note deletion path runs."""
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            if int(getattr(self._db, "_runtime_schema_version", 0)) < 81:
+                return
+        elif self._db._CURRENT_SCHEMA_VERSION < 77:
+            return
+        store = self._db.note_provenance_store
+        record = store.get(note_id, include_deleted=True, conn=conn)
+        if record is not None and not record["deleted"]:
+            store.tombstone(note_id, expected_version=record["version"], conn=conn)
+
     def soft_delete_note(self, note_id: str, expected_version: int) -> bool | None:
         owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
         now = self._db._get_current_utc_timestamp_iso()
@@ -2324,6 +2339,7 @@ class NoteStore:
                         msg = f"Soft delete for note ID {note_id} (expected v{expected_version}) affected 0 rows."
                     raise ConflictError(msg, entity="notes", entity_id=note_id)  # noqa: TRY301
 
+                self._tombstone_provenance(note_id, conn)
                 self._db._invalidate_note_clipper_sidecars(note_id, conn=conn, deleted=True)
                 self._db.note_graph_projection_store.mark_lifecycle(
                     note_id=note_id,
@@ -2351,7 +2367,8 @@ class NoteStore:
         now = self._db._get_current_utc_timestamp_iso()
         try:
             with self._db.transaction() as conn:
-                row = conn.execute(f"SELECT id, version, deleted FROM notes WHERE id = ?{owner_clause}", (note_id,) + owner_params).fetchone()  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                lock_clause = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+                row = conn.execute(f"SELECT id, version, deleted FROM notes WHERE id = ?{owner_clause}{lock_clause}", (note_id,) + owner_params).fetchone()  # nosec B608 - fixed owner/lock SQL fragments; values stay bound.
                 if not row:
                     return False
                 self._db._require_selected_owner_row(conn, "notes", note_id, self._db.client_id, include_deleted=True)
@@ -2377,6 +2394,7 @@ class NoteStore:
                     (deleted_val, now, cur_ver + 1, self._db.client_id, note_id) + owner_params,
                 ).rowcount
                 if rc > 0:
+                    self._tombstone_provenance(note_id, conn)
                     self._db._invalidate_note_clipper_sidecars(note_id, conn=conn, deleted=True)
                     self._db.note_graph_projection_store.mark_lifecycle(
                         note_id=note_id,
@@ -2499,8 +2517,14 @@ class NoteStore:
     # Note search
     # ------------------------------------------------------------------
 
-    def search_notes(self, search_term: str, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]:
-        """Searches notes_fts (title and content) with optional pagination."""
+    def search_notes(
+        self, search_term: str, limit: int = 10, offset: int = 0, *, match_any: bool = False
+    ) -> list[dict[str, Any]]:
+        """Search note text, retaining literal phrases unless RAG requests term matching."""
+        # ponytail: bound questions to 64 lexical terms; semantic expansion stays in RAG.
+        terms = list(dict.fromkeys(re.findall(r"\w+", search_term[:MAX_FTS_QUERY_LENGTH])))[:64] if match_any else []
+        if match_any and not terms:
+            return []
         # Debug: Log FTS table state to help diagnose E2E test failures
         # Only run for SQLite; PostgreSQL uses tsvector columns, not a notes_fts table.
         if self._db.backend_type == BackendType.SQLITE:
@@ -2519,18 +2543,27 @@ class NoteStore:
                 logger.debug("Empty notes search term; returning no results.")
                 return []
             owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
-            tsquery = FTSQueryTranslator.normalize_query(search_term, 'postgresql')
+            tsquery = (
+                " | ".join(f"'{term}'" for term in terms)
+                if match_any
+                else FTSQueryTranslator.normalize_query(search_term, "postgresql")
+            )
+            fallback_match = "n.title ILIKE ? OR n.content ILIKE ?"
+            fallback_values = (f"%{search_term}%", f"%{search_term}%")
+            if match_any:
+                fallback_match = " OR ".join([fallback_match] * len(terms))
+                fallback_values = tuple(value for term in terms for value in ["%" + term.replace("_", "\\_") + "%"] * 2)
             fallback_query = """
                 SELECT n.*
                 FROM notes n
                 WHERE n.deleted = FALSE{owner_clause}
-                  AND (n.title ILIKE ? OR n.content ILIKE ?)
+                  AND ({fallback_match})
                 ORDER BY n.last_modified DESC
                 LIMIT ? OFFSET ?
             """.format_map(
                 locals()
             )  # nosec B608
-            fallback_params = (*owner_params, f"%{search_term}%", f"%{search_term}%", limit, offset)
+            fallback_params = (*owner_params, *fallback_values, limit, offset)
             if not tsquery:
                 logger.debug("Notes search term normalized to empty tsquery for input '{}'", search_term)
                 cursor = self._db.execute_query(fallback_query, fallback_params)
@@ -2559,7 +2592,7 @@ class NoteStore:
                 raise
 
         safe_literal = search_term.replace('"', '""')
-        safe_search_term = f'"{safe_literal}"'
+        safe_search_term = " OR ".join(f'"{term}"' for term in terms) if match_any else f'"{safe_literal}"'
 
         query = """
                 SELECT main.*, bm25(notes_fts) AS bm25_score

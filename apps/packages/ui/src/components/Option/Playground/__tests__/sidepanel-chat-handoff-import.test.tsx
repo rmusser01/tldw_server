@@ -364,6 +364,75 @@ describe("sidepanel chat handoff import", () => {
     return route === "hash" ? `/chat?keep=query#handoff=${encoded}&keep=hash` : `/chat?keep=query&handoff=${encoded}#keep=hash`
   }
 
+  it("reports skipped settings, history and attachments before review and after importing exact text", async () => {
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    const text = "  COPIED  "
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft: text,
+      selectedQuickPrompt: "literal", selectedSystemPrompt: "unqualified-prompt", historyId: "foreign-history", chatDocumentDraftId: "foreign-document", ragMediaIds: [1], fileRetrievalEnabled: false })
+    renderWithRoute(<HookHarness initialDraft="KEEP  " onImportChange={value => { displayed = value }} />, `/chat#handoff=${encoded}`)
+    await screen.findByRole("button", { name: "Replace" })
+    expect(displayed.skippedFeedback).toMatch(/Settings.*Conversation history.*Attachments/)
+    expect(displayed.importReceipt).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }))
+    await waitFor(() => expect(screen.getByLabelText("Composer")).toHaveValue(text))
+    expect(displayed.importReceipt?.description).toMatch(/Draft text imported.*Settings.*Conversation history.*Attachments/)
+    expect(serviceMocks.readSidepanelChatHandoff).not.toHaveBeenCalled()
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+  })
+
+  it.each([{ selectedModel: "foreign-model" }, { chatDocumentDraftId: "foreign-document" }, { historyId: "foreign-history" }])("offers dismissal for a valid no-text copy %j without erasing the destination", async fields => {
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), ...fields })
+    renderWithRoute(<HookHarness initialDraft="KEEP  " onImportChange={value => { displayed = value }} />, `/chat?keep=query#handoff=${encoded}&keep=hash`)
+    await screen.findByRole("button", { name: "Cancel" })
+    expect(displayed.conflict?.handoff.hasText).toBe(false)
+    expect(displayed.skippedFeedback).toBeTruthy()
+    await act(async () => { await displayed.replaceWithHandoffDraft() })
+    expect(screen.getByLabelText("Composer")).toHaveValue("KEEP  ")
+    expect(screen.getByTestId("location-hash")).toHaveTextContent("handoff=")
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.getByTestId("location-hash")).toHaveTextContent("#keep=hash")
+    expect(screen.getByTestId("location-search")).toHaveTextContent("?keep=query")
+    expect(screen.getByLabelText("Composer")).toHaveValue("KEEP  ")
+    expect(notificationApi.warning).not.toHaveBeenCalled()
+  })
+
+  it("does not let an older receipt dismissal erase the same-text replacement receipt", async () => {
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft: "COPIED", selectedModel: "foreign" })
+    const entry = `/chat#handoff=${encoded}`
+    const tree = (destination: string) => <MemoryRouter initialEntries={[entry]}><HookHarness destination={destination} replacementEntry={entry} onImportChange={value => { displayed = value }} /></MemoryRouter>
+    const view = render(tree("A"))
+    await screen.findByRole("button", { name: "Replace" })
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }))
+    await waitFor(() => expect(displayed.importReceipt).not.toBeNull())
+    const dismissOld = displayed.dismissImportReceipt
+    const priorDescription = displayed.importReceipt?.description
+    view.rerender(tree("B"))
+    expect(displayed.importReceipt).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "New fragment route" }))
+    // An identical copy has the same receipt text but a distinct receipt identity.
+    await screen.findByRole("button", { name: "Replace" })
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }))
+    await waitFor(() => expect(displayed.importReceipt).not.toBeNull())
+    const replacement = displayed.importReceipt
+    expect(replacement?.description).toBe(priorDescription)
+    act(() => dismissOld())
+    expect(displayed.importReceipt).toBe(replacement)
+    act(() => displayed.dismissImportReceipt())
+    expect(displayed.importReceipt).toBeNull()
+  })
+
+  it("retires the imported receipt when leaving the chat route", async () => {
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    renderWithRoute(<HookHarness onImportChange={value => { displayed = value }} />, fragmentRoute("COPIED"))
+    await screen.findByRole("button", { name: "Replace" })
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }))
+    await waitFor(() => expect(displayed.importReceipt).not.toBeNull())
+    fireEvent.click(screen.getByRole("button", { name: "Leave chat" }))
+    expect(displayed.importReceipt).toBeNull()
+  })
+
   it.each(["hash", "query"] as const)("waits for hydration and explicit review of exact %s draft", async route => {
     const text = "  {{user}}\n\tFROM SIDEPANEL  "
     const entry = fragmentRoute(text, route)

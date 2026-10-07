@@ -182,6 +182,9 @@ def _append_server_origin_mutation(
     """Append one server-origin envelope to ``dataset`` and require its projection."""
 
     payload_hash, payload_size = canonical_payload_hash(payload)
+    if domain == "notes.provenance":
+        from .notes_provenance_contract import notes_provenance_object_hash
+        payload_hash = notes_provenance_object_hash(payload, deleted=operation == "tombstone")
     if stable_key:
         existing = service.store.list_envelopes_for_entity(
             dataset.dataset_id,

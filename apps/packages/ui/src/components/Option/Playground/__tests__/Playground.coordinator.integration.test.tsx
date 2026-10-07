@@ -1092,11 +1092,13 @@ describe("Playground coordinator integration", () => {
 
     render(<Playground />)
 
-    await waitFor(() => expect(window.location.search).toBe(""))
+    await act(async () => {})
+    // This fixture omits the actual composer: only that owned receiver can dismiss the copy.
+    expect(window.location.search).toContain("handoff=")
     expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalledWith("handoff-chat")
     expect(messageOptionState.value.historyId).toBe("current-history")
     expect(messageOptionState.value.serverChatId).toBe("current-chat")
-    expect(screen.getByTestId("sidepanel-handoff-history-unconfirmed")).toHaveTextContent("Chats sidebar")
+    expect(screen.queryByTestId("sidepanel-handoff-history-unconfirmed")).not.toBeInTheDocument()
     expect(restoreSession).not.toHaveBeenCalled()
   })
 

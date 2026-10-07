@@ -1,3 +1,4 @@
+import { knowledgeNoteHead } from "@/utils/knowledge-note-provenance"
 /**
  * Workspace Zustand Store
  * Manages state for the NotebookLM-style three-pane research interface
@@ -2292,7 +2293,7 @@ interface StudioActions {
   updateNoteKeywords: (keywords: string[]) => void
   clearCurrentNote: () => void
   captureToCurrentNote: (input: CaptureToNoteInput) => void
-  loadNote: (note: { id: string | number; title: string; content: string; keywords?: string[]; version?: number }) => void
+  loadNote: (note: Omit<WorkspaceNote, "isDirty" | "keywords"> & { id: string | number; keywords?: string[] }) => void
 }
 
 interface UIActions {
@@ -3189,6 +3190,7 @@ const coerceWorkspaceNoteForRehydrate = (candidate: unknown): WorkspaceNote => {
           (keyword): keyword is string => typeof keyword === "string"
         )
       : [],
+    ...knowledgeNoteHead(candidate),
     version: typeof candidate.version === "number" ? candidate.version : 1,
     isDirty: Boolean(candidate.isDirty)
   }

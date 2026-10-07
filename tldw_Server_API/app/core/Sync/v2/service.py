@@ -1373,6 +1373,11 @@ class SyncV2Service:
         self.store = store
         self.adapters = adapters
         self.materializers = dict(materializers or {})
+        from .materializers.notes import NotesMaterializer
+        from .notes_provenance import NotesProvenanceMaterializer
+        core_notes = self.materializers.get("notes.note")
+        if isinstance(core_notes, NotesMaterializer) and self.adapters.has_domain("notes.provenance"):
+            self.materializers.setdefault("notes.provenance", NotesProvenanceMaterializer(core_notes.note_db))
         self.clock = clock or (lambda: datetime.now(timezone.utc).isoformat())
         self.id_factory = id_factory or (lambda prefix: f"{prefix}-{uuid4().hex}")
         self.blob_store = blob_store
@@ -3622,6 +3627,7 @@ class SyncV2Service:
         reserved_metadata = {
             "notes_organization_v1",
             "notes_link_v1",
+            "notes_provenance_v1",
             "notes_attachment_v2",
             "default_personal",
             "client_family",
@@ -3634,6 +3640,7 @@ class SyncV2Service:
                 {
                     *NOTES_ORGANIZATION_DOMAINS,
                     *NOTES_LINK_DOMAINS,
+                    "notes.provenance",
                     *PERSONAL_CONTEXT_SYNC_DOMAINS,
                 }
             )
@@ -9907,7 +9914,12 @@ class SyncV2Service:
             return MaterializationResult(status="skipped")
         if store is None:
             try:
-                with self.store.materialization_guard([envelope]) as guarded_store:
+                unit = (
+                    self.store.list_mutation_group(envelope.dataset_id, envelope.mutation_group_id)
+                    if envelope.domain in {"notes.note", "notes.provenance"} and envelope.mutation_group_id
+                    else [envelope]
+                )
+                with self.store.materialization_guard(unit) as guarded_store:
                     return self._materialize_envelope(
                         envelope,
                         store=guarded_store,
@@ -9945,7 +9957,12 @@ class SyncV2Service:
                     envelope,
                 )
             if guarded_mutation is None:
-                result = materializer.apply(clear_envelope, store=store)
+                from .materializers.notes import NotesMaterializer
+                from .notes_provenance import is_notes_provenance_bootstrap, project_notes_provenance, provenance_pair
+                if isinstance(materializer, NotesMaterializer) and (len(provenance_pair(envelope, store)) == 2 or is_notes_provenance_bootstrap(envelope, str(materializer.note_db.owner_user_id))):
+                    result = project_notes_provenance(envelope, store=store, note_db=materializer.note_db)
+                else:
+                    result = materializer.apply(clear_envelope, store=store)
             else:
                 guarded_mutation.require_identity(envelope.domain, envelope.object_id)
                 result = materializer.apply(
@@ -9969,6 +9986,9 @@ class SyncV2Service:
                 )
             return result
         except Exception as exc:  # noqa: BLE001 - materializer failures are captured as replayable sync state.
+            from .notes_provenance import NotesProvenanceCheckpointError
+            if isinstance(exc, NotesProvenanceCheckpointError):
+                raise
             if isinstance(exc, SyncStoreError) and str(exc) == "personal_context_activation_required":
                 raise
             error_code = "sync_projection_failed"

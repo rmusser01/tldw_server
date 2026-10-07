@@ -147,16 +147,31 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
   const [imageGenerateSubmitting, setImageGenerateSubmitting] =
     React.useState(false)
 
-  const imageSendRef = React.useRef<{ isCurrent: () => boolean } | null>(null)
+  const imageOperationRef = React.useRef<{ isCurrent: () => boolean } | null>(null)
+  const refinementSourceRef = React.useRef<{ isCurrent: () => boolean; hasCandidate: boolean } | null>(null)
   const modalRevision = React.useRef(0)
-  React.useLayoutEffect(() => {
-    const active = imageSendRef.current
-    if (active && !active.isCurrent()) {
-      imageSendRef.current = null
-      setImageGenerateSubmitting(false)
+  const settingsEditRevision = React.useRef(0)
+  const settingsRequestRevision = React.useRef(0)
+  const configurationSetters = React.useMemo(() => {
+    const edited = <T,>(setter: React.Dispatch<React.SetStateAction<T>>) => (value: React.SetStateAction<T>) => {
+      settingsEditRevision.current++
+      setter(value)
     }
-  }, [captureCompletionGuard, imageGenerateSubmitting])
-  React.useEffect(() => () => { imageSendRef.current = null; modalRevision.current++ }, [])
+    return {
+      setImageGenerateBackend: edited(setImageGenerateBackend),
+      setImageGenerateFormat: edited(setImageGenerateFormat),
+      setImageGenerateNegativePrompt: edited(setImageGenerateNegativePrompt),
+      setImageGenerateWidth: edited(setImageGenerateWidth),
+      setImageGenerateHeight: edited(setImageGenerateHeight),
+      setImageGenerateSteps: edited(setImageGenerateSteps),
+      setImageGenerateCfgScale: edited(setImageGenerateCfgScale),
+      setImageGenerateSeed: edited(setImageGenerateSeed),
+      setImageGenerateSampler: edited(setImageGenerateSampler),
+      setImageGenerateModel: edited(setImageGenerateModel),
+      setImageGenerateExtraParams: edited(setImageGenerateExtraParams)
+    }
+  }, [])
+  React.useEffect(() => () => { imageOperationRef.current = null; refinementSourceRef.current = null; modalRevision.current++ }, [])
 
   // ---- derived ----
   const imagePromptStrategies = React.useMemo(() => getImagePromptStrategies(), [])
@@ -212,6 +227,7 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
 
   // ---- callbacks ----
   const clearImagePromptRefineCandidate = React.useCallback(() => {
+    if (refinementSourceRef.current) refinementSourceRef.current.hasCandidate = false
     setImagePromptRefineBaseline("")
     setImagePromptRefineCandidate("")
     setImagePromptRefineModel(null)
@@ -220,41 +236,70 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
   }, [])
 
   const clearImagePromptRefineState = React.useCallback(() => {
+    refinementSourceRef.current = null
     clearImagePromptRefineCandidate()
     setImageGenerateRefineMetadata(undefined)
   }, [clearImagePromptRefineCandidate])
+  const renderedRefinementSource = refinementSourceRef.current
+  React.useLayoutEffect(() => {
+    const active = imageOperationRef.current
+    if (active && !active.isCurrent()) {
+      imageOperationRef.current = null
+      setImageGenerateSubmitting(false)
+      setImagePromptRefineSubmitting(false)
+    }
+    const refinement = refinementSourceRef.current
+    if (refinement && !refinement.isCurrent()) clearImagePromptRefineState()
+  }, [captureCompletionGuard, imageGenerateSubmitting, imagePromptRefineSubmitting,
+    renderedRefinementSource, clearImagePromptRefineState])
 
   const hydrateImageGenerateSettings = React.useCallback(
     async (backend: string) => {
-      if (!backend) return
-      const configs = await getImageBackendConfigs().catch(() => ({}))
-      const config = normalizeImageBackendConfig(
-        resolveImageBackendConfig(backend, configs)
-      )
-      setImageGenerateFormat(config.format || "png")
-      setImageGenerateNegativePrompt(config.negativePrompt || "")
-      setImageGenerateWidth(config.width)
-      setImageGenerateHeight(config.height)
-      setImageGenerateSteps(config.steps)
-      setImageGenerateCfgScale(config.cfgScale)
-      setImageGenerateSeed(config.seed)
-      setImageGenerateSampler(config.sampler || "")
-      setImageGenerateModel(config.model || "")
-      setImageGenerateExtraParams(
-        config.extraParams == null
+      const sourceIsCurrent = captureCompletionGuard?.() ?? (() => true)
+      if (!backend || !sourceIsCurrent()) return
+      const revision = modalRevision.current
+      const editRevision = settingsEditRevision.current
+      const requestRevision = ++settingsRequestRevision.current
+      const isCurrent = () => sourceIsCurrent() && modalRevision.current === revision &&
+        settingsEditRevision.current === editRevision && settingsRequestRevision.current === requestRevision
+      try {
+        const configs = await getImageBackendConfigs({ throwOnError: true })
+        if (!isCurrent()) return
+        const config = normalizeImageBackendConfig(resolveImageBackendConfig(backend, configs))
+        const extraParams = config.extraParams == null
           ? ""
           : typeof config.extraParams === "string"
             ? config.extraParams
             : JSON.stringify(config.extraParams, null, 2)
-      )
+        setImageGenerateFormat(config.format || "png")
+        setImageGenerateNegativePrompt(config.negativePrompt || "")
+        setImageGenerateWidth(config.width)
+        setImageGenerateHeight(config.height)
+        setImageGenerateSteps(config.steps)
+        setImageGenerateCfgScale(config.cfgScale)
+        setImageGenerateSeed(config.seed)
+        setImageGenerateSampler(config.sampler || "")
+        setImageGenerateModel(config.model || "")
+        setImageGenerateExtraParams(extraParams)
+      } catch (error) {
+        if (!isCurrent()) return
+        notificationApi.error({
+          message: t("playground:imageGeneration.settingsLoadFailedTitle", "Image settings unavailable"),
+          description: error instanceof Error ? error.message : t(
+            "playground:imageGeneration.settingsLoadFailedBody",
+            "Could not load saved image settings. Your current settings were kept."
+          )
+        })
+      }
     },
-    []
+    [captureCompletionGuard, notificationApi, t]
   )
 
   const openImageGenerateModal = React.useCallback(() => {
     modalRevision.current++
-    imageSendRef.current = null
+    imageOperationRef.current = null
     setImageGenerateSubmitting(false)
+    setImagePromptRefineSubmitting(false)
     setToolsPopoverOpen(false)
     setImagePromptContextBreakdown([])
     clearImagePromptRefineState()
@@ -288,11 +333,13 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
 
   const closeImageGenerateModal = React.useCallback(() => {
     modalRevision.current++
-    imageSendRef.current = null
+    imageOperationRef.current = null
     setImageGenerateSubmitting(false)
+    setImagePromptRefineSubmitting(false)
+    clearImagePromptRefineState()
     setImageGenerateReferenceFileId(undefined)
     setImageGenerateModalOpen(false)
-  }, [])
+  }, [clearImagePromptRefineState])
 
   const handleCreateImagePromptDraft = React.useCallback(() => {
     const rawContext = deriveImagePromptRawContext({
@@ -319,6 +366,9 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
   ])
 
   const handleRefineImagePromptDraft = React.useCallback(async () => {
+    const sourceIsCurrent = captureCompletionGuard?.() ?? (() => true)
+    if (!sourceIsCurrent() || imageOperationRef.current) return
+    const revision = modalRevision.current
     const prompt = imageGeneratePrompt.trim()
     if (!prompt) {
       notificationApi.error({
@@ -361,16 +411,26 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
             })
           }).weightedContext.entries.slice(0, 4)
 
+    const attempt = { isCurrent: () => sourceIsCurrent() && modalRevision.current === revision }
+    imageOperationRef.current = attempt
     setImagePromptRefineSubmitting(true)
     setImageGenerateRefineMetadata(undefined)
     let servicePromptSnapshot: ServicePromptSnapshot | null = null
+    const isCurrent = () => imageOperationRef.current === attempt && attempt.isCurrent() &&
+      !servicePromptSnapshot?.scopeInvalidatedSignal.aborted
+    const assertCurrent = () => {
+      if (!isCurrent()) throw createServicePromptScopeChangedError()
+    }
     try {
+      assertCurrent()
       const startedAt =
         typeof performance !== "undefined" ? performance.now() : Date.now()
       await tldwClient.initialize().catch(() => null)
+      assertCurrent()
       servicePromptSnapshot = await loadServicePromptSnapshot([
         "image.prompt.refinement"
       ])
+      assertCurrent()
       const refinementPrompt =
         servicePromptSnapshot.definitions["image.prompt.refinement"]
       if (!refinementPrompt) {
@@ -380,9 +440,7 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
         modelId: normalizedModel,
         explicitProvider: currentApiProvider
       })
-      if (servicePromptSnapshot.scopeInvalidatedSignal.aborted) {
-        throw createServicePromptScopeChangedError()
-      }
+      assertCurrent()
       const completionResponse = await tldwClient.createChatCompletion(
         {
           model: normalizedModel,
@@ -403,10 +461,9 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
           requestScope: servicePromptSnapshot.requestScope
         }
       )
+      assertCurrent()
       const completionPayload = await completionResponse.json().catch(() => null)
-      if (servicePromptSnapshot.scopeInvalidatedSignal.aborted) {
-        throw createServicePromptScopeChangedError()
-      }
+      assertCurrent()
       const candidate = extractImagePromptRefineCandidate(completionPayload)
       if (!candidate) {
         throw new Error(
@@ -424,12 +481,14 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
         candidate,
         maxHighlights: 4
       })
+      refinementSourceRef.current = { isCurrent: attempt.isCurrent, hasCandidate: true }
       setImagePromptRefineBaseline(prompt)
       setImagePromptRefineCandidate(candidate)
       setImagePromptRefineModel(normalizedModel)
       setImagePromptRefineLatencyMs(latencyMs)
       setImagePromptRefineDiff(diff)
     } catch (error: any) {
+      if (!isCurrent()) return
       notificationApi.error({
         message: t(
           "playground:imageGeneration.refineFailedTitle",
@@ -444,9 +503,13 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
       })
     } finally {
       servicePromptSnapshot?.release()
-      setImagePromptRefineSubmitting(false)
+      if (imageOperationRef.current === attempt) {
+        imageOperationRef.current = null
+        setImagePromptRefineSubmitting(false)
+      }
     }
   }, [
+    captureCompletionGuard,
     currentApiProvider,
     formMessage,
     imageGenerateBackend,
@@ -463,6 +526,8 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
   ])
 
   const applyRefinedImagePromptCandidate = React.useCallback(() => {
+    if (imageOperationRef.current || !renderedRefinementSource?.hasCandidate ||
+      refinementSourceRef.current !== renderedRefinementSource || !renderedRefinementSource.isCurrent()) return
     const candidate = imagePromptRefineCandidate.trim()
     if (!candidate) return
 
@@ -494,6 +559,7 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
     setImageGeneratePrompt(candidate)
     clearImagePromptRefineCandidate()
   }, [
+    renderedRefinementSource,
     clearImagePromptRefineCandidate,
     imagePromptRefineCandidate,
     imagePromptRefineDiff,
@@ -502,13 +568,15 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
   ])
 
   const rejectRefinedImagePromptCandidate = React.useCallback(() => {
+    if (imageOperationRef.current || !renderedRefinementSource?.hasCandidate ||
+      refinementSourceRef.current !== renderedRefinementSource || !renderedRefinementSource.isCurrent()) return
     clearImagePromptRefineState()
-  }, [clearImagePromptRefineState])
+  }, [renderedRefinementSource, clearImagePromptRefineState])
 
   const submitImageGenerateModal = React.useCallback(async () => {
     const sourceIsCurrent = captureCompletionGuard?.() ?? (() => true)
     const canFocus = captureCompletionGuard?.(true) ?? (() => true)
-    if (!sourceIsCurrent() || imageSendRef.current) return
+    if (!sourceIsCurrent() || imageOperationRef.current) return
     const revision = modalRevision.current
 
     const prompt = imageGeneratePrompt.trim()
@@ -582,7 +650,7 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
     }
 
     const attempt = { isCurrent: () => sourceIsCurrent() && modalRevision.current === revision }
-    imageSendRef.current = attempt
+    imageOperationRef.current = attempt
     setImageGenerateSubmitting(true)
     try {
       const result = await sendMessage({
@@ -598,12 +666,12 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
         imageGenerationSource: "generate-modal",
         imageEventSyncPolicy: imageGenerateSyncPolicy
       })
-      if (imageSendRef.current !== attempt || !attempt.isCurrent() || !isChatSubmitSuccess(normalizeChatSubmitResult(result))) return
+      if (imageOperationRef.current !== attempt || !attempt.isCurrent() || !isChatSubmitSuccess(normalizeChatSubmitResult(result))) return
       const focusIsCurrent = canFocus()
       closeImageGenerateModal()
       if (focusIsCurrent) textAreaFocus()
     } catch (error: any) {
-      if (imageSendRef.current !== attempt || !attempt.isCurrent()) return
+      if (imageOperationRef.current !== attempt || !attempt.isCurrent()) return
       notificationApi.error({
         message: t("error", { defaultValue: "Error" }),
         description:
@@ -614,8 +682,8 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
           )
       })
     } finally {
-      if (imageSendRef.current === attempt) {
-        imageSendRef.current = null
+      if (imageOperationRef.current === attempt) {
+        imageOperationRef.current = null
         setImageGenerateSubmitting(false)
       }
     }
@@ -645,37 +713,27 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
   ])
 
   return {
+    ...configurationSetters,
     // state
     imageGenerateModalOpen,
     setImageGenerateModalOpen,
     imageGenerateBackend,
-    setImageGenerateBackend,
     imageGeneratePrompt,
     setImageGeneratePrompt,
     imageGeneratePromptMode,
     setImageGeneratePromptMode,
     imageGenerateFormat,
-    setImageGenerateFormat,
     imageGenerateNegativePrompt,
-    setImageGenerateNegativePrompt,
     imageGenerateWidth,
-    setImageGenerateWidth,
     imageGenerateHeight,
-    setImageGenerateHeight,
     imageGenerateSteps,
-    setImageGenerateSteps,
     imageGenerateCfgScale,
-    setImageGenerateCfgScale,
     imageGenerateSeed,
-    setImageGenerateSeed,
     imageGenerateSampler,
-    setImageGenerateSampler,
     imageGenerateModel,
-    setImageGenerateModel,
     imageGenerateExtraParams,
     imageGenerateReferenceFileId,
     setImageGenerateReferenceFileId,
-    setImageGenerateExtraParams,
     imageGenerateSyncPolicy,
     setImageGenerateSyncPolicy,
     referenceImageCandidates,

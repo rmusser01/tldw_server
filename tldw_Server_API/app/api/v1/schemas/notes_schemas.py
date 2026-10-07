@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 # 3rd-party Libraries
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Notes.wikilinks import (
     MAX_WIKILINK_TOKEN_TEXT_LENGTH,
     is_single_wikilink,
 )
+from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import validate_notes_provenance_payload
 
 from .notes_studio import NoteStudioDocumentSummaryResponse
 
@@ -71,6 +72,39 @@ def _normalize_folder_paths(value: Any) -> list[str] | None:
 
 
 # --- Note Schemas ---
+ProvenanceVersion = Annotated[int, Field(strict=True, ge=0, le=9_007_199_254_740_991)]
+
+
+class NoteProvenanceWrite(BaseModel):
+    """Optional independent evidence replacement; omission preserves history."""
+
+    knowledge_provenance: dict[str, Any] | None = None
+    expected_provenance_version: ProvenanceVersion | None = None
+
+    @field_validator("knowledge_provenance", mode="before")
+    @classmethod
+    def validate_provenance(cls, value):
+        if value is None:
+            raise ValueError("Omit knowledge_provenance to preserve history; null is not a replacement")
+        return validate_notes_provenance_payload(value)
+
+    @model_validator(mode="after")
+    def require_independent_base(self):
+        if self.knowledge_provenance is not None and self.expected_provenance_version is None:
+            raise ValueError("knowledge_provenance requires expected_provenance_version")
+        if self.knowledge_provenance is None and self.expected_provenance_version is not None:
+            raise ValueError("expected_provenance_version requires knowledge_provenance")
+        return self
+
+
+class NoteProvenanceRestore(BaseModel):
+    """Restore only the retained child at its exact independent head."""
+
+    model_config = ConfigDict(extra="forbid")
+    expected_provenance_version: Annotated[int, Field(strict=True, ge=1, le=9_007_199_254_740_991)]
+    expected_provenance_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
 class NoteBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=255, description="Title of the note")
     content: str = Field(..., min_length=1, max_length=5000000, description="Content of the note (max 5MB)")
@@ -78,7 +112,7 @@ class NoteBase(BaseModel):
     message_id: str | None = Field(None, description="Optional message ID backlink")
 
 
-class NoteCreate(NoteBase):
+class NoteCreate(NoteBase, NoteProvenanceWrite):
     # Override to allow optional title when auto_title is used
     title: str | None = Field(
         None,
@@ -160,7 +194,7 @@ class NoteCreate(NoteBase):
         return result
 
 
-class NoteUpdate(BaseModel):
+class NoteUpdate(NoteProvenanceWrite):
     title: str | None = Field(None, min_length=1, max_length=255, description="New title for the note")
     content: str | None = Field(None, min_length=1, max_length=5000000, description="New content for the note (max 5MB)")
     conversation_id: str | None = Field(None, description="Optional conversation ID backlink")
@@ -268,6 +302,13 @@ class NoteFoldersListResponse(BaseModel):
 
 
 class NoteResponse(NoteBase):
+    content: str = Field(..., description="Note body; portable export may add or remove provenance markers")
+    knowledge_provenance_state: Literal["unsupported", "absent", "active", "deleted"] = "unsupported"
+    knowledge_provenance_version: ProvenanceVersion | None = None
+    knowledge_provenance_hash: str | None = None
+    knowledge_provenance: dict[str, Any] | None = None
+    knowledge_provenance_reconciliation: Literal["canonical_wins"] | None = None
+
     id: str = Field(..., description="UUID of the note")
     created_at: datetime = Field(..., description="Timestamp of note creation")
     last_modified: datetime = Field(..., description="Timestamp of last modification")

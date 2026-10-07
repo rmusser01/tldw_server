@@ -2287,6 +2287,9 @@ export const PlaygroundForm = ({
     conflict: sidepanelHandoffConflict,
     importPending: sidepanelImportPending,
     conflictFeedback: sidepanelImportFeedback,
+    skippedFeedback: sidepanelSkippedFeedback,
+    importReceipt: sidepanelImportReceipt,
+    dismissImportReceipt: dismissSidepanelImportReceipt,
     insertHandoffDraft,
     replaceWithHandoffDraft,
     cancelHandoffImport,
@@ -5624,21 +5627,22 @@ export const PlaygroundForm = ({
                     <div className="min-w-0">
                       <div className="font-medium">
                         {t(
-                          "playground:sidepanelHandoff.conflictTitle",
-                          "Import sidepanel draft?",
+                          sidepanelHandoffConflict.handoff.hasText === false ? "playground:sidepanelHandoff.noTextTitle" : "playground:sidepanelHandoff.conflictTitle",
+                          sidepanelHandoffConflict.handoff.hasText === false ? "Copy contains no draft text" : "Import sidepanel draft?",
                         )}
                       </div>
                       <div className="text-text-muted">
                         {t(
-                          "playground:sidepanelHandoff.conflictDescription",
-                          "Review the copied draft below. Insert it, replace your current draft, or cancel the import.",
+                          sidepanelHandoffConflict.handoff.hasText === false ? "playground:sidepanelHandoff.noTextDescription" : "playground:sidepanelHandoff.conflictDescription",
+                          sidepanelHandoffConflict.handoff.hasText === false ? "Your draft remains here. Dismiss this copy, then choose the settings or attachments you need." : "Review the copied draft below. Insert it, replace your current draft, or cancel the import.",
                         )}
                       </div>
                     </div>
-                    <div className="basis-full min-w-0">
+                    {sidepanelHandoffConflict.handoff.hasText !== false ? <div className="basis-full min-w-0">
                       <p className="font-medium">{t("playground:sidepanelHandoff.copiedDraft", "Copied draft")}</p>
                       <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans text-sm text-text">{sidepanelHandoffConflict.handoff.draft.text}</pre>
-                    </div>
+                    </div> : null}
+                    {sidepanelSkippedFeedback ? <p className="basis-full text-text-muted">{sidepanelSkippedFeedback}</p> : null}
                     {(sidepanelImportPending || sidepanelImportFeedback) ? (
                       <p role="status" className="basis-full text-text-muted">
                         {sidepanelImportPending
@@ -5647,6 +5651,7 @@ export const PlaygroundForm = ({
                       </p>
                     ) : null}
                     <div className="flex flex-wrap items-center gap-2">
+                      {sidepanelHandoffConflict.handoff.hasText !== false ? <>
                       <button
                         type="button"
                         onClick={insertHandoffDraft}
@@ -5671,15 +5676,24 @@ export const PlaygroundForm = ({
                           "Replace current draft",
                         )}
                       </button>
+                      </> : null}
                       <button
                         type="button"
                         onClick={cancelHandoffImport}
                         className="min-h-7 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                       >
-                        {t("playground:sidepanelHandoff.cancel", "Cancel import")}
+                        {sidepanelHandoffConflict.handoff.hasText === false ? t("playground:sidepanelHandoff.dismissCopy", "Dismiss copy") : t("playground:sidepanelHandoff.cancel", "Cancel import")}
                       </button>
                     </div>
                   </div>
+                </div>
+              ) : null}
+              {sidepanelImportReceipt ? (
+                <div role="status" className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text">
+                  <p className="min-w-0 flex-1">{sidepanelImportReceipt.description}</p>
+                  <button type="button" onClick={dismissSidepanelImportReceipt} className="min-h-7 rounded border border-border px-3 py-1 focus-visible:ring-2 focus-visible:ring-focus">
+                    {t("playground:sidepanelHandoff.dismissReceipt", "Dismiss notice")}
+                  </button>
                 </div>
               ) : null}
               {/* Attachments summary (collapsed context management) */}

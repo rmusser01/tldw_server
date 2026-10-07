@@ -1,3 +1,4 @@
+import type { KnowledgeNoteSource } from "./knowledge-note-provenance"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
@@ -17,6 +18,7 @@ const persistPrefill = (write: () => Promise<void>): Promise<void> => {
 
 type KnowledgeQaResultLike = {
   id?: string
+  sourceId?: string | number
   content?: string
   text?: string
   metadata?: {
@@ -33,25 +35,19 @@ type KnowledgeQaResultLike = {
   }
 }
 
-export type WorkspaceKnowledgeQaPrefillSource = {
-  originalId: string | number | null
-  excerpt: string
-  snapshotMediaId?: number
-  importError?: string
-  mediaId: number | null
-  title: string
-  type: WorkspaceSourceType
-  sourceType: string | null
-  url?: string
-  pageNumber?: number
-  citationIndex?: number
-}
+export type WorkspaceKnowledgeQaPrefillSource = KnowledgeNoteSource & { importError?: string }
 
 export type ResearchWorkspacePrefill = {
   kind: "knowledge_qa_thread"
   id: string
   ownerScope?: string
   workspaceId?: string
+  pendingNoteWrite?: {
+    idempotencyKey: string
+    method: "POST" | "PUT"
+    expectedVersion?: number
+    body: Record<string, unknown>
+  }
   canonicalNoteId?: string
   legacyNoteId?: number
   draftRetained?: boolean
@@ -139,7 +135,14 @@ const resolveMediaId = (result: KnowledgeQaResultLike): number | null => {
     if (parsed != null) return parsed
   }
   if (/web|url/i.test(String(metadata.source_type || ""))) return null
-  const candidates = [metadata.document_id, metadata.doc_id, result.id]
+  const candidates = [
+    metadata.document_id,
+    metadata.doc_id,
+    ...(metadata.source_type === "media_db"
+      ? [metadata.source_id, result.sourceId]
+      : []),
+    result.id,
+  ]
   for (const candidate of candidates) {
     const parsed = parseNumber(candidate)
     if (parsed != null) return parsed
@@ -147,7 +150,7 @@ const resolveMediaId = (result: KnowledgeQaResultLike): number | null => {
   return null
 }
 
-const toPrefillSource = (
+export const toPrefillSource = (
   result: KnowledgeQaResultLike,
   index: number,
   citedIndices: Set<number>,
@@ -167,6 +170,8 @@ const toPrefillSource = (
     metadata.mediaId ??
     metadata.document_id ??
     metadata.doc_id ??
+    metadata.source_id ??
+    result.sourceId ??
     result.id ??
     url
   const originalId =
@@ -362,7 +367,9 @@ export const buildKnowledgeQaSeedNote = (
       )
       if (source.mediaId == null)
         lines.push(
-          "  Retrieved-excerpt snapshot; not a live or complete copy of the original.",
+          source.originalVersion != null
+            ? `  Full note snapshot (version ${source.originalVersion}); original retrieved evidence below. Refresh by importing the note again.`
+            : "  Retrieved-excerpt snapshot; not a live or complete copy of the original.",
         )
       if (source.excerpt) lines.push(source.excerpt)
     }

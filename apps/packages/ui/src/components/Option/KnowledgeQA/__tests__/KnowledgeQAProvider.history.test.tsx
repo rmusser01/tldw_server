@@ -322,6 +322,33 @@ describe("KnowledgeQAProvider history hydration", () => {
     }
   })
 
+  it.each([true, false])("restores the answered question before an unanswered follow-up (context: %s)", async (withContext) => {
+    fetchWithAuthMock.mockImplementation(async (path: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => path.includes("/messages-with-context") ? [
+        { id: "answered-user", role: "user", content: "Original answered question" },
+        {
+          id: "saved-answer", role: "assistant", content: "Saved answer",
+          ...(withContext ? { rag_context: { search_query: "Original answered question", generated_answer: "Saved answer" } } : {}),
+        },
+        { id: "unanswered-user", role: "user", content: "Unanswered follow-up" },
+      ] : [],
+      text: async () => "",
+    }))
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => { await latestContext!.restoreFromHistory(baseHistoryItem) })
+    expect(latestContext!.answer).toBe("Saved answer")
+    expect(latestContext!.resultQuery).toBe("Original answered question")
+    act(() => latestContext!.setQuery("Edited but not searched"))
+    expect(latestContext!.resultQuery).toBe("Original answered question")
+    ragSearchMock.mockResolvedValue({ results: [], generated_answer: "Follow-up answer", metadata: {} })
+    await act(async () => { await latestContext!.askFollowUp("Next answered question") })
+    expect(latestContext!.resultQuery).toBe("Next answered question")
+    expect(latestContext!.answer).toBe("Follow-up answer")
+  })
+
   it("hydrates partial payloads without failing and clears stale results", async () => {
     localStorage.setItem(TEST_HISTORY_STORAGE_KEY, JSON.stringify([baseHistoryItem]))
     fetchWithAuthMock.mockImplementation(async (path: string) => {

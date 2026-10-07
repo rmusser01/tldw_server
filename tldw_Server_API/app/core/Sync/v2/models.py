@@ -19,6 +19,7 @@ from .notes_link_contract import (
 )
 
 SyncDomain = Literal[
+    "notes.provenance",
     "notes.note",
     "chat.conversation",
     "chat.message",
@@ -193,9 +194,11 @@ SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     + list(MEDIA_SYNC_DOMAINS)
     + list(NOTES_ORGANIZATION_DOMAINS)
     + list(NOTES_LINK_DOMAINS)
+    + ["notes.provenance"]
     + list(PERSONAL_CONTEXT_SYNC_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    "notes.provenance": ["upsert", "tombstone"],
     **M1_SYNC_OPERATIONS,
     **WORKSPACE_SYNC_OPERATIONS,
     **SOURCE_CACHE_SYNC_OPERATIONS,

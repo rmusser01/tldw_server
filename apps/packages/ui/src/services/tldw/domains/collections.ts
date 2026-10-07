@@ -1,3 +1,4 @@
+import { knowledgeNoteWriteFields, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { requestScopeFields } from "./service-prompts"
 import type { ScopedRequestOptions } from "../TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
@@ -78,8 +79,8 @@ export const collectionsMethods = {
       ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: "/api/v1/notes/",
       method: "POST",
-      headers: { "Content-Type": "application/json", ...scopeFields.headers },
-      body: { content, ...metadata }
+      headers: { "Content-Type": "application/json", ...scopeFields.headers, ...(options?.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}) },
+      body: { ...metadata, content: retainKnowledgeNoteProvenance(content, metadata), ...knowledgeNoteWriteFields(content, metadata, { create: true }) }
     })
   },
 

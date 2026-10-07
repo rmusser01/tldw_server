@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ExportDialog } from "../ExportDialog"
-import type { RagResult } from "../types"
+import type { RagResult, ScopeSnapshot } from "../types"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -56,6 +56,7 @@ const state = {
     | "unknown_origin"
     | null,
   query: "What does this source say?",
+  resultQuery: undefined as string | null | undefined,
   settings: {
     sources: ["media_db", "notes"],
     include_media_ids: [42],
@@ -65,6 +66,7 @@ const state = {
     generation_model: "gpt-4o-mini",
     enable_web_fallback: false,
   },
+  lastSearchScope: null as ScopeSnapshot | null,
   preset: "balanced",
   searchDetails: null as null | {
     expandedQueries?: string[]
@@ -76,10 +78,12 @@ const state = {
   },
 }
 
-vi.mock("../KnowledgeQAProvider", () => ({
+vi.mock("../KnowledgeQAProvider", () => {
+  const client = { createNote: createNoteMock, exportChatbook: exportChatbookMock, downloadChatbookExport: downloadChatbookExportMock, createConversationShareLink: createShareLinkMock, revokeConversationShareLink: revokeShareLinkMock }
+  return ({
   useKnowledgeQA: () => ({
     isAuthorityCurrent: () => true,
-    client: { createNote: createNoteMock, exportChatbook: exportChatbookMock, downloadChatbookExport: downloadChatbookExportMock, createConversationShareLink: createShareLinkMock, revokeConversationShareLink: revokeShareLinkMock },
+    client,
     messages: state.messages,
     currentThreadId: state.currentThreadId,
     results: state.results,
@@ -88,11 +92,13 @@ vi.mock("../KnowledgeQAProvider", () => ({
     answerTrustState: state.answerTrustState,
     answerEvidenceOrigin: state.answerEvidenceOrigin,
     query: state.query,
+    resultQuery: state.resultQuery,
     settings: state.settings,
+    lastSearchScope: state.lastSearchScope,
     preset: state.preset,
     searchDetails: state.searchDetails,
   })
-}))
+})})
 
 vi.mock("@/hooks/useAntdMessage", () => ({
   useAntdMessage: () => ({
@@ -140,6 +146,7 @@ describe("ExportDialog accessibility", () => {
     state.answerTrustState = "cited_answer"
     state.answerEvidenceOrigin = "local_library"
     state.query = "What does this source say?"
+    state.resultQuery = undefined
     state.settings = {
       sources: ["media_db", "notes"],
       include_media_ids: [42],
@@ -151,6 +158,7 @@ describe("ExportDialog accessibility", () => {
     }
     state.preset = "balanced"
     state.searchDetails = null
+    state.lastSearchScope = null
   })
 
   it("persists provenance in canonical content when NoteResponse drops metadata", async () => {
@@ -160,6 +168,10 @@ describe("ExportDialog accessibility", () => {
     await waitFor(() => expect(createNoteMock).toHaveBeenCalled())
     expect(createNoteMock.mock.calls[0][0]).toContain("<!-- tldw-knowledge:v1:")
     expect(createNoteMock.mock.calls[0][1].conversation_id).toBe("thread-1")
+    expect(createNoteMock.mock.calls[0][1]).toMatchObject({
+      expected_provenance_version: 0,
+      knowledge_provenance: { origin: "knowledge_qa", question: state.query, scope: { include_media_ids: [42], include_note_ids: ["note-a"] } },
+    })
     expect(await screen.findByRole("link", { name: "Open saved note" })).toHaveAttribute("href", "/notes?source_ref_id=canonical-export")
   })
   it("exposes modal dialog semantics", () => {
@@ -910,4 +922,85 @@ describe("ExportDialog accessibility", () => {
     expect(screen.getByRole("button", { name: /^Copy$/ })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Copied" })).not.toBeInTheDocument()
   })
+})
+
+it("retries Save to Notes with the exact portable body and request identity", async () => {
+  createNoteMock.mockRejectedValueOnce(new Error("Lost response")).mockResolvedValueOnce({ id: "saved" })
+  render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await waitFor(() => expect(messageOpenMock).toHaveBeenCalledWith(expect.objectContaining({ type: "error" })))
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await screen.findByRole("link", { name: "Open saved note" })
+  expect(createNoteMock.mock.calls[1]).toEqual(createNoteMock.mock.calls[0])
+  expect(createNoteMock.mock.calls[0][2].idempotencyKey).toBeTruthy()
+})
+
+it("retains the searched scope after the controls change", async () => {
+  state.lastSearchScope = { preset: "balanced", sources: ["notes"], includeNoteIds: ["original"], includeMediaIds: [], collectionId: 7, keywordFilter: "original-topic", webFallback: false }
+  render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await waitFor(() => expect(createNoteMock).toHaveBeenCalled())
+  expect(createNoteMock.mock.calls.at(-1)![1].knowledge_provenance.scope).toEqual({ sources: ["notes"], include_note_ids: ["original"], include_media_ids: [], collection_id: 7, keyword_filter: "original-topic", enable_web_fallback: false })
+  state.lastSearchScope = null
+})
+
+it.each(['Question one', null])('saves the answered question after editing the search input without searching (question=%s)', async resultQuery => {
+  createNoteMock.mockClear().mockResolvedValue({ id: 'saved' })
+  state.resultQuery = resultQuery
+  state.query = 'Question two, not searched'
+  render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await waitFor(() => expect(createNoteMock).toHaveBeenCalled())
+  expect(createNoteMock.mock.calls.at(-1)?.[1]).toMatchObject({ knowledge_provenance: { question: resultQuery ?? '' } })
+  state.resultQuery = undefined
+})
+
+it.each([422, 409])('handles a rejected direct save without losing uncertain identity (status=%s)', async status => {
+  messageOpenMock.mockClear()
+  createNoteMock.mockReset()
+  state.query = 'Original question'
+  state.resultQuery = 'Original question'
+  state.answer = 'Original answer'
+  state.answerTrustState = 'cited_answer'
+  const policy = { error_code: 'notes_provenance_encryption_unsupported', message: 'Knowledge provenance could not be saved; refresh its state and retry.' }
+  createNoteMock.mockRejectedValueOnce(Object.assign(new Error('rejected'), { status, details: { detail: status === 409 ? policy : 'invalid input' } })).mockResolvedValue({ id: 'saved' })
+  const view = render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await waitFor(() => expect(messageOpenMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' })))
+  state.answer = 'Corrected answer'
+  view.rerender(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await screen.findByRole('link', { name: 'Open saved note' })
+  const [first, second] = createNoteMock.mock.calls
+  if (status === 422) {
+    expect(second[0]).toContain('Corrected answer')
+    expect(second[2].idempotencyKey).not.toBe(first[2].idempotencyKey)
+  } else expect(second).toEqual(first)
+  state.resultQuery = undefined
+})
+
+
+it.each([429, 401])('retains a lost-ack direct save through pre-receipt HTTP %s', async status => {
+  messageOpenMock.mockClear()
+  createNoteMock.mockReset()
+  state.resultQuery = 'Original question'
+  state.answer = 'Original answer'
+  state.answerTrustState = 'cited_answer'
+  createNoteMock.mockRejectedValueOnce(new Error('Lost acknowledgment'))
+    .mockRejectedValueOnce(Object.assign(new Error('Temporarily unavailable'), { status }))
+    .mockResolvedValue({ id: 'saved' })
+  const view = render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await waitFor(() => expect(createNoteMock).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save to Notes' })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await waitFor(() => expect(createNoteMock).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save to Notes' })).not.toBeDisabled())
+  state.answer = 'Later unsaved answer'
+  view.rerender(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await screen.findByRole('link', { name: 'Open saved note' })
+  expect(createNoteMock.mock.calls[2]).toEqual(createNoteMock.mock.calls[0])
+  expect(createNoteMock.mock.calls[0][1].knowledge_provenance.question).toBe('Original question')
+  state.resultQuery = undefined
 })

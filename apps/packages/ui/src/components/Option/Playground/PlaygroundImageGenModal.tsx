@@ -673,7 +673,7 @@ export const PlaygroundImageGenModal: React.FC<PlaygroundImageGenModalProps> =
                   </div>
                 )}
                 <div className="mt-3 flex flex-wrap justify-end gap-2">
-                  <Button onClick={onRejectRefined}>
+                  <Button onClick={onRejectRefined} disabled={busy}>
                     {t(
                       "playground:imageGeneration.refineKeepOriginal",
                       "Keep original"
@@ -682,6 +682,7 @@ export const PlaygroundImageGenModal: React.FC<PlaygroundImageGenModalProps> =
                   <Button
                     type="primary"
                     onClick={onApplyRefined}
+                    disabled={busy}
                     data-testid="image-refine-accept"
                   >
                     {t(

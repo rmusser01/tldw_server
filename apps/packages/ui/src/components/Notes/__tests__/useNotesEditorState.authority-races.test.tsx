@@ -230,3 +230,19 @@ describe('Notes editor authority races', () => {
     expect(view.result.current.taskActivityEvents.map((event) => event.id)).toEqual(['current-event'])
   })
 })
+
+it.each(["active", "deleted"])("opens independent %s history after the marker is removed", async state => {
+  const history = { origin: "knowledge_qa", trust_state: "uncited_degraded_answer", question: "Original question" }
+  mocks.request.mockResolvedValue({ id: "owned", content: "Edited answer", version: 9,
+    knowledge_provenance_state: state, knowledge_provenance_version: 4,
+    knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+    knowledge_provenance: state === "active" ? history : null,
+  })
+  const view = renderEditor()
+  await act(async () => { await view.result.current.loadDetail("owned") })
+  expect(view.result.current.originalMetadata).toMatchObject({
+    knowledge_provenance_state: state, knowledge_provenance_version: 4,
+    knowledge_provenance: state === "active" ? history : null,
+  })
+  expect(view.result.current.content).toBe("Edited answer")
+})

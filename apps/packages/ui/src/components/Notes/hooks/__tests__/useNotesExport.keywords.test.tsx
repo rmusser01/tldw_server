@@ -90,3 +90,17 @@ it("retains linked tags in filtered JSON exports", async () => {
     "filtered-tag",
   ]);
 });
+
+it.each(["active", "deleted"])("exports the %s independent head for filtered and selected notes", async (state) => {
+  const history = { origin: "knowledge_qa", question: "Q" }
+  const marker = `<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`
+  const note = { id: "n", title: "T", content: state === "active" ? "Edited" : `Edited\n\n${marker}`, keywords: [],
+    knowledge_provenance_state: state, knowledge_provenance: state === "active" ? history : null,
+  }
+  const options = { ...deps(), query: "Edited", hasActiveFilters: true, fetchFilteredNotesRaw: async () => ({ items: [note], total: 1 }), selectedBulkNotes: [note] }
+  const { result } = renderHook(() => useNotesExport(options))
+  await act(async () => { await result.current.exportAllJSON() })
+  expect(JSON.parse(await exported.text())[0].content.includes("tldw-knowledge:v1:")).toBe(state === "active")
+  act(() => { result.current.exportSelectedBulk() })
+  expect((await exported.text()).includes("tldw-knowledge:v1:")).toBe(state === "active")
+})

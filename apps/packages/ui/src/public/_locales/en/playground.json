@@ -4117,5 +4117,41 @@
   },
   "composer_persistence_serverFailedPill": {
     "message": "Couldn't save to server"
+  },
+  "sidepanelHandoff_skippedSettings": {
+    "message": "Settings"
+  },
+  "sidepanelHandoff_skippedHistory": {
+    "message": "Conversation history"
+  },
+  "sidepanelHandoff_skippedAttachments": {
+    "message": "Attachments and retrieval sources"
+  },
+  "sidepanelHandoff_notImported": {
+    "message": "Not imported"
+  },
+  "sidepanelHandoff_chooseHere": {
+    "message": "Choose these in the destination chat."
+  },
+  "sidepanelHandoff_draftImported": {
+    "message": "Draft text imported."
+  },
+  "sidepanelHandoff_noTextTitle": {
+    "message": "Copy contains no draft text"
+  },
+  "sidepanelHandoff_noTextDescription": {
+    "message": "Your draft remains here. Dismiss this copy, then choose the settings or attachments you need."
+  },
+  "sidepanelHandoff_dismissCopy": {
+    "message": "Dismiss copy"
+  },
+  "sidepanelHandoff_dismissReceipt": {
+    "message": "Dismiss notice"
+  },
+  "imageGeneration_settingsLoadFailedTitle": {
+    "message": "Image settings unavailable"
+  },
+  "imageGeneration_settingsLoadFailedBody": {
+    "message": "Could not load saved image settings. Your current settings were kept."
   }
 }

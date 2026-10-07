@@ -13,9 +13,7 @@ import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { resolveHistorySelection } from "@/utils/history-selection"
 import { Playground } from "../Playground"
 import {
-  decodeSidepanelChatWebUiHandoff,
   encodeSidepanelChatWebUiHandoff,
-  SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM,
   SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE
 } from "@/services/tldw/sidepanel-chat-webui-handoff"
 
@@ -206,7 +204,7 @@ vi.mock("@/components/Option/Playground/PlaygroundForm", () => {
     const imported = useSidepanelChatHandoffImport({ ready: fragmentComposer.ready, destinationKey: "owned-destination", captureGuard: () => () => true,
       draftValue: form.values.message, getDraftRevision: form.getRevision, setMessageValue: value => form.setFieldValue("message", value), t: (_key, fallback) => fallback })
     return <div data-testid="playground-form"><textarea aria-label="Fragment composer" value={form.values.message} readOnly />
-      {imported.conflict ? <div role="status" aria-label="Fragment review"><pre>{imported.conflict.handoff.draft.text}</pre><button onClick={imported.replaceWithHandoffDraft}>Accept fragment draft</button></div> : null}</div>
+      {imported.conflict ? <div role="status" aria-label="Fragment review"><pre>{imported.conflict.handoff.draft.text}</pre><p>{imported.skippedFeedback}</p><button onClick={imported.replaceWithHandoffDraft}>Accept fragment draft</button><button onClick={imported.cancelHandoffImport}>Cancel fragment import</button></div> : null}</div>
   }
   return { PlaygroundForm: () => fragmentComposer.enabled ? <Composer /> : <div data-testid="playground-form" /> }
 })
@@ -727,60 +725,26 @@ describe("Playground thread search integration", () => {
     window.removeEventListener("tldw:open-history", onOpenHistory)
   })
 
-  it("restores transferable sidepanel WebUI state without granting its reference hints history authority", async () => {
-    messageOptionState.value.historyId = "history-1"
-    messageOptionState.value.serverChatId = null
-    messageOptionState.value.selectedSystemPrompt = "stale-system"
-    messageOptionState.value.selectedQuickPrompt = "stale-quick"
-
-    const encodedHandoff = encodeSidepanelChatWebUiHandoff({
-      source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
-      createdAt: Date.now(),
-      draft: "continue from the sidepanel",
-      historyId: "history-handoff",
-      serverChatId: "server-handoff",
-      selectedSystemPrompt: null,
-      selectedQuickPrompt: "",
-      chatMode: "rag",
-      webSearch: true,
-      toolChoice: "auto",
-      temporaryChat: true,
-      useOCR: true,
-      ragMediaIds: [101, 202],
-      fileRetrievalEnabled: true
-    })
-    const hashParams = new URLSearchParams()
-    hashParams.set(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM, encodedHandoff)
-    window.history.replaceState(null, "", `/chat#${hashParams.toString()}`)
-    expect(decodeSidepanelChatWebUiHandoff(encodedHandoff)).toMatchObject({
-      historyId: "history-handoff"
-    })
-
+  it("keeps mixed sidepanel options and references untouched before review and after Cancel", async () => {
+    fragmentComposer.enabled = true
+    fragmentComposer.ready = true
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(),
+      draft: "COPIED DRAFT  ", historyId: "foreign-history", serverChatId: "foreign-server", selectedModel: "foreign-model",
+      selectedSystemPrompt: "foreign-prompt", selectedQuickPrompt: "literal prompt", chatMode: "rag", webSearch: true,
+      toolChoice: "required", temporaryChat: true, useOCR: true, chatDocumentDraftId: "foreign-document", ragMediaIds: [101], fileRetrievalEnabled: true })
+    window.history.replaceState(null, "", `/chat#handoff=${encoded}`)
     render(<Playground />)
-
-    await waitFor(() => expect(messageOptionState.value.setFileRetrievalEnabled).toHaveBeenCalledWith(true))
-    expect(loadLocalConversationMock).not.toHaveBeenCalled()
-    expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalledWith("server-handoff")
-    expect(screen.getByTestId("sidepanel-handoff-history-unconfirmed")).toHaveTextContent("History was not transferred")
-    expect(
-      messageOptionState.value.setSelectedSystemPrompt
-    ).toHaveBeenCalledWith(null)
-    expect(messageOptionState.value.setSelectedQuickPrompt).toHaveBeenCalledWith(
-      null
-    )
-    expect(messageOptionState.value.setChatMode).toHaveBeenCalledWith("rag")
-    expect(messageOptionState.value.setWebSearch).toHaveBeenCalledWith(true)
-    expect(messageOptionState.value.setToolChoice).toHaveBeenCalledWith("auto")
-    expect(messageOptionState.value.setTemporaryChat).toHaveBeenCalledWith(true)
-    expect(messageOptionState.value.setUseOCR).toHaveBeenCalledWith(true)
-    expect(messageOptionState.value.setRagMediaIds).toHaveBeenCalledWith([
-      101,
-      202
-    ])
-    expect(
-      messageOptionState.value.setFileRetrievalEnabled
-    ).toHaveBeenCalledWith(true)
-    expect(window.location.hash).toContain(`handoff=${encodedHandoff}`)
+    await screen.findByRole("status", { name: "Fragment review" })
+    const writes = [messageOptionState.value.setSelectedModel, messageOptionState.value.setSelectedSystemPrompt,
+      messageOptionState.value.setSelectedQuickPrompt, messageOptionState.value.setChatMode, messageOptionState.value.setWebSearch,
+      messageOptionState.value.setToolChoice, messageOptionState.value.setTemporaryChat, messageOptionState.value.setUseOCR,
+      messageOptionState.value.setRagMediaIds, messageOptionState.value.setFileRetrievalEnabled, messageOptionState.value.setContextFiles,
+      storeOptionState.value.setUploadedFiles, tldwClientState.getDocumentUploadDraft, tldwClientState.deleteDocumentUploadDraft]
+    for (const write of writes) expect(write).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel fragment import" }))
+    expect(screen.getByLabelText("Fragment composer")).toHaveValue("RESTORED DESTINATION  ")
+    for (const write of writes) expect(write).not.toHaveBeenCalled()
+    expect(routerState.navigate).toHaveBeenCalledWith(expect.objectContaining({ hash: "" }), { replace: true })
   })
 
   it("does not let an unavailable foreign local reference block its transferable draft", async () => {
@@ -800,113 +764,51 @@ describe("Playground thread search integration", () => {
       expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalledWith("unqualified-server-id")
       expect(messageOptionState.value.historyId).toBe("history-1")
       expect(messageOptionState.value.serverChatId).toBe("chat-1")
-      expect(screen.getByTestId("sidepanel-handoff-history-unconfirmed")).toHaveTextContent("Chats sidebar")
+      expect(screen.getByRole("status", { name: "Fragment review" })).toHaveTextContent("Conversation history")
     } finally {
       window.removeEventListener("tldw:set-composer-message", draftReceived)
       loadLocalConversationMock.mockReset().mockResolvedValue(undefined)
     }
   })
 
-  it("offers the actual hydrated draft review while settings change and document loading stays held", async () => {
+  it("waits for hydrated draft review without starting an unqualified document read", async () => {
     fragmentComposer.enabled = true
-    let release!: (value: { payload: object }) => void
-    tldwClientState.getDocumentUploadDraft.mockReturnValueOnce(new Promise(resolve => { release = resolve }))
     const copied = "  {{user}}\n\tREVIEW NOW  "
-    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft: copied, selectedModel: "different-model", chatDocumentDraftId: "held-document" })
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft: copied, selectedModel: "different-model", chatDocumentDraftId: "unqualified-document" })
     window.history.replaceState(null, "", `/chat#handoff=${encoded}`)
-    const events = vi.fn()
-    window.addEventListener("tldw:set-composer-message", events)
-    try {
-      const view = render(<Playground />)
-      await waitFor(() => expect(tldwClientState.getDocumentUploadDraft).toHaveBeenCalledWith("held-document"))
-      expect(screen.queryByRole("status", { name: "Fragment review" })).not.toBeInTheDocument()
-      messageOptionState.value.selectedModel = "different-model"
-      fragmentComposer.ready = true
-      view.rerender(<Playground />)
-      await screen.findByRole("status", { name: "Fragment review" })
-      expect(screen.getByRole("status", { name: "Fragment review" }).querySelector("pre")?.textContent).toBe(copied)
-      expect(screen.getByLabelText("Fragment composer")).toHaveValue("RESTORED DESTINATION  ")
-      expect(window.location.hash).toContain(`handoff=${encoded}`)
-      await act(async () => { release({ payload: {} }) })
-      expect(events.mock.calls.some(([event]) => (event as CustomEvent).detail?.message === copied)).toBe(false)
-      expect(screen.getByLabelText("Fragment composer")).toHaveValue("RESTORED DESTINATION  ")
-    } finally { window.removeEventListener("tldw:set-composer-message", events) }
-  })
-
-  it("does not let old document-only work erase a replacement draft token", async () => {
-    fragmentComposer.enabled = true
-    fragmentComposer.ready = true
-    let release!: (value: { payload: object }) => void
-    tldwClientState.getDocumentUploadDraft.mockReturnValueOnce(new Promise(resolve => { release = resolve }))
-    const old = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), chatDocumentDraftId: "held-old-document" })
-    window.history.replaceState(null, "", `/chat#handoff=${old}`)
     const view = render(<Playground />)
-    await waitFor(() => expect(tldwClientState.getDocumentUploadDraft).toHaveBeenCalledWith("held-old-document"))
-    const incoming = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft: "NEW COPY  " })
-    window.history.replaceState(null, "", `/chat?keep=query#handoff=${incoming}&keep=hash`)
+    await act(async () => {})
+    expect(screen.queryByRole("status", { name: "Fragment review" })).not.toBeInTheDocument()
+    expect(tldwClientState.getDocumentUploadDraft).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setSelectedModel).not.toHaveBeenCalled()
+    fragmentComposer.ready = true
     view.rerender(<Playground />)
     await screen.findByRole("status", { name: "Fragment review" })
-    await act(async () => { release({ payload: {} }) })
-    expect(window.location.hash).toContain(`handoff=${incoming}`)
+    expect(screen.getByRole("status", { name: "Fragment review" }).querySelector("pre")?.textContent).toBe(copied)
     expect(screen.getByLabelText("Fragment composer")).toHaveValue("RESTORED DESTINATION  ")
+    expect(tldwClientState.deleteDocumentUploadDraft).not.toHaveBeenCalled()
   })
 
-  it("imports sidepanel document draft files into chat attachments", async () => {
-    const existingFile = {
-      id: "existing-file",
-      filename: "existing.md",
-      type: "text/markdown",
-      content: "existing",
-      size: 8,
-      uploadedAt: 1,
-      processed: false,
-      processingMode: "add_to_chat"
-    }
-    const draftFile = {
-      id: "draft-file",
-      filename: "draft.pdf",
-      type: "application/pdf",
-      content: "draft",
-      size: 16,
-      uploadedAt: 2,
-      processed: false,
-      processingMode: "add_to_chat"
-    }
+  it("keeps a document-only copy reviewable without consuming or merging unqualified files", async () => {
+    fragmentComposer.enabled = true
+    fragmentComposer.ready = true
+    const existingFile = { id: "existing", filename: "keep.md", content: "KEEP" }
     storeOptionState.value.uploadedFiles = [existingFile]
     storeOptionState.value.contextFiles = [existingFile]
-    tldwClientState.getDocumentUploadDraft.mockResolvedValueOnce({
-      payload: { files: [draftFile] }
-    })
-
-    const encodedHandoff = encodeSidepanelChatWebUiHandoff({
-      source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
-      createdAt: Date.now(),
-      chatDocumentDraftId: "document-draft-1"
-    })
-    const hashParams = new URLSearchParams()
-    hashParams.set(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM, encodedHandoff)
-    window.history.replaceState(null, "", `/chat#${hashParams.toString()}`)
-
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), chatDocumentDraftId: "unqualified-document" })
+    window.history.replaceState(null, "", `/chat#handoff=${encoded}`)
     render(<Playground />)
-
-    await waitFor(() => {
-      expect(tldwClientState.getDocumentUploadDraft).toHaveBeenCalledWith(
-        "document-draft-1"
-      )
-    })
-    expect(storeOptionState.value.setUploadedFiles).toHaveBeenCalledWith([
-      existingFile,
-      draftFile
-    ])
-    expect(messageOptionState.value.setContextFiles).toHaveBeenCalledWith([
-      existingFile,
-      draftFile
-    ])
-    expect(tldwClientState.deleteDocumentUploadDraft).toHaveBeenCalledWith(
-      "document-draft-1"
-    )
-    expect(messageOptionState.value.setRagMediaIds).not.toHaveBeenCalled()
+    await screen.findByRole("status", { name: "Fragment review" })
+    expect(tldwClientState.getDocumentUploadDraft).not.toHaveBeenCalled()
+    expect(tldwClientState.deleteDocumentUploadDraft).not.toHaveBeenCalled()
+    expect(storeOptionState.value.setUploadedFiles).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setContextFiles).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel fragment import" }))
+    expect(screen.getByLabelText("Fragment composer")).toHaveValue("RESTORED DESTINATION  ")
+    expect(storeOptionState.value.uploadedFiles).toEqual([existingFile])
+    expect(routerState.navigate).toHaveBeenCalledWith(expect.objectContaining({ hash: "" }), { replace: true })
   })
+
 })
 
 vi.mock("@/db/dexie/history-selection", () => ({

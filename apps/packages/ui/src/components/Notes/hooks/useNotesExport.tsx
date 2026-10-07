@@ -1,3 +1,4 @@
+import { retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import React from 'react'
 import type { MessageInstance } from 'antd/es/message/interface'
 import type { NoteListItem } from '@/components/Notes/notes-manager-types'
@@ -56,7 +57,7 @@ const readReportedTotal = (res: any): number | null => {
 const toExportNote = (n: any): NoteListItem => ({
   id: n?.id,
   title: n?.title,
-  content: n?.content,
+  content: retainKnowledgeNoteProvenance(String(n?.content || ""), n),
   updated_at: n?.updated_at,
   keywords: extractKeywords(n)
 })
@@ -81,6 +82,7 @@ export interface UseNotesExportDeps {
     signal?: AbortSignal
   ) => Promise<{ items: any[]; total: number }>
   /** From editor hook */
+  originalMetadata?: Record<string, unknown> | null
   selectedId: string | number | null
   title: string
   content: string
@@ -104,11 +106,14 @@ export function useNotesExport(deps: UseNotesExportDeps) {
     fetchFilteredNotesRaw,
     selectedId,
     title,
-    content,
+    content: editorContent,
+    originalMetadata,
     editorKeywords,
     selectedStudioState = null,
     studioPaperSize,
   } = deps
+
+  const content = retainKnowledgeNoteProvenance(editorContent, originalMetadata)
 
   const [exportProgress, setExportProgress] = React.useState<ExportProgressState | null>(null)
   const exportAbortRef = React.useRef<AbortController | null>(null)
@@ -388,7 +393,7 @@ export function useNotesExport(deps: UseNotesExportDeps) {
       return
     }
     const md = selectedBulkNotes
-      .map((note, index) => `### ${note.title || `Note ${note.id ?? index + 1}`}\n\n${String(note.content || '')}`)
+      .map((note, index) => `### ${note.title || `Note ${note.id ?? index + 1}`}\n\n${retainKnowledgeNoteProvenance(String(note.content || ''), note)}`)
       .join('\n\n---\n\n')
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
     const url = URL.createObjectURL(blob)

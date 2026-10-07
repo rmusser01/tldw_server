@@ -1,4 +1,5 @@
 import type { InitialChatSetupAttempt } from "@/utils/settings-return"
+import { knowledgeNoteWriteFields, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { BoundedTtlCache } from "./bounded-ttl-cache"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import type { ChatScope } from "@/types/chat-scope"
@@ -1078,6 +1079,7 @@ export interface ChatCompletionRequest {
 }
 
 export type ScopedRequestOptions = {
+  idempotencyKey?: string
   signal?: AbortSignal
   requestScope?: ServicePromptRequestScope
 }
@@ -4619,8 +4621,8 @@ export class TldwApiClientBase {
       ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: '/api/v1/notes/',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
-      body: { content, ...metadata }
+      headers: { 'Content-Type': 'application/json', ...scopeFields.headers, ...(options?.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}) },
+      body: { ...metadata, content: retainKnowledgeNoteProvenance(content, metadata), ...knowledgeNoteWriteFields(content, metadata, { create: true }) }
     })
   }
 
