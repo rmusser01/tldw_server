@@ -281,8 +281,9 @@ export const adminMethods = {
     })
   },
 
-  async listAlertHistory(): Promise<any[]> {
-    return await bgRequest<any[]>({ path: "/api/v1/admin/monitoring/alerts/history", method: "GET" })
+  async listAlertHistory(params?: { limit?: number }): Promise<any[]> {
+    const query = buildQuery(params as Record<string, any>)
+    return await bgRequest<any[]>({ path: `/api/v1/admin/monitoring/alerts/history${query}`, method: "GET" })
   },
 
   async getSecurityAlertStatus(): Promise<any> {

@@ -209,6 +209,11 @@ const MonitoringDashboardPage: React.FC = () => {
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(0)
   const [timeSinceRefresh, setTimeSinceRefresh] = useState("")
 
+  // Tab visibility — pause polling while hidden (LlamacppAdminPage pattern)
+  const [isTabVisible, setIsTabVisible] = useState(
+    () => document.visibilityState !== "hidden"
+  )
+
   const initialLoadRef = useRef(false)
 
   const markAdminGuardFromError = useCallback((err: unknown) => {
@@ -332,7 +337,7 @@ const MonitoringDashboardPage: React.FC = () => {
   const loadAlertHistory = useCallback(async () => {
     setHistoryLoading(true)
     try {
-      const result = await tldwClient.listAlertHistory()
+      const result = await tldwClient.listAlertHistory({ limit: 200 })
       setAlertHistory(Array.isArray(result) ? result : [])
     } catch (err) {
       markAdminGuardFromError(err)
@@ -385,16 +390,27 @@ const MonitoringDashboardPage: React.FC = () => {
     }
   }, [markAdminGuardFromError])
 
-  // Refresh all sections and update timestamp
-  const refreshAll = useCallback(() => {
+  // Live datasets (system stats + security status) — cheap, polled by auto-refresh.
+  const refreshLive = useCallback(() => {
     void loadSystemStats()
     void loadSecurityStatus()
+    setLastRefreshedAt(new Date())
+  }, [loadSystemStats, loadSecurityStatus])
+
+  // Deep datasets (sandbox diagnostics, alert rules, alert history, activity) —
+  // loaded on mount and manual refresh only, never by the poller.
+  const refreshDeep = useCallback(() => {
     void loadSandboxDiagnostics()
     void loadAlertRules()
     void loadAlertHistory()
     void loadActivity()
-    setLastRefreshedAt(new Date())
-  }, [loadSystemStats, loadSecurityStatus, loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
+  }, [loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
+
+  // Refresh every section (manual refresh button)
+  const refreshAll = useCallback(() => {
+    refreshLive()
+    refreshDeep()
+  }, [refreshLive, refreshDeep])
 
   // ── Initial Load ──
 
@@ -424,12 +440,35 @@ const MonitoringDashboardPage: React.FC = () => {
     )
   }, [loadSystemStats, loadSecurityStatus, loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
 
-  // Auto-refresh timer
+  // Track tab visibility so polling can pause while hidden
+  useEffect(() => {
+    const handleVisibilityChange = () =>
+      setIsTabVisible(document.visibilityState !== "hidden")
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+  }, [])
+
+  // Auto-refresh timer — polls live datasets only, and skips work while hidden
   useEffect(() => {
     if (autoRefreshInterval <= 0) return
-    const id = setInterval(refreshAll, autoRefreshInterval * 1000)
+    const id = setInterval(() => {
+      if (document.hidden) return
+      refreshLive()
+    }, autoRefreshInterval * 1000)
     return () => clearInterval(id)
-  }, [autoRefreshInterval, refreshAll])
+  }, [autoRefreshInterval, refreshLive])
+
+  // When the tab becomes visible again, catch up live data if it went stale
+  useEffect(() => {
+    if (!isTabVisible || autoRefreshInterval <= 0) return
+    if (!lastRefreshedAt) {
+      refreshLive()
+      return
+    }
+    const elapsedMs = Date.now() - lastRefreshedAt.getTime()
+    if (elapsedMs >= autoRefreshInterval * 1000) refreshLive()
+  }, [isTabVisible, autoRefreshInterval, lastRefreshedAt, refreshLive])
 
   // Update "last updated X ago" text every 10 seconds
   useEffect(() => {
