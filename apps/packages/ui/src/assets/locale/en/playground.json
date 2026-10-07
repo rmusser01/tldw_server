@@ -1447,7 +1447,10 @@
     "creationStorageUnavailable": "Creation recovery could not be read. Keep your draft and check retained drafts before starting again.",
     "creationDraftHelp": "Open this draft to review its creation before sending. Starting another chat may create a duplicate.",
     "copyAndReviewCreated": "Copy draft and review saved chat",
-    "savedChatDraft": "Retained message for a saved chat"
+    "savedChatDraft": "Retained message for a saved chat",
+    "accountPending": "Checking your account before restoring or saving drafts…",
+    "accountVerificationFailed": "Your account could not be verified. Draft saving, recovery, and imports are paused. Retry or check your connection settings.",
+    "retryAccountVerification": "Retry account verification"
   },
   "characterChatSessions": {
     "regionLabel": "Character chat sessions",

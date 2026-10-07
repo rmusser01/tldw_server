@@ -630,6 +630,8 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     copyRetainedDraft: composerText.copyRetainedDraft,
     draftSaved,
     draftReady,
+    draftOwnerVerificationState: composerText.draftOwnerVerificationState,
+    retryDraftOwnerVerification: composerText.retryDraftOwnerVerification,
     draftOwnerKey: composerText.draftOwnerKey,
     isDraftOwnerCurrent: composerText.isDraftOwnerCurrent,
   };

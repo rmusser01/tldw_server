@@ -171,6 +171,7 @@ export const useDraftPersistence = ({
   const identity = React.useMemo(() => ({ storageKey, enabled, isCurrent }), [storageKey, enabled, isCurrent])
   const currentIdentityRef = React.useRef(identity)
   const [hydrated, setHydrated] = React.useState<object | null>(null)
+  const draftReady = enabled && hydrated === identity && (!isCurrent || isCurrent())
   const boundIdentityRef = React.useRef<{ identity: object; sourceStorageKey: string } | null>(null)
   React.useLayoutEffect(() => {
     const previous = currentIdentityRef.current
@@ -181,7 +182,9 @@ export const useDraftPersistence = ({
         ? { identity, sourceStorageKey: previous.storageKey } : null
     }
     currentIdentityRef.current = identity
-  }, [identity, enabled, hydrated, bindFromStorageKey])
+    // A save receipt cannot outlive readable authority or reappear on re-enable.
+    if (!draftReady) setDraftSaved(false)
+  }, [identity, enabled, hydrated, bindFromStorageKey, draftReady])
   const draftSavedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingPersistRef = React.useRef<(() => void) | null>(null)
@@ -480,8 +483,8 @@ export const useDraftPersistence = ({
     acknowledgeBoundDraft: retireBoundSource,
     listDrafts,
     retainDraft,
-    draftSaved,
-    draftReady: enabled && hydrated === identity && (!isCurrent || isCurrent()),
+    draftSaved: draftSaved && draftReady,
+    draftReady,
     clearDraft
   }
 }

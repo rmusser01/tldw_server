@@ -255,3 +255,106 @@ it("shows acknowledged creation in retained discovery before history qualificati
   expect(await screen.findByText(/Chat already created/)).toBeInTheDocument()
   expect(screen.queryByText("Server save unconfirmed")).not.toBeInTheDocument()
 })
+
+describe("draft account verification recovery", () => {
+  const pending = "Checking your account before restoring or saving drafts…"
+  const failed =
+    "Your account could not be verified. Draft saving, recovery, and imports are paused. Retry or check your connection settings."
+
+  it("describes a pending owner without reading recovery records or offering another Retry", () => {
+    const listDrafts = vi.fn()
+    const retry = vi.fn()
+    render(
+      <ChatDraftRecovery
+        listDrafts={listDrafts}
+        copyDraft={vi.fn()}
+        onRestore={vi.fn()}
+        disabled
+        draftOwnerVerificationState="pending"
+        retryDraftOwnerVerification={retry}
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent(pending)
+    expect(
+      screen.getByRole("button", { name: "Recover drafts" })
+    ).toBeDisabled()
+    expect(
+      screen.queryByRole("button", { name: "Retry account verification" })
+    ).not.toBeInTheDocument()
+    expect(listDrafts).not.toHaveBeenCalled()
+    expect(retry).not.toHaveBeenCalled()
+  })
+
+  it("offers account Retry while recovery is disabled, then removes the notice when ready", async () => {
+    const listDrafts = vi
+      .fn()
+      .mockResolvedValue({ drafts: [], unavailable: false })
+    const retry = vi.fn()
+    const props = {
+      listDrafts,
+      copyDraft: vi.fn(),
+      onRestore: vi.fn(),
+      retryDraftOwnerVerification: retry
+    }
+    const view = render(
+      <ChatDraftRecovery
+        {...props}
+        disabled
+        draftOwnerVerificationState="error"
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent(failed)
+    const action = screen.getByRole("button", {
+      name: "Retry account verification"
+    })
+    expect(action).toBeEnabled()
+    expect(action).toHaveAttribute("type", "button")
+    fireEvent.click(action)
+    expect(retry).toHaveBeenCalledOnce()
+    expect(listDrafts).not.toHaveBeenCalled()
+    expect(
+      screen.getByRole("button", { name: "Recover drafts" })
+    ).toBeDisabled()
+    view.rerender(
+      <ChatDraftRecovery
+        {...props}
+        disabled
+        draftOwnerVerificationState="pending"
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent(pending)
+    expect(
+      screen.queryByRole("button", { name: "Retry account verification" })
+    ).not.toBeInTheDocument()
+    view.rerender(
+      <ChatDraftRecovery {...props} draftOwnerVerificationState="ready" />
+    )
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    expect(screen.queryByText(failed)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Recover drafts" }))
+    await screen.findByText("No other retained drafts on this browser.")
+    expect(listDrafts).toHaveBeenCalledOnce()
+  })
+
+  it("keeps a verified owner distinct from draft hydration or a transient same-owner recheck", () => {
+    const retry = vi.fn()
+    render(
+      <ChatDraftRecovery
+        listDrafts={vi.fn()}
+        copyDraft={vi.fn()}
+        onRestore={vi.fn()}
+        disabled
+        draftOwnerVerificationState="ready"
+        retryDraftOwnerVerification={retry}
+      />
+    )
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Retry account verification" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Recover drafts" })
+    ).toBeDisabled()
+    expect(retry).not.toHaveBeenCalled()
+  })
+})

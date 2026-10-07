@@ -4252,5 +4252,14 @@
   },
   "sidepanelHandoff_pageReferencesImported": {
     "message": "Page references imported."
+  },
+  "draftRecovery_accountPending": {
+    "message": "Checking your account before restoring or saving drafts…"
+  },
+  "draftRecovery_accountVerificationFailed": {
+    "message": "Your account could not be verified. Draft saving, recovery, and imports are paused. Retry or check your connection settings."
+  },
+  "draftRecovery_retryAccountVerification": {
+    "message": "Retry account verification"
   }
 }

@@ -2196,6 +2196,8 @@ export const PlaygroundForm = ({
     wrapComposerProfile,
     draftSaved,
     draftReady,
+    draftOwnerVerificationState,
+    retryDraftOwnerVerification,
     draftOwnerKey,
     isDraftOwnerCurrent,
     captureCompletionGuard,
@@ -5473,7 +5475,7 @@ export const PlaygroundForm = ({
       onRender={onComposerRenderProfile}
     >
       <div className="flex w-full flex-col items-center px-2 pb-0 sm:px-4 sm:pb-0">
-        <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={() => window.dispatchEvent(new Event("tldw:open-chat-sidebar"))} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={restoreRetainedDraft} disabled={!draftReady} /></div>
+        <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={() => window.dispatchEvent(new Event("tldw:open-chat-sidebar"))} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={restoreRetainedDraft} disabled={!draftReady} draftOwnerVerificationState={draftOwnerVerificationState} retryDraftOwnerVerification={retryDraftOwnerVerification} /></div>
         <ChatGreetingPicker selectedCharacter={selectedCharacter} selectedCharacterMode={getAssistantSelectionMode(activeAssistantSelection)}
           messages={messages} historyId={historyId} serverChatId={serverChatId}
           ready={draftReady && !assistantMeta?.isLoading && !temporaryChat && historySelection?.getCurrent().status === "idle" && !historySelection.getCurrent().owner}

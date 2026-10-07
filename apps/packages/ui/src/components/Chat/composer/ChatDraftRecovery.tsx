@@ -8,7 +8,8 @@ import { useTranslation } from "react-i18next"
 
 import type {
   ChatDraftRecoveryListing,
-  RecoveredChatDraft
+  RecoveredChatDraft,
+  UseComposerTextResult
 } from "./hooks/useComposerText"
 
 export type RestoreChatDraft = (
@@ -27,6 +28,8 @@ export function ChatDraftRecovery({
   onReviewCreatedChat,
   onCopyCreationText,
   onFindConversations,
+  draftOwnerVerificationState,
+  retryDraftOwnerVerification,
   disabled = false
 }: {
   listDrafts: () => Promise<ChatDraftRecoveryListing>
@@ -41,6 +44,8 @@ export function ChatDraftRecovery({
   onCopyCreationText?: () => Promise<boolean>
   onFindConversations?: () => void
   disabled?: boolean
+  draftOwnerVerificationState?: UseComposerTextResult["draftOwnerVerificationState"]
+  retryDraftOwnerVerification?: () => void
 }) {
   const { t } = useTranslation("playground")
   const text = (key: string, fallback: string) =>
@@ -148,6 +153,32 @@ export function ChatDraftRecovery({
   }
   return (
     <div className="w-full">
+      {draftOwnerVerificationState && draftOwnerVerificationState !== "ready" && (
+        <div className="mb-2 rounded border border-border p-3 text-sm">
+          <p role="status">
+            {draftOwnerVerificationState === "pending"
+              ? text(
+                  "accountPending",
+                  "Checking your account before restoring or saving drafts…"
+                )
+              : text(
+                  "accountVerificationFailed",
+                  "Your account could not be verified. Draft saving, recovery, and imports are paused. Retry or check your connection settings."
+                )}
+          </p>
+          {draftOwnerVerificationState === "error" &&
+            retryDraftOwnerVerification && (
+              <Button
+                variant="outline"
+                size="lg"
+                className="mt-2"
+                onClick={retryDraftOwnerVerification}
+              >
+                {text("retryAccountVerification", "Retry account verification")}
+              </Button>
+            )}
+        </div>
+      )}
       {!disabled && creationRecovery?.active && <div role="status" className="mb-2 rounded border border-border p-3 text-sm">
         <p className="font-medium">{["acknowledged", "bound", "settled"].includes(creationRecovery.active.state) ? text("creationBound", "Chat already created") : creationRecovery.active.state === "prepared" ? text("creationPrepared", "Chat creation not started") : text("creationUnconfirmed", "Server save unconfirmed")}</p>
         <p>{creationRecovery.active.state === "prepared" ? text("creationPreparedHelp", "No chat creation was dispatched. Review your setup and send when ready; your attempted text is retained.") : ["acknowledged", "bound", "settled"].includes(creationRecovery.active.state) ? text("creationBoundHelp", "This chat was already created. Review it before sending retained text again; starting another chat may create a duplicate.") : text("creationHelp", "The server may have created this chat. Review conversations before starting again; another chat may create a duplicate. Your original attempted text is retained.")}</p>

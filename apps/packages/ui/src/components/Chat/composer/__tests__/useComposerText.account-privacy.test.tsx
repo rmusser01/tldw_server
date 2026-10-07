@@ -11,19 +11,61 @@ import { createServicePromptScopeChangedError } from "@/services/tldw/service-pr
 
 const handoffIO = vi.hoisted(() => ({ read: vi.fn(), consume: vi.fn() }))
 vi.mock("@/services/sidepanel-chat-handoff", () => ({ readSidepanelChatHandoff: handoffIO.read, consumeSidepanelChatHandoff: handoffIO.consume }))
-const authority = vi.hoisted(() => ({ user: "alice" as string | null, org: null as number | null, error: null as unknown }))
-vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+type FixtureOwnerScope = {
+  scopeKey: string
+  userId: string
+  config: {
+    serverUrl: string
+    authMode: "multi-user"
+    authSource: "manual"
+    orgId: number | null
+  }
+}
+const authority = vi.hoisted(() => ({
+  user: "alice" as string | null,
+  org: null as number | null,
+  error: null as unknown,
+  resolveOnce: null as null | (() => Promise<FixtureOwnerScope>)
+}))
+vi.mock(
+  "@plasmohq/storage",
+  () =>
+    import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage")
+)
 vi.mock("@/services/service-prompts", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  ...(await importOriginal<typeof import("@/services/service-prompts")>()),
   resolveServicePromptScope: async () => {
+    const next = authority.resolveOnce
+    authority.resolveOnce = null
+    if (next) return next()
     if (authority.error) throw authority.error
     if (!authority.user) throw new Error("Signed out")
-    return { scopeKey: authority.user, userId: authority.user,
-      config: { serverUrl: "http://localhost:8000", authMode: "multi-user", authSource: "manual", orgId: authority.org } }
+    return {
+      scopeKey: authority.user,
+      userId: authority.user,
+      config: {
+        serverUrl: "http://localhost:8000",
+        authMode: "multi-user",
+        authSource: "manual",
+        orgId: authority.org
+      }
+    }
   }
 }))
 
+
 import { useComposerText } from "../hooks/useComposerText"
+
+const verifiedScope = (user: string): FixtureOwnerScope => ({
+  scopeKey: user,
+  userId: user,
+  config: {
+    serverUrl: "http://localhost:8000",
+    authMode: "multi-user",
+    authSource: "manual",
+    orgId: authority.org
+  }
+})
 
 const draftKey = "tldw:playgroundChatDraft"
 const ownerRecordKeys = () => Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)!)
@@ -45,8 +87,132 @@ const switchTo = async (user: string) => {
 
 describe.each([false, true])("composer account ownership using the real draft registry (tabScoped=%s)", tabScopedDraft => {
   const mount = () => renderHook(() => useComposerText({ draftKey, tabScopedDraft, textareaRef: React.createRef<HTMLTextAreaElement>() }))
-  beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); sessionStorage.clear(); authority.user = "alice"; authority.org = null; authority.error = null })
+  beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); sessionStorage.clear(); authority.user = "alice"; authority.org = null; authority.error = null; authority.resolveOnce = null })
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
+
+  // Actual owner hook, composer and browser storage registry/shim. Only verified
+  // account resolution is scripted; no live backend or credential verification.
+  it("owner verification retains first-unresolved text through an explicit same-config Retry and current acknowledgement", async () => {
+    authority.error = new TypeError("Verification offline")
+    const view = mount()
+    await act(async () => {
+      await vi.dynamicImportSettled()
+    })
+    act(() => view.result.current.setMessageValue("  FIRST UNSAVED TEXT\n  "))
+    expect(view.result.current.draftReady).toBe(false)
+    expect(view.result.current.draftSaved).toBe(false)
+    expect(ownerRecordKeys()).toEqual([])
+    expect(view.result.current.draftOwnerVerificationState).toBe("error")
+    let resolve!: (scope: FixtureOwnerScope) => void
+    authority.error = null
+    authority.resolveOnce = () =>
+      new Promise<FixtureOwnerScope>((finish) => {
+        resolve = finish
+      })
+    act(() => view.result.current.retryDraftOwnerVerification())
+    expect(view.result.current.draftOwnerVerificationState).toBe("pending")
+    expect(view.result.current.form.values.message).toBe(
+      "  FIRST UNSAVED TEXT\n  "
+    )
+    expect(view.result.current.draftReady).toBe(false)
+    await act(async () => {
+      resolve(verifiedScope("alice"))
+    })
+    expect(view.result.current.draftOwnerVerificationState).toBe("ready")
+    expect(view.result.current.form.values.message).toBe(
+      "  FIRST UNSAVED TEXT\n  "
+    )
+    expect(view.result.current.draftReady).toBe(true)
+    expect(view.result.current.draftSaved).toBe(false)
+    await settle()
+    expect(view.result.current.draftSaved).toBe(true)
+    expect(ownerRecordKeys()).toHaveLength(1)
+    expect(localStorage.getItem(ownerRecordKeys()[0])).toContain(
+      "FIRST UNSAVED TEXT"
+    )
+  })
+
+  it("owner verification retires an acknowledged receipt across account loss without reviving it for the next owner", async () => {
+    const view = mount()
+    await settle()
+    act(() => view.result.current.setMessageValue("ALICE ACKNOWLEDGED"))
+    await settle()
+    expect(view.result.current.draftSaved).toBe(true)
+    const aliceRecord = ownerRecordKeys()[0]
+    act(() => {
+      authority.error = new TypeError("Verification offline")
+      window.dispatchEvent(
+        new CustomEvent("tldw:auth-principal-changed", {
+          detail: { kind: "logout" }
+        })
+      )
+    })
+    await act(async () => {
+      await vi.dynamicImportSettled()
+    })
+    expect(view.result.current.form.values.message).toBe("")
+    expect(view.result.current.draftReady).toBe(false)
+    expect(view.result.current.draftSaved).toBe(false)
+    expect(view.result.current.draftOwnerVerificationState).toBe("error")
+    authority.user = "bob"
+    authority.error = null
+    act(() => view.result.current.retryDraftOwnerVerification())
+    await act(async () => {
+      await vi.dynamicImportSettled()
+    })
+    expect(view.result.current.draftOwnerVerificationState).toBe("ready")
+    expect(view.result.current.draftReady).toBe(true)
+    expect(view.result.current.draftSaved).toBe(false)
+    expect(localStorage.getItem(aliceRecord)).toContain("ALICE ACKNOWLEDGED")
+    act(() => view.result.current.setMessageValue("BOB NEW SAVE"))
+    await settle()
+    expect(view.result.current.draftSaved).toBe(true)
+    const bobRecord = ownerRecordKeys().find((key) => key !== aliceRecord)
+    expect(bobRecord).toBeDefined()
+    expect(localStorage.getItem(bobRecord!)).toContain("BOB NEW SAVE")
+  })
+
+  it("owner verification ignores a held earlier Retry after a newer account generation becomes current", async () => {
+    authority.error = new TypeError("Verification offline")
+    const view = mount()
+    await act(async () => {
+      await vi.dynamicImportSettled()
+    })
+    expect(view.result.current.draftOwnerVerificationState).toBe("error")
+    let resolve!: (scope: FixtureOwnerScope) => void
+    authority.error = null
+    authority.resolveOnce = () =>
+      new Promise<FixtureOwnerScope>((finish) => {
+        resolve = finish
+      })
+    act(() => view.result.current.retryDraftOwnerVerification())
+    const oldScope = verifiedScope("alice")
+    act(() => {
+      authority.user = "bob"
+      window.dispatchEvent(
+        new CustomEvent("tldw:config-updated", {
+          detail: { authorityChanged: true }
+        })
+      )
+    })
+    await act(async () => {
+      await vi.dynamicImportSettled()
+    })
+    expect(view.result.current.draftOwnerVerificationState).toBe("ready")
+    const currentOwner = view.result.current.draftOwnerKey
+    act(() => view.result.current.setMessageValue("BOB CURRENT INPUT"))
+    await act(async () => {
+      resolve(oldScope)
+    })
+    expect(view.result.current.draftOwnerKey).toBe(currentOwner)
+    expect(view.result.current.form.values.message).toBe("BOB CURRENT INPUT")
+    expect(view.result.current.draftOwnerVerificationState).toBe("ready")
+    await settle()
+    expect(ownerRecordKeys()).toHaveLength(1)
+    expect(localStorage.getItem(ownerRecordKeys()[0])).toContain(
+      "BOB CURRENT INPUT"
+    )
+  })
 
   it("rejects unowned raw and registry drafts from earlier releases", async () => {
     localStorage.setItem(draftKey, "UNOWNED PRIVATE")
@@ -119,11 +285,14 @@ describe.each([false, true])("composer account ownership using the real draft re
     })
     await act(async () => { await vi.dynamicImportSettled() })
     expect(result.current.form.values).toEqual({ message: "ALICE PENDING", image: "alice-image" })
+    expect(result.current.draftOwnerVerificationState).toBe("ready")
+    expect(result.current.draftReady).toBe(true)
     expect(localStorage.getItem(ownerKey)).toContain("ALICE SAVED")
     await settle()
     expect(localStorage.getItem(ownerKey)).toContain("ALICE PENDING")
     expect(ownerRecordKeys()).toEqual([ownerKey])
     authority.error = null
+    authority.resolveOnce = null
     act(() => window.dispatchEvent(new Event(event)))
     await settle()
     expect(result.current.form.values).toEqual({ message: "ALICE PENDING", image: "alice-image" })
@@ -144,6 +313,8 @@ describe.each([false, true])("composer account ownership using the real draft re
     })
     await settle()
     expect(result.current.form.values).toEqual({ message: "", image: "" })
+    expect(result.current.draftOwnerVerificationState).toBe("error")
+    expect(result.current.draftReady).toBe(false)
     expect(ownerRecordKeys()).toEqual([])
   })
 
@@ -267,6 +438,7 @@ describe("copied drafts use the actual composer restoration and account watcher"
   }, { wrapper: ({ children }) => <MemoryRouter initialEntries={[entry]}>{children}</MemoryRouter> })
   beforeEach(() => {
     vi.useFakeTimers(); localStorage.clear(); sessionStorage.clear(); authority.user = "alice"; authority.org = null; authority.error = null
+    authority.resolveOnce = null
     handoffIO.read.mockReset().mockResolvedValue(copy); handoffIO.consume.mockReset().mockResolvedValue(copy)
   })
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
@@ -352,6 +524,7 @@ describe("owned original creation text uses its displayed source fence", () => {
   beforeEach(() => {
     vi.restoreAllMocks(); vi.useFakeTimers(); localStorage.clear(); sessionStorage.clear()
     authority.user = "alice"; authority.org = null; authority.error = null
+    authority.resolveOnce = null
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } })
     const tails = new Map<string, Promise<unknown>>()
     Object.defineProperty(navigator, "locks", { configurable: true, value: { request: (key: string, work: () => unknown) => {

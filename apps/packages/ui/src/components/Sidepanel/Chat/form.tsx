@@ -401,6 +401,8 @@ export const SidepanelForm = ({
     textAreaFocus: promptAssistReturnFocus,
     draftSaved,
     draftReady,
+    draftOwnerVerificationState,
+    retryDraftOwnerVerification,
     draftOwnerKey,
     isDraftOwnerCurrent,
     captureCompletionGuard,
@@ -3337,7 +3339,7 @@ export const SidepanelForm = ({
       <div
         ref={formContainerRef}
         className={`flex w-full min-w-0 flex-col items-center ${composerPadding}`}>
-      <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={onFindConversations} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={onRecoverDraft} disabled={!draftReady} /></div>
+      <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={onFindConversations} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={onRecoverDraft} disabled={!draftReady} draftOwnerVerificationState={draftOwnerVerificationState} retryDraftOwnerVerification={retryDraftOwnerVerification} /></div>
       <QuickPromptInsertionReview form={form} ready={draftReady}
         destinationKey={JSON.stringify([draftOwnerKey, historyId, serverChatId, draftAddress, sourceDraftRevision])}
         captureGuard={() => captureHandoffGuard(false)} textareaRef={textareaRef}

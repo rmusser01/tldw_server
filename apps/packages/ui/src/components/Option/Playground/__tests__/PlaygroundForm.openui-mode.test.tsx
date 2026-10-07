@@ -20,7 +20,7 @@ import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { TldwApiClientCore } from "@/services/tldw/TldwApiClient"
-const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, search: "", draftReady: true, models: vi.fn(async () => [{ model: "tldw:gpt-4o-mini", provider: "openai", is_configured: true, provider_is_configured: true }]), get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
+const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, search: "", draftReady: true, verificationState: "ready" as "pending" | "ready" | "error", retryVerification: vi.fn(), models: vi.fn(async () => [{ model: "tldw:gpt-4o-mini", provider: "openai", is_configured: true, provider_is_configured: true }]), get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
 vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => handoff.scope }))
 
 // These cases keep the Form, submit hook, action router, session restore, RAG
@@ -882,6 +882,8 @@ vi.mock("../hooks", async () => {
         wrapComposerProfile: (_label: string, node: React.ReactNode) => node,
         draftSaved: false,
         draftReady: handoff.draftReady,
+        draftOwnerVerificationState: handoff.verificationState,
+        retryDraftOwnerVerification: handoff.retryVerification,
         draftOwnerKey: renderedOwner,
         isDraftOwnerCurrent,
         selectedQuickPrompt: null,
@@ -1207,6 +1209,8 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     handoff.scope = "server-a:alice"
     handoff.search = ""
     handoff.draftReady = true
+    handoff.verificationState = "ready"
+    handoff.retryVerification.mockReset()
     sessionStorage.clear()
     handoff.get.mockReset().mockResolvedValue(undefined)
     handoff.clear.mockReset().mockResolvedValue(undefined)
@@ -1571,12 +1575,92 @@ describe("PlaygroundForm OpenUI mode", () => {
     handoff.scope = "server-a:alice"
     handoff.search = ""
     handoff.draftReady = true
+    handoff.verificationState = "ready"
+    handoff.retryVerification.mockReset()
     sessionStorage.clear()
     handoff.get.mockReset().mockResolvedValue(undefined)
     handoff.clear.mockReset().mockResolvedValue(undefined)
     handoff.setRagMediaIds.mockReset()
     useMilestoneStore.getState().resetMilestones()
     messageOptionState.value = createMessageOptionState()
+  })
+
+
+  it("shows verification recovery while a copied draft waits for an owned review", async () => {
+    const user = userEvent.setup()
+    const pkg = await sidepanelCopy.createSidepanelChatHandoff({
+      draftText: "COPIED AFTER CHECK"
+    })
+    const readCopy = vi.spyOn(sidepanelCopy, "readSidepanelChatHandoff")
+    const consumeCopy = vi.spyOn(sidepanelCopy, "consumeSidepanelChatHandoff")
+    handoff.scope = null
+    handoff.draftReady = false
+    handoff.verificationState = "pending"
+    handoff.search = "?handoff=" + pkg.id
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await user.type(
+      screen.getByTestId("composer-textarea"),
+      "UNSAVED WHILE VERIFYING"
+    )
+    expect(
+      screen.getByText(
+        "Checking your account before restoring or saving drafts…"
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Recover drafts" })
+    ).toBeDisabled()
+    expect(readCopy).not.toHaveBeenCalled()
+    expect(consumeCopy).not.toHaveBeenCalled()
+    handoff.verificationState = "error"
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    expect(
+      screen.getByText(
+        "Your account could not be verified. Draft saving, recovery, and imports are paused. Retry or check your connection settings."
+      )
+    ).toBeInTheDocument()
+    const retry = screen.getByRole("button", {
+      name: "Retry account verification"
+    })
+    expect(retry).toBeEnabled()
+    await user.click(retry)
+    expect(handoff.retryVerification).toHaveBeenCalledOnce()
+    expect(readCopy).not.toHaveBeenCalled()
+    expect(consumeCopy).not.toHaveBeenCalled()
+    handoff.verificationState = "pending"
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    expect(
+      screen.queryByRole("button", { name: "Retry account verification" })
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(
+      "UNSAVED WHILE VERIFYING"
+    )
+    handoff.scope = "server-a:alice"
+    handoff.draftReady = true
+    handoff.verificationState = "ready"
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await screen.findByRole("region", { name: "Review copied chat" })
+    expect(readCopy).toHaveBeenCalledWith(pkg.id, { throwOnReadError: false })
+    expect(consumeCopy).not.toHaveBeenCalled()
+    expect(
+      screen.queryByText(
+        "Checking your account before restoring or saving drafts…"
+      )
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(
+      "UNSAVED WHILE VERIFYING"
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Insert handoff draft" })
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("composer-textarea")).toHaveValue(
+        "UNSAVED WHILE VERIFYING\n\nCOPIED AFTER CHECK"
+      )
+    )
+    await waitFor(() =>
+      expect(consumeCopy).toHaveBeenCalledWith(pkg.id, expect.any(Function))
+    )
   })
 
   it("previews bounded page references and shortening before a local copy choice", async () => {

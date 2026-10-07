@@ -116,6 +116,10 @@ export interface UseComposerTextResult {
   draftSaved: boolean
   /** Whether this owner's saved draft has finished restoring. */
   draftReady: boolean
+  /** Existing account verification status, independent of draft hydration. */
+  draftOwnerVerificationState: "pending" | "ready" | "error"
+  /** Retry the existing account check; ownership boundaries remain enforced. */
+  retryDraftOwnerVerification: () => void
   draftOwnerKey: string | null
   isDraftOwnerCurrent: () => boolean
   /** Clear current persistence; pass the acknowledged attempt for delayed sends. */
@@ -243,7 +247,14 @@ export function useComposerText(
   }, [])
   const ownSetupEvent = (source?: Event) => initialSetup.current &&
     (source as CustomEvent<{ initialSetupToken?: object }> | undefined)?.detail?.initialSetupToken === initialSetup.current.attempt.token
-  const { ownerKey, requestScope, isCurrent, hasEverOwned, verificationState } = useChatDraftOwner((source) => {
+  const {
+    ownerKey,
+    requestScope,
+    isCurrent,
+    hasEverOwned,
+    verificationState,
+    retryVerification
+  } = useChatDraftOwner((source) => {
     const checkpoint = initialSetup.current
     if (checkpoint && ownSetupEvent(source) && checkpoint.phase === "admitted" &&
       getRevision() === checkpoint.inputRevision) checkpoint.phase = "cleared"
@@ -763,6 +774,8 @@ export function useComposerText(
     captureCompletionGuard,
     draftSaved,
     draftReady,
+    draftOwnerVerificationState: verificationState,
+    retryDraftOwnerVerification: retryVerification,
     draftOwnerKey: ownerKey,
     isDraftOwnerCurrent: isCurrent,
     clearDraft,
