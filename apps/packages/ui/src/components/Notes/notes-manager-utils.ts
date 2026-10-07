@@ -479,7 +479,7 @@ export type KeywordMergeDraft = {
 export type MarkdownToolbarAction = 'bold' | 'italic' | 'heading' | 'list' | 'link' | 'code'
 export type OfflineDraftSyncState = 'queued' | 'syncing' | 'conflict' | 'error'
 export type OfflineDraftEntry = {
-  pendingWrite?: { key: string; body: Record<string, unknown>; expectedVersion: number | null; previousTitle?: string | null }
+  pendingWrite?: { operation?: 'restore'; key: string; body: Record<string, unknown>; expectedVersion: number | null; previousTitle?: string | null }
   key: string
   noteId: string | null
   baseVersion: number | null
@@ -496,6 +496,7 @@ export type OfflineDraftEntry = {
 export type OfflineDraftSyncResult =
   | {
       status: 'synced'
+      savedTitle: string | null
       head?: KnowledgeNoteHead
       submittedBody?: Record<string, unknown>
       key: string
@@ -529,7 +530,10 @@ export const normalizeOfflineDraftQueue = (rawValue: unknown): Record<string, Of
             : 'queued'
     normalized[normalizedKey] = {
       ...(typeof draft.pendingWrite?.key === 'string' && draft.pendingWrite.body && typeof draft.pendingWrite.body === 'object' &&
-        typeof draft.pendingWrite.body.content === 'string' && (draft.pendingWrite.expectedVersion === null || Number.isSafeInteger(draft.pendingWrite.expectedVersion))
+        (typeof draft.pendingWrite.body.content === 'string' || (draft.pendingWrite.operation === 'restore' && draft.noteId != null &&
+          Number.isSafeInteger(draft.pendingWrite.body.expected_provenance_version) && draft.pendingWrite.body.expected_provenance_version > 0 &&
+          /^sha256:[a-f0-9]{64}$/.test(draft.pendingWrite.body.expected_provenance_hash) && Number.isSafeInteger(draft.pendingWrite.expectedVersion))) &&
+        (draft.pendingWrite.expectedVersion === null || Number.isSafeInteger(draft.pendingWrite.expectedVersion))
         ? { pendingWrite: draft.pendingWrite } : {}),
       key: normalizedKey,
       noteId: draft.noteId != null ? String(draft.noteId) : null,

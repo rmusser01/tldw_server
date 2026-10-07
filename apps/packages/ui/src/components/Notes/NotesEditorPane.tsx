@@ -209,7 +209,6 @@ export interface NotesEditorPaneProps {
 
   // Metrics
   metricSummaryText: string
-  revisionSummaryText: string
   sourceHistory?: unknown
   onRestoreSourceHistory?: () => void
   provenanceSummaryText: string

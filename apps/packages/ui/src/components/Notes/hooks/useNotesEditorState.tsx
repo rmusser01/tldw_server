@@ -142,6 +142,8 @@ type NotesWriteResponse = KnowledgeNoteHead & {
   id?: string | number
   version?: number
   last_modified?: string
+  content?: string
+  title?: string
 }
 
 const noteResourcePath = (id: string | number) =>
@@ -289,6 +291,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     window.addEventListener('tldw:config-updated', configChanged)
     window.addEventListener('tldw:auth-principal-changed', cancelRequests)
     return () => {
+      if (authorityScopeRef.current === authorityScope) persistLeftoverDraftRef.current()
       cancelRequests()
       window.removeEventListener('tldw:config-updated', configChanged)
       window.removeEventListener('tldw:auth-principal-changed', cancelRequests)
@@ -339,7 +342,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const lastEditAtRef = React.useRef(0)
   const dirtySinceRef = React.useRef(0)
   const lastFailureAtRef = React.useRef(0)
-  const [originalMetadata, setOriginalMetadata] = React.useState<Record<string, any> | null>(null)
+  const [originalMetadata, setOriginalMetadataState] = React.useState<Record<string, any> | null>(null)
   const [selectedStudioSummary, setSelectedStudioSummary] =
     React.useState<NoteStudioDocumentSummary | null>(null)
   const [selectedVersion, setSelectedVersion] = React.useState<number | null>(null)
@@ -478,6 +481,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     revision: editRevisionRef.current.revision + (authoredDraftChanged ? 1 : 0),
   }
 
+  // A chained leave save reads the acknowledged head before React renders.
+  // Head publication is not an authored edit and does not advance its revision.
+  const setOriginalMetadata = React.useCallback((value: React.SetStateAction<typeof originalMetadata>) => {
+    const next = typeof value === 'function' ? value(editRevisionRef.current.originalMetadata) : value
+    editRevisionRef.current.originalMetadata = next
+    setOriginalMetadataState(next)
+  }, [])
+
   // ---- AI assist undo ----
   const contentBeforeAssistRef = React.useRef<string | null>(null)
   const assistUndoTimerRef = React.useRef<number | null>(null)
@@ -539,10 +550,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const snapshot = editRevisionRef.current
       const key = offlineDraftKeyFor(noteId)
       const pending = pendingWriteRef.current
-      // Only transfer an ordinary note write; history restore has its own endpoint.
+      // Retain the exact operation as well as the immutable key/body during teardown.
       const request = pending?.authority === authorityEpochRef.current && pending.selection === noteSelectionEpochRef.current &&
-        pending.request.path === (noteId == null ? '/api/v1/notes/' : noteResourcePath(noteId)) ? pending.request : null
+        (pending.request.path === (noteId == null ? '/api/v1/notes/' : noteResourcePath(noteId)) ||
+          (noteId != null && pending.request.path === `${noteResourcePath(noteId)}/provenance/restore`)) ? pending.request : null
       const pendingWrite = request ? {
+        ...(request.path.endsWith('/provenance/restore') ? { operation: 'restore' as const } : {}),
         key: String(request.headers?.['Idempotency-Key']),
         body: request.body as Record<string, any>,
         expectedVersion: request.headers?.['expected-version'] != null ? Number(request.headers['expected-version']) : null,
@@ -592,7 +605,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     replaceWysiwygHtml(markdownToWysiwygHtml(String(draft.content || '')))
     setWysiwygSessionDirty(false)
     markdownBeforeWysiwygRef.current = String(draft.content || '')
-  }, [assignSelectedVersion, dispatchSave, replaceWysiwygHtml, setDirtyFlag, setEditorKeywords, setMonitoringNotice])
+  }, [assignSelectedVersion, dispatchSave, replaceWysiwygHtml, setDirtyFlag, setEditorKeywords, setMonitoringNotice, setOriginalMetadata])
 
   const upsertOfflineDraft = React.useCallback(
     (
@@ -884,7 +897,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (pendingSelectionEpochRef.current === noteEpoch) pendingSelectionEpochRef.current = null
       if (isCurrent()) setLoadingDetail(false)
     }
-  }, [applyOfflineDraftToEditor, assignSelectedVersion, authorityScope, clearAssistUndoState, clearTaskState, dispatchSave, isOnline, message, refreshTaskStateForNote, rememberRecentNote, replaceWysiwygHtml, setDirtyFlag, setEditorKeywords, setLoadingDetail, setMonitoringNotice])
+  }, [applyOfflineDraftToEditor, assignSelectedVersion, authorityScope, clearAssistUndoState, clearTaskState, dispatchSave, isOnline, message, refreshTaskStateForNote, rememberRecentNote, replaceWysiwygHtml, setDirtyFlag, setEditorKeywords, setLoadingDetail, setMonitoringNotice, setOriginalMetadata])
 
   const dismissTaskActivity = React.useCallback(async (eventId: string) => {
     const normalizedEventId = String(eventId || '').trim()
@@ -936,7 +949,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     replaceWysiwygHtml(EMPTY_WYSIWYG_HTML)
     setWysiwygSessionDirty(false)
     markdownBeforeWysiwygRef.current = null
-  }, [assignSelectedVersion, clearAssistUndoState, clearTaskState, dispatchSave, replaceWysiwygHtml, setDirtyFlag, setEditorKeywords, setMonitoringNotice])
+  }, [assignSelectedVersion, clearAssistUndoState, clearTaskState, dispatchSave, replaceWysiwygHtml, setDirtyFlag, setEditorKeywords, setMonitoringNotice, setOriginalMetadata])
 
   /** User-facing reason a save did not reach the server (NS-02, NS-03). */
   const describeSaveFailure = React.useCallback(
@@ -1510,7 +1523,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     async ({
       showSuccessMessage = true,
       trigger = 'manual',
-      restoreProvenance = false,
+      restoreProvenance: requestedRestoreProvenance = false,
       expectedVersion: expectedVersionOverride
     }: SaveNoteOptions = {}) => {
       if (pendingSelectionEpochRef.current != null) return false
@@ -1534,6 +1547,21 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         // re-arms autosave, and saving in parallel would race it into a 409.
         return false
       }
+      const queuedDraft = offlineDraftQueueRef.current[offlineDraftKeyFor(selectedIdRef.current)]
+      const onlinePending = pendingWriteRef.current
+      if (isOnline && !browserReportsOffline() && queuedDraft?.pendingWrite &&
+          !(onlinePending?.authority === authorityEpochRef.current && onlinePending.selection === noteSelectionEpochRef.current &&
+            onlinePending.request.headers?.['Idempotency-Key'] === queuedDraft.pendingWrite.key)) {
+        // After remount the durable queue still owns the unresolved operation.
+        // Settle it before a manual save or autosave may issue a fresh write.
+        const epoch = authorityEpochRef.current
+        const selection = noteSelectionEpochRef.current
+        if (!persistOfflineDraft({ syncState: 'queued', lastError: null })) return false
+        setDirtyFlag(false)
+        dispatchSave({ type: 'queued-offline' })
+        const synced = await syncOfflineDraftQueueRef.current(queuedDraft.key)
+        return Boolean(synced) && authorityEpochRef.current === epoch && noteSelectionEpochRef.current === selection
+      }
       // Read identity and version from refs: a save chained right after
       // another (the leave flush) must not use a stale render's values.
       const noteId = selectedIdRef.current
@@ -1547,6 +1575,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       let requestNoteEpoch = noteSelectionEpochRef.current
       const capturedConfig = connectionConfig ? { ...connectionConfig } : null
       const capability = callerCapabilitiesRef.current
+      const pendingRestore = pendingWriteRef.current
+      const restoreProvenance = requestedRestoreProvenance || Boolean(noteId != null &&
+        pendingRestore?.authority === requestEpoch && pendingRestore.selection === requestNoteEpoch &&
+        pendingRestore.request.path === `${noteResourcePath(noteId)}/provenance/restore`)
       const isCurrent = () => saveEpochRef.current === saveEpoch && authorityEpochRef.current === requestEpoch &&
         authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === requestNoteEpoch
       if (!restoreProvenance && !snapshot.content.trim() && !snapshot.title.trim()) {
@@ -1684,26 +1716,26 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
         const monitoringContext = { isCurrent, ownerId: user.id, request: ownedRequest, capability }
         const draftKey = offlineDraftKeyFor(noteId)
-        const acknowledgeOfflineDraft = (savedNoteId: string | number, version: number | null) => {
+        const acknowledgeOfflineDraft = (savedNoteId: string | number, version: number | null, head: KnowledgeNoteHead) => {
           if (!hasNewerEdits()) {
             dropOfflineDraftNow(draftKey)
             return
           }
-          setOfflineDraftQueue((current) => {
-            const queued = current[draftKey]
-            if (!queued) return current
-            const latest = editRevisionRef.current
-            const next = { ...current }
-            delete next[draftKey]
-            const key = `note:${String(savedNoteId)}`
-            next[key] = {
-              ...queued, key, noteId: String(savedNoteId), baseVersion: version ?? queued.baseVersion,
-              title: latest.title, content: latest.content, keywords: [...latest.editorKeywords],
-              metadata: latest.originalMetadata, backlinkConversationId: latest.backlinkConversationId,
-              backlinkMessageId: latest.backlinkMessageId
-            }
-            return next
-          })
+          const queued = offlineDraftQueueRef.current[draftKey]
+          if (!queued) return
+          const latest = editRevisionRef.current
+          const next = { ...offlineDraftQueueRef.current }
+          delete next[draftKey]
+          const key = `note:${String(savedNoteId)}`
+          next[key] = {
+            ...queued, key, noteId: String(savedNoteId), baseVersion: version ?? queued.baseVersion,
+            pendingWrite: undefined,
+            title: latest.title, content: latest.content, keywords: [...latest.editorKeywords],
+            metadata: { ...latest.originalMetadata, ...head }, backlinkConversationId: latest.backlinkConversationId,
+            backlinkMessageId: latest.backlinkMessageId
+          }
+          offlineDraftQueueRef.current = next
+          setOfflineDraftQueue(next)
         }
         if (restoreProvenance) {
           if (noteId == null || baseVersion == null || snapshot.originalMetadata?.knowledge_provenance_state !== 'deleted' ||
@@ -1716,6 +1748,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           })
           assignSelectedVersion(Math.max(selectedVersionRef.current || 0, toNoteVersion(restored) || 0))
           setOriginalMetadata(current => ({ ...current, ...knowledgeNoteHead(restored) }))
+          acknowledgeOfflineDraft(noteId, toNoteVersion(restored), knowledgeNoteHead(restored))
           dispatchSave({ type: 'save-succeeded', hasNewerEdits: isDirtyRef.current || hasNewerEdits() })
           settled = true
           result = true
@@ -1757,7 +1790,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             savedTitleRef.current = { noteId: String(created.id), title: toNoteTitle(created) ?? snapshot.title }
             selectedIdRef.current = created.id
             setSelectedId(created.id)
-            acknowledgeOfflineDraft(created.id, createdVersion)
+            acknowledgeOfflineDraft(created.id, createdVersion, knowledgeNoteHead(created))
           }
           if (createdVersion != null) assignSelectedVersion(createdVersion)
           if (createdLastSaved) setSelectedLastSavedAt(createdLastSaved)
@@ -1795,7 +1828,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           if (expectedVersion == null) {
             throw Object.assign(new Error('Missing version; reload and try again'), { status: 428 })
           }
-          const previousSavedTitle = pendingWriteRef.current?.previousTitle ?? (
+          const pendingUpdate = pendingWriteRef.current
+          const previousSavedTitle = pendingUpdate?.authority === requestEpoch && pendingUpdate.selection === requestNoteEpoch &&
+            pendingUpdate.request.path === noteResourcePath(noteId) ? pendingUpdate.previousTitle : (
             savedTitleRef.current?.noteId === String(noteId) ? savedTitleRef.current.title : null)
           const updated = await request(
             {
@@ -1824,7 +1859,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           // Record the acknowledged version before anything else can save.
           if (updatedVersion != null) assignSelectedVersion(updatedVersion)
           setSelectedLastSavedAt(updatedLastSaved || new Date().toISOString())
-          acknowledgeOfflineDraft(noteId, updatedVersion)
+          acknowledgeOfflineDraft(noteId, updatedVersion, knowledgeNoteHead(updated))
           acknowledge()
           if (showSuccessMessage) {
             message.success('Note updated')
@@ -1865,6 +1900,16 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         const failure: NoteSaveFailure | null = policyUnavailable
           ? { kind: 'validation', status: Number(e?.status) || null, message: t('option:notesSearch.sourceHistoryUnavailable', { defaultValue: NOTES_PROVENANCE_UNAVAILABLE_MESSAGE }) }
           : classifyNoteSaveError(e)
+        if (failure?.kind === 'conflict' && !isVersionConflictError(e)) failure.kind = 'server'
+        if (isDefinitiveWriteRejection(e)) {
+          const key = offlineDraftKeyFor(noteId)
+          const queued = offlineDraftQueueRef.current[key]
+          if (queued?.pendingWrite) {
+            const next = { ...offlineDraftQueueRef.current, [key]: { ...queued, pendingWrite: undefined } }
+            offlineDraftQueueRef.current = next
+            setOfflineDraftQueue(next)
+          }
+        }
         if (failure?.kind === 'conflict') {
           pendingWriteRef.current = null
           const draftKey = offlineDraftKeyFor(noteId)
@@ -1938,6 +1983,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setDirtyFlag,
       setMonitoringNotice,
       setOfflineDraftQueue,
+      setOriginalMetadata,
       showKeywordSyncWarning,
       t
     ]
@@ -2029,24 +2075,27 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
         const saved = await bgRequest<NotesWriteResponse>({
           ...requestScopeOptions,
-          path: draft.noteId ? noteResourcePath(draft.noteId) : '/api/v1/notes/',
-          method: draft.noteId ? 'PUT' : 'POST',
+          path: pending.operation === 'restore' && draft.noteId ? `${noteResourcePath(draft.noteId)}/provenance/restore` : draft.noteId ? noteResourcePath(draft.noteId) : '/api/v1/notes/',
+          method: pending.operation === 'restore' ? 'POST' : draft.noteId ? 'PUT' : 'POST',
           headers: { ...ownerHeader, 'Content-Type': 'application/json', 'Idempotency-Key': pending.key,
             ...(pending.expectedVersion != null ? { 'expected-version': String(pending.expectedVersion) } : {}),
           },
           body: pending.body,
         })
         // Acknowledged queued renames belong to their captured owner, even after navigation.
-        if (draft.noteId) announceSavedTitle(
+        if (draft.noteId && pending.operation !== 'restore') announceSavedTitle(
           draft.noteId, pending.previousTitle ?? null,
           toNoteTitle(saved) ?? (String(pending.body.title || '').trim() || pending.previousTitle || null),
           requestScope
         )
         if (authorityChanged() || controller.signal.aborted) return cancelledResult
+        const onlinePending = pendingWriteRef.current
+        if (onlinePending?.authority === requestEpoch && onlinePending.request.headers?.['Idempotency-Key'] === pending.key) pendingWriteRef.current = null
         const savedId = String(saved?.id || draft.noteId || '').trim()
         if (!savedId) throw new Error('Queued save did not return its note identity.')
-        return { status: 'synced', key: draft.key, noteId: savedId, version: toNoteVersion(saved),
-          lastSavedAt: toNoteLastModified(saved), head: knowledgeNoteHead(saved), submittedBody: pending.body,
+        return { status: 'synced', key: draft.key, noteId: savedId, version: toNoteVersion(saved), savedTitle: toNoteTitle(saved),
+          lastSavedAt: toNoteLastModified(saved), head: knowledgeNoteHead(saved), submittedBody: pending.operation === 'restore'
+            ? { title: toNoteTitle(saved) || '', content: saved.content || '', keywords: extractKeywords(saved) } : pending.body,
         }
       } catch (error: any) {
         if (authorityChanged() || controller.signal.aborted) return cancelledResult
@@ -2070,7 +2119,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     [announceSavedTitle, authorityScope, connectionConfig, isVersionConflictError, offlineDraftStorageKey, setOfflineDraftQueue]
   )
 
-  const syncOfflineDraftQueue = React.useCallback(async () => {
+  const syncOfflineDraftQueue = React.useCallback(async (onlyKey?: string) => {
     if (!isOnline || browserReportsOffline()) return
     if (!authorityScope || !offlineDraftQueueHydrated) return
     const requestScope = authorityScope
@@ -2079,7 +2128,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     // The editor's own save in flight already carries the open note's draft.
     const editorDraftKey = savingInFlightRef.current ? offlineDraftKeyFor(selectedIdRef.current) : null
     const queuedEntries = Object.values(offlineDraftQueueRef.current)
-      .filter((entry) => entry.syncState !== 'conflict' && entry.key !== editorDraftKey)
+      .filter((entry) => entry.syncState !== 'conflict' && entry.key !== editorDraftKey && (onlyKey == null || entry.key === onlyKey))
       .sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
     if (queuedEntries.length === 0) return
 
@@ -2104,6 +2153,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         const latestEntry = offlineDraftQueueRef.current[queuedEntry.key] || queuedEntry
         const editorSelectionEpoch = noteSelectionEpochRef.current
         const editorNoteId = selectedIdRef.current
+        const editorEditRevision = editRevisionRef.current.revision
         const editorStillSelected = () => noteSelectionEpochRef.current === editorSelectionEpoch && selectedIdRef.current === editorNoteId
         const syncResult = await syncOfflineDraftEntry(latestEntry)
         if (authorityEpochRef.current !== requestEpoch || authorityScopeRef.current !== requestScope) return
@@ -2128,6 +2178,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           if (editorStillSelected() && ((editorNoteId == null && syncResult.key === NOTES_OFFLINE_NEW_DRAFT_KEY) || String(editorNoteId) === syncResult.noteId)) {
             const latest = editRevisionRef.current
             const dirty = isDirtyRef.current || Boolean(differs({ title: latest.title, content: latest.content, keywords: latest.editorKeywords }))
+            savedTitleRef.current = { noteId: syncResult.noteId, title: syncResult.savedTitle ?? String(submitted?.title || '') }
             selectedIdRef.current = syncResult.noteId
             setSelectedId(syncResult.noteId)
             if (syncResult.version != null) assignSelectedVersion(Math.max(selectedVersionRef.current || 0, syncResult.version))
@@ -2135,6 +2186,18 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             setSelectedLastSavedAt(syncResult.lastSavedAt || new Date().toISOString())
             setDirtyFlag(dirty)
             dispatchSave({ type: 'save-succeeded', hasNewerEdits: dirty })
+            let loaded = false
+            let readbackSelectionEpoch = editorSelectionEpoch
+            if (editorNoteId == null && !dirty && editRevisionRef.current.revision === editorEditRevision) {
+              dropOfflineDraftNow(syncResult.key)
+              readbackSelectionEpoch = noteSelectionEpochRef.current + 1
+              loaded = await loadDetail(syncResult.noteId, undefined, editorEditRevision)
+            }
+            if (!loaded && authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestScope &&
+                noteSelectionEpochRef.current === readbackSelectionEpoch && selectedIdRef.current === syncResult.noteId) {
+              rememberRecentNote(syncResult.noteId, savedTitleRef.current?.title || latest.title)
+              void refreshTaskStateForNote(syncResult.noteId)
+            }
           }
           continue
         }
@@ -2193,16 +2256,21 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         })
       )
     }
+    return successfulSyncs > 0
   }, [
     assignSelectedVersion,
     authorityScope,
     dispatchSave,
+    dropOfflineDraftNow,
     offlineDraftQueueHydrated,
     setOfflineDraftQueue,
     isOnline,
     loadDetail,
     message,
     refetch,
+    refreshTaskStateForNote,
+    rememberRecentNote,
+    setOriginalMetadata,
     syncOfflineDraftEntry,
     t
   ])

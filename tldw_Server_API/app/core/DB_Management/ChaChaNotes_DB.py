@@ -7798,8 +7798,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             NoteGraphSuggestionStore,
         )
         from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
-        from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import NoteProvenanceStore
+        from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
             PersonaStateStore,
         )
@@ -18037,8 +18037,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _migrate_from_v80_to_v81_postgres(self, conn: Any) -> None:
         """Install owner-bound Knowledge evidence and forced RLS before version bump."""
-        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
         from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_notes_provenance_rls_sql
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
 
         for statement in (notes_provenance_schema_sql(postgres=True), *build_notes_provenance_rls_sql()):
             self.backend.execute(statement, connection=conn)

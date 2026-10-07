@@ -2288,9 +2288,9 @@ class NoteStore:
     def _tombstone_provenance(self, note_id: str, conn: Any) -> None:
         """Retain independent evidence when any shared note deletion path runs."""
         if self._db.backend_type == BackendType.POSTGRESQL:
-            if int(getattr(self._db, "_runtime_schema_version", 0)) < 79:
+            if int(getattr(self._db, "_runtime_schema_version", 0)) < 81:
                 return
-        elif self._db._CURRENT_SCHEMA_VERSION < 75:
+        elif self._db._CURRENT_SCHEMA_VERSION < 77:
             return
         store = self._db.note_provenance_store
         record = store.get(note_id, include_deleted=True, conn=conn)

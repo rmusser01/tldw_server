@@ -1,8 +1,10 @@
 """Strict bounded canonical provenance and portable marker contract."""
 
 import copy
+
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
 
 def payload():
@@ -37,8 +39,8 @@ def payload():
 
 def test_contract_and_canonical_hash():
     from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import (
-        validate_notes_provenance_payload,
         notes_provenance_object_hash,
+        validate_notes_provenance_payload,
     )
 
     value = payload()

@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import (
     retain_notes_provenance,
 )
 from tldw_Server_API.app.core.Sync.v2.security import server_trusted_encryption_status_from_config
-from tldw_Server_API.app.core.Sync.v2.server_origin import capture_server_origin_mutation, canonical_payload_hash
+from tldw_Server_API.app.core.Sync.v2.server_origin import canonical_payload_hash, capture_server_origin_mutation
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     ServerOriginMutationStep,
     capture_server_origin_mutation_batch,
