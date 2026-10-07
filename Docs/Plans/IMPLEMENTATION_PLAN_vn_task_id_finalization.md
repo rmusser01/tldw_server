@@ -27,9 +27,11 @@ targets, original historical-note prefixes, and byte-identical unrelated records
 **Goal**: Publish a separately reviewable documentation-only follow-up.
 **Success Criteria**: Scoped diff/format checks and an independent review pass;
 runtime/tests/configuration/workflows/dependencies remain identical to dev.
-Publish without force or hook bypass. The summary waiver applies only to PR3060;
-this new PR needs a requester-written Change summary and current-head hosted
-reviews/CI before a normal merge. Remove only this owned plan after completion.
+Publish normally, or protect an explicitly requested rebase with a full
+expected-remote-head lease, without hook bypass. The summary waiver applies
+only to PR3060; this new PR needs a requester-written Change summary and
+current-head hosted reviews/CI before a normal merge. Remove only this owned
+plan after completion.
 **Tests**: Run canonical Backlog normalization checks, applicable pre-commit
 checks, git diff --check, exact changed-path audit, and independent review.
 Bandit has no Python changes to scan; do not claim a fresh runtime/security test.
@@ -49,3 +51,20 @@ PR3060 merged normally as 7ba48f251ec47a1e0bb680f49f9b7d86ec2b988d. A normal
 merge inherits that two-file documentation closeout before publishing this
 checklist correction. Stage 3 remains In Progress: the new head needs review
 and CI, and PR3207 still requires its own requester-written Change summary.
+
+## Requested Rebase Checkpoint (2026-10-06)
+
+The requester supplied PR3207's Change summary, retained verbatim in the PR,
+and explicitly requested rebase and normal merge. The clean owned published
+head was 000aa5aaa627fbc567d05e43c2abeb879cfa3710, and latest dev was
+7ba48f251ec47a1e0bb680f49f9b7d86ec2b988d. The conflict-free three-patch rebase
+completed with exit 0 at e25bc84f08ca6f1d96ad81d0934dd7b84948e897. The FINAL
+completed-rebase range-diff marks all three original patches unchanged; the
+whole tree is byte-identical to the previous published head. Fresh structured
+scope/preservation checks pass, including all six TASK-13518 AC and DoD entries.
+
+This evidence-only checkpoint changes owned tracking, not product behavior.
+Protected publication must use the full old remote head as the expected lease.
+Changed-head independent and CodeRabbit reviews, live required CI and a
+verified normal merge remain pending. Qodo is set aside as explicitly
+authorized. Stage 3 stays In Progress; no runtime or fresh Bandit claim is made.
