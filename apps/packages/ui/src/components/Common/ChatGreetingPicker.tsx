@@ -102,7 +102,10 @@ export const ChatGreetingPicker: React.FC<Props> = (props) => {
       <summary className="cursor-pointer">{t("sidepanel:greetingPicker.alternates", "Alternate greetings")}</summary>
       <div className="mt-2 flex min-w-0 items-center gap-2">
         <Select aria-label={t("sidepanel:greetingPicker.choose", "Choose greeting")} value={option?.id} disabled={busy}
-          className="min-w-0 flex-1" options={options.map(entry => ({ value: entry.id, label: entry.text, title: entry.text }))}
+          className="min-w-0 flex-1" options={options.map(entry => {
+            const label = replaceUserDisplayNamePlaceholders(entry.text, userDisplayName, preview.character?.name)
+            return { value: entry.id, label, title: label }
+          })}
           onChange={(id: string) => { setChoice({ characterId: String(preview.character?.id), id }); setError(null) }} />
         <button type="button" disabled={busy} className="min-h-9 rounded-md border border-border px-2 focus-visible:outline focus-visible:outline-2"
           aria-label={t("sidepanel:greetingPicker.reroll", "Reroll")}

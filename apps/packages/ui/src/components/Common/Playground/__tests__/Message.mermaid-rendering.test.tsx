@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PlaygroundMessage } from "../Message"
@@ -93,7 +93,7 @@ vi.mock("../ActionInfo", () => ({
 }))
 
 vi.mock("../EditMessageForm", () => ({
-  EditMessageForm: () => <div data-testid="edit-form" />
+  EditMessageForm: ({ value }: { value: string }) => <textarea aria-label="Edit canonical message" defaultValue={value} />
 }))
 
 vi.mock("../PlaygroundUserMessage", () => ({
@@ -115,7 +115,7 @@ vi.mock("@/components/Sidepanel/Chat/ToolCallBlock", () => ({
 }))
 
 vi.mock("../MessageActionsBar", () => ({
-  MessageActionsBar: () => null
+  MessageActionsBar: ({ onEdit }: { onEdit?: () => void }) => <button type="button" onClick={onEdit}>Edit canonical message</button>
 }))
 
 vi.mock("../DiscoSkillAnnotation", () => ({
@@ -327,12 +327,25 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
     await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe("Viewer $& meets Guide $'\n  exact  "))
     storageState.values.set("chatUserDisplayName", "")
     view.rerender(<PlaygroundMessage {...props} characterIdentity={{ id: "12", name: "Updated Guide" }} />)
-    await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe("{{user}} meets Updated Guide\n  exact  "))
+    await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe("User meets Updated Guide\n  exact  "))
     expect(props.message).toBe(raw)
     expect(capture.selected_content[0].message).toBe(raw)
     expect(display.history[0].content).toBe(raw)
+    fireEvent.click(screen.getByRole("button", { name: "Edit canonical message" }))
+    expect(screen.getByRole("textbox", { name: "Edit canonical message" })).toHaveValue(raw)
     expect(root.serverMessageId).toBeUndefined()
     expect(root.serverMessageVersion).toBeUndefined()
+  })
+
+  it("keeps a mismatched character name unresolved in a saved greeting", async () => {
+    render(<PlaygroundMessage {...baseProps} message="{{user}} meets {{char}}" message_type="character:greeting"
+      characterIdentityEnabled characterIdentity={{ id: "12", name: "Other Guide" }} speakerCharacterId="34" />)
+    await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe("User meets {{char}}"))
+  })
+  it("does not substitute placeholders in ordinary assistant content", async () => {
+    const raw = "{{user}} meets {{char}}"
+    render(<PlaygroundMessage {...baseProps} message={raw} characterIdentityEnabled characterIdentity={{ id: "12", name: "Guide" }} />)
+    await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe(raw))
   })
 
   it("enables Mermaid for a completed assistant markdown message by default", async () => {

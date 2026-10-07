@@ -9,7 +9,7 @@ vi.mock("@/hooks/useCharacterGreeting", () => ({ useCharacterGreeting: (props: {
   character: props.selectedCharacter, loading: state.loading, unavailable: state.unavailable, retry: state.retry,
   fresh: props.playgroundReady && props.selectedCharacterMode === "tracked" && !!props.selectedCharacter?.id && !props.serverChatId && !props.historyId && props.messagesLength === 0
 }) }))
-vi.mock("antd", () => ({ Select: ({ value, onChange, options, disabled, ...props }: { value: string; onChange: (value: string) => void; options: { value: string; label: string }[]; disabled: boolean; "aria-label"?: string }) => <select aria-label={props["aria-label"]} value={value} onChange={event => onChange(event.target.value)} disabled={disabled}>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select> }))
+vi.mock("antd", () => ({ Select: ({ value, onChange, options, disabled, ...props }: { value: string; onChange: (value: string) => void; options: { value: string; label: string; title?: string }[]; disabled: boolean; "aria-label"?: string }) => <select aria-label={props["aria-label"]} value={value} onChange={event => onChange(event.target.value)} disabled={disabled}>{options.map(option => <option key={option.value} value={option.value} title={option.title}>{option.label}</option>)}</select> }))
 const card = { id: "card-1", name: "Guide", first_message: "{{user}} meets {{char}}", alternate_greetings: ["Alternate greeting"] } as Character
 const props = () => ({ selectedCharacter: card, selectedCharacterMode: "tracked" as const, messages: [], historyId: null, serverChatId: null, ready: true, viewKey: "fresh-1", onStartGreeting: vi.fn().mockResolvedValue(undefined), onStartWithMessage: vi.fn() })
 afterEach(cleanup)
@@ -25,7 +25,35 @@ describe("explicit character opening", () => {
   })
   it.each(["Guide", ""])("renders distinct user and character identities (%s)", name => {
     render(<ChatGreetingPicker {...props()} selectedCharacter={{ ...card, name }} />)
-    expect(screen.getByText(`Viewer meets ${name || "{{char}}"}`)).toBeInTheDocument()
+    expect(screen.getByText(`Viewer meets ${name || "{{char}}"}`, { selector: "div" })).toBeInTheDocument()
+  })
+  it.each(["", " \t "])("renders the default user name in previews and alternate labels/titles (%j)", displayName => {
+    state.displayName = displayName
+    render(<ChatGreetingPicker {...props()} selectedCharacter={{ ...card, alternate_greetings: ["{{username}} greets {{character}}"] }} />)
+    expect(screen.getByText("User meets Guide", { selector: "div" })).toBeInTheDocument()
+    fireEvent.click(screen.getByText("Alternate greetings"))
+    const alternate = screen.getByRole("option", { name: "User greets Guide" })
+    expect(alternate).toHaveAttribute("title", "User greets Guide")
+  })
+  it("updates alternate display names without changing the chosen raw index, seed or option id", async () => {
+    const raw = "  {{ you }} meets {{ CHARACTER }}\n  exact $&  "
+    const input = { ...props(), selectedCharacter: { ...card, alternate_greetings: ["", raw] } }
+    const view = render(<ChatGreetingPicker {...input} />)
+    fireEvent.click(screen.getByText("Alternate greetings"))
+    const alternate = screen.getByRole("option", { name: "Viewer meets Guide exact $&" }) as HTMLOptionElement
+    const id = alternate.value
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: id } })
+    state.displayName = "  Viewer $&  "
+    view.rerender(<ChatGreetingPicker {...input} selectedCharacter={{ ...input.selectedCharacter, name: "Guide $'" }} />)
+    const updated = screen.getByRole("option", { name: "Viewer $& meets Guide $' exact $&" })
+    expect(updated).toHaveAttribute("title", "Viewer $& meets Guide $'\n  exact $&")
+    expect(updated).toHaveValue(id)
+    expect(screen.getByRole("combobox")).toHaveValue(id)
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start with this greeting" })))
+    expect(input.onStartGreeting).toHaveBeenCalledWith(expect.objectContaining({
+      id, text: raw.trim(), seed: { greetingStrategy: "alternate_index", alternateIndex: 1, rawText: raw }
+    }), expect.any(Function))
+    expect(input.selectedCharacter.alternate_greetings[1]).toBe(raw)
   })
   it("alternate selection and reroll only change preview until explicit start", async () => {
     const input = props(); render(<ChatGreetingPicker {...input} />)
@@ -122,6 +150,6 @@ it("retires picker activity on an input revision without changing the preview or
   view.rerender(<ChatGreetingPicker {...input} inputRevision={1} />)
   expect(screen.getByRole("button", { name: "Start with this greeting" })).toBeEnabled()
   expect(screen.getByRole("button", { name: "Start with your message" })).toBeEnabled()
-  expect(screen.getByText("Viewer meets Guide")).toBeInTheDocument()
+  expect(screen.getByText("Viewer meets Guide", { selector: "div" })).toBeInTheDocument()
   await act(async () => finish())
 })
