@@ -257,8 +257,13 @@ async def test_cost_attribution_org_scoped_uses_join(tmp_path, monkeypatch) -> N
         sql, params = _find_query_with_params(recorder.queries, ("FROM llm_usage_log", "GROUP BY"))
         assert "JOIN org_members om ON om.user_id = llm_usage_log.user_id" in sql
         assert params == ("-7 days", 10)
-        # Correctness is asserted above; the org_members index lands in stage 3.
-        _assert_sqlite_uses_ts_index(Path(pool.db_path), sql, params)
+        plan_detail = _assert_sqlite_uses_ts_index(Path(pool.db_path), sql, params)
+        # Stage 3 (admin perf A) delivered idx_org_members_org_user; the join's
+        # org_members side must be an index search, not a table scan.
+        assert "idx_org_members_org_user" in plan_detail, (
+            f"org_members lookup not served by idx_org_members_org_user, plan: {plan_detail}"
+        )
+        assert "SCAN om" not in plan_detail
     finally:
         await reset_db_pool()
 
