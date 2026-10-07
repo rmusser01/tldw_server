@@ -858,7 +858,8 @@ vi.mock("../hooks", async () => {
         typing: false,
         setMessageValue: (value: string) =>
           form.setFieldValue("message", value),
-        restoreMessageValue: vi.fn(),
+        restoreMessageValue: (value: string) =>
+          form.setFieldValue("message", value),
         messageDisplayValue: values.message,
         collapsedDisplayMeta: null,
         textareaRef: { current: null },

@@ -2097,7 +2097,7 @@ export const PlaygroundForm = ({
 
   const [pasteLargeTextAsFile] = useStorage("pasteLargeTextAsFile", false);
 
-  const msgCollapse = useMessageCollapse({ textareaRef });
+  const msgCollapse = useMessageCollapse();
   const {
     isMessageCollapsed,
     setIsMessageCollapsed,
@@ -5563,7 +5563,7 @@ export const PlaygroundForm = ({
                 : null}
               <QuickPromptInsertionReview form={form} ready={draftReady} destinationKey={handoffDestinationKey}
                 captureGuard={captureHandoffGuard} textareaRef={textareaRef}
-                setMessageValue={(value) => setMessageValue(value, { collapseLarge: true })} />
+                setMessageValue={(value) => restoreMessageValue(value, { wasExpanded: true })} />
               {mediaHandoffConflict ? (
                 <div role="status" aria-label={t("mediaHandoff.conflictLabel", "Media handoff conflict")} className="mb-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text">
                   <p>{t("mediaHandoff.conflict", "Your composer already has a draft. Insert the media source, replace your draft, or cancel the import.")}</p>
