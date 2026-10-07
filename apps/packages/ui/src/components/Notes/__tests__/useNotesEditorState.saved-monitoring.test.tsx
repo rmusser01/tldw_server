@@ -1,5 +1,6 @@
 import type { BgRequestInit } from "@/services/background-proxy"
 import React from 'react'
+import { Modal } from 'antd'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -1109,6 +1110,60 @@ describe('Notes saved-state hydration and optional monitoring', () => {
     await act(async () => { expect(await view.result.current.saveNote()).toBe(true) })
     expect(events).toEqual([{ noteId: 'queued-created', oldTitle: 'Server-generated heading', newTitle: 'Newer authored title', authorityScope: authority() }])
     view.unmount()
+  })
+
+  it.each(['retry', 'leave', 'navigation', 'owner'] as const)('returns the owned durable-create result after canonical readback (%s)', async boundary => {
+    const original = 'Original submitted body'
+    const ack = deferred<ReturnType<typeof note>>()
+    const writes: BgRequestInit[] = []
+    const modal = vi.spyOn(Modal, 'confirm').mockImplementation(options => {
+      options.onCancel?.()
+      return { destroy: vi.fn(), update: vi.fn() }
+    })
+    mocks.request.mockImplementation(async request => {
+      if (request.method !== 'POST') return note(request.path.includes('other') ? 'other' : 'retry-clean', { title: 'Canonical retry heading', content: original, version: 1 })
+      writes.push(request)
+      if (writes.length <= 2) throw Object.assign(new Error('Committed response lost'), { status: 503 })
+      return ack.promise
+    })
+    const view = renderEditor()
+    await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
+    act(() => view.result.current.setContentDirty(original))
+    await act(async () => { expect(await view.result.current.saveNote()).toBe(false) })
+    view.unmount()
+    const reopened = renderEditor()
+    try {
+      await waitFor(() => expect(writes).toHaveLength(2))
+      await waitFor(() => expect(Object.values(reopened.result.current.offlineDraftQueue)[0]?.syncState).toBe('error'))
+      if (boundary === 'leave') act(() => {
+        reopened.result.current.setContentDirty('Temporary authored edit')
+        reopened.result.current.setContentDirty(original)
+      })
+      let saving!: Promise<boolean>
+      act(() => { saving = boundary === 'leave'
+        ? reopened.result.current.confirmDiscardIfDirty(undefined, { trigger: 'leave' })
+        : reopened.result.current.retrySave() })
+      await waitFor(() => expect(writes).toHaveLength(3))
+      if (boundary === 'navigation') await act(async () => { await reopened.result.current.loadDetail('other') })
+      if (boundary === 'owner') {
+        mocks.userId = 8
+        reopened.rerender({ scope: authority(), online: true })
+      }
+      await act(async () => {
+        ack.resolve(note('retry-clean', { ...writes[0].body, title: 'Canonical retry heading', version: 1 }))
+        expect(await saving).toBe(boundary === 'retry' || boundary === 'leave')
+      })
+      expect(modal).not.toHaveBeenCalled()
+      if (boundary === 'retry' || boundary === 'leave') {
+        expect(reopened.result.current.title).toBe('Canonical retry heading')
+        expect(reopened.result.current.saveIndicator).toBe('saved')
+      }
+      if (boundary === 'navigation') expect(reopened.result.current.selectedId).toBe('other')
+      if (boundary === 'owner') expect(reopened.result.current.selectedId).not.toBe('retry-clean')
+    } finally {
+      modal.mockRestore()
+      reopened.unmount()
+    }
   })
 
   it('reads back an unchanged queued create with its automatic title, canonical tags, recent entry and saved checklist tasks', async () => {

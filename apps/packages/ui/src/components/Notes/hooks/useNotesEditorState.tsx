@@ -1555,12 +1555,11 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         // After remount the durable queue still owns the unresolved operation.
         // Settle it before a manual save or autosave may issue a fresh write.
         const epoch = authorityEpochRef.current
-        const selection = noteSelectionEpochRef.current
         if (!persistOfflineDraft({ syncState: 'queued', lastError: null })) return false
         setDirtyFlag(false)
         dispatchSave({ type: 'queued-offline' })
-        const synced = await syncOfflineDraftQueueRef.current(queuedDraft.key)
-        return Boolean(synced) && authorityEpochRef.current === epoch && noteSelectionEpochRef.current === selection
+        const sync = await syncOfflineDraftQueueRef.current(queuedDraft.key)
+        return Boolean(sync?.synced) && authorityEpochRef.current === epoch && noteSelectionEpochRef.current === sync?.selectionEpoch
       }
       // Read identity and version from refs: a save chained right after
       // another (the leave flush) must not use a stale render's values.
@@ -2134,6 +2133,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
     offlineSyncInFlightRef.current = requestEpoch
     let successfulSyncs = 0
+    let acknowledgedSelectionEpoch: number | null = null
     try {
       for (const queuedEntry of queuedEntries) {
         if (authorityEpochRef.current !== requestEpoch || authorityScopeRef.current !== requestScope) return
@@ -2193,10 +2193,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
               readbackSelectionEpoch = noteSelectionEpochRef.current + 1
               loaded = await loadDetail(syncResult.noteId, undefined, editorEditRevision)
             }
-            if (!loaded && authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestScope &&
+            if (authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestScope &&
                 noteSelectionEpochRef.current === readbackSelectionEpoch && selectedIdRef.current === syncResult.noteId) {
-              rememberRecentNote(syncResult.noteId, savedTitleRef.current?.title || latest.title)
-              void refreshTaskStateForNote(syncResult.noteId)
+              // Report the queue-owned readback transition, never a user navigation.
+              acknowledgedSelectionEpoch = readbackSelectionEpoch
+              if (!loaded) {
+                rememberRecentNote(syncResult.noteId, savedTitleRef.current?.title || latest.title)
+                void refreshTaskStateForNote(syncResult.noteId)
+              }
             }
           }
           continue
@@ -2256,7 +2260,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         })
       )
     }
-    return successfulSyncs > 0
+    return { synced: successfulSyncs > 0, selectionEpoch: acknowledgedSelectionEpoch }
   }, [
     assignSelectedVersion,
     authorityScope,
