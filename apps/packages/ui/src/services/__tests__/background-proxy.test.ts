@@ -2638,6 +2638,87 @@ describe("background proxy fallback safety", () => {
     }
   )
 
+  it.each(["direct", "extension"] as const)(
+    "retains a structured native context refusal through the real %s completion stream without replay",
+    async (transport) => {
+      const detail = {
+        status: "unsupported_history_capability",
+        code: "unsupported_history_context_world_books"
+      }
+      mocks.runtimeId = transport === "direct" ? null : "test-extension"
+      mocks.storageGet.mockImplementation(async (key) =>
+        key === "tldwConfig"
+          ? {
+              serverUrl: "http://127.0.0.1:19999",
+              authMode: "single-user",
+              apiKey: "synthetic-test-key",
+              credentialSource: "manual",
+              apiKeyPersistence: "device",
+              apiKeyServerOrigin: "http://127.0.0.1:19999"
+            }
+          : null
+      )
+      mocks.sendMessage.mockResolvedValue({ ok: true })
+      const listeners = new Set<(message: unknown) => void>()
+      const port = {
+        onMessage: {
+          addListener: (listener: (message: unknown) => void) =>
+            listeners.add(listener),
+          removeListener: (listener: (message: unknown) => void) =>
+            listeners.delete(listener)
+        },
+        onDisconnect: { addListener: vi.fn(), removeListener: vi.fn() },
+        postMessage: vi.fn((_payload: Record<string, unknown>) => {
+          for (const listener of listeners)
+            listener({
+              event: "error",
+              message: "HTTP 409",
+              status: 409,
+              details: { detail }
+            })
+        }),
+        disconnect: vi.fn()
+      }
+      mocks.connect.mockReturnValue(port)
+      const fetchSpy = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ detail }), {
+            status: 409,
+            headers: { "content-type": "application/json" }
+          })
+      )
+      vi.stubGlobal("fetch", fetchSpy)
+      try {
+        const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+        const client = new TldwApiClient()
+        const consume = async () => {
+          for await (const chunk of client.streamChatCompletion({
+            model: "fixture-model",
+            messages: [{ role: "user", content: "original input" }]
+          })) {
+            void chunk
+          }
+        }
+        await expect(consume()).rejects.toMatchObject({
+          status: 409,
+          details: { detail }
+        })
+        expect(fetchSpy).toHaveBeenCalledTimes(transport === "direct" ? 1 : 0)
+        if (transport === "extension") {
+          expect(port.postMessage).toHaveBeenCalledOnce()
+          expect(port.postMessage.mock.calls[0]?.[0]).toMatchObject({
+            body: { stream: true }
+          })
+        } else
+          expect(
+            JSON.parse(fetchSpy.mock.calls[0]?.[1]?.body as string)
+          ).toMatchObject({ stream: true })
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    }
+  )
+
   it("does not replay a non-idempotent POST when port errors before first data chunk", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: true })
     const onMessageListeners = new Set<(msg: any) => void>()

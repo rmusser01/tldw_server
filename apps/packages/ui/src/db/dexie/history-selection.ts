@@ -1052,6 +1052,19 @@ export const saveHistoryTurnRecovery = async (
       fail("history_operation_conflict")
     if (detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || detached.admission.selection_digest !== detached.selection_digest))
       fail("history_operation_conflict")
+    if (
+      detached.state === "refused" &&
+      (detached.persistence !== "server" ||
+        detached.input_id ||
+        detached.assistant_id ||
+        detached.admission ||
+        detached.result_text ||
+        detached.outcome ||
+        detached.settled_message_id ||
+        detached.input_images?.length)
+    )
+      fail("history_operation_conflict")
+
     const prior = previous?.pending_turns?.[detached.operation_id]
     if (prior) {
       const immutable = (value: HistoryTurnRecovery) => ({
@@ -1062,6 +1075,17 @@ export const saveHistoryTurnRecovery = async (
         input_text: value.input_text, input_images: value.input_images
       })
       if (canonicalHistoryJson(immutable(prior)) !== canonicalHistoryJson(immutable(detached))) fail("history_operation_conflict")
+      if (prior.state === "refused") {
+        if (
+          detached.admission ||
+          detached.assistant_id ||
+          detached.result_text ||
+          detached.outcome
+        )
+          fail("history_operation_conflict")
+        return
+      }
+
       if (prior.persistence === "server") {
         if ((prior.input_id && detached.input_id && prior.input_id !== detached.input_id) || (prior.assistant_id && detached.assistant_id && prior.assistant_id !== detached.assistant_id)) fail("history_operation_conflict")
         if (prior.assistant_id && !detached.assistant_id) return

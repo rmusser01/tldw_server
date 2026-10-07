@@ -3464,6 +3464,12 @@
   "historySelection_expandDescription": {
     "message": "Opens this selected history in the extension full page. Active streaming stays in this panel."
   },
+  "historySelection_refusedTitle": {
+    "message": "Message not added"
+  },
+  "historySelection_refusedMessage": {
+    "message": "This saved chat uses unsupported context. Your original input is kept here; copy it and review the saved setup or start a compatible chat. It will not be sent again automatically."
+  },
   "historySelection_recoveryTitle": {
     "message": "Turn needs review"
   },
@@ -4048,6 +4054,9 @@
   },
   "composer_assistant_selection_restore_failed": {
     "message": "Assistant preferences could not be restored. Your chat and draft are still here; try choosing the assistant again."
+  },
+  "composer_native_history_context_refused": {
+    "message": "Your message was not added because this saved chat uses unsupported context. Your input is kept separately; copy it and review the saved setup or start a compatible chat."
   },
   "composer_native_history_response_pending": {
     "message": "Wait for the current response to finish before starting a character chat. Your chat and draft are still here."

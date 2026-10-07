@@ -39,7 +39,7 @@ import {
   type ChatCompletionRequest
 } from "@/services/tldw/TldwApiClient"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
-import { validateNativeCharacterConfiguration } from "./native-character-preflight"
+import { NativeHistoryContextRefusal, validateNativeCharacterConfiguration } from "./native-character-preflight"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 
 export type NativeHistoryCharacterSendParams = {
@@ -69,6 +69,50 @@ export type NativeHistoryCharacterSendParams = {
   onCreated?: (characterId: string | number) => void
   setMessages: Dispatch<SetStateAction<Message[]>>
   releaseActivity: () => void
+}
+
+// These current backend context refusals precede input admission and provider dispatch.
+// A generic conflict, future code, or observed stream evidence cannot prove refusal.
+const isSavedContextRefusal = (error: unknown): boolean => {
+  const response = error as {
+    status?: unknown
+    details?: { detail?: { status?: unknown; code?: unknown } }
+  } | null
+  const detail = response?.details?.detail
+  return (
+    response?.status === 409 &&
+    detail?.status === "unsupported_history_capability" &&
+    typeof detail.code === "string" &&
+    [
+      "invalid_materialized_behavior",
+      "saved_settings",
+      "materialized_binding",
+      "behavior_controls",
+      "author_note",
+      "assistant_overlay",
+      "world_books",
+      "memory",
+      "greeting",
+      "unbound_snapshot",
+      "persona",
+      "snapshot_missing",
+      "snapshot_invalid",
+      "participants",
+      "source_identity",
+      "exemplars",
+      "default_memory",
+      "generation_defaults",
+      "prompt_extensions",
+      "character_extensions",
+      "prompt_preset",
+      "unbound_sampling",
+      "skills_registry",
+      "skills_unresolved",
+      "skills_recovery",
+      "skills_installed",
+      "prompt_template"
+    ].some((suffix) => detail.code === `unsupported_history_context_${suffix}`)
+  )
 }
 
 /** One native dispatch owns admission and settlement. Browser cancellation is never a rollback receipt. */
@@ -362,6 +406,7 @@ export const sendNativeHistoryCharacter = async (
     let resultId: string | undefined
     let content = ""
     let dispatched = false
+    let streamStarted = false
     let followAttempted = false
     const record = (
       state: HistoryTurnRecovery["state"]
@@ -401,6 +446,7 @@ export const sendNativeHistoryCharacter = async (
         scope: owner.scope,
         streamIdleTimeoutMs: 60_000
       })) {
+        streamStarted = true
         if (!authValid() || signal.aborted)
           throw new Error("native_history_consumption_interrupted")
         if (extractStreamTransportInterruption(chunk))
@@ -473,6 +519,36 @@ export const sendNativeHistoryCharacter = async (
           await controller.followResult(view, resultId)
         return
       }
+      if (
+        dispatched &&
+        !streamStarted &&
+        !admission &&
+        !resultId &&
+        content === "" &&
+        isSavedContextRefusal(error)
+      ) {
+        const acceptedOwner = current.owner
+        const refusal = new NativeHistoryContextRefusal(
+          error,
+          () =>
+            selectionCurrent() &&
+            privateCurrent() &&
+            sameView() &&
+            acceptedOwner.validate_lease()
+        )
+        try {
+          // Composer retention is not an acknowledged write; keep the only durable input.
+          await saveHistoryTurnRecovery(scope, view, record("refused"))
+          if (refusal.isCurrent()) await controller.refreshRecovery()
+        } catch {
+          // The earlier dispatch record remains recoverable if storage or its account retired.
+          console.warn(
+            "Could not record or display a confirmed native context refusal."
+          )
+        }
+        throw refusal
+      }
+
       if (dispatched) {
         await saveHistoryTurnRecovery(
           scope,

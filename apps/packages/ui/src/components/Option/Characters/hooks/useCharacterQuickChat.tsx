@@ -133,7 +133,7 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
       const knownOwner = selected.status === "ready" && selected.capture?.status === "captured" &&
         selected.view?.conversation_id === attempt?.chatId && selected.owner?.kind === "native" &&
         selected.owner.conversation_id === attempt?.chatId && selected.owner.validate_lease()
-      if (turns.length || (attempt && attempt.state !== "prepared" && attempt.state !== "settled" && !knownOwner)) markReview()
+      if (turns.some(entry => entry.turn.state !== "refused") || (attempt && attempt.state !== "prepared" && attempt.state !== "settled" && !knownOwner)) markReview()
     } catch { if (isCurrent()) markReview() }
   }
 

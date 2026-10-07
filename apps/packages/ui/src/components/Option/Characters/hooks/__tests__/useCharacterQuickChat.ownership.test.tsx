@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(), complete: vi.fn(), deleteChat: vi.fn(), nativeSend: vi.fn(),
   navigate: vi.fn(), selectCharacter: vi.fn(), retain: vi.fn(),
   ownerGeneration: 0, ownerReady: true, retryOwner: vi.fn(), getCharacter: vi.fn(), preparePath: vi.fn(), requestScope: {}, accountClear: undefined as undefined | (() => void),
-  reset: vi.fn(), getReference: vi.fn(), copy: vi.fn(), requestNavigation: vi.fn(),
+  selection: null as null | Record<string, unknown>, reset: vi.fn(), getReference: vi.fn(), copy: vi.fn(), requestNavigation: vi.fn(),
 }))
 vi.mock("react-router-dom", () => ({ useNavigate: () => mocks.navigate }))
 vi.mock("@/hooks/useSelectedCharacter", () => ({ useSelectedCharacter: () => [null, mocks.selectCharacter] }))
@@ -29,7 +29,7 @@ vi.mock("@/hooks/useDraftPersistence", () => ({ useDraftPersistence: () => ({
 }) }))
 vi.mock("@/hooks/chat/useHistorySelection", () => ({ useHistorySelection: () => ({
   reset: mocks.reset, getReference: mocks.getReference,
-  getCurrent: () => ({ status: "ready", owner: { kind: "native", conversation_id: "quick-session", validate_lease: () => true }, capture: { status: "captured" } }),
+  getCurrent: () => mocks.selection ?? ({ status: "ready", owner: { kind: "native", conversation_id: "quick-session", validate_lease: () => true }, capture: { status: "captured" } }),
   getSignal: () => undefined, fence: () => () => true, prepareExpansionPath: mocks.preparePath, loadConversation: vi.fn(), recoveries: [], recoveryError: null
 }) }))
 vi.mock("@/hooks/chat/native-history-character-send", () => ({ sendNativeHistoryCharacter: mocks.nativeSend }))
@@ -48,6 +48,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   useStoreChatModelSettings.getState().reset()
   mocks.ownerGeneration = 0
+  mocks.selection = null
   mocks.ownerReady = true
   mocks.getCharacter.mockReset().mockImplementation(async (id: string) => ({ id, name: "Guide" }))
   mocks.preparePath.mockResolvedValue("/chat?chatId=quick-session&client_session_id=qualified-popup-view")
@@ -219,6 +220,66 @@ describe("Character Quick Chat owned lifetime", () => {
     await act(async () => { pending.resolve(); await departing })
     expect(sendsBeforeAck).toBe(0)
   })
+
+  it.each(["refused", "unknown", "dispatching"])(
+    "Quick retains exact input and classifies %s send recovery without automatic replay",
+    async (state) => {
+      mocks.selection = {
+        status: "ready",
+        bookmarkScope: { profile_id: "p", client_session_id: "client" },
+        view: { conversation_id: "quick-session" },
+        owner: {
+          kind: "native",
+          conversation_id: "quick-session",
+          validate_lease: () => true
+        },
+        capture: { status: "captured" }
+      }
+      const { loadHistoryTurnRecoveries } =
+        await import("@/db/dexie/history-selection")
+      const { readChatCreationRecovery } =
+        await import("@/services/pending-chat-promotion")
+      vi.mocked(loadHistoryTurnRecoveries).mockResolvedValueOnce([
+        {
+          scope: { profile_id: "p", client_session_id: "old" },
+          turn: {
+            operation_id: "attempt",
+            state,
+            input_text: "  exact draft\ntrailing spaces  "
+          }
+        } as unknown as Awaited<
+          ReturnType<typeof loadHistoryTurnRecoveries>
+        >[number]
+      ])
+      vi.mocked(readChatCreationRecovery).mockResolvedValueOnce({
+        state: "bound",
+        chatId: "quick-session",
+        inputText: "  exact draft\ntrailing spaces  "
+      } as unknown as NonNullable<
+        Awaited<ReturnType<typeof readChatCreationRecovery>>
+      >)
+      const { NativeHistoryContextRefusal } =
+        await import("@/hooks/chat/native-character-preflight")
+      mocks.nativeSend.mockImplementationOnce(async (params) => {
+        params.setServerChatId("quick-session")
+        throw new NativeHistoryContextRefusal(new Error("HTTP 409"), () => true)
+      })
+      const { result } = renderHook(() => useCharacterQuickChat(deps))
+      await start(result)
+      await act(async () => {
+        await result.current.sendQuickChatMessage()
+      })
+      expect(result.current.quickChatDraft).toBe(
+        "  exact draft\ntrailing spaces  "
+      )
+      expect(result.current.quickChatNeedsReview).toBe(state !== "refused")
+      expect(result.current.quickChatError).toContain(
+        "Your message was not added"
+      )
+      expect(mocks.nativeSend).toHaveBeenCalledOnce()
+      expect(mocks.deleteChat).not.toHaveBeenCalled()
+    }
+  )
 
   it("does not label a native preparation failure as an uncertain send without recovery facts", async () => {
     mocks.nativeSend.mockRejectedValueOnce(new Error("stale_selection"))

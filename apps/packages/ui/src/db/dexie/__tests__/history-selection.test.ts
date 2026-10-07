@@ -1309,6 +1309,98 @@ it("native recovery begins without canonical IDs and binds monotonically to owne
   ).rejects.toThrow()
 })
 
+it("a confirmed refused native turn preserves exact input on reopen and cannot regress to uncertain dispatch", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const pending: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+    operation_id: "refused-native",
+    persistence: "server",
+    origin_view: origin,
+    owner_key: owner.owner_key,
+    conversation_id: owner.conversation_id,
+    selection_digest: "selected",
+    request_context_digest: "prepared",
+    created_at: 1,
+    input_text: "  exact refused input  ",
+    input_images: [],
+    result_text: "",
+    state: "dispatching"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  await history.saveHistoryTurnRecovery(bookmark, origin, {
+    ...pending,
+    state: "refused"
+  })
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  const reopened = await history.loadHistoryTurnRecoveries(
+    { ...bookmark, client_session_id: "reopened" },
+    owner
+  )
+  expect(reopened[0].turn).toMatchObject({
+    state: "refused" as const,
+    input_text: "  exact refused input  ",
+    result_text: ""
+  })
+  expect(reopened[0].turn.admission).toBeUndefined()
+  expect(reopened[0].turn.outcome).toBeUndefined()
+  expect(
+    (await history.captureLocalHistorySnapshot(owner, origin, "send")).snapshot
+      .nodes
+  ).toEqual([])
+})
+
+it.each(["client", "admission", "result", "content", "outcome"])(
+  "refused recovery rejects contradictory %s evidence without rewriting durable input",
+  async (contradiction) => {
+    const owner = await history.getLocalHistoryOwner("chat")
+    const origin = view(owner)
+    const pending: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+      operation_id: "refused-native",
+      persistence: "server",
+      origin_view: origin,
+      owner_key: owner.owner_key,
+      conversation_id: owner.conversation_id,
+      selection_digest: "selected",
+      request_context_digest: "prepared",
+      created_at: 1,
+      input_text: "exact refused input",
+      input_images: [],
+      result_text: "",
+      state: "dispatching"
+    }
+    await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+    const invalid = {
+      ...pending,
+      state: "refused" as const,
+      ...(contradiction === "client"
+        ? { persistence: "client" as const, input_id: "i", assistant_id: "a" }
+        : contradiction === "admission"
+          ? {
+              input_id: "i",
+              admission: {
+                version: 1 as const,
+                owner_key: owner.owner_key,
+                conversation_id: owner.conversation_id,
+                input_message_id: "i",
+                input_message_revision: "r",
+                selection_digest: "selected"
+              }
+            }
+          : contradiction === "result"
+            ? { assistant_id: "a" }
+            : contradiction === "content"
+              ? { result_text: " " }
+              : { outcome: "stopped" as const })
+    }
+    await expect(
+      history.saveHistoryTurnRecovery(bookmark, origin, invalid)
+    ).rejects.toThrow()
+    expect(
+      (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn
+    ).toMatchObject({ state: "dispatching", input_text: "exact refused input" })
+  }
+)
+
 describe("on-device owner preparation", () => {
   const reader = { profileId: "profile", serverScopeKey: "realm-A", isCurrent: () => true }
   it("claims a current scope-only row under its captured profile", async () => {

@@ -7,7 +7,7 @@ import {
   chatSubmitSubmitted,
   createSelectedForkAction
 } from "@/hooks/chat/chat-action-utils";
-import { nativeCharacterPreflightMessage } from "./chat/native-character-preflight";
+import { NativeHistoryContextRefusal, nativeCharacterPreflightMessage } from "./chat/native-character-preflight";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import { SidepanelSendGateContext } from "@/hooks/chat/sidepanel-send-gate";
@@ -2870,7 +2870,7 @@ export const useMessage = () => {
                   description: t("sidepanel:greetingPicker.changedHelp", "The saved opening differs from the preview. Review the opening shown in this chat before sending your message.")
                 });
               } catch (error) {
-                if (!greetingSeed) notification.error({
+                if (!greetingSeed && !(error instanceof NativeHistoryContextRefusal && !error.isCurrent())) notification.error({
                   message: t("error"),
                   description: nativeCharacterPreflightMessage(error, t) ?? (error instanceof Error ? error.message : "Native history completion failed")
                 });

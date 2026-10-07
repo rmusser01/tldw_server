@@ -284,7 +284,12 @@ export type HistoryTurnRecovery = {
   input_text: string;
   input_images: string[];
   result_text: string;
-  state: "dispatching" | "unknown" | "accepted_unsent" | "generated_unsaved";
+  state:
+    | "dispatching"
+    | "unknown"
+    | "accepted_unsent"
+    | "generated_unsaved"
+    | "refused";
   admission?: import("@/types/history-selection").HistoryAdmissionReferenceV1;
   /**
    * Set when the reply belongs back in the transcript rather than in review

@@ -1,4 +1,4 @@
-import { nativeCharacterPreflightMessage } from "./native-character-preflight"
+import { NativeHistoryContextRefusal, nativeCharacterPreflightMessage } from "./native-character-preflight"
 import { captureChatDraftSource } from "./chat-draft-transition"
 import type { GreetingSeed } from "@/utils/character-greetings"
 import {
@@ -4477,7 +4477,7 @@ export const useChatActions = ({
         signal.aborted &&
         isAbortLikeError(e) &&
         !isRequestConfigScopeChangedError(e)
-      if ((!continuationSource || continuationSource.isCurrent()) && !greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
+      if ((!continuationSource || continuationSource.isCurrent()) && !(e instanceof NativeHistoryContextRefusal && !e.isCurrent()) && !greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
         notification.error({
           message: t("error"),
           description: nativeCharacterPreflightMessage(e, t) ?? errorMessage

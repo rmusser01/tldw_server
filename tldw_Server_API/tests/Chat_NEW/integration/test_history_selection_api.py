@@ -287,32 +287,48 @@ def test_versioned_character_override_rejects_before_input_or_defaults(history_a
     assert db.get_conversation_settings(cid) is None
 
 
+@pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("kind", ["template", "world_books", "skills"])
-def test_unsupported_saved_context_rejects_before_provider_or_admission(history_api, monkeypatch, kind):
+def test_unsupported_saved_context_rejects_before_provider_or_admission(history_api, monkeypatch, kind, stream):
     from tldw_Server_API.app.api.v1.endpoints import chat as endpoint
+
     client, db, cid, headers = history_api
     body = capture(client, cid, headers).json()
     selection = resolve_history_selection(body["snapshot"], body["view"], "send", "context")["selection"]
+
     def forbidden(*args, **kwargs):
         raise AssertionError("unsupported context must not reach provider or append")
+
     monkeypatch.setattr(db, "append_selected_history_inputs", forbidden)
     monkeypatch.setattr(endpoint, "perform_chat_api_call", forbidden)
-    request = {"model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True,
-        "messages": [{"role": "user", "content": "hello"}], "tldw_history_selection_v1": selection}
+    request = {
+        "model": "gpt-4o-mini",
+        "conversation_id": cid,
+        "save_to_db": True,
+        "stream": stream,
+        "messages": [{"role": "user", "content": "hello"}],
+        "tldw_history_selection_v1": selection,
+    }
     if kind == "template":
         request["prompt_template_name"] = "mutable-custom-template"
     elif kind == "skills":
         monkeypatch.setattr(db, "history_skills_may_be_visible", lambda: True)
     else:
         original = db.get_roleplay_resume_state
+
         def with_unsupported_context(*args, **kwargs):
             state = original(*args, **kwargs)
             state["settings"] = {"conversationContext": {"world_book_ids": [1]}}
             return state
+
         monkeypatch.setattr(db, "get_roleplay_resume_state", with_unsupported_context)
     response = client.post("/api/v1/chat/completions", headers=headers, json=request)
     assert response.status_code == 409, response.text
-    assert response.json()["detail"]["status"] == "unsupported_history_capability"
+    assert response.json()["detail"] == {
+        "status": "unsupported_history_capability",
+        "code": "unsupported_history_context_"
+        + {"template": "prompt_template", "world_books": "saved_settings", "skills": "skills_registry"}[kind],
+    }
     assert db.count_messages_for_conversation(cid) == 0
 
 

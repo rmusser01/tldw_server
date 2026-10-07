@@ -59,9 +59,10 @@ export function HistorySelectionReview({
   const scroller = React.useRef<HTMLDivElement>(null)
   const errorRegion = React.useRef<HTMLDivElement>(null)
   const identity = React.useId()
-  const reviewOwner = selection.owner && selection.owner.kind !== "unavailable"
-    ? `${selection.owner.kind}:${selection.owner.owner_key}:${selection.owner.conversation_id}`
-    : null
+  const reviewOwner =
+    selection.owner && selection.owner.kind !== "unavailable"
+      ? `${selection.owner.kind}:${selection.owner.owner_key}:${selection.owner.conversation_id}`
+      : null
   const previousReviewOwner = React.useRef(reviewOwner)
   const nodes = selection.capture?.snapshot.nodes || []
   const rowId = (id: string) => `${identity}-${encodeURIComponent(id)}`
@@ -222,6 +223,18 @@ export function HistorySelectionReview({
                   )}
                 </p>
               </>
+            ) : entry.turn.state === "refused" ? (
+              <>
+                <p className="font-medium">
+                  {text("refusedTitle", "Message not added")}
+                </p>
+                <p>
+                  {text(
+                    "refusedMessage",
+                    "This saved chat uses unsupported context. Your original input is kept here; copy it and review the saved setup or start a compatible chat. It will not be sent again automatically."
+                  )}
+                </p>
+              </>
             ) : (
               <>
                 <p className="font-medium">
@@ -239,7 +252,10 @@ export function HistorySelectionReview({
                         "recoveryState.accepted_response_unknown",
                         "User input accepted; response outcome unknown"
                       )
-                    : text(`recoveryState.${entry.turn.state}`, entry.turn.state)}
+                    : text(
+                        `recoveryState.${entry.turn.state}`,
+                        entry.turn.state
+                      )}
                 </p>
               </>
             )}

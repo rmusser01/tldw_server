@@ -884,6 +884,45 @@ const nativeAdmission = (request: any) => ({
     request.tldw_history_selection_v1.selection_revision
 })
 
+it("compact native confirmed context refusal retains raw input and shows a failed result without a transcript row", async () => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  h1.wire.mockImplementation(async function* () {
+    yield await Promise.reject(
+      Object.assign(new Error("HTTP 409"), {
+        status: 409,
+        details: {
+          detail: {
+            status: "unsupported_history_capability",
+            code: "unsupported_history_context_world_books"
+          }
+        }
+      })
+    )
+  })
+  const { result } = renderHook(() => useMessage())
+  let submitted: unknown
+  await act(async () => {
+    submitted = await result.current.onSubmit({
+      message: "  compact exact input  ",
+      image: ""
+    })
+  })
+  expect(submitted).toMatchObject({
+    status: "failed",
+    errorMessage: "native_history_context_refused"
+  })
+  expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+    state: "refused",
+    input_text: "  compact exact input  ",
+    result_text: ""
+  })
+  expect(h1.dismiss).not.toHaveBeenCalled()
+  expect(mocks.setMessages).not.toHaveBeenCalled()
+  expect(h1.wire).toHaveBeenCalledOnce()
+})
+
 it.each(["http502", "sse-afteradmission"])("native provider recovery for %s retains its receipt and exposes existing model settings", async failure => {
   h1.native = true
   mocks.storeState.serverChatCharacterId = "12"

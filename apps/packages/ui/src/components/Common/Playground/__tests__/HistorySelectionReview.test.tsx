@@ -189,6 +189,48 @@ it("shows recoverable text separately with copy and dismiss but no replay action
   ).toBeNull()
 })
 
+it("shows a confirmed native context refusal with exact input, Copy and Dismiss without uncertain outcome or replay", async () => {
+  const copy = vi.fn(async () => undefined)
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: copy }
+  })
+  const selection = {
+    ...controller(),
+    status: "ready",
+    recoveries: [
+      {
+        scope: { profile_id: "p", client_session_id: "old" },
+        turn: {
+          operation_id: "refused",
+          persistence: "server",
+          state: "refused",
+          input_text: "  original refused question  ",
+          result_text: ""
+        }
+      }
+    ],
+    dismissRecovery: vi.fn()
+  } as unknown as HistorySelectionController
+  render(<HistorySelectionReview selection={selection} />)
+  expect(screen.getByText("Message not added")).toBeVisible()
+  expect(
+    screen.getByText(/This saved chat uses unsupported context/)
+  ).toBeVisible()
+  expect(screen.queryByText(/unknown|Turn needs review/i)).toBeNull()
+  fireEvent.click(screen.getByText("Inspect original input and result"))
+  expect(screen.getByText("original refused question")).toBeVisible()
+  fireEvent.click(screen.getByRole("button", { name: "Copy recovered text" }))
+  expect(copy).toHaveBeenCalledWith("  original refused question  ")
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss recovery" }))
+  expect(selection.dismissRecovery).toHaveBeenCalledWith(
+    selection.recoveries[0]
+  )
+  expect(
+    screen.queryByRole("button", { name: /resend|retry|settle/i })
+  ).toBeNull()
+})
+
 const recoveryController = (
   persistence: "server" | "client" | undefined,
   state: "accepted_unsent" | "generated_unsaved",

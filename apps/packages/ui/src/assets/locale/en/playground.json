@@ -470,6 +470,7 @@
     "workspacePlayground": "Multi-model compare"
   },
   "composer": {
+    "native_history_context_refused": "Your message was not added because this saved chat uses unsupported context. Your input is kept separately; copy it and review the saved setup or start a compatible chat.",
     "native_history_response_pending": "Wait for the current response to finish before starting a character chat. Your chat and draft are still here.",
     "chooseProvider": "Choose provider",
     "chooseModelAndProvider": "Choose model and provider",
@@ -1318,6 +1319,8 @@
     "confirm": "Confirm selected history",
     "cancel": "Cancel review",
     "expandDescription": "Opens this selected history in the extension full page. Active streaming stays in this panel.",
+    "refusedTitle": "Message not added",
+    "refusedMessage": "This saved chat uses unsupported context. Your original input is kept here; copy it and review the saved setup or start a compatible chat. It will not be sent again automatically.",
     "recoveryTitle": "Turn needs review",
     "recoveryMessage": "The original send outcome is retained separately from history. It will not be sent again automatically.",
     "inspectRecovery": "Inspect original input and result",

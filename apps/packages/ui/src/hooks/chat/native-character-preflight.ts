@@ -81,6 +81,16 @@ export const validateNativeCharacterConfiguration = (params: NativeCharacterConf
   return { model, provider, settings };
 };
 
+/** A confirmed original-turn refusal retains transport evidence and its accepted view guard. */
+export class NativeHistoryContextRefusal extends Error {
+  constructor(
+    cause: unknown,
+    readonly isCurrent: () => boolean
+  ) {
+    super('native_history_context_refused', { cause });
+  }
+}
+
 export const nativeCharacterPreflightMessage = (
   error: unknown,
   t: (key: string, fallback: string, options?: { setting: string }) => string
@@ -90,6 +100,12 @@ export const nativeCharacterPreflightMessage = (
     'playground:composer.sceneLoadError',
     'Scene settings could not be loaded. Existing chat setup was left unchanged.'
   );
+  if (error instanceof NativeHistoryContextRefusal)
+    return t(
+      'playground:composer.native_history_context_refused',
+      'Your message was not added because this saved chat uses unsupported context. Your input is kept separately; copy it and review the saved setup or start a compatible chat.'
+    );
+
   if (code.startsWith('native_history_setting_unsupported:')) {
     return t(
       'playground:composer.characterUnsupportedSetting',

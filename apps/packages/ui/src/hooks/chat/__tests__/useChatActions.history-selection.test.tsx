@@ -465,6 +465,8 @@ afterEach(() => vi.restoreAllMocks())
 
 beforeEach(async () => {
   h1.connected = false
+  h1.recover.mockReset()
+  h1.dismiss.mockReset()
   h1.lookupRecoveries.mockReset()
   h1.lookupAdmission.mockReset()
   vi.clearAllMocks()
@@ -1319,6 +1321,320 @@ const nativeAdmission = (request: any) => ({
   originating_selection_revision:
     request.tldw_history_selection_v1.selection_revision
 })
+
+const savedContextRefusal = (
+  code = "unsupported_history_context_saved_settings"
+) =>
+  Object.assign(new Error("HTTP 409"), {
+    status: 409,
+    details: { detail: { status: "unsupported_history_capability", code } }
+  })
+
+it.each([
+  "saved_settings",
+  "world_books",
+  "skills_registry",
+  "snapshot_invalid",
+  "prompt_template"
+])(
+  "native confirmed context refusal %s keeps exact input without an uncertain send or transcript row",
+  async (suffix) => {
+    const options = createHookOptions()
+    h1.wire.mockImplementation(async function* () {
+      yield await Promise.reject(
+        savedContextRefusal(`unsupported_history_context_${suffix}`)
+      )
+    })
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+    let submitted: unknown
+    await act(async () => {
+      submitted = await result.current.onSubmit({
+        message: "  exact question\ntrailing spaces  ",
+        image: ""
+      })
+    })
+    expect(submitted).toMatchObject({
+      status: "failed",
+      errorMessage: "native_history_context_refused"
+    })
+    expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+      persistence: "server",
+      state: "refused",
+      input_text: "  exact question\ntrailing spaces  ",
+      result_text: ""
+    })
+    const retained = h1.recover.mock.lastCall?.[2]
+    expect(retained.admission).toBeUndefined()
+    expect(retained.outcome).toBeUndefined()
+    expect(retained.input_id).toBeUndefined()
+    expect(retained.assistant_id).toBeUndefined()
+    expect(h1.dismiss).not.toHaveBeenCalled()
+    expect(options.setMessages).not.toHaveBeenCalled()
+    expect(options.notification.error.mock.lastCall?.[0].description).toContain(
+      "Your message was not added"
+    )
+    expect(h1.controller.refreshRecovery).toHaveBeenCalledOnce()
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+  }
+)
+
+it.each([
+  {
+    label: "general conflict",
+    status: 409,
+    detail: { status: "stale_selection", code: "stale_source" }
+  },
+  {
+    label: "another capability",
+    status: 409,
+    detail: {
+      status: "unsupported_history_capability",
+      code: "sync_owner_unsupported"
+    }
+  },
+  {
+    label: "future context",
+    status: 409,
+    detail: {
+      status: "unsupported_history_capability",
+      code: "unsupported_history_context_future_effect"
+    }
+  },
+  {
+    label: "wrong HTTP status",
+    status: 502,
+    detail: {
+      status: "unsupported_history_capability",
+      code: "unsupported_history_context_world_books"
+    }
+  },
+  {
+    label: "text HTTP status",
+    status: "409",
+    detail: {
+      status: "unsupported_history_capability",
+      code: "unsupported_history_context_world_books"
+    }
+  },
+  {
+    label: "missing capability",
+    status: 409,
+    detail: { code: "unsupported_history_context_world_books" }
+  },
+  {
+    label: "text-only envelope",
+    status: 409,
+    detail: "unsupported_history_context_world_books"
+  }
+])("native $label retains uncertain input", async ({ status, detail }) => {
+  const options = createHookOptions()
+  h1.wire.mockImplementation(async function* () {
+    yield await Promise.reject(
+      Object.assign(new Error("unconfirmed transport"), {
+        status,
+        details: { detail }
+      })
+    )
+  })
+  const { result } = renderHook(() =>
+    useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+  )
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+    state: "unknown",
+    input_text: "next"
+  })
+  expect(h1.dismiss).not.toHaveBeenCalled()
+  expect(
+    options.notification.error.mock.lastCall?.[0].description
+  ).not.toContain("Your message was not added")
+  expect(h1.wire).toHaveBeenCalledOnce()
+})
+
+it.each([
+  "admission",
+  "content",
+  "admission-and-content",
+  "empty-content",
+  "role-only",
+  "admission-name-collision"
+])(
+  "a context-shaped error after %s cannot erase observed native evidence",
+  async (observed) => {
+    const options = createHookOptions()
+    h1.wire.mockImplementation(async function* (request) {
+      if (
+        observed === "admission" ||
+        observed === "admission-and-content" ||
+        observed === "admission-name-collision"
+      )
+        yield { tldw_history_admission_v1: nativeAdmission(request) }
+      if (observed === "content" || observed === "admission-and-content")
+        yield { choices: [{ delta: { content: "kept partial" } }] }
+      if (observed === "empty-content")
+        yield { choices: [{ delta: { content: "" } }] }
+      if (observed === "role-only")
+        yield { choices: [{ delta: { role: "assistant" } }] }
+      if (observed === "admission-name-collision")
+        yield await Promise.reject(new Error("native_history_context_refused"))
+      yield await Promise.reject(savedContextRefusal())
+    })
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+    await act(async () => {
+      await result.current.onSubmit({ message: "next", image: "" })
+    })
+    expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+      state:
+        observed === "admission" || observed === "admission-name-collision"
+          ? "accepted_unsent"
+          : observed === "empty-content" || observed === "role-only"
+            ? "unknown"
+            : "generated_unsaved",
+      input_text: "next"
+    })
+    expect(h1.dismiss).not.toHaveBeenCalled()
+    expect(
+      options.notification.error.mock.lastCall?.[0].description
+    ).not.toContain("Your message was not added")
+    expect(h1.wire).toHaveBeenCalledOnce()
+  }
+)
+
+it.each(["current", "navigation", "account"])(
+  "a confirmed native refusal keeps exact input across a cold %s view and preserves other pending turns",
+  async (boundary) => {
+    const { memory } = await import("./local-history-fixture")
+    for (const table of Object.values(memory))
+      if (table?.rows) table.rows.clear()
+    await memory.userSettings.put({ id: "main", history_profile_id: "profile" })
+    const actual = await vi.importActual<
+      typeof import("@/db/dexie/history-selection")
+    >("@/db/dexie/history-selection")
+    const current = h1.controller.getCurrent()
+    await actual.saveHistoryTurnRecovery(current.bookmarkScope, current.view, {
+      operation_id: "other-uncertain-turn",
+      persistence: "server",
+      origin_view: current.view,
+      owner_key: current.view.owner_key,
+      conversation_id: current.view.conversation_id,
+      selection_digest: "other-selection",
+      request_context_digest: "other-context",
+      created_at: 1,
+      input_text: "earlier uncertain question",
+      input_images: [],
+      result_text: "",
+      state: "unknown"
+    })
+    h1.recover.mockImplementation(actual.saveHistoryTurnRecovery)
+    h1.dismiss.mockImplementation(actual.dismissHistoryTurnRecovery)
+    const options = createHookOptions()
+    h1.wire.mockImplementation(async function* () {
+      if (boundary === "navigation") h1.controller.navigate()
+      if (boundary === "account") h1.auth.abort()
+      options.setMessages.mockClear()
+      yield await Promise.reject(savedContextRefusal())
+    })
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "  cold exact input  ",
+        image: ""
+      })
+    })
+    const reopened = await actual.loadHistoryTurnRecoveries(
+      { ...current.bookmarkScope, client_session_id: "cold-reopen" },
+      current.view
+    )
+    expect(reopened).toHaveLength(2)
+    expect(
+      reopened.find(
+        (entry) => entry.turn.operation_id !== "other-uncertain-turn"
+      )?.turn
+    ).toMatchObject({
+      state: "refused",
+      input_text: "  cold exact input  ",
+      result_text: ""
+    })
+    expect(
+      reopened.find(
+        (entry) => entry.turn.operation_id === "other-uncertain-turn"
+      )?.turn
+    ).toMatchObject({
+      state: "unknown",
+      input_text: "earlier uncertain question"
+    })
+    expect(
+      await actual.loadHistoryTurnRecoveries(current.bookmarkScope, {
+        ...current.view,
+        owner_key: "other-account"
+      })
+    ).toEqual([])
+    expect(options.setMessages).not.toHaveBeenCalled()
+    if (boundary !== "current")
+      expect(options.notification.error).not.toHaveBeenCalled()
+    expect(h1.dismiss).not.toHaveBeenCalled()
+    expect(h1.wire).toHaveBeenCalledOnce()
+  }
+)
+
+it.each(["journal write", "recovery refresh"])(
+  "a failed %s preserves the confirmed native error and original transport cause",
+  async (failure) => {
+    const { sendNativeHistoryCharacter } =
+      await import("../native-history-character-send")
+    const original = savedContextRefusal()
+    const options = createHookOptions()
+    h1.wire.mockImplementation(async function* () {
+      yield await Promise.reject(original)
+    })
+    if (failure === "journal write")
+      h1.recover.mockImplementation(async (_scope, _view, turn) => {
+        if (turn.state === "refused") throw new Error("journal unavailable")
+      })
+    else
+      h1.controller.refreshRecovery.mockRejectedValueOnce(
+        new Error("refresh unavailable")
+      )
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const caught = await sendNativeHistoryCharacter({
+      controller: h1.controller,
+      surface: "playground",
+      originIsCurrent: () => true,
+      signal: new AbortController().signal,
+      temporary: false,
+      historyId: options.historyId,
+      serverChatId: options.serverChatId,
+      model: options.selectedModel,
+      settings: { apiProvider: "openai" } as Parameters<
+        typeof sendNativeHistoryCharacter
+      >[0]["settings"],
+      message: "private input never logged",
+      image: "",
+      t: options.t as import("i18next").TFunction,
+      setServerChatId: options.setServerChatId,
+      setMessages: options.setMessages,
+      releaseActivity: vi.fn()
+    }).catch((error) => error)
+    expect(caught).toMatchObject({
+      message: "native_history_context_refused",
+      cause: original
+    })
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn.mock.calls.flat().join(" ")).not.toContain("private input")
+    expect(h1.dismiss).not.toHaveBeenCalled()
+    expect(h1.wire).toHaveBeenCalledOnce()
+  }
+)
 
 it.each(["http502", "sse-beforeadmission", "sse-afteradmission", "sse-afterpartial"])("native provider recovery for %s retains its receipt and exposes existing model settings", async failure => {
   const options = createHookOptions()
@@ -2316,6 +2632,70 @@ const mountedNativeOpening = async () => {
   const hook = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
   return { draftStore, modelStore, toolsStore, sourceDraft, memory, onCapture, selection, options, hook }
 }
+
+it("a refused first native turn preserves acknowledged bound creation and its exact original input", async () => {
+  const mounted = await mountedNativeOpening()
+  const { readChatCreationRecovery } =
+    await import("@/services/pending-chat-promotion")
+  const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
+  const actual = await vi.importActual<
+    typeof import("@/db/dexie/history-selection")
+  >("@/db/dexie/history-selection")
+  h1.recover.mockImplementation(actual.saveHistoryTurnRecovery)
+  h1.wire.mockImplementation(async function* () {
+    yield await Promise.reject(savedContextRefusal())
+  })
+  let submitted: unknown
+  await act(async () => {
+    submitted = await mounted.hook.result.current.onSubmit({
+      message: "  FIRST ORIGINAL INPUT  ",
+      image: ""
+    })
+  })
+  const selected = mounted.selection.result.current.getCurrent()
+  const owner = selected.owner
+  expect(submitted).toMatchObject({
+    status: "failed",
+    errorMessage: "native_history_context_refused"
+  })
+  expect(owner?.kind).toBe("native")
+  if (
+    owner?.kind !== "native" ||
+    !mounted.sourceDraft ||
+    !selected.bookmarkScope ||
+    !selected.view
+  )
+    throw new Error("expected accepted native owner")
+  const creation = await readChatCreationRecovery({
+    address: mounted.sourceDraft,
+    ownerHash: chatDraftOwnerKey(owner.request_scope)
+  })
+  expect(creation).toMatchObject({
+    state: "bound",
+    chatId: "tracked-chat-1",
+    inputText: "  FIRST ORIGINAL INPUT  "
+  })
+  expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({
+    kind: "native",
+    id: "tracked-chat-1"
+  })
+  const [recovered] = await actual.loadHistoryTurnRecoveries(
+    { ...selected.bookmarkScope, client_session_id: "reopened" },
+    selected.view
+  )
+  expect(recovered.turn).toMatchObject({
+    state: "refused",
+    input_text: "  FIRST ORIGINAL INPUT  "
+  })
+  expect(
+    mounted.options.notification.error.mock.lastCall?.[0].description
+  ).toContain("Your message was not added")
+  expect(createChatMock).toHaveBeenCalledOnce()
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.dismiss).not.toHaveBeenCalled()
+  mounted.hook.unmount()
+  mounted.selection.unmount()
+})
 
 it.each(["capture", "bookmark"].flatMap(stage =>
   ["settings", "tools", "stop", "new"].map(boundary => ({ stage, boundary }))
