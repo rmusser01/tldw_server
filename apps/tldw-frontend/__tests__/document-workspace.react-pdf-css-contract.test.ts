@@ -20,8 +20,27 @@ describe("Document workspace react-pdf CSS contract", () => {
     expect(pdfDocumentSource).not.toContain("react-pdf/dist/esm/Page/TextLayer.css")
   })
 
-  it("loads the shared react-pdf stylesheet from the web and extension app shells", () => {
+  it("co-locates the shared react-pdf stylesheet with the web document-workspace async chunk", () => {
+    // The web app must not load PDF layer CSS app-wide from _app (perf
+    // remediation W4): it rides the document-workspace lazy chunk instead.
     const webAppSource = readSource(path.join(frontendRoot, "pages/_app.tsx"))
+    expect(webAppSource).not.toContain('import "@/assets/react-pdf.css"')
+
+    const webLazyEntrySource = readSource(
+      path.join(frontendRoot, "routes/document-workspace.ts")
+    )
+    expect(webLazyEntrySource).toContain('import "@/assets/react-pdf.css"')
+    expect(webLazyEntrySource).toContain("routes/option-document-workspace")
+
+    const documentWorkspacePageSource = readSource(
+      path.join(frontendRoot, "pages/document-workspace.tsx")
+    )
+    expect(documentWorkspacePageSource).toContain(
+      'import("@web/routes/document-workspace")'
+    )
+  })
+
+  it("keeps loading the shared react-pdf stylesheet from the extension app shells", () => {
     const optionsEntrySource = readSource(
       path.join(packagesUiRoot, "entries/options/main.tsx")
     )
@@ -29,7 +48,6 @@ describe("Document workspace react-pdf CSS contract", () => {
       path.join(packagesUiRoot, "entries/sidepanel/main.tsx")
     )
 
-    expect(webAppSource).toContain('import "@/assets/react-pdf.css"')
     expect(optionsEntrySource).toContain('import "@/assets/react-pdf.css"')
     expect(sidepanelEntrySource).toContain('import "@/assets/react-pdf.css"')
   })

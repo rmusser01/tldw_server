@@ -1,5 +1,4 @@
 import "../styles/globals.css"
-import "@/assets/react-pdf.css"
 import { runtimeBootstrapReady } from "@web/extension/shims/runtime-bootstrap"
 // Use web-specific i18n that works with SSR/static generation
 import "@web/lib/i18n-web"
@@ -15,7 +14,10 @@ import { FirstRunGate } from "@/components/PersonaGarden/FirstRunGate"
 import { AppProviders } from "@web/components/AppProviders"
 import ErrorBoundary from "@web/components/ErrorBoundary"
 import { ConfigurationGuard } from "@web/components/networking/ConfigurationGuard"
-import { ServerReadinessGate } from "@web/components/networking/ServerReadinessGate"
+import {
+  ServerReadinessGate,
+  warmServerReadinessHealth
+} from "@web/components/networking/ServerReadinessGate"
 import {
   getRuntimeApiBearer,
   getRuntimeApiKey,
@@ -171,9 +173,26 @@ const getConfiguredAuthState = async (
     }
     const serverUrl =
       typeof config.serverUrl === "string" ? config.serverUrl : null
+    const hostedMode = isHostedTldwDeployment()
+
+    // Warm the readiness /health probe in parallel with the remaining auth
+    // resolution (the multi-user auth/me validation round trip) so the
+    // readiness gate overlaps the auth bootstrap instead of waiting for it
+    // serially (perf remediation W1). Only warm for established sessions;
+    // cold starts without stored auth keep the fully blocking gate UX.
+    if (
+      config.authMode === "multi-user"
+        ? hostedMode ||
+          (typeof config.accessToken === "string" &&
+            config.accessToken.trim().length > 0)
+        : hasActiveCookieSessionAuth(config) ||
+          (typeof config.apiKey === "string" &&
+            config.apiKey.trim().length > 0)
+    ) {
+      warmServerReadinessHealth(serverUrl)
+    }
 
     if (config.authMode === "multi-user") {
-      const hostedMode = isHostedTldwDeployment()
       const hasAccessToken =
         typeof config.accessToken === "string" &&
         config.accessToken.trim().length > 0
@@ -522,7 +541,8 @@ export default function App({ Component, pageProps }: AppProps) {
             <ServerReadinessGate
               bypass={shouldBypassGates}
               allowDegraded={shouldAllowDegradedReadiness}
-              configuredServerUrl={configuredServerUrl}>
+              configuredServerUrl={configuredServerUrl}
+              nonBlocking={isAuthenticated}>
               {gatedContent}
             </ServerReadinessGate>
           </ErrorBoundary>
