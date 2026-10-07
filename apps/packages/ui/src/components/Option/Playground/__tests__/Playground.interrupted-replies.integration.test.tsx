@@ -12,6 +12,7 @@
  * through the integration harness.
  */
 import {
+  act,
   completionMessages,
   createFakeTldwServer,
   deferred,
@@ -30,11 +31,72 @@ import {
 } from "./harness/playground-harness"
 import { act } from "@testing-library/react"
 import { getChatTurnSettlement } from "@/hooks/chat/abort-turn-cleanup"
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useConnectionStore } from "@/store/connection"
 import { useStoreMessageOption } from "@/store/option"
 import { getServerChatSaveStatus } from "@/store/server-chat-save-status"
 import { resolveChatPersistenceKind } from "@/utils/chat-persistence-status"
+
+const { recoveryReadGate, recoveryDismissGate, retryCompletion } = vi.hoisted(() => ({
+  recoveryReadGate: {
+    current: null as null | { entered: () => void; release: Promise<void>; rows: number },
+    next: null as null | { entered: () => void; release: Promise<void>; rows: number }
+  },
+  recoveryDismissGate: { current: null as null | { entered: () => void; release: Promise<void> }, calls: 0 },
+  retryCompletion: { current: null as Promise<unknown> | null }
+}))
+
+// The UI intentionally ignores Retry’s returned Promise. Observe that same
+// Promise so negative assertions run only after the actual action settles.
+vi.mock("@/hooks/chat/useChatActions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/useChatActions")>()
+  return {
+    ...actual,
+    useChatActions: (...args: Parameters<typeof actual.useChatActions>) => {
+      const actions = actual.useChatActions(...args)
+      return {
+        ...actions,
+        regenerateLastMessage: () => {
+          recoveryReadGate.current = recoveryReadGate.next
+          recoveryReadGate.next = null
+          const completed = actions.regenerateLastMessage()
+          retryCompletion.current = completed
+          return completed
+        }
+      }
+    }
+  }
+})
+
+// Pause the real storage functions over the harness's MemoryDexie DB while
+// the mounted Playground and its HistorySelection controller keep running.
+vi.mock("@/db/dexie/history-selection", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db/dexie/history-selection")>()
+  return {
+    ...actual,
+    loadHistoryTurnRecoveries: async (...args: Parameters<typeof actual.loadHistoryTurnRecoveries>) => {
+      const gate = recoveryReadGate.current
+      if (gate) recoveryReadGate.current = null
+      const rows = await actual.loadHistoryTurnRecoveries(...args)
+      if (gate) {
+        gate.rows = rows.length
+        gate.entered()
+        await gate.release
+      }
+      return rows
+    },
+    dismissHistoryTurnRecovery: async (...args: Parameters<typeof actual.dismissHistoryTurnRecovery>) => {
+      recoveryDismissGate.calls++
+      await actual.dismissHistoryTurnRecovery(...args)
+      const gate = recoveryDismissGate.current
+      if (gate) {
+        recoveryDismissGate.current = null
+        gate.entered()
+        await gate.release
+      }
+    }
+  }
+})
 
 type Row = { role: string; text: string; interrupted?: boolean; stopped?: boolean }
 
@@ -104,6 +166,11 @@ const retryInterruptedReply = async (view: PlaygroundView, server: ReturnType<ty
 describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
   beforeEach(async () => {
     await resetPlaygroundHarness()
+    recoveryReadGate.current = null
+    recoveryReadGate.next = null
+    recoveryDismissGate.current = null
+    recoveryDismissGate.calls = 0
+    retryCompletion.current = null
   })
 
   it("CS-04: a reload while a reply streams keeps the question and the partial answer, marked Interrupted", async () => {
@@ -554,6 +621,146 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
       server.planCompletion({ reply: "Complete answer" })
       return resume
     }
+
+    const openInterruptedSavedChat = async () => {
+      const server = createFakeTldwServer()
+      server.seedChat({
+        id: "saved-chat",
+        title: "Saved topic",
+        turns: [
+          { role: "user", content: "Saved question" },
+          { role: "assistant", content: "Saved answer" }
+        ]
+      })
+      const resume = planDroppedThenComplete(server)
+      const view = await renderPlayground({
+        server,
+        extras: <SidebarServerChatButton chatId="saved-chat" title="Saved topic" />
+      })
+      await openSavedServerChat(view, { title: "Saved topic", lastMessage: "Saved answer" })
+      await startSend(view, "Follow-up question")
+      await waitForStreamedText("Partial answer")
+      resume.resolve()
+      await waitForChatIdle()
+      await interruptionNotice("Interrupted")
+      return { server, view }
+    }
+    const savedView = async () => (await getHarnessDb().historySelections.toArray())
+      .find(row => row.conversation_id === "saved-chat")?.view
+
+    it.each(["different view", "ABA"])("Retry recovery read cannot choose a cursor after this chat changes view (%s)", async destination => {
+      const geometry = destination === "ABA" ? [
+        vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(480),
+        vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(320)
+      ] : []
+      try {
+        const { server, view } = await openInterruptedSavedChat()
+        const release = deferred()
+        const gate = { entered: vi.fn(), release: release.promise, rows: 0 }
+        recoveryReadGate.next = gate
+        const selectionRequests = () => server.find("POST", /^\/api\/v1\/chat\/conversations\/saved-chat\/history\/selection$/).length
+        const before = selectionRequests()
+        const originalView = await savedView()
+        const originalCursor = originalView?.cursor
+        try {
+          const notice = await interruptionNotice("Interrupted")
+          await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
+          await waitFor(() => expect(retryCompletion.current).not.toBeNull(), HARNESS_WAIT)
+          await waitFor(() => expect(gate.entered).toHaveBeenCalled(), HARNESS_WAIT)
+          expect(gate.rows).toBeGreaterThan(0)
+          await view.user.click(screen.getByRole("button", { name: "Use no prior messages" }))
+          await waitFor(() => expect(selectionRequests()).toBe(before + 1), HARNESS_WAIT)
+          await waitFor(async () => expect((await savedView())?.cursor).toEqual({ kind: "empty" }), HARNESS_WAIT)
+          if (destination === "ABA") {
+            expect(originalCursor).toMatchObject({ kind: "after_message" })
+            await view.user.click(screen.getByRole("button", { name: "Review conversation history" }))
+            const originalRow = await waitFor(() => {
+              const row = document.querySelector<HTMLElement>(`[data-history-message-id="${originalCursor.message_id}"]`)
+              expect(row).not.toBeNull()
+              return row!
+            }, HARNESS_WAIT)
+            await view.user.click(within(originalRow).getByRole("button", { name: "Continue after this message" }))
+            await waitFor(() => expect(selectionRequests()).toBe(before + 2), HARNESS_WAIT)
+            await waitFor(async () => {
+              const restored = await savedView()
+              expect(restored?.cursor).toEqual(originalCursor)
+              expect(restored?.selection_revision).toBeGreaterThan(originalView?.selection_revision ?? -1)
+            }, HARNESS_WAIT)
+          }
+          const selectedView = await savedView()
+          let outcome: unknown
+          await act(async () => { release.resolve(); outcome = await retryCompletion.current })
+          expect(outcome).toMatchObject({ status: "failed", errorMessage: "history_selection_changed" })
+          expect(selectionRequests()).toBe(before + (destination === "ABA" ? 2 : 1))
+          expect(await savedView()).toEqual(selectedView)
+          expect(recoveryDismissGate.calls).toBe(0)
+          expect(server.completionRequests()).toHaveLength(1)
+        } finally {
+          release.resolve()
+          try { await retryCompletion.current } catch { /* Preserve the assertion failure during cleanup. */ }
+          view.unmount()
+        }
+      } finally {
+        for (const spy of geometry) spy.mockRestore()
+      }
+    })
+
+    it("Retry recovery read cannot choose or dismiss after account revocation", async () => {
+      const { server, view } = await openInterruptedSavedChat()
+      const release = deferred()
+      const gate = { entered: vi.fn(), release: release.promise, rows: 0 }
+      recoveryReadGate.next = gate
+      try {
+        const notice = await interruptionNotice("Interrupted")
+        await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
+        await waitFor(() => expect(retryCompletion.current).not.toBeNull(), HARNESS_WAIT)
+        await waitFor(() => expect(gate.entered).toHaveBeenCalled(), HARNESS_WAIT)
+        expect(gate.rows).toBeGreaterThan(0)
+        await act(async () => {
+          window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+        })
+        let outcome: unknown
+        await act(async () => { release.resolve(); outcome = await retryCompletion.current })
+        expect(outcome).toMatchObject({ status: "failed", errorMessage: "history_selection_changed" })
+        expect(screen.queryByText("This chat changed before the reply could be retried. Send the question again.")).not.toBeInTheDocument()
+        expect(recoveryDismissGate.calls).toBe(0)
+        expect(server.completionRequests()).toHaveLength(1)
+      } finally {
+        release.resolve()
+        try { await retryCompletion.current } catch { /* Preserve the assertion failure during cleanup. */ }
+        view.unmount()
+      }
+    })
+
+    it("Retry cannot dispatch after its own cursor choice when dismissal outlives the view", async () => {
+      const { server, view } = await openInterruptedSavedChat()
+      const release = deferred()
+      const entered = vi.fn()
+      recoveryDismissGate.current = { entered, release: release.promise }
+      const selectionRequests = () => server.find("POST", /^\/api\/v1\/chat\/conversations\/saved-chat\/history\/selection$/).length
+      const before = selectionRequests()
+      try {
+        const notice = await interruptionNotice("Interrupted")
+        await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
+        await waitFor(() => expect(retryCompletion.current).not.toBeNull(), HARNESS_WAIT)
+        await waitFor(() => expect(entered).toHaveBeenCalled(), HARNESS_WAIT)
+        expect(selectionRequests()).toBe(before + 1)
+        await view.user.click(screen.getByRole("button", { name: "Use no prior messages" }))
+        await waitFor(() => expect(selectionRequests()).toBe(before + 2), HARNESS_WAIT)
+        await waitFor(async () => expect((await savedView())?.cursor).toEqual({ kind: "empty" }), HARNESS_WAIT)
+        const selectedView = await savedView()
+        let outcome: unknown
+        await act(async () => { release.resolve(); outcome = await retryCompletion.current })
+        expect(outcome).toMatchObject({ status: "failed", errorMessage: "history_selection_changed" })
+        expect(await savedView()).toEqual(selectedView)
+        expect(screen.queryByText("invalid_history_retry")).not.toBeInTheDocument()
+        expect(server.completionRequests()).toHaveLength(1)
+      } finally {
+        release.resolve()
+        try { await retryCompletion.current } catch { /* Preserve the assertion failure during cleanup. */ }
+        view.unmount()
+      }
+    })
 
     it("in a saved server chat: one copy of the question on screen and on the server, answered by the new reply", async () => {
       const server = createFakeTldwServer()

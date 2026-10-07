@@ -753,8 +753,58 @@ E2E routing unit committed locally c2b22246aafb2404786acb6fd07818bda0d24102, par
 **Goal**: Independently reviewed scoped patch with normal hooks committed locally.
 **Success Criteria**: Exact patch parity, unrelated Sync WIP preserved, no live UAT claim.
 **Tests**: Actual/staged review and normal scoped hooks.
-**Status**: In Progress
+**Status**: Complete
 
 ### Specified three-item module qualification
 
 Specified three-item Results coverage COMPLETE locally: separate literal test, exactly9insertions0deletions, every original line byte-identical and actual component/fixtures/mocks unchanged. First full navigation module UI30passed1.852066250s outer and WebUI30passed1.663324916s outer, natural0/no deadline/no skips/no pending at normal existing Node20.19.5/Vitest4.0.18/configured workers and600outer. Complete native JSON recovered/released in memory, stderr empty, exact source/fixture/config hashes unchanged. This verifies mocked translation fallback accessible role/name Review these 3 saved items and exact saved-ID callback[42,43,44]; not actual ICU/shipped translation/native/browser/UAT acceptance. TypeScript parse passes. Official ESLint sees file (not ignored), baseline/current0errors19identical inherited no-explicit-any warnings; inherited Next pages-discovery diagnostic remains, no new finding. TS-only BanditN/A, no unchanged Python/typecheck/build/runtime replay. Independent source/test spec+quality review CLEAR. Normal scoped hooks/final staged review/local commit next; all43 real workflow acceptance and Sync-specific approval remain open.
+
+
+## Playground interrupted Retry view ownership
+
+Saved-set three-item coverage committed locally a7412b4d3d29d57e19157bc39ab7495c93f6ede6, parentc2b222, exactly3paths38insertions1deletion; committed binary patch equals independently reviewed indexSHA256d586f52db6b6b67ea1a1cd6583f6c2f0d168cd32ffe5be430a3aa388b575731b. Normal scoped hooks1.638746167s and final staged spec/quality reviewCLEAR; no publication or actual43 acceptance. Next scoped Playground interrupted-Retry ownership unit: actual useChatActions retryInterruptedHistoryTurn awaits recovery/local-admission reads before choosing a cursor without rechecking its captured view, and awaits recovery dismissal after an owned choose before dispatch without rechecking the adopted view. New causal cases first hold these actual boundaries, change selection (including same-chat different-view/ABA and account revocation), and require no stale choose/dismiss/dispatch; preserve ordinary successful Retry and its legitimate own choose transition. Reuse existing controller.fence/getCurrent/choose and actual shared hook/controller or established integrations, no parallel protocol/owner abstraction. Root declares ONE selected new-case RED on unchanged production after independent fixture review, then minimal shared-boundary repair and first full affected UI/WebUI checks, scoped lint/types/security as applicable, actual/staged independent review, normal hooks/local commit. Maximum3attempts/issue; no replay of completed Persona/Notes/Sync/native controls. ADR:no new durable decision; existingADR049 ownership/selection fence applies. Ruling: explicit all43 approval covers this bounded existing-flow repair and causal validation; do not request duplicate design approval. Specific six-file Sync automatic-review hold remains pending and unaffected, automationPAUSED, no runtime/browser/provider/GitHub/queue/proof actions.
+
+| Unit or shared boundary | Producer and consumer agreement | Ruling |
+| --- | --- | --- |
+| Interrupted Retry | Captured selection must remain current through recovery/admission reads before cursor choice | Existing controller fence; stop stale work |
+| Owned cursor choice | A successful Retry advances the selection itself | Capture its advanced fence immediately after invoking choose, before awaiting it; do not reject its legitimate own transition |
+| Recovery dismissal and Send | Dismissal waits must not dispatch into a replacement view | Recheck the adopted fence after each wait |
+| Later composer/editor units | Share useChatActions, but separate draft/editor lifecycle from Retry | Serial units; no concurrent writers or speculative public API changes |
+
+### Stage 1: Reproduce stale Retry waits
+**Goal**: New causal checks exercise real interrupted Retry waits on unchanged production.
+**Success Criteria**: Demonstrated stale cursor movement or dispatch; legitimate Retry control succeeds.
+**Tests**: Deferred recovery/admission reads and deferred dismissal, changed view/account/ABA, ordinary owned choose.
+**Status**: Complete
+
+### Stage 2: Retain captured and adopted ownership
+**Goal**: Minimal existing-fence checks stop stale work without changing admission or settlement.
+**Success Criteria**: New cases and full genuinely affected UI/WebUI modules pass; no removed guards or original assertions.
+**Tests**: Causal GREEN, existing interrupted-reply and hook/controller consumers, configured static checks.
+**Status**: Complete
+
+### Stage 3: Independent review and local commit
+**Goal**: Scoped reviewed patch committed with normal hooks, preserving unrelated Sync WIP.
+**Success Criteria**: Actual/staged review clear, no new lint/security findings, exact commit parity.
+**Tests**: Source review, normal scoped hooks, committed/index equality.
+**Status**: In Progress
+
+
+### Retry causal fixture review and separate partial-retention gate
+
+Playground Retry tests-only causal patch independently reviewed CLEAR after correcting gate identity, settled ABA revision and actual Promise/teardown synchronization. Four new expanded cases run real Playground/useChatActions/controller/recovery algorithms over the existing MemoryDexie/fake external server harness; transparent wrappers delegate to actual implementations and return the exact Retry promise. All59originalexpect calls retained in order, parse0; testSHA25622cada4f9dcfc5d8cf01754f806e23d600c3e1b4cad221138e5947c419c04b50, productionunchanged5a1cfd683cfec82f0c32dc79b45c5f861fbde29ed492fc90e654028bbbd75783. Next ONE selected new-case RED plus existing saved-server positive control, normal UI Node20.19.5/Vitest4.0.18/configuredworkers/600outer. No fixture bypass/native acceptance. Reviewed minimal production design: capture initial fence before reads; call choose synchronously, capture its advanced fence immediately, then await that same choose promise; check adopted fence before stale failure notification, after dismissal waits and before dispatch. This avoids adopting an unrelated epoch after an await. Distinct OPEN source issue: existing Retry deletes native partial's only recovery record before dispatch; an abandoned/failed Retry can lose it. Current post-delete gate verifies stale-dispatch suppression only. Require a separate causal retention unit and durable result/owner reasoning later; do not claim fence repair accepts partial preservation or real A03/43 UAT.
+
+
+### Retry first RED and ABA fixture correction
+
+Playground Retry first selected RED completed ONCE on unchanged production:4failed1passed9selection-excluded,21.920282750souter,natural1/no deadline at600outer/configured frontend; all source/fixture hashesunchanged. Complete10497-character nativeJSON recovered in owned memory and holder80319 released naturally0; no proof/logfiles. Three causal failures: different-view Retry returned submitted after original view changed; account revocation still displayed old retry-unavailable notification; post-dismiss navigation returned a different failed outcome rather than selection-changed refusal (exact error value not shown by native JSON, so invalid_history_retry remains source inference). Existing saved-server legitimate own-choose control passed. ABA failed before causal release because originalRow lookup was null immediately after Review click; NOT accepted as defectRED. Author tracing actual review-row rendering and correcting only that test synchronization; after independent narrow review run ONLY this previously unqualified ABA case on unchanged production, no replay of the three cause-failures/positive control. Current official ESLint test baseline/current0errors0warnings/notignored and TypeScript parse0/original59expect calls retained. Root correction remains unimplemented until fixture repaired. Early destructive recovery dismissal remains separateOPEN, all43 actual workflows unaccepted.
+
+
+### Retry ABA RED and minimal fence correction
+
+Playground Retry ABA-only corrected-fixture RED completed ONCE on unchangedproduction5a1cfd...:1failed13excluded,9.824663084souter,natural1/no deadline, all hashesunchanged; complete7704-character nativeJSON recovered in owned memory and holder74345 released naturally0. Existing case-local offsetHeight480/offsetWidth320 geometry and awaited original-ID row reached the causal assertion: Retry returned submitted after same-chat empty-view then original-cursor ABA with advanced revision. This establishes the fourth cause independently; prior three failures/positive control were excluded from replay. Author/reviewer fixture fixes retained originalactions/assertions; no fakecontroller/Retry logic or actual nativebrowser acceptance. All four cause cases now RED; implementation candidate1 authorized: ONLY useChatActions.retryInterruptedHistoryTurn existing fences, initial before storageawaits and beforechoose, adopted fence captured synchronously immediately after invoking choose before its await, then before old false-notification and after each dismissal/before onSubmit. Return existing chatSubmitFailed(history_selection_changed) without stale UI error. No new helper/protocol/owner mechanism or unrelated assertion weakening. Next independent actualsource review and first full affected UI/WebUI interrupted-replies module plus relevant hook consumers, configured types/static as needed, normal hooks/localcommit. Distinct pre-dispatch partial-record deletion remainsOPEN/separate; Sync hold/automationPAUSED/real43/installer/native/canonical/publication gates remain.
+
+
+### Retry candidate1 local qualification
+
+Playground interrupted Retry candidate1 qualified locally: four causal RED cases repaired by existing initial/adopted selection fences. Full interrupted-replies module UI14passed/41.268s and Web14passed/40.018s; one relevant existing Regenerate fallback case UI1passed64excluded/4.282s and Web1passed64excluded/3.602s. Normal configs/Node20.19.5/Vitest4.0.18/600outer retained, no deadlines/unhandled failures. Configured types UI0/67.785s and declared Web npm typecheck0/52.445s; an operator direct cross-env invocation failed before compiler spawn because npm bin PATH was absent, then the actual npm script succeeded without source/config change. TypeScript parse0; ESLint hook0errors23identicalwarnings/test0errors0warnings, original59expect calls retained in order. Independent actual source reviewCLEAR; TS-only BanditN/A. Early recovery-record deletion remains separatelyOPEN; actual43/native/installer/canonical/publication acceptance and Sync hold remain. Next scoped4path normalhooks/finalstagedreview/localcommit only.
