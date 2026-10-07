@@ -2035,20 +2035,9 @@ const PlaygroundContent = () => {
 
     let cancelled = false;
     const applySidepanelHandoff = async () => {
-      if (
-        sidepanelChatHandoff.historyId &&
-        sidepanelChatHandoff.historyId !== historyId
-      ) {
-        if (await loadLocalConversation(sidepanelChatHandoff.historyId) === false) return;
-      }
+      // Fragment reference hints carry no origin/account/server ownership.
+      // History is selected explicitly through the destination's owned loader.
       if (cancelled) return;
-
-      if (
-        sidepanelChatHandoff.serverChatId &&
-        sidepanelChatHandoff.serverChatId !== serverChatId
-      ) {
-        setServerChatId(sidepanelChatHandoff.serverChatId);
-      }
       if (
         sidepanelChatHandoff.selectedModel &&
         sidepanelChatHandoff.selectedModel !== selectedModel
@@ -2203,12 +2192,9 @@ const PlaygroundContent = () => {
     };
   }, [
     chatMode,
-    historyId,
-    loadLocalConversation,
     selectedModel,
     selectedQuickPrompt,
     selectedSystemPrompt,
-    serverChatId,
     setChatMode,
     setContextFiles,
     setFileRetrievalEnabled,
@@ -2216,7 +2202,6 @@ const PlaygroundContent = () => {
     setSelectedModel,
     setSelectedQuickPrompt,
     setSelectedSystemPrompt,
-    setServerChatId,
     setTemporaryChat,
     setToolChoice,
     setUploadedFiles,
@@ -3892,6 +3877,12 @@ const PlaygroundContent = () => {
             data-testid="playground-chat-shell"
             className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
           >
+            {sidepanelChatHandoff && (sidepanelChatHandoff.historyId || sidepanelChatHandoff.serverChatId) && (
+              <div role="status" data-testid="sidepanel-handoff-history-unconfirmed" className="mx-3 mt-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text">
+                <p className="font-medium">{t("playground:sidepanelHandoff.historyNotTransferred", "History was not transferred")}</p>
+                <p className="text-text-muted">{t("playground:sidepanelHandoff.chooseDestinationHistory", "This copy does not identify the source account and server. Open the Chats sidebar and choose a conversation available here before continuing its history.")}</p>
+              </div>
+            )}
             {!focusModeActive && parentMeta?.parentHistoryId && (
               <div className="flex w-full justify-center px-5 pt-2">
                 <div className="inline-flex flex-wrap items-center justify-center gap-2">

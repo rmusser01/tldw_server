@@ -1514,6 +1514,8 @@
     "selectionError": "The assistant could not be selected. Your current chat and draft are still here; try choosing again."
   },
   "sidepanelHandoff": {
+    "historyNotTransferred": "History was not transferred",
+    "chooseDestinationHistory": "This copy does not identify the source account and server. Open the Chats sidebar and choose a conversation available here before continuing its history.",
     "checkingCopy": "Checking the copy…",
     "draftChanged": "Your draft changed while the copy was checked. Review it, then choose Insert or Replace again.",
     "readFailed": "The copy could not be checked. Your draft remains here. Try Insert or Replace again.",

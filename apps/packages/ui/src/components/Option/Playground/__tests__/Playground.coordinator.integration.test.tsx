@@ -1071,12 +1071,14 @@ describe("Playground coordinator integration", () => {
     expect(tldwClientState.getCharacter).not.toHaveBeenCalled()
   })
 
-  it("applies a sidepanel handoff before persisted session restore", async () => {
+  it("keeps unqualified handoff history hints out of destination selection and automatic restore", async () => {
     const restoreSession = vi.fn(async () => "restored" as const)
     sessionPersistenceState.value.restoreSession = restoreSession
     sessionPersistenceState.value.hasPersistedSession = true
     sessionPersistenceState.value.persistedServerChatId = "persisted-chat"
     restoreDecisionState.value = true
+    messageOptionState.value.historyId = "current-history"
+    messageOptionState.value.serverChatId = "current-chat"
     const handoff = encodeSidepanelChatWebUiHandoff({
       source: "sidepanel-chat",
       createdAt: Date.now(),
@@ -1090,11 +1092,11 @@ describe("Playground coordinator integration", () => {
 
     render(<Playground />)
 
-    await waitFor(() => {
-      expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(
-        "handoff-chat"
-      )
-    })
+    await waitFor(() => expect(window.location.search).toBe(""))
+    expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalledWith("handoff-chat")
+    expect(messageOptionState.value.historyId).toBe("current-history")
+    expect(messageOptionState.value.serverChatId).toBe("current-chat")
+    expect(screen.getByTestId("sidepanel-handoff-history-unconfirmed")).toHaveTextContent("Chats sidebar")
     expect(restoreSession).not.toHaveBeenCalled()
   })
 

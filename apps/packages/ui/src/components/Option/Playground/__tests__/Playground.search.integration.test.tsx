@@ -709,7 +709,7 @@ describe("Playground thread search integration", () => {
     window.removeEventListener("tldw:open-history", onOpenHistory)
   })
 
-  it("restores sidepanel WebUI handoff state from the URL fragment and clears the fragment", async () => {
+  it("restores transferable sidepanel WebUI state without granting its reference hints history authority", async () => {
     messageOptionState.value.historyId = "history-1"
     messageOptionState.value.serverChatId = null
     messageOptionState.value.selectedSystemPrompt = "stale-system"
@@ -740,19 +740,10 @@ describe("Playground thread search integration", () => {
 
     render(<Playground />)
 
-    await waitFor(
-      () => {
-        expect(loadLocalConversationMock).toHaveBeenCalledWith(
-          "history-handoff"
-        )
-      },
-      { timeout: 5_000 }
-    )
-    await waitFor(() => {
-      expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(
-        "server-handoff"
-      )
-    })
+    await waitFor(() => expect(window.location.hash).toBe(""))
+    expect(loadLocalConversationMock).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalledWith("server-handoff")
+    expect(screen.getByTestId("sidepanel-handoff-history-unconfirmed")).toHaveTextContent("History was not transferred")
     expect(
       messageOptionState.value.setSelectedSystemPrompt
     ).toHaveBeenCalledWith(null)
@@ -772,6 +763,26 @@ describe("Playground thread search integration", () => {
       messageOptionState.value.setFileRetrievalEnabled
     ).toHaveBeenCalledWith(true)
     expect(window.location.hash).toBe("")
+  })
+
+  it("does not let an unavailable foreign local reference block its transferable draft", async () => {
+    loadLocalConversationMock.mockResolvedValueOnce(false)
+    const draftReceived = vi.fn()
+    window.addEventListener("tldw:set-composer-message", draftReceived)
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), historyId: "foreign-local-id", serverChatId: "unqualified-server-id", draft: "TRANSFERABLE DRAFT" })
+    window.history.replaceState(null, "", `/chat#handoff=${encoded}`)
+    try {
+      render(<Playground />)
+      await waitFor(() => expect(draftReceived.mock.calls.some(([event]) => (event as CustomEvent).detail?.message === "TRANSFERABLE DRAFT")).toBe(true))
+      expect(loadLocalConversationMock).not.toHaveBeenCalled()
+      expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalledWith("unqualified-server-id")
+      expect(messageOptionState.value.historyId).toBe("history-1")
+      expect(messageOptionState.value.serverChatId).toBe("chat-1")
+      expect(screen.getByTestId("sidepanel-handoff-history-unconfirmed")).toHaveTextContent("Chats sidebar")
+    } finally {
+      window.removeEventListener("tldw:set-composer-message", draftReceived)
+      loadLocalConversationMock.mockReset().mockResolvedValue(undefined)
+    }
   })
 
   it("imports sidepanel document draft files into chat attachments", async () => {

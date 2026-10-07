@@ -4099,5 +4099,11 @@
   },
   "sidepanelHandoff_copiedDraft": {
     "message": "Copied draft"
+  },
+  "sidepanelHandoff_historyNotTransferred": {
+    "message": "History was not transferred"
+  },
+  "sidepanelHandoff_chooseDestinationHistory": {
+    "message": "This copy does not identify the source account and server. Open the Chats sidebar and choose a conversation available here before continuing its history."
   }
 }
