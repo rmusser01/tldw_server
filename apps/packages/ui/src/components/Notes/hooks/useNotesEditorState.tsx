@@ -82,6 +82,7 @@ import {
   isEditorSaveShortcutContext,
   normalizeOfflineDraftQueue,
   isCompleteNoteSourceAcknowledgement,
+  isValidNoteLanguage,
   NOTES_TITLE_STRATEGIES,
   normalizeNotesTitleStrategy,
   deriveAllowedTitleStrategies,
@@ -402,8 +403,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   }
   const setContentLanguage = React.useCallback(
     (language: string | null) => {
-      if (language !== null && (!language.length || language.length > 100))
-        throw new Error('Invalid note language');
+      if (!isValidNoteLanguage(language)) throw new Error('Invalid note language');
       setContentLanguageState(language);
       setImplicitDefaultLanguage(false);
       if (language !== contentLanguage || implicitDefaultLanguage) setIsDirty(true);

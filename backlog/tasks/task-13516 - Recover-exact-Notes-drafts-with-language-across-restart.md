@@ -13,7 +13,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
-updated_date: 2026-10-07 09:45
+updated_date: 2026-10-07 09:51
 ---
 
 ## Description
@@ -63,6 +63,7 @@ Ruling34 (progress.md and task-5-fix3-findings.md): use the existing complete so
 Implemented coherent language-bearing recovery in the existing authority-scoped browser queue (v3), with matching source/revision cleanup, quota/authority fences and stable retained-error replay until Save/edit. Untouched fresh defaults carry narrowly validated provenance and retain ordinary legacy-create compatibility; explicit/null/future metadata remains capability-protected. Actual New/reset and duplicate handlers preserve loading ownership and known/unknown mode/provenance. Governing ADR065 amended before serialization. Evidence: final post-format structured/authority/actual-page trio53; whole frontend typecheck exit0 recorded; no introduced scoped ESLint, direct changed-region/test formatting evidence. Initial task review and two scoped rounds are clean. Inherited whole-file/static debt and baseline pin-order fixture limitation remain disclosed; no external live-server/OS-kill or downstream formatter adoption claim.
 Reopened for controller-identified post-ack legacy body-only compatibility qualification. Round2 reviewed implementation remains the baseline; no new fix verified yet.
 F5 fix round3: complete implicit-create acknowledgements now supply only their associated optional mode and created identity/version to newer body-only drafts in ordinary Save and queue replay; rekey consumes fresh proof and explicit language edits remain protected. Unknown-mode mutations also require exact source/identity/version acknowledgement under Ruling34, and malformed present language retains pending recovery. Governing ADR065 amended; existing helper/result owner reused. Deferred RED2 plus unknown-mode RED10 and malformed-present RED2 captured. Final targeted structured/authority/actual-page trio and whole frontend typecheck recorded in task-5-report.md; scoped immutable-base lint/format evidence has no new debt. In Progress for independent scoped review; no C or Monaco production changes or repeated tests.
+Pre-review fix3 boundary follow-up: canonical opaque language uses raw nonempty 1..100 Unicode code points, not trimmed text or JavaScript UTF-16 units. One existing-utils predicate now governs setter, queue restoration and acknowledgement. Whitespace and non-BMP modes retain exact values through deferred acknowledgement/rekey; 100 accepted and 101 refused. RED6 captured; final amended trio89 and whole W typecheck exit0; immutable S79e74a4 comparison has no introduced lint findings and changed-line formatting verified. In Progress for scoped review.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

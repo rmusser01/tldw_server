@@ -193,3 +193,8 @@ made during the request keeps its own language and stronger capability protectio
 Ordinary and queued mutation cleanup require exact source, identity and version
 acknowledgement even when language is unknown. This uses the existing source
 acknowledgement boundary, with no exemption for arbitrary existing null-mode notes.
+
+Opaque language validation uses raw nonempty strings of at most100 Unicode code
+points, matching the canonical Python/schema contract. Whitespace is not trimmed
+and non-BMP characters are not counted twice by browser setter, queue or reply
+validation. Missing metadata remains distinct from malformed present metadata.

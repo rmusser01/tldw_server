@@ -497,6 +497,10 @@ export type OfflineDraftEntry = {
   syncState: OfflineDraftSyncState
   lastError: string | null
 }
+export const isValidNoteLanguage = (value: unknown): value is string | null =>
+  value === null ||
+  (typeof value === 'string' && value.length > 0 && Array.from(value).length <= 100);
+
 export const isCompleteNoteSourceAcknowledgement = (
   reply: unknown,
   content: string,
@@ -513,11 +517,7 @@ export const isCompleteNoteSourceAcknowledgement = (
   return (
     validId &&
     note.content === content &&
-    (note.content_language === undefined ||
-      note.content_language === null ||
-      (typeof note.content_language === 'string' &&
-        note.content_language.trim().length > 0 &&
-        note.content_language.length <= 100)) &&
+    (note.content_language === undefined || isValidNoteLanguage(note.content_language)) &&
     version !== null &&
     Number.isSafeInteger(version) &&
     (expectedId == null || String(id) === String(expectedId))
@@ -577,7 +577,9 @@ export const normalizeOfflineDraftQueue = (rawValue: unknown): Record<string, Of
         toNoteVersion(draft) === null &&
         draft.content_language === null,
       revision: Number.isSafeInteger(draft.revision) && draft.revision >= 0 ? draft.revision : 0,
-      ...(draft.content_language === null || (typeof draft.content_language === "string" && draft.content_language.length > 0 && draft.content_language.length <= 100) ? { content_language: draft.content_language } : {}),
+      ...(isValidNoteLanguage(draft.content_language)
+        ? { content_language: draft.content_language }
+        : {}),
       key: normalizedKey,
       noteId: draft.noteId != null ? String(draft.noteId) : null,
       baseVersion:

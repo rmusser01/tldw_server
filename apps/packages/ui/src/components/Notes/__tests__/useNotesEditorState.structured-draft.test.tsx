@@ -593,6 +593,7 @@ describe('structured drafts', () => {
       { id: 'n', content: 'exact' },
       { id: 'n', version: -1, content: 'exact' },
       { id: 'n', version: 1, content: 'exact', content_language: { invalid: true } },
+      { id: 'n', version: 1, content: 'exact', content_language: '😀'.repeat(101) },
     ].flatMap((reply) => ['ordinary', 'queue'].map((pathway) => ({ reply, pathway })))
   )(
     'retains an untouched default after an incomplete legacy acknowledgement %j',
@@ -720,7 +721,10 @@ describe('structured drafts', () => {
   );
   it.each(
     ['ordinary', 'queue'].flatMap((pathway) =>
-      [undefined, null, 'yaml', 'future-mode'].map((language) => ({ pathway, language }))
+      [undefined, null, 'yaml', 'future-mode', '   ', '😀'.repeat(51)].map((language) => ({
+        pathway,
+        language,
+      }))
     )
   )(
     'saves newer body-only edits after a deferred legacy first POST via $pathway $language',
@@ -903,4 +907,33 @@ describe('structured drafts', () => {
       expect(view.result.current.saveIndicator).not.toBe('saved');
     }
   );
+  it.each(['   ', '😀'.repeat(51), '😀'.repeat(100)])(
+    'retains raw opaque mode in setter and recovery %s',
+    async (language) => {
+      const view = renderEditor(false);
+      act(() => {
+        view.result.current.setContentLanguage(language);
+        view.result.current.setContent('exact');
+      });
+      await act(async () => {
+        await view.result.current.saveNote({ showSuccessMessage: false });
+      });
+      expect(view.result.current.contentLanguage).toBe(language);
+      const restored = normalizeOfflineDraftQueue(
+        JSON.parse(JSON.stringify(view.result.current.offlineDraftQueue))
+      );
+      expect(restored['draft:new'].content_language).toBe(language);
+    }
+  );
+  it('refuses raw opaque modes over 100 code points', () => {
+    const view = renderEditor(false);
+    expect(() => view.result.current.setContentLanguage('😀'.repeat(101))).toThrow(
+      'Invalid note language'
+    );
+    expect(
+      normalizeOfflineDraftQueue({
+        'draft:new': { content: 'exact', content_language: '😀'.repeat(101) },
+      })['draft:new'].content_language
+    ).toBeUndefined();
+  });
 });
