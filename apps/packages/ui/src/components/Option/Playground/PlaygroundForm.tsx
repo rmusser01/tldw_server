@@ -2312,6 +2312,18 @@ export const PlaygroundForm = ({
     notificationApi,
     t,
   });
+  const sidepanelContextOnlyCopy = Boolean(
+    sidepanelHandoffConflict?.handoff.pageContext &&
+    sidepanelHandoffConflict.handoff.hasText !== false &&
+    sidepanelHandoffConflict.handoff.draft.text.length === 0,
+  );
+  const sidepanelCopyShortened = Boolean(
+    sidepanelHandoffConflict?.handoff.draft.truncated ||
+    sidepanelHandoffConflict?.handoff.pageContext?.truncated ||
+    sidepanelHandoffConflict?.handoff.pageContext?.snippets.some(
+      (snippet) => snippet.truncated,
+    ),
+  );
   useIsomorphicLayoutEffect(() => {
     onDraftPresenceChange?.(hasDraft);
   }, [hasDraft, onDraftPresenceChange]);
@@ -5561,10 +5573,10 @@ export const PlaygroundForm = ({
               ) : null}
               {sidepanelHandoffConflict ? (
                 <div
-                  role="status"
+                  role="region"
                   aria-label={t(
                     "playground:sidepanelHandoff.conflictLabel",
-                    "Sidepanel handoff conflict",
+                    "Review copied chat",
                   )}
                   className="mb-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text"
                 >
@@ -5572,21 +5584,84 @@ export const PlaygroundForm = ({
                     <div className="min-w-0">
                       <div className="font-medium">
                         {t(
-                          sidepanelHandoffConflict.handoff.hasText === false ? "playground:sidepanelHandoff.noTextTitle" : "playground:sidepanelHandoff.conflictTitle",
-                          sidepanelHandoffConflict.handoff.hasText === false ? "Copy contains no draft text" : "Import sidepanel draft?",
+                          sidepanelHandoffConflict.handoff.hasText === false ? "playground:sidepanelHandoff.noTextTitle" : sidepanelContextOnlyCopy ? "playground:sidepanelHandoff.contextOnlyTitle" : "playground:sidepanelHandoff.conflictTitle",
+                          sidepanelHandoffConflict.handoff.hasText === false ? "Copy contains no draft text" : sidepanelContextOnlyCopy ? "Import page references?" : "Import sidepanel draft?",
                         )}
                       </div>
                       <div className="text-text-muted">
                         {t(
-                          sidepanelHandoffConflict.handoff.hasText === false ? sidepanelOptionReview.length > 0 ? "playground:sidepanelHandoff.settingsOnlyDescription" : "playground:sidepanelHandoff.noTextDescription" : "playground:sidepanelHandoff.conflictDescription",
-                          sidepanelHandoffConflict.handoff.hasText === false ? sidepanelOptionReview.length > 0 ? "Your draft remains here. Review the copied settings below, apply them if wanted, or dismiss this copy." : "Your draft remains here. Dismiss this copy, then choose the settings or attachments you need." : "Review the copied draft below. Insert it, replace your current draft, or cancel the import.",
+                          sidepanelHandoffConflict.handoff.hasText === false ? sidepanelOptionReview.length > 0 ? "playground:sidepanelHandoff.settingsOnlyDescription" : "playground:sidepanelHandoff.noTextDescription" : sidepanelContextOnlyCopy ? "playground:sidepanelHandoff.contextOnlyDescription" : "playground:sidepanelHandoff.conflictDescription",
+                          sidepanelHandoffConflict.handoff.hasText === false ? sidepanelOptionReview.length > 0 ? "Your draft remains here. Review the copied settings below, apply them if wanted, or dismiss this copy." : "Your draft remains here. Dismiss this copy, then choose the settings or attachments you need." : sidepanelContextOnlyCopy ? "Review the copied page references, add them to this chat, or cancel. Your current draft will be kept." : "Review the copied draft below. Insert it, replace your current draft, or cancel the import.",
                         )}
                       </div>
                     </div>
-                    {sidepanelHandoffConflict.handoff.hasText !== false ? <div className="basis-full min-w-0">
+                    {!sidepanelHandoffConflict.route.webUi ? (
+                      <p role="status" className="basis-full text-text-muted">
+                        {t(
+                          "playground:sidepanelHandoff.sourceAccountUnverified",
+                          "This copy does not identify its source account. Review the content before importing.",
+                        )}
+                      </p>
+                    ) : null}
+                    {sidepanelCopyShortened ? (
+                      <p className="basis-full text-text-muted">
+                        {t(
+                          "playground:sidepanelHandoff.copyShortened",
+                          "Some copied text or page references were shortened.",
+                        )}
+                      </p>
+                    ) : null}
+                    {sidepanelHandoffConflict.handoff.hasText !== false && !sidepanelContextOnlyCopy ? <div className="basis-full min-w-0">
                       <p className="font-medium">{t("playground:sidepanelHandoff.copiedDraft", "Copied draft")}</p>
                       <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans text-sm text-text">{sidepanelHandoffConflict.handoff.draft.text}</pre>
                     </div> : null}
+                    {sidepanelHandoffConflict.handoff.pageContext ? (
+                      <details className="basis-full min-w-0">
+                        <summary className="min-h-11 cursor-pointer py-3 font-medium focus-visible:ring-2 focus-visible:ring-focus">
+                          {t(
+                            "playground:sidepanelHandoff.copiedPageReferences",
+                            "Copied page references",
+                          )}
+                        </summary>
+                        <div
+                          role="region"
+                          aria-label={t(
+                            "playground:sidepanelHandoff.copiedPageReferences",
+                            "Copied page references",
+                          )}
+                          tabIndex={0}
+                          className="mt-1 max-h-48 space-y-2 overflow-auto rounded border border-border p-2 focus-visible:ring-2 focus-visible:ring-focus"
+                        >
+                          {sidepanelHandoffConflict.handoff.pageContext.title ? (
+                            <p className="break-words font-medium">
+                              {sidepanelHandoffConflict.handoff.pageContext.title}
+                            </p>
+                          ) : null}
+                          {sidepanelHandoffConflict.handoff.pageContext.url ? (
+                            <p className="break-all text-text-muted">
+                              {sidepanelHandoffConflict.handoff.pageContext.url}
+                            </p>
+                          ) : null}
+                          {sidepanelHandoffConflict.handoff.pageContext.snippets.map(
+                            (snippet, index) => (
+                              <div key={index}>
+                                <p className="font-medium">
+                                  {snippet.label ||
+                                    t(
+                                      "playground:sidepanelHandoff.copiedSnippet",
+                                      "Snippet {{number}}",
+                                      { number: index + 1 },
+                                    )}
+                                </p>
+                                <pre className="whitespace-pre-wrap break-words font-sans text-sm">
+                                  {snippet.text}
+                                </pre>
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      </details>
+                    ) : null}
                     {sidepanelOptionReview.length > 0 ? (
                       <div className="basis-full min-w-0 space-y-2">
                         <table
@@ -5665,25 +5740,25 @@ export const PlaygroundForm = ({
                         onClick={insertHandoffDraft}
                         disabled={sidepanelImportPending}
                         aria-busy={sidepanelImportPending || undefined}
-                        className="min-h-7 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                        className="min-h-11 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                       >
                         {t(
-                          "playground:sidepanelHandoff.insert",
-                          "Insert handoff draft",
+                          sidepanelContextOnlyCopy ? "playground:sidepanelHandoff.addPageReferences" : "playground:sidepanelHandoff.insert",
+                          sidepanelContextOnlyCopy ? "Add page references" : "Insert handoff draft",
                         )}
                       </button>
-                      <button
+                      {!sidepanelContextOnlyCopy ? <button
                         type="button"
                         onClick={replaceWithHandoffDraft}
                         disabled={sidepanelImportPending}
                         aria-busy={sidepanelImportPending || undefined}
-                        className="min-h-7 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                        className="min-h-11 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                       >
                         {t(
                           "playground:sidepanelHandoff.replace",
                           "Replace current draft",
                         )}
-                      </button>
+                      </button> : null}
                       </> : null}
                       {sidepanelHandoffConflict.handoff.hasText === false && sidepanelOptionReview.length > 0 ? <button
                         type="button" onClick={applySidepanelOptions} disabled={sidepanelImportPending || !includeSidepanelOptions}
@@ -5693,7 +5768,7 @@ export const PlaygroundForm = ({
                       <button
                         type="button"
                         onClick={cancelHandoffImport}
-                        className="min-h-7 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                        className="min-h-11 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                       >
                         {sidepanelHandoffConflict.handoff.hasText === false ? t("playground:sidepanelHandoff.dismissCopy", "Dismiss copy") : t("playground:sidepanelHandoff.cancel", "Cancel import")}
                       </button>

@@ -3,12 +3,15 @@ import React from "react";
 import {
   act,
   fireEvent,
-  render,
+  render as renderTestingLibrary,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { historySelectionExpansionPath } from "@/hooks/chat/useHistorySelection";
+import type { HistoryBookmark } from "@/db/dexie/types";
 
 import { Playground } from "../Playground";
 import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
@@ -18,6 +21,20 @@ import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant
 import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition";
 import { characterToAssistantSelection } from "@/types/assistant-selection";
 import { resolveHistorySelection } from "@/utils/history-selection";
+
+// Keep the real query lifecycle: the shared no-provider fallback intentionally
+// does not execute catalog reads and cannot prove root readiness outcomes.
+const render = (ui: React.ReactElement) => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  function QueryFixture({ children }: { children: React.ReactNode }) {
+    return (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+  }
+  return renderTestingLibrary(ui, { wrapper: QueryFixture });
+};
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -86,7 +103,12 @@ const sessionPersistenceState = vi.hoisted(() => ({
 const storageState = vi.hoisted(() => ({
   values: new Map<string, unknown>(),
 }));
-const recentChatState = vi.hoisted(() => ({ enabled: false, recent: vi.fn(), capture: vi.fn() }));
+const recentChatState = vi.hoisted(() => ({
+  enabled: false,
+  recent: vi.fn(),
+  capture: vi.fn(),
+  bookmark: vi.fn(),
+}));
 vi.mock("@/db/dexie/chat", () => ({
   PageAssistDatabase: class {
     getHistoryInfo = async (id: string) => ({ id, local_owner_key: "local-owner" });
@@ -97,7 +119,7 @@ vi.mock("@/db/dexie/history-selection", () => ({
   getLocalHistoryOwner: async (id: string) => ({ kind: "local", profile_id: "profile", owner_key: "local-owner", conversation_id: id }),
   loadHistoryTurnRecoveries: async () => [],
   dismissHistoryTurnRecovery: async () => {},
-  loadHistoryBookmark: async () => null,
+  loadHistoryBookmark: (...args: unknown[]) => recentChatState.bookmark(...args),
   saveHistoryBookmark: async () => {}
 }));
 vi.mock("@/db/dexie/fork-operations", () => ({ findForkCandidate: async () => null, loadForkOperations: async () => [] }));
@@ -378,7 +400,10 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useDesktop: () => true,
 }));
 
-vi.mock("@/hooks/useLoadLocalConversation", () => ({
+vi.mock("@/hooks/useLoadLocalConversation", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/hooks/useLoadLocalConversation")
+  >()),
   useLoadLocalConversation: () => vi.fn(async () => {}),
 }));
 
@@ -417,6 +442,7 @@ describe("Playground cockpit shell", () => {
     vi.clearAllMocks();
     recentChatState.enabled = false;
     recentChatState.recent.mockReset().mockResolvedValue(null);
+    recentChatState.bookmark.mockReset().mockResolvedValue(null);
     recentChatState.capture.mockReset().mockImplementation(async (owner, request) => {
       const view = { ...request, owner_key: "local-owner" };
       const snapshot = { version: 1, owner_key: "local-owner", conversation_id: owner.conversation_id, source_digest: "source", storage_context_digest: "storage", fences: {}, interpretation_status: { kind: "parent_graph_v1" }, nodes: [] };
@@ -525,8 +551,7 @@ describe("Playground cockpit shell", () => {
     ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(tldwServerState.fetchChatModels).toHaveBeenCalledWith({
-        returnEmpty: true,
-        forceRefresh: true,
+        requireFresh: true,
       });
     });
   });
@@ -698,6 +723,218 @@ describe("Playground cockpit shell", () => {
     expect(useStoreMessageOption.getState().chatDraftTransition?.kind).toBe("switch");
   });
 
+  // Actual route/H1/core; the Form action, database rows, owner resolution and
+  // backend reads remain the existing declared fixture boundaries.
+  it.each([
+    [
+      "same query character",
+      "/chat?mode=character&characterId=foreign-card&handoff=opaque-copy",
+    ],
+    [
+      "hash-router character",
+      "/options.html#/chat?mode=character&characterId=foreign-card&handoff=opaque-copy",
+    ],
+    [
+      "search copy with hash character",
+      "/chat?handoff=opaque-copy#/chat?mode=character&characterId=foreign-card",
+    ],
+    [
+      "bare fragment copy with search character",
+      "/chat?mode=character&characterId=foreign-card#handoff=opaque-copy",
+    ],
+    [
+      "same query chatId",
+      "/chat?mode=character&characterId=foreign-card&chatId=foreign-chat&handoff=opaque-copy",
+    ],
+    [
+      "hash chat_id with search copy",
+      "/chat?handoff=opaque-copy#/chat?mode=character&chat_id=foreign-chat",
+    ],
+    [
+      "search serverChatId with hash-query copy",
+      "/chat?mode=character&serverChatId=foreign-chat#?handoff=opaque-copy",
+    ],
+    [
+      "search server_chat_id with bare fragment copy",
+      "/chat?mode=character&server_chat_id=foreign-chat#handoff=opaque-copy",
+    ],
+  ])(
+    "keeps %s in literal-copy review without adopting bare character or chat identity",
+    async (_case, url) => {
+      window.history.replaceState({}, "", url);
+      render(<Playground />);
+      await screen.findByTestId("playground-cockpit-shell");
+      await act(async () => {});
+
+      expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+      expect(
+        messageOptionState.value.setSelectedCharacter,
+      ).not.toHaveBeenCalled();
+      expect(messageOptionState.value.setHistoryId).not.toHaveBeenCalled();
+      expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled();
+      expect(
+        usePlaygroundSessionStore.getState().serverChatSelectionIntent,
+      ).toBeNull();
+      expect(
+        screen.getByTestId("playground-active-chat-mode"),
+      ).toHaveTextContent("Standard chat");
+    },
+  );
+
+  it.each([
+    ["outer character pointer", ""],
+    ["outer character pointer and copy token", "&handoff=ambient-copy"],
+  ])(
+    "retires %s after copy cleanup while allowing a new explicit router character link",
+    async (_case, outerCopy) => {
+      const ambientSearch =
+        "?mode=character&characterId=foreign-card" + outerCopy;
+      window.history.replaceState(
+        {},
+        "",
+        "/options.html" + ambientSearch + "#/chat?handoff=opaque-copy",
+      );
+      routerLocationState.value = {
+        pathname: "/chat",
+        search: "?handoff=opaque-copy",
+        hash: "",
+        key: "copy",
+      };
+      const { rerender } = render(<Playground />);
+      await screen.findByTestId("playground-cockpit-shell");
+      await act(async () => {});
+      expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+
+      window.history.replaceState(
+        {},
+        "",
+        "/options.html" + ambientSearch + "#/chat",
+      );
+      routerLocationState.value = {
+        pathname: "/chat",
+        search: "",
+        hash: "",
+        key: "copy-cleaned",
+      };
+      rerender(<Playground />);
+      await act(async () => {});
+      expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+      expect(
+        usePlaygroundSessionStore.getState().serverChatSelectionIntent,
+      ).toBeNull();
+      expect(
+        screen.getByTestId("playground-active-chat-mode"),
+      ).toHaveTextContent("Standard chat");
+
+      window.history.replaceState(
+        {},
+        "",
+        "/options.html" +
+          ambientSearch +
+          "#/chat?mode=character&characterId=chosen-card",
+      );
+      routerLocationState.value = {
+        pathname: "/chat",
+        search: "?mode=character&characterId=chosen-card",
+        hash: "",
+        key: "explicit-character",
+      };
+      rerender(<Playground />);
+      await waitFor(() =>
+        expect(tldwClientState.getCharacter).toHaveBeenCalledOnce(),
+      );
+      expect(tldwClientState.getCharacter.mock.calls[0]?.[0]).toBe(
+        "chosen-card",
+      );
+      expect(
+        messageOptionState.value.setSelectedCharacter,
+      ).toHaveBeenCalledWith({ id: "chosen-card", name: "Route Character" });
+    },
+  );
+
+  it("does not introduce bare-fragment character commands without a copy", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat#mode=character&characterId=foreign-card&chatId=foreign-chat",
+    );
+    render(<Playground />);
+    await screen.findByTestId("playground-cockpit-shell");
+    await act(async () => {});
+    expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+    expect(
+      usePlaygroundSessionStore.getState().serverChatSelectionIntent,
+    ).toBeNull();
+    expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled();
+    expect(screen.getByTestId("playground-active-chat-mode")).toHaveTextContent(
+      "Standard chat",
+    );
+  });
+
+  it("still loads an owner-qualified history selection while a literal-copy token awaits review", async () => {
+    useStoreMessageOption.getState().startNewChatDraft();
+    const reference = {
+      profile_id: "profile",
+      client_session_id: "source-session",
+      owner_key: "local-owner",
+      conversation_id: "qualified-local-chat",
+    };
+    const bookmark: HistoryBookmark = {
+      profile_id: reference.profile_id,
+      client_session_id: reference.client_session_id,
+      owner_key: reference.owner_key,
+      conversation_id: reference.conversation_id,
+      view: {
+        view_session_id: "source-view",
+        owner_key: reference.owner_key,
+        conversation_id: reference.conversation_id,
+        interpretation: { kind: "parent_graph_v1" },
+        cursor: { kind: "empty" },
+        selection_revision: 1,
+      },
+    };
+    recentChatState.bookmark.mockResolvedValue(bookmark);
+    const path = historySelectionExpansionPath({
+      reference,
+      owner: {
+        kind: "local",
+        profile_id: "profile",
+        owner_key: "local-owner",
+        conversation_id: "qualified-local-chat",
+      },
+    });
+    window.history.replaceState({}, "", path + "&handoff=opaque-copy");
+    messageOptionState.value.setHistoryId = vi.fn((id, options) =>
+      useStoreMessageOption.getState().setHistoryId(id, options),
+    );
+    messageOptionState.value.setServerChatId = vi.fn((id) =>
+      useStoreMessageOption.getState().setServerChatId(id),
+    );
+    render(<Playground />);
+
+    await waitFor(() =>
+      expect(useStoreMessageOption.getState()).toMatchObject({
+        historyId: "qualified-local-chat",
+        serverChatId: null,
+        chatDraftAddress: {
+          kind: "local",
+          id: "qualified-local-chat",
+          profileId: "profile",
+        },
+      }),
+    );
+    expect(recentChatState.capture).toHaveBeenCalledOnce();
+    expect(recentChatState.capture.mock.calls[0]?.[0]).toMatchObject({
+      kind: "local",
+      owner_key: "local-owner",
+      conversation_id: "qualified-local-chat",
+    });
+    expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+    expect(
+      usePlaygroundSessionStore.getState().serverChatSelectionIntent,
+    ).toBeNull();
+  });
+
   it("qualifies an explicit saved-character URL through the shared draft selection callback", async () => {
     window.history.replaceState({}, "", "/chat?mode=character&characterId=char-route&chatId=route-chat");
     render(<Playground />);
@@ -732,8 +969,7 @@ describe("Playground cockpit shell", () => {
 
     await waitFor(() => {
       expect(tldwServerState.fetchChatModels).toHaveBeenCalledWith({
-        returnEmpty: true,
-        forceRefresh: true,
+        requireFresh: true,
       });
     });
 
@@ -1294,26 +1530,17 @@ describe("Playground cockpit shell", () => {
       name: "Ariadne",
     };
     messageOptionState.value.selectedModel = "openai:gpt-4.1-mini";
-    let resolveInitialModels:
-      | ((models: Array<{
-          model: string
-          provider: string
-          is_configured: boolean
-          provider_is_configured: boolean
-        }>) => void)
-      | null = null;
+    let rejectInitialModels: ((reason?: unknown) => void) | null = null;
     const initialModels = new Promise<
       Array<{
-        model: string
-        provider: string
-        is_configured: boolean
-        provider_is_configured: boolean
+        model: string;
+        provider: string;
+        is_configured: boolean;
+        provider_is_configured: boolean;
       }>
-    >(
-      (resolve) => {
-        resolveInitialModels = resolve;
-      },
-    );
+    >((_resolve, reject) => {
+      rejectInitialModels = reject;
+    });
     tldwServerState.fetchChatModels
       .mockImplementationOnce(() => initialModels)
       .mockResolvedValueOnce([
@@ -1333,17 +1560,26 @@ describe("Playground cockpit shell", () => {
       ).getByText("Checking chat model readiness"),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await act(async () =>
+      rejectInitialModels?.(new Error("Fixture catalog read failed")),
+    );
+    const readinessPanel = within(
+      screen.getByTestId("character-chat-readiness-panel"),
+    );
+    await readinessPanel.findByText("Could not check chat models");
+    fireEvent.click(readinessPanel.getByRole("button", { name: "Try again" }));
 
     await waitFor(() => {
       expect(tldwServerState.fetchChatModels).toHaveBeenCalledTimes(2);
     });
     expect(tldwServerState.fetchChatModels).toHaveBeenLastCalledWith({
-      returnEmpty: true,
-      forceRefresh: true,
+      requireFresh: true,
     });
-
-    resolveInitialModels?.([]);
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("character-chat-readiness-panel"),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   it("surfaces unavailable selected chat models from the model catalog", async () => {

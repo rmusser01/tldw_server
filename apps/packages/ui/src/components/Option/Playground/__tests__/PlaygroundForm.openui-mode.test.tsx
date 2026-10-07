@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { encodeSidepanelChatWebUiHandoff, SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
 import * as mediaHandoff from "@/services/tldw/media-chat-handoff"
+import * as sidepanelCopy from "@/services/sidepanel-chat-handoff"
 import type { MediaChatHandoffPayload } from "@/services/tldw/media-chat-handoff"
 import { useMilestoneStore } from "@/store/milestones"
 import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
@@ -1577,6 +1578,105 @@ describe("PlaygroundForm OpenUI mode", () => {
     useMilestoneStore.getState().resetMilestones()
     messageOptionState.value = createMessageOptionState()
   })
+
+  it("previews bounded page references and shortening before a local copy choice", async () => {
+    const user = userEvent.setup();
+    render(<PlaygroundForm droppedFiles={[]} />);
+    await user.type(screen.getByTestId("composer-textarea"), "KEEP THIS DRAFT");
+    const pkg = await sidepanelCopy.createSidepanelChatHandoff({
+      draftText: "<script>literal copied draft</script>  ",
+      pageContext: {
+        title: "<img src=x> literal page title",
+        url: "javascript:literal-reference",
+        snippets: [
+          {
+            kind: "selection",
+            label: "Copied selection",
+            text: "Long copied text beyond the banner preview. ".repeat(110),
+          },
+        ],
+      },
+    });
+    await act(async () => {
+      handoff.search = "?handoff=" + pkg.id;
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await screen.findByText("Copied draft");
+    const disclosure = screen.getByText("Copied page references");
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(
+      "KEEP THIS DRAFT",
+    );
+    expect(await sidepanelCopy.readSidepanelChatHandoff(pkg.id)).not.toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Imported sidepanel context" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This copy does not identify its source account. Review the content before importing.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Some copied text or page references were shortened."),
+    ).toBeInTheDocument();
+    await user.click(disclosure);
+    const preview = screen.getByRole("region", {
+      name: "Copied page references",
+    });
+    expect(preview).toHaveTextContent(pkg.pageContext!.title!);
+    expect(preview).toHaveTextContent(pkg.pageContext!.url!);
+    expect(preview.querySelector("pre")?.textContent).toBe(
+      pkg.pageContext!.snippets[0].text,
+    );
+    expect(preview.querySelector("a, img, script")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Cancel import" }));
+    await waitFor(async () =>
+      expect(await sidepanelCopy.readSidepanelChatHandoff(pkg.id)).toBeNull(),
+    );
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(
+      "KEEP THIS DRAFT",
+    );
+    expect(
+      screen.queryByRole("region", { name: "Imported sidepanel context" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("adds reviewed page references without replacing a destination draft for a context-only copy", async () => {
+    const user = userEvent.setup();
+    render(<PlaygroundForm droppedFiles={[]} />);
+    await user.type(
+      screen.getByTestId("composer-textarea"),
+      "MY CURRENT QUESTION",
+    );
+    const pkg = await sidepanelCopy.createSidepanelChatHandoff({
+      draftText: "",
+      pageContext: {
+        title: "Context-only page",
+        url: "https://example.test/page",
+        snippets: [],
+      },
+    });
+    await act(async () => {
+      handoff.search = "?handoff=" + pkg.id;
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await screen.findByText("Import page references?");
+    expect(
+      screen.queryByRole("button", { name: "Replace current draft" }),
+    ).not.toBeInTheDocument();
+    expect(await sidepanelCopy.readSidepanelChatHandoff(pkg.id)).not.toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Add page references" }),
+    );
+    await screen.findByRole("region", { name: "Imported sidepanel context" });
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(
+      "MY CURRENT QUESTION",
+    );
+    expect(screen.getByText("Page references imported.")).toBeInTheDocument();
+    await waitFor(async () =>
+      expect(await sidepanelCopy.readSidepanelChatHandoff(pkg.id)).toBeNull(),
+    );
+    expect(handoff.search).toBe("");
+  });
 
   it("reviews current/copied passive settings in the actual Form and applies them only with consent", async () => {
     const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(),

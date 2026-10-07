@@ -288,6 +288,7 @@ const SubmitImportHarness = ({
   return (
     <div>
       <textarea aria-label="Composer" value={draft} readOnly />
+      {handoffImport.conflict ? <button type="button" onClick={handoffImport.insertHandoffDraft}>Insert</button> : null}
       {handoffImport.importedContext ? (
         <SidepanelImportedContextBanner
           context={handoffImport.importedContext}
@@ -318,12 +319,61 @@ describe("sidepanel chat handoff import", () => {
 
   afterEach(() => { vi.useRealTimers() })
 
+  // Actual receiver/simple form/router; package storage and the destination's
+  // verified owner predicate are declared boundaries, not source-owner proof.
+  it.each(["EXACT COPIED TEXT  ", " \n\t ", ""])("requires an explicit choice for an opaque copy %j in an empty ready destination", async text => {
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    serviceMocks.readSidepanelChatHandoff.mockResolvedValue(buildPackage({ draft: { text } }))
+    renderWithRoute(<HookHarness onImportChange={value => { displayed = value }} />)
+    await act(async () => {})
+    expect(displayed.conflict?.handoff.draft.text).toBe(text)
+    expect(screen.getByLabelText("Composer")).toHaveValue("")
+    expect(displayed.importedContext).toBeNull()
+    expect(displayed.importReceipt).toBeNull()
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+    expect(screen.getByTestId("location-search")).toHaveTextContent("handoff=handoff-1")
+    fireEvent.click(screen.getByRole("button", { name: "Insert" }))
+    await waitFor(() => expect(displayed.importedContext).toBe(importedPageContext))
+    expect(screen.getByLabelText("Composer")).toHaveValue(text)
+    await waitFor(() => expect(serviceMocks.consumeSidepanelChatHandoff).toHaveBeenCalledOnce())
+  })
+
+  it("adds context-only page references while preserving the destination draft and reporting the actual import", async () => {
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    serviceMocks.readSidepanelChatHandoff.mockResolvedValue(buildPackage({ draft: { text: "" } }))
+    renderWithRoute(<HookHarness initialDraft="KEEP EXACT  " onImportChange={value => { displayed = value }} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
+    await waitFor(() => expect(displayed.importedContext).toBe(importedPageContext))
+    expect(screen.getByLabelText("Composer")).toHaveValue("KEEP EXACT  ")
+    expect(displayed.importReceipt?.description).toBe("Page references imported.")
+    await waitFor(() => expect(serviceMocks.consumeSidepanelChatHandoff).toHaveBeenCalledOnce())
+  })
+
+  it("reviews an old literal copy on first arrival in a different verified destination", async () => {
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    const text = "ACCOUNT A COPIED TEXT  "
+    serviceMocks.readSidepanelChatHandoff.mockResolvedValue(buildPackage({ draft: { text } }))
+    // No previous destination read exists: readability in shared storage cannot
+    // prove that this literal copy belongs to the currently verified account.
+    renderWithRoute(<HookHarness destination="verified-account-B" ownerCurrent={() => true} onImportChange={value => { displayed = value }} />)
+    await act(async () => {})
+    expect(displayed.conflict?.handoff.draft.text).toBe(text)
+    expect(screen.getByLabelText("Composer")).toHaveValue("")
+    expect(displayed.importedContext).toBeNull()
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(serviceMocks.consumeSidepanelChatHandoff).toHaveBeenCalledOnce())
+    expect(screen.getByLabelText("Composer")).toHaveValue("")
+    expect(displayed.importedContext).toBeNull()
+  })
+
   it("preserves replacement imported context when an older send removes its context", async () => {
     let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
     const replacementContext = { ...importedPageContext, title: "Replacement article", url: "https://example.test/replacement" }
     serviceMocks.readSidepanelChatHandoff.mockImplementation(async (id: string) =>
       buildPackage(id === "handoff-2" ? { id, pageContext: replacementContext } : { id }))
     renderWithRoute(<HookHarness replacementEntry="/chat?handoff=handoff-2" onImportChange={value => { displayed = value }} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await waitFor(() => expect(displayed.importedContext).toBe(importedPageContext))
     const removeSubmittedContext = displayed.removeImportedContext
     fireEvent.click(screen.getByRole("button", { name: "New fragment route" }))
@@ -339,6 +389,7 @@ describe("sidepanel chat handoff import", () => {
     let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
     renderWithRoute(<HookHarness onImportChange={value => { displayed = value }} />)
     const removeEmptyContext = displayed.removeImportedContext
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await waitFor(() => expect(displayed.importedContext).toBe(importedPageContext))
     act(() => removeEmptyContext())
     expect(displayed.importedContext).toBe(importedPageContext)
@@ -347,6 +398,7 @@ describe("sidepanel chat handoff import", () => {
   it("removes the unchanged current imported context", async () => {
     let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
     renderWithRoute(<HookHarness onImportChange={value => { displayed = value }} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await waitFor(() => expect(displayed.importedContext).toBe(importedPageContext))
     act(() => displayed.removeImportedContext())
     expect(displayed.importedContext).toBeNull()
@@ -571,6 +623,10 @@ describe("sidepanel chat handoff import", () => {
     const view = render(mode === "StrictMode" ? <React.StrictMode>{tree()}</React.StrictMode> : tree());
     if (mode === "callback rerender") view.rerender(tree(() => true));
     await act(async () => { release(buildPackage()) });
+    await screen.findByRole("button", { name: "Insert" });
+    expect(screen.getByLabelText("Composer")).toHaveValue("");
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Insert" }));
     await waitFor(() => expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft"));
     expect(serviceMocks.consumeSidepanelChatHandoff).toHaveBeenCalledOnce();
   })
@@ -675,6 +731,7 @@ describe("sidepanel chat handoff import", () => {
 
   it("retires imported page context on destination change without clearing current input", async () => {
     const view = renderWithRoute(<HookHarness />);
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await screen.findByRole("region", { name: "Imported sidepanel context" });
     fireEvent.change(screen.getByLabelText("Composer"), { target: { value: "NEXT DESTINATION  " } });
     view.rerender(<MemoryRouter><HookHarness destination="owner-and-chat-2" /></MemoryRouter>);
@@ -682,9 +739,10 @@ describe("sidepanel chat handoff import", () => {
     expect(screen.getByLabelText("Composer")).toHaveValue("NEXT DESTINATION  ");
   })
 
-  it("imports a valid handoff, pre-fills the composer, renders context, then consumes the package", async () => {
+  it("explicitly imports a reviewed handoff, fills the composer, renders context, then consumes the package", async () => {
     renderWithRoute(<HookHarness />)
 
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await waitFor(() =>
       expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft"),
     )
@@ -896,18 +954,75 @@ describe("sidepanel chat handoff import", () => {
     )
   })
 
-  it("cleans only handoff from the hash-route query and preserves character params", async () => {
+  it.each(["Insert", "Cancel", "invalid"] as const)("removes legacy unqualified character/chat pointers across URL fields after %s", async choice => {
+    const qualifiedHistory = JSON.stringify({ profile_id: "current-profile", client_session_id: "current-session", owner_key: "known-owner", conversation_id: "qualified-conversation", owner_kind: "native" })
+    const search = new URLSearchParams({ handoff: "handoff-1", mode: choice === "Cancel" ? "vision" : "character", characterId: "old-card", chatId: "old-chat", serverChatId: "old-server-chat", keep: "query", historySelection: qualifiedHistory })
+    const hash = new URLSearchParams({ mode: choice === "Insert" ? "vision" : " CHARACTER ", character_id: "old-card-alias", chat_id: "old-chat-alias", server_chat_id: "old-server-alias", keep: "hash", historySelection: qualifiedHistory })
+    if (choice === "invalid") serviceMocks.readSidepanelChatHandoff.mockResolvedValue(null)
+    renderWithRoute(<HookHarness initialDraft="KEEP EXACT  " />, "/chat?" + search + "#?" + hash)
+    if (choice !== "invalid") fireEvent.click(await screen.findByRole("button", { name: choice }))
+    else await waitFor(() => expect(notificationApi.warning).toHaveBeenCalledOnce())
+    await waitFor(() => expect(new URLSearchParams(screen.getByTestId("location-search").textContent ?? "").has("handoff")).toBe(false))
+    const remainingSearch = new URLSearchParams(screen.getByTestId("location-search").textContent ?? "")
+    const remainingHash = new URLSearchParams((screen.getByTestId("location-hash").textContent ?? "").replace(/^#/, ""))
+    for (const params of [remainingSearch, remainingHash]) {
+      for (const pointer of ["characterId", "character_id", "chatId", "chat_id", "serverChatId", "server_chat_id"]) expect(params.has(pointer)).toBe(false)
+      expect(params.get("historySelection")).toBe(qualifiedHistory)
+    }
+    expect(remainingSearch.get("keep")).toBe("query")
+    expect(remainingHash.get("keep")).toBe("hash")
+    expect(remainingSearch.get("mode")).toBe(choice === "Cancel" ? "vision" : null)
+    expect(remainingHash.get("mode")).toBe(choice === "Insert" ? "vision" : null)
+    expect(screen.getByLabelText("Composer")).toHaveValue(choice === "Insert" ? "KEEP EXACT  \n\nImported draft" : "KEEP EXACT  ")
+    if (choice === "invalid") expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+    else await waitFor(() => expect(serviceMocks.consumeSidepanelChatHandoff).toHaveBeenCalledOnce())
+  })
+
+  it.each(["#/chat?mode=character&characterId=old-card&server_chat_id=old-chat&keep=hash", "#section-anchor"])("cleans only legacy pointers from a path/anchor fragment %s", async hash => {
+    renderWithRoute(<HookHarness initialDraft="KEEP EXACT  " />, "/chat?handoff=handoff-1&keep=query" + hash)
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.getByTestId("location-search")).toHaveTextContent("?keep=query"))
+    expect(screen.getByTestId("location-hash").textContent).toBe(hash.startsWith("#/chat?") ? "#/chat?keep=hash" : hash)
+    expect(screen.getByLabelText("Composer")).toHaveValue("KEEP EXACT  ")
+  })
+
+  it("cleans legacy character pointers without removing a revealed second copy or owner-qualified history selection", async () => {
+    const qualifiedHistory = JSON.stringify({ profile_id: "current-profile", client_session_id: "current-session", owner_key: "known-owner", conversation_id: "qualified-conversation", owner_kind: "local" })
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft: "FRAGMENT COPY  " })
+    const search = new URLSearchParams({ handoff: "hidden-copy", mode: "character", characterId: "old-card", chatId: "old-chat", keep: "query", historySelection: qualifiedHistory })
+    const hash = new URLSearchParams({ handoff: encoded, character_id: "old-card-alias", server_chat_id: "old-chat-alias", keep: "hash", historySelection: qualifiedHistory })
+    serviceMocks.readSidepanelChatHandoff.mockImplementation(async (id: string) => buildPackage({ id }))
+    renderWithRoute(<HookHarness initialDraft="KEEP EXACT  " />, "/chat?" + search + "#" + hash)
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(serviceMocks.readSidepanelChatHandoff).toHaveBeenCalledWith("hidden-copy", expect.anything()))
+    const remainingSearch = new URLSearchParams(screen.getByTestId("location-search").textContent ?? "")
+    const remainingHash = new URLSearchParams((screen.getByTestId("location-hash").textContent ?? "").replace(/^#/, ""))
+    expect(remainingSearch.get("handoff")).toBe("hidden-copy")
+    expect(remainingHash.has("handoff")).toBe(false)
+    for (const params of [remainingSearch, remainingHash]) {
+      for (const pointer of ["mode", "characterId", "character_id", "chatId", "chat_id", "serverChatId", "server_chat_id"]) expect(params.has(pointer)).toBe(false)
+      expect(params.get("historySelection")).toBe(qualifiedHistory)
+    }
+    expect(remainingSearch.get("keep")).toBe("query")
+    expect(remainingHash.get("keep")).toBe("hash")
+    await screen.findByRole("button", { name: "Insert" })
+    expect(screen.getByLabelText("Composer")).toHaveValue("KEEP EXACT  ")
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+  })
+
+  it("cleans legacy character params when explicitly importing a copied draft", async () => {
     renderWithRoute(
       <HookHarness />,
       "/chat?mode=character&characterId=char-1&handoff=handoff-1",
     )
 
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await waitFor(() =>
       expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft"),
     )
 
     expect(screen.getByTestId("location-search").textContent).toBe(
-      "?mode=character&characterId=char-1",
+      "",
     )
   })
 
@@ -915,6 +1030,7 @@ describe("sidepanel chat handoff import", () => {
     const user = userEvent.setup()
     renderWithRoute(<SubmitImportHarness />)
 
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await waitFor(() =>
       expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft"),
     )
@@ -948,6 +1064,7 @@ describe("sidepanel chat handoff import", () => {
       />,
     )
 
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await waitFor(() =>
       expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft"),
     )
@@ -974,6 +1091,7 @@ describe("sidepanel chat handoff import", () => {
 
     renderWithRoute(<SubmitImportHarness />)
 
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await screen.findByRole("region", { name: "Imported sidepanel context" })
     expect(screen.getByLabelText("Composer")).toHaveValue("")
 
@@ -1004,6 +1122,7 @@ describe("sidepanel chat handoff import", () => {
       />,
     )
 
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await waitFor(() =>
       expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft"),
     )
@@ -1039,6 +1158,7 @@ describe("sidepanel chat handoff import", () => {
       />,
     )
 
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await waitFor(() =>
       expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft"),
     )
@@ -1066,6 +1186,7 @@ describe("sidepanel chat handoff import", () => {
     }))
     renderWithRoute(<SubmitImportHarness submitOverrides={{ sendMessage }} />)
 
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await waitFor(() =>
       expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft"),
     )
@@ -1206,6 +1327,7 @@ describe("sidepanel chat handoff import", () => {
       return (
         <div>
           <textarea aria-label="Composer" value={draft} readOnly />
+          {handoffImport.conflict ? <button type="button" onClick={handoffImport.insertHandoffDraft}>Insert</button> : null}
           {handoffImport.importedContext ? (
             <SidepanelImportedContextBanner
               context={handoffImport.importedContext}
@@ -1221,6 +1343,7 @@ describe("sidepanel chat handoff import", () => {
 
     renderWithRoute(<SubmitHarness />)
 
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
     await screen.findByRole("region", { name: "Imported sidepanel context" })
     await user.click(
       screen.getByRole("button", {

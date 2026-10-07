@@ -4225,5 +4225,32 @@
   },
   "sidepanelHandoff_optionsCheckFailed": {
     "message": "The copied settings could not be checked. Your draft and settings remain here. Try again, or uncheck settings to import text only."
+  },
+  "sidepanelHandoff_conflictLabel": {
+    "message": "Review copied chat"
+  },
+  "sidepanelHandoff_sourceAccountUnverified": {
+    "message": "This copy does not identify its source account. Review the content before importing."
+  },
+  "sidepanelHandoff_copyShortened": {
+    "message": "Some copied text or page references were shortened."
+  },
+  "sidepanelHandoff_contextOnlyTitle": {
+    "message": "Import page references?"
+  },
+  "sidepanelHandoff_contextOnlyDescription": {
+    "message": "Review the copied page references, add them to this chat, or cancel. Your current draft will be kept."
+  },
+  "sidepanelHandoff_addPageReferences": {
+    "message": "Add page references"
+  },
+  "sidepanelHandoff_copiedPageReferences": {
+    "message": "Copied page references"
+  },
+  "sidepanelHandoff_copiedSnippet": {
+    "message": "Snippet {{number}}"
+  },
+  "sidepanelHandoff_pageReferencesImported": {
+    "message": "Page references imported."
   }
 }

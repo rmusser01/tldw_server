@@ -2071,10 +2071,10 @@
     "message": "Copy draft & page references"
   },
   "controlRow_copyDraftContextExtensionDescription": {
-    "message": "Opens the extension full page with a short-lived copy of your draft and page titles and URLs. Page content, history, and chat settings are not included. Review the copy in the destination."
+    "message": "Opens the extension full page with a short-lived copy of your draft and page titles and URLs. Page content, character choices, history, and chat settings are not included. Choose a character there if needed. Review the copy in the destination."
   },
   "controlRow_copyDraftContextWebuiDescription": {
-    "message": "Opens /chat in this WebUI with a short-lived copy of your draft and page titles and URLs. Page content, history, and chat settings are not included. Review the copy in the destination."
+    "message": "Opens /chat in this WebUI with a short-lived copy of your draft and page titles and URLs. Page content, character choices, history, and chat settings are not included. Choose a character there if needed. Review the copy in the destination."
   },
   "controlRow_copyDraftNothingToSend": {
     "message": "No draft or page references to copy"

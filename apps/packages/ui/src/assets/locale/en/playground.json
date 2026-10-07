@@ -1557,7 +1557,16 @@
     "destinationChanged": "Your draft or settings changed while the copy was checked. Review them, then choose again.",
     "settingsUnavailable": "Wait for this conversation to finish loading, or uncheck settings to import text only.",
     "modelUnavailable": "The copied model and provider could not be verified. Choose them here, or uncheck settings to import text only.",
-    "optionsCheckFailed": "The copied settings could not be checked. Your draft and settings remain here. Try again, or uncheck settings to import text only."
+    "optionsCheckFailed": "The copied settings could not be checked. Your draft and settings remain here. Try again, or uncheck settings to import text only.",
+    "conflictLabel": "Review copied chat",
+    "sourceAccountUnverified": "This copy does not identify its source account. Review the content before importing.",
+    "copyShortened": "Some copied text or page references were shortened.",
+    "contextOnlyTitle": "Import page references?",
+    "contextOnlyDescription": "Review the copied page references, add them to this chat, or cancel. Your current draft will be kept.",
+    "addPageReferences": "Add page references",
+    "copiedPageReferences": "Copied page references",
+    "copiedSnippet": "Snippet {{number}}",
+    "pageReferencesImported": "Page references imported."
   },
   "imageGeneration": {
     "settingsLoadFailedTitle": "Image settings unavailable",

@@ -198,14 +198,35 @@ const extractHashSearch = (hash: string | null | undefined): string => {
 const getCharacterChatRouteIntentFromLocation = (
   locationSearch: string,
   locationHash: string,
+  retiredAmbientCharacterIntent: React.MutableRefObject<boolean>,
 ) => {
   const candidates = [locationSearch, extractHashSearch(locationHash)];
-  if (typeof window !== "undefined") {
-    candidates.push(
-      window.location.search,
-      extractHashSearch(window.location.hash),
-    );
+  const ambientCandidates =
+    typeof window === "undefined" || retiredAmbientCharacterIntent.current
+      ? []
+      : [window.location.search, extractHashSearch(window.location.hash)];
+  // Literal copies carry no authority for character or conversation IDs. Raw
+  // fragments are checked only for copy presence, never as character commands.
+  const copyCandidates = [
+    ...candidates,
+    ...ambientCandidates,
+    locationHash.replace(/^#/, ""),
+    typeof window === "undefined" || retiredAmbientCharacterIntent.current
+      ? ""
+      : window.location.hash.replace(/^#/, ""),
+  ];
+  if (
+    copyCandidates.some((candidate) =>
+      new URLSearchParams(candidate).has(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM),
+    )
+  ) {
+    retiredAmbientCharacterIntent.current = true;
+    return null;
   }
+  // HashRouter can clean its own copy query while an old outer search remains.
+  // That ambient command stays retired; later explicit router links still work.
+  if (!retiredAmbientCharacterIntent.current)
+    candidates.push(...ambientCandidates);
 
   for (const candidate of candidates) {
     const intent = getCharacterChatRouteIntent(candidate);
@@ -671,11 +692,13 @@ const PlaygroundContent = () => {
   const routeLocationKeyRef = React.useRef(routeLocationKey);
   routeLocationKeyRef.current = routeLocationKey;
   React.useEffect(() => () => { routeCharacterIntentRequestRef.current++; }, []);
+  const retiredAmbientCharacterIntentRef = React.useRef(false);
   const rawRouteCharacterIntent = React.useMemo(
     () =>
       getCharacterChatRouteIntentFromLocation(
         location.search ?? "",
         location.hash ?? "",
+        retiredAmbientCharacterIntentRef,
       ),
     [location.hash, location.key, location.search],
   );

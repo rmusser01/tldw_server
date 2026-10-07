@@ -56,12 +56,8 @@ const mocks = vi.hoisted(() => ({
   tabsCreate: vi.fn(),
   createSidepanelChatHandoff: vi.fn(),
   consumeSidepanelChatHandoff: vi.fn(),
-  buildSidepanelChatHandoffRoute: vi.fn(
-    (basePath: string, handoffId: string) => {
-      const separator = basePath.includes("?") ? "&" : "?"
-      return `${basePath}${separator}handoff=${handoffId}`
-    }
-  ),
+  buildSidepanelChatHandoffRoute:
+    vi.fn<(basePath: string, handoffId: string) => string>(),
   setToolCatalog: vi.fn(),
   setToolCatalogId: vi.fn(),
   setToolModules: vi.fn(),
@@ -82,11 +78,18 @@ vi.mock("wxt/browser", () => ({
   }
 }))
 
-vi.mock("@/services/sidepanel-chat-handoff", () => ({
-  createSidepanelChatHandoff: mocks.createSidepanelChatHandoff,
-  consumeSidepanelChatHandoff: mocks.consumeSidepanelChatHandoff,
-  buildSidepanelChatHandoffRoute: mocks.buildSidepanelChatHandoffRoute
-}))
+vi.mock("@/services/sidepanel-chat-handoff", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/services/sidepanel-chat-handoff")>();
+  mocks.buildSidepanelChatHandoffRoute.mockImplementation(
+    actual.buildSidepanelChatHandoffRoute,
+  );
+  return {
+    createSidepanelChatHandoff: mocks.createSidepanelChatHandoff,
+    consumeSidepanelChatHandoff: mocks.consumeSidepanelChatHandoff,
+    buildSidepanelChatHandoffRoute: mocks.buildSidepanelChatHandoffRoute,
+  };
+});
 
 vi.mock("antd", async (importOriginal) => {
   const actual = await importOriginal<typeof import("antd")>()
@@ -436,7 +439,7 @@ describe("ControlRow sidepanel chat handoff", () => {
   it("names the bounded copy destination and its carried-state limits", () => {
     render(<ControlRow {...defaultProps()} draftMessage="draft text" />)
     const copy = screen.getByRole("button", { name: "Copy draft & page references" })
-    expect(copy).toHaveAccessibleDescription("Opens the extension full page with a short-lived copy of your draft and page titles and URLs. Page content, history, and chat settings are not included. Review the copy in the destination.")
+    expect(copy).toHaveAccessibleDescription("Opens the extension full page with a short-lived copy of your draft and page titles and URLs. Page content, character choices, history, and chat settings are not included. Choose a character there if needed. Review the copy in the destination.")
   })
 
   it.each([false, true])("keeps an opened copy outcome outside More, shortened=%s", async shortened => {
@@ -457,7 +460,7 @@ describe("ControlRow sidepanel chat handoff", () => {
     vi.mocked(window.open).mockImplementationOnce(() => ({ closed: false }) as Window)
     render(<ControlRow {...defaultProps()} draftMessage="Source draft" onOpenChatInWebUi={callback} />)
     const copy = screen.getByRole("button", { name: "Copy draft & page references" })
-    expect(copy).toHaveAccessibleDescription("Opens /chat in this WebUI with a short-lived copy of your draft and page titles and URLs. Page content, history, and chat settings are not included. Review the copy in the destination.")
+    expect(copy).toHaveAccessibleDescription("Opens /chat in this WebUI with a short-lived copy of your draft and page titles and URLs. Page content, character choices, history, and chat settings are not included. Choose a character there if needed. Review the copy in the destination.")
     fireEvent.click(copy)
     await waitFor(() => expect(window.open).toHaveBeenCalledWith("/chat?handoff=handoff-123", "_blank"))
     expect(callback).not.toHaveBeenCalled()
@@ -583,42 +586,83 @@ describe("ControlRow sidepanel chat handoff", () => {
     })
   })
 
-  it("merges handoff into active character route params", async () => {
+  it.each(["tracked assistant", "legacy selection"])(
+    "copies a %s character draft to generic chat without a foreign character reference",
+    async (selection) => {
+      if (selection === "tracked assistant") {
+        mocks.selectedAssistant = {
+          kind: "character",
+          id: "source-card-1",
+          name: "Source Guide",
+        };
+      }
+      const pageContext = {
+        title: "Source scene",
+        url: "https://example.test/scene",
+        snippets: [
+          { kind: "selection" as const, text: "  Keep this exact scene.  " },
+        ],
+      };
+      const sourceDraft = "  Continue the scene\n  ";
+      render(
+        <ControlRow
+          {...defaultProps()}
+          selectedCharacterId="source-card-1"
+          draftMessage={sourceDraft}
+          hasVisiblePageContextForHandoff
+          getVisiblePageContextForHandoff={() => pageContext}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("chat-continue-in-webui"));
+
+      await waitFor(() => expect(mocks.tabsCreate).toHaveBeenCalledOnce());
+      expect(mocks.tabsCreate).toHaveBeenCalledWith({
+        url: "chrome-extension://handoff/options.html#/chat?handoff=handoff-123",
+      });
+      expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledWith(
+        {
+          draftText: sourceDraft,
+          pageContext,
+          routeIntent: { path: "/chat" },
+        },
+        expect.any(Function),
+      );
+      expect(mocks.buildSidepanelChatHandoffRoute).toHaveBeenCalledWith(
+        "/chat",
+        "handoff-123",
+      );
+      expect(mocks.setSelectedCharacterId).not.toHaveBeenCalled();
+      expect(mocks.setSelectedAssistant).not.toHaveBeenCalled();
+      expect(mocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps explicit Open full app on the selected character route without creating a copy", async () => {
     mocks.selectedAssistant = {
       kind: "character",
-      id: "char-review",
-      name: "Review Guide"
-    }
-
+      id: "source-card-1",
+      name: "Source Guide",
+    };
     render(
       <ControlRow
         {...defaultProps()}
-        selectedCharacterId="char-review"
-        draftMessage="Continue the scene"
-      />
-    )
+        selectedCharacterId="source-card-1"
+        draftMessage="Retain this scene"
+      />,
+    );
 
-    fireEvent.click(screen.getByTestId("chat-continue-in-webui"))
+    fireEvent.click(screen.getByTestId("chat-open-full-app"));
 
-    await waitFor(() => {
-      expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledWith({
-        draftText: "Continue the scene",
-        pageContext: undefined,
-        routeIntent: {
-          path: "/chat?mode=character&characterId=char-review",
-          mode: "character",
-          characterId: "char-review"
-        }
-      }, expect.any(Function))
-    })
-    expect(mocks.buildSidepanelChatHandoffRoute).toHaveBeenCalledWith(
-      "/chat?mode=character&characterId=char-review",
-      "handoff-123"
-    )
-    expect(mocks.runtimeGetURL).toHaveBeenCalledWith(
-      "/options.html#/chat?mode=character&characterId=char-review&handoff=handoff-123"
-    )
-  })
+    await waitFor(() => expect(mocks.tabsCreate).toHaveBeenCalledOnce());
+    expect(mocks.tabsCreate).toHaveBeenCalledWith({
+      url: "chrome-extension://handoff/options.html#/chat?mode=character&characterId=source-card-1",
+    });
+    expect(mocks.createSidepanelChatHandoff).not.toHaveBeenCalled();
+    expect(mocks.buildSidepanelChatHandoffRoute).not.toHaveBeenCalled();
+    expect(mocks.setSelectedCharacterId).not.toHaveBeenCalled();
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled();
+  });
 
   it("does not serialize draft, snippets, title, or URL content into the URL", async () => {
     const pageContext = {

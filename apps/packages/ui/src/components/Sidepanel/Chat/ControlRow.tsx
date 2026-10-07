@@ -41,6 +41,7 @@ import {
 } from "@/utils/quick-ingest-open"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { buildSidepanelFullAppChatPath } from "@/utils/sidepanel-full-app-route"
+import { CHAT_PATH } from "@/routes/route-paths"
 import type { ToolChoice } from "@/store/option"
 import { useStoreChatModelSettings } from "@/store/model"
 import {
@@ -460,8 +461,8 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         : t("sidepanel:header.openFullChatExtensionDescription", "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy.")
   const copyDraftButtonLabel = t("sidepanel:controlRow.copyDraftContext", "Copy draft & page references")
   const copyDraftDescription = browser.runtime.id
-    ? t("sidepanel:controlRow.copyDraftContextExtensionDescription", "Opens the extension full page with a short-lived copy of your draft and page titles and URLs. Page content, history, and chat settings are not included. Review the copy in the destination.")
-    : t("sidepanel:controlRow.copyDraftContextWebuiDescription", "Opens /chat in this WebUI with a short-lived copy of your draft and page titles and URLs. Page content, history, and chat settings are not included. Review the copy in the destination.")
+    ? t("sidepanel:controlRow.copyDraftContextExtensionDescription", "Opens the extension full page with a short-lived copy of your draft and page titles and URLs. Page content, character choices, history, and chat settings are not included. Choose a character there if needed. Review the copy in the destination.")
+    : t("sidepanel:controlRow.copyDraftContextWebuiDescription", "Opens /chat in this WebUI with a short-lived copy of your draft and page titles and URLs. Page content, character choices, history, and chat settings are not included. Choose a character there if needed. Review the copy in the destination.")
   const draftText = draftMessage ?? ""
   const hasDraftForHandoff = draftText.trim().length > 0
   const copyDraftEnabled =
@@ -484,26 +485,6 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     setCopyDraftPending(false)
     setHandoffFeedback(null)
   }, [draftReady, handoffSourceKey, draftText, fullAppChatPath, hasVisiblePageContextForHandoff, getVisiblePageContextForHandoff, captureHandoffGuard])
-  const activeCharacterIdForRouteIntent =
-    selectedAssistant?.kind === "character"
-      ? String(selectedAssistant.id ?? "").trim()
-      : selectedAssistant?.kind === "persona"
-        ? ""
-      : selectedCharacterId == null
-        ? ""
-        : String(selectedCharacterId).trim()
-  const routeIntent = React.useMemo(
-    () => ({
-      path: fullAppChatPath,
-      ...(activeCharacterIdForRouteIntent
-        ? {
-            mode: "character" as const,
-            characterId: activeCharacterIdForRouteIntent
-          }
-        : {})
-    }),
-    [activeCharacterIdForRouteIntent, fullAppChatPath]
-  )
   const openRolePlayPicker = React.useCallback(() => {
     if (typeof window === "undefined") return
     window.dispatchEvent(
@@ -649,14 +630,14 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         const pkg = await createSidepanelChatHandoff({
           draftText,
           pageContext,
-          routeIntent
+          routeIntent: { path: CHAT_PATH }
         }, attempt.isCurrent)
         if (!attempt.isCurrent()) {
           // This unique copy has not been opened or published to a destination.
           await consumeSidepanelChatHandoff(pkg.id).catch(() => undefined)
           return
         }
-        const handoffPath = buildSidepanelChatHandoffRoute(fullAppChatPath, pkg.id)
+        const handoffPath = buildSidepanelChatHandoffRoute(CHAT_PATH, pkg.id)
         const opened = await openFullAppPath(handoffPath, attempt.isCurrent)
         if (!attempt.isCurrent()) return
         if (!opened) {
