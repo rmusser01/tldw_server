@@ -150,3 +150,19 @@ means unknown), and a draft revision. Unknown/structured modes cannot enter
 Markdown conversion. A captured complete language-capable acknowledgement removes
 only its matching draft; rejected and empty drafts remain local. Storage failures
 fence navigation instead of reporting a saved draft. This adopts no new editor.
+
+### Fresh default provenance (F5 review Ruling32)
+
+Version-3 entries in the same offline queue carry `implicitDefaultLanguage` proof
+only for a fresh new draft whose null editing mode has never been explicitly
+selected. This known UI default may omit language on creation without requiring
+language capability; cleanup still requires exact source, a valid new identity
+and a version acknowledgement. Selecting even the same null mode consumes that
+proof and is a draft mutation. Canonical loads, recognized metadata and ambiguous historical entries receive no
+exemption. Duplication carries the coherent mode/provenance tuple through the
+existing reset helper: unknown remains unknown and proven implicit default remains
+eligible, while a genuinely fresh reset still starts in the known UI default.
+Restoration accepts the proof only for a v3 new-draft entry with null language and
+no note/base-version identity. Rekeying to a saved note consumes it. Explicit mode
+changes/resets retain capability and complete language acknowledgement protection.
+No new storage owner, inferred language, or downgrade of an explicit mutation.

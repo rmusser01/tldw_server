@@ -480,7 +480,8 @@ export type MarkdownToolbarAction = 'bold' | 'italic' | 'heading' | 'list' | 'li
 export type OfflineDraftSyncState = 'queued' | 'syncing' | 'conflict' | 'error'
 export type OfflineDraftEntry = {
   pendingWrite?: { operation?: 'restore'; key: string; body: Record<string, unknown>; expectedVersion: number | null; previousTitle?: string | null }
-  draftVersion?: 2
+  draftVersion?: 2 | 3;
+  implicitDefaultLanguage?: boolean;
   revision?: number
   content_language?: string | null
   key: string
@@ -496,6 +497,28 @@ export type OfflineDraftEntry = {
   syncState: OfflineDraftSyncState
   lastError: string | null
 }
+export const isCompleteNoteSourceAcknowledgement = (
+  reply: unknown,
+  content: string,
+  expectedId?: string | number | null
+): boolean => {
+  if (!reply || typeof reply !== 'object') return false;
+  const note = reply as Record<string, unknown>;
+  const id = note.id;
+  const validId =
+    typeof id === 'string'
+      ? id.length > 0 && id.trim() === id
+      : typeof id === 'number' && Number.isSafeInteger(id) && id > 0;
+  const version = toNoteVersion(note);
+  return (
+    validId &&
+    note.content === content &&
+    version !== null &&
+    Number.isSafeInteger(version) &&
+    (expectedId == null || String(id) === String(expectedId))
+  );
+};
+
 export type OfflineDraftSyncResult =
   | {
       status: 'synced'
@@ -538,7 +561,15 @@ export const normalizeOfflineDraftQueue = (rawValue: unknown): Record<string, Of
           /^sha256:[a-f0-9]{64}$/.test(draft.pendingWrite.body.expected_provenance_hash) && Number.isSafeInteger(draft.pendingWrite.expectedVersion))) &&
         (draft.pendingWrite.expectedVersion === null || Number.isSafeInteger(draft.pendingWrite.expectedVersion))
         ? { pendingWrite: draft.pendingWrite } : {}),
-      draftVersion: 2,
+      draftVersion: 3,
+      implicitDefaultLanguage:
+        draft.draftVersion === 3 &&
+        draft.implicitDefaultLanguage === true &&
+        normalizedKey === NOTES_OFFLINE_NEW_DRAFT_KEY &&
+        draft.noteId == null &&
+        draft.baseVersion == null &&
+        toNoteVersion(draft) === null &&
+        draft.content_language === null,
       revision: Number.isSafeInteger(draft.revision) && draft.revision >= 0 ? draft.revision : 0,
       ...(draft.content_language === null || (typeof draft.content_language === "string" && draft.content_language.length > 0 && draft.content_language.length <= 100) ? { content_language: draft.content_language } : {}),
       key: normalizedKey,

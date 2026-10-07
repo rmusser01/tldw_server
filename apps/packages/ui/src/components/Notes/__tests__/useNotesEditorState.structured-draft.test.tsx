@@ -114,7 +114,7 @@ describe('structured drafts', () => {
       content: '雪',
       content_language: ' future ',
       revision: 7,
-      draftVersion: 2,
+      draftVersion: 3,
     });
   });
 
@@ -441,7 +441,7 @@ describe('structured drafts', () => {
     }
   );
   it.each(['save', 'edit'])(
-    'keeps an incompatible fresh default draft stable until %s retries',
+    'keeps an incompatible explicitly selected null draft stable until %s retries',
     async (retry) => {
       let compatible = false;
       let probes = 0;
@@ -461,6 +461,7 @@ describe('structured drafts', () => {
       const view = renderEditor();
       act(() => {
         view.result.current.setContent('default source');
+        view.result.current.setContentLanguage(null);
         view.result.current.setIsDirty(true);
       });
       await act(async () => {
@@ -501,6 +502,219 @@ describe('structured drafts', () => {
         );
       }
       expect(mocks.request.mock.calls.filter(([arg]) => arg.method === 'POST')).toHaveLength(1);
+    }
+  );
+  it('resets loading ownership when New interrupts a deferred detail request', async () => {
+    const response = deferred<unknown>();
+    mocks.request.mockReturnValue(response.promise);
+    const view = renderEditor();
+    let loading!: Promise<boolean>;
+    act(() => {
+      loading = view.result.current.loadDetail('old');
+    });
+    expect(view.result.current.markdownAllowed).toBe(false);
+    act(() => {
+      view.result.current.resetEditor();
+      view.result.current.setEditorInputMode('wysiwyg');
+    });
+    expect(view.result.current.markdownAllowed).toBe(true);
+    expect(view.result.current.editorInputMode).toBe('wysiwyg');
+    await act(async () => {
+      response.resolve({ id: 'old', content: 'old', content_language: 'yaml', version: 1 });
+      await loading;
+    });
+    expect(view.result.current.selectedId).toBeNull();
+    expect(view.result.current.contentLanguage).toBeNull();
+    expect(view.result.current.markdownAllowed).toBe(true);
+  });
+
+  it.each(['ordinary', 'restart'])(
+    'creates an untouched default on a legacy server via %s',
+    async (pathway) => {
+      mocks.request.mockImplementation(({ body }) =>
+        Promise.resolve({ id: 'legacy', content: body?.content ?? '<>& legacy', version: 1 })
+      );
+      let view = renderEditor(pathway === 'ordinary');
+      act(() => {
+        view.result.current.setContent('<>& legacy');
+        view.result.current.setIsDirty(true);
+      });
+      if (pathway === 'restart') {
+        await act(async () => {
+          await view.result.current.saveNote({ showSuccessMessage: false });
+        });
+        view.unmount();
+        view = renderEditor();
+        await waitFor(() => expect(view.result.current.content).toBe('<>& legacy'));
+        view.rerender({ scope: 'alice', online: true });
+        await waitFor(() =>
+          expect(mocks.request.mock.calls.some(([arg]) => arg.method === 'POST')).toBe(true)
+        );
+        await waitFor(() =>
+          expect(view.result.current.offlineDraftQueue['draft:new']).toBeUndefined()
+        );
+      } else {
+        await act(async () => {
+          expect(await view.result.current.saveNote({ showSuccessMessage: false })).toBe(true);
+        });
+      }
+      const posts = mocks.request.mock.calls.filter(([arg]) => arg.method === 'POST');
+      expect(posts).toHaveLength(1);
+      expect(posts[0][0].body).not.toHaveProperty('content_language');
+      expect(mocks.request.mock.calls.some(([arg]) => arg.path.endsWith('/capabilities'))).toBe(
+        false
+      );
+    }
+  );
+
+  it('treats explicit same-null selection as a portable mutation and retains it on legacy servers', async () => {
+    mocks.request.mockResolvedValue({});
+    const view = renderEditor(true);
+    act(() => {
+      view.result.current.setContentLanguage(null);
+    });
+    expect(view.result.current.isDirty).toBe(true);
+    act(() => {
+      view.result.current.setContent('explicit null');
+    });
+    await act(async () => {
+      expect(await view.result.current.saveNote({ showSuccessMessage: false })).toBe(false);
+    });
+    expect(mocks.request.mock.calls.some(([arg]) => arg.method === 'POST')).toBe(false);
+    expect(view.result.current.offlineDraftQueue['draft:new'].content_language).toBeNull();
+  });
+
+  it.each(
+    [
+      { id: 'n', version: 1 },
+      { id: 'n', version: 1, content: 'wrong' },
+      { id: {}, version: 1, content: 'exact' },
+      { id: '', version: 1, content: 'exact' },
+      { id: 'n', content: 'exact' },
+      { id: 'n', version: -1, content: 'exact' },
+    ].flatMap((reply) => ['ordinary', 'queue'].map((pathway) => ({ reply, pathway })))
+  )(
+    'retains an untouched default after an incomplete legacy acknowledgement %j',
+    async ({ reply, pathway }) => {
+      mocks.request.mockImplementation(({ method }) =>
+        Promise.resolve(method === 'POST' ? reply : {})
+      );
+      const view = renderEditor(pathway === 'ordinary');
+      act(() => {
+        view.result.current.setContent('exact');
+        view.result.current.setIsDirty(true);
+      });
+      if (pathway === 'ordinary') {
+        await act(async () => {
+          expect(await view.result.current.saveNote({ showSuccessMessage: false })).toBe(false);
+        });
+      } else {
+        await act(async () => {
+          await view.result.current.saveNote({ showSuccessMessage: false });
+        });
+        view.rerender({ scope: 'alice', online: true });
+        await waitFor(() =>
+          expect(view.result.current.offlineDraftQueue['draft:new']?.syncState).toBe('error')
+        );
+      }
+      expect(mocks.request.mock.calls.some(([arg]) => arg.method === 'POST')).toBe(true);
+      expect(view.result.current.offlineDraftQueue['draft:new'].content).toBe('exact');
+      expect(view.result.current.saveIndicator).not.toBe('saved');
+    }
+  );
+
+  it('does not infer fresh-default provenance for historical or existing-note entries', () => {
+    const queue = normalizeOfflineDraftQueue({
+      historical: { content: 'x', content_language: null },
+      old: { draftVersion: 2, implicitDefaultLanguage: true, content: 'x', content_language: null },
+      'note:n': {
+        draftVersion: 3,
+        implicitDefaultLanguage: true,
+        noteId: 'n',
+        content: 'x',
+        content_language: null,
+      },
+      'draft:new': {
+        draftVersion: 3,
+        implicitDefaultLanguage: true,
+        noteId: null,
+        baseVersion: null,
+        content: 'x',
+        content_language: null,
+      },
+    });
+    expect(queue.historical.implicitDefaultLanguage).not.toBe(true);
+    expect(queue.old.implicitDefaultLanguage).not.toBe(true);
+    expect(queue['note:n'].implicitDefaultLanguage).not.toBe(true);
+    expect(queue['draft:new'].implicitDefaultLanguage).toBe(true);
+  });
+
+  it('retains a same-null selection made while an implicit-default POST is pending', async () => {
+    const response = deferred<unknown>();
+    mocks.request.mockImplementation(({ method }) =>
+      method === 'POST' ? response.promise : Promise.resolve({})
+    );
+    const view = renderEditor(true);
+    act(() => {
+      view.result.current.setContent('exact');
+      view.result.current.setIsDirty(true);
+    });
+    let saving!: Promise<boolean>;
+    act(() => {
+      saving = view.result.current.saveNote({ showSuccessMessage: false });
+    });
+    await waitFor(() =>
+      expect(mocks.request.mock.calls.some(([arg]) => arg.method === 'POST')).toBe(true)
+    );
+    act(() => {
+      view.result.current.setContentLanguage(null);
+    });
+    await act(async () => {
+      response.resolve({ id: 'n', content: 'exact', version: 1 });
+      await saving;
+    });
+    expect(view.result.current.offlineDraftQueue['note:n']).toMatchObject({
+      content: 'exact',
+      content_language: null,
+      implicitDefaultLanguage: false,
+    });
+    expect(view.result.current.isDirty).toBe(true);
+    expect(view.result.current.saveIndicator).not.toBe('saved');
+  });
+
+  it.each(['ordinary', 'queue'])(
+    'rejects a different note identity in a protected %s acknowledgement',
+    async (pathway) => {
+      mocks.request.mockImplementation(({ method, path }) => {
+        if (path.endsWith('/capabilities')) return Promise.resolve({ content_language: true });
+        return Promise.resolve({
+          id: method === 'PUT' ? 'wrong-note' : 'n',
+          content: 'exact',
+          content_language: 'yaml',
+          version: method === 'PUT' ? 2 : 1,
+        });
+      });
+      const view = renderEditor(pathway === 'ordinary');
+      await act(async () => {
+        await view.result.current.loadDetail('n');
+      });
+      act(() => {
+        view.result.current.setIsDirty(true);
+      });
+      if (pathway === 'ordinary') {
+        await act(async () => {
+          expect(await view.result.current.saveNote({ showSuccessMessage: false })).toBe(false);
+        });
+      } else {
+        await act(async () => {
+          await view.result.current.saveNote({ showSuccessMessage: false });
+        });
+        view.rerender({ scope: 'alice', online: true });
+        await waitFor(() =>
+          expect(view.result.current.offlineDraftQueue['note:n']?.syncState).toBe('error')
+        );
+      }
+      expect(view.result.current.offlineDraftQueue['note:n'].content).toBe('exact');
     }
   );
 });

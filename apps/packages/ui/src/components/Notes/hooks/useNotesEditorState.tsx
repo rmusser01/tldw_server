@@ -81,6 +81,7 @@ import {
   NOTES_OFFLINE_NEW_DRAFT_KEY,
   isEditorSaveShortcutContext,
   normalizeOfflineDraftQueue,
+  isCompleteNoteSourceAcknowledgement,
   NOTES_TITLE_STRATEGIES,
   normalizeNotesTitleStrategy,
   deriveAllowedTitleStrategies,
@@ -318,6 +319,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [contentLanguage, setContentLanguageState] = React.useState<string | null | undefined>(
     null
   );
+  const [implicitDefaultLanguage, setImplicitDefaultLanguage] = React.useState(true);
   const [loadingDetail, setLoadingDetail] = useNotesAuthorityState(authorityScope, false);
   const markdownAllowed =
     !loadingDetail &&
@@ -398,11 +400,16 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     interruptedSaveRef.current = true
     dispatchSave({ type: 'save-cancelled', hasPendingEdits: isDirtyRef.current })
   }
-  const setContentLanguage = React.useCallback((language: string | null) => {
-    if (language !== null && (!language.length || language.length > 100)) throw new Error('Invalid note language')
-    setContentLanguageState(language)
-    if (language !== contentLanguage) setIsDirty(true)
-  }, [contentLanguage, setIsDirty])
+  const setContentLanguage = React.useCallback(
+    (language: string | null) => {
+      if (language !== null && (!language.length || language.length > 100))
+        throw new Error('Invalid note language');
+      setContentLanguageState(language);
+      setImplicitDefaultLanguage(false);
+      if (language !== contentLanguage || implicitDefaultLanguage) setIsDirty(true);
+    },
+    [contentLanguage, implicitDefaultLanguage, setIsDirty]
+  );
   const [backlinkConversationId, setBacklinkConversationId] = React.useState<string | null>(null)
   const [backlinkMessageId, setBacklinkMessageId] = React.useState<string | null>(null)
   const [remoteVersionInfo, setRemoteVersionInfo] = React.useState<RemoteVersionInfo | null>(null)
@@ -485,7 +492,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const attachmentInputRef = React.useRef<HTMLInputElement | null>(null)
   const markdownBeforeWysiwygRef = React.useRef<string | null>(null)
   contentRef.current = content
-  const draftSnapshot = { title, content, contentLanguage, editorKeywords, originalMetadata, backlinkConversationId, backlinkMessageId, wysiwygInputCount }
+  const draftSnapshot = { title, content, contentLanguage, implicitDefaultLanguage, editorKeywords, originalMetadata, backlinkConversationId, backlinkMessageId, wysiwygInputCount }
   const editRevisionRef = React.useRef({ ...draftSnapshot, revision: 0 })
   const authoredDraftChanged = (Object.keys(draftSnapshot) as Array<keyof typeof draftSnapshot>).some(
     (key) => key !== "originalMetadata" && editRevisionRef.current[key] !== draftSnapshot[key]
@@ -578,7 +585,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         previousTitle: pending!.previousTitle
       } : offlineDraftQueueRef.current[key]?.pendingWrite
       return {
-        draftVersion: 2,
+        draftVersion: 3,
+        implicitDefaultLanguage: noteId == null && snapshot.implicitDefaultLanguage,
         revision: snapshot.revision,
         content_language: snapshot.contentLanguage,
         pendingWrite,
@@ -604,6 +612,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   const applyOfflineDraftToEditor = React.useCallback((draft: OfflineDraftEntry) => {
     setContentLanguageState(draft.content_language)
+    setImplicitDefaultLanguage(draft.implicitDefaultLanguage === true);
     editRevisionRef.current.revision = Math.max(editRevisionRef.current.revision, draft.revision ?? 0)
     setTitle(String(draft.title || ''))
     setContent(stripKnowledgeNoteProvenance(String(draft.content || '')))
@@ -863,6 +872,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       savedTitleRef.current = { noteId: String(id), title: String(d?.title || '') }
       selectedIdRef.current = id
       setSelectedId(id)
+      setImplicitDefaultLanguage(false);
       setTitle(String(d?.title || ''))
       setContent(String(d?.content || ''))
       setContentLanguageState((previous) => d?.content_language !== undefined ? d.content_language : String(selectedId) === String(id) ? previous : undefined)
@@ -937,7 +947,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     void refreshTaskStateForNote(selectedId)
   }, [refreshTaskStateForNote, selectedId])
 
-  const resetEditor = React.useCallback(() => {
+  const resetEditor = React.useCallback((languageState?: {contentLanguage: string | null | undefined; implicitDefaultLanguage: boolean}) => {
     noteSelectionEpochRef.current += 1
     pendingSelectionEpochRef.current = null
     activeSaveRef.current?.abort()
@@ -951,7 +961,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setSelectedId(null)
     setTitle('')
     setContent('')
-    setContentLanguageState(null);
+    setContentLanguageState(languageState ? languageState.contentLanguage : null);
+    setImplicitDefaultLanguage(languageState ? languageState.implicitDefaultLanguage && languageState.contentLanguage === null : true);
     setEditorKeywords([])
     setOriginalMetadata(null)
     setSelectedStudioSummary(null)
@@ -1749,16 +1760,25 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           if (init.method === 'POST' || init.method === 'PUT') pendingWriteRef.current = null
           return response
         }
-        if (contentLanguage !== undefined) {
+        const omitUntouchedDefault =
+          selectedId == null && implicitDefaultLanguage && contentLanguage === null;
+        const portableLanguage = contentLanguage !== undefined && !omitUntouchedDefault;
+        if (portableLanguage) {
           const support = await request({ path: '/api/v1/notes/capabilities', method: 'GET' })
           if (!decodeNotesLanguageCapability(support).available) throw new Error('Portable language is unavailable; draft kept locally.')
         }
         const completeAcknowledgement = (reply: unknown) => {
-          const result = reply as Record<string, unknown> | null
-          if (contentLanguage !== undefined && (!result || result.content_language !== contentLanguage || result.content !== content || toNoteVersion(result) === null)) {
-            throw new Error('Server did not acknowledge the complete source and language; draft kept locally.')
+          const result = reply as Record<string, unknown> | null;
+          if (
+            contentLanguage !== undefined &&
+            (!isCompleteNoteSourceAcknowledgement(result, content, selectedId) ||
+              (portableLanguage && result?.content_language !== contentLanguage))
+          ) {
+            throw new Error(
+              'Server did not acknowledge the complete source and language; draft kept locally.'
+            );
           }
-        }
+        };
         const monitoringContext = { isCurrent, ownerId: user.id, request: ownedRequest, capability }
         const draftKey = offlineDraftKeyFor(noteId)
         const acknowledgeOfflineDraft = (savedNoteId: string | number, version: number | null, head: KnowledgeNoteHead) => {
@@ -1773,9 +1793,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           delete next[draftKey]
           const key = `note:${String(savedNoteId)}`
           next[key] = {
-            ...queued, key, noteId: String(savedNoteId), baseVersion: version ?? queued.baseVersion,
+            ...queued, key, noteId: String(savedNoteId), baseVersion: version ?? queued.baseVersion, implicitDefaultLanguage: false,
             pendingWrite: undefined,
-            content_language: latest.contentLanguage, revision: latest.revision, draftVersion: 2,
+            content_language: latest.contentLanguage, revision: latest.revision, draftVersion: 3,
             title: latest.title, content: latest.content, keywords: [...latest.editorKeywords],
             metadata: { ...latest.originalMetadata, ...head }, backlinkConversationId: latest.backlinkConversationId,
             backlinkMessageId: latest.backlinkMessageId
@@ -1811,7 +1831,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           title: snapshot.title || undefined,
           content: retainKnowledgeNoteProvenance(snapshot.content, snapshot.originalMetadata),
           ...knowledgeNoteWriteFields(snapshot.content, snapshot.originalMetadata, { create: noteId == null }),
-          ...(snapshot.contentLanguage !== undefined ? { content_language: snapshot.contentLanguage } : {}),
+          ...(portableLanguage ? { content_language: snapshot.contentLanguage } : {}),
           metadata,
           keywords: snapshot.editorKeywords
         }
@@ -2025,6 +2045,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       confirmDanger,
       content,
       contentLanguage,
+      implicitDefaultLanguage,
       editorKeywords,
       handleVersionConflict,
       isDirty,
@@ -2066,11 +2087,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       }
       if (draft.backlinkConversationId) metadata.conversation_id = draft.backlinkConversationId
       if (draft.backlinkMessageId) metadata.message_id = draft.backlinkMessageId
+      const omitUntouchedDefault =
+        !draft.noteId && draft.implicitDefaultLanguage === true && draft.content_language === null;
+      const portableLanguage = draft.content_language !== undefined && !omitUntouchedDefault;
       const payload: Record<string, any> = {
         title: draft.title || undefined,
         content: retainKnowledgeNoteProvenance(draft.content, draft.metadata),
         ...knowledgeNoteWriteFields(draft.content, draft.metadata, { create: !draft.noteId }),
-        ...(draft.content_language !== undefined ? { content_language: draft.content_language } : {}),
+        ...(portableLanguage ? { content_language: draft.content_language } : {}),
         metadata,
         keywords: draft.keywords
       }
@@ -2104,13 +2128,18 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
         const requestScopeOptions = { servicePromptConfig, abortSignal: controller.signal }
         const ownerHeader = { 'X-TLDW-Expected-User-ID': String(user.id) }
-        if (draft.content_language !== undefined) {
+        if (portableLanguage) {
           const support = await bgRequest({ ...requestScopeOptions, headers: ownerHeader, path: '/api/v1/notes/capabilities', method: 'GET' })
           if (authorityChanged() || !decodeNotesLanguageCapability(support).available) return { status: 'error', key: draft.key, message: 'Portable language is unavailable; draft kept locally.' }
         }
         const acknowledge = (reply: Record<string, unknown> | null) => {
-          if (draft.content_language !== undefined && (reply?.content_language !== draft.content_language || reply?.content !== draft.content || toNoteVersion(reply) === null)) throw new Error('Incomplete language acknowledgement; draft kept locally.')
-        }
+          if (
+            draft.content_language !== undefined &&
+            (!isCompleteNoteSourceAcknowledgement(reply, draft.content, draft.noteId) ||
+              (portableLanguage && reply?.content_language !== draft.content_language))
+          )
+            throw new Error('Incomplete language acknowledgement; draft kept locally.');
+        };
         let pending = draft.pendingWrite
         if (!pending) {
           let expectedVersion: number | null = null
@@ -2238,7 +2267,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             delete next[syncResult.key]
             if (differs(queued)) {
               const key = `note:${syncResult.noteId}`
-              next[key] = { ...queued, key, noteId: syncResult.noteId, baseVersion: syncResult.version,
+              next[key] = { ...queued, key, noteId: syncResult.noteId, baseVersion: syncResult.version, implicitDefaultLanguage: false,
                 metadata: { ...queued.metadata, ...syncResult.head }, pendingWrite: undefined, syncState: 'queued' }
             }
             return next
@@ -3299,6 +3328,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     remoteVersionInfo,
     editorMode, setEditorMode,
     contentLanguage, setContentLanguage, markdownAllowed,
+    implicitDefaultLanguage: selectedId == null && implicitDefaultLanguage,
     editorInputMode: markdownAllowed ? editorInputMode : 'markdown' as NotesInputMode, setEditorInputMode,
     wysiwygHtml, wysiwygRevision, replaceWysiwygHtml, recordWysiwygEditorHtml,
     wysiwygSessionDirty, setWysiwygSessionDirty,

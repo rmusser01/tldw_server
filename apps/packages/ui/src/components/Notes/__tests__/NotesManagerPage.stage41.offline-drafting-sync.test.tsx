@@ -263,6 +263,90 @@ describe('NotesManagerPage stage 41 offline drafting and sync', () => {
     })
   })
 
+  it('creates an untouched ordinary default on a legacy server through the page', async () => {
+    const original = mockBgRequest.getMockImplementation()!;
+    mockBgRequest.mockImplementation(async (request) => {
+      if (request.path === '/api/v1/notes/capabilities') return {};
+      if (request.path === '/api/v1/notes/' && request.method === 'POST') {
+        return { id: 11, content: request.body.content, version: 1 };
+      }
+      return original(request);
+    });
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Title'), {
+      target: { value: 'Legacy ordinary' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Write your note here... (Markdown supported)'), {
+      target: { value: '<>& ordinary' },
+    });
+    fireEvent.click(screen.getByTestId('notes-save-button'));
+    await waitFor(() => expect(postCreateCalls()).toHaveLength(1));
+    expect(postCreateCalls()[0][0].body).not.toHaveProperty('content_language');
+    await waitFor(() =>
+      expect(
+        JSON.parse(window.localStorage.getItem(OFFLINE_QUEUE_KEY) || '{}')['draft:new']
+      ).toBeUndefined()
+    );
+  });
+
+  it.each([false, true])(
+    'duplicates the source mode and default provenance (implicit=%s)',
+    async (implicit) => {
+      mockOnlineState.value = false;
+      window.localStorage.setItem(
+        OFFLINE_QUEUE_KEY,
+        JSON.stringify({
+          'draft:new': {
+            draftVersion: 3,
+            implicitDefaultLanguage: implicit,
+            key: 'draft:new',
+            noteId: null,
+            baseVersion: null,
+            title: 'Source',
+            content: '<>& exact',
+            ...(implicit ? { content_language: null } : {}),
+            revision: 3,
+            keywords: [],
+            syncState: 'queued',
+          },
+        })
+      );
+      const original = mockBgRequest.getMockImplementation()!;
+      mockBgRequest.mockImplementation(async (request) => {
+        if (request.path === '/api/v1/notes/capabilities') return {};
+        if (request.method === 'POST') return { id: 11, content: request.body.content, version: 1 };
+        return original(request);
+      });
+      renderPage();
+      await waitFor(() => expect(screen.getByPlaceholderText('Title')).toHaveValue('Source'));
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+      fireEvent.click(await screen.findByText('Duplicate'));
+      await waitFor(() =>
+        expect(screen.getByPlaceholderText('Title')).toHaveValue('Source (Copy)')
+      );
+      if (!implicit) fireEvent.click(screen.getByRole('button', { name: 'Bold' }));
+      expect(
+        screen.getByPlaceholderText('Write your note here... (Markdown supported)')
+      ).toHaveValue('<>& exact');
+      fireEvent.click(screen.getByTestId('notes-save-button'));
+      await waitFor(() => {
+        const draft = JSON.parse(window.localStorage.getItem(OFFLINE_QUEUE_KEY) || '{}')[
+          'draft:new'
+        ];
+        expect(draft.implicitDefaultLanguage).toBe(implicit);
+        expect(draft.content_language).toBe(implicit ? null : undefined);
+      });
+      if (implicit) {
+        mockOnlineState.value = true;
+        fireEvent.change(screen.getByPlaceholderText('Title'), {
+          target: { value: 'Legacy duplicate' },
+        });
+        await waitFor(() => expect(postCreateCalls()).toHaveLength(1));
+        expect(postCreateCalls()[0][0].body).not.toHaveProperty('content_language');
+      }
+    }
+  );
+
   it('duplicates recovered structured source and language through the real page action', async () => {
     mockOnlineState.value = false
     window.localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify({ 'draft:new': {

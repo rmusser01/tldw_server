@@ -396,10 +396,13 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       window.removeEventListener('tldw:auth-principal-changed', resetOnLogout)
     }
   }, [resetEditorToEmptyState])
-  const startDraftSession = React.useCallback(() => {
-    setHasActiveDraft(true)
-    ed.resetEditor()
-  }, [ed.resetEditor])
+  const startDraftSession = React.useCallback(
+    (languageState?: Parameters<typeof ed.resetEditor>[0]) => {
+      setHasActiveDraft(true);
+      ed.resetEditor(languageState);
+    },
+    [ed.resetEditor]
+  );
   const focusSearchInput = React.useCallback(() => {
     searchInputRef.current?.focus()
   }, [])
@@ -1133,14 +1136,16 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     if (isMobileViewport) setMobileSidebarOpen(false)
     const baseTitle = ed.title.trim() || (ed.selectedId != null ? `Note ${ed.selectedId}` : 'Untitled note')
     const duplicateTitle = /\(copy\)$/i.test(baseTitle) ? baseTitle : `${baseTitle} (Copy)`
-    const duplicateLanguage = ed.contentLanguage
+    const duplicateLanguage = {
+      contentLanguage: ed.contentLanguage,
+      implicitDefaultLanguage: ed.implicitDefaultLanguage,
+    };
     const duplicateContent = ed.content
     const duplicateKeywords = [...kw.editorKeywords]
 
-    startDraftSession()
+    startDraftSession(duplicateLanguage)
     ed.setTitle(duplicateTitle)
     ed.setContent(duplicateContent)
-    if (duplicateLanguage !== undefined) ed.setContentLanguage(duplicateLanguage)
     kw.setEditorKeywords(duplicateKeywords)
     ed.setIsDirty(true)
     ed.setSaveIndicator('dirty')
@@ -1151,8 +1156,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [
     ed.content,
     ed.contentLanguage,
+    ed.implicitDefaultLanguage,
     ed.confirmDiscardIfDirty,
-    ed.setContentLanguage,
     ed.selectedId,
     ed.setContent,
     ed.setIsDirty,
