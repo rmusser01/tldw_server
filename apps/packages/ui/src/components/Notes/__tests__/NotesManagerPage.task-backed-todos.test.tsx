@@ -3,6 +3,36 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
+import type { NoteTaskStatusUpdate } from "@/services/notes-tasks"
+
+const notesConnectionConfig = {
+  serverUrl: "https://notes.example.test",
+  authMode: "multi-user" as const,
+  accessToken: "test-access-token"
+}
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig,
+    loading: false,
+    authorityLoading: false
+  })
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
+  }
+}))
+
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/hooks/useNotesGraphAuthorityScope")>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () =>
+      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
 
 const {
   mockBgRequest,
@@ -127,21 +157,28 @@ vi.mock("@/components/Common/MarkdownPreview", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
-  default: () => <div data-testid="notes-list-panel" />
+  default: ({ onSelectNote }: { onSelectNote: (id: string) => void }) => (
+    <button data-testid="notes-list-panel" onClick={() => onSelectNote("note-1")}>
+      Open task note
+    </button>
+  )
 }))
 
-const renderPage = () => {
+const renderPage = async () => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
       mutations: { retry: false }
     }
   })
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <NotesManagerPage />
     </QueryClientProvider>
   )
+  fireEvent.click(screen.getByText("Open task note"))
+  await screen.findByTestId("notes-task-activity-notice")
+  return view
 }
 
 const setupTaskBackedNoteMock = (options: { conflictOnSave?: boolean } = {}) => {
@@ -151,12 +188,13 @@ const setupTaskBackedNoteMock = (options: { conflictOnSave?: boolean } = {}) => 
   let taskVersion = 5
   let activityDismissed = false
 
-  mockGetSetting.mockImplementation(async (setting: { key?: string }) => {
-    if (setting?.key === "tldw:lastNoteId") return "note-1"
-    return null
-  })
+  mockGetSetting.mockResolvedValue(null)
 
-  mockBgRequest.mockImplementation(async (request: { path?: string; method?: string; body?: any }) => {
+  mockBgRequest.mockImplementation(async (request: {
+    path?: string
+    method?: string
+    body?: { updates?: NoteTaskStatusUpdate[]; content?: string }
+  }) => {
     const path = String(request.path || "")
     const method = String(request.method || "GET").toUpperCase()
 
@@ -284,7 +322,7 @@ describe("NotesManagerPage task-backed todos", () => {
 
   it("renders task-backed checkboxes in preview while edit mode keeps raw markdown", async () => {
     setupTaskBackedNoteMock()
-    renderPage()
+    await renderPage()
 
     expect(await screen.findByDisplayValue("- [ ] Draft PRD")).toBeInTheDocument()
 
@@ -299,7 +337,7 @@ describe("NotesManagerPage task-backed todos", () => {
 
   it("uses the backend status endpoint for clean checkbox toggles and refreshes the note", async () => {
     setupTaskBackedNoteMock()
-    renderPage()
+    await renderPage()
 
     await screen.findByDisplayValue("- [ ] Draft PRD")
     fireEvent.click(screen.getByRole("button", { name: "Preview" }))
@@ -330,7 +368,7 @@ describe("NotesManagerPage task-backed todos", () => {
 
   it("keeps dirty checkbox toggles local and preserves the draft on save conflict", async () => {
     setupTaskBackedNoteMock({ conflictOnSave: true })
-    renderPage()
+    await renderPage()
 
     const textarea = await screen.findByDisplayValue("- [ ] Draft PRD")
     fireEvent.change(textarea, { target: { value: "- [ ] Draft PRD\nlocal note" } })
@@ -346,15 +384,14 @@ describe("NotesManagerPage task-backed todos", () => {
 
     fireEvent.click(screen.getByTestId("notes-save-button"))
 
-    await waitFor(() => {
-      expect(mockMessageError).toHaveBeenCalled()
-    })
+    expect(await screen.findByTestId("notes-save-issue")).toHaveAttribute("data-kind", "conflict")
+    expect(mockMessageError).not.toHaveBeenCalled()
     expect(screen.getByLabelText("Note content")).toHaveValue("- [x] Draft PRD\nlocal note")
   }, 10000)
 
   it("shows unread agent task activity and can dismiss it", async () => {
     setupTaskBackedNoteMock()
-    renderPage()
+    await renderPage()
 
     expect(
       await screen.findByText("agent-1 via notes.tasks.set_status changed 1 task in Task note.")

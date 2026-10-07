@@ -3,11 +3,37 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDesignSystemState } from '@/design-system'
+import type { NotesGraphEdge, NotesGraphNode } from '@/services/note-graph-suggestions'
 import NotesManagerPage from '../NotesManagerPage'
 
-vi.mock('@/components/Notes/hooks/useNotesGraphAuthorityScope', () => ({
-  useNotesGraphAuthorityScope: () => 'test-notes-authority'
+const notesConnectionConfig = {
+  serverUrl: 'https://notes.example.test',
+  authMode: 'multi-user' as const,
+  accessToken: 'test-access-token'
+}
+
+vi.mock('@/hooks/useCanonicalConnectionConfig', () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig,
+    loading: false,
+    authorityLoading: false
+  })
 }))
+
+vi.mock('@/services/tldw/TldwAuth', () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
+  }
+}))
+
+vi.mock('@/components/Notes/hooks/useNotesGraphAuthorityScope', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/Notes/hooks/useNotesGraphAuthorityScope')>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () =>
+      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
 
 const {
   mockBgRequest,
@@ -183,6 +209,7 @@ const seedAndSaveNote = async () => {
   await waitFor(() => {
     expect(screen.getByTestId('notes-editor-revision-meta')).toHaveTextContent('Version 1')
   })
+  fireEvent.click(screen.getByTestId('notes-section-connections-toggle'))
 }
 
 describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
@@ -465,7 +492,10 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
   })
 
   it('shows loading and empty states for relation panels', async () => {
-    let resolveNeighbors: ((value: any) => void) | null = null
+    let resolveNeighbors!: (value: {
+      nodes: Pick<NotesGraphNode, 'id' | 'type' | 'label'>[]
+      edges: NotesGraphEdge[]
+    }) => void
     const neighborsPromise = new Promise((resolve) => {
       resolveNeighbors = resolve
     })
@@ -502,10 +532,9 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
     renderPage()
     await seedAndSaveNote()
 
-    expect(await screen.findByText('Loading related notes...')).toBeInTheDocument()
-    expect(await screen.findByText('Loading backlinks...')).toBeInTheDocument()
+    expect(await screen.findByText('Loading note connections...')).toHaveAttribute('role', 'status')
 
-    resolveNeighbors?.({
+    resolveNeighbors({
       nodes: [{ id: 'note-a', type: 'note', label: 'Graph seed note' }],
       edges: []
     })
@@ -548,10 +577,7 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
     await seedAndSaveNote()
 
     expect(await screen.findByTestId('notes-related-error')).toHaveTextContent(
-      'Could not load related notes.'
-    )
-    expect(await screen.findByTestId('notes-backlinks-error')).toHaveTextContent(
-      'Could not load backlinks.'
+      'Could not load note connections.'
     )
   })
 

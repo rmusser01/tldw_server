@@ -332,7 +332,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         answerTrustReasonCodes: action.payload ? [] : state.answerTrustReasonCodes,
         answerEvidenceOrigin: action.payload ? null : state.answerEvidenceOrigin,
         extensionFailureState: action.payload ? "search_failed" : null,
-        hasSearched: true,
+        hasSearched: action.payload !== null || state.hasSearched,
         isSearching: false,
         queryStage: action.payload ? "error" : "idle",
       }

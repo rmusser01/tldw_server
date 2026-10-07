@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import (
 from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import (
     PostgreSQLBackend,
 )
+from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
 from tldw_Server_API.app.core.DB_Management.Sync_DB import (
     SYNC_POSTGRES_SCHEMA,
     SYNC_SQLITE_SCHEMA,
@@ -924,14 +925,81 @@ def test_adapter_state_migration_serializes_concurrent_sqlite_initializers(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "concurrent-adapter-migration.db"
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        databases = list(executor.map(lambda _index: SyncDatabase(sqlite_path=path), range(2)))
+    config = DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(path))
+    backends = [SQLiteBackend(config), SQLiteBackend(config)]
+    creation_paused, release_creation, second_begin = Event(), Event(), Event()
 
-    assert databases[0].execute(
-        "SELECT COUNT(*) AS count FROM sync_schema_migrations WHERE migration_id = ? "
-        "AND completed_at IS NOT NULL",
-        ("adapter_cursor_ack_blob_id_v1",),
-    ).rows[0]["count"] == 1
+    def initialize_first() -> SyncDatabase:
+        connection = backends[0].get_pool().get_connection()
+
+        def pause_before_cleanup_table(statement: str) -> None:
+            if " ".join(statement.split()).startswith(
+                "CREATE TABLE IF NOT EXISTS sync_notes_attachment_cleanup_candidates"
+            ):
+                creation_paused.set()
+                release_creation.wait(timeout=5)
+
+        connection.set_trace_callback(pause_before_cleanup_table)
+        try:
+            return SyncDatabase(backend=backends[0])
+        finally:
+            connection.set_trace_callback(None)
+
+    def initialize_second() -> SyncDatabase:
+        connection = backends[1].get_pool().get_connection()
+        connection.set_trace_callback(lambda statement: second_begin.set() if statement == "BEGIN IMMEDIATE" else None)
+        try:
+            return SyncDatabase(backend=backends[1])
+        finally:
+            connection.set_trace_callback(None)
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(initialize_first)
+            try:
+                assert creation_paused.wait(timeout=5)
+                second = executor.submit(initialize_second)
+                assert second_begin.wait(timeout=5)
+                with sqlite3.connect(path) as observer:
+                    visible_authority = observer.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?)",
+                        (
+                            "sync_notes_attachment_source_map",
+                            "sync_notes_attachment_cleanup_candidates",
+                        ),
+                    ).fetchall()
+                    assert visible_authority == []
+            finally:
+                release_creation.set()
+            databases = [first.result(timeout=5), second.result(timeout=5)]
+
+        completed_migrations = databases[0].execute(
+            "SELECT COUNT(*) AS count FROM sync_schema_migrations WHERE migration_id = ? AND completed_at IS NOT NULL",
+            ("adapter_cursor_ack_blob_id_v1",),
+        )
+        assert completed_migrations.rows == [{"count": 1}]
+    finally:
+        for backend in backends:
+            backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize(
+    "catalog_change",
+    [
+        "DROP TABLE sync_notes_attachment_source_map",
+        "DROP TABLE sync_notes_attachment_cleanup_candidates",
+        "ALTER TABLE sync_notes_attachment_source_map ADD COLUMN unexpected_state TEXT",
+        "DROP INDEX idx_sync_notes_attachment_cleanup_page",
+    ],
+)
+def test_attachment_bootstrap_preexisting_authority_fails_closed_on_catalog_drift(
+    sync_store: SyncV2Store,
+    catalog_change: str,
+) -> None:
+    sync_store.db.execute(catalog_change)
+
+    with pytest.raises(SyncStoreError, match="bootstrap catalog is malformed"):
+        sync_store.db.ensure_schema()
 
 
 def test_adapter_state_migration_completed_authority_fails_closed_on_catalog_drift(
