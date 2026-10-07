@@ -1,0 +1,81 @@
+{
+  "existingOwner": {
+    "id": "TASK-12116",
+    "title": "Re-enable frontend type-safety and lint gates, harden persisted stores"
+  },
+  "errors": 0,
+  "warnings": 85,
+  "findings": [
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesEditorState.tsx",
+      "rules": {
+        "@typescript-eslint/no-unused-vars": 8,
+        "@typescript-eslint/no-explicit-any": 48,
+        "react-hooks/exhaustive-deps": 1
+      },
+      "messages": [
+        {
+          "line": 30,
+          "column": 34,
+          "ruleId": "@typescript-eslint/no-unused-vars",
+          "message": "'clearSetting' is defined but never used. Allowed unused vars must match /^_/u."
+        },
+        {
+          "line": 34,
+          "column": 3,
+          "ruleId": "@typescript-eslint/no-unused-vars",
+          "message": "'LAST_NOTE_ID_SETTING' is defined but never used. Allowed unused vars must match /^_/u."
+        },
+        {
+          "line": 54,
+          "column": 3,
+          "ruleId": "@typescript-eslint/no-unused-vars",
+          "message": "'MarkdownToolbarAction' is defined but never used. Allowed unused vars must match /^_/u."
+        },
+        {
+          "line": 83,
+          "column": 3,
+          "ruleId": "@typescript-eslint/no-unused-vars",
+          "message": "'NOTES_TITLE_STRATEGIES' is defined but never used. Allowed unused vars must match /^_/u."
+        },
+        {
+          "line": 87,
+          "column": 3,
+          "ruleId": "@typescript-eslint/no-unused-vars",
+          "message": "'wysiwygHtmlToMarkdown' is defined but never used. Allowed unused vars must match /^_/u."
+        },
+        {
+          "line": 92,
+          "column": 3,
+          "ruleId": "@typescript-eslint/no-unused-vars",
+          "message": "'NOTE_ASSIST_STOP_WORDS' is defined but never used. Allowed unused vars must match /^_/u."
+        },
+        {
+          "line": 93,
+          "column": 3,
+          "ruleId": "@typescript-eslint/no-unused-vars",
+          "message": "'toAttachmentMarkdown' is defined but never used. Allowed unused vars must match /^_/u."
+        },
+        {
+          "line": 654,
+          "column": 9,
+          "ruleId": "@typescript-eslint/no-unused-vars",
+          "message": "'removeOfflineDraftByKey' is assigned a value but never used. Allowed unused vars must match /^_/u."
+        },
+        {
+          "line": 2264,
+          "column": 6,
+          "ruleId": "react-hooks/exhaustive-deps",
+          "message": "React Hook React.useCallback has a missing dependency: 'setDirtyFlag'. Either include it or remove the dependency array."
+        }
+      ]
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/notes-manager-utils.ts",
+      "rules": {
+        "@typescript-eslint/no-explicit-any": 28
+      },
+      "messages": []
+    }
+  ]
+}

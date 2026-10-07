@@ -1,0 +1,44 @@
+{
+  "extensionDir": "<temporary>/knowledge-burndown-extension-react-durable/chrome-mv3",
+  "config": "<temporary>/knowledge-burndown-extension-react-durable.config.ts",
+  "productionConfig": "apps/extension/wxt.config.ts",
+  "productionResolverOverride": false,
+  "buildExitCode": 0,
+  "buildFinishedSeconds": 44.5,
+  "tokenCheckExitCode": 0,
+  "tokenCheckLog": "<temporary>/knowledge-burndown-extension-react-durable-token-sync.log",
+  "finalArtifactJSFiles": 1071,
+  "receiptFiles": [
+    "1f26010903cd.json",
+    "62063c8488db.json",
+    "bb06783fccd7.json",
+    "e472855696fa.json",
+    "e5732c3fbfe6.json"
+  ],
+  "virtualizers": [
+    {
+      "file": "chunks/index-DBdKL3Vs.js",
+      "bytes": 15161,
+      "head": "import{r as x,a_ as F}from\"./react-instance-check-B-PEFy0O.js\";function S(r,l,e){let s=e.initialDeps??[],t,n=!0;function o(){var i,h,u;let c;e.ke",
+      "declaresDispatcher": false,
+      "sha256": "0f6573e6cab83903b66b208599fdb269fb64eebb2d291171dc9861b9ae4e9789"
+    }
+  ],
+  "qaProvider": {
+    "sourceFile": "apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx",
+    "sourceSHA256": "4bebab26de47422a55937e079464a5f44848d7921359bea1c3da0ea376e125a1",
+    "compiled": {
+      "file": "chunks/option-knowledge-DeWpotDm.js",
+      "context": "case\"SET_ERROR\":return{...e,error:t.payload,answerTrustState:t.payload?\"failed_search\":e.answerTrustState,answerTrustReasonCodes:t.payload?[]:e.answerTrustReasonCodes,answerEvidenceOrigin:t.payload?null:e.answerEvidenceOrigin,extensionFailureState:t.payload?\"search_failed\":null,hasSearched:t.payload!==null||e.hasSearched,isSearching:!1,queryStage:t.payload?\"error\":\"idle\"};",
+      "sha256": "ed9be5467d107d5a2ccd015c19a53b056bf79ba3c67b4a719bd4079ea6446fba",
+      "nullErrorPreservesHasSearched": true
+    }
+  },
+  "manifestSHA256": "eee750652303fb30ac81f62859ea89f114f6a2f89d01ea6a79318f9ef3d20042",
+  "dependencyQualification": "Reuses existing packages in an owned worktree link forest; full clean installation was not performed",
+  "wxtVite": "5.4.21",
+  "reactRootCount": 1,
+  "reactDOMRootCount": 1,
+  "reactVersion": "18.3.1",
+  "reactDOMVersion": "18.3.1"
+}
