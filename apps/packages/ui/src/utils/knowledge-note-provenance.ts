@@ -1,3 +1,4 @@
+import type { WorkspaceSource } from "@/types/workspace";
 import type { KnowledgeQaScope } from "./research-workspace-prefill";
 import { isKnowledgeAnswerTrustState } from "@/components/Option/KnowledgeQA/trustState";
 
@@ -360,4 +361,57 @@ export const stripKnowledgeNoteProvenance = (content: string): string => {
     return "";
   });
   return removed ? body.trimEnd() : content;
+};
+
+/** Explicit cited-message capture merges evidence without changing the saved canonical head. */
+export const appendCapturedNoteProvenance = (
+  head: KnowledgeNoteHead & {
+    pendingKnowledgeProvenance?: KnowledgeNoteProvenance;
+    content?: string;
+  },
+  cited: WorkspaceSource[],
+): KnowledgeNoteProvenance | null => {
+  if (
+    head.knowledge_provenance_state === "deleted" ||
+    head.knowledge_provenance_state === "unsupported"
+  )
+    return null;
+  const captures = cited.filter((source) => source.webCapture);
+  if (!captures.length) return null;
+  const original =
+    head.pendingKnowledgeProvenance ||
+    resolveKnowledgeNoteProvenance(head).provenance;
+  const sources = [...(original?.sources || [])];
+  for (const source of captures) {
+    const pin = source.webCapture!;
+    const refs: KnowledgeNoteSource[] = [
+      ...(source.knowledgeQaEvidence?.sources || []),
+      {
+        originalId: pin.clipId,
+        excerpt: "",
+        mediaId: pin.mediaId,
+        title: source.title,
+        type: source.type,
+        sourceType: "server_article",
+        url: pin.requestedUrl,
+        snapshotMediaId: pin.mediaId,
+        originalVersion: pin.versionNumber,
+      },
+    ];
+    for (const reference of refs)
+      if (
+        !sources.some((existing) =>
+          knowledgeNoteProvenanceMatches(existing, reference),
+        )
+      )
+        sources.push(reference);
+  }
+  const result = validateKnowledgeNoteProvenance({
+    ...original,
+    origin: original?.origin || "reviewed_sources",
+    sources,
+  });
+  if (!result)
+    throw new Error("Source history is invalid or too large to save");
+  return result;
 };

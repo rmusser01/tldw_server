@@ -4,6 +4,8 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import type { WebClipperSaveRequest } from "@/services/web-clipper/types"
+import type { WebArticleCapturePin, WorkspaceSource } from "@/types/workspace"
 import type { WorkspaceSourceType } from "@/types/workspace"
 
 const PREFILL_KEY = "__tldw_research_workspace_prefill"
@@ -313,6 +315,85 @@ export const saveResearchWorkspacePrefill = async (
     await storage.set(prefillKey(owner), checkpoint)
   })
 }
+
+/** Capture checkpoints share the owner-bound recovery backend, never the replaceable handoff. */
+export type ResearchWebCapture = {
+  ownerScope: string
+  workspaceId: string
+  sourceId: string
+  body: WebClipperSaveRequest
+  pin?: WebArticleCapturePin
+  attached?: boolean
+}
+
+export const readResearchWebCaptures = async (
+  owner: string,
+  workspaceId: string
+): Promise<ResearchWebCapture[]> => {
+  await pendingPrefillWrite.catch(() => {})
+  const records = await storage.get<Record<string, ResearchWebCapture>>(
+    `${prefillKey(owner)}:web-captures`
+  )
+  return Object.values(records || {})
+    .filter(
+      (record) =>
+        record.ownerScope === owner && record.workspaceId === workspaceId
+    )
+    .map((record) => {
+      // These are the closed, credential-free acceptance objects produced by prepareWebCaptureAcceptance.
+      Object.freeze(record.body.content)
+      Object.freeze(record.body.workspace)
+      Object.freeze(record.body.enhancements)
+      Object.freeze(record.body.capture_metadata?.web_capture_v1)
+      Object.freeze(record.body.capture_metadata)
+      Object.freeze(record.body)
+      return record
+    })
+}
+
+export const saveResearchWebCapture = async (
+  record: ResearchWebCapture
+): Promise<void> => {
+  assertPersistentStorage()
+  if (
+    !record.ownerScope ||
+    record.body.workspace?.workspace_id !== record.workspaceId
+  )
+    throw new Error("Missing capture owner or destination")
+  const checkpoint = structuredClone(record)
+  await persistPrefill(async () => {
+    const key = `${prefillKey(checkpoint.ownerScope)}:web-captures`
+    const records =
+      (await storage.get<Record<string, ResearchWebCapture>>(key)) || {}
+    const previous = records[checkpoint.body.clip_id]
+    if (
+      previous &&
+      (previous.workspaceId !== checkpoint.workspaceId ||
+        JSON.stringify(previous.body) !== JSON.stringify(checkpoint.body))
+    )
+      throw new Error("Accepted capture cannot change; retry the original body")
+    await storage.set(key, {
+      ...records,
+      [checkpoint.body.clip_id]: checkpoint
+    })
+  })
+}
+
+/** Only decorate authoritative owned membership; a checkpoint never restores a removed source. */
+export const retainResearchWebCapturePins = (
+  sources: WorkspaceSource[],
+  records: ResearchWebCapture[]
+): WorkspaceSource[] =>
+  sources.map((source) => {
+    const record = records.find(
+      (item) =>
+        item.pin &&
+        source.id === `web-clipper:${item.pin.clipId}` &&
+        source.mediaId === item.pin.mediaId &&
+        source.url === item.pin.requestedUrl
+    )
+    return record?.pin ? { ...source, webCapture: record.pin } : source
+  })
 
 const truncate = (value: string, max: number): string =>
   value.length > max ? `${value.slice(0, max - 1)}...` : value

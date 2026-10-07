@@ -188,3 +188,59 @@ it.each([
 ])("rejects strict or portable contract violation", value => {
   expect(validateKnowledgeNoteProvenance(value)).toBeNull()
 })
+it("explicit capture references coexist with original references using strict v1 fields", async () => {
+  const { appendCapturedNoteProvenance } =
+    await import("../knowledge-note-provenance")
+  const originalSource = {
+    originalId: "result",
+    excerpt: "original excerpt",
+    mediaId: null,
+    title: "Result",
+    type: "website" as const,
+    sourceType: "web"
+  }
+  const head = {
+    knowledge_provenance_state: "active",
+    knowledge_provenance_version: 2,
+    knowledge_provenance: { origin: "knowledge_qa", sources: [originalSource] }
+  }
+  const source = {
+    id: "web-clipper:clip",
+    mediaId: 71,
+    title: "Article",
+    type: "website" as const,
+    addedAt: new Date(),
+    webCapture: {
+      clipId: "clip",
+      requestedUrl: "https://example.org",
+      capturedAt: "2026-10-07T00:00:00Z",
+      contentSha256: "hash",
+      refreshOf: null,
+      mediaId: 71,
+      versionNumber: 9,
+      versionUuid: "version"
+    }
+  }
+  const value = appendCapturedNoteProvenance(head, [source])
+  expect(value?.sources).toEqual([
+    originalSource,
+    expect.objectContaining({
+      originalVersion: 9,
+      snapshotMediaId: 71,
+      sourceType: "server_article"
+    })
+  ])
+  expect(validateKnowledgeNoteProvenance(value)).toEqual(value)
+  expect(
+    appendCapturedNoteProvenance(
+      { ...head, knowledge_provenance_state: "deleted" },
+      [source]
+    )
+  ).toBeNull()
+  expect(
+    appendCapturedNoteProvenance(
+      { ...head, knowledge_provenance_state: "unsupported" },
+      [source]
+    )
+  ).toBeNull()
+})

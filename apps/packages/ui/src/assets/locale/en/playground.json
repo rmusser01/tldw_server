@@ -1386,5 +1386,22 @@
     "draftChanged": "Your draft changed while the server version was loading. Your newer draft is preserved.",
     "serverLoadFailed": "The server version could not be loaded. Your draft is preserved.",
     "downloadFailed": "Download could not be prepared. Your draft is preserved."
+  },
+  "sources": {
+    "captureArticle": "Capture article",
+    "saveCapture": "Save capture",
+    "refreshCapture": "Refresh capture",
+    "retryCapture": "Retry capture",
+    "cancelCapture": "Cancel",
+    "expandText": "Expand text",
+    "collapseText": "Collapse text",
+    "captureDisclosure": "Save creates an additional capture Note and a new source containing the complete extracted article snapshot. Original retrieved evidence stays intact.",
+    "capturePublicOnly": "Public readable text only. Website sign-ins, browser cookies, and private-page access are not used.",
+    "captureCompleteText": "The complete text is saved; it is never silently shortened.",
+    "extractedSnapshot": "Extracted article snapshot",
+    "retrievedExcerpt": "Retrieved excerpt",
+    "snapshotVersion": "Source snapshot: Media version {{version}}",
+    "snapshotChanged": "Snapshot changed outside refresh",
+    "textUnchanged": "Text unchanged"
   }
 }

@@ -3,6 +3,7 @@ import { KnowledgeNoteHistory } from "@/components/Notes/KnowledgeNoteHistory"
 import {
   knowledgeNoteHead,
   knowledgeNoteWriteFields,
+  knowledgeNoteProvenanceMatches,
   resolveKnowledgeNoteProvenance,
   type KnowledgeNoteHead,
   retainKnowledgeNoteProvenance,
@@ -758,9 +759,17 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       const payload: Record<string, unknown> = {
         title: draft.title || "Untitled Note",
         content: retainKnowledgeNoteProvenance(draft.content, draft),
-        ...knowledgeNoteWriteFields(draft.content, draft, { create: !draft.id }),
+        ...knowledgeNoteWriteFields(draft.content, draft, {
+          create: !draft.id,
+          replacement: draft.pendingKnowledgeProvenance
+        }),
         keywords: persistedKeywords.length > 0 ? persistedKeywords : undefined
       }
+      if (payload.knowledge_provenance)
+        payload.content = retainKnowledgeNoteProvenance(draft.content, {
+          knowledge_provenance_state: "active",
+          knowledge_provenance: payload.knowledge_provenance
+        })
       if (draftWorkspaceTag) payload.workspace_tag = draftWorkspaceTag
 
       let pending = pendingSaveRef.current
@@ -772,8 +781,23 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           const remote = await bgRequest<NoteListItem>({ ...request, path, method: "GET" })
           if (!isCurrent()) return
           expectedVersion = remote.version
-          Object.assign(payload, knowledgeNoteWriteFields(draft.content, remote))
-          payload.content = retainKnowledgeNoteProvenance(draft.content, remote)
+          delete payload.knowledge_provenance
+          delete payload.expected_provenance_version
+          Object.assign(
+            payload,
+            knowledgeNoteWriteFields(draft.content, remote, {
+              replacement: draft.pendingKnowledgeProvenance
+            })
+          )
+          payload.content = retainKnowledgeNoteProvenance(
+            draft.content,
+            payload.knowledge_provenance
+              ? {
+                  knowledge_provenance_state: "active",
+                  knowledge_provenance: payload.knowledge_provenance
+                }
+              : remote
+          )
         }
         if (draft.id && expectedVersion == null) throw new Error("Missing note version; reload before saving.")
         pending = {
@@ -789,6 +813,10 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       const saved = await bgRequest<NoteListItem>({ ...request, path: pending.path, method: pending.method, headers: { ...request.headers, ...pending.headers }, body: pending.body })
       if (!isCurrent()) return
       const latest = useWorkspaceStore.getState().currentNote
+      if (pending.draft.pendingKnowledgeProvenance && pending.body.knowledge_provenance &&
+          !knowledgeNoteProvenanceMatches(resolveKnowledgeNoteProvenance(saved).provenance, pending.body.knowledge_provenance)) {
+        throw new Error("Capture source history was not confirmed; retry the saved draft.")
+      }
       // The acknowledgment may assign the first canonical ID to this draft.
       noteId = saved.id
       pendingSaveRef.current = null
@@ -803,6 +831,13 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       } else {
         setCurrentNote({
           ...latest,
+          ...(latest.pendingKnowledgeProvenance &&
+          knowledgeNoteProvenanceMatches(
+            latest.pendingKnowledgeProvenance,
+            pending.body.knowledge_provenance
+          )
+            ? { pendingKnowledgeProvenance: undefined }
+            : {}),
           id: saved.id,
           version: Math.max(latest.version || 0, saved.version || 0),
           ...((saved.knowledge_provenance_version || 0) >= (latest.knowledge_provenance_version || 0) ? knowledgeNoteHead(saved) : {}),

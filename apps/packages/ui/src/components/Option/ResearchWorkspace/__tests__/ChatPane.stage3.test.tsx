@@ -1,9 +1,12 @@
+import { webcrypto } from "node:crypto"
+import { sha256Text } from "@/store/workspace-migration"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
 import { ChatPane } from "../ChatPane"
+import type { WebArticleCapturePin } from "@/types/workspace"
 
 const mockCheckConnectionOnce = vi.fn()
 const mockSaveWorkspaceChatSession = vi.fn()
@@ -22,6 +25,15 @@ const mockRegenerateLastMessage = vi.fn()
 const mockDeleteMessage = vi.fn()
 const mockEditMessage = vi.fn()
 const mockGetMediaDetails = vi.fn()
+const mockCaptureHead = vi.fn()
+const mockVersion = vi.fn()
+const mockScope = vi.fn()
+vi.mock("@/utils/research-web-capture", () => ({
+  assertWebCaptureHeadCurrent: (...args: unknown[]) => mockCaptureHead(...args)
+}))
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: (...args: unknown[]) => mockScope(...args)
+}))
 const mockSetRagMediaIds = vi.fn()
 const mockSetChatMode = vi.fn()
 const mockSetFileRetrievalEnabled = vi.fn()
@@ -41,6 +53,7 @@ const connectionStoreState = {
 }
 
 const workspaceStoreState = {
+  currentNote: { title: "", content: "", keywords: [], isDirty: true },
   sources: [] as Array<{
     id: string
     mediaId: number
@@ -49,6 +62,7 @@ const workspaceStoreState = {
     status?: "processing" | "ready" | "error"
     addedAt?: Date
     url?: string
+    webCapture?: WebArticleCapturePin
   }>,
   selectedSourceIds: [] as string[],
   getSelectedSources: () =>
@@ -61,6 +75,7 @@ const workspaceStoreState = {
     }>,
   getSelectedMediaIds: () => [] as number[],
   setSelectedSourceIds: vi.fn(),
+  setSourceStatusById: vi.fn(),
   focusSourceById: mockFocusSourceById,
   focusSourceByMediaId: mockFocusSourceByMediaId,
   chatFocusTarget: null as { messageId: string; token: number } | null,
@@ -96,7 +111,10 @@ const messageOptionState = {
     sources: any[]
   }>,
   setMessages: mockSetMessages,
-  history: [] as Array<{ role: "user" | "assistant" | "system"; content: string }>,
+  history: [] as Array<{
+    role: "user" | "assistant" | "system"
+    content: string
+  }>,
   setHistory: mockSetHistory,
   streaming: false,
   setStreaming: mockSetStreaming,
@@ -123,8 +141,10 @@ vi.mock("react-i18next", () => ({
             defaultValue?: string
           }
     ) => {
-      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
-      if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
+      if (typeof defaultValueOrOptions === "string")
+        return defaultValueOrOptions
+      if (defaultValueOrOptions?.defaultValue)
+        return defaultValueOrOptions.defaultValue
       return key
     }
   })
@@ -149,9 +169,11 @@ vi.mock("@/store/connection", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
-    selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  useWorkspaceStore: Object.assign(
+    (selector: (state: typeof workspaceStoreState) => unknown) =>
+      selector(workspaceStoreState),
+    { getState: () => workspaceStoreState, subscribe: () => () => {} }
+  )
 }))
 
 vi.mock("@/store/option", () => ({
@@ -167,13 +189,21 @@ vi.mock("@/hooks/useMessageOption", () => ({
 vi.mock("@/components/Common/Playground/Message", () => ({
   PlaygroundMessage: ({
     message,
-    onSaveToWorkspaceNotes
+    onSaveToWorkspaceNotes,
+    onRegenerate,
+    onEditFormSubmit
   }: {
     message: string
     onSaveToWorkspaceNotes?: () => void
+    onRegenerate?: () => void
+    onEditFormSubmit?: (value: string, isSend: boolean) => void
   }) => (
     <div>
       <div data-testid="playground-message">{message}</div>
+      <button onClick={onRegenerate}>Regenerate capture test</button>
+      <button onClick={() => onEditFormSubmit?.("edited question", true)}>
+        Edit and send capture test
+      </button>
       {onSaveToWorkspaceNotes && (
         <button type="button" onClick={onSaveToWorkspaceNotes}>
           Save to Notes
@@ -211,6 +241,7 @@ vi.mock("../source-location-copy", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    getMediaDocumentVersion: (...args: unknown[]) => mockVersion(...args),
     getMediaDetails: (...args: unknown[]) =>
       (mockGetMediaDetails as (...inner: unknown[]) => unknown)(...args),
     getChatLorebookDiagnostics: vi.fn(async () => ({
@@ -290,6 +321,10 @@ function renderChatPane() {
 describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperty(globalThis, "crypto", {
+      value: webcrypto,
+      configurable: true
+    })
 
     connectionStoreState.state.phase = ConnectionPhase.CONNECTED
     connectionStoreState.state.isChecking = false
@@ -303,6 +338,8 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     workspaceStoreState.getSelectedMediaIds = () => []
     workspaceStoreState.chatFocusTarget = null
     mockCaptureToCurrentNote.mockReset()
+    mockCaptureHead.mockReset()
+    mockVersion.mockReset()
 
     optionStoreState.ragTopK = 8
     optionStoreState.selectedModel = "test-model"
@@ -325,6 +362,298 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     })
 
     mockGetWorkspaceChatSession.mockReturnValue(null)
+  })
+
+  it("blocks captured stale heads at the actual Ask boundary", async () => {
+    const source = {
+      id: "capture",
+      mediaId: 101,
+      title: "Article",
+      type: "website" as const,
+      status: "ready" as const,
+      webCapture: {
+        clipId: "clip",
+        requestedUrl: "https://example.org",
+        capturedAt: "2026-10-07T00:00:00Z",
+        contentSha256: "hash",
+        refreshOf: null,
+        mediaId: 101,
+        versionNumber: 9,
+        versionUuid: "version"
+      }
+    }
+    workspaceStoreState.sources = [source]
+    workspaceStoreState.selectedSourceIds = [source.id]
+    workspaceStoreState.getSelectedSources = () => [source]
+    mockScope.mockResolvedValue({
+      requestScope: {},
+      scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: new AbortController().signal,
+      release: vi.fn()
+    })
+    mockCaptureHead.mockRejectedValue(
+      new Error("Snapshot changed outside refresh")
+    )
+    renderChatPane()
+    fireEvent.change(screen.getByPlaceholderText("Ask about your sources..."), {
+      target: { value: "Explain" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/Snapshot changed outside refresh/).length
+      ).toBeGreaterThan(0)
+    )
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+  })
+
+  it("uses exact capture version text and rechecks before dispatch", async () => {
+    const source = {
+      id: "capture",
+      mediaId: 101,
+      title: "Article",
+      type: "website" as const,
+      status: "ready" as const,
+      webCapture: {
+        clipId: "clip",
+        requestedUrl: "https://example.org",
+        capturedAt: "2026-10-07T00:00:00Z",
+        contentSha256: await sha256Text("exact captured body"),
+        refreshOf: null,
+        mediaId: 101,
+        versionNumber: 9,
+        versionUuid: "version"
+      }
+    }
+    workspaceStoreState.sources = [source]
+    workspaceStoreState.selectedSourceIds = [source.id]
+    workspaceStoreState.getSelectedSources = () => [source]
+    mockScope.mockResolvedValue({
+      requestScope: {},
+      scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: new AbortController().signal,
+      release: vi.fn()
+    })
+    mockCaptureHead.mockResolvedValue(undefined)
+    mockVersion.mockResolvedValue({
+      uuid: "version",
+      version_number: 9,
+      content: "exact captured body"
+    })
+    renderChatPane()
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Include full source contents" })
+    )
+    fireEvent.change(screen.getByPlaceholderText("Ask about your sources..."), {
+      target: { value: "Explain" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() =>
+      expect(mockOnSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining("exact captured body")
+        })
+      )
+    )
+    expect(mockGetMediaDetails).not.toHaveBeenCalled()
+    expect(mockVersion).toHaveBeenCalledWith(
+      101,
+      9,
+      expect.objectContaining({ requestScope: {} })
+    )
+    expect(mockCaptureHead).toHaveBeenCalledTimes(3)
+  })
+
+  it("a source removed during head readback cannot dispatch", async () => {
+    const source = {
+      id: "capture",
+      mediaId: 101,
+      title: "Article",
+      type: "website" as const,
+      status: "ready" as const,
+      webCapture: {
+        clipId: "clip",
+        requestedUrl: "https://example.org",
+        capturedAt: "2026-10-07T00:00:00Z",
+        contentSha256: "hash",
+        refreshOf: null,
+        mediaId: 101,
+        versionNumber: 9,
+        versionUuid: "version"
+      }
+    }
+    workspaceStoreState.sources = [source]
+    workspaceStoreState.selectedSourceIds = [source.id]
+    workspaceStoreState.getSelectedSources = () => [source]
+    mockScope.mockResolvedValue({
+      requestScope: {},
+      scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: new AbortController().signal,
+      release: vi.fn()
+    })
+    mockCaptureHead.mockImplementation(async () => {
+      workspaceStoreState.sources = []
+    })
+    renderChatPane()
+    fireEvent.change(screen.getByPlaceholderText("Ask about your sources..."), {
+      target: { value: "Explain" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/Research source selection or account changed/)
+          .length
+      ).toBeGreaterThan(0)
+    )
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+  })
+
+  it.each(["Regenerate capture test", "Edit and send capture test"])(
+    "guards actual %s dispatch",
+    async (action) => {
+      const source = {
+        id: "capture",
+        mediaId: 101,
+        title: "Article",
+        type: "website" as const,
+        status: "ready" as const,
+        webCapture: {
+          clipId: "clip",
+          requestedUrl: "https://example.org",
+          capturedAt: "2026-10-07T00:00:00Z",
+          contentSha256: "hash",
+          refreshOf: null,
+          mediaId: 101,
+          versionNumber: 9,
+          versionUuid: "version"
+        }
+      }
+      workspaceStoreState.sources = [source]
+      workspaceStoreState.selectedSourceIds = [source.id]
+      workspaceStoreState.getSelectedSources = () => [source]
+      messageOptionState.messages = [
+        {
+          id: "answer",
+          isBot: true,
+          name: "Assistant",
+          message: "Prior answer",
+          sources: []
+        }
+      ]
+      mockScope.mockResolvedValue({
+        requestScope: {},
+        scopeSignal: new AbortController().signal,
+        scopeInvalidatedSignal: new AbortController().signal,
+        release: vi.fn()
+      })
+      mockCaptureHead.mockRejectedValue(Error("changed"))
+      renderChatPane()
+      fireEvent.click(screen.getByRole("button", { name: action }))
+      await waitFor(() =>
+        expect(
+          screen.getAllByText(/Snapshot changed outside refresh/).length
+        ).toBeGreaterThan(0)
+      )
+      expect(mockRegenerateLastMessage).not.toHaveBeenCalled()
+      expect(mockEditMessage).not.toHaveBeenCalled()
+    }
+  )
+
+  it("Save to Notes adds only actually cited capture pins", () => {
+    const pin = {
+      clipId: "clip",
+      requestedUrl: "https://example.org",
+      capturedAt: "2026-10-07T00:00:00Z",
+      contentSha256: "hash",
+      refreshOf: null,
+      mediaId: 101,
+      versionNumber: 9,
+      versionUuid: "version"
+    }
+    workspaceStoreState.sources = [
+      {
+        id: "capture",
+        mediaId: 101,
+        title: "Article",
+        type: "website",
+        webCapture: pin
+      },
+      {
+        id: "uncited",
+        mediaId: 102,
+        title: "Uncited article",
+        type: "website",
+        webCapture: { ...pin, mediaId: 102 }
+      }
+    ]
+    messageOptionState.messages = [
+      {
+        id: "answer",
+        isBot: true,
+        name: "Assistant",
+        message: "Sourced answer",
+        sources: [{ media_id: 101 }]
+      }
+    ]
+    renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+    const saved = mockCaptureToCurrentNote.mock.calls[0][0]
+    expect(saved.provenance.sources).toEqual([
+      expect.objectContaining({
+        mediaId: 101,
+        originalVersion: 9,
+        snapshotMediaId: 101
+      })
+    ])
+  })
+
+  it("refuses inline text whose digest differs from the pin even when version identity matches", async () => {
+    const source = {
+      id: "capture",
+      mediaId: 101,
+      title: "Article",
+      type: "website" as const,
+      status: "ready" as const,
+      webCapture: {
+        clipId: "clip",
+        requestedUrl: "https://example.org",
+        capturedAt: "2026-10-07T00:00:00Z",
+        contentSha256: await sha256Text("accepted text"),
+        refreshOf: null,
+        mediaId: 101,
+        versionNumber: 9,
+        versionUuid: "version"
+      }
+    }
+    workspaceStoreState.sources = [source]
+    workspaceStoreState.selectedSourceIds = [source.id]
+    workspaceStoreState.getSelectedSources = () => [source]
+    mockScope.mockResolvedValue({
+      requestScope: {},
+      scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: new AbortController().signal,
+      release: vi.fn()
+    })
+    mockCaptureHead.mockResolvedValue(undefined)
+    mockVersion.mockResolvedValue({
+      uuid: "version",
+      version_number: 9,
+      content: "different text"
+    })
+    renderChatPane()
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Include full source contents" })
+    )
+    fireEvent.change(screen.getByPlaceholderText("Ask about your sources..."), {
+      target: { value: "Explain" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/Snapshot changed outside refresh/).length
+      ).toBeGreaterThan(0)
+    )
+    expect(mockOnSubmit).not.toHaveBeenCalled()
   })
 
   it("renders the empty chat shell through the canonical EmptyState primitive", () => {
@@ -532,9 +861,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       expect.objectContaining({ min_score: 0.55 })
     )
 
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: "Enable reranking" })
-    )
+    fireEvent.click(screen.getByRole("checkbox", { name: "Enable reranking" }))
     expect(mockSetRagAdvancedOptions).toHaveBeenCalledWith(
       expect.objectContaining({ enable_reranking: true })
     )
@@ -653,7 +980,9 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     renderChatPane()
 
     expect(
-      screen.getByText("Enter or Cmd/Ctrl+Enter to send, Shift+Enter for new line")
+      screen.getByText(
+        "Enter or Cmd/Ctrl+Enter to send, Shift+Enter for new line"
+      )
     ).toBeInTheDocument()
   })
 
@@ -705,7 +1034,9 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
 
     renderChatPane()
 
-    expect(screen.getAllByRole("button", { name: "Save to Notes" })).toHaveLength(2)
+    expect(
+      screen.getAllByRole("button", { name: "Save to Notes" })
+    ).toHaveLength(2)
   })
 
   it("saves chat message content into workspace note draft", () => {

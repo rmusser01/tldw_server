@@ -1,3 +1,7 @@
+import {
+  readResearchWebCaptures,
+  retainResearchWebCapturePins,
+} from "@/utils/research-workspace-prefill";
 import { normalizeNoteKeyword } from "@/services/note-keywords";
 import { resolveKnowledgeNoteProvenance, knowledgeNoteHead, retainKnowledgeNoteProvenance, type KnowledgeNoteHead } from "@/utils/knowledge-note-provenance";
 import { bgRequest } from "@/services/background-proxy";
@@ -213,6 +217,15 @@ export const restoreMigratedResearchWorkspace = async (options: {
             : "processing";
       return { ...source, status, readiness: authoritative.readiness };
     });
+    const captureRecords = await readResearchWebCaptures(
+      scope.scopeKey,
+      workspaceId,
+    );
+    assertCurrent();
+    snapshot.sources = retainResearchWebCapturePins(
+      snapshot.sources,
+      captureRecords,
+    );
     snapshot.selectedSourceIds = local.selectedSourceIds;
     snapshot.generatedArtifacts = local.artifacts;
     snapshot.workspaceBanner = {

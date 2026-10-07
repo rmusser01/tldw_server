@@ -2,10 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const boundary = vi.hoisted(() => ({
   request: vi.fn(),
+  captures: [] as unknown[],
   controller: new AbortController(),
   release: vi.fn(),
   scopeKey: "original-alice",
   userId: "alice",
+}));
+vi.mock("@/utils/research-workspace-prefill", async (original) => ({
+  ...(await original<typeof import("@/utils/research-workspace-prefill")>()),
+  readResearchWebCaptures: async (owner: string, workspace: string) =>
+    owner === "original-alice" && workspace === "original"
+      ? boundary.captures
+      : [],
 }));
 vi.mock("@/services/background-proxy", () => ({ bgRequest: boundary.request }));
 vi.mock("@/services/service-prompts", () => ({
@@ -67,6 +75,7 @@ const restore = (apply = useWorkspaceStore.getState().restoreServerWorkspace) =>
 
 beforeEach(() => {
   localStorage.clear();
+  boundary.captures = [];
   useWorkspaceStore.getState().reset();
   boundary.controller = new AbortController();
   boundary.scopeKey = "original-alice";
@@ -351,3 +360,30 @@ it("allows only an owned explicit source-history restore route", () => {
   expect(isServicePromptRequestPath("/api/v1/notes/owned/provenance/restore", "POST")).toBe(true)
   expect(isServicePromptRequestPath("/api/v1/notes/owned%2Fforeign/provenance/restore", "POST")).toBe(false)
 })
+
+it("restores exact pins only onto matching owned server membership", async () => {
+  const pin = {
+    clipId: "clip",
+    requestedUrl: "https://example.org",
+    capturedAt: "2026-10-07T00:00:00Z",
+    contentSha256: "digest",
+    refreshOf: "prior",
+    mediaId: 7,
+    versionNumber: 9,
+    versionUuid: "version-nine",
+  };
+  boundary.captures = [{ pin }];
+  const ctx = context();
+  Object.assign(ctx.sources.items[0], {
+    id: "web-clipper:clip",
+    url: pin.requestedUrl,
+  });
+  boundary.request.mockImplementation(async ({ path }: { path: string }) =>
+    path.endsWith("/context") ? ctx : [],
+  );
+  await restore();
+  expect(useWorkspaceStore.getState().sources[0].webCapture).toEqual(pin);
+  ctx.sources.items = [];
+  await restore();
+  expect(useWorkspaceStore.getState().sources).toEqual([]);
+});

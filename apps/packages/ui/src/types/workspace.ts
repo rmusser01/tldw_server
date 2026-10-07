@@ -1,4 +1,8 @@
-import type { KnowledgeNoteHead, KnowledgeNoteEvidence } from "@/utils/knowledge-note-provenance"
+import type {
+  KnowledgeNoteHead,
+  KnowledgeNoteEvidence,
+  KnowledgeNoteProvenance
+} from "@/utils/knowledge-note-provenance"
 /**
  * Workspace Types
  * Types for the NotebookLM-style three-pane research interface
@@ -632,6 +636,7 @@ export const DEFAULT_AUDIO_SETTINGS: AudioGenerationSettings = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface WorkspaceNote extends KnowledgeNoteHead {
+  pendingKnowledgeProvenance?: KnowledgeNoteProvenance
   id?: string | number // Canonical Notes UUID or legacy workspace note ID
   title: string
   content: string
