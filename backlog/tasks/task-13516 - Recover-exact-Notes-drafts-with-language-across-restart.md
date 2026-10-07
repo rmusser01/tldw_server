@@ -1,7 +1,7 @@
 ---
 id: TASK-13516
 title: Recover exact Notes drafts with language across restart
-status: Done
+status: In Progress
 created_date: 2026-10-07 03:08
 dependencies:
 - TASK-13513
@@ -13,7 +13,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
-updated_date: 2026-10-07 08:33
+updated_date: 2026-10-07 09:45
 ---
 
 ## Description
@@ -30,6 +30,7 @@ Keep unsaved edits recoverable across navigation, rejected saves and process res
 - [x] #4 Storage/quota failures prevent discard-producing navigation and show a truthful error; existing storage ownership is reused without diagnostics persistence.
 - [x] #5 Targeted recovery/session tests cover profile isolation, logout, restart and actual copy/history owners touched by this change.
 - [x] #6 Relevant governing ADR is assessed/linked and repo-local completion notes name actual evidence and remaining limitations.
+- [ ] #7 Body-only edits during first legacy create or queue replay can subsequently save exact newer source against acknowledged identity/version without a spurious portable-language capability veto; explicit language mutations and ambiguous baselines remain protected.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -45,24 +46,35 @@ Reason: implement approved scoped durable-draft recovery and serialized-language
 5. Extend the existing browser offline queue version/snapshot with language/revision, legacy unknown-mode gating and quota/authority controls. No second storage mechanism or editor adoption.
 6. Run named affected C state/session/recovery/device-store and real-port controls plus U structured-draft/authority/offline selections and whole W typecheck; scoped static/security/format comparisons against captured bases, no full sweep.
 7. Document actual copy/history ownership, evidence and limitations, self-review and commit explicit C/S unit files separately. Keep In Progress pending independent review.
+F5 fix round3/5 — controller source-level follow-up after independent round2 closure.
+ADR required: yes
+ADR path: Docs/ADR/065-portable-note-language-and-negotiated-structured-editing.md (existing); C ADR194 unchanged
+Reason: complete the existing source-bound acknowledgement/recovery contract and Ruling32 ordinary legacy compatibility without a new store or state owner.
+1. Read task-5-fix3-findings.md and previous report/rulings; trace save and offline replay plus actual snapshot/result/queue consumers.
+2. Add meaningful mounted deferred legacy POST controls with body-only newer editing for ordinary Save and queue replay; demonstrate the specific spurious follow-up veto before correction.
+3. Correct existing captured acknowledgement/baseline/rekey ownership narrowly so source/version/identity and known/unknown language remain associated while explicit language intent stays protected. No arbitrary existing-null downgrade or metadata borrowing; raise a concrete boundary ambiguity before deviating.
+4. Run amended structured-draft, authority-races and actual-page offline-drafting selections plus final whole W typecheck, with scoped immutable-base static/formatter evidence. Do not repeat unchanged C or Monaco native checks without a concrete related change.
+5. Append exact RED/GREEN/final commands and output/self-review to task-5-report.md, update concise task notes and commit explicit S unit files. Keep In Progress pending scoped round3 re-review.
+Ruling34 (progress.md and task-5-fix3-findings.md): use the existing complete source/identity/version acknowledgement check regardless of language presence; capability/language equality stays portable-only. Baseline association uses only the complete implicit-create reply and leaves explicit language edits protected. Governing existing ADR065 must describe this conservative acknowledgement boundary before changing it; minimal/body-less replies retain pending recovery.
 <!-- SECTION:PLAN:END -->
-
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented coherent language-bearing recovery in the existing authority-scoped browser queue (v3), with matching source/revision cleanup, quota/authority fences and stable retained-error replay until Save/edit. Untouched fresh defaults carry narrowly validated provenance and retain ordinary legacy-create compatibility; explicit/null/future metadata remains capability-protected. Actual New/reset and duplicate handlers preserve loading ownership and known/unknown mode/provenance. Governing ADR065 amended before serialization. Evidence: final post-format structured/authority/actual-page trio53; whole frontend typecheck exit0 recorded; no introduced scoped ESLint, direct changed-region/test formatting evidence. Initial task review and two scoped rounds are clean. Inherited whole-file/static debt and baseline pin-order fixture limitation remain disclosed; no external live-server/OS-kill or downstream formatter adoption claim.
+Reopened for controller-identified post-ack legacy body-only compatibility qualification. Round2 reviewed implementation remains the baseline; no new fix verified yet.
+F5 fix round3: complete implicit-create acknowledgements now supply only their associated optional mode and created identity/version to newer body-only drafts in ordinary Save and queue replay; rekey consumes fresh proof and explicit language edits remain protected. Unknown-mode mutations also require exact source/identity/version acknowledgement under Ruling34, and malformed present language retains pending recovery. Governing ADR065 amended; existing helper/result owner reused. Deferred RED2 plus unknown-mode RED10 and malformed-present RED2 captured. Final targeted structured/authority/actual-page trio and whole frontend typecheck recorded in task-5-report.md; scoped immutable-base lint/format evidence has no new debt. In Progress for independent scoped review; no C or Monaco production changes or repeated tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-F5 complete after independent review and two scoped fixes. Exact authority-scoped drafts, legacy creation and duplicate provenance are covered by final53; whole frontend typecheck exit0. ADR065 applies. Known inherited static/formatter debt and later live/editor qualification gates are recorded in the F5 report and ledger.
+In Progress: qualify/fix deferred legacy-create and queue-replay body-only follow-up behavior. Previous F5 controls remain reviewed; the new criterion is not complete.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->

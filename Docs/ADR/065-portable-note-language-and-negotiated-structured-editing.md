@@ -183,3 +183,13 @@ mounting an editable model; the exact original remains in a read-only fallback.
 Homogeneous LF/CRLF must additionally pass an exact model round-trip. This is an
 experiment admission profile, not a new web storage normalization policy. I3 may
 adopt only the independently reviewed qualified profile and loading mechanism.
+
+### F5 source-bound creation acknowledgement (2026-10-07)
+
+A complete implicit-default creation reply supplies the created identity, version,
+and only its own associated language to a newer body-only draft. An absent language
+remains unknown; rekeying consumes the fresh-default proof. An explicit mode edit
+made during the request keeps its own language and stronger capability protection.
+Ordinary and queued mutation cleanup require exact source, identity and version
+acknowledgement even when language is unknown. This uses the existing source
+acknowledgement boundary, with no exemption for arbitrary existing null-mode notes.

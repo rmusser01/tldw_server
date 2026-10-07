@@ -46,7 +46,7 @@ const deferred = <T,>() => {
   return { promise, resolve, reject };
 };
 
-const renderEditor = (isOnline = false) => {
+const renderEditor = (isOnline = false, refetch = vi.fn(async () => undefined)) => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -70,7 +70,7 @@ const renderEditor = (isOnline = false) => {
     listMode: 'active',
     setListMode: vi.fn(),
     data: [],
-    refetch: vi.fn(async () => undefined),
+    refetch,
     setPage: vi.fn(),
     setQuery: vi.fn(),
     setQueryInput: vi.fn(),
@@ -592,6 +592,7 @@ describe('structured drafts', () => {
       { id: '', version: 1, content: 'exact' },
       { id: 'n', content: 'exact' },
       { id: 'n', version: -1, content: 'exact' },
+      { id: 'n', version: 1, content: 'exact', content_language: { invalid: true } },
     ].flatMap((reply) => ['ordinary', 'queue'].map((pathway) => ({ reply, pathway })))
   )(
     'retains an untouched default after an incomplete legacy acknowledgement %j',
@@ -715,6 +716,191 @@ describe('structured drafts', () => {
         );
       }
       expect(view.result.current.offlineDraftQueue['note:n'].content).toBe('exact');
+    }
+  );
+  it.each(
+    ['ordinary', 'queue'].flatMap((pathway) =>
+      [undefined, null, 'yaml', 'future-mode'].map((language) => ({ pathway, language }))
+    )
+  )(
+    'saves newer body-only edits after a deferred legacy first POST via $pathway $language',
+    async ({ pathway, language }) => {
+      const firstReply = deferred<unknown>();
+      const firstRefresh = deferred<void>();
+      let remote = { id: 'created', content: 'older <>&', version: 7, content_language: language };
+      mocks.request.mockImplementation(({ method, path, body }) => {
+        if (path.endsWith('/capabilities')) return Promise.resolve({ content_language: true });
+        if (method === 'POST') return firstReply.promise;
+        if (method === 'PUT') {
+          remote = { id: 'created', content: body.content, version: 8, content_language: language };
+          return Promise.resolve(remote);
+        }
+        return Promise.resolve(remote);
+      });
+      const refetch = vi.fn(async () => {
+        if (pathway === 'ordinary') await firstRefresh.promise;
+      });
+      const view = renderEditor(pathway === 'ordinary', refetch);
+      act(() => {
+        view.result.current.setContent('older <>&');
+        view.result.current.setIsDirty(true);
+      });
+      let saving!: Promise<boolean>;
+      if (pathway === 'ordinary') {
+        act(() => {
+          saving = view.result.current.saveNote({ showSuccessMessage: false });
+        });
+      } else {
+        await act(async () => {
+          await view.result.current.saveNote({ showSuccessMessage: false });
+        });
+        view.rerender({ scope: 'alice', online: true });
+      }
+      await waitFor(() =>
+        expect(mocks.request.mock.calls.some(([arg]) => arg.method === 'POST')).toBe(true)
+      );
+      act(() => {
+        view.result.current.setContent('newer <>&\n雪');
+        view.result.current.setIsDirty(true);
+      });
+      if (pathway === 'queue') view.rerender({ scope: 'alice', online: false });
+      await act(async () => {
+        firstReply.resolve(remote);
+      });
+      await waitFor(() => expect(view.result.current.selectedId).toBe('created'));
+      expect(view.result.current.content).toBe('newer <>&\n雪');
+      expect(view.result.current.contentLanguage).toBe(language);
+      expect(view.result.current.selectedVersion).toBe(7);
+      expect(view.result.current.offlineDraftQueue['note:created']).toMatchObject({
+        content: 'newer <>&\n雪',
+        baseVersion: 7,
+        implicitDefaultLanguage: false,
+      });
+      expect(view.result.current.offlineDraftQueue['note:created'].content_language).toBe(language);
+      if (pathway === 'ordinary') {
+        await act(async () => {
+          firstRefresh.resolve();
+          await saving;
+        });
+        await act(async () => {
+          expect(await view.result.current.saveNote({ showSuccessMessage: false })).toBe(true);
+        });
+      } else {
+        view.rerender({ scope: 'alice', online: true });
+        await waitFor(() =>
+          expect(view.result.current.offlineDraftQueue['note:created']).toBeUndefined()
+        );
+      }
+      const puts = mocks.request.mock.calls.filter(([arg]) => arg.method === 'PUT');
+      expect(puts).toHaveLength(1);
+      expect(puts[0][0].body.content).toBe('newer <>&\n雪');
+      if (language === undefined) expect(puts[0][0].body).not.toHaveProperty('content_language');
+      else expect(puts[0][0].body.content_language).toBe(language);
+      expect(puts[0][0].headers['expected-version']).toBe('7');
+      expect(puts[0][0].path).toBe('/api/v1/notes/created');
+      expect(view.result.current.offlineDraftQueue['note:created']).toBeUndefined();
+      expect(mocks.request.mock.calls.some(([arg]) => arg.path.endsWith('/capabilities'))).toBe(
+        language !== undefined
+      );
+      expect(view.result.current.isDirty).toBe(false);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      });
+      expect(view.result.current.offlineDraftQueue['note:created']).toBeUndefined();
+    }
+  );
+
+  it.each(
+    ['ordinary', 'queue'].flatMap((pathway) =>
+      [null, 'yaml', 'future-mode'].map((language) => ({ pathway, language }))
+    )
+  )(
+    'preserves explicit mode edits during first POST $pathway $language',
+    async ({ pathway, language }) => {
+      const reply = deferred<unknown>();
+      mocks.request.mockImplementation(({ method }) =>
+        method === 'POST' ? reply.promise : Promise.resolve({})
+      );
+      const view = renderEditor(pathway === 'ordinary');
+      act(() => {
+        view.result.current.setContent('older');
+        view.result.current.setIsDirty(true);
+      });
+      let saving!: Promise<boolean>;
+      if (pathway === 'ordinary')
+        act(() => {
+          saving = view.result.current.saveNote({ showSuccessMessage: false });
+        });
+      else {
+        await act(async () => {
+          await view.result.current.saveNote({ showSuccessMessage: false });
+        });
+        view.rerender({ scope: 'alice', online: true });
+      }
+      await waitFor(() =>
+        expect(mocks.request.mock.calls.some(([arg]) => arg.method === 'POST')).toBe(true)
+      );
+      act(() => {
+        view.result.current.setContent('newer');
+        view.result.current.setContentLanguage(language);
+      });
+      if (pathway === 'queue') view.rerender({ scope: 'alice', online: false });
+      await act(async () => {
+        reply.resolve({ id: 'created', content: 'older', version: 7 });
+        if (saving) await saving;
+      });
+      await waitFor(() => expect(view.result.current.selectedId).toBe('created'));
+      expect(view.result.current.contentLanguage).toBe(language);
+      expect(view.result.current.offlineDraftQueue['note:created']).toMatchObject({
+        content: 'newer',
+        content_language: language,
+        baseVersion: 7,
+        implicitDefaultLanguage: false,
+      });
+      expect(view.result.current.isDirty).toBe(true);
+    }
+  );
+
+  it.each(
+    ['ordinary', 'queue'].flatMap((pathway) =>
+      [
+        { id: 'n', version: 2 },
+        { id: 'n', version: 2, content: 'wrong' },
+        { id: 'other', version: 2, content: 'newer' },
+        { id: 'n', content: 'newer' },
+        { id: 'n', version: -1, content: 'newer' },
+      ].map((reply) => ({ pathway, reply }))
+    )
+  )(
+    'retains unknown-mode source after incomplete acknowledgement $pathway $reply',
+    async ({ pathway, reply }) => {
+      mocks.request.mockImplementation(({ method }) =>
+        Promise.resolve(method === 'PUT' ? reply : { id: 'n', content: 'older', version: 1 })
+      );
+      const view = renderEditor(pathway === 'ordinary');
+      await act(async () => {
+        await view.result.current.loadDetail('n');
+      });
+      act(() => {
+        view.result.current.setContent('newer');
+        view.result.current.setIsDirty(true);
+      });
+      if (pathway === 'ordinary')
+        await act(async () => {
+          expect(await view.result.current.saveNote({ showSuccessMessage: false })).toBe(false);
+        });
+      else {
+        await act(async () => {
+          await view.result.current.saveNote({ showSuccessMessage: false });
+        });
+        view.rerender({ scope: 'alice', online: true });
+        await waitFor(() =>
+          expect(view.result.current.offlineDraftQueue['note:n']?.syncState).toBe('error')
+        );
+      }
+      expect(view.result.current.contentLanguage).toBeUndefined();
+      expect(view.result.current.offlineDraftQueue['note:n'].content).toBe('newer');
+      expect(view.result.current.saveIndicator).not.toBe('saved');
     }
   );
 });

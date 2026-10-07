@@ -1770,9 +1770,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         const completeAcknowledgement = (reply: unknown) => {
           const result = reply as Record<string, unknown> | null;
           if (
-            contentLanguage !== undefined &&
-            (!isCompleteNoteSourceAcknowledgement(result, content, selectedId) ||
-              (portableLanguage && result?.content_language !== contentLanguage))
+            !isCompleteNoteSourceAcknowledgement(result, content, selectedId) ||
+            (portableLanguage && result?.content_language !== contentLanguage)
           ) {
             throw new Error(
               'Server did not acknowledge the complete source and language; draft kept locally.'
@@ -1781,11 +1780,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         };
         const monitoringContext = { isCurrent, ownerId: user.id, request: ownedRequest, capability }
         const draftKey = offlineDraftKeyFor(noteId)
-        const acknowledgeOfflineDraft = (savedNoteId: string | number, version: number | null, head: KnowledgeNoteHead) => {
+        const acknowledgeOfflineDraft = (savedNoteId: string | number, version: number | null, head: KnowledgeNoteHead, acknowledgedLanguage?: string | null) => {
           if (!hasNewerEdits()) {
             if (!removeOfflineDraftByKey(draftKey)) throw new Error("Local recovery cleanup failed; draft kept.")
             return
           }
+          const adoptCreatedMode = omitUntouchedDefault && editRevisionRef.current.implicitDefaultLanguage && editRevisionRef.current.contentLanguage === null
+          if (adoptCreatedMode) { setContentLanguageState(acknowledgedLanguage); setImplicitDefaultLanguage(false) }
           const queued = offlineDraftQueueRef.current[draftKey]
           if (!queued) return
           const latest = editRevisionRef.current
@@ -1795,7 +1796,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           next[key] = {
             ...queued, key, noteId: String(savedNoteId), baseVersion: version ?? queued.baseVersion, implicitDefaultLanguage: false,
             pendingWrite: undefined,
-            content_language: latest.contentLanguage, revision: latest.revision, draftVersion: 3,
+            content_language: adoptCreatedMode ? acknowledgedLanguage : latest.contentLanguage, revision: latest.revision, draftVersion: 3,
             title: latest.title, content: latest.content, keywords: [...latest.editorKeywords],
             metadata: { ...latest.originalMetadata, ...head }, backlinkConversationId: latest.backlinkConversationId,
             backlinkMessageId: latest.backlinkMessageId
@@ -1858,7 +1859,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             savedTitleRef.current = { noteId: String(created.id), title: toNoteTitle(created) ?? snapshot.title }
             selectedIdRef.current = created.id
             setSelectedId(created.id)
-            acknowledgeOfflineDraft(created.id, createdVersion, knowledgeNoteHead(created))
+            acknowledgeOfflineDraft(created.id, createdVersion, knowledgeNoteHead(created), created.content_language)
           }
           if (createdVersion != null) assignSelectedVersion(createdVersion)
           if (createdLastSaved) setSelectedLastSavedAt(createdLastSaved)
@@ -1982,6 +1983,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         if (failure?.kind === 'conflict') {
           pendingWriteRef.current = null
           const draftKey = offlineDraftKeyFor(noteId)
+          const adoptCreatedMode = omitUntouchedDefault && editRevisionRef.current.implicitDefaultLanguage && editRevisionRef.current.contentLanguage === null
+          if (adoptCreatedMode) { setContentLanguageState(acknowledgedLanguage); setImplicitDefaultLanguage(false) }
           const queued = offlineDraftQueueRef.current[draftKey]
           if (queued) {
             const next = { ...offlineDraftQueueRef.current, [draftKey]: { ...queued, pendingWrite: undefined, syncState: 'conflict' as const } }
@@ -2134,9 +2137,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
         const acknowledge = (reply: Record<string, unknown> | null) => {
           if (
-            draft.content_language !== undefined &&
-            (!isCompleteNoteSourceAcknowledgement(reply, draft.content, draft.noteId) ||
-              (portableLanguage && reply?.content_language !== draft.content_language))
+            !isCompleteNoteSourceAcknowledgement(reply, draft.content, draft.noteId) ||
+            (portableLanguage && reply?.content_language !== draft.content_language)
           )
             throw new Error('Incomplete language acknowledgement; draft kept locally.');
         };
@@ -2189,7 +2191,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         if (onlinePending?.authority === requestEpoch && onlinePending.request.headers?.['Idempotency-Key'] === pending.key) pendingWriteRef.current = null
         const savedId = String(saved?.id || draft.noteId || '').trim()
         if (!savedId) throw new Error('Queued save did not return its note identity.')
-        return { status: 'synced', key: draft.key, noteId: savedId, version: toNoteVersion(saved), savedTitle: toNoteTitle(saved),
+        return { status: 'synced', key: draft.key, noteId: savedId, version: toNoteVersion(saved), contentLanguage: saved.content_language, savedTitle: toNoteTitle(saved),
           lastSavedAt: toNoteLastModified(saved), head: knowledgeNoteHead(saved), submittedBody: pending.operation === 'restore'
             ? { title: toNoteTitle(saved) || '', content: saved.content || '', keywords: extractKeywords(saved) } : pending.body,
         }

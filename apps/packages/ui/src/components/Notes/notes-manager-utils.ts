@@ -513,6 +513,11 @@ export const isCompleteNoteSourceAcknowledgement = (
   return (
     validId &&
     note.content === content &&
+    (note.content_language === undefined ||
+      note.content_language === null ||
+      (typeof note.content_language === 'string' &&
+        note.content_language.trim().length > 0 &&
+        note.content_language.length <= 100)) &&
     version !== null &&
     Number.isSafeInteger(version) &&
     (expectedId == null || String(id) === String(expectedId))
@@ -522,6 +527,7 @@ export const isCompleteNoteSourceAcknowledgement = (
 export type OfflineDraftSyncResult =
   | {
       status: 'synced'
+      contentLanguage?: string | null
       savedTitle: string | null
       head?: KnowledgeNoteHead
       submittedBody?: Record<string, unknown>
