@@ -1,6 +1,6 @@
 # VN PR 3016 Review And Merge
 
-Task: TASK-13369. Parent [#3016](https://github.com/rmusser01/tldw_server/pull/3016);
+Task: TASK-13518 (formerly TASK-13369). Parent [#3016](https://github.com/rmusser01/tldw_server/pull/3016);
 stacked follow-up [#3067](https://github.com/rmusser01/tldw_server/pull/3067).
 Designs: Docs/Design/2026-09-25-vn-pr-3016-review.md and
 Docs/Design/2026-10-02-vn-pr-3067-review-tests.md.

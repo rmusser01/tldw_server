@@ -1,5 +1,5 @@
 ---
-id: TASK-13358
+id: TASK-13517
 title: Make VN asset variant publication replay-safe
 status: Done
 assignee: []
@@ -32,6 +32,7 @@ Finish the server worker replay portion of issue #2021: duplicate delivery or wo
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Replay ledger uses recipe rows; hidden reservations are excluded from public listings and failed reservations from item capacity. Parent fanout preserves child-updated status. Verification: 124 scoped backend tests passed plus owner-isolation test; Ruff E,F,I clean; Bandit 0 findings; git diff --check clean.
+2026-10-06: requester-approved scoped identity migration changed the VN replay-safe publication record from TASK-13358 to TASK-13517 and its matching filename because TASK-13358 also identifies unrelated MCP testing work. Historical sections remain intact; the unrelated MCP record is unchanged. Migration is tracked by TASK-13515.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

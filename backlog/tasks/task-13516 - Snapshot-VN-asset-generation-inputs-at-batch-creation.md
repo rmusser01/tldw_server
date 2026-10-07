@@ -1,5 +1,5 @@
 ---
-id: TASK-13356
+id: TASK-13516
 title: Snapshot VN asset generation inputs at batch creation
 status: Done
 assignee: []
@@ -40,6 +40,7 @@ Stages 1-2 of IMPLEMENTATION_PLAN_vn_generation_durability.md
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 41 focused VN repository/generation tests passed; scoped Ruff E,F,I passed; Bandit on three touched production modules reported zero findings; git diff --check passed. Existing BLE001 lint findings in preexisting broad exception handlers remain.
+2026-10-06: requester-approved scoped identity migration changed the VN snapshot record from TASK-13356 to TASK-13516 and its matching filename because TASK-13356 also identifies unrelated ADR work. Historical sections remain intact; the unrelated ADR record is unchanged. Migration is tracked by TASK-13515.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
