@@ -71,6 +71,7 @@ import {
   createBranchMessage
 } from "@/hooks/handlers/messageHandlers"
 import { type UploadedFile } from "@/db/dexie/types"
+import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 import { buildAssistantErrorContent, decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent"
 import { buildCharacterChatAssistantErrorContent, classifyCharacterChatFailureRecovery } from "./useCharacterChatMode"
@@ -3508,7 +3509,8 @@ export const useChatActions = ({
     historyRetryAdmission,
     historyEditResend,
     historyRegenerate,
-    assertCurrent
+    assertCurrent,
+    historyRetryRecoveries
   }: {
     message: string
     image: string
@@ -3547,6 +3549,7 @@ export const useChatActions = ({
     historyRetryAdmission?: HistoryAdmissionReferenceV1
     historyEditResend?: NativeHistoryEditResend
     historyRegenerate?: NativeHistoryRegenerate
+    historyRetryRecoveries?: HistoryTurnRecoveryEntry[]
   }, beginResponse: () => boolean): Promise<ChatSubmitResult> => {
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined
     assertCurrent?.()
@@ -4565,6 +4568,9 @@ export const useChatActions = ({
                       !useConnectionStore.getState().state.offlineBypass,
                     ...(historyRetryAdmission
                       ? { retryAdmission: historyRetryAdmission }
+                      : {}),
+                    ...(historyRetryRecoveries
+                      ? { retryRecoveries: historyRetryRecoveries }
                       : {})
                   }
                 : undefined
@@ -5571,14 +5577,19 @@ export const useChatActions = ({
           : selection.recoveries ?? []
       if (!sourceFence() || !sameSource()) return retired()
       const retained = recoveries.filter(
-        (entry) => entry.turn.persistence !== "server" && (
-          entry.turn.input_id === question.id ||
-          entry.turn.admission?.input_message_id === question.id)
+        (entry) =>
+          entry.scope.profile_id === current.bookmarkScope?.profile_id &&
+          entry.turn.owner_key === current.view?.owner_key &&
+          entry.turn.conversation_id === current.view?.conversation_id &&
+          (entry.turn.input_id === question.id ||
+            entry.turn.admission?.input_message_id === question.id)
       )
+      const retryRecoveries = structuredClone(retained)
+      const admissionRecoveries = retained.filter(entry => entry.turn.persistence !== "server")
       // A server chat's partial reply exists only in its record on this
       // device; a local chat stores the question with its admission.
       let questionAdmission: HistoryAdmissionReferenceV1 | null =
-        retained
+        admissionRecoveries
           .map((entry) => entry.turn.admission)
           .find(
             (admission) =>
@@ -5614,38 +5625,6 @@ export const useChatActions = ({
         })
         return chatSubmitFailed("history_selection_changed")
       }
-      for (const entry of retained) {
-        if (!retryFence() || !sameSource()) return retired()
-        dispatch?.controller?.signal.throwIfAborted()
-        dispatch?.assertCurrent?.()
-        const dismissed = await selection.dismissRecovery(entry, () => {
-          if (
-            !retryFence() ||
-            !sameSource() ||
-            dispatch?.controller?.signal.aborted
-          )
-            return false
-          try {
-            dispatch?.assertCurrent?.()
-            return true
-          } catch {
-            return false
-          }
-        })
-        dispatch?.controller?.signal.throwIfAborted()
-        dispatch?.assertCurrent?.()
-        if (!retryFence() || !sameSource()) return retired()
-        if (!dismissed) {
-          notification.error({
-            message: t("error", { defaultValue: "Error" }),
-            description: t(
-              "playground:errorRecovery.dismissFailed",
-              "The saved recovery could not be dismissed. Your text is still available; try again."
-            )
-          })
-          return chatSubmitFailed("recovery_dismissal_not_committed")
-        }
-      }
       if (!retryFence() || !sameSource()) return retired()
       dispatch?.controller?.signal.throwIfAborted()
       dispatch?.assertCurrent?.()
@@ -5658,7 +5637,8 @@ export const useChatActions = ({
           // again as a new branch from the same point.
           ...(questionAdmission
             ? { historyRetryAdmission: questionAdmission }
-            : {})
+            : {}),
+          historyRetryRecoveries: retryRecoveries
         })
       )
     }

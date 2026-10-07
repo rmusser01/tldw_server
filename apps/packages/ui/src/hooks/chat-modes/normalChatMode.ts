@@ -32,6 +32,7 @@ import {
   markHistoryTurnLive,
   releaseHistoryTurn
 } from "@/services/history-turn-keep"
+import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 import { beginServerChatWrite } from "@/store/server-chat-save-status"
 import {
   beginChatTurnSettlement,
@@ -209,6 +210,7 @@ type NormalChatModeParams = {
      */
     retryAdmission?: HistoryAdmissionReferenceV1
     editResend?: NativeHistoryEditResend
+    retryRecoveries?: HistoryTurnRecoveryEntry[]
   }
   historyTurn?: HistorySendTurn
 
@@ -1105,6 +1107,13 @@ const captureNormalHistoryTurn = async (
       view.cursor.kind !== "before_message" || view.cursor.message_id !== retryAdmission.input_message_id))
     throw new Error("invalid_history_retry")
   const bookmarkScope = { ...current.bookmarkScope }
+  const retryRecoveries = params.historySelection!.retryRecoveries ?? []
+  if (retryRecoveries.some(entry =>
+    entry.scope.profile_id !== bookmarkScope.profile_id ||
+    entry.turn.owner_key !== view.owner_key ||
+    entry.turn.conversation_id !== view.conversation_id ||
+    !entry.turn.operation_id
+  )) throw new Error("invalid_history_retry")
   const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
   const owner =
     current.owner.kind === "native"
@@ -1403,6 +1412,8 @@ const captureNormalHistoryTurn = async (
       )
       if (creationHandle && owner.kind === "native")
         await markChatCreationSettled(creationHandle, owner.conversation_id)
+      for (const entry of retryRecoveries)
+        await dismissHistoryTurnRecovery(entry.scope, view, entry.turn.operation_id, "completed")
     },
     followResult: async (id) => {
       if (!canUpdateView() || (editResend && !editOriginIsCurrent())) return false
@@ -1447,14 +1458,14 @@ const captureNormalHistoryTurn = async (
       await recoveryWrites
       if (!lastRecord?.outcome) return
       releaseHistoryTurn(operationId)
-      await keepHistoryTurnRecovery(
+      const kept = await keepHistoryTurnRecovery(
         controller,
-        {
-          scope: bookmarkScope,
-          turn: lastRecord
-        },
+        { scope: bookmarkScope, turn: lastRecord },
         stopSignal
       )
+      if (kept.status === "kept" && kept.settledByKeep)
+        for (const entry of retryRecoveries)
+          await dismissHistoryTurnRecovery(entry.scope, view, entry.turn.operation_id, "completed")
     },
     release: () => {
       stopCheckpoints()

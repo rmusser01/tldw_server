@@ -36,12 +36,15 @@ import { useConnectionStore } from "@/store/connection"
 import { useStoreMessageOption } from "@/store/option"
 import { getServerChatSaveStatus } from "@/store/server-chat-save-status"
 import { resolveChatPersistenceKind } from "@/utils/chat-persistence-status"
+import { saveHistoryTurnRecovery } from "@/db/dexie/history-selection"
+import type { HistoryTurnRecovery } from "@/db/dexie/types"
 
-const { recoveryReadGate, recoveryDismissGate, retryCompletion } = vi.hoisted(() => ({
+const { recoveryReadGate, recoveryWriteGate, recoveryDismissGate, retryCompletion } = vi.hoisted(() => ({
   recoveryReadGate: {
     current: null as null | { entered: () => void; release: Promise<void>; rows: number },
     next: null as null | { entered: () => void; release: Promise<void>; rows: number }
   },
+  recoveryWriteGate: { current: null as null | { entered: () => void; release: Promise<void> } },
   recoveryDismissGate: { current: null as null | { entered: () => void; release: Promise<void> }, calls: 0 },
   retryCompletion: { current: null as Promise<unknown> | null }
 }))
@@ -74,6 +77,15 @@ vi.mock("@/db/dexie/history-selection", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db/dexie/history-selection")>()
   return {
     ...actual,
+    saveHistoryTurnRecovery: async (...args: Parameters<typeof actual.saveHistoryTurnRecovery>) => {
+      await actual.saveHistoryTurnRecovery(...args)
+      const gate = recoveryWriteGate.current
+      if (gate && args[2].state === "dispatching") {
+        recoveryWriteGate.current = null
+        gate.entered()
+        await gate.release
+      }
+    },
     loadHistoryTurnRecoveries: async (...args: Parameters<typeof actual.loadHistoryTurnRecoveries>) => {
       const gate = recoveryReadGate.current
       if (gate) recoveryReadGate.current = null
@@ -168,6 +180,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     await resetPlaygroundHarness()
     recoveryReadGate.current = null
     recoveryReadGate.next = null
+    recoveryWriteGate.current = null
     recoveryDismissGate.current = null
     recoveryDismissGate.calls = 0
     retryCompletion.current = null
@@ -610,7 +623,10 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
 
   // Retry answers the question that is already saved; it never saves it again.
   describe("Retry after a dropped reply answers the saved question once", () => {
-    const planDroppedThenComplete = (server: ReturnType<typeof createFakeTldwServer>) => {
+    const planDroppedThenComplete = (
+      server: ReturnType<typeof createFakeTldwServer>,
+      retryPlan: Parameters<typeof server.planCompletion>[0] = { reply: "Complete answer" }
+    ) => {
       const resume = deferred()
       server.planCompletion({
         chunks: ["Partial answer", " lost"],
@@ -618,11 +634,13 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
         resume: resume.promise,
         end: "drop"
       })
-      server.planCompletion({ reply: "Complete answer" })
+      server.planCompletion(retryPlan)
       return resume
     }
 
-    const openInterruptedSavedChat = async () => {
+    const openInterruptedSavedChat = async (
+      retryPlan?: Parameters<ReturnType<typeof createFakeTldwServer>["planCompletion"]>[0]
+    ) => {
       const server = createFakeTldwServer()
       server.seedChat({
         id: "saved-chat",
@@ -632,7 +650,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
           { role: "assistant", content: "Saved answer" }
         ]
       })
-      const resume = planDroppedThenComplete(server)
+      const resume = planDroppedThenComplete(server, retryPlan)
       const view = await renderPlayground({
         server,
         extras: <SidebarServerChatButton chatId="saved-chat" title="Saved topic" />
@@ -647,6 +665,175 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     }
     const savedView = async () => (await getHarnessDb().historySelections.toArray())
       .find(row => row.conversation_id === "saved-chat")?.view
+    const savedRecovery = async (operationId: string) =>
+      (await getHarnessDb().historySelections.toArray())
+        .find(row => row.conversation_id === "saved-chat" && row.pending_turns?.[operationId])
+        ?.pending_turns?.[operationId]
+    const partialRecoveryId = async () => {
+      const rows = await getHarnessDb().historySelections.toArray()
+      const turn = rows.filter(row => row.conversation_id === "saved-chat")
+        .flatMap(row => Object.values<HistoryTurnRecovery>(row.pending_turns ?? {}))
+        .find(turn => turn.result_text === "Partial answer" && turn.outcome === "interrupted")
+      expect(turn).toBeDefined()
+      return turn!.operation_id as string
+    }
+
+    it("keeps the original partial through replacement preparation, then retires it after owner settlement", async () => {
+      const release = deferred()
+      const { server, view } = await openInterruptedSavedChat()
+      const operationId = await partialRecoveryId()
+      const bookmark = (await getHarnessDb().historySelections.toArray())
+        .find(row => row.pending_turns?.[operationId])!
+      const otherScope = { profile_id: bookmark.profile_id, client_session_id: "retry-other-session" }
+      const otherId = crypto.randomUUID()
+      const lateId = crypto.randomUUID()
+      await saveHistoryTurnRecovery(otherScope, bookmark.view, {
+        ...bookmark.pending_turns[operationId], operation_id: otherId, assistant_id: crypto.randomUUID()
+      })
+      const entered = vi.fn()
+      recoveryWriteGate.current = { entered, release: release.promise }
+      try {
+        const notice = await interruptionNotice("Interrupted")
+        await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
+        await waitFor(() => expect(entered).toHaveBeenCalled(), HARNESS_WAIT)
+        expect(await savedRecovery(operationId)).toMatchObject({ result_text: "Partial answer", outcome: "interrupted" })
+        expect(await savedRecovery(otherId)).toMatchObject({ result_text: "Partial answer", outcome: "interrupted" })
+        // This record arrives after Retry captured its exact cleanup set.
+        await saveHistoryTurnRecovery(otherScope, bookmark.view, {
+          ...bookmark.pending_turns[operationId], operation_id: lateId,
+          assistant_id: crypto.randomUUID(), result_text: "Late partial"
+        })
+        expect(await savedRecovery(lateId)).toMatchObject({ result_text: "Late partial" })
+        expect(server.completionRequests()).toHaveLength(1)
+        expect(serverRows(server, "saved-chat").map(row => row.content)).toEqual([
+          "Saved question", "Saved answer", "Follow-up question"
+        ])
+      } finally {
+        release.resolve()
+        try { await retryCompletion.current } catch { /* Preserve the assertion failure during cleanup. */ }
+        view.unmount()
+      }
+      expect(await savedRecovery(operationId)).toBeUndefined()
+      expect(await savedRecovery(otherId)).toBeUndefined()
+      expect(await savedRecovery(lateId)).toMatchObject({ result_text: "Late partial" })
+      expect(serverRows(server, "saved-chat").map(row => row.content)).toEqual([
+        "Saved question", "Saved answer", "Follow-up question", "Complete answer"
+      ])
+    })
+
+    it("keeps the original partial when the Retry provider fails", async () => {
+      const { server, view } = await openInterruptedSavedChat({ status: 503 })
+      const operationId = await partialRecoveryId()
+      try {
+        const notice = await interruptionNotice("Interrupted")
+        await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
+        await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
+        await act(async () => { await retryCompletion.current })
+        await waitForChatIdle()
+        expect(await savedRecovery(operationId)).toMatchObject({ result_text: "Partial answer", outcome: "interrupted" })
+        expect(serverRows(server, "saved-chat").map(row => row.content)).toEqual([
+          "Saved question", "Saved answer", "Follow-up question"
+        ])
+      } finally {
+        try { await retryCompletion.current } catch { /* Preserve the assertion failure during cleanup. */ }
+        view.unmount()
+      }
+    })
+
+    it("keeps the original partial when Retry is stopped before a replacement settles", async () => {
+      const resume = deferred()
+      const { server, view } = await openInterruptedSavedChat({
+        chunks: ["Replacement", " unfinished"], pauseAfterChunks: 1, resume: resume.promise
+      })
+      const operationId = await partialRecoveryId()
+      try {
+        const notice = await interruptionNotice("Interrupted")
+        await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
+        await waitForStreamedText("Replacement")
+        await view.user.click(screen.getByRole("button", { name: "Stop Streaming" }))
+        await act(async () => { await retryCompletion.current })
+        await waitForChatIdle()
+        expect(await savedRecovery(operationId)).toMatchObject({ result_text: "Partial answer", outcome: "interrupted" })
+        expect(serverRows(server, "saved-chat").map(row => row.content)).toEqual([
+          "Saved question", "Saved answer", "Follow-up question"
+        ])
+      } finally {
+        resume.resolve()
+        try { await retryCompletion.current } catch { /* Preserve the assertion failure during cleanup. */ }
+        view.unmount()
+      }
+    })
+
+    it("keeps the original partial if generation finishes but the owner rejects the replacement", async () => {
+      const { server, view } = await openInterruptedSavedChat()
+      const operationId = await partialRecoveryId()
+      const serverFetch = server.fetch
+      let rejectedSettlements = 0
+      server.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+        if (new URL(url, server.url).pathname === "/api/v1/chats/saved-chat/messages" &&
+            init?.method === "POST" && body?.role === "assistant") {
+          rejectedSettlements++
+          return new Response(JSON.stringify({ detail: "Owner write failed" }), {
+            status: 503, headers: { "content-type": "application/json" }
+          })
+        }
+        return serverFetch(input, init)
+      }
+      vi.stubGlobal("fetch", server.fetch)
+      try {
+        const notice = await interruptionNotice("Interrupted")
+        await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
+        await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
+        await act(async () => { await retryCompletion.current })
+        await waitForChatIdle()
+        // Completion and the existing recovery keep path each try the owner write.
+        expect(rejectedSettlements).toBe(2)
+        expect(await savedRecovery(operationId)).toMatchObject({ result_text: "Partial answer", outcome: "interrupted" })
+        expect(serverRows(server, "saved-chat").map(row => row.content)).toEqual([
+          "Saved question", "Saved answer", "Follow-up question"
+        ])
+      } finally {
+        try { await retryCompletion.current } catch { /* Preserve the assertion failure during cleanup. */ }
+        view.unmount()
+      }
+    })
+
+    it("retires the original partial when recovery saves a reply after the first owner write fails", async () => {
+      const { server, view } = await openInterruptedSavedChat()
+      const operationId = await partialRecoveryId()
+      const serverFetch = server.fetch
+      let settlementAttempts = 0
+      server.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+        if (new URL(url, server.url).pathname === "/api/v1/chats/saved-chat/messages" &&
+            init?.method === "POST" && body?.role === "assistant" && ++settlementAttempts === 1) {
+          return new Response(JSON.stringify({ detail: "First owner write failed" }), {
+            status: 503, headers: { "content-type": "application/json" }
+          })
+        }
+        return serverFetch(input, init)
+      }
+      vi.stubGlobal("fetch", server.fetch)
+      try {
+        const notice = await interruptionNotice("Interrupted")
+        await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
+        await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
+        await act(async () => { await retryCompletion.current })
+        await waitForChatIdle()
+        expect(settlementAttempts).toBe(2)
+        expect(await savedRecovery(operationId)).toBeUndefined()
+        expect(getServerChatSaveStatus("saved-chat")).toBe("saved")
+        expect(serverRows(server, "saved-chat").map(row => row.content)).toEqual([
+          "Saved question", "Saved answer", "Follow-up question", "Complete answer"
+        ])
+      } finally {
+        try { await retryCompletion.current } catch { /* Preserve the assertion failure during cleanup. */ }
+        view.unmount()
+      }
+    })
 
     it.each(["different view", "ABA"])("Retry recovery read cannot choose a cursor after this chat changes view (%s)", async destination => {
       const geometry = destination === "ABA" ? [
@@ -732,33 +919,68 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
       }
     })
 
-    it("Retry cannot dispatch after its own cursor choice when dismissal outlives the view", async () => {
+    it("Retry cannot dispatch after its own cursor choice when the view changes before capture resolves", async () => {
       const { server, view } = await openInterruptedSavedChat()
+      const geometry = [
+        vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(480),
+        vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(320)
+      ]
       const release = deferred()
       const entered = vi.fn()
-      recoveryDismissGate.current = { entered, release: release.promise }
+      const serverFetch = server.fetch
+      let holdRetryChoice = true
+      server.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+        if (holdRetryChoice && init?.method === "POST" &&
+            new URL(url, server.url).pathname === "/api/v1/chat/conversations/saved-chat/history/selection" &&
+            body?.view?.cursor?.kind === "before_message") {
+          holdRetryChoice = false
+          const response = await serverFetch(input, init)
+          entered()
+          await release.promise
+          return response
+        }
+        return serverFetch(input, init)
+      }
+      vi.stubGlobal("fetch", server.fetch)
       const selectionRequests = () => server.find("POST", /^\/api\/v1\/chat\/conversations\/saved-chat\/history\/selection$/).length
       const before = selectionRequests()
+      const originalView = await savedView()
+      const savedQuestionId = server.chats.get("saved-chat")?.messages[0]?.id
+      expect(savedQuestionId).toBeTruthy()
       try {
         const notice = await interruptionNotice("Interrupted")
         await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
         await waitFor(() => expect(retryCompletion.current).not.toBeNull(), HARNESS_WAIT)
         await waitFor(() => expect(entered).toHaveBeenCalled(), HARNESS_WAIT)
         expect(selectionRequests()).toBe(before + 1)
-        await view.user.click(screen.getByRole("button", { name: "Use no prior messages" }))
+        await view.user.click(screen.getByRole("button", { name: "Review conversation history" }))
+        const savedQuestion = await waitFor(() => {
+          const row = document.querySelector<HTMLElement>(`[data-history-message-id="${savedQuestionId}"]`)
+          expect(row).not.toBeNull()
+          return row!
+        }, HARNESS_WAIT)
+        await view.user.click(within(savedQuestion).getByRole("button", { name: "Continue after this message" }))
         await waitFor(() => expect(selectionRequests()).toBe(before + 2), HARNESS_WAIT)
-        await waitFor(async () => expect((await savedView())?.cursor).toEqual({ kind: "empty" }), HARNESS_WAIT)
+        await waitFor(async () => {
+          const changed = await savedView()
+          expect(changed?.cursor).toEqual({ kind: "after_message", message_id: savedQuestionId })
+          expect(changed?.selection_revision).toBeGreaterThan(originalView?.selection_revision ?? -1)
+        }, HARNESS_WAIT)
         const selectedView = await savedView()
         let outcome: unknown
         await act(async () => { release.resolve(); outcome = await retryCompletion.current })
         expect(outcome).toMatchObject({ status: "failed", errorMessage: "history_selection_changed" })
         expect(await savedView()).toEqual(selectedView)
         expect(screen.queryByText("invalid_history_retry")).not.toBeInTheDocument()
+        expect(recoveryDismissGate.calls).toBe(0)
         expect(server.completionRequests()).toHaveLength(1)
       } finally {
         release.resolve()
         try { await retryCompletion.current } catch { /* Preserve the assertion failure during cleanup. */ }
         view.unmount()
+        for (const spy of geometry) spy.mockRestore()
       }
     })
 

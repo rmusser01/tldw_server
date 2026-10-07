@@ -118,7 +118,7 @@ export function useKeepInterruptedHistoryTurns({
             ? previous
             : [...previous, retainedReplyMessage(entry.turn)]
         )
-      } else if (next && next.id !== entry.turn.assistant_id) {
+      } else if (next && !next.isBot && next.id !== entry.turn.assistant_id) {
         // The user continued after it: the cut-off reply is no longer needed.
         void selectionRef.current?.dismissRecovery(entry)
       }

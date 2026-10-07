@@ -787,7 +787,7 @@ Saved-set three-item coverage committed locally a7412b4d3d29d57e19157bc39ab7495c
 **Goal**: Scoped reviewed patch committed with normal hooks, preserving unrelated Sync WIP.
 **Success Criteria**: Actual/staged review clear, no new lint/security findings, exact commit parity.
 **Tests**: Source review, normal scoped hooks, committed/index equality.
-**Status**: In Progress
+**Status**: Complete
 
 
 ### Retry causal fixture review and separate partial-retention gate
@@ -808,3 +808,55 @@ Playground Retry ABA-only corrected-fixture RED completed ONCE on unchangedprodu
 ### Retry candidate1 local qualification
 
 Playground interrupted Retry candidate1 qualified locally: four causal RED cases repaired by existing initial/adopted selection fences. Full interrupted-replies module UI14passed/41.268s and Web14passed/40.018s; one relevant existing Regenerate fallback case UI1passed64excluded/4.282s and Web1passed64excluded/3.602s. Normal configs/Node20.19.5/Vitest4.0.18/600outer retained, no deadlines/unhandled failures. Configured types UI0/67.785s and declared Web npm typecheck0/52.445s; an operator direct cross-env invocation failed before compiler spawn because npm bin PATH was absent, then the actual npm script succeeded without source/config change. TypeScript parse0; ESLint hook0errors23identicalwarnings/test0errors0warnings, original59expect calls retained in order. Independent actual source reviewCLEAR; TS-only BanditN/A. Early recovery-record deletion remains separatelyOPEN; actual43/native/installer/canonical/publication acceptance and Sync hold remain. Next scoped4path normalhooks/finalstagedreview/localcommit only.
+
+
+## Playground interrupted Retry partial retention
+
+Interrupted Retry ownership committed locally8a5dc12ebd17e593e287acfa25a40e890fc69963, parenta7412b4, exactly4paths279insertions4deletions; committed binary patch byte-equal to independently reviewed indexSHA256465ad408bcf5f5073a89f02e0e9253e67a938c86c0d3404960f8e9b5df0cd860. Normal scoped hooks0/2.280s and final staged reviewCLEAR. Unpublished; unrelated Sync WIP preserved. Next separate partial-retention unit: existing Retry deletes original native partial's only recovery record before onSubmit; changed view or failed/cancelled preparation/provider leaves no safely stored replacement. Causal checks must preserve that original record through held preparation/failure/cancellation and retire it only after actual owner settlement, retaining legitimate Retry one-question/one-reply and local alternatives. Reuse existing HistorySendTurn complete/settlement and dismissal primitives; no new storage/protocol abstraction. Establish tests before minimal implementation, full genuinely affected UI/Web checks, scoped static/type review as needed, independent actual/staged review and normal hooks. Maximum3attempts; no blind replay/real43 claim.
+
+ADR required: no; existing ADR049 ownership and recovery settlement apply. Human all43 approval covers this bounded repair. Fence qualification does not prove durable partial retention. A submitted display result alone is insufficient: pipeline may report complete after reply generation while owner storage failed. Cleanup must follow actual owner settlement; durable cleanup remains tied to captured owner/profile rather than the current UI view. No speculative concurrent writer or broad redesign.
+
+### Stage 1: Reproduce lost partial recovery
+**Goal**: Real shared Retry/storage lifecycle demonstrates premature deletion on unchanged production.
+**Success Criteria**: Original native partial remains inspectable until genuine replacement owner settlement; failure/cancellation do not lose it.
+**Tests**: Held replacement preparation, provider failure/cancellation, successful settlement and local alternative controls using established real-component/storage algorithms.
+**Status**: Complete
+
+### Stage 2: Retire recovery after durable replacement
+**Goal**: Minimal shared-boundary correction defers old recovery removal until actual settlement.
+**Success Criteria**: Causal cases and affected configured clients pass; no owner/auth/current-view guard loss.
+**Tests**: Causal RED/GREEN, relevant recovery/admission consumers, static/types as genuinely affected.
+**Status**: Complete
+
+### Stage 3: Review and local commit
+**Goal**: Qualified small patch committed with normal hooks and exact staged parity.
+**Success Criteria**: Independent actual/staged review clear, no new lint/security findings, unrelated Sync WIP retained.
+**Tests**: Scoped hooks, index/commit parity; actual43 remains separate.
+**Status**: In Progress
+
+
+### Partial-retention causal RED and shared settlement ruling
+
+Partial-retention selected RED completed on unchangedproductiona7c0e...:4failed14excluded/23.466s/no deadline/allhashesunchanged. Three cases causally found original operation record undefined during held preparation/provider503/Stop. Owner-write case initially failed at new fixture count2vs1 BEFORE retention assertion; source traced initial settlement plus existing recovery keep reattempt, no second model generation. Corrected exact2 fixture independentlyCLEAR; ONLY previously unqualified owner case reran1failed17excluded/12.416s, now original record undefined after verified rejected owner writes. All four causal failures established; no three-case replay. Complete nativeJSON recovered in ownedmemory and both holders released naturally, no log/proof files. Production candidate1: carry exact frozen original entry scopes/operation IDs through private Retry params; retire them only from HistorySendTurn.complete after settleAcceptedAssistant succeeds. Do not use submitted result, current UI epoch or blanket later query as durable cleanup authority. Preserve original through provider/cancel/preparation/owner failures. Existing early-dismiss wait case must move to an actual pending choose boundary before dispatch while retaining all stale-view assertions. Add narrow scope/snapshot preservation positive coverage. No actual43 acceptance.
+
+| Producer | Consumer | Ruling |
+| --- | --- | --- |
+| Retry original recovery snapshot | Normal history turn cleanup | Carry original scope and operation ID; never replace with later blanket read |
+| settleAcceptedAssistant owner write | HistorySendTurn.complete | Only actual owner settlement authorizes retiring superseded recovery |
+| UI selection changes | Durable cleanup | Preserve captured owner/profile authority; current view controls display only |
+| Moved cleanup boundary | Stale Retry case | Hold actual choose response before dispatch; retain no stale submission/view overwrite |
+| Other session/new recovery records | Retirement loop | Preserve original scope and leave records outside captured superseded set intact |
+
+### Candidate1 failure and second deletion caller
+
+Partial-retention candidate1 actual UI qualification: 15 passed/4 failed, natural1/51.966s, no deadline and exact guarded hashes unchanged. All four causal retention cases still lost original operation records at preparation/provider503/Stop/two rejected owner writes; candidate1 is NOT qualified. Full native JSON recovered in owned memory, holder released, no proof/log files. Source root cause independently confirmed: saveHistoryTurnRecovery merges per-operation pending_turns and bookmark writes preserve it; useKeepInterruptedHistoryTurns instead calls dismissRecovery when Retry's new assistant placeholder follows the original question. Candidate2 bounded shared-hook correction: its 'user continued' branch must require an actual user message, preserving assistant replacements until the already implemented acknowledged owner-settlement cleanup. Existing genuine user continuation behavior remains. Selected new keeper-success/status case passed1/18excluded/9.344s; API addChatMessage already uses trackServerChatWrite, so hypothesized extra tracker is rejected as redundant and not implemented. Four-file TypeScript parse0/lint0errors; useChatActions23/normal8 inherited warnings unchanged, keeper/test0. One old cursor assertion adapted for the moved nondestructive choose seam; no whole-original-assertion equality claim. Independent candidate1 review was source-only and superseded by the actual retention failures. No Web replay, types, commit/publication or real43 acceptance yet. Two observed production candidate attempts maximum remain bounded; establish fifth-file edit under this associated task.
+
+| Producer | Consumer | Ruling |
+| --- | --- | --- |
+| Retry assistant placeholder | useKeepInterruptedHistoryTurns continuation effect | A different bot ID is not a following user message and cannot retire the old partial |
+| Genuine following user message | Existing continuation effect | Preserve its established behavior; only correct the assistant/user distinction |
+| Native addChatMessage acknowledgment | Shared save-status store | Existing trackServerChatWrite covers keeper success; no duplicate tracker |
+
+### Partial-retention final local qualification
+
+Interrupted Retry partial-retention candidate2 qualified locally. Complete affected interrupted module: UI19passed/60.722s and Web19passed/60.328s; three history/admission/normal-mode consumer modules111passed per configuration/UI4.083s/Web3.158s. Natural0/no deadline/no skips/source guards unchanged. Four causal loss cases now retain original on held preparation/provider503/Stop/two rejected owner writes; genuine acknowledged direct/keeper success retires exact captured operation IDs in original session scopes and preserves late records/local alternatives. Keeper-success status already covered by API client tracker; extra tracker not implemented. Web declared typecheck0/12.118s. UI initially3 NEW unknown fixture type errors; only existing HistoryTurnRecovery annotation/Object.values generic corrected. Exact old test6a6c... and current958ec... transpile to byte-identical JS685a1499bd2421112a16c7404cf1c0dc21dec3e0c4a28c1c82e517f3a4723eda; no behavioral/Web replay. Only failed UI check reran0/98.849s, unchanged600cap. Five touched TypeScript files parse0/lint0errors/no new warnings: hook23 and normal8 inherited; other3zero. Existing whole-file Prettier flags identical baseline/current on all5; no broad format rewrite. Old cursor assertion retargeted to actual selected row at nondestructive choose seam; no claim all90 original expect call texts identical. Scoped Bandit N/A TypeScript/prose-only. Final independent actual5source/newbody/caller review CLEAR, including previously missed destructive hook. Candidate1 failure retained honestly; candidate2 bounded correction of actual observed cause, no third behavioral candidate. Native result memory recovered/released, no proof/log files. Prepare normal exact7path staged review/hooks/local commit; publication, actual provider/browser/native A03 and all43 acceptance remain OPEN. Unrelated Sync WIP/approval hold and all retained STOPs preserved.

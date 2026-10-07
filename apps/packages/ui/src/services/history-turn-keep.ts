@@ -47,6 +47,8 @@ export type HistoryTurnKeepResult =
       followed: boolean
       /** A partial server reply kept only in the retained record. */
       retained: boolean
+      /** This attempt received an acknowledged owner write. */
+      settledByKeep?: true
     }
   | { status: "skipped"; reason: string }
 
@@ -210,6 +212,7 @@ const keep = async (
   const content = turn.result_text;
   let resultId = admission.input_message_id;
   const retained = isRetainedPartialReply(turn, owner.kind);
+  let settledByKeep = false
   if (turn.settled_message_id) {
     resultId = turn.settled_message_id
   } else if (content.trim() && !retained) {
@@ -230,6 +233,7 @@ const keep = async (
     }
     try {
       await settleAcceptedAssistant(owner, admission, reply)
+      settledByKeep = true
     } catch (error) {
       // An earlier attempt already wrote this reply (e.g. the page closed
       // before its record was cleared): follow it rather than write again.
@@ -266,7 +270,10 @@ const keep = async (
     await dismissHistoryTurnRecovery(fresh.scope, view, turn.operation_id, 'completed');
   }
   await controller.refreshRecovery?.()
-  return { status: "kept", resultId, followed, retained }
+  return {
+    status: "kept", resultId, followed, retained,
+    ...(settledByKeep ? { settledByKeep: true as const } : {})
+  }
 }
 
 /**
