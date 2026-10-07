@@ -394,3 +394,26 @@ updated billing notice `5984355774` at 17:31:48 UTC: credits are still exhausted
 Do not repeat review commands while that state is unchanged. TASK-13425 remains
 In Progress pending fresh Qodo/CI and normal exact-head merge. The owner's
 Change Summary waiver remains in force; no merge or deployment is claimed.
+
+### Verified Merge and Cleanup Closeout (2026-10-06)
+
+**Status:** Complete. PR #3170 merged into dev at `2026-10-06T23:40:25Z`,
+merge commit `17c47c49d857a2a1fd1e58602b704213760a4a85`.
+
+The owner explicitly selected manual review in place of waiting for Qodo credits.
+Complete manual review of all 16 changed files and supporting native request
+flows found no actionable findings; the independent reviewer assessed exact
+head `2ee261a7257c970e9da34bd7efd940235be64ace` as ready to merge. It included
+latest dev. All seven required checks passed and all eleven inline threads
+were resolved before normal exact-head merge. Recorded source verification is
+676/676 native tests across 18 files, full frontend compiler exit 0 with zero
+diagnostics, and helper ESLint zero errors/warnings.
+[Manual review receipt](https://github.com/rmusser01/tldw_server/pull/3170#issuecomment-6027488559).
+
+The owner Change Summary waiver remains recorded. The recurring follow-up is
+paused. Completion evidence and the owned worktree snapshot are retained for
+recoverable cleanup. This owner-authorized administrative update marks
+TASK-13425 Done and records the completed workstream. No items remain.
+No new ADR is required; ADR-059 governs the task edit. Markdown-only closeout
+verification uses backlog-py normalization and whitespace checks; Bandit is
+not applicable to this non-code scope.
