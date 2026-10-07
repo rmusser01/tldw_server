@@ -275,7 +275,9 @@ describe("NotesManagerPage stage 47 save state and recovery", () => {
     fireEvent.click(screen.getByText("Open saved note"))
     await waitFor(() => expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "saved"))
     expect(screen.getByTestId("notes-save-status")).toHaveTextContent("Saved")
-    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("aria-live", "polite")
+    // Outcomes are announced from one polite region; the pill itself is not live (NS-06).
+    expect(screen.getByTestId("notes-save-status-announcement")).toHaveAttribute("aria-live", "polite")
+    expect(screen.getByTestId("notes-save-status-announcement")).toHaveTextContent("Saved")
     expect(screen.getByTestId("notes-editor-revision-meta")).toHaveTextContent("Version 1")
     expect(createCalls()).toHaveLength(0)
     fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {
@@ -329,12 +331,14 @@ describe("NotesManagerPage stage 47 save state and recovery", () => {
       target: { value: "Body while save is pending" }
     })
 
-    expect(screen.getByTestId("notes-save-feedback")).toHaveTextContent("Unsaved changes")
+    // The pill is the one status (NS-06); there is no second feedback line.
+    expect(screen.getByTestId("notes-save-status")).toHaveTextContent("Unsaved changes")
+    expect(screen.queryByTestId("notes-save-feedback")).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("notes-save-button"))
 
     await waitFor(() => {
-      expect(screen.getByTestId("notes-save-feedback")).toHaveTextContent("Saving...")
+      expect(screen.getByTestId("notes-save-status")).toHaveTextContent("Saving...")
     })
     expect(screen.getByTestId("notes-save-button")).toBeDisabled()
 
@@ -348,7 +352,7 @@ describe("NotesManagerPage stage 47 save state and recovery", () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByTestId("notes-save-feedback")).toHaveTextContent("All changes saved")
+      expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "saved")
     })
   })
 
@@ -405,8 +409,10 @@ describe("NotesManagerPage stage 47 save state and recovery", () => {
     expect(screen.getByPlaceholderText("Write your note here... (Markdown supported)")).toHaveValue(
       "Draft should stay visible"
     )
-    expect(screen.getByTestId("notes-save-feedback")).toHaveTextContent(
-      "Could not save — check your connection and try again."
+    // A network failure keeps a copy on this device and says so (NS-05).
+    expect(screen.getByTestId("notes-save-issue")).toHaveAttribute("data-kind", "retrying")
+    expect(screen.getByTestId("notes-save-issue")).toHaveTextContent(
+      "Could not reach the server. A copy is kept on this device and saving will retry automatically."
     )
 
     fireEvent.click(screen.getByTestId("notes-save-retry"))
@@ -415,8 +421,9 @@ describe("NotesManagerPage stage 47 save state and recovery", () => {
       expect(createCalls()).toHaveLength(2)
     })
     await waitFor(() => {
-      expect(screen.getByTestId("notes-save-feedback")).toHaveTextContent("All changes saved")
+      expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "saved")
     })
+    expect(screen.queryByTestId("notes-save-issue")).not.toBeInTheDocument()
   })
 
   it("shows a persistent conflict recovery action without replacing the local draft", async () => {
@@ -476,7 +483,10 @@ describe("NotesManagerPage stage 47 save state and recovery", () => {
     })
     fireEvent.click(screen.getByTestId("notes-save-button"))
 
-    expect(await screen.findByTestId("notes-save-conflict-reload")).toBeInTheDocument()
+    // One conflict surface with explicit choices (NS-03).
+    expect(await screen.findByTestId("notes-conflict-take-theirs")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-conflict-keep-mine")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-conflict-copy-mine")).toBeInTheDocument()
     expect(screen.getByPlaceholderText("Write your note here... (Markdown supported)")).toHaveValue(
       "Local conflicting edit"
     )

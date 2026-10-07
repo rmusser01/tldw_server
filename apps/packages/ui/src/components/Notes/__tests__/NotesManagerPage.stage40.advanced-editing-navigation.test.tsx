@@ -183,6 +183,19 @@ describe("NotesManagerPage stage 40 advanced editing and navigation", () => {
     })
   })
 
+  it("offers the WYSIWYG input mode by default now that NE-01 is fixed", async () => {
+    renderPage()
+
+    expect(
+      await screen.findByPlaceholderText("Write your note here... (Markdown supported)")
+    ).toBeInTheDocument()
+    expect(screen.getByTestId("notes-input-mode-toggle")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-input-mode-markdown")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-input-mode-wysiwyg")).toBeInTheDocument()
+    // Markdown stays the default input mode.
+    expect(screen.queryByTestId("notes-wysiwyg-editor")).not.toBeInTheDocument()
+  }, 10000)
+
   it("preserves markdown content when switching to WYSIWYG and back without edits", async () => {
     renderPage()
 

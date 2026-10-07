@@ -116,6 +116,7 @@ export interface NotesSidebarProps {
   conversationLabelById: Record<string, string>
   importSubmitting: boolean
   exportProgress: ExportProgressState | null
+  cancelExport?: () => void
 
   // Callbacks - sidebar controls
   setMobileSidebarOpen: (open: boolean) => void
@@ -148,7 +149,7 @@ export interface NotesSidebarProps {
   deleteMoodboard: () => Promise<void>
   clearBulkSelection: () => void
   exportSelectedBulk: () => void
-  assignKeywordsToSelectedBulk: () => Promise<void>
+  addTagsToSelectedBulk: () => Promise<void>
   deleteSelectedBulk: () => Promise<void>
   toggleNotePinned: (id: string | number) => Promise<void>
   restoreNote: (id: string | number, version?: number) => Promise<void>
@@ -249,6 +250,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   conversationLabelById,
   importSubmitting,
   exportProgress,
+  cancelExport,
 
   // Callbacks - sidebar controls
   setMobileSidebarOpen,
@@ -281,7 +283,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   deleteMoodboard,
   clearBulkSelection,
   exportSelectedBulk,
-  assignKeywordsToSelectedBulk,
+  addTagsToSelectedBulk,
   deleteSelectedBulk,
   toggleNotePinned,
   restoreNote,
@@ -1315,6 +1317,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 onSyncFolder={onSyncFolder}
                 importInProgress={importSubmitting}
                 exportProgress={exportProgress}
+                onCancelExport={cancelExport}
               />
             )}
           </div>
@@ -1379,12 +1382,12 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   size="small"
                   className={isMobileViewport ? 'min-h-[44px]' : undefined}
                   onClick={() => {
-                    void assignKeywordsToSelectedBulk()
+                    void addTagsToSelectedBulk()
                   }}
                   data-testid="notes-bulk-assign-keywords"
                 >
-                  {t('option:notesSearch.bulkAssignKeywords', {
-                    defaultValue: 'Assign tags'
+                  {t('option:notesSearch.bulkAddTags', {
+                    defaultValue: 'Add tags'
                   })}
                 </Button>
                 <Button

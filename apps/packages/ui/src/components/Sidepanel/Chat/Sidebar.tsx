@@ -40,6 +40,15 @@ import { ConversationContextMenu } from "./ConversationContextMenu"
 import { FolderPickerModal } from "./FolderPickerModal"
 import { exportTabToJSON, exportTabToMarkdown } from "@/utils/conversation-export"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { useUndoNotification } from "@/hooks/useUndoNotification"
+import {
+  moveServerChatToTrash,
+  readTabConversationTitle,
+  removeLocalCopyOfServerChat,
+  renameTabConversation,
+  restoreServerChatFromTrash
+} from "./tab-conversation-actions"
+import { useSidepanelRecentChats } from "./useSidepanelRecentChats"
 
 const DEFAULT_SIDEBAR_WIDTH = 288
 const SIDEBAR_MIN_WIDTH = 240
@@ -322,12 +331,125 @@ export const SidepanelChatSidebar = ({
     }
   }, [isResizing])
 
-  // Context menu handlers
-  const handleRename = React.useCallback(
-    (tabId: string, newLabel: string) => {
-      renameTab(tabId, newLabel)
+  // Context menu handlers. Rename and Delete act on the tab's conversation
+  // (XS-07); each resolves false to keep its dialog open after a failure.
+  const { showUndoNotification } = useUndoNotification()
+  // Undo can run after this sidebar re-renders or closes; reopen through the
+  // latest handler, whose tab list no longer holds the deleted tab.
+  const openServerChatRef = React.useRef(onOpenServerChat)
+  openServerChatRef.current = onOpenServerChat
+  const unverifiedAccountMessage = t(
+    "sidepanel:contextMenu.accountUnverified",
+    "This conversation can't be changed until your account is verified."
+  )
+
+  const handleLoadRenameTitle = React.useCallback(
+    async (tabId: string): Promise<string | null> => {
+      const tab = tabs.find((item) => item.id === tabId)
+      if (!tab) return null
+      return readTabConversationTitle(
+        tab,
+        owner?.isCurrent() ? owner.snapshot.requestScope : undefined
+      )
     },
-    [renameTab]
+    [owner, tabs]
+  )
+
+  const handleRename = React.useCallback(
+    async (tabId: string, newLabel: string): Promise<boolean> => {
+      const tab = tabs.find((item) => item.id === tabId)
+      if (!tab) return true
+      if (tab.serverChatId && !owner?.isCurrent()) {
+        message.error(unverifiedAccountMessage)
+        return false
+      }
+      try {
+        const title = await renameTabConversation(
+          tab,
+          newLabel,
+          owner?.snapshot.requestScope
+        )
+        if (tab.serverChatId) {
+          void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+          if (!owner?.isCurrent()) return true
+        }
+        renameTab(tabId, title)
+        return true
+      } catch (error) {
+        console.error("[sidepanel] Failed to rename chat", error)
+        message.error(
+          t(
+            "sidepanel:contextMenu.renameFailed",
+            "Couldn't rename this conversation. Its name is unchanged."
+          )
+        )
+        return false
+      }
+    },
+    [owner, queryClient, renameTab, t, tabs, unverifiedAccountMessage]
+  )
+
+  const handleDeleteTab = React.useCallback(
+    async (tabId: string): Promise<boolean> => {
+      const tab = tabs.find((item) => item.id === tabId)
+      const chatId = tab?.serverChatId
+      if (!tab || !chatId) {
+        onCloseTab(tabId)
+        return true
+      }
+      if (!owner?.isCurrent()) {
+        message.error(unverifiedAccountMessage)
+        return false
+      }
+      try {
+        await moveServerChatToTrash(chatId, owner.snapshot.requestScope)
+      } catch (error) {
+        console.error("[sidepanel] Failed to move chat to Trash", error)
+        message.error(
+          t(
+            "sidepanel:contextMenu.moveToTrashFailed",
+            "Couldn't move this conversation to Trash. It is still saved."
+          )
+        )
+        return false
+      }
+      void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+      if (!owner.isCurrent()) return true
+      onCloseTab(tabId)
+      await removeLocalCopyOfServerChat(chatId, owner.ownerKey)
+      showUndoNotification({
+        title: t("sidepanel:contextMenu.movedToTrash", "Moved to Trash"),
+        description: t("sidepanel:contextMenu.movedToTrashDescription", {
+          defaultValue: "\"{{title}}\" is in Trash.",
+          title: tab.label
+        }),
+        onUndo: async () => {
+          if (!owner.isCurrent()) {
+            throw new Error(unverifiedAccountMessage)
+          }
+          const restored = await restoreServerChatFromTrash(chatId)
+          void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+          if (!owner.isCurrent()) return
+          const createdAtMs = Date.parse(restored?.created_at ?? "")
+          openServerChatRef.current?.({
+            ...restored,
+            id: String(restored?.id ?? chatId),
+            title: restored?.title || tab.label,
+            createdAtMs: Number.isNaN(createdAtMs) ? Date.now() : createdAtMs
+          })
+        }
+      })
+      return true
+    },
+    [
+      onCloseTab,
+      owner,
+      queryClient,
+      showUndoNotification,
+      t,
+      tabs,
+      unverifiedAccountMessage
+    ]
   )
 
   const handleSetStatus = React.useCallback(
@@ -613,12 +735,14 @@ export const SidepanelChatSidebar = ({
           key={tab.id}
           tab={tab}
           onRename={handleRename}
+          loadRenameTitle={handleLoadRenameTitle}
           onTogglePin={togglePinned}
           onSetStatus={handleSetStatus}
           onAddToFolder={handleAddToFolder}
           onExportJSON={handleExportJSON}
           onExportMarkdown={handleExportMarkdown}
-          onDelete={onCloseTab}
+          onDelete={handleDeleteTab}
+          onCloseTab={onCloseTab}
           currentStatus={tab.status}
         >
           {row}
@@ -635,7 +759,9 @@ export const SidepanelChatSidebar = ({
       toggleTabSelected,
       handleRowClick,
       onCloseTab,
+      handleDeleteTab,
       handleRename,
+      handleLoadRenameTitle,
       handleSetStatus,
       handleAddToFolder,
       handleExportJSON,
@@ -649,13 +775,16 @@ export const SidepanelChatSidebar = ({
       label,
       metaLabel,
       onOpen,
-      topic
+      topic,
+      snippet
     }: {
       key: string
       label: string
       metaLabel: string
       onOpen: () => void
       topic?: string | null
+      /** What was said in the chat, when the search matched its messages. */
+      snippet?: string | null
     }) => (
       <div
         key={key}
@@ -674,6 +803,14 @@ export const SidepanelChatSidebar = ({
           <div className="flex items-center gap-1.5">
             <span className="truncate">{label}</span>
           </div>
+          {snippet && (
+            <div
+              className="mt-0.5 truncate text-[11px] text-text-subtle"
+              title={snippet}
+            >
+              {snippet}
+            </div>
+          )}
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-text-subtle">
             <span>{metaLabel}</span>
             {topic && (
@@ -714,6 +851,14 @@ export const SidepanelChatSidebar = ({
     })
     return ids
   }, [tabs])
+
+  // XS-06: past chats are listed without a search, below the open tabs.
+  const recentChats = useSidepanelRecentChats({
+    owner,
+    enabled: open && !hasSearch && !selectionMode,
+    openHistoryIds,
+    openServerChatIds
+  })
 
   const filteredLocalResults = React.useMemo(() => {
     if (!hasSearch || !owner?.isCurrent() || !localSearchCurrent || localSearch.status !== "success") return []
@@ -1137,6 +1282,7 @@ export const SidepanelChatSidebar = ({
                         t("common:untitled", { defaultValue: "Untitled" }),
                       metaLabel: t("common:chatSidebar.serverLabel", "Server"),
                       topic: chat.topic_label ?? null,
+                      snippet: chat.match_snippet ?? null,
                       onOpen: () => onOpenServerChat?.(chat)
                     })
                   )}
@@ -1178,6 +1324,37 @@ export const SidepanelChatSidebar = ({
                 </div>
               </div>
             ))}
+
+            {recentChats.length > 0 && (
+              <section
+                aria-label={t("common:chatSidebar.recentChats", "Recent chats")}
+                className={groupSpacing}
+              >
+                <div className="panel-section-label">
+                  {t("common:chatSidebar.recent", "Recent")}
+                </div>
+                <div className={classNames("flex flex-col", groupGap)}>
+                  {recentChats.map((item) =>
+                    renderSearchRow({
+                      key: item.key,
+                      label:
+                        item.title ||
+                        t("common:untitled", { defaultValue: "Untitled" }),
+                      metaLabel:
+                        item.kind === "server"
+                          ? t("common:chatSidebar.serverLabel", "Server")
+                          : t("common:chatSidebar.localLabel", "Local"),
+                      topic: item.kind === "server" ? item.chat.topic_label ?? null : null,
+                      // Each opens in its own tab (XS-01).
+                      onOpen: () =>
+                        item.kind === "server"
+                          ? onOpenServerChat?.(item.chat)
+                          : onOpenLocalHistory?.(item.history.id)
+                    })
+                  )}
+                </div>
+              </section>
+            )}
           </>
         )}
       </div>

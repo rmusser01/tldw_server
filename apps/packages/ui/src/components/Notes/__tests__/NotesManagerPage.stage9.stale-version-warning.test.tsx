@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
@@ -226,7 +226,7 @@ describe("NotesManagerPage stage 9 stale-version warning", () => {
     mockClearSetting.mockResolvedValue(undefined)
   })
 
-  it("warns before save when server version is newer and allows cancel", async () => {
+  it("turns local edits on a stale version into a conflict instead of saving or prompting", async () => {
     setupVersionDriftMock()
     renderPage()
 
@@ -239,20 +239,23 @@ describe("NotesManagerPage stage 9 stale-version warning", () => {
     fireEvent.click(screen.getByTestId("notes-save-button"))
 
     await waitFor(() => expect(screen.getByTestId("notes-editor-revision-meta")).toHaveTextContent("Version 1"))
-    expect(await screen.findByTestId("notes-stale-version-warning")).toHaveTextContent(
+    const staleNotice = await screen.findByTestId("notes-save-issue")
+    expect(staleNotice).toHaveAttribute("data-kind", "remote-newer")
+    expect(staleNotice).toHaveTextContent(
       "This note was updated elsewhere. Reload to see the latest version."
     )
 
     fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {
       target: { value: "local edits pending" }
     })
-    mockConfirmDanger.mockResolvedValueOnce(false)
+    await waitFor(() =>
+      expect(screen.getByTestId("notes-save-issue")).toHaveAttribute("data-kind", "conflict")
+    )
     fireEvent.click(screen.getByTestId("notes-save-button"))
+    await act(async () => {})
 
-    await waitFor(() => {
-      expect(mockConfirmDanger).toHaveBeenCalled()
-    })
-
+    // No "Save anyway" modal (NS-N2) and no stale PUT (NS-03).
+    expect(mockConfirmDanger).not.toHaveBeenCalled()
     const putCalled = mockBgRequest.mock.calls.some(([request]) => {
       const path = String(request?.path || "")
       const method = String(request?.method || "GET").toUpperCase()
@@ -273,11 +276,11 @@ describe("NotesManagerPage stage 9 stale-version warning", () => {
     })
     fireEvent.click(screen.getByTestId("notes-save-button"))
 
-    expect(await screen.findByTestId("notes-stale-version-warning")).toBeInTheDocument()
+    expect(await screen.findByTestId("notes-stale-version-reload")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("notes-stale-version-reload"))
 
     await waitFor(() => {
-      expect(screen.queryByTestId("notes-stale-version-warning")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("notes-save-issue")).not.toBeInTheDocument()
     })
     expect(screen.getByPlaceholderText("Write your note here... (Markdown supported)")).toHaveValue(
       "remote content"

@@ -210,6 +210,14 @@ SYNC_DATASET_RECOVERY_KEY_PURPOSE = "dataset_recovery"
 SYNC_KEY_RECOVERY_MAX_WRAPPED_KEY_BYTES = 64 * 1024
 _SERVER_ORIGIN_DEVICE_ID = "server-origin"
 _AUTHORITY_ENVELOPE_TAG_KEY = "authority_envelope_tag"
+# Recorded on a conflict the service settles itself, so that it can be told apart from a
+# reviewer's decision.
+STRANDED_TOMBSTONE_RESOLUTION_NOTE = "server_origin_tombstone_of_object_without_sync_history"
+# The action recorded when a conflicted envelope's retried projection applies after all.
+APPLIED_ON_RETRY_RESOLUTION_ACTION = "apply_on_retry"
+# A dataset holds at most one projection blocker at a time, so this only bounds the loop
+# against a settlement that does not take effect.
+_MAX_STRANDED_TOMBSTONE_SETTLEMENTS = 8
 
 
 def _routing_metadata_without_authority_tag(
@@ -4644,6 +4652,9 @@ class SyncV2Service:
             else None
         )
         device = self._require_registered_device(user_id, device_id)
+        # A stranded chat.message tombstone would refuse every envelope below. Settling it
+        # here lets a user who writes only from devices recover without a server write.
+        self.recover_stranded_tombstones(user_id=user_id, dataset_id=dataset.dataset_id)
 
         accepted: list[SyncPushAccepted] = []
         rejected: list[SyncPushRejected] = []
@@ -9950,6 +9961,12 @@ class SyncV2Service:
                     store=store,
                     exchange=exchange,
                 )
+            elif result.status == "applied" and result.metadata.get("settles_conflict"):
+                self._settle_applied_conflict(
+                    envelope,
+                    reason=str(result.metadata["settles_conflict"]),
+                    store=store,
+                )
             return result
         except Exception as exc:  # noqa: BLE001 - materializer failures are captured as replayable sync state.
             if isinstance(exc, SyncStoreError) and str(exc) == "personal_context_activation_required":
@@ -10010,6 +10027,183 @@ class SyncV2Service:
             apply_error_code=envelope.apply_error_code,
             apply_error_message=envelope.apply_error_message,
         )
+
+    def _settle_applied_conflict(self, envelope: SyncEnvelope, *, reason: str, store: SyncV2Store) -> None:
+        """Close the conflict record of an envelope whose retried projection applied.
+
+        A materializer asks for this by returning ``settles_conflict`` with its
+        reason. The record no longer blocks anything once its envelope is
+        applied, so a failure to close it is logged and does not undo the
+        projection.
+        """
+
+        try:
+            conflict = store.get_unresolved_conflict_for_envelope(
+                envelope.dataset_id,
+                local_envelope_id=envelope.client_envelope_id,
+                server_sequence=envelope.server_sequence,
+            )
+            if conflict is None:
+                return
+            store.resolve_conflict(
+                conflict.conflict_id,
+                dataset_id=envelope.dataset_id,
+                server_cursor=envelope.server_sequence,
+                status="resolved",
+                resolution_action=APPLIED_ON_RETRY_RESOLUTION_ACTION,
+                resolution_notes=reason,
+            )
+        except SyncStoreError as exc:
+            logger.warning(
+                "Sync applied a formerly conflicted envelope but could not close its conflict record. "
+                "dataset={} cursor={} error={}",
+                envelope.dataset_id,
+                envelope.server_sequence,
+                type(exc).__name__,
+            )
+
+    def recover_stranded_tombstones(self, *, user_id: str, dataset_id: str) -> bool:
+        """Unblock a dataset held up by a stranded ``chat.message`` tombstone, if it is.
+
+        Best effort and safe to call before any write: it never raises, and it
+        reports whether a tombstone was settled. See ``settle_stranded_tombstones``.
+        """
+
+        try:
+            if self.store.get_unresolved_materialization_conflict(dataset_id) is None:
+                return False
+            with self.store.conflict_resolution_guard(dataset_id) as guarded:
+                _blocker, settled = self.settle_stranded_tombstones(
+                    user_id=user_id,
+                    dataset_id=dataset_id,
+                    store=guarded,
+                )
+        except Exception as exc:  # noqa: BLE001 - best effort; the caller's own refusal stands.
+            logger.warning(
+                "Sync could not check a blocked dataset for a stranded tombstone. dataset={} error={}",
+                dataset_id,
+                type(exc).__name__,
+            )
+            return False
+        return settled
+
+    def settle_stranded_tombstones(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        store: SyncV2Store,
+    ) -> tuple[SyncConflict | None, bool]:
+        """Settle the projection conflict a tombstone of an unknown chat message left behind.
+
+        A ``chat.message`` tombstone for a message the dataset holds no state
+        for used to be rejected as ``message_base_conflict`` /
+        ``missing_server_message``, and the unresolved conflict refused every
+        later append. Such a tombstone is now applied as satisfied, so the
+        conflict is settled by where the tombstone came from:
+
+        * A device's tombstone is applied under the current rule. The device
+          deleted the message on its side and was told "conflict"; applying the
+          delete makes both sides agree and delivers it to the other devices.
+        * The server's own tombstone (a delete route, before those routes
+          deleted such rows directly) is resolved with ``skip``. Its request
+          answered 503, so no client was told the delete happened, and the row
+          it named is left for the user to delete again.
+
+        Neither loses anything: a pull withholds conflicted envelopes and stops
+        at the blocking one, so no device has received the tombstone, and
+        nothing was projected from it. Every other conflict is left for review.
+
+        Args:
+            user_id: The dataset's owner.
+            dataset_id: The dataset to check.
+            store: A store that holds the dataset fence. Each settlement runs in
+                a savepoint, so one that fails part-way is rolled back on its own.
+
+        Returns:
+            The conflict that still blocks the dataset, if any, and whether a
+            stranded tombstone was settled.
+        """
+
+        settled = False
+        blocker = store.get_unresolved_materialization_conflict(dataset_id)
+        for _attempt in range(_MAX_STRANDED_TOMBSTONE_SETTLEMENTS):
+            source = None if blocker is None else self._stranded_tombstone_source(store, dataset_id, blocker)
+            if blocker is None or source is None:
+                break
+            from_server = source.device_id == _SERVER_ORIGIN_DEVICE_ID
+            try:
+                with store.conflict_resolution_savepoint():
+                    if from_server:
+                        self.resolve_conflict(
+                            user_id=user_id,
+                            dataset_id=dataset_id,
+                            conflict_id=blocker.conflict_id,
+                            action="skip",
+                            notes=STRANDED_TOMBSTONE_RESOLUTION_NOTE,
+                            _conflict=blocker,
+                            _store=store,
+                        )
+                    else:
+                        result = self._materialize_envelope(source, store=store)
+                        if (
+                            result.status != "applied"
+                            or self._envelope_snapshot(source, store=store).apply_status != "applied"
+                        ):
+                            raise SyncStoreError("Sync stranded tombstone could not be applied as satisfied")
+            except SyncStoreError as exc:
+                logger.warning(
+                    "Sync could not settle a stranded chat.message tombstone. dataset={} conflict={} error={}",
+                    dataset_id,
+                    blocker.conflict_id,
+                    type(exc).__name__,
+                )
+                break
+            settled = True
+            logger.warning(
+                "Sync settled a stranded chat.message tombstone of an object without Sync state. "
+                "dataset={} conflict={} object={} origin={} outcome={}",
+                dataset_id,
+                blocker.conflict_id,
+                blocker.object_id,
+                "server" if from_server else "device",
+                "skipped" if from_server else "applied",
+            )
+            blocker = store.get_unresolved_materialization_conflict(dataset_id)
+        return blocker, settled
+
+    @staticmethod
+    def _stranded_tombstone_source(
+        store: SyncV2Store,
+        dataset_id: str,
+        conflict: SyncConflict,
+    ) -> SyncEnvelope | None:
+        """Return the conflict's envelope if it is a tombstone of a message with no Sync state."""
+
+        if (
+            conflict.domain != "chat.message"
+            or conflict.conflict_type != "message_base_conflict"
+            or conflict.metadata.get("reason") != "missing_server_message"
+            or conflict.server_sequence is None
+        ):
+            return None
+        source = store.get_envelope_by_server_cursor(conflict.server_sequence)
+        if (
+            source is None
+            or source.dataset_id != dataset_id
+            or source.client_envelope_id != conflict.local_envelope_id
+            or source.domain != conflict.domain
+            or source.object_id != conflict.object_id
+            or source.operation != "tombstone"
+            or source.status != "accepted"
+            or source.apply_status != "conflict"
+            or source.base_server_cursor is not None
+            or source.base_object_revision is not None
+            or source.base_object_hash is not None
+            or store.get_object_state(dataset_id, source.domain, source.object_id) is not None
+        ):
+            return None
+        return source
 
     def _store_materialization_conflict(
         self,

@@ -206,5 +206,17 @@ if (typeof window !== 'undefined') {
 
   afterEach(() => {
     cleanup();
+    // Notes keeps unsaved edits in an offline draft queue when the editor
+    // unmounts (#3102 NS-01); never carry one test's draft into the next.
+    try {
+      const notesQueueKeys: string[] = [];
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (key?.startsWith('tldw:notesOfflineDraftQueue:')) notesQueueKeys.push(key);
+      }
+      for (const key of notesQueueKeys) window.localStorage.removeItem(key);
+    } catch {
+      // Storage may be unavailable or replaced by a test.
+    }
   });
 }

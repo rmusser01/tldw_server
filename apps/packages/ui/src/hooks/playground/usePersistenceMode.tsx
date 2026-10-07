@@ -33,12 +33,25 @@ export const getPersistenceModeControlLabel = (
 ) =>
   `${t("playground:composer.persistence.historyControl", "Chat history")}: ${getPersistenceModePillLabel(t, temporaryChat)}`
 
+import { useServerChatSaveStatus } from "@/hooks/chat/useServerChatSaveStatus"
+import {
+  resolveChatPersistenceKind
+} from "@/utils/chat-persistence-status"
+
 export type UsePersistenceModeParams = {
   temporaryChat: boolean
+  serverChatId?: string | null
 }
 
+/**
+ * Persistence status for the active chat (CS-03 / XS-05, #3104).
+ *
+ * The label claims the server only when the chat has a server id and its
+ * latest server write was acknowledged. Connectivity alone never counts.
+ */
 export function usePersistenceMode({
-  temporaryChat
+  temporaryChat,
+  serverChatId = null
 }: UsePersistenceModeParams) {
   const { t } = useTranslation(["playground", "common"])
   const persistenceModeLabel = getPersistenceModeLabel(t, temporaryChat)
@@ -47,6 +60,9 @@ export function usePersistenceMode({
     t,
     temporaryChat
   )
+
+  const serverSaveStatus = useServerChatSaveStatus(serverChatId)
+  const persistenceKind = resolveChatPersistenceKind({ temporaryChat, serverChatId, serverSaveStatus })
 
   const persistenceTooltip = React.useMemo(
     () => (
@@ -79,12 +95,11 @@ export function usePersistenceMode({
   }, [])
 
   return {
+    persistenceKind,
     persistenceModeLabel,
     persistencePillLabel,
     persistenceControlLabel,
     persistenceTooltip,
-    focusConnectionCard,
-    /** Re-exported for callers that need the raw function (e.g. toggle handler) */
-    getPersistenceModeLabel
+    focusConnectionCard
   }
 }

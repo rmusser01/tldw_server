@@ -21,6 +21,10 @@ import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { ImageSupportUnconfirmedError } from "@/utils/chat-error-message"
+import {
+  beginServerChatWrite,
+  type ServerChatWriteOutcome
+} from "@/store/server-chat-save-status"
 
 export interface ChatTldwOptions {
   model: string
@@ -275,7 +279,20 @@ export class ChatTldw {
       handleChunk
     )
 
+    // A completion the server persists into an existing server chat is a
+    // server write. Record its outcome so chat persistence labels only claim
+    // the server once it has acknowledged the turn (CS-03 / XS-05, #3104).
+    const serverWriteChatId =
+      this.saveToDb === true && !this.clientManagedHistory
+        ? this.conversationId
+        : undefined
+
     async function* generator() {
+      const endServerWrite = serverWriteChatId
+        ? beginServerChatWrite(serverWriteChatId)
+        : null
+      // Stops and dropped transports leave the server outcome unknown.
+      let serverWriteOutcome: ServerChatWriteOutcome = "unknown"
       let fullText = ""
       try {
         for await (const token of stream) {
@@ -296,7 +313,14 @@ export class ChatTldw {
         if (interruptionChunk && !signal?.aborted) {
           yield interruptionChunk
         }
+        if (!interruptionChunk && !signal?.aborted) {
+          serverWriteOutcome = "saved"
+        }
+      } catch (error) {
+        if (!signal?.aborted) serverWriteOutcome = "failed"
+        throw error
       } finally {
+        endServerWrite?.(serverWriteOutcome)
         // Synthesize a minimal LangChain-style result for handleLLMEnd
         if (callbacks && callbacks.length > 0) {
           const generationInfo =

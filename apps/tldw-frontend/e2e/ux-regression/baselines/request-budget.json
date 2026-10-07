@@ -1,0 +1,143 @@
+{
+  "$comment": "Request-budget ratchet baseline for request-budget.spec.ts. Counts are API requests started in the first windowMs after loading a primed /notes or /chat under next dev (React StrictMode runs effects twice). duplicate-get counts repeats of the same path and query within duplicateWindowMs; polling counts hits after idleFromMs for endpoints with at least pollingMinHits. Tolerances cover measured noise only (10 samples per page, 2026-10-03). See e2e/ux-regression/README.md.",
+  "settings": { "windowMs": 15000, "duplicateWindowMs": 2000, "idleFromMs": 5000, "pollingMinHits": 2 },
+  "entries": [
+    {
+      "page": "notes",
+      "kind": "total",
+      "key": "api-requests",
+      "count": 23,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "23 in 10 of 10 samples: 19 load requests plus 4 buddy polls. Lower it when you remove a poll or a duplicate below."
+    },
+    {
+      "page": "notes",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/persona/profiles",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "Two concurrent requests at ~0.2 s; likely a StrictMode double effect (dev only)."
+    },
+    {
+      "page": "notes",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/buddies",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "IndependentBuddyHost mount fetch, issued twice concurrently (StrictMode)."
+    },
+    {
+      "page": "notes",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/buddies/attachment",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "IndependentBuddyHost mount fetch, issued twice concurrently (StrictMode)."
+    },
+    {
+      "page": "notes",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/auth/me",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "Two sequential requests ~0.1 s apart from separate consumers, not coalesced (10 of 10 samples)."
+    },
+    {
+      "page": "notes",
+      "kind": "polling",
+      "key": "GET /api/v1/buddies",
+      "count": 2,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "IndependentBuddyHost polls every 5 s with no visibility check: 2 hits in the 10 s idle window."
+    },
+    {
+      "page": "notes",
+      "kind": "polling",
+      "key": "GET /api/v1/buddies/attachment",
+      "count": 2,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "Polled with /buddies every 5 s."
+    },
+    {
+      "page": "chat",
+      "kind": "total",
+      "key": "api-requests",
+      "count": 25,
+      "tolerance": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "25 or 26 (+1 when the config/providers race below loses): 21 or 22 load requests plus 4 buddy polls."
+    },
+    {
+      "page": "chat",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/persona/profiles",
+      "count": 3,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "Four requests: two concurrent pairs at ~0.2 s and ~0.7 s. The review measured 3x on /chat; pairs are StrictMode doubles."
+    },
+    {
+      "page": "chat",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/users/me/profile",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "users/me/profile?sections=preferences issued twice concurrently at load."
+    },
+    {
+      "page": "chat",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/buddies",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "IndependentBuddyHost mount fetch, issued twice concurrently (StrictMode)."
+    },
+    {
+      "page": "chat",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/buddies/attachment",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "IndependentBuddyHost mount fetch, issued twice concurrently (StrictMode)."
+    },
+    {
+      "page": "chat",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/config/providers",
+      "count": 1,
+      "tolerance": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "Race: Playground and PlaygroundChat both fetch provider status. In-flight coalescing merges them only while the first request is pending, so a second request appears in ~1 of 4 loads. Tolerance 1 lets it be absent, so this entry cannot report its own fix: delete it when you dedupe the two consumers."
+    },
+    {
+      "page": "chat",
+      "kind": "polling",
+      "key": "GET /api/v1/buddies",
+      "count": 2,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "IndependentBuddyHost polls every 5 s with no visibility check: 2 hits in the 10 s idle window."
+    },
+    {
+      "page": "chat",
+      "kind": "polling",
+      "key": "GET /api/v1/buddies/attachment",
+      "count": 2,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "Polled with /buddies every 5 s."
+    }
+  ]
+}

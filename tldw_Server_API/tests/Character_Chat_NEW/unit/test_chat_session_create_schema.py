@@ -61,3 +61,47 @@ def test_chat_session_create_rejects_invalid_persona_memory_mode(invalid_mode):
             assistant_id="garden-helper",
             persona_memory_mode=invalid_mode,
         )
+
+
+# --- D7 P3: optional client chat id ---------------------------------------------------------
+
+_CLIENT_ID = "6b0f8c1e-2d4a-4f3b-9a71-5c2e8d9f0a14"
+
+
+@pytest.mark.unit
+def test_chat_session_create_id_is_optional_and_canonicalized():
+    assert ChatSessionCreate().id is None
+    assert ChatSessionCreate(id=_CLIENT_ID.upper()).id == _CLIENT_ID
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "",
+        "not-a-uuid",
+        _CLIENT_ID.replace("-", ""),
+        f"{{{_CLIENT_ID}}}",
+        f"urn:uuid:{_CLIENT_ID}",
+        "00000000-0000-0000-0000-000000000000",
+        7,
+    ],
+)
+def test_chat_session_create_rejects_non_canonical_ids(bad_id):
+    with pytest.raises(ValidationError):
+        ChatSessionCreate(id=bad_id)
+
+
+@pytest.mark.unit
+def test_create_fingerprint_ignores_key_order_and_id_but_not_explicit_nulls():
+    from tldw_Server_API.app.core.Chat.conversation_create_idempotency import conversation_create_fingerprint
+
+    def fingerprint(payload, **options):
+        body = ChatSessionCreate.model_validate(payload).model_dump(mode="json", exclude_unset=True, exclude={"id"})
+        return conversation_create_fingerprint(body, {"seed_first_message": False, **options})
+
+    base = fingerprint({"id": _CLIENT_ID, "title": "A", "state": "resolved"})
+    assert len(base) == 64
+    assert fingerprint({"state": "RESOLVED", "title": "A"}) == base
+    assert fingerprint({"title": "A", "state": "resolved", "topic_label": None}) != base
+    assert fingerprint({"title": "A", "state": "resolved"}, seed_first_message=True) != base

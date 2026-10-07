@@ -158,6 +158,30 @@ class SyncV2Store:
             yield guarded
 
     @contextmanager
+    def projection_fence(
+        self,
+        dataset_id: str,
+        domains: Sequence[SyncDomain],
+    ) -> Iterator[SyncV2Store]:
+        """Hold the dataset projection fence for a caller that commits its own projection.
+
+        ``materialization_guard`` takes the same lock for envelopes that already
+        exist. This is for a server-origin write whose envelope is built only
+        after its product row commits: one Sync transaction, opened before that
+        write, in which no other envelope can be accepted or projected for the
+        dataset.
+        """
+
+        if self._connection is not None:
+            yield self
+            return
+        keys = [(dataset_id, domain, "*") for domain in domains]
+        with self.db.materialization_transaction(keys) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
+    @contextmanager
     def conflict_resolution_guard(self, dataset_id: str) -> Iterator[SyncV2Store]:
         """Hold one dataset snapshot and projection fence for a resolution batch."""
 

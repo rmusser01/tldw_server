@@ -621,8 +621,8 @@ export const saveMessageOnSuccess = async ({
       historyTurn.admission,
       assistant
     )
-    await historyTurn.complete?.()
     historyTurn.resultId = assistant.id
+    await historyTurn.complete?.()
     return historyId ?? assistant.history_id
   }
   if (scopeInvalidatedSignal?.aborted) {

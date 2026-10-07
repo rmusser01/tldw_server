@@ -170,6 +170,7 @@ import {
   type CharacterChatReadinessAction,
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
+import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedHistoryTurns";
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
 import { isEditableTarget } from "@/utils/editable-target"
 
@@ -390,7 +391,6 @@ export const Playground = () => {
 
 const PlaygroundContent = () => {
   const historySelection = useHistorySelectionContext()!;
-  const resetHistorySelection = historySelection.reset;
   const drop = React.useRef<HTMLDivElement>(null);
   const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null);
   const artifactsEdgeExpandRef = React.useRef<HTMLButtonElement>(null);
@@ -547,6 +547,26 @@ const PlaygroundContent = () => {
     setServerChatPersonaMemoryMode,
     setServerChatMetaLoaded,
   } = useMessageOption({ hydrateServerChat: true });
+  // CS-04 (#3104): replies that ended early or finished off-screen stay in
+  // the transcript; the review panel leaves out the ones shown or handled.
+  const hideKeptHistoryTurn = useKeepInterruptedHistoryTurns({
+    selection: historySelection,
+    messages,
+    setMessages,
+  });
+  // Reloading or closing the page ends a reply that is still being written.
+  // What arrived is kept (marked Interrupted), but warn first. Leaving /chat
+  // inside the app does not end the reply: it finishes and is kept.
+  const replyInFlight = streaming || isProcessing;
+  React.useEffect(() => {
+    if (!replyInFlight || typeof window === "undefined") return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [replyInFlight]);
   const setUploadedFiles = useStoreMessageOption(
     (state) => state.setUploadedFiles,
   );
@@ -943,7 +963,10 @@ const PlaygroundContent = () => {
         detail.historyId !== current.historyId ||
         detail.restoreRevision !== session.restoreRevision) return;
       if (detail.characterId === undefined) {
-        resetHistorySelection();
+        // New chat and Clear (useClearChat, from the header, sidebar "+",
+        // Ctrl+Shift+U or the composer) start a clean conversation: release the
+        // previous one's history selection and persisted session (CS-01, #3106).
+        clearPersistedSession();
         setCharacterModeIntentActive(false);
         void setChatWorkflowMode("standard");
       }
@@ -980,7 +1003,7 @@ const PlaygroundContent = () => {
     };
     window.addEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, handleReplacement);
     return () => window.removeEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, handleReplacement);
-  }, [location.hash, location.pathname, location.search, navigate, rawRouteCharacterIntent, resetHistorySelection, routeLocationKey, setChatWorkflowMode]);
+  }, [clearPersistedSession, location.hash, location.pathname, location.search, navigate, rawRouteCharacterIntent, routeLocationKey, setChatWorkflowMode]);
 
   React.useEffect(() => {
     if (!routeRequestsCharacterMode) return;
@@ -4300,7 +4323,7 @@ const PlaygroundContent = () => {
             >
               <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
                 <ChatErrorBoundary>
-                  <HistorySelectionReview selection={historySelection} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
+                  <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
                   <PlaygroundChat
                     scrollParentRef={containerRef}
                     navigationRef={chatTimelineRef}

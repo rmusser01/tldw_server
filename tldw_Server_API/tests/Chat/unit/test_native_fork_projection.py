@@ -214,6 +214,39 @@ def test_active_rows_reject_but_stopped_failed_text_is_retained():
         assert projected.retained_context_digest
 
 
+@pytest.mark.parametrize("generation_status", ["complete", "stopped", "interrupted", "length", "error"])
+def test_server_settled_generation_metadata_is_retained(generation_status):
+    generation = {
+        "generation_status": generation_status,
+        "model_id": "gpt-4o-mini",
+        "provider": "openai",
+        "finish_reason": "stop",
+        "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+    }
+    retained = project_native_fork_messages((row(extra={"sender_role": "assistant", **generation}),))
+    extra = dict(retained[0]["extra_metadata"])
+    assert dict(extra.pop("usage")) == generation["usage"]
+    assert extra == {"sender_role": "assistant", **{k: v for k, v in generation.items() if k != "usage"}}
+    assert project_native_fork_context(
+        neutral(), (row(extra={"sender_role": "assistant", **generation}),), ()
+    ).retained_context_digest
+
+
+@pytest.mark.parametrize(
+    "generation",
+    [
+        {"generation_status": "streaming"},
+        {"model_id": ""},
+        {"provider": {"name": "openai"}},
+        {"usage": {"prompt_tokens": "3"}},
+        {"usage": {"prompt_tokens": 3, "cost_usd": 1}},
+    ],
+)
+def test_invalid_generation_metadata_rejects(generation):
+    with pytest.raises(HistorySelectionError, match="unsupported_native_fork_metadata"):
+        project_native_fork_context(neutral(), (row(extra=generation),), ())
+
+
 def test_incomplete_tool_replay_rejects_and_complete_group_has_inventory():
     call = row(tools=[{"id": "call1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}])
     with pytest.raises(HistorySelectionError, match="incomplete_tool_replay"):

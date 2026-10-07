@@ -100,6 +100,20 @@ vi.mock("@/services/prompt-sync", async (importOriginal) => ({
   shouldAutoSyncWorkspacePrompts: () => mocks.shouldAutoSyncWorkspacePrompts()
 }))
 
+// The server prompt library has its own suite
+// (PromptSelect.server-library.test.tsx). Keep its listing off the runtime
+// channel whose messages these modal tests count.
+vi.mock("@/services/server-prompt-library", async (importActual) => ({
+  ...(await importActual<
+    typeof import("@/services/server-prompt-library")
+  >()),
+  listAllServerPrompts: vi.fn(async () => ({
+    prompts: [],
+    totalItems: 0,
+    truncated: false
+  }))
+}))
+
 vi.mock("@/services/prompts-api", async (importActual) => {
   const actual = await importActual<typeof import("@/services/prompts-api")>()
   return {

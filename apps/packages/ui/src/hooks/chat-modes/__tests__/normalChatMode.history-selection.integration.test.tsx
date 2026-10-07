@@ -91,6 +91,8 @@ const preparation = vi.hoisted(() => ({ beforeModel: vi.fn() }))
 
 import { normalChatMode } from "../normalChatMode"
 import { useHistorySelection } from "@/hooks/chat/useHistorySelection"
+import { keepHistoryTurnRecovery } from "@/services/history-turn-keep"
+import { loadHistoryTurnRecoveries } from "@/db/dexie/history-selection"
 import { PageAssistDatabase } from "@/db/dexie/chat"
 import { saveHistory } from "@/db/dexie/helpers"
 import { saveMessageOnSuccess, saveMessageOnError } from "@/hooks/chat-helper"
@@ -125,6 +127,7 @@ const send = (controller: HistorySelectionController, options: {
   toolChoice?: Parameters<typeof normalChatMode>[6]["toolChoice"]
   fixedOverrides?: boolean
   setServerChatId?: (id: string) => void
+  saveOnSuccess?: typeof saveMessageOnSuccess
   surface?: "playground" | "sidepanel"
 } = {}) => {
   const params: Parameters<typeof normalChatMode>[6] = {
@@ -142,7 +145,7 @@ const send = (controller: HistorySelectionController, options: {
     setHistoryId: options.setHistoryId ?? (() => {}),
     setMessages: () => {}, setHistory: () => {}, setIsProcessing: () => {},
     setStreaming: () => {}, setAbortController: () => {},
-    saveMessageOnSuccess, saveMessageOnError,
+    saveMessageOnSuccess: options.saveOnSuccess ?? saveMessageOnSuccess, saveMessageOnError,
     userMessageId: "first-user", assistantMessageId: "first-answer"
   }
   return normalChatMode("First question", "", false, [], [], new AbortController().signal, params)
@@ -676,13 +679,17 @@ it.each(["new", "ABA"])("captures the source before awaited service setup crosse
 })
 
 
-it("keeps original ordinary input bound when the assistant save acknowledgement is lost", async () => {
+it.each([false, true])("keeps original ordinary input bound when the assistant save acknowledgement is lost (persisted=%s)", async persisted => {
+  const serverReplies: unknown[] = []
   const source = creationSource()
   const mounted = renderHook(() => useHistorySelection())
   vi.spyOn(tldwClient, "createChat").mockResolvedValue({ id: "new-server" } as never)
   vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => emptyServerCapture(request))
   const append = vi.spyOn(tldwClient, "addChatMessage").mockImplementation(async (_id, body) => {
-    if (body.role === "assistant") throw new Error("Assistant save response lost")
+    if (body.role === "assistant") {
+      if (persisted) serverReplies.push(structuredClone(body))
+      throw new Error("Assistant save response lost")
+    }
     const selection = body.tldw_history_selection_v1!
     return { id: body.id, tldw_history_admission_v1: {
       version: 1, owner_key: "server-owner", conversation_id: "new-server", input_message_id: body.id,
@@ -692,6 +699,13 @@ it("keeps original ordinary input bound when the assistant save acknowledgement 
   })
   await act(async () => { expect((await send(mounted.result.current, { setServerChatId: vi.fn() })).status).toBe("failed") })
   expect(append).toHaveBeenCalledTimes(2)
+  expect(serverReplies).toHaveLength(persisted ? 1 : 0)
+  const selected = mounted.result.current.getCurrent()
+  const retained = await loadHistoryTurnRecoveries(selected.bookmarkScope!, selected.view!)
+  expect(retained).toEqual([expect.objectContaining({ turn: expect.objectContaining({
+    state: "generated_unsaved", input_text: "First question", result_text: "First answer"
+  }) })])
+  expect(retained[0].turn.outcome).toBeUndefined()
   expect(await readChatCreationRecovery(source)).toMatchObject({ state: "bound", chatId: "new-server", inputText: "First question" })
   mounted.unmount()
 })
@@ -723,5 +737,57 @@ it.each(["new-server", "newer-server"])("a held ordinary bound-record write cann
   expect(newer.owner?.kind === "native" && newer.owner.validate_lease()).toBe(true)
   expect(tldwChat.streamMessage).not.toHaveBeenCalled()
   expect(await readChatCreationRecovery(source)).toMatchObject({ state: "bound", inputText: "First question" })
+  mounted.unmount()
+})
+
+
+it.each(["cleanup", "navigation", "account"])("retains an acknowledged local assistant through %s after saving", async boundary => {
+  const source = await saveHistory("Source", false, "web-ui", undefined, undefined, snapshot().requestScope)
+  const other = await saveHistory("Other", false, "web-ui", undefined, undefined, snapshot().requestScope)
+  const mounted = renderHook(() => useHistorySelection())
+  await act(async () => { await mounted.result.current.loadConversation({ historyId: source.id }) })
+  const origin = mounted.result.current.getCurrent()
+  const scoped = snapshot()
+  const invalidation = new AbortController()
+  // Explicit account-signal I/O double; real event/controller retirement is covered by root ownership checks.
+  scoped.scopeInvalidatedSignal = invalidation.signal
+  let acknowledgedId: string | undefined
+  const save = vi.fn(async (data: Parameters<typeof saveMessageOnSuccess>[0]) => {
+    const turn = data.historyTurn!
+    const complete = turn.complete!
+    turn.complete = async () => {
+      await complete()
+      acknowledgedId = turn.resultId
+      if (boundary !== "cleanup") {
+        if (boundary === "account") invalidation.abort()
+        await mounted.result.current.loadConversation({ historyId: other.id })
+        useStoreMessageOption.getState().startNewChatDraft()
+      }
+      throw new Error("Ancillary cleanup failed")
+    }
+    return saveMessageOnSuccess(data)
+  })
+  await act(async () => {
+    expect((await send(mounted.result.current, { historyId: source.id, saveOnSuccess: save, snapshot: scoped })).status).toBe(boundary === "account" ? "failed" : "submitted")
+  })
+  expect(acknowledgedId).toBe("first-answer")
+  expect(save).toHaveBeenCalledOnce()
+  expect((await savedMessages()).filter(row => row.role === "assistant")).toHaveLength(1)
+  if (boundary === "cleanup") {
+    expect(mounted.result.current.getCurrent().view?.cursor).toEqual({ kind: "after_message", message_id: "first-answer" })
+  } else {
+    expect(mounted.result.current.getCurrent().owner?.conversation_id).toBe(other.id)
+    expect(mounted.result.current.getCurrent().view?.cursor).toEqual({ kind: "empty" })
+    const retained = await loadHistoryTurnRecoveries(origin.bookmarkScope!, origin.view!)
+    if (boundary === "navigation") {
+      expect(retained).toEqual([expect.objectContaining({ turn: expect.objectContaining({ settled_message_id: "first-answer", outcome: "complete" }) })])
+      await act(async () => {
+        await mounted.result.current.loadConversation({ historyId: source.id })
+        expect((await keepHistoryTurnRecovery(mounted.result.current, retained[0])).status).toBe("kept")
+      })
+      expect((await savedMessages()).filter(row => row.role === "assistant")).toHaveLength(1)
+      expect(mounted.result.current.getCurrent().view?.cursor).toEqual({ kind: "after_message", message_id: "first-answer" })
+    } else expect(retained).toEqual([expect.objectContaining({ turn: expect.objectContaining({ settled_message_id: "first-answer", outcome: "complete" }) })])
+  }
   mounted.unmount()
 })

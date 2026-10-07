@@ -1437,7 +1437,7 @@ export const SidepanelForm = ({
     persistenceTooltip,
     persistenceControlLabel,
     persistencePillLabel: temporaryChatToggleLabel
-  } = usePersistenceMode({ temporaryChat })
+  } = usePersistenceMode({ temporaryChat, serverChatId })
 
   // Character selection state
   const storedCharacterId = React.useMemo(

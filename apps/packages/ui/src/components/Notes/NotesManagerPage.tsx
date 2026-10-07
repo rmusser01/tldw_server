@@ -16,6 +16,8 @@ import { useServerCapabilities } from '@/hooks/useServerCapabilities'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { tldwAuth } from '@/services/tldw/TldwAuth'
 import { useAntdMessage } from '@/hooks/useAntdMessage'
+import { useAntdModal } from '@/hooks/useAntdModal'
+import { useUndoNotification } from '@/hooks/useUndoNotification'
 import { useStoreMessageOption, type Message as ChatMessage } from "@/store/option"
 import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { useTutorialStore } from "@/store/tutorials"
@@ -29,6 +31,7 @@ import { fetchAllServerChatMessages, mapServerChatMessagesToPlaygroundMessages, 
 import NotesEditorPane from "@/components/Notes/NotesEditorPane"
 import NotesGraphWorkspace from "@/components/Notes/NotesGraphWorkspace"
 import NotesStudioCreateModal from "@/components/Notes/NotesStudioCreateModal"
+import { promptBulkAddTags } from "@/components/Notes/NotesBulkAddTagsPrompt"
 import NotesSidebar from "@/components/Notes/NotesSidebar"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { createNotesGraphAuthorityScope, useNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
@@ -39,8 +42,12 @@ import {
   useNotesExport,
   useNotesImport,
   useNotesWikilinks,
+  useNotesWikilinkRename,
+  type NoteRenamedEvent,
 } from "@/components/Notes/hooks"
+import type { NotesLeaveGuardState } from "@/components/Notes/hooks/useNotesEditorState"
 import type { NoteListItem } from "@/components/Notes/notes-manager-types"
+import { parseWikilinkHref } from "@/components/Notes/wikilinks"
 import { clearSetting, getSetting } from "@/services/settings/registry"
 import { useFlashcardsGenerateTransfer, useStudyPackTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
 import { buildSourcesNewPath } from "@/routes/route-paths"
@@ -80,8 +87,16 @@ import {
   NOTE_TEMPLATES,
   toSortableTimestamp,
   toNoteVersion,
+  extractKeywords,
+  normalizeTagList,
+  mergeTagLists,
+  tagSetsMatch,
+  toKeywordSyncWarning,
   markdownToWysiwygHtml,
   wysiwygHtmlToMarkdown,
+  getEditableSelectionBlock,
+  isHeadingElement,
+  unwrapListsFromBlocks,
   LARGE_NOTES_PAGINATION_THRESHOLD,
   TRASH_LOOKUP_PAGE_SIZE,
   TRASH_LOOKUP_MAX_PAGES,
@@ -126,7 +141,62 @@ const hasUnsavedChatWork = (row: ChatMessage): boolean => {
     !(row.isBot && (!row.role || row.role === "assistant") && decodeChatErrorPayload(row.message)))
 }
 
-const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNoteId = null }) => {
+/** What bulk "Add tags" changed on one note, so Undo can put it back. */
+type BulkTagUndoSnapshot = {
+  noteId: string
+  label: string
+  previousTags: string[]
+  appliedTags: string[]
+  appliedVersion: number
+}
+
+type NotePath = `/api/v1/notes/${string}`
+
+const notePath = (noteId: string): NotePath => `/api/v1/notes/${encodeURIComponent(noteId)}`
+
+const fetchNote = (noteId: string) => bgRequest<unknown>({ path: notePath(noteId), method: 'GET' })
+
+/** Replace a note's tags, guarded by its version (the server returns 409 on mismatch). */
+const patchNoteTags = (noteId: string, expectedVersion: number, tags: string[]) =>
+  bgRequest<unknown>({
+    path: `${notePath(noteId)}?expected_version=${expectedVersion}`,
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'expected-version': String(expectedVersion)
+    },
+    body: { keywords: tags }
+  })
+
+const toBulkNoteLabel = (note: { id: string | number; title?: string }) =>
+  String(note.title || '').trim() || `Note ${String(note.id)}`
+
+const formatBulkNoteLabels = (labels: readonly string[]) => {
+  const shown = labels.slice(0, 3).map((label) => `"${label}"`).join(', ')
+  return labels.length > 3 ? `${shown} and ${labels.length - 3} more` : shown
+}
+
+const formatNoteCount = (count: number) => `${count} note${count === 1 ? '' : 's'}`
+
+const formatTagSummary = (tags: readonly string[]) =>
+  tags.length > 3 ? `${tags.slice(0, 3).join(', ')} +${tags.length - 3} more` : tags.join(', ')
+
+const hasInlineKeywords = (note: unknown) => {
+  const record = (note ?? {}) as { keywords?: unknown; metadata?: { keywords?: unknown } }
+  return Array.isArray(record.keywords) || Array.isArray(record.metadata?.keywords)
+}
+
+type NotesManagerPageProps = {
+  sourceNoteId?: string | null
+  /**
+   * Router-aware guard that holds in-app navigation while unsaved edits are
+   * flushed (NS-01). The route supplies it (RouteLeaveGuard) so the page stays
+   * independent of the router; without it only the unmount backstop applies.
+   */
+  LeaveGuard?: React.ComponentType<NotesLeaveGuardState>
+}
+
+const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null, LeaveGuard }) => {
   const transferFlashcards = useFlashcardsGenerateTransfer()
   const transferStudyPack = useStudyPackTransfer()
   const { t } = useTranslation(['option', 'common'])
@@ -146,6 +216,8 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     loading: canonicalAuthorityLoading ?? canonicalConnectionLoading,
   })
   const message = useAntdMessage()
+  const modal = useAntdModal()
+  const { showUndoNotification } = useUndoNotification()
   const rawConfirmDanger = useConfirmDanger()
   const confirmDanger = React.useCallback((options: ConfirmDangerOptions) => {
     useTutorialStore.getState().endTutorial()
@@ -190,6 +262,8 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
   const setSaveIndicatorRef = React.useRef<(state: any) => void>(() => {})
   const setMonitoringNoticeRef = React.useRef<(notice: any) => void>(() => {})
   const markGeneratedEditRef = React.useRef<(action: NotesAssistAction) => void>(() => {})
+  // The rename offer hook is initialized after the editor hook that reports renames.
+  const noteRenamedRef = React.useRef<(event: NoteRenamedEvent) => void>(() => {})
 
   const list = useNotesListManagement({
     authorityScope: notesGraphAuthorityScope,
@@ -268,6 +342,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     setKeywordSuggestionOptions: kw.setKeywordSuggestionOptions,
     setKeywordSuggestionSelection: kw.setKeywordSuggestionSelection,
     editorDisabled,
+    onNoteRenamed: (event) => noteRenamedRef.current(event),
   })
   const [hasActiveDraft, setHasActiveDraft] = React.useState(false)
   const resetEditorToEmptyState = React.useCallback(() => {
@@ -729,7 +804,18 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
   }, [list.data, noteRelations.backlinks, noteRelations.related, ed.selectedId])
 
   // ---- Wikilinks hook ----
+  const wikilinkCreateNoteLabel = React.useCallback(
+    (linkTitle: string) =>
+      t('option:notesSearch.wikilinkCreateNoteTooltip', {
+        defaultValue: 'Create note "{{title}}"',
+        title: linkTitle
+      }),
+    [t]
+  )
   const wl = useNotesWikilinks({
+    isOnline,
+    authorityScope: notesGraphAuthorityScope,
+    createNoteLabel: wikilinkCreateNoteLabel,
     selectedId: ed.selectedId,
     title: ed.title,
     content: ed.content,
@@ -743,6 +829,26 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     data: list.data,
     noteRelations,
   })
+
+  // ---- Offer to update [[Old title]] links after a rename (#3110) ----
+  const wikilinkRename = useNotesWikilinkRename({
+    isOnline,
+    authorityScope: notesGraphAuthorityScope,
+    connectionConfig: canonicalConnectionConfig,
+    message,
+    t,
+    selectedId: ed.selectedId,
+    isDirty: ed.isDirty,
+    hasQueuedDraft: (noteId) => Boolean(ed.offlineDraftQueue[`note:${noteId}`]),
+    reloadSelectedNote: () => (ed.selectedId == null ? undefined : ed.loadDetail(ed.selectedId)),
+    onLinksChanged: () => {
+      void list.refetch()
+      ed.setGraphMutationTick((tick) => tick + 1)
+    },
+  })
+  noteRenamedRef.current = (event) => {
+    void wikilinkRename.handleNoteRenamed(event)
+  }
 
   // ---- Export hook ----
   const exp = useNotesExport({
@@ -1382,68 +1488,158 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     }
   }, [confirmDanger, ed, list, message])
 
-  const assignKeywordsToSelectedBulk = React.useCallback(async () => {
-    if (list.selectedBulkNotes.length === 0) {
+  // Undo runs from a toast after later renders, so read the live editor/list.
+  const latestEditorRef = React.useRef(ed)
+  latestEditorRef.current = ed
+  const latestListRef = React.useRef(list)
+  latestListRef.current = list
+
+  const refreshAfterBulkTagChange = React.useCallback(async (noteIds: readonly string[]) => {
+    await latestListRef.current.refetch()
+    const editor = latestEditorRef.current
+    if (
+      editor.selectedId != null &&
+      !editor.isDirty &&
+      noteIds.includes(String(editor.selectedId))
+    ) {
+      await editor.loadDetail(editor.selectedId)
+    }
+  }, [])
+
+  const undoBulkTagAdd = React.useCallback(
+    async (snapshots: readonly BulkTagUndoSnapshot[]) => {
+      const restoredIds: string[] = []
+      const skipped: string[] = []
+      const failed: string[] = []
+      for (const snapshot of snapshots) {
+        const editor = latestEditorRef.current
+        if (editor.isDirty && editor.selectedId != null && String(editor.selectedId) === snapshot.noteId) {
+          // The open note's next save would re-apply the editor's tags.
+          skipped.push(snapshot.label)
+          continue
+        }
+        try {
+          const current = await fetchNote(snapshot.noteId)
+          // Content edits bump the version; tag-only edits do not, so compare tags too.
+          if (
+            toNoteVersion(current) !== snapshot.appliedVersion ||
+            !tagSetsMatch(extractKeywords(current), snapshot.appliedTags)
+          ) {
+            skipped.push(snapshot.label)
+            continue
+          }
+          await patchNoteTags(snapshot.noteId, snapshot.appliedVersion, snapshot.previousTags)
+          restoredIds.push(snapshot.noteId)
+        } catch (error) {
+          if (latestEditorRef.current.isVersionConflictError(error)) skipped.push(snapshot.label)
+          else failed.push(snapshot.label)
+        }
+      }
+      if (restoredIds.length > 0) await refreshAfterBulkTagChange(restoredIds)
+      if (skipped.length > 0 || failed.length > 0) {
+        // useUndoNotification reports a thrown error as the undo outcome.
+        const parts = [`Restored tags on ${formatNoteCount(restoredIds.length)}.`]
+        if (skipped.length > 0) {
+          parts.push(`Skipped ${formatBulkNoteLabels(skipped)}: changed after the tags were added.`)
+        }
+        if (failed.length > 0) parts.push(`Could not restore ${formatBulkNoteLabels(failed)}.`)
+        throw new Error(parts.join(' '))
+      }
+    },
+    [refreshAfterBulkTagChange]
+  )
+
+  const addTagsToSelectedBulk = React.useCallback(async () => {
+    const targets = list.selectedBulkNotes
+    if (targets.length === 0) {
       message.info('No selected notes to update')
       return
     }
     const okToLeave = await ed.confirmDiscardIfDirty()
     if (!okToLeave) return
-    const suggested = kw.keywordTokens.join(', ')
-    const rawInput = await promptModal({
-      title: 'Assign tags to selected notes',
-      label: 'Enter tag names separated by commas.',
-      defaultValue: suggested,
-      placeholder: 'tag1, tag2, tag3',
-      okText: 'Assign',
+    const picked = await promptBulkAddTags(modal, {
+      noteCount: targets.length,
+      suggestions: kw.availableKeywords,
+      renderSuggestionLabel: (tag) =>
+        kw.renderKeywordLabelWithFrequency(tag, {
+          includeCount: true,
+          testIdPrefix: 'notes-bulk-add-tags-option-label'
+        }),
+      t
     })
-    if (rawInput == null) return
-    const keywords = rawInput.split(',').map((entry) => entry.trim()).filter(Boolean)
-    if (keywords.length === 0) {
-      message.warning('Enter at least one tag to assign')
+    if (picked == null) return
+    const additions = normalizeTagList(picked)
+    if (additions.length === 0) {
+      message.warning('Choose at least one tag to add')
       return
     }
-    const confirmed = await confirmDanger({
-      title: 'Apply tags to selected notes?',
-      content: `Apply ${keywords.join(', ')} to ${list.selectedBulkNotes.length} selected notes?`,
-      okText: 'Apply tags',
-      cancelText: 'Cancel'
-    })
-    if (!confirmed) return
 
-    let updated = 0
-    let failed = 0
-    for (const note of list.selectedBulkNotes) {
+    const snapshots: BulkTagUndoSnapshot[] = []
+    const alreadyTagged: string[] = []
+    const conflicted: string[] = []
+    const failed: string[] = []
+    const partiallyTagged: string[] = []
+    for (const note of targets) {
       const noteId = String(note.id)
-      const expectedVersion = await ed.getExpectedVersionForNoteId(noteId)
-      if (expectedVersion == null) { failed += 1; continue }
+      const label = toBulkNoteLabel(note)
       try {
-        await bgRequest<any>({
-          path: `/api/v1/notes/${encodeURIComponent(noteId)}?expected_version=${encodeURIComponent(
-            String(expectedVersion)
-          )}` as any,
-          method: 'PATCH' as any,
-          headers: {
-            'Content-Type': 'application/json',
-            'expected-version': String(expectedVersion)
-          },
-          body: { keywords }
+        // List rows can be stale and tag-only edits keep the note version, so
+        // merge with the server's current tags rather than the cached row.
+        const current = await fetchNote(noteId)
+        const version = toNoteVersion(current)
+        if (version == null) {
+          failed.push(label)
+          continue
+        }
+        const previousTags = normalizeTagList(extractKeywords(current))
+        const nextTags = mergeTagLists(previousTags, additions)
+        if (nextTags.length === previousTags.length) {
+          alreadyTagged.push(label)
+          continue
+        }
+        const updated = await patchNoteTags(noteId, version, nextTags)
+        snapshots.push({
+          noteId,
+          label,
+          previousTags,
+          appliedTags: hasInlineKeywords(updated) ? normalizeTagList(extractKeywords(updated)) : nextTags,
+          appliedVersion: toNoteVersion(updated) ?? version
         })
-        updated += 1
-      } catch { failed += 1 }
-    }
-
-    if (updated > 0) {
-      message.success(`Updated tags on ${updated} selected note${updated === 1 ? '' : 's'}`)
-      await list.refetch()
-      if (ed.selectedId != null && list.selectedBulkNotes.some((note) => String(note.id) === String(ed.selectedId))) {
-        await ed.loadDetail(ed.selectedId)
+        if (toKeywordSyncWarning(updated)) partiallyTagged.push(label)
+      } catch (error) {
+        if (ed.isVersionConflictError(error)) conflicted.push(label)
+        else failed.push(label)
       }
     }
-    if (failed > 0) {
-      message.warning(`${failed} selected note${failed === 1 ? '' : 's'} failed tag update`)
+
+    if (snapshots.length > 0) {
+      await refreshAfterBulkTagChange(snapshots.map((snapshot) => snapshot.noteId))
+      showUndoNotification({
+        title: `Added ${formatTagSummary(additions)} to ${formatNoteCount(snapshots.length)}`,
+        description: 'Existing tags were kept.',
+        duration: 10,
+        onUndo: () => undoBulkTagAdd(snapshots)
+      })
     }
-  }, [confirmDanger, ed, kw.keywordTokens, list, message])
+    if (alreadyTagged.length > 0) {
+      message.info(
+        `${alreadyTagged.length} selected note${alreadyTagged.length === 1 ? '' : 's'} already had ${
+          additions.length === 1 ? 'this tag' : 'these tags'
+        }`
+      )
+    }
+    const problems: string[] = []
+    if (conflicted.length > 0) {
+      problems.push(
+        `Tags were not added to ${formatBulkNoteLabels(conflicted)}: changed on the server. Refresh and try again.`
+      )
+    }
+    if (failed.length > 0) problems.push(`Could not add tags to ${formatBulkNoteLabels(failed)}.`)
+    if (partiallyTagged.length > 0) {
+      problems.push(`Some tags could not be attached to ${formatBulkNoteLabels(partiallyTagged)}.`)
+    }
+    if (problems.length > 0) message.warning(problems.join(' '))
+  }, [ed, kw, list, message, modal, refreshAfterBulkTagChange, showUndoNotification, t, undoBulkTagAdd])
 
   // Editor input handlers
   const handleEditorChange = React.useCallback(
@@ -1477,11 +1673,35 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
           }
           document.execCommand(command, false, value)
         }
+        // The command edited the DOM in place: record it without replacing the
+        // editor's nodes, so the caret and selection stay where they are (NE-01).
+        const syncFromRichEditor = () => {
+          const nextHtml = richEditor.innerHTML
+          ed.recordWysiwygEditorHtml(nextHtml)
+          ed.setWysiwygSessionDirty(true)
+          const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)
+          ed.setContentDirty(nextMarkdown)
+          ed.setEditorCursorIndex(nextMarkdown.length)
+        }
         if (action === 'bold') execute('bold')
         else if (action === 'italic') execute('italic')
-        else if (action === 'heading') execute('formatBlock', '<h2>')
-        else if (action === 'list') execute('insertUnorderedList')
-        else if (action === 'link') {
+        else if (action === 'heading') {
+          // Toggle: a heading goes back to a paragraph. Leave a list first,
+          // because formatBlock would wrap the whole list in the heading.
+          const block = getEditableSelectionBlock(richEditor)
+          if (isHeadingElement(block)) execute('formatBlock', '<p>')
+          else {
+            if (block?.tagName === 'LI') {
+              execute(block.parentElement?.tagName === 'OL' ? 'insertOrderedList' : 'insertUnorderedList')
+            }
+            execute('formatBlock', '<h2>')
+          }
+        } else if (action === 'list') {
+          // A heading becomes a plain list item, not a list inside a heading.
+          if (isHeadingElement(getEditableSelectionBlock(richEditor))) execute('formatBlock', '<p>')
+          execute('insertUnorderedList')
+          unwrapListsFromBlocks(richEditor)
+        } else if (action === 'link') {
           ;(async () => {
             const savedSelection =
               typeof window !== 'undefined'
@@ -1509,22 +1729,12 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
               selection?.addRange(savedSelection)
             }
             execute('createLink', normalizedHref, { focus: false })
-            const nextHtml = richEditor.innerHTML
-            ed.setWysiwygHtml(nextHtml)
-            ed.setWysiwygSessionDirty(true)
-            const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)
-            ed.setContentDirty(nextMarkdown)
-            ed.setEditorCursorIndex(nextMarkdown.length)
+            syncFromRichEditor()
           })()
           return
         } else if (action === 'code') execute('insertText', '`code`')
 
-        const nextHtml = richEditor.innerHTML
-        ed.setWysiwygHtml(nextHtml)
-        ed.setWysiwygSessionDirty(true)
-        const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)
-        ed.setContentDirty(nextMarkdown)
-        ed.setEditorCursorIndex(nextMarkdown.length)
+        syncFromRichEditor()
         return
       }
       const textarea = ed.contentTextareaRef.current
@@ -1644,7 +1854,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         if (ed.editorInputMode === 'wysiwyg') {
           const nextContent = ed.content.trim().length > 0 ? `${ed.content}\n${markdown}` : markdown
           ed.setContentDirty(nextContent)
-          ed.setWysiwygHtml(markdownToWysiwygHtml(nextContent))
+          ed.replaceWysiwygHtml(markdownToWysiwygHtml(nextContent))
           ed.setWysiwygSessionDirty(true)
         } else {
           const activeTextarea = ed.contentTextareaRef.current
@@ -1682,7 +1892,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
   // WYSIWYG handlers
   const enterWysiwygMode = React.useCallback(() => {
     ed.markdownBeforeWysiwygRef.current = ed.content
-    ed.setWysiwygHtml(markdownToWysiwygHtml(ed.content))
+    ed.replaceWysiwygHtml(markdownToWysiwygHtml(ed.content))
     ed.setWysiwygSessionDirty(false)
     ed.setEditorInputMode('wysiwyg')
     ed.setEditorCursorIndex(null)
@@ -1716,10 +1926,12 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     [ed, enterWysiwygMode, exitWysiwygMode]
   )
 
+  // The user's own input never writes back into the editor: record the HTML
+  // and update the Markdown, leaving the DOM (and the caret) alone (NE-01).
   const handleWysiwygInput = React.useCallback(
     (event: React.FormEvent<HTMLDivElement>) => {
       const nextHtml = event.currentTarget.innerHTML
-      ed.setWysiwygHtml(nextHtml)
+      ed.recordWysiwygEditorHtml(nextHtml)
       ed.setWysiwygSessionDirty(true)
       const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)
       ed.setContentDirty(nextMarkdown)
@@ -1777,21 +1989,50 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     [ed]
   )
 
-  // Preview link click
+  // An unresolved [[Title]] link offers to create that note: start a draft
+  // with the title filled in. Saving it resolves the link and adds the backlink.
+  const handleCreateNoteFromWikilink = React.useCallback(
+    async (linkTitle: string) => {
+      if (editorDisabled) return
+      const ok = await ed.confirmDiscardIfDirty()
+      if (!ok) return
+      if (list.listMode !== 'active') list.setListMode('active')
+      if (isMobileViewport) setMobileSidebarOpen(false)
+      startDraftSession()
+      ed.setTitle(linkTitle)
+      ed.setIsDirty(true)
+      ed.setSaveIndicator('dirty')
+      if (ed.editorMode === 'preview') ed.setEditorMode('edit')
+      message.info(
+        t('option:notesSearch.wikilinkCreateNoteStarted', {
+          defaultValue: 'New note "{{title}}". Save it to complete the link.',
+          title: linkTitle
+        })
+      )
+      window.setTimeout(() => {
+        ed.contentTextareaRef.current?.focus()
+      }, 0)
+    },
+    [ed, editorDisabled, isMobileViewport, list, message, startDraftSession, t]
+  )
+
+  // Preview link click: open a resolved wikilink, or offer to create a missing note.
   const handlePreviewLinkClick = React.useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       const target = event.target as HTMLElement | null
       if (!target) return
       const anchor = target.closest('a')
       if (!(anchor instanceof HTMLAnchorElement)) return
-      const href = String(anchor.getAttribute('href') || '')
-      if (!href.startsWith('note://')) return
+      const wikilink = parseWikilinkHref(String(anchor.getAttribute('href') || ''))
+      if (!wikilink) return
       event.preventDefault()
-      const noteId = decodeURIComponent(href.slice('note://'.length))
-      if (!noteId) return
-      void ed.handleSelectNote(noteId)
+      if (wikilink.kind === 'create') {
+        void handleCreateNoteFromWikilink(wikilink.title)
+        return
+      }
+      void ed.handleSelectNote(wikilink.noteId)
     },
-    [ed]
+    [ed, handleCreateNoteFromWikilink]
   )
 
   const closeNotesStudioCreateModal = React.useCallback(() => {
@@ -1889,7 +2130,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
       if (!detailReloaded) {
         ed.setTitle(String(refreshed.note.title || ''))
         ed.setContent(String(refreshed.note.content || ''))
-        ed.setWysiwygHtml(markdownToWysiwygHtml(String(refreshed.note.content || '')))
+        ed.replaceWysiwygHtml(markdownToWysiwygHtml(String(refreshed.note.content || '')))
         ed.setIsDirty(false)
       }
       setSelectedStudioState(refreshed)
@@ -2361,6 +2602,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
 
   return (
     <div className="relative flex h-full w-full bg-bg p-2 sm:p-4 mt-16">
+      {LeaveGuard ? <LeaveGuard when={ed.leaveGuard.when} onLeave={ed.leaveGuard.onLeave} /> : null}
       <a href={`#${NOTES_LIST_REGION_ID}`} onClick={handleSkipLinkActivate(NOTES_LIST_REGION_ID)} className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-border focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text focus:shadow">
         {t('option:notesSearch.skipToNotesList', { defaultValue: 'Skip to notes list' })}
       </a>
@@ -2425,6 +2667,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         conversationLabelById={conversationLabelById}
         importSubmitting={imp.importSubmitting}
         exportProgress={exp.exportProgress}
+        cancelExport={exp.cancelExport}
         setMobileSidebarOpen={setMobileSidebarOpen}
         setListViewMode={list.setListViewMode}
         setPage={list.setPage}
@@ -2457,7 +2700,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         deleteMoodboard={list.deleteMoodboard}
         clearBulkSelection={list.clearBulkSelection}
         exportSelectedBulk={exp.exportSelectedBulk}
-        assignKeywordsToSelectedBulk={assignKeywordsToSelectedBulk}
+        addTagsToSelectedBulk={addTagsToSelectedBulk}
         deleteSelectedBulk={deleteSelectedBulk}
         toggleNotePinned={ed.toggleNotePinned}
         restoreNote={restoreNote}
@@ -2540,12 +2783,11 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         editorKeywords={kw.editorKeywords}
         keywordOptions={kw.keywordOptions}
         saveIndicator={ed.saveIndicator}
-        saveIndicatorText={ed.saveIndicatorText}
-        saveRecoveryNotice={ed.saveRecoveryNotice}
+        saveIssue={ed.saveIssue}
+        saveStatusDetail={ed.saveStatusDetail}
         selectedLastSavedAt={ed.selectedLastSavedAt}
         offlineStatusText={ed.offlineStatusText}
         currentOfflineDraft={ed.currentOfflineDraft}
-        remoteVersionInfo={ed.remoteVersionInfo}
         monitoringNotice={ed.monitoringNotice}
         monitoringNoticeClasses={ed.monitoringNoticeClasses}
         noteTasks={ed.noteTasks}
@@ -2582,12 +2824,12 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         usesLargePreviewGuardrails={wl.usesLargePreviewGuardrails}
         largePreviewReady={wl.largePreviewReady}
         wysiwygHtml={ed.wysiwygHtml}
+        wysiwygRevision={ed.wysiwygRevision}
         activeWikilinkQuery={wl.activeWikilinkQuery}
         wikilinkSuggestions={wl.wikilinkSuggestions}
         wikilinkSuggestionDisplayCounts={wl.wikilinkSuggestionDisplayCounts}
         wikilinkSelectionIndex={wl.wikilinkSelectionIndex}
         metricSummaryText={ed.metricSummaryText}
-        revisionSummaryText={ed.revisionSummaryText}
         provenanceSummaryText={ed.provenanceSummaryText}
         queuedOfflineDraftCount={ed.queuedOfflineDraftCount}
         titleInputRef={ed.titleInputRef}
@@ -2619,7 +2861,11 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
         handleOpenNotesStudio={handleOpenNotesStudio}
         exportSelected={exp.exportSelected}
         saveNote={ed.saveNote}
-        reloadSelectedNoteAfterConflict={ed.reloadSelectedNoteAfterConflict}
+        retrySave={ed.retrySave}
+        keepMyVersion={ed.keepMyVersion}
+        takeTheirVersion={ed.takeTheirVersion}
+        copyMyText={ed.copyMyText}
+        loadLatestVersion={ed.loadLatestVersion}
         saveAndStartNew={saveAndStartNew}
         deleteNote={async () => {
           await deleteNote()

@@ -204,7 +204,10 @@ from tldw_Server_API.app.core.Chat.knowledge_save import (
     KnowledgeFlashcardError,
     resolve_knowledge_flashcard,
 )
-from tldw_Server_API.app.core.Chat.persistence_service import save_workspace_chat_model_selection
+from tldw_Server_API.app.core.Chat.persistence_service import (
+    assistant_generation_extra,
+    save_workspace_chat_model_selection,
+)
 
 # Backward-compatible re-exports for legacy tests patching these symbols on the endpoint module.
 from tldw_Server_API.app.core.Chat.prompt_template_manager import (  # noqa: F401
@@ -3171,6 +3174,12 @@ async def _save_message_turn_to_db(
             serialized_extra = {}
         serialized_extra.update(sender_meta)
 
+    generation_extra = assistant_generation_extra(message_obj)
+    if generation_extra:
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra.update(generation_extra)
+
     if serialized_extra is not None and not serialized_extra:
         serialized_extra = None
 
@@ -3382,7 +3391,14 @@ async def _persist_system_message_if_needed(
         status.HTTP_400_BAD_REQUEST: {"description": "Invalid request (e.g., empty messages, text too long, bad parameters)."},
         status.HTTP_401_UNAUTHORIZED: {"description": "Invalid authentication token."},
         status.HTTP_404_NOT_FOUND: {"description": "Resource not found (e.g., character)."},
-        status.HTTP_409_CONFLICT: {"description": "Data conflict (e.g., version mismatch during DB operation)."},
+        status.HTTP_409_CONFLICT: {
+            "description": (
+                "Data conflict (e.g., version mismatch during DB operation, or a stale "
+                "`tldw_history_selection_v1`). With `tldw_history_branch: false`, a selection whose "
+                "last message already has a live child is refused before any provider call with "
+                "`detail.code` `history_branch_changed` and the current `leaf_ids`."
+            )
+        },
         status.HTTP_413_CONTENT_TOO_LARGE: {"description": "Request payload too large (e.g., too many messages, too many images)."},
         status.HTTP_402_PAYMENT_REQUIRED: {"description": "Billing limit exceeded. Upgrade plan to continue."},
         status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded."},
@@ -4612,6 +4628,10 @@ async def create_chat_completion(
                     )
                     history_scope = conversation_scope
                     _verify_conversation_ownership(chat_db, final_conversation_id, current_user, history_scope)
+                    # A server-settled turn stays refused for a Sync v2 owner. This request saves the
+                    # reply itself, so no client retry would publish it if its Sync capture were lost.
+                    # Client-managed turns (POST /chats/{id}/messages) are supported.
+                    # See Docs/Design/2026-10-04-d7-sync-v2-native-history.md.
                     if _active_message_sync_service(current_user, history_scope) is not None:
                         raise HTTPException(409, detail={"code": "sync_owner_unsupported", "status": "unsupported_history_capability"})
                     history_owner = native_history_owner_key(request, current_user.id)
@@ -4658,6 +4678,7 @@ async def create_chat_completion(
                         if payload.get("role") == "system":
                             return None
                         prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync)
+                        prepared["extra_metadata"].update(assistant_generation_extra(payload))
                         prepared["id"] = str(uuid.uuid4())
                         prepared["parent_message_id"] = reference["input_message_id"]
                         try:
@@ -6490,11 +6511,14 @@ def _conversation_search_query_strategy(
     *,
     include_deleted: bool,
     deleted_only: bool,
+    search_in: str | None = None,
 ) -> str:
     if not (query or "").strip():
         return "none"
     if include_deleted or deleted_only:
         return "deleted_text"
+    if "content" in {field.strip().lower() for field in (search_in or "").split(",")}:
+        return "fts_content"
     return "fts"
 
 
@@ -6505,12 +6529,14 @@ def _conversation_search_metric_labels(
     include_deleted: bool,
     deleted_only: bool,
     outcome: str,
+    search_in: str | None = None,
 ) -> dict[str, str]:
     return {
         "query_strategy": _conversation_search_query_strategy(
             query,
             include_deleted=include_deleted,
             deleted_only=deleted_only,
+            search_in=search_in,
         ),
         "order_by": order_by,
         "deleted_scope": _conversation_search_deleted_scope(include_deleted, deleted_only),
@@ -7076,7 +7102,20 @@ async def save_chat_knowledge(
     include_in_schema=False,
 )
 async def list_chat_conversations(
-    query: str | None = Query(None, description="Search term for conversation title"),
+    query: str | None = Query(
+        None,
+        description="Search term, matched against the fields named by search_in (the title by default)",
+    ),
+    search_in: str | None = Query(
+        None,
+        max_length=64,
+        description=(
+            "Comma-separated fields the query is matched against: 'title' (default) and/or 'content' "
+            "(the text of live messages). With 'content', title matches rank first and each item reports "
+            "matched_in, match_snippet and match_message_id. Trash views (include_deleted/deleted_only) "
+            "always search title, topic and state only."
+        ),
+    ),
     state: str | None = Query(None, description="Conversation state"),
     topic_label: str | None = Query(None, description="Topic label filter (use * for prefix)"),
     keywords: list[str] | None = Query(None, description="Keyword filters (repeatable)"),
@@ -7107,6 +7146,7 @@ async def list_chat_conversations(
             include_deleted=effective_include_deleted,
             deleted_only=deleted_only,
             outcome=outcome,
+            search_in=search_in,
         )
         duration_seconds = max(time.perf_counter() - started_at, 0.0)
         registry = get_metrics_registry()
@@ -7136,9 +7176,12 @@ async def list_chat_conversations(
         end_iso = _parse_iso_datetime(end_date, "end_date").isoformat() if end_date else None
         resolved_scope = _resolve_conversation_scope(scope_type, workspace_id)
         search_as_of = datetime.now(timezone.utc)
+        # Title-only callers keep the exact call they always made; the store validates search_in.
+        search_field_kwargs: dict[str, Any] = {"search_in": search_in} if search_in and search_in.strip() else {}
 
         page_rows, total, _max_bm25 = db.search_conversations_page(
             query,
+            **search_field_kwargs,
             client_id=str(current_user.id),
             include_deleted=effective_include_deleted,
             deleted_only=deleted_only,
@@ -7198,6 +7241,9 @@ async def list_chat_conversations(
                     source=row.get("source"),
                     external_ref=row.get("external_ref"),
                     version=row.get("version") or 1,
+                    matched_in=row.get("matched_in"),
+                    match_snippet=row.get("match_snippet"),
+                    match_message_id=row.get("match_message_id"),
                 )
             )
 
@@ -8290,14 +8336,21 @@ async def capture_conversation_history(
     current_user: User = Depends(get_request_user),
 ):
     """Capture a complete owner-bound history manifest and selected content."""
-    from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
     from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection, snapshot_to_wire
     from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
 
     scope = _resolve_conversation_scope(scope_type, workspace_id)
-    _verify_conversation_ownership(db, conversation_id, current_user, scope)
-    if _active_message_sync_service(current_user, scope) is not None:
-        raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
+    conversation = _verify_conversation_ownership(db, conversation_id, current_user, scope)
+    # A capture is a read and the capability handshake for versioned writes. A Sync v2
+    # owner passes it for client-managed turns, whose admission and settlement publish
+    # their envelopes (character_messages.send_message). A chat bound to a character
+    # takes server-settled turns (the server owns its input and result writes), which
+    # that owner cannot use yet, so the handshake still refuses it, before any dispatch.
+    if conversation.get("assistant_kind") == "character" or conversation.get("character_id") is not None:
+        from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
+
+        if _active_message_sync_service(current_user, scope) is not None:
+            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
     owner = native_history_owner_key(request, current_user.id)
     view = body.view.model_dump(mode="json")
     if view["conversation_id"] != conversation_id or view["owner_key"] not in {None, owner}:
@@ -8332,13 +8385,12 @@ async def confirm_conversation_history_projection(
     current_user: User = Depends(get_request_user),
 ):
     """Retain one immutable reviewed interpretation after an authorized source CAS."""
-    from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
     from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
 
     scope = _resolve_conversation_scope(scope_type, workspace_id)
     _verify_conversation_ownership(db, conversation_id, current_user, scope)
-    if _active_message_sync_service(current_user, scope) is not None:
-        raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
+    # The projection is this owner's reading of rows that already exist. It changes no
+    # message, so a Sync v2 owner records it without an envelope.
     if body.confirmation.conversation_id != conversation_id:
         raise HTTPException(409, detail={"code": "owner_conversation_mismatch"})
     try:

@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import React from "react"
-import { render, renderHook, screen } from "@testing-library/react"
+import { act, render, renderHook, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { Switch, Tooltip } from "antd"
 import ts from "typescript"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import english from "@/assets/locale/en/playground.json"
 import { usePersistenceMode } from "../usePersistenceMode"
 
@@ -228,4 +228,126 @@ describe("actual compact history switch semantics", () => {
       expect(onToggleTemporaryChat).toHaveBeenCalledWith(!temporaryChat)
     }
   )
+})
+
+import { beginServerChatWrite, resetServerChatSaveStatus } from "@/store/server-chat-save-status"
+import { getChatPersistenceCopy, resolveChatPersistenceKind } from "@/utils/chat-persistence-status"
+
+const renderReceipt = (params: {
+  temporaryChat?: boolean
+  serverChatId?: string | null
+}) =>
+  renderHook((props: typeof params) =>
+    usePersistenceMode({
+      temporaryChat: props.temporaryChat ?? false,
+      serverChatId: props.serverChatId ?? null
+    }),
+    { initialProps: params }
+  )
+
+describe("usePersistenceMode labels (CS-03 / XS-05, #3104)", () => {
+  beforeEach(() => {
+    resetServerChatSaveStatus()
+  })
+
+  it("labels a local-only chat as saved on this device, even while the server is connected", () => {
+    const { result } = renderReceipt({ serverChatId: null })
+
+    expect(result.current.persistenceKind).toBe("local")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).pill).toBe("Saved on this device")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).description).toBe(
+      "Saved on this device only. This chat is not on your tldw server."
+    )
+  })
+
+  it("labels a server chat with an acknowledged write as saved on server", () => {
+    beginServerChatWrite("chat-1")("saved")
+
+    const { result } = renderReceipt({ serverChatId: "chat-1" })
+
+    expect(result.current.persistenceKind).toBe("server")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).pill).toBe("Saved on server")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).description).toBe(
+      "Saved on your tldw server and on this device."
+    )
+  })
+
+  it("labels a chat opened from the server as saved on server before any new write", () => {
+    const { result } = renderReceipt({ serverChatId: "chat-from-history" })
+
+    expect(result.current.persistenceKind).toBe("server")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).pill).toBe("Saved on server")
+  })
+
+  it("does not claim the server while a server write is pending", () => {
+    beginServerChatWrite("chat-1")
+
+    const { result } = renderReceipt({ serverChatId: "chat-1" })
+
+    expect(result.current.persistenceKind).toBe("serverSaving")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).pill).toBe("Saving to server…")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).pill).not.toBe("Saved on server")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).description).toBe(
+      "Saved on this device. Waiting for your tldw server to confirm the latest changes."
+    )
+  })
+
+  it("does not claim the server after a server write failed", () => {
+    beginServerChatWrite("chat-1")("failed")
+
+    const { result } = renderReceipt({ serverChatId: "chat-1" })
+
+    expect(result.current.persistenceKind).toBe("serverFailed")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).pill).toBe("Couldn't save to server")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).description).toBe(
+      "Saved on this device. Your tldw server didn't confirm the latest changes."
+    )
+  })
+
+  it("updates when the pending server write is acknowledged", () => {
+    const endWrite = beginServerChatWrite("chat-1")
+    const { result } = renderReceipt({ serverChatId: "chat-1" })
+    expect(result.current.persistenceKind).toBe("serverSaving")
+
+    act(() => endWrite("saved"))
+
+    expect(result.current.persistenceKind).toBe("server")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).pill).toBe("Saved on server")
+  })
+
+  it("labels a temporary chat as temporary even if a server id lingers", () => {
+    beginServerChatWrite("chat-1")("saved")
+
+    const { result } = renderReceipt({ temporaryChat: true, serverChatId: "chat-1" })
+
+    expect(result.current.persistenceKind).toBe("temporary")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).pill).toBe("Temporary")
+  })
+
+  it("never uses the 'Locally + Server' jargon in any state", () => {
+    const states = [
+      { temporaryChat: true },
+      { serverChatId: null },
+      { serverChatId: "chat-1" }
+    ]
+    for (const state of states) {
+      const { result } = renderReceipt(state)
+      expect(getChatPersistenceCopy(translate, result.current.persistenceKind).pill).not.toMatch(/locally/i)
+      expect(getChatPersistenceCopy(translate, result.current.persistenceKind).description).not.toMatch(/locally/i)
+    }
+  })
+})
+
+describe("resolveChatPersistenceKind", () => {
+  it.each([
+    [{ temporaryChat: true, serverChatId: "c", serverSaveStatus: "saved" }, "temporary"],
+    [{ temporaryChat: false, serverChatId: null, serverSaveStatus: "unknown" }, "local"],
+    [{ temporaryChat: false, serverChatId: "  ", serverSaveStatus: "saved" }, "local"],
+    [{ temporaryChat: false, serverChatId: "c", serverSaveStatus: "unknown" }, "server"],
+    [{ temporaryChat: false, serverChatId: "c", serverSaveStatus: "saved" }, "server"],
+    [{ temporaryChat: false, serverChatId: "c", serverSaveStatus: "saving" }, "serverSaving"],
+    [{ temporaryChat: false, serverChatId: "c", serverSaveStatus: "failed" }, "serverFailed"]
+  ] as const)("%o -> %s", (input, expected) => {
+    expect(resolveChatPersistenceKind(input)).toBe(expected)
+  })
 })

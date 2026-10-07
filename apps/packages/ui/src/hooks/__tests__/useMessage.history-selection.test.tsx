@@ -457,6 +457,10 @@ vi.mock("@/utils/mcp-disclosure", () => ({
 }))
 
 import { useMessage } from "../useMessage"
+import {
+  SidepanelSendGateContext,
+  type SidepanelSendGate
+} from "@/hooks/chat/sidepanel-send-gate"
 
 const h1 = vi.hoisted(() => ({
   native: false,
@@ -2011,4 +2015,60 @@ it.each(["default", "alternate_index"] as const)("actual compact submit binds th
   expect(h1.live).not.toHaveBeenCalled()
   expect(mocks.finalModel.stream).not.toHaveBeenCalled()
   hook.unmount(); selection.unmount()
+})
+
+describe("side-panel send gate (XP-08)", () => {
+  const withGate = (gate: SidepanelSendGate) => {
+    const ref = { current: gate }
+    return ({ children }: { children: React.ReactNode }) => (
+      <SidepanelSendGateContext.Provider value={ref}>
+        {children}
+      </SidepanelSendGateContext.Provider>
+    )
+  }
+
+  it("holds a send the gate refuses before anything reaches the server", async () => {
+    const gate = vi.fn<SidepanelSendGate>(async () => ({ proceed: false, refreshed: false }))
+    const { result } = renderHook(() => useMessage(), { wrapper: withGate(gate) })
+    await act(async () => {
+      await result.current.onSubmit({ message: "next", image: "" })
+    })
+    expect(gate).toHaveBeenCalledWith({ message: "next" })
+    expect(h1.capture).not.toHaveBeenCalled()
+    expect(h1.append).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+  })
+
+  it("sends from the message the gate refreshed the tab onto", async () => {
+    // The server gained a newer answer (a2); the gate moves the tab onto it.
+    const gate = vi.fn<SidepanelSendGate>(async () => {
+      const current = h1.controller.getCurrent()
+      current.view = { ...current.view, cursor: { kind: "after_message", message_id: "a2" } }
+      current.capture = captureFor(current.view)
+      return { proceed: true, refreshed: true }
+    })
+    const { result } = renderHook(() => useMessage(), { wrapper: withGate(gate) })
+    await act(async () => {
+      await result.current.onSubmit({ message: "next", image: "" })
+    })
+    expect(gate).toHaveBeenCalledOnce()
+    const user = h1.append.mock.calls[0][1]
+    expect(
+      user.tldw_history_selection_v1.messages.map((row: any) => row.id)
+    ).toEqual(["u-old", "a2"])
+  })
+
+  it("does not ask the gate before regenerating an answer", async () => {
+    const gate = vi.fn<SidepanelSendGate>(async () => ({ proceed: false, refreshed: false }))
+    const current = h1.controller.getCurrent()
+    current.status = "idle"
+    current.owner = null
+    current.view = null
+    mocks.storeState.serverChatId = null
+    const { result } = renderHook(() => useMessage(), { wrapper: withGate(gate) })
+    await act(async () => {
+      await result.current.onSubmit({ message: "again", image: "", isRegenerate: true })
+    })
+    expect(gate).not.toHaveBeenCalled()
+  })
 })

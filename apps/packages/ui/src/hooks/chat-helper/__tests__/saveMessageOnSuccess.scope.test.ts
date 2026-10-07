@@ -409,3 +409,20 @@ it("local tool-only settlement preserves canonical tool metadata for the next ow
     metadataExtra: { tool_calls: calls }
   })
 })
+
+
+it.each([false, true])("retains the assistant receipt before cleanup fails (acknowledged=%s)", async acknowledged => {
+  const turn = {
+    resultId: undefined as string | undefined,
+    owner: { kind: "native", conversation_id: "original" },
+    admission: { input_message_id: "accepted" },
+    createdAt: 123,
+    complete: vi.fn(async () => { throw new Error("cleanup failed") })
+  }
+  if (!acknowledged) mocks.settle.mockRejectedValueOnce(new Error("save response lost"))
+  await expect(saveMessageOnSuccess(payload({ historyTurn: turn }) as Parameters<typeof saveMessageOnSuccess>[0])).rejects.toThrow(
+    acknowledged ? "cleanup failed" : "save response lost"
+  )
+  expect(turn.resultId).toBe(acknowledged ? "assistant-1" : undefined)
+  expect(turn.complete).toHaveBeenCalledTimes(acknowledged ? 1 : 0)
+})

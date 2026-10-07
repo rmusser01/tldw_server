@@ -18,6 +18,10 @@ import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useBuddyManagementStore } from "@/store/buddy-management"
 import { buildQueuedRequest } from "@/utils/chat-request-queue"
 
+// Declared local sources have acknowledged rows/profile; only the table engine is doubled.
+vi.mock("@/db/dexie/schema", async () => ({ db: (await import("@/hooks/chat/__tests__/local-history-fixture")).memory }))
+import { seedLocalFork } from "@/hooks/chat/__tests__/local-history-fixture"
+
 const queuedDocumentPreparation = vi.hoisted(() => vi.fn())
 vi.mock("@/services/chat-document-processing", async original => ({
   ...await original<typeof import("@/services/chat-document-processing")>(),
@@ -240,7 +244,7 @@ vi.mock("@/hooks/useChatDraftOwner", () => {
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({ data: queryKey[0] === "playground:chatModels" && nativeSetupFixture.settings
-    ? nativeSetupFixture.models : [] }),
+    ? nativeSetupFixture.models : [], isSuccess: true, isFetching: false, isError: false, refetch: vi.fn() }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
   useMutation: ({
     mutationFn,
@@ -1151,7 +1155,8 @@ vi.mock("@/hooks/playground", () => ({
   })
 }))
 
-beforeEach(() => {
+beforeEach(async () => {
+  await seedLocalFork(false)
   localStorage.clear()
   nativeSetupFixture.realSettings = false
   nativeSetupFixture.realModelPicker = false

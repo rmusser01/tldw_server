@@ -19,6 +19,12 @@ type SidepanelHeaderSimpleProps = {
   setSidebarOpen?: (open: boolean) => void
   activeTitle?: string
   onRenameTitle?: (nextTitle: string) => void
+  /**
+   * The conversation's full title for an edit to start from. `activeTitle`
+   * is the tab label, truncated for display, so it is used only when this is
+   * missing or resolves to null.
+   */
+  loadEditableTitle?: () => Promise<string | null>
   onOpenChatInWebUi?: () => Promise<boolean | void> | boolean | void
 }
 
@@ -37,6 +43,7 @@ export const SidepanelHeaderSimple = ({
   setSidebarOpen: propSetSidebarOpen,
   activeTitle,
   onRenameTitle,
+  loadEditableTitle,
   onOpenChatInWebUi
 }: SidepanelHeaderSimpleProps = {}) => {
   const historySelection = useHistorySelectionContext()
@@ -48,6 +55,10 @@ export const SidepanelHeaderSimple = ({
   const [ttsClipsOpen, setTtsClipsOpen] = React.useState(false)
   const [isEditingTitle, setIsEditingTitle] = React.useState(false)
   const [draftTitle, setDraftTitle] = React.useState(activeTitle || "")
+  // The title an edit started from; submitting it unchanged renames nothing.
+  const [titleBaseline, setTitleBaseline] = React.useState(activeTitle || "")
+  const [titleLoading, setTitleLoading] = React.useState(false)
+  const titleRequestRef = React.useRef(0)
   const titleBlurActionRef = React.useRef<"submit" | "cancel" | null>(null)
   const titleInputRef = React.useRef<HTMLInputElement>(null)
   const fullChatHandoffDescriptionId = React.useId()
@@ -88,33 +99,60 @@ export const SidepanelHeaderSimple = ({
   }, [isControlled, propSetSidebarOpen, sidebarOpen])
 
   React.useEffect(() => {
+    titleRequestRef.current++
     setDraftTitle(activeTitle || "")
+    setTitleBaseline(activeTitle || "")
+    setTitleLoading(false)
     setIsEditingTitle(false)
   }, [activeTitle])
 
   React.useEffect(() => {
-    if (!isEditingTitle) return
+    if (!isEditingTitle || titleLoading) return
     titleInputRef.current?.focus()
     titleInputRef.current?.select()
-  }, [isEditingTitle])
+  }, [isEditingTitle, titleLoading])
+
+  const startTitleEdit = React.useCallback(() => {
+    const request = ++titleRequestRef.current
+    setDraftTitle(activeTitle || "")
+    setTitleBaseline(activeTitle || "")
+    setIsEditingTitle(true)
+    if (!loadEditableTitle) return
+    setTitleLoading(true)
+    loadEditableTitle()
+      .then((title) => {
+        if (request !== titleRequestRef.current || !title?.trim()) return
+        setDraftTitle(title)
+        setTitleBaseline(title)
+      })
+      .catch((error) => {
+        console.warn("[sidepanel] Could not load the chat's title to rename", error)
+      })
+      .finally(() => {
+        if (request === titleRequestRef.current) setTitleLoading(false)
+      })
+  }, [activeTitle, loadEditableTitle])
 
   const cancelTitleEdit = React.useCallback(() => {
+    titleRequestRef.current++
+    setTitleLoading(false)
     setDraftTitle(activeTitle || "")
     setIsEditingTitle(false)
   }, [activeTitle])
 
   const submitTitleEdit = React.useCallback(() => {
+    if (titleLoading) return
     const trimmed = draftTitle.trim()
     if (!trimmed) {
       setDraftTitle(activeTitle || "")
       setIsEditingTitle(false)
       return
     }
-    if (trimmed !== (activeTitle || "").trim()) {
+    if (trimmed !== titleBaseline.trim()) {
       onRenameTitle?.(trimmed)
     }
     setIsEditingTitle(false)
-  }, [activeTitle, draftTitle, onRenameTitle])
+  }, [activeTitle, draftTitle, onRenameTitle, titleBaseline, titleLoading])
 
   const webUiOpenAttemptRef = React.useRef(0)
   const mountedRef = React.useRef(false)
@@ -212,6 +250,7 @@ export const SidepanelHeaderSimple = ({
               <input
                 ref={titleInputRef}
                 value={draftTitle}
+                disabled={titleLoading}
                 onChange={(event) => setDraftTitle(event.target.value)}
                 onBlur={() => {
                   if (!onRenameTitle) return
@@ -245,9 +284,7 @@ export const SidepanelHeaderSimple = ({
               onRenameTitle ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsEditingTitle(true)
-                  }}
+                  onClick={startTitleEdit}
                   className="group flex max-w-full items-center gap-1 text-caption text-text-muted hover:text-text"
                   title={activeTitle}
                   aria-label={t(
