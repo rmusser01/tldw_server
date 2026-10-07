@@ -12,7 +12,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
-updated_date: 2026-10-07 12:59
+updated_date: 2026-10-07 13:30
 ---
 
 ## Description
@@ -43,8 +43,9 @@ Reason: qualify browser-local source-preserving engines and new runtime dependen
 4. Qualify source-aware YAML APIs for nontrivial comments/multi-document/anchors/merges/block-scalars plus explicit unsupported refusal; compare shared validity/categories with the reviewed Python table without modifying fixture expectations. Record real package version/license/source invariants before accepting/pinning dependencies and lock updates; amend ADR065 before adoption.
 5. Run explicit contract/JSON/YAML/position selections and scoped lint/format/type checks, whole-W typecheck after shared edits, and actual Next/extension module-loading controls. No full sweep, runtime Prettier, editor/worker adoption, CDN, shared dependency rebind or user data/config.
 6. Write durable browser qualification report and full task-9-report.md with exact RED/GREEN/final commands/output/process exits, source/fixture hash, supported/refused constructs, resource/import/bundler observations and precise limits. Self-review and commit explicit unit paths; remain In Progress for fresh controller review.
+Fix round1/5 after independent E3 review: ImportantI1 repeated YAML merge declarations bypass the per-map key set; ImportantI2 explicit merge-tag scalar spellings bypass qualification. ADR065 already governs duplicate/qualified-value refusal; no new runtime/authority decision. Exact fix base9d50710a37cab6bd759b0b55b6762a4c5f64c7d2; C unchanged3ffaf527f304. Before production changes, reproduce both holes with meaningful RED in the existing whole-YAML test owner, retain valid single/sequence merges, explicit overrides and valid explicit merge tags, correct each shared TS admission branch once. Run whole amended YAML selection and relevant scoped strict/whole-W types, lint/formatter/diff, refresh the captured final-engine artifact and focused reproduced cases/positive controls. Preserve unchanged JSON/position/contract/build provenance without reruns solely to regenerate it; any new loading concern gets a named targeted build. Append exact RED/GREEN/commands/output/exits, amended artifact provenance and historical-vs-current qualification to the bounded report/durable record; self-review, explicit commits, remain In Progress for fresh scoped re-review. Deferred warning M1 is not an unrelated tooling fix.
+Additional fix1 scope under existingAC3/ADR065: actual9d captured-engine probe confirms valid four-space explicit-tagged mapping key checks complete/format-allowed but fails/no replacement during reindent because leading() sees the tag before key offset and leaves that line unchanged while siblings move. Controller Ruling38 authorizes only a small CST property-prefix indentation correction for block mapping keys, preserving inline-key/value/flow/block-scalar boundaries; no general formatter rewrite. Keep the three meaningful actual-reindent positives, add adjacent tag/anchor and inline/no-op preservation controls as needed, retain whole-YAML and final captured-bundle/strict/static/whole-W evidence. Record the actual base probe and new branch risks before scoped re-review.
 <!-- SECTION:PLAN:END -->
-
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
@@ -55,11 +56,16 @@ Evidence: final 142 targeted contract/JSON/YAML/position tests passed; strict sc
 Limits: pure synchronous engine has cooperative two-second checks, 1 MiB UTF-8 source, depth 100 and diagnostic cap 100, but no hard termination or heap ceiling (large synthetic YAML reached about 318 MB whole-process RSS). Unsupported YAML profiles, including candidate 1.1 mantissa-less floats, are explicit; Python accepts bare 1.1 dot as a string. Later worker/lifecycle qualification remains required. No full suite; Bandit not applicable because no Python production source changed. Immutable base bf0965412cb65b6fbfee3b31e5e211dbd2872841.
 
 Paths: apps/packages/ui/src/services/document-editing/{engine,json-document,yaml-document,source-positions}.ts and __tests__/{json-document,yaml-document,source-positions}.test.ts; apps/packages/ui/package.json; apps/bun.lock; Docs/ADR/065-portable-note-language-and-negotiated-structured-editing.md; backlog/docs/lessons-structured-notes.md. Durable qualification: Docs/superpowers/reviews/2026-09-27-document-engine-browser.md. Complete commands/output: Chatbook plan workspace task-9-report.md, raw captures /private/tmp/tldw-task9-evidence. Self-review completed; remains In Progress for fresh controller review.
+Review fix round 1/5 closes Important I1/I2 from base 9d50710a37cab6bd759b0b55b6762a4c5f64c7d2: merge declarations now enter the same map-local duplicate set; explicit merge tags must match qualified scalar source before target handling. Single/sequence merges, explicit imported-member overrides and sibling scopes remain supported. Ruling38 additionally authorized one shared CST property-prefix whitespace correction for tagged/anchored block mapping keys after real positive reindent controls exposed the pre-existing preservation failure. ADR065 governs these corrections; no dependency/runtime/ownership boundary changed.
+
+Evidence: I1 RED 2 failed/74 passed -> 76 passed; I2 RED 7 failed/77 passed (including three layout failures), then 3 failed/81 passed; expanded layout RED 5 failed/86 passed -> final whole YAML 91 passed. Strict scoped types, whole-W 8 GiB typecheck, changed-source ESLint/Prettier and diff checks pass. Final browser-target engine rebuilt (85 modules/no externals) and 15 exact-hole/positive/layout bundle cases pass; 260791-byte artifact SHA256 2ebc823bdccb659abe3b00d003733a9539ff594d18c83d0a1f49254ae546c1c2. Original bundle/captures retained; current engine-final.mjs points to amended artifact. Frozen fixture SHA unchanged. No unchanged JSON/positions/contracts, benchmarks, Next/WXT builds or old browser controls rerun; their existing 9d50710a37 provenance is historical, not new amended-source qualification.
+
+Paths: yaml-document.ts and its existing YAML test owner; durable browser qualification report; structured-notes lessons; this task. Bounded fix evidence appended to Chatbook plan task-9-report.md; exact commands/output/exits/source/artifact hashes under /private/tmp/tldw-task9-evidence/fix1. Self-review complete; remaining cooperative timing/heap/lifecycle limits and deferred inherited warning M1 unchanged. Bandit N/A, no Python production edits. Keep In Progress for fresh scoped controller review.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Pure browser engines qualified with 142 passing targeted tests, actual Next/WXT browser loading, unchanged shared fixtures and explicit YAML/resource/lifecycle limits; awaiting controller review.
+Review fix1: merge duplicate/tag-value admission and approved CST property-prefix indentation corrected; 91 YAML tests and 15 amended bundle controls pass, static/types clean; In Progress pending fresh review.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->

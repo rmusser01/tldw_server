@@ -29,3 +29,15 @@ cross-runtime semantics. Keep per-document source metadata, require a real
 mantissa for finite numeric identities, and decline unqualified interpretations
 without modifying the draft. Evidence: the E3 browser qualification report and
 `/private/tmp/tldw-task9-evidence/{version,mantissa}-{red,green}.log`.
+
+### E3 merge review and property-prefix indentation (2026-10-07)
+
+Task 13518 review found that exempting merge processing from the ordinary key set
+also admitted repeated `<<` declarations; imported-member overrides do not exempt
+the merge declaration itself. The same review found `!!merge x` bypassed the tag's
+source matcher. Adjacent real formatting controls then showed yaml 2.8.1 CST key
+offsets start after tags/anchors: reindenting only the scalar offset left that
+line behind and failed the source-preservation gate. Track merge declarations in
+the map-local set, qualify tag values before merge handling, and use retained CST
+property tokens when adjusting leading key whitespace. The 91-case YAML selection
+and 15 amended bundle controls cover these incidents; generic dumping is no remedy.

@@ -142,7 +142,7 @@ export function analyzeYaml(
         !tag.startsWith(TAG) ||
         !SCALARS.has(name) ||
         (node.tag &&
-          !["str", "merge"].includes(name) &&
+          name !== "str" &&
           !doc.schema.tags.some((t) => t.tag === tag && t.test?.test(source)))
       ) {
         unsupported(node.range?.[0] ?? 0, node.range?.[1] ?? 0);
@@ -209,7 +209,11 @@ export function analyzeYaml(
           const k = pair.key as Node | null,
             v = pair.value as Node | null;
           const identity = walk(k, true, depth + 1);
-          if (isScalar(k) && tagOf(k, true) === TAG + "merge") {
+          if (
+            identity !== null &&
+            isScalar(k) &&
+            tagOf(k, true) === TAG + "merge"
+          ) {
             const qualified = (target: Node | null): boolean =>
               isMap(target) ||
               (isAlias(target) && isMap(anchors.get(target.source)));
@@ -224,7 +228,8 @@ export function analyzeYaml(
                 k.range[1],
                 "Merge target is not a qualified mapping.",
               );
-          } else if (identity !== null) {
+          }
+          if (identity !== null) {
             if (keys.has(identity))
               context.report(
                 "duplicate_key",
@@ -284,7 +289,13 @@ export function analyzeYaml(
         separators(item.start);
         if (item.sep) separators(item.sep);
         for (const start of item.start)
-          if (start.type === "seq-item-ind") leading(start.offset, indent);
+          if (
+            start.type === "seq-item-ind" ||
+            (token.type === "block-map" &&
+              item.key &&
+              ["tag", "anchor"].includes(start.type))
+          )
+            leading(start.offset, indent);
         if (item.key) {
           leading(item.key.offset, indent);
           layout(item.key, indent);

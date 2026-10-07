@@ -279,3 +279,43 @@ Fixture v1 SHA-256: `fcf516e4c0bb8ff7a19748a4d5f7deb8a30ad0078ea0ce2af0e1e81af50
 | yaml-chomping | checked | — | [] | true | unchanged |
 | yaml-duplicate | checked | duplicate_key | [[5,6]] | false | blocked |
 | yaml-malformed | checked | syntax | [[9,9]] | false | blocked |
+
+## Review fix round 1 — merge admission and key-property indentation
+
+Fix base: `9d50710a37cab6bd759b0b55b6762a4c5f64c7d2`. Independent review found
+that merge declarations skipped per-map duplicate tracking and explicit merge
+scalar tags skipped value qualification. Both shared admission branches are
+corrected: merge identities enter the same per-map key set, independently of
+symbolic merge-target validation; explicit merge tags use the existing schema
+source matcher (`^<<$`), and an unqualified scalar cannot enter merge handling.
+Single mapping/alias/sequence merges and explicit imported-member overrides stay
+qualified, sibling-map scopes stay separate, and quoted string `"<<"` is distinct.
+
+Adjacent positive controls exposed a pre-existing layout failure: CST mapping
+key offsets follow tag/anchor properties, so the formatter left their line's
+indentation while moving sibling keys. The base bundle safely returned failed/no
+replacement. Controller Ruling 38 authorized a narrow existing-AC3 correction:
+the same leading-whitespace helper now also visits tag/anchor tokens in the start
+of block-map keys. Exact token spellings, both property orders, inline key/value
+properties, flow layouts, block-scalar contents, no-op and idempotence are covered.
+The original three explicit-merge reindent expectations were retained.
+
+Whole-YAML RED/GREEN: I1 2 failed/74 passed → 76 passed; I2 7 failed/77 passed
+(including three newly exposed layout failures) → 3 failed/81 passed after
+admission correction; expanded layout RED 5 failed/86 passed → final **91 passed**.
+Final scoped strict types, whole-W 8 GiB typecheck, changed-source ESLint/Prettier
+and diff checks pass. No unchanged JSON/position/contract suite, benchmark,
+Next/WXT build or browser-lifecycle probe was rerun. Those original observations
+above remain evidence for the original head, not the amended source.
+
+The refreshed browser-target engine (esbuild 0.27.2, 85 modules, no externals)
+passes 15 focused bundle cases including the exact reproduced holes and adjacent
+positive/layout controls. Artifact: `/private/tmp/tldw-task9-evidence/fix1/engine-fix1.mjs`,
+also copied to the review probe's `/private/tmp/tldw-task9-evidence/engine-final.mjs`;
+260,791 bytes, SHA-256 `2ebc823bdccb659abe3b00d003733a9539ff594d18c83d0a1f49254ae546c1c2`.
+Original 260,687-byte bundle is preserved as `fix1/engine-base-9d50710a37.mjs`.
+Full commands, outputs, exit JSON and source/artifact hashes live under
+`/private/tmp/tldw-task9-evidence/fix1`; the bounded task report has the evidence
+index. Shared fixture SHA remains unchanged. Pure-engine resource/lifecycle limits
+and deferred inherited tooling warning M1 remain as previously disclosed.
+ADR065 already governs this correction; no dependency or ownership boundary changed.

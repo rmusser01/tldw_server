@@ -219,3 +219,110 @@ it("keeps default 1.2 and quoted dot keys as exact strings", () => {
     expect(formatDocument(requestFor(text, "yaml")).state).toBe("unchanged");
   }
 });
+it.each(["<<", "!!merge <<"])(
+  "blocks repeated merge declarations in one mapping: %s",
+  (secondKey) => {
+    const text = `a: &a {x: 1}\nb: &b {y: 2}\nc:\n    <<: *a\n    ${secondKey}: *b\n`;
+    const req = requestFor(text, "yaml");
+    const check = checkDocument(req);
+    expect(check.state).toBe("checked");
+    expect(check.diagnostics.map((d) => d.code)).toEqual(["duplicate_key"]);
+    expect(
+      text.slice(check.diagnostics[0].start, check.diagnostics[0].end),
+    ).toBe("<<");
+    expect(check.format_allowed).toBe(false);
+    expect(formatDocument(req).state).toBe("blocked");
+    expect(formatDocument(req).replacement).toBeNull();
+  },
+);
+it.each(["*a", "[*a, *b]", "{x: 1}"])(
+  "preserves a single merge target and explicit imported-member override: %s",
+  (target) => {
+    const text = `a: &a {x: 1}\nb: &b {y: 2}\nc:\n    <<: ${target}\n    x: 2\n`;
+    const expected = `a: &a {x: 1}\nb: &b {y: 2}\nc:\n  <<: ${target}\n  x: 2\n`;
+    const req = requestFor(text, "yaml");
+    expect(checkDocument(req).diagnostics).toEqual([]);
+    const result = formatDocument(req);
+    expect(result.state).toBe("formatted");
+    expect(result.replacement).toBe(expected);
+    expect(formatDocument(requestFor(expected, "yaml")).state).toBe(
+      "unchanged",
+    );
+  },
+);
+it("keeps merge declaration identities scoped to sibling mappings", () => {
+  const text = "a: &a {x: 1}\nb: {<<: *a}\nc: {<<: *a}\n";
+  expect(checkDocument(requestFor(text, "yaml")).format_allowed).toBe(true);
+  expect(formatDocument(requestFor(text, "yaml")).state).toBe("unchanged");
+});
+it("distinguishes a merge declaration from a quoted string key", () => {
+  const text = '<<: {x: 1}\n"<<": literal\n';
+  expect(checkDocument(requestFor(text, "yaml")).diagnostics).toEqual([]);
+  expect(formatDocument(requestFor(text, "yaml")).state).toBe("unchanged");
+});
+it.each([
+  "!!merge x: {a: 1}\n!!merge x: {b: 2}\n",
+  "!!merge x: {a: 1}\n",
+  "!!merge x\n",
+  "value: !!merge x\n",
+  "!!merge x: 1\n",
+])(
+  "refuses an explicit merge tag with unqualified scalar spelling: %s",
+  (text) => {
+    const req = requestFor(text, "yaml");
+    const check = checkDocument(req);
+    expect(check.state).toBe("unsupported");
+    expect(check.complete).toBe(false);
+    expect(check.diagnostics.map((d) => d.code)).toEqual(
+      text === "!!merge x: {a: 1}\n!!merge x: {b: 2}\n"
+        ? ["unsupported", "unsupported"]
+        : ["unsupported"],
+    );
+    expect(check.format_allowed).toBe(false);
+    expect(formatDocument(req).state).toBe("blocked");
+    expect(formatDocument(req).replacement).toBeNull();
+  },
+);
+it.each(["!!merge <<", '!!merge "<<"', "!<tag:yaml.org,2002:merge> <<"])(
+  "preserves a qualified explicit merge scalar tag: %s",
+  (key) => {
+    const text = `a: &a {x: 1}\nb:\n    ${key}: *a\n    x: 2\n`;
+    const expected = `a: &a {x: 1}\nb:\n  ${key}: *a\n  x: 2\n`;
+    const req = requestFor(text, "yaml");
+    expect(checkDocument(req).diagnostics).toEqual([]);
+    const result = formatDocument(req);
+    expect(result.state).toBe("formatted");
+    expect(result.replacement).toBe(expected);
+    expect(formatDocument(requestFor(expected, "yaml")).state).toBe(
+      "unchanged",
+    );
+  },
+);
+it.each(["!!str &key name", "&key !!str name"])(
+  "reindents mapping key properties without rewriting their tokens: %s",
+  (key) => {
+    const text = `root:\n    ${key}:  value\n    copy: *key\nbody: |-\n  keep  spaces\n`;
+    const expected = `root:\n  ${key}: value\n  copy: *key\nbody: |-\n  keep  spaces\n`;
+    const result = formatDocument(requestFor(text, "yaml"));
+    expect(result.state).toBe("formatted");
+    expect(result.replacement).toBe(expected);
+    expect(formatDocument(requestFor(expected, "yaml")).state).toBe(
+      "unchanged",
+    );
+  },
+);
+it.each([
+  "!!str key: !!str value\n",
+  "root:\n  !!str key: &value raw\n  copy: *value\n",
+  "root: {!!str key: !!str value}\n",
+  "- !!str key: value\n  other: !!str value\n",
+  "body: |-\n  !!str key:  literal bytes\n",
+])(
+  "retains inline properties, flow and block-scalar boundaries: %s",
+  (text) => {
+    expect(checkDocument(requestFor(text, "yaml")).format_allowed).toBe(true);
+    const result = formatDocument(requestFor(text, "yaml"));
+    expect(result.state).toBe("unchanged");
+    expect(result.replacement).toBeNull();
+  },
+);
