@@ -1,6 +1,6 @@
 id: TASK-13511
 title: Remediate WebUI and extension performance review findings
-status: In Progress
+status: Done
 labels:
 - frontend
 - performance
@@ -52,7 +52,7 @@ Note: implemented across parallel subagents + direct edits after several subagen
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the tractable performance fixes from the 2026-10-06 WebUI/extension review: extension per-page JS cost cut ~99% (4.5KB+8.2KB top-frame-only stubs vs 560KB+337KB in every frame), MV3 worker cold-start fan-out removed, ingest N+1 polling batched, web auth/health gate parallelized with non-blocking reconnect banner, chat streaming re-render cost bounded to visible rows (selectors + memoized rows + shared 80ms scheduler), KnowledgeQA throttled, per-request debug deep-clones made lazy, keyword searches debounced, dead files removed. Large architectural refactors deferred to TASK-13526. PR against dev from codex/frontend-perf-arch-remediation-20261006.
+Implemented the tractable performance fixes from the 2026-10-06 WebUI/extension review: extension per-page JS cost cut ~99% (4.5KB+8.2KB top-frame-only stubs vs 560KB+337KB in every frame), MV3 worker cold-start fan-out removed, ingest N+1 polling batched, web auth/health gate parallelized with non-blocking reconnect banner, chat streaming re-render cost bounded to visible rows (selectors + memoized rows + shared 80ms scheduler), KnowledgeQA throttled, per-request debug deep-clones made lazy, keyword searches debounced, dead files removed. Large architectural refactors deferred to TASK-13526. PR: https://github.com/rmusser01/tldw_server/pull/3210 (branch codex/frontend-perf-arch-remediation-20261006, base dev).
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
