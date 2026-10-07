@@ -74,14 +74,14 @@ export default defineConfig({
     {
       name: 'notes-firefox',
       testDir: 'e2e',
-      testMatch: 'notes-structured-editing.spec.ts',
+      testMatch: /notes-(structured-editing|monaco-qualification)\.spec\.ts/,
       retries: 0,
       use: { ...devices['Desktop Firefox'] },
     },
     {
       name: 'notes-webkit',
       testDir: 'e2e',
-      testMatch: 'notes-structured-editing.spec.ts',
+      testMatch: /notes-(structured-editing|monaco-qualification)\.spec\.ts/,
       retries: 0,
       use: { ...devices['Desktop Safari'] },
     },

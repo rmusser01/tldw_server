@@ -1,0 +1,56 @@
+diff --git a/apps/packages/ui/src/components/Notes/NotesEditorPane.tsx b/apps/packages/ui/src/components/Notes/NotesEditorPane.tsx
+index 0a357f74c2..a3a54676a8 100644
+--- a/apps/packages/ui/src/components/Notes/NotesEditorPane.tsx
++++ b/apps/packages/ui/src/components/Notes/NotesEditorPane.tsx
+@@ -1,4 +1,5 @@
+ import React from 'react'
++import { MonacoNotesQualification } from './__tests__/fixtures/MonacoNotesQualification'
+ import type { InputRef } from 'antd'
+ import { Input, Typography, Select, Button, Tooltip, Spin } from 'antd'
+ import {
+@@ -96,6 +97,7 @@ export interface NoteRelationsShape {
+ }
+
+ export interface NotesEditorPaneProps {
++  qualification?: {authority:string; language:string; editable:boolean}
+   // Layout
+   isMobileViewport: boolean
+   setMobileSidebarOpen: (open: boolean) => void
+@@ -310,6 +312,7 @@ export const NotesEditorEmptyState: React.FC<{
+ }
+
+ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
++  qualification,
+   isMobileViewport,
+   setMobileSidebarOpen,
+   selectedId,
+@@ -1581,7 +1584,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
+                     defaultValue: 'Edit'
+                   })}
+                 </Typography.Text>
+-                {editorInputMode === 'wysiwyg' ? (
++                {qualification && ['json','jsonl','yaml'].includes(qualification.language) ? <MonacoNotesQualification key={JSON.stringify([qualification.authority, selectedId, qualification.language])} value={content} authority={qualification.authority} documentId={String(selectedId)} language={qualification.language} editable={qualification.editable} onChange={handleEditorChange} /> : editorInputMode === 'wysiwyg' ? (
+                   <div
+                     ref={richEditorRef}
+                     role="textbox"
+@@ -1720,7 +1723,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
+             </div>
+           ) : (
+             <div className="flex h-full min-h-0 flex-col">
+-              {editorInputMode === 'wysiwyg' ? (
++              {qualification && ['json','jsonl','yaml'].includes(qualification.language) ? <MonacoNotesQualification key={JSON.stringify([qualification.authority, selectedId, qualification.language])} value={content} authority={qualification.authority} documentId={String(selectedId)} language={qualification.language} editable={qualification.editable} onChange={handleEditorChange} /> : editorInputMode === 'wysiwyg' ? (
+                 <div
+                   ref={richEditorRef}
+                   role="textbox"
+diff --git a/apps/packages/ui/src/components/Notes/NotesManagerPage.tsx b/apps/packages/ui/src/components/Notes/NotesManagerPage.tsx
+index a614c51581..3ef159b0a8 100644
+--- a/apps/packages/ui/src/components/Notes/NotesManagerPage.tsx
++++ b/apps/packages/ui/src/components/Notes/NotesManagerPage.tsx
+@@ -2525,6 +2525,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
+         />
+       ) : (
+       <NotesEditorPane
++        qualification={{authority:notesGraphAuthorityScope ?? "unavailable",language:ed.contentLanguage ?? "markdown",editable:!editorDisabled && Boolean(notesGraphAuthorityScope) && !ed.loadingDetail && ed.saveRecoveryNotice?.kind !== "conflict"}}
+         isMobileViewport={isMobileViewport}
+         setMobileSidebarOpen={setMobileSidebarOpen}
+         selectedId={ed.selectedId}

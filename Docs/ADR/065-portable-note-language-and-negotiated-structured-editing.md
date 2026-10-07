@@ -166,3 +166,20 @@ Restoration accepts the proof only for a v3 new-draft entry with null language a
 no note/base-version identity. Rekeying to a saved note consumes it. Explicit mode
 changes/resets retain capability and complete language acknowledgement protection.
 No new storage owner, inferred language, or downgrade of an explicit mutation.
+
+### I1 Monaco qualification boundary (2026-10-07)
+
+The requester authorized a removable Monaco candidate experiment after WebKit's
+native textarea history failed. The installed Monaco distribution is copied into
+Next's public directory and WXT's existing shared public directory by a test-only
+preparation script. The candidate explicitly configures the loader to that same
+origin path. Test preparation also emits same-origin static worker bootstraps
+that import the installed worker assets and emit Monaco's readiness message;
+this avoids the distribution's blob-worker default under extension CSP. No CDN, package
+installation, source validation network request, or production editor adoption is
+introduced. Markdown keeps its existing editor. Native edits use Monaco history,
+never a second undo stack. BOM, mixed-newline and lone-CR source is refused before
+mounting an editable model; the exact original remains in a read-only fallback.
+Homogeneous LF/CRLF must additionally pass an exact model round-trip. This is an
+experiment admission profile, not a new web storage normalization policy. I3 may
+adopt only the independently reviewed qualified profile and loading mechanism.

@@ -392,3 +392,16 @@ only after the current request's profile check succeeds.
 ## A copied linter baseline needs the same module filename
 
 **PR3091, 2026-10-04.** The Buddy service-base integration copied nine reviewed dev modules into a temporary directory for a Ruff comparison. Their bytes matched the integrated modules, but the copy reported fifteen findings versus six: its temporary paths bypassed nine `BLE001` per-file ignores. Passing the real module name through `--stdin-filename` in both arms applied the same configuration and produced the same six findings. Preserve the filename/configuration context as well as source bytes when comparing static diagnostics; do not report an apparent improvement from a mismatched baseline.
+
+## Monaco history depends on its browser platform and source EOL (TASK-13512, 2026-10-07)
+
+The I1 real Notes candidate initially typed at the wrong location when host-macOS
+shortcuts were used against Playwright Desktop Chrome/Firefox Windows user agents.
+Monaco derives its keybinding platform from the UA, not the host's platform field.
+A newline-free source also defaulted to Windows CRLF, changing an LF replacement.
+Explicit source EOL at model load, exact round-trip admission, and actual UA-native
+keyboard traces exposed and fixed both errors. Test LF and CRLF history separately;
+a mocked edit or a host-based shortcut is insufficient evidence. The mounted
+composition control also caught an ignored option typo: installed Monaco 0.55 uses
+`editContext`, not `experimentalEditContextEnabled`. Synthetic composition flag
+coverage still does not establish actual OS IME behavior.
