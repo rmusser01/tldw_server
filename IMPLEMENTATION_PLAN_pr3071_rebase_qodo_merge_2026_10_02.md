@@ -1387,7 +1387,7 @@ immutable production build/token/budget checks; Bandit and normal pre-commit.
    officially. Do not choose either complete test side or weaken assertions.
 3. Complete locally: Review and qualify integrated owning source; preserve each failed attempt and
    source binding separately. Do not substitute old3ac results for successor.
-4. In progress: Publish normally using explicit GitHub URL and a fresh exact3ac lease, preserve
+4. Published, remaining gates pending: Publish normally using explicit GitHub URL and a fresh exact3ac lease, preserve
    the human Change summary byte-for-byte, then await real new-head gates.
 
 Current3ac hosted all-seven/owning checks are already complete, all15 historical
@@ -1444,3 +1444,479 @@ remain historical for the successor. Fresh exact-head Qodo is still credit-block
 native/original-profile acceptance, new-head hosted gates and normal merge/cleanup
 remain pending. No credit purchase, duplicate Qodo command, shared-service mutation,
 new application Send/resend, native fixture or fourth Character-root probe occurred.
+
+Normal publication is read back exactly: head135aca79b573cb202c39b14b6b6803921dfbbe3c,
+treef84e996bb67bc9da95dc6187084aac72fdae3958, exact parents3ac and actualdev1fc.
+All16649 bound source entries match the committed tree. Normal366-file PR/incoming
+hook preflight covers all77 staged files, dependency links excluded. Explicit GitHub
+push used the fresh exact3ac lease and existing normal LFS hook, fast-forward only.
+Whole prepared/live body9f36b70b3d9a87e92e30cddf5e0a73b028571c40fec6120a16575ca242a1f3d9
+and canonical740-byte human suffix000648a4/content3ad24a remain byte-exact.
+
+New-head15:44 readback: OPEN/base1fc/BLOCKED,2success/28queued/26skipped/1cancelled,
+no actual failures;15 historical threads resolved, oldd912 Qodo dashboard and no
+credit-restoration evidence or fresh135 review. Actual CI37489935814 at15:44:56 has
+three initial jobs(allhead135), two queued and one skipped; E2ECritical37489936082
+queued. Missing/queued/skipped/cancelled required or owning jobs are NOT passed.
+All135 hosted required/owning qualification, fresh review and applicable acceptance
+remain pending. No PR merge or cleanup. These post-publication plan/task receipts
+remain intentionally UNCOMMITTED/UNPUBLISHED so healthy hosted runs are preserved.
+
+## Stage 25: Manual Review Corrections
+**Goal**: Correct validated MR-1 through MR-5 without weakening durable ownership,
+checkpoint, error or quota boundaries.
+**Success Criteria**: Each correction has causal RED/GREEN coverage and substantive
+independent manual review. The eventual integrated batch has fresh source-bound
+local and hosted qualification; native acceptance remains independently pending.
+**Tests**: Begin MR-5 with finite RG/legacy token admission and real owned queue
+HTTP/SQLite cases, using the existing provider double and intact receipt assertions.
+**Status**: In Progress
+
+Published135 hosted all-seven/owning/204-shard qualification is complete. The human
+replaced fresh Qodo with manual review, which found five open P2s. Actualdev1e06 is
+not integrated. Start with MR-5 by reusing the existing inference-only envelope at
+all admission paths, retaining full request-size validation and persistence. No
+publication, provider/native inference, browser probe or shared-service mutation
+is part of this bounded correction. The other four findings remain open.
+
+MR-5 is now locally corrected, independently reviewed and UNCOMMITTED/UNPUBLISHED.
+Initial invalid fixture attempt10FAIL/10PASS is retained as failed, not causal RED.
+Distinct corrected REDv2 has8FAIL/12PASS: false429s for both finite limiters and
+4858/4859-token cited queue estimates across all four modes. Same20 cases GREEN;
+final owning101PASS/7files/0FAIL/ERROR/SKIP includes two full-envelope413 guards,
+with all9094 API/test/config source entries exact. Production changes only the
+endpoint's placement/reuse of the existing inference-only JSON; full-envelope
+validation, original persistence, completion budget and error/fallback guards stay.
+Newton's completed/closed source-bound review has no actionableP1/P2; optional
+exact queue equality/retry-envelope/billing-unit coverage gaps remain documented.
+Production Bandit0findings/errors. Test rawBandit123B101 vs baseline106 with no
+other findings/errors/suppressions, not a zero-finding scan. Ruff no-cache0,
+Black check0 and normal four-file preflightPASS; sandbox Ruff cacheEPERM retained.
+Evidence: manual-mr5-*-20261006 and manual-mr5-independent-review-20261006.json.
+MR-1 through MR-4 remain open/unfixed; actualdev1e06 integration and full corrected
+batch qualification/publication/current-head hosted acceptance remain pending.
+Published135 and its healthy CI were not mutated or rerun. Native/profile limits,
+fullUatPassedfalse and prior invalid broad-Audio inference uncertainty remain.
+
+MR-2 is now locally corrected, independently reviewed and UNCOMMITTED/UNPUBLISHED.
+Both stored and explicit-route restore targets forward temporary mode into the
+existing H1 pre-profile guard. Mode changes retire pending/ready native authority;
+the native fastpath is not adopted in temporary mode. Existing draftRevision is
+retained under the same workspace/reference/scope/route key so newer composer
+edits survive mode-only reloads in memory without checkpoint save authority.
+H1 controller, account guards, checkpoint qualification and persistence remain
+unchanged. Actual mounted tests use existing capture/scope/Dexie boundary doubles,
+not native transport, provider inference or protected database fixtures.
+
+Original causal RED5FAIL/89filtered -> GREEN5PASS/89filtered is retained. Initial
+owning931PASS/45files is a predecessor candidate, not final qualification:
+Meitner found pending typed-draft loss; distinct typing RED2FAIL/6PASS/89filtered
+reproduced it at outer scope and actual H1 capture. Final eight focused cases PASS;
+final current owning933PASS/45files/0FAIL/SKIP and types8GB exit0 bind all7264 app
+entries. Actual matched two-file ESLint0errors/warnings/new findings, fresh
+unchanged MR5 endpoint Bandit0findings/errors and normal six-file preflightPASS.
+The initial symlink snapshot, ignored lint, JSON-status validator, review-tool
+argument and premature types-read collectors remain distinct/nonqualifying.
+
+Completed/closed Meitner final source-bound review has no actionable P1/P2; parent
+independently verified actual results and five reviewed source hashes. Combined
+typing-after-temporary/context-change/explicit-route coverage, queued H1 writes
+and the combined real server-loader flow remain coverage gaps, not proven defects.
+Evidence: manual-mr2-*-20261006; authoritative final qualification is
+manual-mr2-local-qualified-20261006.json. MR5 source remains exact across its9094
+API/test/config entries. MR-1/MR-3/MR-4 remain open/unfixed. Published135 still has
+all five original findings; neither local patch has been committed or published.
+Actualdev1e06 integration/full corrected-batch tests/build/manual review/current
+successor hosted qualification/applicable acceptance/NORMAL merge remain pending.
+No new build, native acceptance, browser/data verification or provider UAT claimed.
+
+Final readback independently verifies actualdev17c47c49d857a2a1fd1e58602b704213760a4a85
+via PR3170, parent1e06. Sixteen incoming domain-cache/native-ownership paths are
+not integrated, tested or independently review-qualified here; pending VN1e06
+qualification remains. No new merge-tree/conflict claim. The stale expected-dev
+readback collector remains failed; separate actual-ref/API agreement succeeds.
+Future necessary batch must reverify then-current dev/head/mode, not reuse1e06.
+
+MR-1 regression setup is STOPPED after three bounded failed invocations; no
+production correction or causal RED was established. All three reports retain
+four preflight failures/71 name-filtered cases: invalid_history_durable_request
+before the synthetic transport. The model stub forwarded an unnormalized tool
+choice; its resolver correction was insufficient. Final diagnostic identifies
+the other boundary: the formatter stub retains array-form text, unlike the real
+helper's canonical single-text-part string. Existing real formatter/model factory
+and strict-string pipeline/model fixtures were inspected as alternatives. One
+additional, separately authorized zero-provider continuation was requested; no
+fourth invocation ran. The exact unqualified fixture patch and all raw results
+are retained in manual-mr1-*-20261007. Only that unqualified test edit was removed,
+restoring the test byte-exact to135; qualified MR2/MR5 patches remain untouched.
+MR1/MR3/MR4, actual latestdev integration and applicable acceptance remain pending.
+No production change/publication/hosted retry/native operation/merge/cleanup.
+
+MR-4 is now locally corrected and independently reviewed, UNCOMMITTED/UNPUBLISHED.
+The existing completed-stream usage/RG accounting block runs before durable
+settlement, so failed metadata/recovery verification cannot erase consumed usage.
+Existing terminal errors, persistence fences and estimates remain intact. Arendt
+also found a preflight-completion org double-charge: the existing streaming callback
+and endpoint context exit both charged. The one-condition correction limits that
+exit to nonstreaming; streaming callback accounting remains the sole owner, with
+actual JSON context-entry/exit control retained and no lost resource teardown.
+
+Initial quota fixture RED6FAIL was invalid/noncausal; REDv2 retained four causal
+missing-usage failures plus two invalid zero-refund expectations. Distinct REDv3
+4FAIL/2PASS is causal; identical six cases GREEN. Initial187PASS/10files is a
+predecessor before billing correction, not final qualification. Separate billing
+RED2FAIL/1PASS directly observed duplicate cache charges; JSON control passed.
+Same three cases GREEN check one cache delta and durable ledger write. Final
+current owning245PASS/13files/0FAIL/ERROR/SKIP includes both fixes and MR5 cases,
+with all9094 API/test/config source entries exact. Local Python3.11/provider
+doubles/isolated SQLite/real MemoryGovernor are not hosted3.12 or native UAT.
+
+Completed/closed Arendt final source-bound review has no actionable P1/P2.
+Accounting-sink failure and RG reservation-identity/bucket assertions remain
+nonblocking gaps. Reviewer did not run tests; parent validates actual XML/exit/
+hashes. Final matched three-file Ruff0; fresh two-production-file Bandit0findings/
+errors. Raw test Bandit157B101 versus exact135baseline106, no other findings/
+errors/suppressions, NOT zero-finding test scan. Black check passes the touched
+test only; initial overbroad endpoint Black failure and unmatched copied Ruff
+baseline remain separately nonqualifying. Normal seven-file preflightPASS;
+actual inherited pre-commit hook remains absent, no automatic-hook claim.
+
+Authoritative manual-mr4-local-qualified-20261007.json binds final source, actual
+results, independent review and fresh refs/API/body/queue at00:51:02Z. MR2 all7264
+app entries remain exact without reruns; MR5 endpoint is exact except the new MR4
+billing guard. Its prior9094 global binding now differs in only endpoint/service/
+test; all9091 other entries exact, final combined owning requalifies MR5 cases.
+MR1 test stays exact135 and STOPPED; no fourth invocation or answer to its separate
+permission request. MR3 remains open. Published135 still has all five original
+findings, actualdev17c is not integrated, and healthy135 hosted CI is untouched.
+Seven tracked owned files now dirty, dependency link never stage; no commit/push/
+body change/native operation/service mutation/merge/cleanup. Full corrected-batch
+latestdev qualification/manual review/publication/successor hosted gates and
+applicable native/profile acceptance remain pending; fullUatPassedfalse.
+
+MR-3 correction is STOPPED after three independent correction/review rounds.
+The current candidate is preserved UNCOMMITTED/UNPUBLISHED, not qualified. It
+moves native Clear/Undo ownership into the shared checkpoint hook: qualified
+empty Clear, fresh receipt/currentness-fenced H1 Undo, explicit route consumption
+and visible terminal failure. Existing controller/save/temporary guards remain.
+Actual mounted H1/checkpoint/stores/ChatPane tests use capture/Dexie boundaries;
+no application Send, provider inference, native/browser/protected DB operation.
+
+Original causal RED3FAIL/97filtered and identical three-case GREEN are retained.
+Guard GREEN7PASS/2FAIL was an invalid expectation attempt, not a clean pass.
+Initial owning942PASS and946PASS are predecessor candidates. First review P2s
+were causally reproduced by review-red3FAIL/13PASS; mixed review-green14PASS/2FAIL
+passed those three identical causal cases but retained two obsolete failure-state
+expectation failures. Distinct18GREEN/owning951PASS remain predecessors. Second
+review RED3FAIL/18PASS led to21GREEN; only the older route scope-call assertion
+changed to prove no redundant read, not whole-file equivalence. Parent delayed
+route RED1FAIL/21PASS directly observed canceled Undo/null ID, not just readiness;
+identical22cases GREEN. Final current-source corpus955PASS/45files/0FAIL/PENDING/
+TODO and types8GBexit0 bind all7264 app entries exactly. These passing bounded
+results do NOT cover the three remaining static findings or qualify MR3.
+
+Plato third completed review retains THREE validated P2s/zero P1: empty route
+removal falls back to old Next asPath because pathname is absent; failed exact-
+owner Undo resets H1 and invalidates its expected late route marker; typing after
+capture publication but before bookmark settlement is rejected by the unchanged
+save guard, then older draft is persisted on unmount. Parent inspected actual
+shim, H1 install publish/onCapture-before-persist and checkpoint save/cleanup.
+No causal runtime RED for these final three was run; they remain static findings.
+Reviewer executed no tests/security checks. All three reports are retained,
+latest verbatim/source-bound third-open-findings receipt; Plato completed/CLOSED.
+No further correction attempt ran. A separate bounded zero-provider lifecycle
+rework question is now pending; no native/publication/merge permission implied.
+
+Alternatives inspected: actual Next resolved-path navigation/search-param helper,
+existing same-authority checkpoint lease/context fences, and H1 capture/bookmark
+settlement split. A rework should keep qualified empty draft authority separate
+from partial restored rows/reference, preserve exact owner/context invalidation,
+and use actual shim tests rather than BrowserRouter-only route proof. Do not
+weaken checkpoint guards, add a new controller abstraction or silently retry.
+
+Matched three-file lint0errors/10INHERITEDwarnings vs11baseline/0NEW; rawCleanfalse.
+Fresh unchanged endpoint/service Bandit0findings/errors, normal eight-file
+preflightPASS. Original shifted embedded lint-line collector and unsupported
+Vitest runtime-error-field validator failures are separately retained, not tests
+or hosted failures. Corrected stop validator uses actual supported success/suite/
+case fields without test rerun. MR2 hook excluding MR3 changes reconstructs exact
+qualified SHA in memory only; current owning requalifies combined bounded corpus.
+All9094 MR4 backend entries remain exact without reruns, preserving MR4/MR5;
+MR1 test exact135 and STOPPED, no fourth invocation or answer. Existing pre-commit
+hook absent, LFS pre-push retained; no automatic-hook claim or hook installation.
+
+Authoritative manual-mr3-three-review-stop-readback-20261007.json at01:32:46Z
+verifies current source/results/review/refs/API/body/queue/status. Actual head135/
+latestdev17c agree independent explicit refs and branch API; dev not integrated,
+MERGE_QUEUE UNSET/auto-merge null and human740-byte suffix exact. Eight owned
+tracked files dirty, nothing staged, dependency link never stage. Final hosted
+snapshot01:27:50Z remains293SUCCESS/41SKIPPED/one nonrequired canceled license
+ audit/no new failures/comments; passing135 CI never reset. MR2/MR4/MR5 local
+qualified patches preserved; MR3 candidate unresolved, MR1 stopped. ALL FIVE
+original findings remain on published135. Stage25 stays In Progress. Full latest-
+dev corrected batch/build/unchanged budgets/manual review/publication/successor
+hosted gates/applicable native acceptance/NORMAL merge/safe cleanup remain pending.
+No commit/push/body/service/data/native mutation or cleanup; fullUatPassedfalse.
+
+### Approved MR1/MR3 Continuation, 2026-10-07
+
+The human explicitly approved continuing and fixing all identified issues.
+This answers the separately bounded MR1 formatter/regression and MR3 lifecycle
+rework questions. Foreground corrections are active; heartbeat is read-only.
+No new native input, browser probe, provider/model inference, Character-root
+reproduction, financial purchase or protected DB/service operation is authorized.
+
+MR1's real formatter and existing tool resolver reach the finite transport path.
+The first extra run fails an invalid new assertion that normal durable recovery
+journal writes must be absent; it is not a causal RED. The distinct corrected
+regression is causal: 3FAIL/1PASS at old-conversation publication after navigation,
+ABA and navigation during mirror persistence. Exact four cases pass after the
+existing turn fence is retained through success, with mirror storage still using
+the ordinary path rather than client-managed H1 settlement.
+
+Huygens review finds two additional P2s: synchronous selection can precede the
+debounced H1 load, and the new setter wrapper drops preserveServerChatId. Distinct
+eight-case RED4FAIL/4PASS reproduces both plus unmount. The same eight cases pass
+after shared canUpdateView also checks the existing H1 lifetime and captured
+selection-intent/restore revision, and the setter forwards its original flags.
+Original review and raw attempts remain separately attributed. First owning run
+1262PASS/1FAIL requires updating only the old pipeline expectation from stripped
+historyTurn to the exact retained turn; receipt/no-client-append/single-settlement
+assertions remain unchanged. Corrected first owning verification passed1263
+cases/64files. Second review found result-follow bypass and preparation-await
+selection drift. Distinct RED7FAIL/2PASS proves six superseded result-follow calls
+and one stale dispatch. Minimum existing canUpdateView checks block both
+boundaries. First corrected run8PASS/1FAIL has an invalid new response-field
+expectation (reason instead of the existing errorMessage); retained failed.
+Corrected exact nine cases pass.
+
+Third approved MR1 review still finds one P2: the real H1 followResult/choose
+capture await can publish A after newer B intent before B's delayed H1 load.
+This final finding is source-validated, not causally reproduced or fixed. Three
+approved correction/review rounds are exhausted: STOP MR1 here. A separately
+bounded real-H1 async-follow rework question is asked once, pending direct human
+answer. Preserve the candidate; no fourth correction or publication. Passing
+owning/focused tests do not qualify this uncovered lifecycle race.
+
+MR3's first additional run has three causal failures and one invalid Next-context
+fixture failure. A distinct actual RouterContext run reproduces all four cases:
+sole-query route fallback, failed Undo's delayed route re-read, and lost typing
+before bookmark success/failure. The same corpus passes26 cases after explicit
+resolved pathname navigation, refreshed exact-owner reset fence, and draft-only
+saving into the existing qualified empty snapshot while Undo is current. Partial
+captured rows/reference still grant no checkpoint authority. Four further negative
+controls preserve workspace/account/new-H1/temporary fences; their first fixture
+incorrectly awaits a serialized replacement bookmark before releasing its own
+blocked predecessor and remains failed. Corrected ordering passes30 focused
+cases, without deadline/assertion/health weakening. Bernoulli independent review
+finds a further pre-owner currentness P2: Undo's unset fence admits a newer H1
+capture's draft. Distinct actual H1.open native/local takeover RED2FAIL/30PASS
+reproduces old A's empty draft being overwritten. Minimum preparingFence captured
+immediately after loadConversation starts restricts pending draft/route permission
+until the existing own-owner fence takes over; target currentness remains
+independent of its own open epoch transition. Exact corpus32PASS/97filtered.
+Second approved MR3 review finds own-open epoch handoff and pre-owner scope-error
+cleanup P2s. Distinct RED2FAIL/32PASS observes redundant scope reads on delayed
+own-route acknowledgment during profile lookup and after scope failure. Existing
+H1 open predicate now runs synchronously after loading-owner publication before
+profile lookup, and scope-failure open retains its existing predicate/cancellation.
+The hook captures that exact own unavailable fence for cleanup. Same34 cases pass;
+external native/local takeovers remain rejected. Third approved Bernoulli review
+finds NO actionable P1/P2 in four exact source files; no reviewer tests executed.
+Successful post-ack completion and takeover during profile lookup, full native
+Next location/cancellation and actual Dexie/account watcher acceptance remain
+documented coverage gaps, not proven defects or native UAT.
+
+Final current MR3 owning967PASS/45files and shared-H1 sibling chat owning1268PASS/
+64files/zero failed/pending/todo bind all7264 actual app entries. Counts overlap,
+not repository-wide unique totals. Earlier965/1266 owning records are predecessors
+before legitimate own-epoch corrections. Exact34focused GREEN and both final
+owning runs retain every original failed attempt. Final types8GB exits0, all7264
+app entries exact. Matched
+nine-file ESLint has1INHERITEDerror/169INHERITEDwarnings versus1/171 baseline and
+ZEROnew findings, rawCleanfalse. Fresh unchanged two-production-file Bandit has
+zero findings/errors; prior raw157 testB101s remain distinct, not zero test scan.
+Normal14tracked-file preflight passes, inherited pre-commit hook remains absent,
+LFSprepush retained/no installation. All9094 backend qualification entries remain
+exact without rerun; MR4/MR5 safe245-case qualification is retained. MR2 guards
+and draft baseline remain protected/requalified in the combined MR3 owning scope.
+MR3 is locally corrected/reviewed, UNCOMMITTED/UNPUBLISHED. MR1 remains STOPPED with
+one final asynchronous follow-installation P2; passing suites do not waive it.
+
+Foreground approved correction work is complete for the unaffected MR3 scope;
+MR1 stops after its three approved review rounds, pending the separately asked
+real-H1 async-follow continuation. Both reviewers are completed/closed and all
+local sessions drained. Fourteen owned tracked files remain dirty, nothing staged,
+dependency link never stage. No partial correction/evidence-only publication or
+passing hosted-CI reset. No latestdev integration, production build, native/browser/
+provider/protected-data operation, merge or cleanup. Stage25 stays In Progress.
+Published135 still has all five original findings; current-source correction batch
+is NOT fully qualified. Automation remains ACTIVE/read-only pending the direct
+bounded answer; original native/profile/fullUatPassedfalse protections remain.
+
+Final live readback02:36:17Z independently agrees actualdev7ba48f251ec47a1e0bb680f49f9b7d86ec2b988d
+with explicitrefs and separate branch API, superseding1047 as current tip. Exact
+commit API/fetched qualification ref show PR3060 other-owner VN closeout ONLY:
+two docs/task paths15insertions481deletions; application/runtime/config/workflow/
+agent paths exact1047. Pending delta from publishedbase1fc is118paths27879+
+2439-, including still-unintegrated VN1e06/cache17c functional changes. Limited
+read-only inspection is NOT integrated tests/fullincoming review/native acceptance.
+Inherited shared gc warning retained, no gc.log/prune/recovery cleanup. Live body
+and740-byte human suffix remain exact; queueUNSET/auto-mergenull/all7published135
+gatesSUCCESS/no activechecks or failures/15historicalthreadsresolved. This does not
+qualify any successor, waive MR1 or native acceptance, or authorize partial publish.
+
+Fresh explicit remote refs and separate branch API agree published135 and actual
+latestdev1047ce10ecc191f78b0bee7e1b8ad19780c68015. The dev advance from17c is only
+the other-owned PR3206 plan/task closeout; pending VN1e06/cache17c application
+integration and qualification remain. No integration/publication/hosted rerun has
+occurred. Qualified MR2/MR4/MR5 patches remain protected; backend sources unchanged.
+Stage25 remains In Progress until current owning/types/security/manual review and
+the final integrated batch qualify. Published135 still contains all five original
+findings; its green hosted CI is historical for any successor. Applicable native
+acceptance remains unverified/fullUatPassedfalse. No merge or cleanup is claimed.
+
+### MR1 Async Result-Follow Continuation: 2026-10-07
+
+The human directed "adddress them and what continiation qusetion", authorizing
+the newly proposed bounded real-H1 follow continuation. This supersedes only the
+latest unanswered MR1 stop; native/provider/browser and protected-data limits
+remain. TASK-13421.1/Stage25 stay In Progress; no new ADR is required.
+
+Mounted actual native H1 plus the existing capture/storage doubles reproduces
+the installation window: causal RED3FAIL/1PASS on select, navigation ABA and
+Clear, with the unchanged-selection control passing. Minimum shared choose and
+followResult forwarding reuses install's existing isCurrentLoad predicate.
+Normal/RAG capture passes its captured navigation identity independently of the
+H1 epoch changed by its own choose. Owner/account/epoch/unmount and original-turn
+persistence fences remain. Identical four cases GREEN4PASS; no provider dispatch.
+
+Additional controls initially produce7PASS/1FAIL because the new account test
+incorrectly expected null instead of the existing request_config_scope_changed
+error. Correct expectation yields8PASS. Initial owning1274PASS/2FAIL is retained:
+two overbroad new mock assertions demanded the new third argument on an unchanged
+Character-helper caller. Independent Sartre review confirms this test mismatch
+and no other actionable P1/P2 in the bounded normal/RAG production correction.
+Restore only those new mismatched assertions and require predicate propagation
+on the actual mounted-H1 adapter instead. Final owning, source-bound type/security
+qualification and independent re-review remain pending; no candidate publication
+or overall merge/acceptance qualification is claimed.
+
+The second completed review additionally finds an unchanged sibling omission in
+the Character helper's completion and post-ACK disconnect paths. Actual mounted
+H1 plus finite stream/capture/storage doubles yields causal RED8FAIL/16PASS:
+six stale-capture publications and two stale-error publications, with all
+unchanged-selection/account/unmount/current-error controls passing. Identical
+24 cases GREEN24PASS after the helper forwards the captured navigation predicate
+through initial loading and both result-follow calls. Existing owner settlement,
+receipt, error and persistence guards remain; no provider or native application
+input is used. The two existing mock contract assertions now legitimately require
+the predicate because their actual Character caller is corrected. Final owning,
+types, matched quality and third substantive review still pending at this note.
+
+The earlier normal/RAG-only final owning1276PASS/64files and workspace967PASS/
+45files are predecessor source evidence, not final qualification of this newly
+changed sibling. Retain the original failed mock assertions and all causal REDs.
+
+Third completed Sartre review validates both corrected async-follow siblings but
+finds one OPEN static P2 in initial Character loading: its target.isCurrent
+predicate is retained in H1 owner.validate_lease and includes the first turn's
+signal plus settings/tools object identities. After successful adoption, changing
+temperature or aborting the original turn can therefore invalidate the otherwise
+current conversation until reload. Parent independently read the actual retained
+predicate and normal adapter's existing loadAdopted/loadRejected handoff. No causal
+RED or correction for this new P2 has run; no clean MR1 qualification is claimed.
+
+STOP at three independent correction/review rounds. One NEW concise async question
+requests separately bounded provider-free owner-lease adoption work; it is distinct
+from the approved async-follow question. No fourth correction/reproduction while
+unanswered. Preserve this candidate and qualified MR2/MR3/MR4/MR5 patches. The
+current type check exits0 at unchanged8GB with all7264 app entries exact. Current
+chat owning is1290PASS/2FAIL64files: sidepanel useMessage assertions still expect
+two followResult arguments after the shared Character caller now forwards the
+third predicate. Retain these failures; do not silently change tests after stop
+or call this corpus green. Workspace/current quality checks are recorded separately.
+All changes remain uncommitted/unpublished, Stage25 In Progress, no native/provider
+acceptance, corrected-batch build, latest-dev integration, publication or merge.
+
+Final current workspace run first fails beforeAll's existing10s import hook:
+881PASS/86SKIP/one failed suite; retain raw exit1/log/JSON, not a source-causal
+failure or pass. Distinct unchanged isolated rerun passes967/45files with no
+assertion/timeout/source change. Compiler contention is not proven sole cause.
+Final types8GBexit0 and actual owning source bindings have all7264 app entries
+exact. The chat owning1290PASS/2FAIL remains failed from the two sidepanel mock
+contracts, not overall MR1 qualification. All24 focused cases pass, but the final
+static owner-lease finding was not reproduced or corrected.
+
+Actual matched10-file ESLint has1inherited error/169inherited warnings versus
+1/171baseline, zero new findings, rawCleanfalse. Fresh unchanged endpoint+service
+production Bandit has0findings/errors; TS is not Python Bandit scope. Normal15-file
+preflight passes; inherited precommit hook remains absent/LFSprepush retained,
+installation untouched. All9094 MR4 backend entries remain exact without reruns,
+retaining245safe owning passes includingMR5. Sartre completed/closed. Readback
+and final owned-note preflight record actual source/status/refs/body/queue/results.
+The separate owner-lease decision remains pending; automation active/read-only.
+
+### Approved Owner-Lease Continuation
+
+The human's "continye" answers the separately bounded owner-lease question.
+Reuse normal chat's existing loadAdopted/loadRejected handoff after the exact
+receipt, owner, view and current H1 fence are verified. Loading still observes
+navigation, Stop and request settings/tools; adopted ownership retains the
+existing independent account/config watchers. No new ownership abstraction or
+shared guard weakening. ADR required: no; ADR-049 and existing ownership rules
+remain unchanged.
+
+Bounded checks: real mounted H1 initial loading, finite transport/capture/storage
+doubles, post-adoption sampling/tools change and original-turn abort, plus pending
+selection/account/unmount cancellation and adopted account/config revocation.
+The initial regression has three causal invalid-owner failures and one invalid
+new account-error expectation; retain it as failed, not a wholly causal corpus.
+A distinct same-behavior regression corrects that expectation to the existing
+stale_selection guard. Two sidepanel mock assertions now include the actual
+third followResult predicate without changing their receipt/dispatch assertions.
+Correction, owning tests/types/security and independent review remain pending.
+No native application input, browser, provider inference, latest-dev integration,
+source publication, merge or cleanup is authorized by this bounded qualification.
+
+Owner-lease causal RED-v2 is3FAIL32PASS; identical35focused cases pass after the
+minimal existing adoption handoff. RED observes invalid retained owners in the
+three cases; GREEN additionally proves a second finite-double dispatch. Current
+chat owning1303PASS64files and workspace967PASS45files have zero failed/pending/
+todo tests and exact7264app bindings. Counts overlap. The old1290PASS2FAIL remains
+failed, separately retained. Matched11-file lint has1inherited error224inherited
+warnings vs1/226baseline, zero new findings; rawCleanfalse. Fresh unchanged
+two-production-file Bandit0findings/errors and normal16-file preflight pass.
+All9094MR4 backend bindings remain exact without rerun, retaining245safe-owning
+includingMR5. Types and substantive Curie independent review remain pending.
+
+Final types8GBexit0 and substantive Curie independent review NO actionableP1/P2
+in the bounded owner-lease correction/MR1 async-follow integration. Verbatim report
+binds35 reviewed files; reviewer ran no tests/security/preflight and is closed.
+Parent evaluated exact receipt/fence handoff and retained account/config watchers.
+Created/history-ID-only callers, delayed fork/bookmark/epoch-only handoff and full
+normal/RAG pipeline-to-mounted-H1 are documented coverage gaps, not proven defects.
+
+All five original manual-review findings now have qualified local corrections,
+uncommitted/unpublished. The direct human "continye" answers the owner-lease
+question; no new continuation question or correction stop remains. Published135
+still contains the original findings and its passing CI is historical for any
+successor. Stage25/Task13421.1 remain In Progress: actual latest-dev incoming union,
+integrated full corrected-batch tests/types/build/unchanged budgets/security/manual
+review, successor actual all7+owning CI and applicable native/profile acceptance
+still precede normal merge/safe cleanup. No new full-batch build/native acceptance
+or source publication claimed; no service/data/browser/native/hosted mutation.
+
+## Stage 26: Publish Reviewed Corrections With Current Dev
+**Goal**: Publish the five source-bound manual-review corrections to existing PR3071.
+**Success Criteria**: Preserve qualified fixes and normal history; integrate independently verified current dev; qualify combined source with tests, types, immutable build/tokens/unchanged budgets, security, normal preflights and substantive manual review before publication. Actual successor hosted gates and applicable acceptance remain prerequisites for normal merge and safe cleanup.
+**Tests**: Combined owning UI/frontend and safe backend/AuthNZ/isolated PostgreSQL/incoming VN/storage/Jobs/Sync/Notes/CI tests; official OpenAPI check; unchanged bundle budgets; independent source-bound review.
+**Status**: In Progress
+
+The human explicitly requested a PR after asking whether issues were found.
+PR3071 already exists; publish the qualified correction batch there rather than
+creating a duplicate. Fresh explicit GitHub refs and separate branch API agree
+actual dev3ca1ff055be3c75a7fa844a02b5d8ba925baa2be, which includes PR3203 Chat,
+Notes and Sync changes beyond the prior7ba tip. Queue remains unset. All five
+findings are locally corrected, but incoming union/global corrected-batch
+qualification is not yet established. No native allowance or merge gate is waived.

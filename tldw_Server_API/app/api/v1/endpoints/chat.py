@@ -4056,6 +4056,13 @@ async def create_chat_completion(
                     ) from None
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request.") from None
 
+            # Validate the full envelope above, but charge only provider-bound inference.
+            inference_request_json = json.dumps(
+                request_data.model_dump(
+                    exclude={"tldw_turn", "tldw_history_selection_v1", "tldw_history_admission_v1"}
+                )
+            )
+
             # Apply rate limiting after slash command mutation so estimates are accurate.
             #
             # When ResourceGovernor is active (via RGSimpleMiddleware), request-level
@@ -4121,7 +4128,7 @@ async def create_chat_completion(
 
             if rg_ready:
                 # Estimate tokens for rate limiting (heuristic).
-                estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json))
+                estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(inference_request_json))
                 try:
                     # Derive policy_id from middleware route_map when present.
                     policy_id = str(
@@ -4236,7 +4243,7 @@ async def create_chat_completion(
                 active_count = await _increment_active_request(user_id)
                 try:
                     # Estimate tokens for rate limiting (heuristic).
-                    estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json))
+                    estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(inference_request_json))
 
                     # In TEST_MODE, avoid cross-test flakiness by scoping limiter to this request
                     # when no explicit conversation_id is provided. This prevents cumulative
@@ -4346,11 +4353,6 @@ async def create_chat_completion(
             # Durable persistence envelopes never reach the provider and must
             # not count citation excerpts a second time against inference quotas.
             try:
-                inference_request_json = json.dumps(
-                    request_data.model_dump(
-                        exclude={"tldw_turn", "tldw_history_selection_v1", "tldw_history_admission_v1"}
-                    )
-                )
                 _estimated_request_tokens = estimate_tokens_from_json(
                     _sanitize_json_for_rate_limit(inference_request_json)
                 )
@@ -5298,7 +5300,7 @@ async def create_chat_completion(
                 if admission_queue is not None:
                     try:
                         # Estimate tokens for queue gating (sanitize base64 payloads)
-                        est_tokens_for_queue = _estimate_tokens_for_queue(request_json)
+                        est_tokens_for_queue = _estimate_tokens_for_queue(inference_request_json)
                         # Use user_id for per-client fairness; HIGH priority for streaming
                         priority = RequestPriority.HIGH if bool(request_data.stream) else RequestPriority.NORMAL
                         # Use request_id generated for this call
@@ -5602,7 +5604,7 @@ async def create_chat_completion(
                             selected_provider=selected_provider,
                             provider=provider,
                             model=model,
-                            request_json=request_json,
+                            request_json=inference_request_json,
                             request=request,
                             metrics=metrics,
                             provider_manager=provider_manager,
@@ -5961,7 +5963,7 @@ async def create_chat_completion(
                             selected_provider=selected_provider,
                             provider=provider,
                             model=model,
-                            request_json=request_json,
+                            request_json=inference_request_json,
                             request=request,
                             metrics=metrics,
                             provider_manager=provider_manager,
@@ -6416,7 +6418,7 @@ async def create_chat_completion(
                 # For streaming: the callback handles recording via apply_usage_delta
                 # directly, so __aexit__ only needs to run for non-streaming paths
                 # (where record_actual was called before __aexit__).
-                if _billing_enforcer is not None and _billing_enforcer_entered:
+                if _billing_enforcer is not None and _billing_enforcer_entered and not request_data.stream:
                     try:
                         await _billing_enforcer.__aexit__(exc_type, exc_value, exc_tb)
                     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_exit_err:

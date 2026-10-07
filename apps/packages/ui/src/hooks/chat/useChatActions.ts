@@ -262,7 +262,7 @@ const throwIfServicePromptScopeInvalidated = (
 }
 
 type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
-  setHistoryId?: SaveMessageData["setHistoryId"]
+  setHistoryId?: (id: string, options?: { preserveServerChatId?: boolean }) => void
   conversationId?: string | number | null
   message_source?: "copilot" | "web-ui" | "server" | "branch"
   message_type?: string
@@ -964,7 +964,8 @@ export const useChatActions = ({
   const saveMessageOnSuccess = async (
     payload?: SaveMessagePayload
   ): Promise<string | null> => {
-    if (payload?.historyTurn) return baseSaveMessageOnSuccess(payload)
+    if (payload?.historyTurn && !payload.historyTurn.serverOwned)
+      return baseSaveMessageOnSuccess(payload)
     const scopeSignal = payload?.scopeSignal
     const scopeInvalidatedSignal = payload?.scopeInvalidatedSignal
     const throwIfScopeChanged = () => {
@@ -982,16 +983,19 @@ export const useChatActions = ({
     let payloadForLocalPersistence = payload
       ? {
           ...payload,
+          // Server-owned turns persist their verified mirror through the ordinary path.
+          historyTurn: undefined,
           setHistoryId:
-            payload.setHistoryId ??
-            ((id: string) => {
-              setHistoryId(
+            (id: string, options?: { preserveServerChatId?: boolean }) => {
+              if (payload.historyTurn && !payload.historyTurn.canUpdateView()) return
+              if (payload.setHistoryId) payload.setHistoryId(id, options)
+              else setHistoryId(
                 id,
-                payloadConversationId || serverChatId
+                options ?? (payloadConversationId || serverChatId
                   ? { preserveServerChatId: true }
-                  : undefined
+                  : undefined)
               )
-            })
+            }
         }
       : undefined
     const persistLocally = async (): Promise<string | null> => {
@@ -1286,7 +1290,8 @@ export const useChatActions = ({
     }
 
     if (scopeSignal) historyKey = await persistLocally()
-    if (payload?.saveToDb && payloadConversationId && !serverChatId && !compareModeActive) {
+    if (payload?.saveToDb && payloadConversationId && !serverChatId && !compareModeActive &&
+      (!payload.historyTurn || payload.historyTurn.canUpdateView())) {
       throwIfScopeChanged()
       // Creation may already have published this ID during the current turn.
       // Re-selecting it clears the resolved metadata in the server-chat store.

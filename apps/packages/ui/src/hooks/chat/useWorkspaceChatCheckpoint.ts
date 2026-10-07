@@ -24,6 +24,7 @@ type CheckpointOptions = {
   chat: CheckpointChat
   legacySessionKey?: string
   routeSearch?: string
+  replaceRouteSearch?: (search: string) => void
 }
 
 type CheckpointLease = {
@@ -35,6 +36,7 @@ type CheckpointLease = {
   writable: boolean
   allowEmpty: boolean
   snapshot: WorkspaceChatSession | null
+  pendingUndo?: () => boolean
 }
 
 const hasRouteIntent = (search: string) => {
@@ -94,9 +96,11 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
   const selection = useRef(control)
   selection.current = control
   const lease = useRef<CheckpointLease | null>(null)
+  const clearRoute = useRef<{ from: string; to: string; origin: CheckpointLease; isCurrent: () => boolean } | null>(null)
   const legacy = useRef<{ key: string; snapshot: WorkspaceChatSession | null; skipCapture: boolean } | null>(null)
   const generation = useRef(0)
   const draftRevision = useRef(0)
+  const draftScope = useRef<{ key: string; revision: number } | null>(null)
   const [scopeRevision, setScopeRevision] = useState(0)
   const [restoring, setRestoring] = useState(false)
   const [restoreError, setRestoreError] = useState<{ message: string; isCurrent: () => boolean } | null>(null)
@@ -137,6 +141,98 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
     }
   }, [])
 
+  const clearChat = useCallback(() => {
+    const controller = selection.current
+    const owned = lease.current
+    const { chat, draft } = latest.current
+    if (!controller || !owned?.writable || chat.temporaryChat || !fence()()) return null
+    const reference = qualifiedReference(controller, chat, owned.qualification)
+    if (!reference) return null
+    const search = route.current.search
+    if (hasRouteIntent(search) && !latest.current.replaceRouteSearch) return null
+    const target = { historyId: chat.historyId, serverChatId: chat.serverChatId }
+    controller.reset()
+    const cleared = controller.fence()
+    clearView(false)
+    owned.allowEmpty = true
+    owned.snapshot = {
+      messages: [], history: [], historyId: null, serverChatId: null,
+      checkpoint: { version: 1, ...owned.qualification, historySelectionReference: null, draft }
+    }
+    saveSession(owned.key, owned.snapshot)
+    if (hasRouteIntent(search)) {
+      const params = new URLSearchParams(search)
+      for (const key of ["historySelection", "chatId", "chat_id", "serverChatId", "server_chat_id", "historyId"]) params.delete(key)
+      const next = params.size ? `?${params}` : ""
+      clearRoute.current = { from: search, to: next, origin: owned, isCurrent: cleared }
+      latest.current.replaceRouteSearch!(next)
+    }
+    return async () => {
+      const restoringLease = lease.current
+      if (!cleared() || restoringLease !== owned ||
+        restoringLease.generation !== generation.current || !fence()() || latest.current.chat.temporaryChat) return false
+      let undoOwner: HistoryLoadReceipt["owner"] | null = null
+      let undoFence: (() => boolean) | undefined
+      let preparingFence: (() => boolean) | undefined
+      let completed = false
+      // H1's owner lease calls this predicate; keep it independent of that lease.
+      const contextCurrent = () => {
+        const state = useWorkspaceStore.getState()
+        const owner = controller.getCurrent().owner
+        return state.storeHydrated && latest.current.workspaceReady && !latest.current.chat.temporaryChat &&
+          latest.current.workspaceId?.trim() === owned.qualification.workspaceId &&
+          state.workspaceId === owned.qualification.workspaceId &&
+          state.workspaceChatReferenceId === owned.qualification.referenceId &&
+          (!undoOwner || owner === undoOwner) &&
+          (owner?.kind !== "native" || (owner.conversation_id === reference.conversation_id &&
+            serverChatMirrorOwnerKey({ requestScope: owner.request_scope }) === owned.qualification.ownerKey))
+      }
+      const isCurrent = () => lease.current === restoringLease && restoringLease.valid &&
+        restoringLease.generation === generation.current && contextCurrent()
+      const loadIsCurrent = () => {
+        const owner = controller.getCurrent().owner
+        if (!undoOwner && owner && (owner.kind === "unavailable" || owner.conversation_id === reference.conversation_id)) {
+          undoOwner = owner
+          undoFence = controller.fence()
+        }
+        return isCurrent()
+      }
+      const operationCurrent = () => (undoFence ?? preparingFence ?? cleared)()
+      if (clearRoute.current?.origin === owned) clearRoute.current.isCurrent = () =>
+        lease.current === owned && owned.valid && contextCurrent() && operationCurrent()
+      owned.pendingUndo = () => isCurrent() && operationCurrent()
+      setRestoring(true)
+      setRestoreError(null)
+      try {
+        let receipt: HistoryLoadReceipt | undefined
+        const loading = controller.loadConversation({ ...target, temporary: false,
+          scope: { type: "workspace", workspaceId: owned.qualification.workspaceId }, isCurrent: loadIsCurrent
+        }, reference, result => { receipt = result })
+        preparingFence = controller.fence()
+        const loaded = await loading
+        const current = controller.getCurrent()
+        if (!isCurrent() || !loaded || (undoFence && !undoFence())) return false
+        if (!receipt || current.owner !== receipt.owner || current.view !== receipt.view ||
+          !qualifiedReference(controller, target, owned.qualification)) return "failed"
+        latest.current.chat.setHistoryId(target.historyId, { preserveServerChatId: true })
+        latest.current.chat.setServerChatId(target.serverChatId)
+        completed = true
+        return true
+      } catch {
+        return isCurrent() && (!undoFence || undoFence()) ? "failed" : false
+      } finally {
+        if (!completed && isCurrent() && undoFence?.() && controller.getCurrent().owner === undoOwner) {
+          controller.reset()
+          clearView(false)
+          undoOwner = null
+          undoFence = controller.fence()
+        }
+        owned.pendingUndo = undefined
+        if (lease.current === restoringLease && restoringLease.generation === generation.current) setRestoring(false)
+      }
+    }
+  }, [clearView, fence, saveSession])
+
   useLayoutEffect(() => {
     if (!active) return
     const invalidateScope = () => {
@@ -163,18 +259,31 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
     const token = ++generation.current
     const request = new AbortController()
     const key = buildWorkspaceChatSessionKey(workspaceId, referenceId)
-    const revision = draftRevision.current
+    const draftKey = JSON.stringify([key, scopeRevision, routeSearch, routeRevision])
+    if (draftScope.current?.key !== draftKey) draftScope.current = { key: draftKey, revision: draftRevision.current }
+    const revision = draftScope.current.revision
+    const temporary = chat.temporaryChat
+    const replacingClearRoute = clearRoute.current
+    const continuingClear = Boolean(replacingClearRoute && replacingClearRoute.to === routeSearch &&
+      replacingClearRoute.origin === lease.current && replacingClearRoute.origin.valid && replacingClearRoute.isCurrent() &&
+      replacingClearRoute.origin.qualification.workspaceId === workspaceId &&
+      replacingClearRoute.origin.qualification.referenceId === referenceId && !temporary)
     const intent = usePlaygroundSessionStore.getState()
     const explicitRoute = hasRouteIntent(routeSearch)
     const existing = controller.getCurrent()
     const liveWorkspace = existing.capture?.status === "captured" && existing.owner?.kind === "native" &&
       existing.owner.scope?.type === "workspace" && existing.owner.scope.workspaceId === workspaceId
-    if (explicitRoute || !liveWorkspace) {
+    if (!continuingClear && (temporary || explicitRoute || !liveWorkspace)) {
       controller.reset()
-      clearView()
+      clearView(draftRevision.current === revision)
     }
     const beforeLoad = controller.fence()
-    let owned: CheckpointLease | null = null
+    let owned: CheckpointLease | null = continuingClear ? replacingClearRoute!.origin : null
+    if (owned) {
+      // A qualified local clear consumes only its route; it needs no new history/scope read.
+      owned.generation = token
+      clearRoute.current = null
+    }
     let capturedOwnerKey: string | null = null
     const matchesOwner = () => {
       const owner = controller.getCurrent().owner
@@ -183,6 +292,7 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
     }
     const isCurrent = () => token === generation.current && !request.signal.aborted &&
       matchesOwner() &&
+      latest.current.chat.temporaryChat === temporary &&
       (route.current.supplied ? route.current.search : window.location.search) === routeSearch &&
       latest.current.workspaceId?.trim() === workspaceId &&
       useWorkspaceStore.getState().workspaceId === workspaceId &&
@@ -201,9 +311,9 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
     }
     window.addEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, routeChanged)
     window.addEventListener("popstate", routeChanged)
-    setRestoring(true)
+    if (!continuingClear) setRestoring(true)
     setRestoreError(null)
-    void (async () => {
+    if (!continuingClear) void (async () => {
       try {
         const scope = await resolveServicePromptScope({ signal: request.signal })
         if (!isCurrent() || !scope.clientPrincipalVerified) return
@@ -227,7 +337,7 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
           capturedOwnerKey = qualification.ownerKey
           let receipt: HistoryLoadReceipt | undefined
           const loaded = await controller.loadConversation({
-            serverChatId: target.serverChatId, scope: { type: "workspace", workspaceId }, isCurrent
+            serverChatId: target.serverChatId, temporary, scope: { type: "workspace", workspaceId }, isCurrent
           }, target.reference, result => { receipt = result })
           if (!isCurrent() || !loaded || !receipt) return
           const current = controller.getCurrent()
@@ -248,7 +358,7 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
           owned.settled = true
           return
         }
-        if (qualifiedReference(controller, latest.current.chat, qualification)) {
+        if (!temporary && qualifiedReference(controller, latest.current.chat, qualification)) {
           owned.settled = true
           return
         }
@@ -263,7 +373,7 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
           let receipt: HistoryLoadReceipt | undefined
           const loaded = await controller.loadConversation({
             historyId: stored.historyId, serverChatId: stored.serverChatId,
-            scope: { type: "workspace", workspaceId }, isCurrent
+            temporary, scope: { type: "workspace", workspaceId }, isCurrent
           }, reference, result => { receipt = result })
           if (!isCurrent() || !loaded || !receipt) return
           const current = controller.getCurrent()
@@ -298,20 +408,32 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
     return () => {
       // Use only the last qualified copy, never the incoming surface's current rows.
       if (owned?.valid && owned.snapshot && useWorkspaceStore.getState().storeHydrated) saveSession(owned.key, owned.snapshot)
-      if (lease.current === owned) lease.current = null
+      const replacement = clearRoute.current
+      const consumingClear = owned?.valid && replacement?.origin === owned && replacement.from === routeSearch &&
+        replacement.to === route.current.search && replacement.isCurrent() && !latest.current.chat.temporaryChat &&
+        latest.current.workspaceId?.trim() === owned.qualification.workspaceId &&
+        useWorkspaceStore.getState().workspaceChatReferenceId === owned.qualification.referenceId
+      if (lease.current === owned && !consumingClear) lease.current = null
       generation.current += 1
       request.abort()
-      controller.beginLoad()
+      if (!consumingClear) controller.beginLoad()
       window.removeEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, routeChanged)
       window.removeEventListener("popstate", routeChanged)
     }
-  }, [ready, workspaceId, referenceId, scopeRevision, routeSearch, routeRevision, control?.activate, clearView, getSession, saveSession])
+  }, [ready, workspaceId, referenceId, scopeRevision, routeSearch, routeRevision, chat.temporaryChat, control?.activate, clearView, getSession, saveSession])
 
   useLayoutEffect(() => {
     const owned = lease.current
     if (!control || !owned?.valid || owned.generation !== generation.current || !owned.writable ||
       workspaceId !== owned.qualification.workspaceId || referenceId !== owned.qualification.referenceId ||
       chat.temporaryChat) return
+    if (owned.pendingUndo?.() && owned.settled && owned.allowEmpty &&
+      owned.snapshot?.checkpoint?.historySelectionReference === null && !chat.historyId && !chat.serverChatId) {
+      // Undo's partial capture grants no row/reference authority; retain only the cleared draft.
+      owned.snapshot = { ...owned.snapshot, checkpoint: { ...owned.snapshot.checkpoint, draft } }
+      saveSession(owned.key, owned.snapshot)
+      return
+    }
     const reference = qualifiedReference(control, { serverChatId: chat.serverChatId, historyId: chat.historyId }, owned.qualification)
     if (!owned.settled) {
       // A newer authorized H1 capture can win while the checkpoint read is still pending.
@@ -358,5 +480,5 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
   }, [active, legacySessionKey, chat.messages, chat.history, chat.historyId, chat.serverChatId, getSession, saveSession])
 
   return { active, restoring, restoreError: restoreError?.isCurrent() ? restoreError.message : null,
-    setDraft, controller: control, referenceId, fence }
+    setDraft, controller: control, referenceId, fence, clearChat }
 }

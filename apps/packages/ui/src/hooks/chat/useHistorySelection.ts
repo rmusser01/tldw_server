@@ -299,6 +299,7 @@ export function useHistorySelection(
       }
       publish({ ...initialState(), owner, status: "loading" })
       try {
+        if (!isCurrentLoad()) return false
         // Unsupported temporary owners must not create even a profile/bookmark.
         if (owner.kind === "unavailable") throw new Error(owner.code)
         const profile = await ensureLocalProfileId()
@@ -473,9 +474,9 @@ export function useHistorySelection(
   )
 
   const choose = useCallback(
-    async (cursor: HistoryCursorV1) => {
+    async (cursor: HistoryCursorV1, isCurrentLoad: () => boolean = () => true) => {
       const current = live.current
-      if (!current.owner || !current.view || !current.bookmarkScope || !ownerLeaseValid(current.owner))
+      if (!current.owner || !current.view || !current.bookmarkScope || !ownerLeaseValid(current.owner) || !isCurrentLoad())
         return false
       const operation = invalidate()
       const view = {
@@ -502,10 +503,11 @@ export function useHistorySelection(
           current.owner,
           current.bookmarkScope,
           operation.epoch,
-          current.pending
+          current.pending,
+          isCurrentLoad
         )
       } catch (error) {
-        if (operation.epoch === epoch.current)
+        if (operation.epoch === epoch.current && isCurrentLoad())
           publish({ ...live.current, status: "error", error: errorCode(error) })
         return false
       }
@@ -651,9 +653,9 @@ export function useHistorySelection(
     [publish, refresh]
   )
   const followResult = useCallback(
-    async (origin: HistoryViewSelectionV1, messageId: string) => {
-      if (!sameView(live.current.view, origin)) return false
-      return choose({ kind: "after_message", message_id: messageId })
+    async (origin: HistoryViewSelectionV1, messageId: string, isCurrentLoad: () => boolean = () => true) => {
+      if (!sameView(live.current.view, origin) || !isCurrentLoad()) return false
+      return choose({ kind: "after_message", message_id: messageId }, isCurrentLoad)
     },
     [choose]
   )
@@ -853,7 +855,7 @@ export function useHistorySelection(
         return completed(result)
       } catch (error) {
         if (operation.epoch !== epoch.current || !isCurrent()) return false
-        return open({ kind: "unavailable", code: errorCode(error) })
+        return open({ kind: "unavailable", code: errorCode(error) }, null, undefined, isCurrent, target.resetOnCancel)
       }
     },
     [invalidate, open, publish]

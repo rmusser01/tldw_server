@@ -6161,6 +6161,55 @@ async def execute_streaming_call(
             outcome="blocked" if post_stream_blocked else "success",
         )
 
+        # Account for completed provider consumption even if history settlement fails.
+        total_est = 0
+        try:
+            pt_est = 0
+            try:
+                pt_est = _estimate_tokens_from_messages(templated_llm_payload)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                pt_est = 0
+            ct_est = max(0, len(full_reply or "") // 4)
+            user_id = None
+            api_key_id = None
+            try:
+                if request is not None and hasattr(request, "state"):
+                    user_id = getattr(request.state, "user_id", None)
+                    api_key_id = getattr(request.state, "api_key_id", None)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                pass
+            latency_ms = int((time.time() - llm_start_time) * 1000)
+            total_est = int(pt_est + ct_est)
+            await log_llm_usage(
+                user_id=user_id,
+                key_id=api_key_id,
+                request=request,
+                endpoint=(f"{request.method}:{request.url.path}" if request else "POST:/api/v1/chat/completions"),
+                operation="chat",
+                provider=selected_provider,
+                model=model,
+                status=200,
+                latency_ms=latency_ms,
+                prompt_tokens=int(pt_est),
+                completion_tokens=int(ct_est),
+                total_tokens=total_est,
+                request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
+                conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
+                estimated=True,
+                estimate_source="stream_estimate",
+            )
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            pass
+        # Commit reserved tokens to Resource Governor, if provided
+        try:
+            if callable(rg_commit_cb):
+                # rg_commit_cb may be async or sync; call accordingly
+                res = rg_commit_cb(total_est)
+                if hasattr(res, "__await__"):
+                    await res  # type: ignore[misc]
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            pass
+
         if should_persist and final_conversation_id and not post_stream_blocked and (
             full_reply_to_save or tool_calls or function_call
         ):
@@ -6216,54 +6265,6 @@ async def execute_streaming_call(
                     "Streaming chat tool auto-execution skipped error_type={}",
                     type(autoexec_err).__name__,
                 )
-        # Usage logging (estimated) after stream completes
-        total_est = 0
-        try:
-            pt_est = 0
-            try:
-                pt_est = _estimate_tokens_from_messages(templated_llm_payload)
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                pt_est = 0
-            ct_est = max(0, len(full_reply or "") // 4)
-            user_id = None
-            api_key_id = None
-            try:
-                if request is not None and hasattr(request, "state"):
-                    user_id = getattr(request.state, "user_id", None)
-                    api_key_id = getattr(request.state, "api_key_id", None)
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                pass
-            latency_ms = int((time.time() - llm_start_time) * 1000)
-            total_est = int(pt_est + ct_est)
-            await log_llm_usage(
-                user_id=user_id,
-                key_id=api_key_id,
-                request=request,
-                endpoint=(f"{request.method}:{request.url.path}" if request else "POST:/api/v1/chat/completions"),
-                operation="chat",
-                provider=selected_provider,
-                model=model,
-                status=200,
-                latency_ms=latency_ms,
-                prompt_tokens=int(pt_est),
-                completion_tokens=int(ct_est),
-                total_tokens=total_est,
-                request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
-                conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
-                estimated=True,
-                estimate_source="stream_estimate",
-            )
-        except _CHAT_NONCRITICAL_EXCEPTIONS:
-            pass
-        # Commit reserved tokens to Resource Governor, if provided
-        try:
-            if callable(rg_commit_cb):
-                # rg_commit_cb may be async or sync; call accordingly
-                res = rg_commit_cb(total_est)
-                if hasattr(res, "__await__"):
-                    await res  # type: ignore[misc]
-        except _CHAT_NONCRITICAL_EXCEPTIONS:
-            pass
         # Audit success
         try:
             if audit_service and audit_context:

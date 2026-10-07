@@ -57,7 +57,7 @@ import {
 import { buildConversationShareUrl } from "@/components/Layouts/chat-share-links"
 import { PlaygroundMessage } from "@/components/Common/Playground/Message"
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { EmptyState } from "@/components/ui/feedback/EmptyState"
 import { ChatModelSelectorDropdown } from "@/components/Option/Playground/ChatModelSelectorDropdown"
 import { buildChatLorebookDebugPath } from "@/routes/route-paths"
@@ -1534,6 +1534,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   )
   const isMobile = useMobile()
   const navigate = useNavigate()
+  const location = useLocation()
   const [messageApi, messageContextHolder] = message.useMessage()
 
   // Workspace store
@@ -1696,7 +1697,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const checkpoint = useWorkspaceChatCheckpoint({
     workspaceId, workspaceReady: Boolean(storeHydrated && workspaceId),
     draft: composerDraft, setDraft: setComposerDraftState, chat,
-    legacySessionKey: workspaceSessionId
+    legacySessionKey: workspaceSessionId,
+    replaceRouteSearch: search => navigate({ pathname: location.pathname, search, hash: location.hash }, { replace: true, flushSync: true })
   })
   const { controller: checkpointController, setDraft: setCheckpointDraft } = checkpoint
   const recoveryReference = checkpoint.controller?.getReference()
@@ -2558,6 +2560,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleClearChat = () => {
     if (!hasMessages) return
+    const isCurrent = checkpoint.fence()
+    const currentSelection = checkpointController?.fence()
+    const nativeClear = checkpointController?.getCurrent().owner?.kind === "native" && !chat.temporaryChat
 
     Modal.confirm({
       title: t("playground:chat.clearTitle", "Clear chat?"),
@@ -2568,6 +2573,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       okText: t("common:clear", "Clear"),
       cancelText: t("common:cancel", "Cancel"),
       onOk: () => {
+        if ((nativeClear && !isCurrent()) || currentSelection?.() === false) return
+        const restoreNative = nativeClear ? checkpoint.clearChat() : null
+        if (nativeClear && !restoreNative) return
         const previousMessages = [...messages]
         const previousHistory = [...history]
         const previousHistoryId = historyId
@@ -2575,6 +2583,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
         const undoHandle = scheduleWorkspaceUndoAction({
           apply: () => {
+            if (restoreNative) { setSubmitError(null); return }
             setMessages([])
             setHistory([])
             setHistoryId(null, { preserveServerChatId: true })
@@ -2584,6 +2593,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             setSubmitError(null)
           },
           undo: () => {
+            if (restoreNative) {
+              void restoreNative().then(restored => {
+                if (restored === true) messageApi.success(t("playground:chat.restored", "Chat restored"))
+                else if (restored === "failed") messageApi.error(t("playground:chat.restoreFailed", "Chat could not be restored."))
+              })
+              return
+            }
             setMessages(previousMessages)
             setHistory(previousHistory)
             setHistoryId(previousHistoryId, { preserveServerChatId: true })
@@ -2609,7 +2625,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               size="small"
               type="link"
               onClick={() => {
-                if (undoWorkspaceAction(undoHandle.id)) {
+                if (undoWorkspaceAction(undoHandle.id) && !restoreNative) {
                   messageApi.success(
                     t("playground:chat.restored", "Chat restored")
                   )

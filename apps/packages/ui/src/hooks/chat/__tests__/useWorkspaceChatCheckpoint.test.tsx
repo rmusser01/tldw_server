@@ -2,26 +2,39 @@ import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { BrowserRouter, MemoryRouter, useLocation, useNavigate } from "react-router-dom"
+import { Modal } from "antd"
 import { ConnectionPhase } from "@/types/connection"
 import { resolveHistorySelection } from "@/utils/history-selection"
 import type { HistorySelectionSnapshotV1, HistoryViewSelectionV1 } from "@/types/history-selection"
+import { RouterContext as NextRouterContext } from "../../../../../../tldw-frontend/node_modules/next/dist/shared/lib/router-context.shared-runtime"
 
 const mocks = vi.hoisted(() => ({
   bookmarks: new Map<string, unknown>(),
   listeners: new Set<() => void>(),
   scope: vi.fn(),
   capture: vi.fn(),
+  profile: vi.fn(),
+  saveBookmark: vi.fn(),
   stop: vi.fn(),
   submit: vi.fn()
 }))
+const nextNavigation = vi.hoisted(() => ({
+  enabled: false,
+  router: { asPath: "", replace: vi.fn(async () => true), push: vi.fn(async () => true), back: vi.fn() }
+}))
+vi.mock("react-router-dom", async (original) => {
+  const actual = await original<typeof import("react-router-dom")>()
+  const next = await import("../../../../../../tldw-frontend/extension/shims/react-router-dom")
+  return { ...actual, useNavigate: () => (nextNavigation.enabled ? next.useNavigate : actual.useNavigate)() }
+})
 const bookmarkKey = (scope: { profile_id: string; client_session_id: string }, owner: { owner_key: string; conversation_id: string }) =>
   JSON.stringify([scope.profile_id, scope.client_session_id, owner.owner_key, owner.conversation_id])
 vi.mock("@/db/dexie/history-selection", () => ({
-  ensureLocalProfileId: async () => "profile",
+  ensureLocalProfileId: (...args: unknown[]) => mocks.profile(...args),
   loadHistoryBookmark: async (scope: Parameters<typeof bookmarkKey>[0], owner: Parameters<typeof bookmarkKey>[1]) =>
     mocks.bookmarks.get(bookmarkKey(scope, owner)) ?? null,
   saveHistoryBookmark: async (scope: Parameters<typeof bookmarkKey>[0], view: Parameters<typeof bookmarkKey>[1]) =>
-    mocks.bookmarks.set(bookmarkKey(scope, view), { ...scope, view }),
+    mocks.saveBookmark(scope, view),
   loadHistoryTurnRecoveries: async () => [],
   dismissHistoryTurnRecovery: async () => {}
 }))
@@ -74,6 +87,7 @@ import { useWorkspaceStore, type WorkspaceChatSession } from "@/store/workspace"
 import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { ChatPane } from "@/components/Option/ResearchWorkspace/ChatPane"
 import { WorkspaceChatPanel } from "@/components/Option/ChatWorkspace/WorkspaceChatPanel"
+import { clearWorkspaceUndoActionsForTests, undoLatestWorkspaceAction } from "@/components/Option/ResearchWorkspace/undo-manager"
 
 const scope = (userId = 1, serverUrl = "http://owner.test") => ({
   config: { serverUrl, authMode: "multi-user" as const, authSource: "manual" as const },
@@ -132,12 +146,31 @@ const capture = (owner: { conversation_id: string }, view: HistoryViewSelectionV
 }
 let controller: HistorySelectionController | null
 let checkpointFence: (() => () => boolean) | undefined
+let checkpointClear: ReturnType<typeof useWorkspaceChatCheckpoint>["clearChat"] | undefined
 function SelectionObserver() {
   const selection = useHistorySelectionContext()
   React.useLayoutEffect(() => { controller = selection }, [selection])
   return null
 }
-function Surface({ legacySessionKey, routeSearch, watchSessions = false }: { legacySessionKey?: string; routeSearch?: string; watchSessions?: boolean }) {
+function ResearchRouteSurface() {
+  const location = useLocation()
+  return <WorkspaceChatRouteSearchContext.Provider value={location.search}>
+    <SelectionObserver /><ChatPane />
+  </WorkspaceChatRouteSearchContext.Provider>
+}
+const mountResearchBrowserRouted = () => {
+  const content = <BrowserRouter>
+  <HistorySelectionProvider onCapture={result => {
+    const state = useStoreMessageOption.getState()
+    state.setMessages(result.selected_content.map(row => ({ id: row.id, name: "Assistant", isBot: true, message: row.message, sources: [] })))
+    state.setHistory(result.selected_content.map(row => ({ role: "assistant", content: row.message })))
+  }}><ResearchRouteSurface /></HistorySelectionProvider>
+</BrowserRouter>
+  return render(nextNavigation.enabled ? <NextRouterContext.Provider value={nextNavigation.router as React.ComponentProps<typeof NextRouterContext.Provider>["value"]}>
+    {content}
+  </NextRouterContext.Provider> : content)
+}
+function Surface({ legacySessionKey, routeSearch, replaceRouteSearch, watchSessions = false }: { legacySessionKey?: string; routeSearch?: string; replaceRouteSearch?: (search: string) => void; watchSessions?: boolean }) {
   useWorkspaceStore(state => watchSessions ? state.workspaceChatSessions : null)
   const selection = useHistorySelectionContext()
   React.useLayoutEffect(() => { controller = selection }, [selection])
@@ -147,9 +180,10 @@ function Surface({ legacySessionKey, routeSearch, watchSessions = false }: { leg
   const [draft, setDraft] = React.useState("")
   const checkpoint = useWorkspaceChatCheckpoint({
     workspaceId, workspaceReady: hydrated, draft, setDraft,
-    chat: { ...chat, stopStreamingRequest: mocks.stop }, legacySessionKey, routeSearch
+    chat: { ...chat, stopStreamingRequest: mocks.stop }, legacySessionKey, routeSearch, replaceRouteSearch
   })
   React.useLayoutEffect(() => { checkpointFence = checkpoint.fence }, [checkpoint.fence])
+  React.useLayoutEffect(() => { checkpointClear = checkpoint.clearChat }, [checkpoint.clearChat])
   return <>
     <input aria-label="Draft" value={draft} onChange={event => checkpoint.setDraft(event.target.value)} />
     <output aria-label="Transcript">{chat.messages.map(row => row.message).join(" / ")}</output>
@@ -207,11 +241,17 @@ const traverseHistory = async (direction: "back" | "forward") => {
 const handoffSearch = (name = "B") => `?historySelection=${encodeURIComponent(JSON.stringify({ ...reference(name), owner_kind: "native" }))}`
 
 beforeEach(() => {
+  nextNavigation.enabled = false
+  nextNavigation.router.replace.mockClear()
+  nextNavigation.router.push.mockClear()
+  clearWorkspaceUndoActionsForTests()
   localStorage.setItem("tldw:feature-rollout:workspace_indexeddb_offload_v1:enabled", "0")
   mocks.bookmarks.clear()
   mocks.listeners.clear()
   mocks.scope.mockReset().mockResolvedValue(scope())
   mocks.capture.mockReset().mockImplementation(capture)
+  mocks.profile.mockReset().mockResolvedValue("profile")
+  mocks.saveBookmark.mockReset().mockImplementation((scope, view) => mocks.bookmarks.set(bookmarkKey(scope, view), { ...scope, view }))
   mocks.stop.mockReset()
   mocks.submit.mockReset().mockResolvedValue({ status: "submitted" })
   window.history.replaceState({}, "", "/chat-workspace")
@@ -220,10 +260,655 @@ beforeEach(() => {
   usePlaygroundSessionStore.getState().clearSession()
   controller = null
   checkpointFence = undefined
+  checkpointClear = undefined
 })
-afterEach(() => { localStorage.clear(); vi.restoreAllMocks() })
+afterEach(() => { clearWorkspaceUndoActionsForTests(); localStorage.clear(); vi.restoreAllMocks() })
 
 describe("qualified workspace checkpoint handoff", () => {
+  const clearResearchChat = () => {
+    vi.spyOn(Modal, "confirm").mockImplementation(config => {
+      config.onOk?.()
+      return { destroy: vi.fn(), update: vi.fn() } as ReturnType<typeof Modal.confirm>
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Clear chat" }))
+  }
+
+  it("MR3 native clear retires H1 and persists an empty qualified checkpoint", async () => {
+    seed()
+    mount(true, undefined, true)
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    expect(controller!.getReference()).toBeNull()
+    expect(checkpoint()).toMatchObject({
+      messages: [], history: [], historyId: null, serverChatId: null,
+      checkpoint: { historySelectionReference: null, draft: "Draft A" }
+    })
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3 native clear does not resurrect the old checkpoint on reopen", async () => {
+    seed()
+    const surface = mount(true, undefined, true)
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    surface.unmount()
+    mount(true, undefined, true)
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+    expect(controller!.getReference()).toBeNull()
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3 native undo reacquires H1 instead of reinstalling cached rows", async () => {
+    seed()
+    mount(true, undefined, true)
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    mocks.capture.mockClear()
+    mocks.capture.mockImplementation((owner, view) => {
+      const result = capture(owner, view)
+      return { ...result, selected_content: [{ id: "verified-A", revision: "2", message: "Fresh native A", images: [] }] }
+    })
+    await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
+    await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(useStoreMessageOption.getState().messages[0]?.message).toBe("Fresh native A"))
+    expect(controller!.getCurrent().status).toBe("ready")
+    expect(checkpoint().checkpoint?.historySelectionReference).toEqual(controller!.getReference())
+    expect(checkpoint().messages[0].message).toBe("Fresh native A")
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3 failed undo retains the cleared checkpoint without cached rows", async () => {
+    seed()
+    mount(true, undefined, true)
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    const empty = structuredClone(checkpoint())
+    mocks.capture.mockClear()
+    mocks.capture.mockRejectedValueOnce(new Error("capture_unavailable"))
+    await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
+    await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+    expect(controller!.getReference()).toBeNull()
+    expect(controller!.getCurrent().capture?.status).not.toBe("captured")
+    expect(checkpoint()).toEqual(empty)
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3 undo preserves typing while the actual H1 capture is pending", async () => {
+    seed()
+    mount(true, undefined, true)
+    const composer = () => screen.getByRole("textbox", { name: "Chat message" })
+    await waitFor(() => expect(composer()).toHaveValue("Draft A"))
+    clearResearchChat()
+    const pending = deferred<ReturnType<typeof capture>>()
+    mocks.capture.mockReturnValueOnce(pending.promise)
+    mocks.capture.mockClear()
+    await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
+    await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+    fireEvent.change(composer(), { target: { value: "Typed during undo" } })
+    const [owner, view] = mocks.capture.mock.calls[0]
+    await act(async () => { pending.resolve(capture(owner, view)) })
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatId).toBe("chat-A"))
+    expect(composer()).toHaveValue("Typed during undo")
+    expect(checkpoint().checkpoint?.draft).toBe("Typed during undo")
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["workspace", "account", "selection"])("MR3 undo cannot overwrite a newer %s", async (change) => {
+    seed()
+    seed("B")
+    mount(true, undefined, true)
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    if (change === "workspace") changeWorkspace("B")
+    if (change === "account") {
+      mocks.scope.mockResolvedValue(scope(2))
+      act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
+    }
+    if (change === "selection") await act(async () => {
+      await controller!.loadConversation({ serverChatId: "chat-B", scope: { type: "workspace", workspaceId: "workspace-A" } })
+      useStoreMessageOption.getState().setServerChatId("chat-B")
+    })
+    await waitFor(() => expect(controller!.getCurrent().status).not.toBe("loading"))
+    const before = structuredClone(useStoreMessageOption.getState().messages)
+    const beforeCheckpoint = structuredClone(checkpoint())
+    mocks.capture.mockClear()
+    await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
+    expect(mocks.capture).not.toHaveBeenCalled()
+    expect(useStoreMessageOption.getState().messages).toEqual(before)
+    expect(checkpoint()).toEqual(beforeCheckpoint)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3 confirmation cannot clear a newer H1 selection", async () => {
+    seed()
+    mount(true, undefined, true)
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    let confirm: (() => void) | undefined
+    vi.spyOn(Modal, "confirm").mockImplementation(config => {
+      confirm = () => { config.onOk?.() }
+      return { destroy: vi.fn(), update: vi.fn() } as ReturnType<typeof Modal.confirm>
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Clear chat" }))
+    await act(async () => {
+      await controller!.loadConversation({ serverChatId: "chat-B", scope: { type: "workspace", workspaceId: "workspace-A" } })
+      useStoreMessageOption.getState().setServerChatId("chat-B")
+    })
+    act(() => confirm!())
+    expect(useStoreMessageOption.getState().messages[0]?.message).toBe("Verified B")
+    expect(controller!.getReference()?.conversation_id).toBe("chat-B")
+    expect(undoLatestWorkspaceAction()).toBe(false)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["workspace", "selection"])("MR3 a late undo capture cannot overwrite a newer %s", async (change) => {
+    seed()
+    seed("B")
+    mount(true, undefined, true)
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    const pending = deferred<ReturnType<typeof capture>>()
+    mocks.capture.mockReturnValueOnce(pending.promise)
+    mocks.capture.mockClear()
+    await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
+    await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+    const [owner, view] = mocks.capture.mock.calls[0]
+    if (change === "workspace") changeWorkspace("B")
+    else await act(async () => {
+      await controller!.loadConversation({ serverChatId: "chat-B", scope: { type: "workspace", workspaceId: "workspace-A" } })
+      useStoreMessageOption.getState().setServerChatId("chat-B")
+    })
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatId).toBe("chat-B"))
+    const before = structuredClone(checkpoint(change === "workspace" ? "B" : "A"))
+    await act(async () => { pending.resolve(capture(owner, view)) })
+    expect(useStoreMessageOption.getState().messages[0]?.message).toBe("Verified B")
+    expect(controller!.getReference()?.conversation_id).toBe("chat-B")
+    expect(checkpoint(change === "workspace" ? "B" : "A")).toEqual(before)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3 an unexpected foreign scope reply cannot capture or save the old chat", async () => {
+    seed()
+    mount(true, undefined, true)
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    const empty = structuredClone(checkpoint())
+    mocks.capture.mockClear()
+    mocks.scope.mockResolvedValueOnce(scope(2))
+    await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
+    await waitFor(() => {
+      const owner = controller!.getCurrent().owner
+      expect(owner?.kind).toBe("native")
+      if (owner?.kind === "native") expect(owner.request_scope.userId).toBe(2)
+    })
+    expect(mocks.capture).not.toHaveBeenCalled()
+    expect(controller!.getCurrent().owner?.kind === "native" && controller!.getCurrent().owner.validate_lease()).toBe(false)
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(checkpoint()).toEqual(empty)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3 a failed bookmark write cannot grant undo checkpoint authority", async () => {
+    seed()
+    mount(true, undefined, true)
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    const empty = structuredClone(checkpoint())
+    mocks.saveBookmark.mockRejectedValueOnce(new Error("bookmark_write_failed"))
+    await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
+    await waitFor(() => expect(mocks.saveBookmark).toHaveBeenCalledTimes(2))
+    expect(controller!.getReference()).toBeNull()
+    expect(controller!.getCurrent().status).not.toBe("ready")
+    expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+    expect(checkpoint()).toEqual(empty)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3-review failed bookmark undo must preserve subsequent typing on reopen", async () => {
+    seed()
+    const surface = mount(true, undefined, true)
+    const composer = () => screen.getByRole("textbox", { name: "Chat message" })
+    await waitFor(() => expect(composer()).toHaveValue("Draft A"))
+    clearResearchChat()
+    mocks.saveBookmark.mockRejectedValueOnce(new Error("bookmark_write_failed"))
+    await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
+    await waitFor(() => expect(controller!.getCurrent().status).not.toBe("ready"))
+    fireEvent.change(composer(), { target: { value: "Typed after failed undo" } })
+    expect(checkpoint().checkpoint?.draft).toBe("Typed after failed undo")
+    surface.unmount()
+    mount(true, undefined, true)
+    await waitFor(() => expect(composer()).toHaveValue("Typed after failed undo"))
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(controller!.getReference()).toBeNull()
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["chatId", "handoff"])("MR3-review clear consumes the original %s route without resurrection", async (kind) => {
+    seed()
+    const search = kind === "chatId" ? "?chatId=chat-A" : handoffSearch("A")
+    window.history.replaceState({}, "", `/research-workspace${search}&tab=chat#composer`)
+    const surface = mountResearchBrowserRouted()
+    const composer = () => screen.getByRole("textbox", { name: "Chat message" })
+    await waitFor(() => expect(composer()).toHaveValue("Draft A"))
+    clearResearchChat()
+    expect(window.location.search).toBe("?tab=chat")
+    expect(window.location.hash).toBe("#composer")
+    act(() => useStoreMessageOption.setState({ temporaryChat: true }))
+    act(() => useStoreMessageOption.setState({ temporaryChat: false }))
+    await waitFor(() => expect(composer()).toHaveValue("Draft A"))
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    surface.unmount()
+    mountResearchBrowserRouted()
+    await waitFor(() => expect(composer()).toHaveValue("Draft A"))
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(controller!.getReference()).toBeNull()
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["chatId", "handoff"])("MR3 undo remains qualified after its own %s route is consumed", async (kind) => {
+    seed()
+    window.history.replaceState({}, "", `/research-workspace${kind === "chatId" ? "?chatId=chat-A" : handoffSearch("A")}`)
+    mountResearchBrowserRouted()
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    expect(mocks.scope).toHaveBeenCalledTimes(2)
+    mocks.capture.mockClear()
+    await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
+    await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatId).toBe("chat-A"))
+    expect(controller!.getCurrent().status).toBe("ready")
+    expect(checkpoint().checkpoint?.historySelectionReference).toEqual(controller!.getReference())
+    expect(window.location.search).toBe("")
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3-review2 clear keeps typing durable without awaiting a redundant route scope read", async () => {
+    seed()
+    window.history.replaceState({}, "", "/research-workspace?chatId=chat-A")
+    const pending = deferred<ReturnType<typeof scope>>()
+    mocks.scope.mockResolvedValueOnce(scope()).mockResolvedValueOnce(scope()).mockReturnValueOnce(pending.promise)
+    const surface = mountResearchBrowserRouted()
+    const composer = () => screen.getByRole("textbox", { name: "Chat message" })
+    await waitFor(() => expect(composer()).toHaveValue("Draft A"))
+    clearResearchChat()
+    fireEvent.change(composer(), { target: { value: "Typed while route settles" } })
+    surface.unmount()
+    await act(async () => { pending.resolve(scope()) })
+    expect(checkpoint().checkpoint?.draft).toBe("Typed while route settles")
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3-review2 clear does not consume an early undo behind a redundant scope read", async () => {
+    seed()
+    window.history.replaceState({}, "", "/research-workspace?chatId=chat-A")
+    const pending = deferred<ReturnType<typeof scope>>()
+    mocks.scope.mockResolvedValueOnce(scope()).mockResolvedValueOnce(scope()).mockReturnValueOnce(pending.promise)
+    mountResearchBrowserRouted()
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    mocks.capture.mockClear()
+    await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
+    await act(async () => { pending.resolve(scope()) })
+    await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatId).toBe("chat-A"))
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3-review2 current undo failure remains visible after partial authority is retired", async () => {
+    seed()
+    mount(true, undefined, true)
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    mocks.saveBookmark.mockRejectedValueOnce(new Error("bookmark_write_failed"))
+    await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
+    await waitFor(() => expect(screen.getByText("Chat could not be restored.")).toBeVisible())
+    expect(screen.queryByText("Chat restored")).not.toBeInTheDocument()
+    expect(controller!.getReference()).toBeNull()
+    expect(checkpoint().checkpoint?.historySelectionReference).toBeNull()
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3 delayed route acknowledgment keeps an actual pending undo gated", async () => {
+    seed()
+    const replace = vi.fn()
+    const content = (search: string) => <HistorySelectionProvider onCapture={result => {
+      const state = useStoreMessageOption.getState()
+      state.setMessages(result.selected_content.map(row => ({ id: row.id, name: "Assistant", isBot: true, message: row.message, sources: [] })))
+      state.setHistory(result.selected_content.map(row => ({ role: "assistant", content: row.message })))
+    }}><Surface routeSearch={search} replaceRouteSearch={replace} /></HistorySelectionProvider>
+    const surface = render(content("?chatId=chat-A"))
+    await waitFor(() => expect(draft().value).toBe("Draft A"))
+    let undo: ReturnType<NonNullable<typeof checkpointClear>>
+    act(() => { undo = checkpointClear!() })
+    expect(replace).toHaveBeenCalledWith("")
+    const pending = deferred<ReturnType<typeof scope>>()
+    mocks.scope.mockReturnValueOnce(pending.promise)
+    let completion: Promise<boolean | string> | undefined
+    act(() => { completion = undo!() })
+    await waitFor(() => expect(mocks.scope).toHaveBeenCalledTimes(3))
+    try {
+      surface.rerender(content(""))
+      expect(screen.getByLabelText("Restoring")).toHaveTextContent("true")
+      fireEvent.change(draft(), { target: { value: "Typed during delayed navigation" } })
+    } finally {
+      await act(async () => { pending.resolve(scope()); await completion })
+    }
+    expect(screen.getByLabelText("Restoring")).toHaveTextContent("false")
+    expect(useStoreMessageOption.getState().serverChatId).toBe("chat-A")
+    expect(checkpoint().checkpoint?.draft).toBe("Typed during delayed navigation")
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3-review3 actual Next navigation clears a sole history query before reopen", async () => {
+    seed()
+    nextNavigation.enabled = true
+    nextNavigation.router.asPath = "/research-workspace?chatId=chat-A"
+    window.history.replaceState({}, "", nextNavigation.router.asPath)
+    const surface = mountResearchBrowserRouted()
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    expect(nextNavigation.router.replace).toHaveBeenCalledWith("/research-workspace")
+    act(() => {
+      window.history.replaceState({}, "", "/research-workspace")
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    })
+    surface.unmount()
+    mountResearchBrowserRouted()
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    expect(controller!.getReference()).toBeNull()
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3-review3 a failed undo keeps the qualified empty draft through delayed route acknowledgment", async () => {
+    seed()
+    const content = (search: string) => <HistorySelectionProvider onCapture={result => {
+      const state = useStoreMessageOption.getState()
+      state.setMessages(result.selected_content.map(row => ({ id: row.id, name: "Assistant", isBot: true, message: row.message, sources: [] })))
+      state.setHistory(result.selected_content.map(row => ({ role: "assistant", content: row.message })))
+    }}><Surface routeSearch={search} replaceRouteSearch={vi.fn()} /></HistorySelectionProvider>
+    const surface = render(content("?chatId=chat-A"))
+    await waitFor(() => expect(draft()).toHaveValue("Draft A"))
+    let undo: ReturnType<NonNullable<typeof checkpointClear>>
+    act(() => { undo = checkpointClear!() })
+    mocks.saveBookmark.mockRejectedValueOnce(new Error("bookmark_write_failed"))
+    await act(async () => { expect(await undo!()).toBe("failed") })
+    const reads = mocks.scope.mock.calls.length
+    surface.rerender(content(""))
+    expect(mocks.scope).toHaveBeenCalledTimes(reads)
+    fireEvent.change(draft(), { target: { value: "Typed after failure and delayed route" } })
+    surface.unmount()
+    expect(checkpoint()).toMatchObject({ messages: [], history: [], historyId: null, serverChatId: null,
+      checkpoint: { historySelectionReference: null, draft: "Typed after failure and delayed route" } })
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["success", "failure"])("MR3-review3 typing after capture remains an empty checkpoint before bookmark %s", async outcome => {
+    seed()
+    const surface = mount()
+    await waitFor(() => expect(draft()).toHaveValue("Draft A"))
+    let undo: ReturnType<NonNullable<typeof checkpointClear>>
+    act(() => { undo = checkpointClear!() })
+    const pending = deferred<void>()
+    mocks.saveBookmark.mockReturnValueOnce(pending.promise)
+    let completion: Promise<boolean | string> | undefined
+    act(() => { completion = undo!() })
+    await waitFor(() => expect(mocks.saveBookmark).toHaveBeenCalledTimes(2))
+    expect(controller!.getCurrent().capture?.status).toBe("captured")
+    expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+    fireEvent.change(draft(), { target: { value: "Typed after capture before bookmark" } })
+    surface.unmount()
+    await act(async () => {
+      if (outcome === "failure") pending.reject(new Error("bookmark_write_failed"))
+      else pending.resolve()
+      await completion
+    })
+    expect(checkpoint()).toMatchObject({ messages: [], history: [], historyId: null, serverChatId: null,
+      checkpoint: { historySelectionReference: null, draft: "Typed after capture before bookmark" } })
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["workspace", "account", "selection", "temporary"])("MR3-review3 a pending bookmark cannot save into a newer %s", async change => {
+    seed()
+    seed("B")
+    mount()
+    await waitFor(() => expect(draft()).toHaveValue("Draft A"))
+    let undo: ReturnType<NonNullable<typeof checkpointClear>>
+    act(() => { undo = checkpointClear!() })
+    const pending = deferred<void>()
+    mocks.saveBookmark.mockReturnValueOnce(pending.promise)
+    let completion: Promise<boolean | string> | undefined
+    act(() => { completion = undo!() })
+    await waitFor(() => expect(mocks.saveBookmark).toHaveBeenCalledTimes(2))
+    if (change === "workspace") changeWorkspace("B")
+    if (change === "account") {
+      mocks.scope.mockResolvedValue(scope(2))
+      act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
+    }
+    if (change === "temporary") act(() => useStoreMessageOption.setState({ temporaryChat: true }))
+    if (change === "selection") act(() => { controller!.beginLoad() })
+    if (change === "workspace") await waitFor(() => expect(controller!.getCurrent().owner).toMatchObject({ conversation_id: "chat-B" }))
+    if (change === "account" || change === "temporary") await waitFor(() => expect(screen.getByLabelText("Restoring")).toHaveTextContent("false"))
+    fireEvent.change(draft(), { target: { value: "Typed in replacement context" } })
+    const before = structuredClone(checkpoint())
+    await act(async () => { pending.resolve(); expect(await completion).toBe(false) })
+    expect(checkpoint()).toEqual(before)
+    expect(checkpoint().checkpoint?.draft).toBe("Draft A")
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["profile", "scope failure"] as const)("MR3 own route acknowledgment preserves Undo's %s epoch handoff", async boundary => {
+    seed()
+    const content = (search: string) => <HistorySelectionProvider onCapture={result => {
+      const state = useStoreMessageOption.getState()
+      state.setMessages(result.selected_content.map(row => ({ id: row.id, name: "Assistant", isBot: true, message: row.message, sources: [] })))
+      state.setHistory(result.selected_content.map(row => ({ role: "assistant", content: row.message })))
+    }}><Surface routeSearch={search} replaceRouteSearch={vi.fn()} /></HistorySelectionProvider>
+    const surface = render(content("?chatId=chat-A"))
+    await waitFor(() => expect(draft()).toHaveValue("Draft A"))
+    let undo: ReturnType<NonNullable<typeof checkpointClear>>
+    act(() => { undo = checkpointClear!() })
+    const pendingProfile = deferred<string>()
+    if (boundary === "profile") mocks.profile.mockReturnValueOnce(pendingProfile.promise)
+    else mocks.scope.mockRejectedValueOnce(new Error("scope_unavailable"))
+    let completion: Promise<boolean | string> | undefined
+    act(() => { completion = undo!() })
+    if (boundary === "profile") await waitFor(() => expect(mocks.profile).toHaveBeenCalledTimes(2))
+    else await act(async () => { expect(await completion).toBe("failed") })
+    const reads = mocks.scope.mock.calls.length
+    const unexpectedRead = deferred<ReturnType<typeof scope>>()
+    mocks.scope.mockReturnValueOnce(unexpectedRead.promise)
+    try {
+      surface.rerender(content(""))
+      expect(mocks.scope).toHaveBeenCalledTimes(reads)
+      fireEvent.change(draft(), { target: { value: "Typed through own epoch handoff" } })
+      surface.unmount()
+      expect(checkpoint()).toMatchObject({ messages: [], history: [], historyId: null, serverChatId: null,
+        checkpoint: { historySelectionReference: null, draft: "Typed through own epoch handoff" } })
+    } finally {
+      await act(async () => {
+        pendingProfile.resolve("profile")
+        unexpectedRead.resolve(scope())
+        await completion
+      })
+    }
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["native", "local"] as const)("MR3 pre-owner Undo cannot checkpoint a newer %s capture", async kind => {
+    seed()
+    mount()
+    await waitFor(() => expect(draft()).toHaveValue("Draft A"))
+    let undo: ReturnType<NonNullable<typeof checkpointClear>>
+    act(() => { undo = checkpointClear!() })
+    const pendingScope = deferred<ReturnType<typeof scope>>()
+    mocks.scope.mockReturnValueOnce(pendingScope.promise)
+    let completion: Promise<boolean | string> | undefined
+    act(() => { completion = undo!() })
+    await waitFor(() => expect(mocks.scope).toHaveBeenCalledTimes(3))
+    const pendingBookmark = deferred<void>()
+    mocks.saveBookmark.mockReturnValueOnce(pendingBookmark.promise)
+    let replacement: Promise<boolean> | undefined
+    act(() => {
+      replacement = controller!.open(kind === "native" ? {
+        kind: "native", conversation_id: "chat-A", request_scope: scope(),
+        scope: { type: "workspace", workspaceId: "workspace-A" }, validate_lease: () => true
+      } : { kind: "local", profile_id: "profile", owner_key: "native-local-new", conversation_id: "local-new" })
+    })
+    try {
+      await waitFor(() => expect(mocks.saveBookmark).toHaveBeenCalledTimes(2))
+      expect(controller!.getCurrent().capture?.status).toBe("captured")
+      expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+      fireEvent.change(draft(), { target: { value: "Typed in newer pre-owner selection" } })
+      expect(checkpoint().checkpoint?.draft).toBe("Draft A")
+    } finally {
+      await act(async () => {
+        pendingScope.resolve(scope())
+        pendingBookmark.resolve()
+        await replacement
+        expect(await completion).toBe(false)
+      })
+    }
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["stored", "chat route", "handoff route"])("blocks temporary %s restoration before H1 profile/bookmark writes", async (target) => {
+    seed()
+    const original = structuredClone(checkpoint())
+    const bookmarks = structuredClone([...mocks.bookmarks])
+    useStoreMessageOption.setState({ temporaryChat: true })
+    const surface = target === "stored" ? mount() : mountRouted(target === "chat route" ? "?chatId=chat-A" : handoffSearch("A"))
+    await waitFor(() => expect(screen.getByLabelText("Restoring")).toHaveTextContent("false"))
+    expect(mocks.profile).not.toHaveBeenCalled()
+    expect(mocks.saveBookmark).not.toHaveBeenCalled()
+    expect(mocks.capture).not.toHaveBeenCalled()
+    expect(controller!.getCurrent().error).toBe("temporary_history_unavailable")
+    expect(controller!.getReference()).toBeNull()
+    expect(checkpointFence!()()).toBe(false)
+    expect(transcript()).toBe("")
+    expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+    expect(checkpoint()).toEqual(original)
+    surface.unmount()
+    expect([...mocks.bookmarks]).toEqual(bookmarks)
+    expect(checkpoint()).toEqual(original)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("retires a pending normal restore when temporary mode changes", async () => {
+    seed()
+    const original = structuredClone(checkpoint())
+    const bookmarks = structuredClone([...mocks.bookmarks])
+    const pending = deferred<ReturnType<typeof scope>>()
+    mocks.scope.mockReturnValueOnce(pending.promise)
+    mount()
+    act(() => useStoreMessageOption.setState({ temporaryChat: true }))
+    await act(async () => { pending.resolve(scope()) })
+    await waitFor(() => expect(screen.getByLabelText("Restoring")).toHaveTextContent("false"))
+    expect(mocks.profile).not.toHaveBeenCalled()
+    expect(mocks.saveBookmark).not.toHaveBeenCalled()
+    expect(mocks.capture).not.toHaveBeenCalled()
+    expect([...mocks.bookmarks]).toEqual(bookmarks)
+    expect(checkpoint()).toEqual(original)
+    expect(checkpointFence!()()).toBe(false)
+    expect(transcript()).toBe("")
+    act(() => useStoreMessageOption.setState({ temporaryChat: false }))
+    await waitFor(() => expect(transcript()).toBe("Verified A"))
+    expect(draft().value).toBe("Draft A")
+    expect(checkpointFence!()()).toBe(true)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("retires a ready normal capture in temporary mode and recovers its qualified draft", async () => {
+    seed()
+    mount()
+    await waitFor(() => expect(draft().value).toBe("Draft A"))
+    fireEvent.change(draft(), { target: { value: "Unsent qualified draft" } })
+    const original = structuredClone(checkpoint())
+    const bookmarks = structuredClone([...mocks.bookmarks])
+    mocks.profile.mockClear()
+    mocks.saveBookmark.mockClear()
+    mocks.capture.mockClear()
+    const oldFence = checkpointFence!()
+    act(() => useStoreMessageOption.setState({ temporaryChat: true }))
+    await waitFor(() => expect(screen.getByLabelText("Restoring")).toHaveTextContent("false"))
+    expect(oldFence()).toBe(false)
+    expect(checkpointFence!()()).toBe(false)
+    expect(controller!.getCurrent().error).toBe("temporary_history_unavailable")
+    expect(controller!.getReference()).toBeNull()
+    expect(transcript()).toBe("")
+    expect(mocks.profile).not.toHaveBeenCalled()
+    expect(mocks.saveBookmark).not.toHaveBeenCalled()
+    expect(mocks.capture).not.toHaveBeenCalled()
+    expect([...mocks.bookmarks]).toEqual(bookmarks)
+    expect(checkpoint()).toEqual(original)
+    act(() => useStoreMessageOption.setState({ temporaryChat: false }))
+    await waitFor(() => expect(draft().value).toBe("Unsent qualified draft"))
+    expect(transcript()).toBe("Verified A")
+    expect(checkpointFence!()()).toBe(true)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("rejects a late normal capture after entering temporary mode", async () => {
+    seed()
+    const original = structuredClone(checkpoint())
+    const bookmarks = structuredClone([...mocks.bookmarks])
+    const pending = deferred<ReturnType<typeof capture>>()
+    mocks.capture.mockReturnValueOnce(pending.promise)
+    mount()
+    await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+    const [owner, view] = mocks.capture.mock.calls[0] as Parameters<typeof capture>
+    act(() => useStoreMessageOption.setState({ temporaryChat: true }))
+    await waitFor(() => expect(controller!.getCurrent().error).toBe("temporary_history_unavailable"))
+    mocks.profile.mockClear()
+    mocks.capture.mockClear()
+    await act(async () => { pending.resolve(capture(owner, view)) })
+    expect(controller!.getCurrent().error).toBe("temporary_history_unavailable")
+    expect(controller!.getReference()).toBeNull()
+    expect(transcript()).toBe("")
+    expect(checkpointFence!()()).toBe(false)
+    expect(mocks.profile).not.toHaveBeenCalled()
+    expect(mocks.saveBookmark).not.toHaveBeenCalled()
+    expect(mocks.capture).not.toHaveBeenCalled()
+    expect([...mocks.bookmarks]).toEqual(bookmarks)
+    expect(checkpoint()).toEqual(original)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(["scope", "capture"])("retains newer in-memory typing across temporary mode retirement during %s", async (boundary) => {
+    seed()
+    const original = structuredClone(checkpoint())
+    const pendingScope = deferred<ReturnType<typeof scope>>()
+    const pendingCapture = deferred<ReturnType<typeof capture>>()
+    if (boundary === "scope") mocks.scope.mockReturnValueOnce(pendingScope.promise)
+    else mocks.capture.mockReturnValueOnce(pendingCapture.promise)
+    mount()
+    if (boundary === "capture") await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+    const firstCapture = mocks.capture.mock.calls[0] as Parameters<typeof capture> | undefined
+    fireEvent.change(draft(), { target: { value: "Newer uncheckpointed draft" } })
+    act(() => useStoreMessageOption.setState({ temporaryChat: true }))
+    await waitFor(() => expect(controller!.getCurrent().error).toBe("temporary_history_unavailable"))
+    expect(draft().value).toBe("Newer uncheckpointed draft")
+    expect(checkpoint()).toEqual(original)
+    expect(mocks.saveBookmark).not.toHaveBeenCalled()
+    await act(async () => {
+      if (boundary === "scope") pendingScope.resolve(scope())
+      else pendingCapture.resolve(capture(...firstCapture!))
+    })
+    expect(draft().value).toBe("Newer uncheckpointed draft")
+    expect(checkpointFence!()()).toBe(false)
+    expect(checkpoint()).toEqual(original)
+    expect(mocks.saveBookmark).not.toHaveBeenCalled()
+    act(() => useStoreMessageOption.setState({ temporaryChat: false }))
+    await waitFor(() => expect(transcript()).toBe("Verified A"))
+    expect(draft().value).toBe("Newer uncheckpointed draft")
+    expect(checkpointFence!()()).toBe(true)
+    expect(checkpoint()!.checkpoint!.draft).toBe("Newer uncheckpointed draft")
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
   it("reports an unexpected scope failure without exposing details or changing its saved checkpoint", async () => {
     seed()
     const original = structuredClone(checkpoint())

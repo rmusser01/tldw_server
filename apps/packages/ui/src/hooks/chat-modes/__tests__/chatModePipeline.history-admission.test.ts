@@ -310,7 +310,7 @@ describe("selected durable server settlement", () => {
       .toEqual({ status: "submitted" })
     expect(mocks.append).not.toHaveBeenCalled()
     expect(save).toHaveBeenCalledWith(expect.objectContaining({
-      historyTurn: undefined, serverMessagesAlreadyPersisted: true,
+      historyTurn: turn, serverMessagesAlreadyPersisted: true,
       userServerMessageId: inputId, assistantServerMessageId: resultId
     }))
     expect(model.stream.mock.lastCall[1].preparedRequest.tldw_turn.history_v1.kind).toBe("selection")

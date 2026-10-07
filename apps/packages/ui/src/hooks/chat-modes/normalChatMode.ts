@@ -13,6 +13,7 @@ import {
 } from "@/db/dexie/history-selection"
 import type { HistoryTurnRecovery } from "@/db/dexie/types"
 import { useStoreChatModelSettings } from "@/store/model"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
 import { systemPromptForNonRagOption } from "~/services/tldw-server"
@@ -801,12 +802,19 @@ export const captureNormalHistoryTurn = async (
     })
   }
   const capturedDispatchSettings = dispatchSettings()
+  const viewIsCurrent = controller.fence()
+  const selectionIntent = usePlaygroundSessionStore.getState()
   const validateLease = () =>
     authValid() &&
     dispatchSettings() === capturedDispatchSettings
+  const navigationIsCurrent = () =>
+    usePlaygroundSessionStore.getState().restoreRevision === selectionIntent.restoreRevision &&
+    usePlaygroundSessionStore.getState().serverChatSelectionIntent === selectionIntent.serverChatSelectionIntent
   const canUpdateView = () => {
     const now = controller.getCurrent().view
     return (
+      viewIsCurrent() &&
+      navigationIsCurrent() &&
       !!now &&
       now.owner_key === view.owner_key &&
       now.conversation_id === view.conversation_id &&
@@ -911,7 +919,7 @@ export const captureNormalHistoryTurn = async (
       )
     },
     followResult: async (id) => {
-      await controller.followResult(view, id)
+      if (canUpdateView()) await controller.followResult(view, id, navigationIsCurrent)
     }
   }
   return turn

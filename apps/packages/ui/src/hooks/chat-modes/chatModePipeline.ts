@@ -833,6 +833,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       await historyTurn.beforeDispatch?.()
       if (!historyTurn.validateLease() || signal.aborted)
         throw new Error("request_config_scope_changed")
+      if (!historyTurn.canUpdateView()) throw new Error("stale_selection")
       // Revalidate the view after the durable pending-intent write, immediately before dispatch.
       finalizeHistorySelection(
         historyTurn.owner,
@@ -1114,7 +1115,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     )
 
     await saveMessageOnSuccess({
-      historyTurn: historyTurn?.serverOwned ? undefined : historyTurn,
+      historyTurn,
       historyId,
       setHistoryId,
       isRegenerate,

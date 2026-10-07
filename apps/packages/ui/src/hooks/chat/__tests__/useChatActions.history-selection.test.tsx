@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import React from "react"
 import { getLatestChatErrorBannerEntry } from "@/components/Option/Playground/PlaygroundChatErrorBanner"
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
 import type { HistorySendTurn } from "@/types/chat-modes"
 import type { HistorySelectionController } from "../useHistorySelection"
+import { historyDurableRequestDigest } from "@/services/history-durable-turn"
+import { historyAdmissionReference } from "@/services/chat-history-selection"
+import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 
 const {
   addChatMessageMock,
@@ -99,6 +103,9 @@ vi.mock("@/db/dexie/helpers", async (original) => ({
   saveMessage: vi.fn(),
   updateHistory: vi.fn(),
   updateMessage: vi.fn(),
+  updateLastUsedModel: vi.fn(),
+  updateLastUsedPrompt: vi.fn(),
+  updateChatHistoryCreatedAt: vi.fn(),
   updateMessageMedia: vi.fn(async () => null),
   removeMessageByIndex: vi.fn(),
   removeMessageById: vi.fn(),
@@ -122,6 +129,7 @@ vi.mock("@/db/dexie/nickname", () => ({
 vi.mock("@/services/actor-settings", () => ({
   getActorSettingsForChat: vi.fn(async () => null)
 }))
+vi.mock("@/services/title", () => ({ generateTitle: vi.fn(async () => "First question") }))
 
 vi.mock("@/utils/character-mood", () => ({
   detectCharacterMood: detectCharacterMoodMock
@@ -325,23 +333,19 @@ vi.mock("@/services/tldw-server", async (original) => ({
   systemPromptForNonRagOption: async () => "system",
   getWebSearchPrompt: vi.fn()
 }))
-vi.mock("@/utils/human-message", async () => {
-  const { HumanMessage } = await import("@/types/messages")
-  return {
-    humanMessageFormatter: async ({ content }: any) =>
-      new HumanMessage({ content })
-  }
-})
+vi.mock("@/utils/human-message", async (original) => original())
 vi.mock("@/utils/actor", () => ({
   maybeInjectActorMessage: async (rows: any) => rows
 }))
 vi.mock("@/models", async () => {
   const { ChatTldw } = await import("@/models/ChatTldw")
+  const { resolveChatToolRequest } = await import("@/utils/chat-tools")
   return {
     pageAssistModel: async (options: any) => {
       await h1.beforeModel()
       return new ChatTldw({
         ...options,
+        toolChoice: resolveChatToolRequest({ tools: [], toolChoice: options.toolChoice }).toolChoice,
         temperature: 0.23,
         supportsMultimodal: true,
         slashCommandInjectionMode: (
@@ -457,6 +461,8 @@ beforeEach(async () => {
   h1.beforeModel.mockReset()
   messageStoreState.value.selectedModel = "deepseek-chat"
   messageStoreState.value.toolChoice = "auto"
+  messageStoreState.value.serverChatId = null
+  usePlaygroundSessionStore.getState().clearSession()
   h1.auth = new AbortController()
   h1.mirror.mockImplementation((await vi.importActual<any>("@/db/dexie/server-chat-mirror")).linkServerChatMirror)
   const actual = await vi.importActual<any>("@/hooks/chat-modes/normalChatMode")
@@ -576,6 +582,131 @@ const ordinaryOptions = () => ({
     { role: "assistant", content: "wrong latest" }
   ]
 })
+
+it.each(["stay", "navigation", "aba", "persistence-navigation", "selection-intent", "same-selection-intent", "unmount", "mirror-creation", "preparation-intent"] as const)(
+  "first selected durable completion retains its persistence owner across %s",
+  async boundary => {
+    const helpers = await import("@/db/dexie/helpers")
+    const options = {
+      ...ordinaryOptions(), messages: [], history: [], historyId: null,
+      serverChatId: null, scope: { type: "workspace" as const, workspaceId: "workspace-first" }
+    }
+    const ready = makeController().getCurrent()
+    ready.owner.scope = options.scope
+    ready.view.cursor = { kind: "empty" }
+    ready.capture = captureFor(ready.view)
+    let current = { status: "idle", owner: null, view: null } as ReturnType<HistorySelectionController["getCurrent"]>
+    let mounted = true
+    let unmount = () => {}
+    h1.controller = {
+      getCurrent: () => current,
+      fence: () => { const origin = current; return () => mounted && current === origin },
+      loadConversation: vi.fn(async (_target, _reference, onLoaded) => {
+        current = ready
+        onLoaded({ owner: ready.owner, view: ready.view })
+        return true
+      }),
+      recoveries: [], refreshRecovery: vi.fn(), followResult: vi.fn(async () => true)
+    }
+    createChatMock.mockResolvedValue({ id: "tracked-chat-1" })
+    options.ensureServerChatHistoryId.mockResolvedValue("history-first")
+    if (boundary === "mirror-creation") {
+      options.ensureServerChatHistoryId.mockResolvedValue(null)
+      h1.saveHistory.mockResolvedValue({ id: "history-first" })
+    }
+    options.setServerChatId.mockImplementation(id => { messageStoreState.value.serverChatId = id })
+    const navigate = () => {
+      current = { ...ready, view: { ...ready.view, conversation_id: "other", view_session_id: "other" } }
+      messageStoreState.value.serverChatId = "other"
+      if (boundary === "aba") {
+        current = { ...ready, view: { ...ready.view, view_session_id: "new-origin" } }
+        messageStoreState.value.serverChatId = "tracked-chat-1"
+      }
+      options.setMessages.mockClear()
+      options.setHistory.mockClear()
+    }
+    const inputId = crypto.randomUUID(), resultId = crypto.randomUUID()
+    if (boundary === "preparation-intent") h1.recover.mockImplementationOnce(async () => {
+      messageStoreState.value.serverChatId = "other"
+      usePlaygroundSessionStore.getState().cancelPendingRestore()
+      usePlaygroundSessionStore.getState().requestServerChatSelection("other")
+      options.setMessages.mockClear()
+      options.setHistory.mockClear()
+    })
+    h1.wire.mockImplementation(async function* (request: ChatCompletionRequest) {
+      expect(request).toMatchObject({ conversation_id: "tracked-chat-1", save_to_db: true })
+      const envelope = request.tldw_turn!.history_v1!
+      if (envelope.kind !== "selection") throw new Error("Expected selected history")
+      const admission = {
+        version: 1 as const, owner_key: "native-key", conversation_id: "tracked-chat-1",
+        input_message_id: inputId, input_message_revision: "1", selection_digest: envelope.selection.selection_digest,
+        messages: envelope.selection.messages, originating_selection_revision: envelope.selection.selection_revision
+      }
+      yield { tldw_conversation_id: "tracked-chat-1", tldw_user_message_id: inputId,
+        tldw_history_admission_v1: admission, choices: [{ delta: { content: "original answer" } }] }
+      options.setServerChatId.mockClear()
+      options.invalidateServerChatHistory.mockClear()
+      if (boundary === "navigation" || boundary === "aba") navigate()
+      if (boundary === "selection-intent" || boundary === "same-selection-intent") {
+        const id = boundary === "selection-intent" ? "other" : "tracked-chat-1"
+        messageStoreState.value.serverChatId = id
+        usePlaygroundSessionStore.getState().cancelPendingRestore()
+        usePlaygroundSessionStore.getState().requestServerChatSelection(id)
+        options.setMessages.mockClear()
+        options.setHistory.mockClear()
+      }
+      if (boundary === "unmount") {
+        mounted = false
+        unmount()
+        options.setMessages.mockClear()
+        options.setHistory.mockClear()
+      }
+      if (boundary === "persistence-navigation") vi.mocked(helpers.saveMessage).mockImplementationOnce(async () => { navigate() })
+      yield { tldw_conversation_id: "tracked-chat-1", tldw_user_message_id: inputId, tldw_message_id: resultId,
+        tldw_history_result_v1: { version: 1, result_message_id: resultId, result_message_revision: "1",
+          admission: historyAdmissionReference(admission), request_context_digest: historyDurableRequestDigest(request), sources: [] } }
+    })
+    const hook = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    unmount = hook.unmount
+    let result: Awaited<ReturnType<typeof hook.result.current.onSubmit>>
+    await act(async () => {
+      result = await hook.result.current.onSubmit({ message: "first", image: "",
+        requestOverrides: { tldwTurn: { user_message_id: inputId } } })
+    })
+    if (boundary === "preparation-intent") {
+      expect(result!).toEqual({ status: "failed", errorMessage: "stale_selection" })
+      expect(h1.wire).not.toHaveBeenCalled()
+      expect(helpers.saveMessage).not.toHaveBeenCalled()
+      expect(h1.controller.followResult).not.toHaveBeenCalled()
+      expect(messageStoreState.value.serverChatId).toBe("other")
+      expect(options.setMessages).not.toHaveBeenCalled()
+      expect(options.setHistory).not.toHaveBeenCalled()
+      hook.unmount()
+      return
+    }
+    expect(result!).toEqual({ status: "submitted" })
+    expect(createChatMock).toHaveBeenCalledOnce()
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    expect(helpers.saveMessage).toHaveBeenCalledTimes(2)
+    expect(helpers.saveMessage).toHaveBeenCalledWith(expect.objectContaining({ history_id: "history-first", role: "user", serverMessageId: inputId }))
+    expect(helpers.saveMessage).toHaveBeenCalledWith(expect.objectContaining({ history_id: "history-first", role: "assistant", serverMessageId: resultId, content: "original answer" }))
+    expect(h1.dismiss).toHaveBeenCalledWith(expect.anything(), ready.view, expect.any(String), "completed")
+    expect(h1.recover.mock.calls.map((call) => call[2].state)).toEqual([
+      "dispatching", "accepted_unsent", "accepted_unsent"
+    ])
+    expect(options.setServerChatId).not.toHaveBeenCalled()
+    expect(options.invalidateServerChatHistory).toHaveBeenCalledTimes(boundary === "stay" || boundary === "mirror-creation" ? 1 : 0)
+    expect(h1.controller.followResult).toHaveBeenCalledTimes(boundary === "stay" || boundary === "mirror-creation" ? 1 : 0)
+    expect(messageStoreState.value.serverChatId).toBe(boundary === "navigation" || boundary === "persistence-navigation" || boundary === "selection-intent" ? "other" : "tracked-chat-1")
+    if (boundary === "mirror-creation") expect(options.setHistoryId).toHaveBeenCalledWith("history-first", { preserveServerChatId: true })
+    if (["navigation", "aba", "selection-intent", "same-selection-intent", "unmount"].includes(boundary)) {
+      expect(options.setMessages).not.toHaveBeenCalled()
+      expect(options.setHistory).not.toHaveBeenCalled()
+    }
+    hook.unmount()
+  }
+)
 
 it("edits an ordinary local message while the mounted history controller is idle", async () => {
   const helpers = await import("@/db/dexie/helpers")
@@ -755,7 +886,8 @@ it("mounted native character sends A1 selection and only new input, following th
   ).toEqual(["u-old", "a1"])
   expect(h1.controller.followResult).toHaveBeenCalledWith(
     expect.objectContaining({ view_session_id: "origin" }),
-    "native-result"
+    "native-result",
+    expect.any(Function)
   )
   expect(createChatMock).not.toHaveBeenCalled()
   expect(addChatMessageMock).not.toHaveBeenCalled()
@@ -1512,7 +1644,8 @@ it("a disconnect after the native owner ACK preserves the completed outcome", as
   )
   expect(h1.controller.followResult).toHaveBeenCalledWith(
     expect.anything(),
-    "owner-result"
+    "owner-result",
+    expect.any(Function)
   )
   expect(addChatMessageMock).not.toHaveBeenCalled()
   expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
@@ -1986,6 +2119,257 @@ it("mounted branch action captures a stable boundary and returns the committed o
 vi.mock("@/db/dexie/schema", async () => ({
   db: (await import("@/hooks/chat/__tests__/local-history-fixture")).memory
 }))
+
+it.each(["stay", "select", "aba", "clear", "account", "unmount", "select-error", "current-error"])(
+  "real H1 result follow keeps delayed capture bound to navigation (%s)",
+  async (navigation) => {
+    const { seedLocalFork } = await import("./local-history-fixture")
+    await seedLocalFork(false)
+    const { useHistorySelection } = await import("../useHistorySelection")
+    const { captureNormalHistoryTurn } = await vi.importActual<
+      typeof import("@/hooks/chat-modes/normalChatMode")
+    >("@/hooks/chat-modes/normalChatMode")
+    const onCapture = vi.fn()
+    const mounted = renderHook(() => useHistorySelection({ onCapture }))
+    await act(async () => {
+      expect(await mounted.result.current.open({
+        kind: "native",
+        owner_key: "native-key",
+        conversation_id: "tracked-chat-1",
+        request_scope: {
+          config: { serverUrl: "https://server.test", authMode: "multi-user" },
+          userId: "alice"
+        },
+        validate_lease: () => !h1.auth.signal.aborted
+      })).toBe(true)
+    })
+    const { loadServicePromptSnapshot } = await import("@/services/service-prompts")
+    const followResult = vi.spyOn(mounted.result.current, "followResult")
+    const turn = await captureNormalHistoryTurn({
+      ...createHookOptions(),
+      tldwTurn: { user_message_id: crypto.randomUUID() },
+      historySelection: {
+        controller: mounted.result.current,
+        originIsCurrent: () => true,
+        temporary: false
+      }
+    }, "next", await loadServicePromptSnapshot([]), new AbortController().signal)
+    expect(turn.serverOwned).toBe(true)
+    onCapture.mockClear()
+    const before = h1.capture.mock.calls.length
+    let release!: () => void
+    const pendingCapture = new Promise<void>((resolve) => { release = resolve })
+    h1.capture.mockImplementationOnce(async (_id, request) => {
+      await pendingCapture
+      if (navigation.endsWith("-error")) throw new Error("late-capture-error")
+      return captureFor(request.view)
+    })
+    let follow!: Promise<void>
+    act(() => { follow = turn.followResult!("a1") })
+    await waitFor(() => expect(h1.capture).toHaveBeenCalledTimes(before + 1))
+    if (navigation === "select" || navigation === "aba" || navigation === "select-error") {
+      usePlaygroundSessionStore.getState().requestServerChatSelection("B")
+      if (navigation === "aba")
+        usePlaygroundSessionStore.getState().requestServerChatSelection("tracked-chat-1")
+    } else if (navigation === "clear") {
+      usePlaygroundSessionStore.getState().clearSession()
+    } else if (navigation === "account") {
+      h1.auth.abort()
+    } else if (navigation === "unmount") {
+      mounted.unmount()
+    }
+    await act(async () => { release(); await follow })
+    expect(followResult).toHaveBeenCalledWith(
+      expect.objectContaining({ conversation_id: "tracked-chat-1" }),
+      "a1",
+      expect.any(Function)
+    )
+    expect(onCapture).toHaveBeenCalledTimes(navigation === "stay" ? 1 : 0)
+    if (navigation === "stay") {
+      expect(mounted.result.current.getCurrent().status).toBe("ready")
+      expect(mounted.result.current.getCurrent().view?.cursor).toEqual({
+        kind: "after_message", message_id: "a1"
+      })
+    }
+    expect(mounted.result.current.getCurrent().error).toBe(
+      navigation === "current-error" ? "late-capture-error" :
+      navigation === "account" ? "request_config_scope_changed" : null
+    )
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+  }
+)
+
+it.each(["completed", "disconnect"].flatMap(outcome =>
+  ["stay", "select", "aba", "clear", "account", "unmount", "select-error", "current-error"].map(navigation => [outcome, navigation])
+))(
+  "real H1 result follow keeps Character %s ACK bound to navigation (%s)",
+  async (outcome, navigation) => {
+    const { seedLocalFork } = await import("./local-history-fixture")
+    await seedLocalFork(false)
+    const { useHistorySelection } = await import("../useHistorySelection")
+    const { sendNativeHistoryCharacter } = await import("../native-history-character-send")
+    const onCapture = vi.fn()
+    const mounted = renderHook(() => useHistorySelection({ onCapture }))
+    await act(async () => {
+      expect(await mounted.result.current.open({
+        kind: "native", owner_key: "native-key", conversation_id: "tracked-chat-1",
+        request_scope: {
+          config: { serverUrl: "https://server.test", authMode: "multi-user" }, userId: "alice"
+        },
+        validate_lease: () => !h1.auth.signal.aborted
+      })).toBe(true)
+    })
+    onCapture.mockClear()
+    let release!: () => void
+    let following = false
+    const pendingCapture = new Promise<void>((resolve) => { release = resolve })
+    h1.wire.mockImplementation(async function* (request) {
+      yield { tldw_history_admission_v1: nativeAdmission(request) }
+      yield { tldw_message_id: "a1", tldw_conversation_id: "tracked-chat-1" }
+      h1.capture.mockImplementationOnce(async (_id, request) => {
+        following = true
+        await pendingCapture
+        if (navigation.endsWith("-error")) throw new Error("late-capture-error")
+        return captureFor(request.view)
+      })
+      if (outcome === "disconnect") throw new Error("late disconnect")
+    })
+    const options = createHookOptions()
+    let sent!: Promise<void>
+    act(() => {
+      sent = sendNativeHistoryCharacter({
+        controller: mounted.result.current,
+        originIsCurrent: mounted.result.current.fence(),
+        signal: new AbortController().signal, temporary: false,
+        historyId: options.historyId, serverChatId: options.serverChatId,
+        characterId: options.serverChatCharacterId,
+        model: options.selectedModel, settings: { apiProvider: "openai" },
+        message: "next", image: "",
+        t: options.t as Parameters<typeof sendNativeHistoryCharacter>[0]["t"],
+        setServerChatId: options.setServerChatId, setMessages: options.setMessages,
+        releaseActivity: vi.fn()
+      })
+    })
+    await waitFor(() => expect(following).toBe(true))
+    if (navigation === "select" || navigation === "aba" || navigation === "select-error") {
+      usePlaygroundSessionStore.getState().requestServerChatSelection("B")
+      if (navigation === "aba")
+        usePlaygroundSessionStore.getState().requestServerChatSelection("tracked-chat-1")
+    } else if (navigation === "clear") {
+      usePlaygroundSessionStore.getState().clearSession()
+    } else if (navigation === "account") {
+      h1.auth.abort()
+    } else if (navigation === "unmount") {
+      mounted.unmount()
+    }
+    await act(async () => { release(); await sent })
+    expect(onCapture).toHaveBeenCalledTimes(navigation === "stay" ? 1 : 0)
+    expect(mounted.result.current.getCurrent().error).toBe(
+      navigation === "current-error" ? "late-capture-error" :
+      navigation === "account" ? "request_config_scope_changed" : null
+    )
+    expect(h1.dismiss).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.any(String), "completed"
+    )
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    expect(options.setMessages).not.toHaveBeenCalled()
+  }
+)
+
+it.each([
+  ["adopted", "temperature"], ["adopted", "tools"], ["adopted", "abort"],
+  ["adopted", "stay"], ["adopted", "account"], ["adopted", "config"],
+  ["pending", "temperature"], ["pending", "abort"], ["pending", "select"],
+  ["pending", "account"], ["pending", "unmount"]
+])("real H1 result follow keeps Character owner lease valid (%s, %s)", async (phase, change) => {
+  const { seedLocalFork } = await import("./local-history-fixture")
+  await seedLocalFork(false)
+  const prompts = await import("@/services/service-prompts")
+  const scope = vi.spyOn(prompts, "resolveServicePromptScope").mockResolvedValue({
+    config: { serverUrl: "https://server.test", authMode: "multi-user" },
+    userId: "alice", scopeKey: "scope", clientPrincipalVerified: true
+  })
+  const { useStoreChatModelSettings } = await import("@/store/model")
+  const { useMcpToolsStore } = await import("@/store/mcp-tools")
+  const previousSettings = useStoreChatModelSettings.getState()
+  const previousTools = useMcpToolsStore.getState()
+  const { useHistorySelection } = await import("../useHistorySelection")
+  const { sendNativeHistoryCharacter } = await import("../native-history-character-send")
+  const mounted = renderHook(() => useHistorySelection())
+  const firstSignal = new AbortController()
+  let release!: () => void
+  let loading = false
+  const pendingCapture = new Promise<void>(resolve => { release = resolve })
+  h1.capture.mockImplementation(async (_id, request) => {
+    if (phase === "pending" && !loading) {
+      loading = true
+      await pendingCapture
+    }
+    return captureFor({ ...request.view, owner_key: "native-key" })
+  })
+  h1.wire.mockImplementation(async function* (request) {
+    yield { tldw_history_admission_v1: nativeAdmission(request) }
+    yield { tldw_message_id: "a1", tldw_conversation_id: "tracked-chat-1" }
+  })
+  const options = createHookOptions()
+  const send = (signal: AbortSignal) => sendNativeHistoryCharacter({
+    controller: mounted.result.current, originIsCurrent: mounted.result.current.fence(),
+    signal, temporary: false, historyId: null, serverChatId: "tracked-chat-1",
+    model: options.selectedModel, settings: { apiProvider: "openai" },
+    message: "next", image: "", t: options.t as Parameters<typeof sendNativeHistoryCharacter>[0]["t"],
+    setServerChatId: options.setServerChatId, setMessages: options.setMessages,
+    releaseActivity: vi.fn()
+  })
+  const mutate = () => {
+    if (change === "temperature") useStoreChatModelSettings.setState({ temperature: 0.37 })
+    if (change === "tools") useMcpToolsStore.setState({ ...previousTools })
+    if (change === "abort") firstSignal.abort()
+    if (change === "select") usePlaygroundSessionStore.getState().requestServerChatSelection("B")
+    if (change === "account") {
+      h1.auth.abort()
+      window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+    }
+    if (change === "config") window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+    if (change === "unmount") mounted.unmount()
+  }
+  try {
+    if (phase === "pending") {
+      let outcome!: Promise<unknown>
+      act(() => { outcome = send(firstSignal.signal).catch(error => error) })
+      await waitFor(() => expect(loading).toBe(true))
+      await act(async () => { mutate(); release(); expect(await outcome).toBeInstanceOf(Error) })
+      expect(h1.wire).not.toHaveBeenCalled()
+      expect(options.setServerChatId).not.toHaveBeenCalled()
+      const owner = mounted.result.current.getCurrent().owner
+      expect(owner?.kind === "native" && owner.validate_lease()).toBeFalsy()
+    } else {
+      await act(async () => { await send(firstSignal.signal) })
+      expect(h1.wire).toHaveBeenCalledOnce()
+      await act(async () => { mutate() })
+      const owner = mounted.result.current.getCurrent().owner
+      if (owner?.kind !== "native") throw new Error("Expected native owner")
+      if (change === "account" || change === "config") {
+        expect(owner.validate_lease()).toBe(false)
+        await act(async () => { await expect(send(new AbortController().signal)).rejects.toThrow(change === "account" ? "stale_selection" : "request_config_scope_changed") })
+        expect(h1.wire).toHaveBeenCalledOnce()
+      } else {
+        expect(owner.validate_lease()).toBe(true)
+        await act(async () => { await send(new AbortController().signal) })
+        expect(h1.wire).toHaveBeenCalledTimes(2)
+        expect(mounted.result.current.getCurrent().status).toBe("ready")
+      }
+    }
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+  } finally {
+    mounted.unmount()
+    scope.mockRestore()
+    useStoreChatModelSettings.setState(previousSettings)
+    useMcpToolsStore.setState(previousTools)
+  }
+})
 
 it.each(["normal", "bubble", "cluster"])(
   "real controller fork -> immediate send -> reopen keeps source unchanged (entry=%s)",

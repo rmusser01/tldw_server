@@ -1,11 +1,14 @@
 """HTTP/SQLite regression tests with a provider double; these are not native UAT."""
 
+import asyncio
 import json
 import re
 import threading
 from collections.abc import Mapping
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -66,7 +69,7 @@ def isolated_usage_api(selected_api, tmp_path, monkeypatch, test_openai_server_c
     reset_settings()
 
 
-def body_for(client, cid, headers, stream=False, sources=None):
+def body_for(client, cid, headers, stream=False, sources=None, max_tokens=None, user_content=" original {{char}} "):
     captured = client.post(
         f"/api/v1/chat/conversations/{cid}/history/selection",
         headers=headers,
@@ -90,10 +93,12 @@ def body_for(client, cid, headers, stream=False, sources=None):
         "save_to_db": True,
         "messages": [
             {"role": "system", "content": " frozen <doc id='0'>evidence</doc> "},
-            {"role": "user", "content": " original {{char}} "},
+            {"role": "user", "content": user_content},
         ],
         "tldw_turn": {"user_message_id": str(uuid4()), "result_v1": {"version": 1, "sources": sources or []}},
     }
+    if max_tokens is not None:
+        body["max_tokens"] = max_tokens
     capture = captured.json()
     selection = resolve_history_selection(
         capture["snapshot"], capture["view"], "send", selected_durable_request_digest(body)
@@ -112,6 +117,20 @@ def frames(response, stream):
         if stream
         else [response.json()]
     )
+
+
+def receipt_sources():
+    return [
+        {
+            "name": "Paper",
+            "type": "pdf",
+            "mode": "rag",
+            "url": "provenance:paper",
+            "pageContent": f"Excerpt {index}: " + "evidence " * 80,
+            "metadata": {"page": 2, "score": -2.5},
+        }
+        for index in range(20)
+    ]
 
 
 @pytest.mark.parametrize("cited", [False, True])
@@ -164,6 +183,134 @@ def test_monthly_token_admission_excludes_persistence_only_sources(selected_api,
     )
     assert receipt["sources"] == sources
     assert db.count_messages_for_conversation(cid) == 2
+
+
+@pytest.mark.parametrize("gate", ["legacy", "rg"])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("payload", ["plain", "citations", "large-prompt"])
+def test_finite_token_admission_charges_inference_not_receipts(selected_api, monkeypatch, gate, stream, payload):
+    from tldw_Server_API.app.core.Chat.rate_limiter import ConversationRateLimiter, RateLimitConfig
+    from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor, RGRequest
+
+    client, db, cid, headers = selected_api
+    sources = receipt_sources() if payload == "citations" else []
+    body = body_for(
+        client,
+        cid,
+        headers,
+        stream,
+        sources,
+        max_tokens=32,
+        user_content="inference " * 1600 if payload == "large-prompt" else " original {{char}} ",
+    )
+    monkeypatch.setenv("RG_ENABLED", "1" if gate == "rg" else "0")
+    policy = {"tokens": {"per_min": 3000, "burst": 1.0}, "scopes": ["global", "user"]}
+    governor = MemoryResourceGovernor(policies={"chat.default": policy}, time_source=lambda: 1000.0)
+    loader = SimpleNamespace(
+        get_policy=lambda _: policy,
+        get_snapshot=lambda: SimpleNamespace(route_map={"default": "chat.default"}),
+    )
+    monkeypatch.setattr(client.app.state, "rg_governor", governor, raising=False)
+    monkeypatch.setattr(client.app.state, "rg_policy_loader", loader, raising=False)
+    reservations = []
+    if gate == "rg":
+        # A partially consumed real bucket distinguishes prompt admission from capacity clamping.
+        decision, _ = client.portal.call(
+            governor.reserve,
+            RGRequest(entity="user:1", categories={"tokens": {"units": 1000}}, tags={"policy_id": "chat.default"}),
+        )
+        assert decision.allowed
+        reserve = governor.reserve
+
+        async def record_reserve(req, op_id=None):
+            reservations.append(req.categories["tokens"]["units"])
+            return await reserve(req, op_id=op_id)
+
+        monkeypatch.setattr(governor, "reserve", record_reserve)
+    limiter = ConversationRateLimiter(RateLimitConfig(per_user_tokens_per_minute=3000, burst_multiplier=1.0))
+    monkeypatch.setattr(endpoint, "get_rate_limiter", lambda: limiter)
+    provider = endpoint.perform_chat_api_call
+    calls = []
+
+    def record(*args, **kwargs):
+        calls.append(True)
+        return provider(*args, **kwargs)
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", record)
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    if gate == "rg":
+        assert len(reservations) == 1
+    if payload == "large-prompt":
+        assert response.status_code == 429, response.text
+        assert calls == []
+        assert db.count_messages_for_conversation(cid) == 0
+    else:
+        assert response.status_code == 200, response.text
+        assert calls == [True]
+        receipt = next(
+            event["tldw_history_result_v1"] for event in frames(response, stream) if "tldw_history_result_v1" in event
+        )
+        assert receipt["sources"] == sources
+        assert db.count_messages_for_conversation(cid) == 2
+
+
+@pytest.mark.parametrize("execution", [False, True])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("cited", [False, True])
+def test_owned_queue_estimates_exclude_persistence_only_sources(selected_api, monkeypatch, execution, stream, cited):
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.Chat.request_queue import RequestQueue
+
+    client, db, cid, headers = selected_api
+    sources = receipt_sources() if cited else []
+    body = body_for(client, cid, headers, stream, sources, max_tokens=32)
+    queue = RequestQueue(max_queue_size=2, max_concurrent=1, timeout=5)
+    enqueue = queue.enqueue
+    estimates = []
+
+    async def record_enqueue(*args, **kwargs):
+        estimates.append(kwargs["estimated_tokens"])
+        return await enqueue(*args, **kwargs)
+
+    monkeypatch.setattr(queue, "enqueue", record_enqueue)
+    monkeypatch.setenv("RG_ENABLED", "0")
+    monkeypatch.setenv("FORCE_CHAT_QUEUE_IN_TESTS", "1")
+    monkeypatch.setattr(endpoint, "QUEUED_EXECUTION", execution)
+    monkeypatch.setattr(endpoint, "get_request_queue", lambda: queue)
+    monkeypatch.setattr(chat_service, "get_request_queue", lambda: queue)
+    client.portal.call(queue.start)
+    try:
+        response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+        assert response.status_code == 200, response.text
+        assert len(estimates) == 1
+        assert 0 < estimates[0] < 3000
+        receipt = next(
+            event["tldw_history_result_v1"] for event in frames(response, stream) if "tldw_history_result_v1" in event
+        )
+        assert receipt["sources"] == sources
+        assert db.count_messages_for_conversation(cid) == 2
+    finally:
+        client.portal.call(queue.stop)
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_full_persistence_envelope_still_obeys_request_size_limit(selected_api, monkeypatch, stream):
+    from tldw_Server_API.app.api.v1.schemas import chat_validators
+
+    client, db, cid, headers = selected_api
+    body = body_for(client, cid, headers, stream, receipt_sources(), max_tokens=32)
+    monkeypatch.setattr(chat_validators, "MAX_REQUEST_SIZE", 3000)
+    calls = []
+
+    def unexpected_provider(*args, **kwargs):
+        calls.append(True)
+        raise AssertionError("Size refusal must precede provider dispatch")
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", unexpected_provider)
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert response.status_code == 413, response.text
+    assert calls == []
+    assert db.count_messages_for_conversation(cid) == 0
 
 
 @pytest.mark.parametrize("invalid", ["text-parts", "image", "tool"])
@@ -231,13 +378,17 @@ def test_rejected_projection_records_consumed_tokens_before_next_quota_check(iso
 
 @pytest.mark.parametrize(
     ("stream", "unified", "settled_before_admission"),
-    [(False, False, False), (True, False, False), (True, True, False),
-     (True, False, True), (True, True, True)],
+    [(False, False, False), (True, False, False), (True, True, False), (True, False, True), (True, True, True)],
     ids=["json", "legacy", "unified", "settled-legacy", "settled-unified"],
 )
 @pytest.mark.parametrize("cited", [False, True])
 def test_receipt_is_server_owned_verified_atomic_result(
-    selected_api, monkeypatch, stream, cited, unified, settled_before_admission,
+    selected_api,
+    monkeypatch,
+    stream,
+    cited,
+    unified,
+    settled_before_admission,
 ):
     client, db, cid, headers = selected_api
     sources = (
@@ -763,6 +914,204 @@ def test_mandatory_sse_settlement_fault_is_an_explicit_unknown_terminal(selected
     assert "private metadata failure details" not in response.text
     assert response.text.rstrip().endswith("data: [DONE]")
     assert db.count_messages_for_conversation(cid) == (1 if fault == "metadata" else 2)
+
+
+@pytest.mark.parametrize("unified", [False, True])
+@pytest.mark.parametrize("fault", [None, "metadata", "unverified"])
+def test_completed_sse_consumption_is_accounted_once_even_if_settlement_fails(
+    isolated_usage_api, monkeypatch, unified, fault
+):
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor
+
+    client, db, cid, headers = isolated_usage_api
+    monkeypatch.setenv("LLM_USAGE_ENABLED", "true")
+    monkeypatch.setenv("STREAMS_UNIFIED", "1" if unified else "0")
+    monkeypatch.setenv("RG_ENABLED", "1")
+    used_before = client.portal.call(endpoint.llm_tokens_this_month, 1)
+    limit = used_before + 5000
+
+    async def allowance(_uid, key):
+        return limit if key == "limits.llm_tokens_per_month" else None
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.user_quota", allowance)
+    policy = {"tokens": {"per_min": 1000000, "burst": 1.0}, "scopes": ["global", "user"]}
+    governor = MemoryResourceGovernor(policies={"chat.default": policy}, time_source=lambda: 1000.0)
+    loader = SimpleNamespace(
+        get_policy=lambda _: policy,
+        get_snapshot=lambda: SimpleNamespace(route_map={"default": "chat.default"}),
+    )
+    monkeypatch.setattr(client.app.state, "rg_governor", governor, raising=False)
+    monkeypatch.setattr(client.app.state, "rg_policy_loader", loader, raising=False)
+    commits = []
+    commit = governor.commit
+
+    async def record_commit(handle_id, actuals=None, op_id=None):
+        commits.append((handle_id, actuals))
+        return await commit(handle_id, actuals=actuals, op_id=op_id)
+
+    monkeypatch.setattr(governor, "commit", record_commit)
+    usage = []
+    log_usage = chat_service.log_llm_usage
+
+    async def record_usage(**kwargs):
+        usage.append(kwargs)
+        await log_usage(**kwargs)
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", record_usage)
+    body = body_for(client, cid, headers, True)
+    reply = "Answer " * 128
+    calls = []
+
+    def provider(*args, **kwargs):
+        calls.append(True)
+        return iter(
+            [
+                "data: " + json.dumps({"choices": [{"index": 0, "delta": {"content": reply}}]}) + "\n\n",
+                "data: [DONE]\n\n",
+            ]
+        )
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    if fault == "metadata":
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("private metadata failure details")
+
+        monkeypatch.setattr(db.message_store, "_add_message_metadata_with_conn", fail)
+    elif fault == "unverified":
+        read = db.read_history_recovery_messages
+
+        def unverified(*args, **kwargs):
+            rows, total = read(*args, **kwargs)
+            rows[0]["tldw_history_recovery_v1"] = {"version": 1, "status": "unverified", "code": "live_state_mismatch"}
+            return rows, total
+
+        monkeypatch.setattr(db, "read_history_recovery_messages", unverified)
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    events = frames(response, True)
+    if fault:
+        assert [event["error"]["code"] for event in events if "error" in event] == [
+            "selected_durable_result_unverified"
+        ], response.text
+        assert not any(event.get("success") is True for event in events)
+        assert not any(choice.get("finish_reason") == "stop" for event in events for choice in event.get("choices", []))
+        assert not any("tldw_history_result_v1" in event or "tldw_message_id" in event for event in events)
+    else:
+        assert any("tldw_history_result_v1" in event for event in events)
+    assert response.text.rstrip().endswith("data: [DONE]")
+    assert db.count_messages_for_conversation(cid) == (1 if fault == "metadata" else 2)
+    assert len(usage) == 1
+    total = usage[0]["total_tokens"]
+    assert usage[0]["completion_tokens"] == len(reply) // 4
+    assert total == usage[0]["prompt_tokens"] + usage[0]["completion_tokens"]
+    assert total > 100
+    assert client.portal.call(endpoint.llm_tokens_this_month, 1) == used_before + total
+    assert len(commits) == 1
+    assert commits[0][1] == {"tokens": total}
+
+    limit = used_before + total
+    next_cid = db.add_conversation({"title": "Quota after streamed settlement"})
+    next_body = body_for(client, next_cid, headers, True, max_tokens=1)
+    denied = client.post("/api/v1/chat/completions", headers=headers, json=next_body)
+    assert denied.status_code == 402, denied.text
+    assert denied.json()["detail"]["category"] == "llm_tokens_month"
+    assert calls == [True]
+    assert len(usage) == 1
+    assert [actuals for _, actuals in commits] == [{"tokens": total}, {"tokens": 0}]
+    assert db.count_messages_for_conversation(next_cid) == 0
+
+
+@pytest.mark.parametrize("stream,fault", [(False, False), (True, False), (True, True)])
+def test_completed_stream_billing_has_one_owner_even_before_preflight_returns(selected_api, monkeypatch, stream, fault):
+    from tldw_Server_API.app.api.v1.API_Deps import billing_deps
+    from tldw_Server_API.app.core.Billing.enforcement import EnforcementAction, LimitCheckResult
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    client, db, cid, headers = selected_api
+    body = body_for(client, cid, headers, stream)
+    monkeypatch.setenv("STREAMS_UNIFIED", "1")
+    monkeypatch.setenv("RG_ENABLED", "0")
+    enforcer = SimpleNamespace(
+        check_limit=AsyncMock(
+            return_value=LimitCheckResult(
+                category=endpoint.LimitCategory.LLM_TOKENS_MONTH.value,
+                action=EnforcementAction.ALLOW,
+                current=0,
+                limit=1000000,
+                percent_used=0.0,
+            )
+        ),
+        apply_usage_delta=Mock(return_value=True),
+        invalidate_cache=Mock(),
+    )
+    monkeypatch.setattr(endpoint, "enforcement_enabled", lambda: True)
+    monkeypatch.setattr(billing_deps, "enforcement_enabled", lambda: True)
+    monkeypatch.setattr(billing_deps, "billing_checks_active", AsyncMock(return_value=True))
+    monkeypatch.setattr(endpoint, "get_billing_enforcer", lambda: enforcer)
+    monkeypatch.setattr(billing_deps, "get_billing_enforcer", lambda: enforcer)
+    monkeypatch.setitem(client.app.dependency_overrides, endpoint.get_billing_org_id, lambda: 42)
+    ledger = AsyncMock()
+    monkeypatch.setattr(endpoint.cost_units, "record_cost_units_for_entity", ledger)
+    usage = AsyncMock()
+    monkeypatch.setattr(chat_service, "log_llm_usage", usage)
+    prime = endpoint._prime_provider_stream_response
+
+    async def prime_after_completion(response, error_state):
+        buffered, code, has_output, _ = await prime(response, error_state)
+
+        async def drain():
+            chunks = list(buffered)
+            async for chunk in response.body_iterator:
+                chunks.append(chunk)
+            return tuple(chunks), code, has_output, True
+
+        result = await asyncio.wait_for(drain(), timeout=2)
+        assert ledger.await_count == 1
+        return result
+
+    monkeypatch.setattr(endpoint, "_prime_provider_stream_response", prime_after_completion)
+
+    def provider(*args, **kwargs):
+        if stream:
+            return iter(['data: {"choices":[{"index":0,"delta":{"content":"Answer"}}]}\n\n', "data: [DONE]\n\n"])
+        return {
+            "id": "billing-control",
+            "object": "chat.completion",
+            "created": 1,
+            "model": body["model"],
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "Answer"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+        }
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    if fault:
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("private metadata failure details")
+
+        monkeypatch.setattr(db.message_store, "_add_message_metadata_with_conn", fail)
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    events = frames(response, stream)
+    if fault:
+        assert [event["error"]["code"] for event in events if "error" in event] == [
+            "selected_durable_result_unverified"
+        ]
+        assert not any(event.get("success") is True for event in events)
+        assert not any("tldw_history_result_v1" in event or "tldw_message_id" in event for event in events)
+    else:
+        assert any("tldw_history_result_v1" in event for event in events)
+    assert db.count_messages_for_conversation(cid) == (1 if fault else 2)
+    assert usage.await_count == 1
+    total = usage.await_args.kwargs["total_tokens"]
+    assert total > 0
+    enforcer.apply_usage_delta.assert_called_once_with(42, endpoint.LimitCategory.LLM_TOKENS_MONTH, total)
+    assert ledger.await_count == 1
+    assert ledger.await_args.kwargs["entity_scope"] == "org"
+    assert ledger.await_args.kwargs["entity_value"] == "42"
+    assert ledger.await_args.kwargs["tokens"] == total
 
 
 def test_selected_durable_receipt_wrapper_preserves_sse_control_frames(selected_api, monkeypatch):
