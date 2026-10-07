@@ -1,6 +1,6 @@
 # Knowledge workstream burndown — 2026-10-07
 
-Baseline: `dev` at `26ae4fd679ddd43f9f904cd3cca1b1cf8af51e48`, isolated branch `codex/knowledge-burndown-20261007`. Parent tracking: TASK-13530. Primary checkout, installed dependencies and existing local model service remain separate from this work.
+Baseline: `dev` at `26ae4fd679ddd43f9f904cd3cca1b1cf8af51e48`, isolated branch `codex/knowledge-burndown-20261007`. Rebased without conflicts onto current dev `5ec8c7939f46d6baecf8767caf070cb4a2eb335c`; intervening changes only touch Admin readiness and its task. Parent tracking: TASK-13530. Primary checkout, installed dependencies and existing local model service remain separate from this work.
 
 ## Current disposition
 

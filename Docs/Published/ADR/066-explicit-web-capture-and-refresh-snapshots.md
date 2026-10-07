@@ -10,7 +10,7 @@
 
 **Related task:** TASK-13530.1
 
-**Related spec/plan:** [Proposed Research capture design (repository source)](https://github.com/rmusser01/tldw_server/blob/5617614e545e480ea9abb1b14a36312da7402423/Docs/Design/2026-10-07-knowledge-web-capture-refresh.md)
+**Related spec/plan:** [Proposed Research capture design (repository source)](https://github.com/rmusser01/tldw_server/blob/746598afff328fd0585677003bd916b7471a106f/Docs/Design/2026-10-07-knowledge-web-capture-refresh.md)
 
 ## Decision
 
