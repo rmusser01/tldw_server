@@ -882,7 +882,7 @@ describe('Notes editor save state machine', () => {
           releaseUser = () => resolve({ id: 7, is_active: true })
         })
         mocks.currentUser.mockClear()
-        mocks.currentUser.mockImplementation(() => user)
+        mocks.currentUser.mockImplementationOnce(() => user)
         let pending!: Promise<boolean>
         await act(async () => {
           pending = view.result.current.takeTheirVersion()

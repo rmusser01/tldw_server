@@ -9,6 +9,7 @@ import { NotesDockHost } from "../NotesDockHost"
 import { getQueryClient } from "@/services/query-client"
 import type { BgRequestInit } from "@/services/background-proxy"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import type { NoteTaskActivityEvent } from "@/services/notes-tasks"
 
 const {
   mockBgRequest,
@@ -852,5 +853,184 @@ describe("Notes checkbox original ownership", () => {
     expect(useNotesDockStore.getState().notes).toHaveLength(0)
     expect(stableMessageApi.error).not.toHaveBeenCalled()
     expect(stableMessageApi.success).not.toHaveBeenCalled()
+  })
+
+  describe("Notes activity original ownership", () => {
+    let events: Map<number, NoteTaskActivityEvent[]>
+    const eventFor = (id: number, actor = "original-agent"): NoteTaskActivityEvent => ({
+      id: `event-${id}`, note_id: String(id), task_id: `task-${id}`, event_type: "updated",
+      actor_type: "agent", actor_id: actor, tool_name: "notes.tasks.update", created_at: "2026-10-07T10:00:00Z"
+    })
+    const patches = () => dockRequests().filter((request) => request.method === "PATCH" && String(request.path).startsWith("/api/v1/notes/tasks/activity/"))
+    const notice = () => screen.getByTestId("notes-dock-task-activity-notice")
+    const invalidate = async (user: ReturnType<typeof userEvent.setup>, view: ReturnType<typeof mountOwnedDock>, change: "active" | "account" | "server" | "edit" | "unmount") => {
+      if (change === "active") {
+        await openOwnedDockNote(user, "Beta", 102)
+        await user.click(screen.getByRole("button", { name: "Alpha note" }))
+        await waitFor(() => expect(notice()).toHaveTextContent("Alpha note"))
+      } else if (change === "account" || change === "server") {
+        changeDockAuthority(change)
+        const refresh = within(screen.getByText("Archive").parentElement!).getAllByRole("button")[0]
+        await waitFor(() => expect(refresh).toBeEnabled())
+        await user.click(refresh)
+        await openOwnedDockNote(user)
+      } else if (change === "edit") await user.type(dockContentEditor(), " New draft")
+      else view.unmount()
+    }
+    beforeEach(() => {
+      events = new Map([[101, [eventFor(101)]], [102, [eventFor(102)]]])
+      mockBgRequest.mockImplementation((request: BgRequestInit) => {
+        const url = new URL(String(request.path), "https://fixture.test")
+        const response = url.pathname === "/api/v1/notes/tasks/activity"
+          ? Promise.resolve({ events: (events.get(Number(url.searchParams.get("note_id"))) || []).map((event) => ({ ...event })) })
+          : request.method === "PATCH" && url.pathname.startsWith("/api/v1/notes/tasks/activity/")
+            ? Promise.resolve({ event_id: decodeURIComponent(url.pathname.split("/").at(-1)!), user_id: "1", dismissed_at: "2026-10-07T10:01:00Z" })
+            : ownedDockResponse(request)
+        const promise = response.then((value) => dockScript ? dockScript(request, value) : value)
+        dockPendingRequests.add(promise)
+        void promise.then(() => dockPendingRequests.delete(promise), () => dockPendingRequests.delete(promise))
+        return promise
+      })
+    })
+
+    it("dismisses the current owned event without changing a dirty Dock row", async () => {
+      const user = userEvent.setup()
+      mountOwnedDock()
+      await openOwnedDockNote(user)
+      await screen.findByTestId("notes-dock-task-activity-notice")
+      await user.type(dockContentEditor(), " Dirty draft")
+      await settleDock()
+      const original = dockRow()
+      mockBgRequest.mockClear()
+      await user.click(screen.getByRole("button", { name: "Dismiss task activity" }))
+      await settleDock()
+      expect(patches()).toHaveLength(1)
+      expect(patches()[0]).toMatchObject({ path: "/api/v1/notes/tasks/activity/event-101", method: "PATCH", body: { dismissed: true } })
+      expectScopedDock(patches()[0])
+      expect(dockRow()).toBe(original)
+      expect(dockRow()?.isDirty).toBe(true)
+      expect(screen.queryByTestId("notes-dock-task-activity-notice")).not.toBeInTheDocument()
+    })
+
+    it("keeps the notice and dirty row when a current owned dismissal fails", async () => {
+      const user = userEvent.setup()
+      mountOwnedDock()
+      await openOwnedDockNote(user)
+      await user.type(dockContentEditor(), " Dirty draft")
+      await settleDock()
+      const original = dockRow()
+      dockScript = async (request, response) => { if (request.method === "PATCH") throw { status: 503, message: "Dismiss failed" }; return response }
+      await user.click(screen.getByRole("button", { name: "Dismiss task activity" }))
+      await settleDock()
+      expect(notice()).toHaveTextContent("original-agent")
+      expect(dockRow()).toBe(original)
+      expect(stableMessageApi.error).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Dismiss task activity" })).not.toHaveClass("ant-btn-loading")
+    })
+
+    it("keeps the replacement event with the same ID after an old dismissal ACK", async () => {
+      const user = userEvent.setup()
+      mountOwnedDock()
+      await openOwnedDockNote(user)
+      await screen.findByTestId("notes-dock-task-activity-notice")
+      const gate = dockDeferred(undefined)
+      dockScript = async (request, response) => { if (request.method === "PATCH") await gate.promise; return response }
+      await user.click(screen.getByRole("button", { name: "Dismiss task activity" }))
+      await waitFor(() => expect(patches()).toHaveLength(1))
+      events.set(101, [eventFor(101, "replacement-agent")])
+      await user.click(screen.getByRole("checkbox", { name: "Task: Alpha" }))
+      await waitFor(() => expect(notice()).toHaveTextContent("replacement-agent"))
+      const acceptedRow = dockRow()
+      await act(async () => gate.resolve(undefined))
+      await settleDock()
+      expect(notice()).toHaveTextContent("replacement-agent")
+      expect(dockRow()).toBe(acceptedRow)
+      expect(patches()[0].path).toBe("/api/v1/notes/tasks/activity/event-101")
+    })
+
+    it.each(["active", "account", "server", "edit", "unmount"] as const)(
+      "revokes dismissal during delayed authentication after %s invalidation", async (change) => {
+        const user = userEvent.setup()
+        const view = mountOwnedDock()
+        await openOwnedDockNote(user)
+        await screen.findByTestId("notes-dock-task-activity-notice")
+        const gate = dockDeferred({ id: 1, is_active: true })
+        dockAuthority.currentUser.mockClear()
+        dockAuthority.currentUser.mockImplementationOnce(() => gate.promise)
+        mockBgRequest.mockClear()
+        await user.click(screen.getByRole("button", { name: "Dismiss task activity" }))
+        expect(dockAuthority.currentUser).toHaveBeenCalledTimes(1)
+        await invalidate(user, view, change)
+        const original = dockRow()
+        await act(async () => gate.resolve({ id: 1, is_active: true }))
+        await settleDock()
+        expect(patches()).toHaveLength(0)
+        expect(dockRow()).toBe(original)
+        expect(stableMessageApi.error).not.toHaveBeenCalled()
+        if (change !== "unmount") expect(notice()).toHaveTextContent("original-agent")
+      }
+    )
+
+    it.each([
+      ["active", "ack"], ["account", "ack"], ["server", "ack"], ["edit", "ack"], ["unmount", "ack"],
+      ["active", "error"], ["account", "error"], ["server", "error"], ["edit", "error"], ["unmount", "error"]
+    ] as const)("ignores a delayed dismissal %s %s after the original Dock lifetime ends", async (change, result) => {
+      const user = userEvent.setup()
+      const view = mountOwnedDock()
+      await openOwnedDockNote(user)
+      await screen.findByTestId("notes-dock-task-activity-notice")
+      const gate = dockDeferred(undefined)
+      dockScript = async (request, response) => {
+        if (request.method === "PATCH") { await gate.promise; if (result === "error") throw { status: 503, message: "Old dismissal failed" } }
+        return response
+      }
+      await user.click(screen.getByRole("button", { name: "Dismiss task activity" }))
+      await waitFor(() => expect(patches()).toHaveLength(1))
+      await invalidate(user, view, change)
+      const original = dockRow()
+      const summary = change === "unmount" ? null : notice().textContent
+      stableMessageApi.error.mockClear()
+      await act(async () => gate.resolve(undefined))
+      await settleDock()
+      expect(dockRow()).toBe(original)
+      expect(stableMessageApi.error).not.toHaveBeenCalled()
+      if (change !== "unmount") expect(notice().textContent).toBe(summary)
+    })
+
+    it.each(["ack", "error"] as const)("does not clear a newer pending dismissal when the old %s settles", async (result) => {
+      const user = userEvent.setup()
+      const view = mountOwnedDock()
+      await openOwnedDockNote(user)
+      await screen.findByTestId("notes-dock-task-activity-notice")
+      const originalGate = dockDeferred(undefined)
+      const newerGate = dockDeferred(undefined)
+      dockScript = async (request, response) => {
+        if (request.method === "PATCH") {
+          if (String(request.path).endsWith("/event-101")) {
+            await originalGate.promise
+            if (result === "error") throw { status: 503, message: "Old dismissal failed" }
+          } else await newerGate.promise
+        }
+        return response
+      }
+      await user.click(screen.getByRole("button", { name: "Dismiss task activity" }))
+      await waitFor(() => expect(patches()).toHaveLength(1))
+      events.set(101, [{ ...eventFor(101, "newer-agent"), id: "event-new" }])
+      await invalidate(user, view, "active")
+      await waitFor(() => expect(notice()).toHaveTextContent("newer-agent"))
+      await user.click(screen.getByRole("button", { name: "Dismiss task activity" }))
+      await waitFor(() => expect(patches()).toHaveLength(2))
+      expect(patches()[1].path).toBe("/api/v1/notes/tasks/activity/event-new")
+      expect(screen.getByRole("button", { name: "Dismiss task activity" })).toHaveClass("ant-btn-loading")
+      stableMessageApi.error.mockClear()
+      await act(async () => originalGate.resolve(undefined))
+      await act(async () => { await Promise.resolve() })
+      expect(notice()).toHaveTextContent("newer-agent")
+      expect(screen.getByRole("button", { name: "Dismiss task activity" })).toHaveClass("ant-btn-loading")
+      expect(stableMessageApi.error).not.toHaveBeenCalled()
+      await act(async () => newerGate.resolve(undefined))
+      await settleDock()
+      expect(screen.queryByTestId("notes-dock-task-activity-notice")).not.toBeInTheDocument()
+    })
   })
 })

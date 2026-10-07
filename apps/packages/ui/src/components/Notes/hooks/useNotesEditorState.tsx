@@ -427,6 +427,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [taskReconciliation, setTaskReconciliation] =
     React.useState<NoteTaskReconciliationSummary | null>(null)
   const [taskActivityEvents, setTaskActivityEvents] = React.useState<NoteTaskActivityEvent[]>([])
+  const taskActivityEventsRef = React.useRef(taskActivityEvents)
+  taskActivityEventsRef.current = taskActivityEvents
   const [taskConflictNotice, setTaskConflictNotice] = React.useState<string | null>(null)
   const [recentNotes, setRecentNotes] = useNotesAuthorityState<NotesRecentOpenedEntry[]>(authorityScope, [])
   const recentNotesRef = React.useRef<NotesRecentOpenedEntry[]>([])
@@ -586,9 +588,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   )
 
   const applyOfflineDraftToEditor = React.useCallback((draft: OfflineDraftEntry) => {
-    setTitle(String(draft.title || ''))
-    setContent(stripKnowledgeNoteProvenance(String(draft.content || '')))
-    setEditorKeywords(Array.isArray(draft.keywords) ? [...draft.keywords] : [])
+    const title = String(draft.title || '')
+    const content = stripKnowledgeNoteProvenance(String(draft.content || ''))
+    const keywords = Array.isArray(draft.keywords) ? [...draft.keywords] : []
+    setTitle(title)
+    setContent(content)
+    setEditorKeywords(keywords)
     const head = knowledgeNoteHead(draft.metadata, draft.content)
     setOriginalMetadata({ ...(draft.metadata || {}), ...head, ...(head.knowledge_provenance || {}) })
     setBacklinkConversationId(draft.backlinkConversationId)
@@ -607,6 +612,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     replaceWysiwygHtml(markdownToWysiwygHtml(String(draft.content || '')))
     setWysiwygSessionDirty(false)
     markdownBeforeWysiwygRef.current = String(draft.content || '')
+    return { title, content, editorKeywords: keywords,
+      backlinkConversationId: draft.backlinkConversationId, backlinkMessageId: draft.backlinkMessageId }
   }, [assignSelectedVersion, dispatchSave, replaceWysiwygHtml, setDirtyFlag, setEditorKeywords, setMonitoringNotice, setOriginalMetadata])
 
   const upsertOfflineDraft = React.useCallback(
@@ -719,40 +726,97 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setTaskConflictNotice(null)
   }, [])
 
-  const loadTaskActivityForNote = React.useCallback(async (noteId: string | number, ownedRequest?: NotesOwnedRequestOptions) => {
-    const requestEpoch = authorityEpochRef.current
-    const selectionEpoch = noteSelectionEpochRef.current
+  // Page and checklist mutations share the editor's existing owner and draft lifetimes.
+  const captureNoteMutation = React.useCallback(() => {
+    const epoch = authorityEpochRef.current
+    const scope = authorityScopeRef.current
+    const config = connectionConfigRef.current ? { ...connectionConfigRef.current } : null
+    let selection = noteSelectionEpochRef.current
+    let revision = editRevisionRef.current.revision
+    const dirtyRevision = dirtyRevisionRef.current
+    const isOwnerCurrent = () => authorityEpochRef.current === epoch && authorityScopeRef.current === scope
+    return {
+      scope, config,
+      get editRevision() { return revision },
+      isOwnerCurrent,
+      isEditorCurrent: () => isOwnerCurrent() && noteSelectionEpochRef.current === selection &&
+        editRevisionRef.current.revision === revision && dirtyRevisionRef.current === dirtyRevision,
+      acceptSavedDraft: () => {
+        if (isOwnerCurrent() && dirtyRevisionRef.current === dirtyRevision) {
+          selection = noteSelectionEpochRef.current
+          revision = editRevisionRef.current.revision
+        }
+      },
+      register: (controller: AbortController) => {
+        authorityRequestsRef.current.add(controller)
+        return () => { authorityRequestsRef.current.delete(controller) }
+      },
+    }
+  }, [])
+
+  const loadTaskActivityForNote = React.useCallback(async (
+    noteId: string | number, ownedRequest: NotesOwnedRequestOptions, isCurrent: () => boolean
+  ) => {
     try {
-      if (ownedRequest?.abortSignal.aborted) return
+      if (!isCurrent()) return
       const response = await listTaskActivity({ note_id: noteId, limit: 50 }, ownedRequest)
-      if (authorityEpochRef.current !== requestEpoch || noteSelectionEpochRef.current !== selectionEpoch || ownedRequest?.abortSignal.aborted) return
+      if (!isCurrent()) return
       const noteIdText = String(noteId)
       const events = Array.isArray(response.events)
         ? response.events.filter((event) => String(event.note_id || '') === noteIdText)
         : []
       setTaskActivityEvents(events)
     } catch {
-      if (authorityEpochRef.current !== requestEpoch || noteSelectionEpochRef.current !== selectionEpoch || ownedRequest?.abortSignal.aborted) return
+      if (!isCurrent()) return
       setTaskActivityEvents([])
     }
   }, [])
 
   const refreshTaskStateForNote = React.useCallback(async (noteId: string | number, ownedRequest?: NotesOwnedRequestOptions) => {
-    const requestEpoch = authorityEpochRef.current
-    const selectionEpoch = noteSelectionEpochRef.current
+    const selectedNote = selectedIdRef.current
+    if (selectedNote == null || String(selectedNote) !== String(noteId)) return
+    const operation = captureNoteMutation()
+    const controller = ownedRequest ? undefined : new AbortController()
+    const signal = ownedRequest?.abortSignal ?? controller!.signal
+    const unregister = controller ? operation.register(controller) : undefined
+    const isCurrent = () => !signal.aborted && operation.isEditorCurrent() &&
+      String(selectedIdRef.current) === String(selectedNote)
     try {
-      if (ownedRequest?.abortSignal.aborted) return
-      const response = await listNoteTasks(noteId, { limit: 500 }, ownedRequest)
-      if (authorityEpochRef.current !== requestEpoch || noteSelectionEpochRef.current !== selectionEpoch || ownedRequest?.abortSignal.aborted) return
-      setNoteTasks(Array.isArray(response.tasks) ? response.tasks : [])
-      setTaskReconciliation(response.reconciliation ?? null)
+      if (!isCurrent()) return
+      if (!ownedRequest) {
+        if (!operation.scope || !operation.config) return
+        const user = await tldwAuth.getCurrentUser()
+        if (!isCurrent() || !user?.is_active || user.id == null ||
+            createNotesGraphAuthorityScope(operation.config.serverUrl, user.id) !== operation.scope) return
+        ownedRequest = {
+          servicePromptConfig: {
+            serverUrl: operation.config.serverUrl, authMode: operation.config.authMode,
+            authSource: operation.config.authSource, orgId: operation.config.orgId,
+            expectedUserId: user.id,
+            expectedSingleUserApiKeyScope: operation.config.authMode === 'single-user'
+              ? deriveSingleUserApiKeyCredentialScope('single-user', operation.config.apiKey) : undefined
+          },
+          abortSignal: signal, headers: { 'X-TLDW-Expected-User-ID': String(user.id) }
+        }
+      }
+      try {
+        const response = await listNoteTasks(noteId, { limit: 500 }, ownedRequest)
+        if (!isCurrent()) return
+        setNoteTasks(Array.isArray(response.tasks) ? response.tasks : [])
+        setTaskReconciliation(response.reconciliation ?? null)
+      } catch {
+        if (!isCurrent()) return
+        setNoteTasks([])
+        setTaskReconciliation(null)
+      }
+      await loadTaskActivityForNote(noteId, ownedRequest, isCurrent)
     } catch {
-      if (authorityEpochRef.current !== requestEpoch || noteSelectionEpochRef.current !== selectionEpoch || ownedRequest?.abortSignal.aborted) return
-      setNoteTasks([])
-      setTaskReconciliation(null)
+      // Failed ownership lookup cannot publish task or activity state.
+    } finally {
+      controller?.abort()
+      unregister?.()
     }
-    await loadTaskActivityForNote(noteId, ownedRequest)
-  }, [loadTaskActivityForNote])
+  }, [captureNoteMutation, loadTaskActivityForNote])
 
   const toggleTaskCheckboxLocal = React.useCallback(
     (payload: TaskChecklistTogglePayload) => {
@@ -834,12 +898,15 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const d = await bgRequest<any>({ ...ownedRequest, path: noteResourcePath(id) as any, method: 'GET' as any })
       if (!isCurrent() || editRevisionRef.current.revision !== editRevision) return false
       const loadedTitle = String(d?.title || `Note ${id}`)
+      const documentTitle = String(d?.title || '')
+      const documentContent = stripKnowledgeNoteProvenance(String(d?.content || ''))
+      const documentKeywords = extractKeywords(d)
       savedTitleRef.current = { noteId: String(id), title: String(d?.title || '') }
       selectedIdRef.current = id
       setSelectedId(id)
-      setTitle(String(d?.title || ''))
-      setContent(stripKnowledgeNoteProvenance(String(d?.content || '')))
-      setEditorKeywords(extractKeywords(d))
+      setTitle(documentTitle)
+      setContent(documentContent)
+      setEditorKeywords(documentKeywords)
       assignSelectedVersion(toNoteVersion(d))
       setSelectedLastSavedAt(toNoteLastModified(d))
       const rawMeta = d && typeof d === "object" ? (d as any).metadata : null
@@ -870,10 +937,20 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setWysiwygSessionDirty(false)
       markdownBeforeWysiwygRef.current = String(d?.content || '')
       rememberRecentNote(id, loadedTitle)
+      let acceptedDocument = { title: documentTitle, content: documentContent, editorKeywords: documentKeywords,
+        backlinkConversationId: links.conversation_id, backlinkMessageId: links.message_id }
       const queuedDraft = offlineDraftQueueRef.current[`note:${String(id)}`]
       if (queuedDraft) {
-        applyOfflineDraftToEditor(queuedDraft)
+        acceptedDocument = applyOfflineDraftToEditor(queuedDraft)
       }
+      // Publish our accepted document before refresh captures its editor lifetime.
+      const previous = editRevisionRef.current
+      const acceptedSnapshot = { ...acceptedDocument, originalMetadata: previous.originalMetadata,
+        wysiwygInputCount: previous.wysiwygInputCount }
+      const authoredDraftChanged = (Object.keys(acceptedSnapshot) as Array<keyof typeof acceptedSnapshot>).some(
+        (key) => key !== 'originalMetadata' && previous[key] !== acceptedSnapshot[key]
+      )
+      editRevisionRef.current = { ...acceptedSnapshot, revision: previous.revision + (authoredDraftChanged ? 1 : 0) }
       await refreshTaskStateForNote(id, ownedRequest)
       return isCurrent()
     } catch {
@@ -887,16 +964,40 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   const dismissTaskActivity = React.useCallback(async (eventId: string) => {
     const normalizedEventId = String(eventId || '').trim()
-    if (!normalizedEventId) return
+    const noteId = selectedIdRef.current
+    const event = taskActivityEventsRef.current.find((item) => String(item.id) === normalizedEventId &&
+      noteId != null && String(item.note_id) === String(noteId))
+    if (!normalizedEventId || !event) return
+    const operation = captureNoteMutation()
+    const controller = new AbortController()
+    const unregister = operation.register(controller)
+    const isCurrent = () => !controller.signal.aborted && operation.isEditorCurrent() &&
+      taskActivityEventsRef.current.includes(event)
     try {
-      await markTaskActivityRead(normalizedEventId, { dismissed: true })
+      if (!operation.scope || !operation.config) return
+      const user = await tldwAuth.getCurrentUser()
+      if (!isCurrent() || !user?.is_active || user.id == null ||
+          createNotesGraphAuthorityScope(operation.config.serverUrl, user.id) !== operation.scope) return
+      const ownedRequest: NotesOwnedRequestOptions = {
+        servicePromptConfig: {
+          serverUrl: operation.config.serverUrl, authMode: operation.config.authMode,
+          authSource: operation.config.authSource, orgId: operation.config.orgId,
+          expectedUserId: user.id,
+          expectedSingleUserApiKeyScope: operation.config.authMode === 'single-user'
+            ? deriveSingleUserApiKeyCredentialScope('single-user', operation.config.apiKey) : undefined
+        },
+        abortSignal: controller.signal, headers: { 'X-TLDW-Expected-User-ID': String(user.id) }
+      }
+      await markTaskActivityRead(normalizedEventId, { dismissed: true }, ownedRequest)
+      if (!isCurrent()) return
+      setTaskActivityEvents((current) => operation.isEditorCurrent() ? current.filter((item) => item !== event) : current)
     } catch {
-      // Non-critical notice state. Keep the UI moving if the server already marked it.
+      // Keep the original notice until its dismissal is acknowledged.
+    } finally {
+      controller.abort()
+      unregister()
     }
-    setTaskActivityEvents((current) =>
-      current.filter((event) => String(event.id) !== normalizedEventId)
-    )
-  }, [])
+  }, [captureNoteMutation])
 
   const inspectTaskActivity = React.useCallback(() => {
     if (selectedId == null) return
@@ -1381,34 +1482,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       duration: 6
     })
   }, [message, reloadNotes])
-
-  // Page and checklist mutations share the editor's existing owner and draft lifetimes.
-  const captureNoteMutation = React.useCallback(() => {
-    const epoch = authorityEpochRef.current
-    const scope = authorityScopeRef.current
-    const config = connectionConfigRef.current ? { ...connectionConfigRef.current } : null
-    let selection = noteSelectionEpochRef.current
-    let revision = editRevisionRef.current.revision
-    const dirtyRevision = dirtyRevisionRef.current
-    const isOwnerCurrent = () => authorityEpochRef.current === epoch && authorityScopeRef.current === scope
-    return {
-      scope, config,
-      get editRevision() { return revision },
-      isOwnerCurrent,
-      isEditorCurrent: () => isOwnerCurrent() && noteSelectionEpochRef.current === selection &&
-        editRevisionRef.current.revision === revision && dirtyRevisionRef.current === dirtyRevision,
-      acceptSavedDraft: () => {
-        if (isOwnerCurrent() && dirtyRevisionRef.current === dirtyRevision) {
-          selection = noteSelectionEpochRef.current
-          revision = editRevisionRef.current.revision
-        }
-      },
-      register: (controller: AbortController) => {
-        authorityRequestsRef.current.add(controller)
-        return () => { authorityRequestsRef.current.delete(controller) }
-      },
-    }
-  }, [])
 
   const toggleTaskCheckboxStatus = React.useCallback(
     async (payload: TaskChecklistTogglePayload) => {

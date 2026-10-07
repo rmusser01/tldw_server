@@ -218,7 +218,10 @@ export const NotesDockPanel: React.FC = () => {
   const [taskReconciliation, setTaskReconciliation] =
     useState<NoteTaskReconciliationSummary | null>(null)
   const [taskActivityEvents, setTaskActivityEvents] = useState<NoteTaskActivityEvent[]>([])
+  const taskActivityEventsRef = useRef(taskActivityEvents)
+  taskActivityEventsRef.current = taskActivityEvents
   const [dismissingTaskActivityId, setDismissingTaskActivityId] = useState<string | null>(null)
+  const dismissingTaskActivityOperationRef = useRef<DockOperation | null>(null)
 
   const dockRef = useRef<HTMLDivElement | null>(null)
   const dragStateRef = useRef<DragState | null>(null)
@@ -783,17 +786,33 @@ export const NotesDockPanel: React.FC = () => {
 
   const dismissTaskActivity = useCallback(
     async (eventId: string) => {
+      const event = taskActivityEventsRef.current.find((item) => item.id === eventId &&
+        activeNote?.id != null && String(item.note_id) === String(activeNote.id))
+      if (!event || !activeNote) return
+      const operation = captureDockOperation(activeNote, true)
+      if (!operation) return
+      dismissingTaskActivityOperationRef.current?.release()
+      dismissingTaskActivityOperationRef.current = operation
+      const isCurrent = () => operation.isCurrent() &&
+        dismissingTaskActivityOperationRef.current === operation && taskActivityEventsRef.current.includes(event)
       setDismissingTaskActivityId(eventId)
       try {
-        await markTaskActivityRead(eventId, { dismissed: true })
-        setTaskActivityEvents((current) => current.filter((event) => event.id !== eventId))
+        const snapshot = await operation.ready
+        if (!isCurrent()) return
+        await markTaskActivityRead(eventId, { dismissed: true }, dockRequestOptions(snapshot))
+        if (!isCurrent()) return
+        setTaskActivityEvents((current) => current.filter((item) => item !== event))
       } catch {
-        message.error(t("option:notesSearch_taskActivityDismissError", "Failed to dismiss task activity"))
+        if (isCurrent()) message.error(t("option:notesSearch_taskActivityDismissError", "Failed to dismiss task activity"))
       } finally {
-        setDismissingTaskActivityId(null)
+        operation.release()
+        if (dismissingTaskActivityOperationRef.current === operation) {
+          dismissingTaskActivityOperationRef.current = null
+          if (mountedRef.current) setDismissingTaskActivityId(null)
+        }
       }
     },
-    [message, t]
+    [activeNote, captureDockOperation, message, t]
   )
 
   const saveAllDirtyNotes = async () => {

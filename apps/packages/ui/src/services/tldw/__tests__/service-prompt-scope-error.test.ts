@@ -452,3 +452,25 @@ describe("Notes checkbox original ownership", () => {
     expect(isServicePromptRequestPath(path, method)).toBe(allowed)
   })
 })
+
+describe("Notes activity original ownership", () => {
+  it.each([
+    ["/api/v1/notes/tasks/activity/event-1", "PATCH", true],
+    ["/api/v1/notes/tasks/activity/event-1?source=notice", "PATCH", true],
+    ["/api/v1/notes/tasks/activity/event-1", "GET", false],
+    ["/api/v1/notes/tasks/activity/event-1", "POST", false],
+    ["/api/v1/notes/tasks/activity/event-1", "PUT", false],
+    ["/api/v1/notes/tasks/activity/event-1", "DELETE", false],
+    ["/api/v1/notes/tasks/activity", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/event-1/", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/event-1/other", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/event%2fother", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/event%5cother", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/%2e%2e", "PATCH", false],
+    ["/api/v1/notes/tasks/activity-events/event-1", "PATCH", false],
+    ["/api/v1/notes/tasks/event-1", "PATCH", false]
+  ] as const)("bounds owned activity %s %s to %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+})

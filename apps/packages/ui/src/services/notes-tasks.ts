@@ -237,9 +237,11 @@ export const listTaskActivity = async (params: {
 
 export const markTaskActivityRead = async (
   eventId: string | number,
-  body: NoteTaskActivityPatch
+  body: NoteTaskActivityPatch,
+  options?: NoteTaskRequestOptions
 ): Promise<NoteTaskActivityState> =>
   bgRequest<NoteTaskActivityState, AllowedPath, "PATCH">({
+    ...options,
     path: toAllowedPath(`/api/v1/notes/tasks/activity/${encodePathId(eventId)}`),
     method: "PATCH",
     body

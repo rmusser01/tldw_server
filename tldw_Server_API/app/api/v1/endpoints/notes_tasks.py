@@ -366,7 +366,7 @@ async def list_task_activity(
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Task activity list failed")
 
 
-@router.patch("/tasks/activity/{event_id}", response_model=TaskActivityStateResponse, tags=["notes"])
+@router.patch("/tasks/activity/{event_id}", response_model=TaskActivityStateResponse, tags=["notes"], dependencies=[Depends(require_expected_user)])
 async def update_task_activity_state(
     event_id: str,
     request: TaskActivityPatchRequest,

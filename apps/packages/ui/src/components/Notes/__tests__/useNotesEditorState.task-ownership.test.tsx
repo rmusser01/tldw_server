@@ -5,8 +5,9 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BgRequestInit } from '@/services/background-proxy'
-import type { NoteTask } from '@/services/notes-tasks'
+import type { NoteTask, NoteTaskActivityEvent } from '@/services/notes-tasks'
 import TaskChecklistPreview from '../TaskChecklistPreview'
+import TaskActivityNotice from '../TaskActivityNotice'
 import { useNotesEditorState, type UseNotesEditorStateDeps } from '../hooks/useNotesEditorState'
 import { createNotesGraphAuthorityScope } from '../hooks/useNotesGraphAuthorityScope'
 
@@ -106,6 +107,8 @@ const Harness = () => {
     <textarea aria-label="Note text" value={value.content} onChange={(event) => current().setContentDirty(event.target.value)} />
     <TaskChecklistPreview content={value.content} tasks={value.noteTasks} isDirty={value.isDirty}
       onToggleLocal={value.toggleTaskCheckboxLocal} onToggleTaskStatus={(payload) => track(current().toggleTaskCheckboxStatus(payload))} />
+    <TaskActivityNotice events={value.taskActivityEvents} noteTitle={value.title}
+      onInspect={value.inspectTaskActivity} onDismiss={(eventId) => track(current().dismissTaskActivity(eventId))} />
   </>
 }
 let client: QueryClient
@@ -293,6 +296,295 @@ describe('Notes checkbox original ownership', () => {
     expect(current().content).toBe('- [ ] Alpha\n')
     expect(current().selectedVersion).toBe(2)
     expect(mocks.error).toHaveBeenCalledTimes(1)
+  })
+
+  describe('Notes activity original ownership', () => {
+    let events: Map<string, NoteTaskActivityEvent[]>
+    let script: ((request: BgRequestInit, response: unknown) => Promise<unknown>) | undefined
+    const eventFor = (noteId: string, actor = 'original-agent'): NoteTaskActivityEvent => ({
+      id: `event-${noteId}`, note_id: noteId, task_id: `task-${noteId}`, event_type: 'updated',
+      actor_type: 'agent', actor_id: actor, tool_name: 'notes.tasks.update', created_at: '2026-10-07T10:00:00Z'
+    })
+    const patches = () => requests().filter((request) => request.method === 'PATCH' && String(request.path).startsWith('/api/v1/notes/tasks/activity/'))
+    const settle = async () => { await act(async () => { await Promise.allSettled([...actions]) }) }
+    const invalidate = async (user: ReturnType<typeof userEvent.setup>, view: ReturnType<typeof mount>, change: 'selection' | 'account' | 'server' | 'edit' | 'unmount') => {
+      if (change === 'selection') {
+        await user.click(screen.getByRole('button', { name: 'Open Beta' }))
+        await waitFor(() => expect(current().selectedId).toBe('other'))
+        await openAlpha(user)
+      } else if (change === 'account' || change === 'server') {
+        changeOwner(view, change)
+        await openAlpha(user)
+      } else if (change === 'edit') await user.type(screen.getByRole('textbox', { name: 'Note text' }), ' New draft')
+      else view.unmount()
+    }
+    beforeEach(() => {
+      events = new Map([['one', [eventFor('one')]], ['other', [eventFor('other')]]])
+      script = undefined
+      mocks.request.mockImplementation(async (request) => {
+        const url = new URL(String(request.path), 'https://fixture.test')
+        let response: unknown
+        if (url.pathname === '/api/v1/notes/tasks/activity') {
+          response = { events: (events.get(url.searchParams.get('note_id') || '') || []).map((event) => ({ ...event })) }
+        } else if (request.method === 'PATCH' && url.pathname.startsWith('/api/v1/notes/tasks/activity/')) {
+          response = { event_id: decodeURIComponent(url.pathname.split('/').at(-1)!), user_id: '1', dismissed_at: '2026-10-07T10:01:00Z' }
+        } else if (request.method === 'PUT' && url.pathname === '/api/v1/notes/one') {
+          const note = notes.get('one')!
+          if (request.headers?.['expected-version'] !== String(note.version)) throw { status: 409, message: 'Note version conflict' }
+          note.content = String(request.body?.content)
+          note.version += 1
+          response = { ...note }
+        } else response = await respond(request)
+        return script ? script(request, response) : response
+      })
+    })
+
+    it('loads tasks and activity after a committed default detail render while fresh auth is delayed', async () => {
+      const user = userEvent.setup()
+      mount()
+      const gate = deferred({ id: 1, is_active: true })
+      mocks.currentUser.mockClear()
+      mocks.currentUser.mockImplementationOnce(() => gate.promise)
+      await user.click(screen.getByRole('button', { name: 'Open Alpha' }))
+      await waitFor(() => expect(screen.getByRole('textbox', { name: 'Note text' })).toHaveValue('- [ ] Alpha\n'))
+      expect(current().selectedId).toBe('one')
+      expect(mocks.currentUser).toHaveBeenCalledTimes(1)
+      expect(requests().filter((request) => String(request.path).includes('/tasks'))).toHaveLength(0)
+      await act(async () => gate.resolve({ id: 1, is_active: true }))
+      await settle()
+      expect(current().noteTasks).toHaveLength(1)
+      expect(current().taskActivityEvents[0]?.id).toBe('event-one')
+      expect(screen.getByRole('checkbox', { name: 'Task: Alpha' })).toBeEnabled()
+    })
+
+    it('loads tasks and activity after a committed supplied-owned detail render while task read is delayed', async () => {
+      mount()
+      const controller = new AbortController()
+      const ownedRequest = {
+        servicePromptConfig: { serverUrl: 'https://notes.example.test', authMode: 'multi-user' as const, expectedUserId: 1 },
+        abortSignal: controller.signal, headers: { 'X-TLDW-Expected-User-ID': '1' }
+      }
+      const gate = deferred(undefined)
+      script = async (request, response) => {
+        if (new URL(String(request.path), 'https://fixture.test').pathname === '/api/v1/notes/one/tasks') await gate.promise
+        return response
+      }
+      await act(async () => { track(current().loadDetail('one', ownedRequest)) })
+      await waitFor(() => expect(screen.getByRole('textbox', { name: 'Note text' })).toHaveValue('- [ ] Alpha\n'))
+      const taskRead = requests().find((request) => String(request.path).startsWith('/api/v1/notes/one/tasks'))
+      expect(taskRead).toMatchObject(ownedRequest)
+      expect(taskRead?.abortSignal).toBe(controller.signal)
+      await act(async () => gate.resolve(undefined))
+      await settle()
+      expect(current().noteTasks).toHaveLength(1)
+      expect(current().taskActivityEvents[0]?.id).toBe('event-one')
+      const activityRead = requests().find((request) => String(request.path).startsWith('/api/v1/notes/tasks/activity'))
+      expect(activityRead).toMatchObject(ownedRequest)
+      expect(activityRead?.abortSignal).toBe(controller.signal)
+    })
+
+    it('dismisses the current original event with its captured principal and signal', async () => {
+      const user = userEvent.setup()
+      mount()
+      await openAlpha(user)
+      await screen.findByTestId('notes-task-activity-notice')
+      mocks.request.mockClear()
+      await user.click(screen.getByRole('button', { name: 'Dismiss task activity' }))
+      await settle()
+      expect(patches()).toHaveLength(1)
+      expect(patches()[0]).toMatchObject({ path: '/api/v1/notes/tasks/activity/event-one', body: { dismissed: true },
+        servicePromptConfig: { serverUrl: 'https://notes.example.test', expectedUserId: 1 }, headers: { 'X-TLDW-Expected-User-ID': '1' } })
+      expect(patches()[0].abortSignal).toBeInstanceOf(AbortSignal)
+      expect(screen.queryByTestId('notes-task-activity-notice')).not.toBeInTheDocument()
+    })
+
+    it('keeps the notice when the current owned dismissal fails', async () => {
+      const user = userEvent.setup()
+      mount()
+      await openAlpha(user)
+      await screen.findByTestId('notes-task-activity-notice')
+      const original = current().taskActivityEvents[0]
+      script = async (request, response) => { if (request.method === 'PATCH') throw { status: 503, message: 'Dismiss failed' }; return response }
+      await user.click(screen.getByRole('button', { name: 'Dismiss task activity' }))
+      await settle()
+      expect(current().taskActivityEvents[0]).toBe(original)
+      expect(screen.getByTestId('notes-task-activity-notice')).toHaveTextContent('original-agent')
+    })
+
+    it('does not clear a replacement object with the original event ID after its dismissal ACK', async () => {
+      const user = userEvent.setup()
+      mount()
+      await openAlpha(user)
+      await screen.findByTestId('notes-task-activity-notice')
+      const gate = deferred(undefined)
+      script = async (request, response) => { if (request.method === 'PATCH') await gate.promise; return response }
+      await user.click(screen.getByRole('button', { name: 'Dismiss task activity' }))
+      await waitFor(() => expect(patches()).toHaveLength(1))
+      events.set('one', [eventFor('one', 'replacement-agent')])
+      await user.click(screen.getByRole('button', { name: 'Inspect task activity' }))
+      await waitFor(() => expect(screen.getByTestId('notes-task-activity-notice')).toHaveTextContent('replacement-agent'))
+      const replacement = current().taskActivityEvents[0]
+      await act(async () => gate.resolve(undefined))
+      await settle()
+      expect(current().taskActivityEvents[0]).toBe(replacement)
+      expect(patches()[0].path).toBe('/api/v1/notes/tasks/activity/event-one')
+    })
+
+    it('refuses dismissal of an event outside the selected notice', async () => {
+      const user = userEvent.setup()
+      mount()
+      await openAlpha(user)
+      await user.click(screen.getByRole('button', { name: 'Open Beta' }))
+      await waitFor(() => expect(current().taskActivityEvents[0]?.id).toBe('event-other'))
+      mocks.request.mockClear()
+      await act(async () => { await current().dismissTaskActivity('event-one') })
+      expect(patches()).toHaveLength(0)
+      expect(current().taskActivityEvents[0].id).toBe('event-other')
+    })
+
+    it('refuses a replacement event with the same ID during fresh dismissal authentication', async () => {
+      const user = userEvent.setup()
+      mount()
+      await openAlpha(user)
+      await screen.findByTestId('notes-task-activity-notice')
+      const gate = deferred({ id: 1, is_active: true })
+      mocks.currentUser.mockClear()
+      mocks.currentUser.mockImplementationOnce(() => gate.promise)
+      mocks.request.mockClear()
+      await user.click(screen.getByRole('button', { name: 'Dismiss task activity' }))
+      expect(mocks.currentUser).toHaveBeenCalledTimes(1)
+      events.set('one', [eventFor('one', 'replacement-agent')])
+      await act(async () => { await current().refreshTaskStateForNote('one') })
+      const replacement = current().taskActivityEvents[0]
+      expect(screen.getByTestId('notes-task-activity-notice')).toHaveTextContent('replacement-agent')
+      await act(async () => gate.resolve({ id: 1, is_active: true }))
+      await settle()
+      expect(patches()).toHaveLength(0)
+      expect(current().taskActivityEvents[0]).toBe(replacement)
+    })
+
+    it.each(['selection', 'account', 'server', 'edit', 'unmount'] as const)(
+      'revokes dismissal during delayed authentication after %s invalidation', async (change) => {
+        const user = userEvent.setup()
+        const view = mount()
+        await openAlpha(user)
+        await screen.findByTestId('notes-task-activity-notice')
+        const gate = deferred({ id: 1, is_active: true })
+        mocks.currentUser.mockClear()
+        mocks.currentUser.mockImplementationOnce(() => gate.promise)
+        mocks.request.mockClear()
+        await user.click(screen.getByRole('button', { name: 'Dismiss task activity' }))
+        expect(mocks.currentUser).toHaveBeenCalledTimes(1)
+        await invalidate(user, view, change)
+        const expected = current().taskActivityEvents
+        await act(async () => gate.resolve({ id: 1, is_active: true }))
+        await settle()
+        expect(patches()).toHaveLength(0)
+        expect(mocks.error).not.toHaveBeenCalled()
+        if (change !== 'unmount') expect(current().taskActivityEvents).toBe(expected)
+      }
+    )
+
+    it.each([
+      ['selection', 'ack'], ['account', 'ack'], ['server', 'ack'], ['edit', 'ack'], ['unmount', 'ack'],
+      ['selection', 'error'], ['account', 'error'], ['server', 'error'], ['edit', 'error'], ['unmount', 'error']
+    ] as const)('ignores a delayed dismissal %s %s after the original lifetime ends', async (change, result) => {
+      const user = userEvent.setup()
+      const view = mount()
+      await openAlpha(user)
+      await screen.findByTestId('notes-task-activity-notice')
+      const gate = deferred(undefined)
+      script = async (request, response) => {
+        if (request.method === 'PATCH') { await gate.promise; if (result === 'error') throw { status: 503, message: 'Old dismissal failed' } }
+        return response
+      }
+      await user.click(screen.getByRole('button', { name: 'Dismiss task activity' }))
+      await waitFor(() => expect(patches()).toHaveLength(1))
+      await invalidate(user, view, change)
+      const expected = { events: current().taskActivityEvents, content: current().content, version: current().selectedVersion, dirty: current().isDirty }
+      mocks.error.mockClear()
+      await act(async () => gate.resolve(undefined))
+      await settle()
+      expect(mocks.error).not.toHaveBeenCalled()
+      if (change !== 'unmount') expect({ events: current().taskActivityEvents, content: current().content, version: current().selectedVersion, dirty: current().isDirty }).toEqual(expected)
+    })
+
+    it.each(['inspect', 'default', 'save'] as const)('owns both task and activity reads from %s refresh', async (caller) => {
+      const user = userEvent.setup()
+      mount()
+      await openAlpha(user)
+      await settle()
+      if (caller === 'save') await user.type(screen.getByRole('textbox', { name: 'Note text' }), ' Saved text')
+      mocks.request.mockClear()
+      if (caller === 'inspect') await user.click(screen.getByRole('button', { name: 'Inspect task activity' }))
+      else await act(async () => { track(caller === 'save' ? current().saveNote() : current().refreshTaskStateForNote('one')) })
+      await waitFor(() => expect(requests().some((request) => String(request.path).startsWith('/api/v1/notes/tasks/activity'))).toBe(true))
+      await settle()
+      const reads = requests().filter((request) => request.method === 'GET' && String(request.path).includes('/tasks'))
+      expect(reads).toHaveLength(2)
+      for (const read of reads) {
+        expect(read.servicePromptConfig).toMatchObject({ serverUrl: 'https://notes.example.test', expectedUserId: 1 })
+        expect(read.headers?.['X-TLDW-Expected-User-ID']).toBe('1')
+        expect(read.abortSignal).toBeInstanceOf(AbortSignal)
+        expect(read.abortSignal).toBe(reads[0].abortSignal)
+      }
+      expect(current().noteTasks).toHaveLength(1)
+      expect(current().taskActivityEvents[0].id).toBe('event-one')
+    })
+
+    it.each(['selection', 'account', 'server'] as const)(
+      'revokes Inspect during delayed authentication after %s away-return', async (change) => {
+        const user = userEvent.setup()
+        const view = mount()
+        await openAlpha(user)
+        await settle()
+        const gate = deferred({ id: 1, is_active: true })
+        mocks.currentUser.mockClear()
+        mocks.currentUser.mockImplementationOnce(() => gate.promise)
+        mocks.request.mockClear()
+        await user.click(screen.getByRole('button', { name: 'Inspect task activity' }))
+        expect(mocks.currentUser).toHaveBeenCalledTimes(1)
+        await invalidate(user, view, change)
+        const expected = { tasks: current().noteTasks, events: current().taskActivityEvents }
+        mocks.request.mockClear()
+        await act(async () => gate.resolve({ id: 1, is_active: true }))
+        await act(async () => { await Promise.resolve() })
+        expect(requests()).toHaveLength(0)
+        expect({ tasks: current().noteTasks, events: current().taskActivityEvents }).toEqual(expected)
+      }
+    )
+
+    it.each([
+      ['tasks', 'selection'], ['tasks', 'account'], ['tasks', 'server'], ['tasks', 'edit'], ['tasks', 'unmount'],
+      ['activity', 'selection'], ['activity', 'account'], ['activity', 'server'], ['activity', 'edit'], ['activity', 'unmount']
+    ] as const)('rejects delayed Inspect %s publication after %s invalidation', async (boundary, change) => {
+      const user = userEvent.setup()
+      const view = mount()
+      await openAlpha(user)
+      await settle()
+      const gate = deferred(undefined)
+      let started = false
+      script = async (request, response) => {
+        const path = new URL(String(request.path), 'https://fixture.test').pathname
+        if (!started && path === (boundary === 'tasks' ? '/api/v1/notes/one/tasks' : '/api/v1/notes/tasks/activity')) {
+          started = true
+          await gate.promise
+          return boundary === 'tasks' ? { tasks: [{ ...taskFor(notes.get('one')!), text: 'Stale task' }], reconciliation: { status: 'warnings' } }
+            : { events: [eventFor('one', 'stale-agent')] }
+        }
+        return response
+      }
+      await user.click(screen.getByRole('button', { name: 'Inspect task activity' }))
+      await waitFor(() => expect(started).toBe(true))
+      await invalidate(user, view, change)
+      const expected = { tasks: current().noteTasks, events: current().taskActivityEvents, reconciliation: current().taskReconciliation }
+      mocks.request.mockClear()
+      await act(async () => gate.resolve(undefined))
+      await waitFor(() => {
+        if (change !== 'unmount') expect({ tasks: current().noteTasks, events: current().taskActivityEvents, reconciliation: current().taskReconciliation }).toEqual(expected)
+        expect(requests()).toHaveLength(0)
+      })
+    })
   })
 
   describe('scheduled note freshness ownership', () => {

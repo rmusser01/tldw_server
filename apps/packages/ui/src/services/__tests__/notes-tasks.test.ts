@@ -167,3 +167,28 @@ describe("Notes checkbox original ownership", () => {
     expect(controller.signal.aborted).toBe(false)
   })
 })
+
+describe("Notes activity original ownership", () => {
+  it.each([{ read: true }, { dismissed: true }])(
+    "forwards the original encoded event, body and owned options for %j",
+    async (body) => {
+      const controller = new AbortController()
+      const config: ServicePromptTargetConfig = {
+        serverUrl: "https://notes.example.test", authMode: "multi-user", expectedUserId: 1
+      }
+      const headers = { "X-TLDW-Expected-User-ID": "1" }
+      await markTaskActivityRead("event/one ?#", body, {
+        servicePromptConfig: config, headers, abortSignal: controller.signal
+      })
+      expect(mocks.bgRequest).toHaveBeenLastCalledWith({
+        path: "/api/v1/notes/tasks/activity/event%2Fone%20%3F%23", method: "PATCH", body,
+        servicePromptConfig: config, headers, abortSignal: controller.signal
+      })
+      const request = mocks.bgRequest.mock.calls.at(-1)?.[0]
+      expect(request.servicePromptConfig).toBe(config)
+      expect(request.headers).toBe(headers)
+      expect(request.abortSignal).toBe(controller.signal)
+      expect(request.body).toBe(body)
+    }
+  )
+})

@@ -630,3 +630,84 @@ def test_checkbox_original_ownership_preserves_cas(
     assert _checkbox_storage_head(
         db, owner=db.client_id, dataset=dataset, note_id=note["id"], task_id=task["id"]
     ) == before  # nosec B101: pytest behavioral assertion, retained under normal test execution.
+
+
+@pytest.mark.parametrize("mutation", ["read", "dismissed"])
+@pytest.mark.parametrize("header", ["matching", "legacy", "wrong"])
+def test_activity_original_ownership_expected_user(
+    checkbox_pg_api: tuple[TestClient, CharactersRAGDB, str, dict[str, Any], str], mutation: str, header: str
+) -> None:
+    client, db, note_id, task, dataset = checkbox_pg_api
+    event = db.record_task_event(
+        owner_user_id=db.client_id, dataset_id=dataset, task_id=task["id"],
+        note_id=note_id, event_type="updated", actor_type="agent", actor_id="assistant",
+    )
+    if mutation == "dismissed":
+        db.mark_task_activity_read(
+            owner_user_id=db.client_id, dataset_id=dataset, event_id=event["id"], user_id=db.client_id,
+        )
+    before = _checkbox_storage_head(db, owner=db.client_id, dataset=dataset, note_id=note_id, task_id=task["id"])
+    state_before = db.get_task_activity_read_state(
+        owner_user_id=db.client_id, dataset_id=dataset, event_id=event["id"], user_id=db.client_id,
+    )
+    if mutation == "read":
+        assert state_before is None  # nosec B101: pytest behavioral assertion.
+    headers = {} if header == "legacy" else {"X-TLDW-Expected-User-ID": db.client_id if header == "matching" else "2"}
+    response = client.patch(f"/api/v1/notes/tasks/activity/{event['id']}", json={mutation: True}, headers=headers)
+    assert response.status_code == (412 if header == "wrong" else 200), response.text  # nosec B101: pytest behavioral assertion.
+    state_after = db.get_task_activity_read_state(
+        owner_user_id=db.client_id, dataset_id=dataset, event_id=event["id"], user_id=db.client_id,
+    )
+    assert _checkbox_storage_head(
+        db, owner=db.client_id, dataset=dataset, note_id=note_id, task_id=task["id"]
+    ) == before  # nosec B101: pytest behavioral assertion.
+    if header == "wrong":
+        assert response.json()["detail"]["code"] == "request_config_scope_changed"  # nosec B101: pytest behavioral assertion.
+        assert response.headers["Cache-Control"] == "no-store"  # nosec B101: pytest behavioral assertion.
+        assert state_after == state_before  # nosec B101: pytest behavioral assertion.
+    else:
+        assert state_after is not None  # nosec B101: pytest behavioral assertion.
+        assert response.json()["event_id"] == event["id"]  # nosec B101: pytest behavioral assertion.
+        assert response.json()["user_id"] == db.client_id  # nosec B101: pytest behavioral assertion.
+        assert response.json()["read_at"] == state_after["read_at"].isoformat()  # nosec B101: pytest behavioral assertion.
+        assert (state_after["dismissed_at"] is not None) == (mutation == "dismissed")  # nosec B101: pytest behavioral assertion.
+        if mutation == "dismissed":
+            assert response.json()["dismissed_at"] == state_after["dismissed_at"].isoformat()  # nosec B101: pytest behavioral assertion.
+
+
+def test_activity_original_ownership_isolates_another_owners_event(
+    checkbox_pg_api: tuple[TestClient, CharactersRAGDB, str, dict[str, Any], str],
+    pg_database_config: DatabaseConfig,
+) -> None:
+    client, db, own_note_id, own_task, dataset = checkbox_pg_api
+    own_before = _checkbox_storage_head(
+        db, owner=db.client_id, dataset=dataset, note_id=own_note_id, task_id=own_task["id"]
+    )
+    backend, foreign_db, _service, note_id, task, foreign_dataset = _bound_task_graph(pg_database_config, owner="960091")
+    try:
+        event = foreign_db.record_task_event(
+            owner_user_id="960091", dataset_id=foreign_dataset, task_id=task["id"], note_id=note_id,
+            event_type="updated", actor_type="agent", actor_id="foreign-assistant",
+        )
+        before = _checkbox_storage_head(foreign_db, owner="960091", dataset=foreign_dataset, note_id=note_id, task_id=task["id"])
+        for mutation in ["read", "dismissed"]:
+            response = client.patch(
+                f"/api/v1/notes/tasks/activity/{event['id']}", json={mutation: True},
+                headers={"X-TLDW-Expected-User-ID": db.client_id},
+            )
+            assert response.status_code == 409, response.text  # nosec B101: pytest behavioral assertion.
+            assert _checkbox_storage_head(
+                db, owner=db.client_id, dataset=dataset, note_id=own_note_id, task_id=own_task["id"]
+            ) == own_before  # nosec B101: pytest behavioral assertion.
+            assert _checkbox_storage_head(
+                foreign_db, owner="960091", dataset=foreign_dataset, note_id=note_id, task_id=task["id"]
+            ) == before  # nosec B101: pytest behavioral assertion.
+        assert foreign_db.get_task_activity_read_state(
+            owner_user_id="960091", dataset_id=foreign_dataset, event_id=event["id"], user_id="960091",
+        ) is None  # nosec B101: pytest behavioral assertion.
+        assert db.get_task_activity_read_state(
+            owner_user_id=db.client_id, dataset_id=dataset, event_id=event["id"], user_id=db.client_id,
+        ) is None  # nosec B101: pytest behavioral assertion.
+    finally:
+        foreign_db.close_all_connections()
+        backend.get_pool().close_all()
