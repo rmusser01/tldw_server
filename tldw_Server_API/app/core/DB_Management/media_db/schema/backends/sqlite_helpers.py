@@ -298,7 +298,7 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                             "before starting this server version."
                         )
 
-                    conn.close()
+                    db.backend.get_pool().invalidate_connection(conn)
 
                     migrations_dir = None
                     db_name = os.path.basename(db.db_path_str)
@@ -350,8 +350,7 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                                 "No migration scripts to apply (status={}); proceeding with FTS/setup checks",
                                 status,
                             )
-                        conn = sqlite3.connect(db.db_path_str, check_same_thread=False)
-                        conn.row_factory = sqlite3.Row
+                        conn = db.get_connection()
                         final_db_version = db._get_db_version(conn)
                         if final_db_version != target_version:
                             raise SchemaError(
