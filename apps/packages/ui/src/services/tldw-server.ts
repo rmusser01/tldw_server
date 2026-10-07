@@ -341,6 +341,16 @@ export const fetchChatModels = async ({
   const cookieSession = isActiveCookieSessionConfig(
     await tldwClient.getConfig().catch(() => null)
   )
+  // Config resolution can retire this caller before shared request admission.
+  if (fetchGeneration !== getChatModelsCacheGeneration()) {
+    return await fetchChatModels({
+      returnEmpty,
+      forceRefresh,
+      refreshOpenRouter,
+      allowNetwork,
+      requireFresh
+    })
+  }
   const now = Date.now()
   if (!requireFresh && !cookieSession && !forceRefresh && chatModelsCache && chatModelsCache.expiresAt > now) {
     return chatModelsCache.value
