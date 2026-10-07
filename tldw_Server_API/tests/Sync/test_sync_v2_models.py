@@ -224,15 +224,16 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
     assert capabilities.encryption_policies == ["server_trusted_v1"]
     assert capabilities.blob_transfer == {"supported": False}
     assert capabilities.domain_schemas["notes.note"] == {
-        "schema_version": 1,
+        "schema_version": 2,
         "encryption_policy": "server_trusted_v1",
         "upsert": {
-            "required": ["title", "content"],
+            "required": ["title", "content", "conversation_id", "message_id", "content_language"],
             "properties": {
                 "title": {"type": "string", "max_length": 255},
                 "content": {"type": "string", "max_length": 5_000_000},
                 "conversation_id": {"type": ["string", "null"]},
                 "message_id": {"type": ["string", "null"]},
+                "content_language": {"type": ["string", "null"], "min_length": 1, "max_length": 100},
             },
             "additional_properties": False,
         },
@@ -2049,7 +2050,7 @@ def test_capabilities_advertise_supported_and_writable_adapter_versions_separate
 
     assert capabilities.supported_adapter_versions["attachment.ref"] == [1, 2]
     assert capabilities.writable_adapter_versions["attachment.ref"] == []
-    assert capabilities.supported_adapter_versions["notes.note"] == [1]
+    assert capabilities.supported_adapter_versions["notes.note"] == [1, 2]
     assert capabilities.writable_adapter_versions["notes.note"] == []
 
 

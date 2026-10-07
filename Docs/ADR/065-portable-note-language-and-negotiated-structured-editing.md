@@ -86,3 +86,42 @@ Notes table write fence followed by a fresh read so a same-ID INSERT cannot slip
 through; only that absent-row path briefly serializes other Notes writes. SQLite
 already supplies its database write fence. The expected product version is a
 process-local admission condition and never changes v1 payloads or hashes.
+
+## Complete publication qualification (F3, TASK-13514)
+
+The allocated clear `notes.note` adapter/schema pair is `(2, 2)`. Its complete
+snapshot contains all four v1 fields and explicit `content_language`, either null
+or an exact nonempty string of at most 100 characters. The locked v1 validator and
+hashes remain unchanged. New publications use one complete snapshot builder;
+REST, restore, compound organization, ingestion, interop, Studio/WebClipper and
+both task-projection producers retain source and language. Legacy admitted v1
+materialization preserves current language; new unsafe v1 writes are refused under
+the existing pre-append Notes admission lock. A v1 writer cannot downgrade a v2
+head even with an otherwise current base.
+
+Versioned pull uses the existing `SYNC_V2_PULL_TOKEN_SIGNING_SECRET`. Without it,
+portable-language/writable-v2 capabilities stay unavailable. New null-language
+objects and v1 heads may continue through v1; language-bearing writes and v2 heads
+cannot fall back. No new secret owner or generated fallback key is introduced.
+Losing the key produces actionable HTTP 503 before a versioned pull advances its
+cursor. Already durable ordinary/batch capture retries retain their original
+versions, hashes and materialization semantics.
+
+A selected Notes stream containing accepted v2 data refuses an older consumer
+with `notes_snapshot_upgrade_required` (HTTP 409). It does not down-project or
+rehash a newer head. This check uses a bounded indexed store read after page
+scanning and before cursor changes. Any later append is beyond the scanned page's
+watermark and is detected on the next pull. Other domains may be pulled separately.
+
+The actual server does not register a legacy private `notes` domain, and its API
+rejects private envelope ingress. F3 retains this boundary and advertises private
+transport as unavailable; it does not add a private transport. Private clients must
+retain encrypted metadata and pending local intent until a peer negotiates that
+contract. No language is added to clear routing metadata.
+
+Canonical rows do not record their historical wire version. New row-derived Studio
+provenance therefore uses v2. Existing storage verification may recognize the exact
+v1 hash of the same owner-bound current row only when language is null and existing
+revision/content/deletion checks still hold. Sidecar canonical/result hashes remain
+mandatory. Known Sync heads retain strict versioned lineage. Historical migration
+hashes and persisted accepted provenance are never rewritten.

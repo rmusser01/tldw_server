@@ -26,7 +26,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     logger,
 )
 from tldw_Server_API.app.core.Notes.wikilinks import parse_wikilinks
-from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload
+from tldw_Server_API.app.core.Sync.v2.models import complete_note_snapshot, validate_notes_note_upsert_payload
 from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     SYNC_ENVELOPE_MAX_BYTES,
     NotesMoodboardStudioContractError,
@@ -46,6 +46,9 @@ if TYPE_CHECKING:
 # Whitelists for note list ordering; values are interpolated into ORDER BY.
 _NOTE_LIST_SORT_COLUMNS = frozenset({"last_modified", "created_at", "title"})
 _NOTE_LIST_SORT_DIRECTIONS = {"asc": "ASC", "desc": "DESC"}
+
+
+_UNSET_CONTENT_LANGUAGE = object()
 
 
 class NoteStore:
@@ -236,11 +239,14 @@ class NoteStore:
         object_hash: str,
         expected_product_version: int | None = None,
         projection_timestamp: str | None = None,
+        content_language: object = _UNSET_CONTENT_LANGUAGE,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
     ) -> bool:
         """Create or update a note projection from an accepted Sync v2 envelope."""
 
         del object_hash
+        if content_language is not _UNSET_CONTENT_LANGUAGE:
+            self._validate_content_language(content_language)
         normalized_note_id = str(note_id).strip()
         exact_title = title if isinstance(title, str) else ""
         if not normalized_note_id:
@@ -262,9 +268,9 @@ class NoteStore:
         query = """
             INSERT INTO notes (
                 id, title, content, last_modified, client_id, version, deleted,
-                created_at, conversation_id, message_id
+                created_at, conversation_id, message_id, content_language
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 content = excluded.content,
@@ -275,15 +281,17 @@ class NoteStore:
                 conversation_id = excluded.conversation_id,
                 message_id = excluded.message_id
         """
-        query += " WHERE notes.content_language IS NULL"
+        if content_language is not _UNSET_CONTENT_LANGUAGE:
+            query += ", content_language = excluded.content_language"
+        query += " WHERE 1 = 1"
         if owner_params:
             query += " AND notes.client_id = ?"
         insert_if_absent_query = """
             INSERT INTO notes (
                 id, title, content, last_modified, client_id, version, deleted,
-                created_at, conversation_id, message_id
+                created_at, conversation_id, message_id, content_language
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO NOTHING
         """
         params = (
@@ -297,6 +305,7 @@ class NoteStore:
             now,
             normalized_conversation_id,
             normalized_message_id,
+            None if content_language is _UNSET_CONTENT_LANGUAGE else content_language,
         )
 
         try:
@@ -307,8 +316,6 @@ class NoteStore:
                     f"SELECT title, content, content_language FROM notes WHERE id = ?{owner_clause}",  # nosec B608
                     (normalized_note_id,) + owner_params,
                 ).fetchone()
-                if previous is not None and previous["content_language"] is not None:
-                    raise InputError("Notes v1 Sync cannot mutate a language-bearing note.")  # noqa: TRY003
                 if expected_product_version is None:
                     cursor = transaction_conn.execute(query, params + owner_params)
                     if cursor.rowcount == 0:
@@ -326,6 +333,7 @@ class NoteStore:
                             sync_client_id=sync_client_id,
                             object_revision=object_revision,
                             projection_timestamp=now,
+                            content_language=content_language,
                             include_created_at=True,
                         ):
                             self._db.note_graph_projection_store.replace_projection(
@@ -349,7 +357,7 @@ class NoteStore:
                     cursor = transaction_conn.execute(
                         "UPDATE notes SET title = ?, content = ?, last_modified = ?, "
                         "client_id = ?, version = ?, deleted = ?, conversation_id = ?, "
-                        f"message_id = ? WHERE id = ? AND version = ? AND deleted = ?{owner_clause}",  # nosec B608
+                        f"message_id = ?, content_language = ? WHERE id = ? AND version = ? AND deleted = ?{owner_clause}",  # nosec B608
                         (
                             exact_title,
                             content,
@@ -359,10 +367,16 @@ class NoteStore:
                             self._deleted_value(False),
                             normalized_conversation_id,
                             normalized_message_id,
+                            (
+                                (previous["content_language"] if previous is not None else None)
+                                if content_language is _UNSET_CONTENT_LANGUAGE
+                                else content_language
+                            ),
                             normalized_note_id,
                             expected_product_version,
                             self._deleted_value(False),
-                        ) + owner_params,
+                        )
+                        + owner_params,
                     )
                     if cursor.rowcount == 0:
                         if self._matches_ingestion_postcondition(
@@ -375,6 +389,7 @@ class NoteStore:
                             sync_client_id=sync_client_id,
                             object_revision=object_revision,
                             projection_timestamp=now,
+                            content_language=content_language,
                             include_created_at=False,
                         ):
                             self._db.note_graph_projection_store.replace_projection(
@@ -451,10 +466,11 @@ class NoteStore:
         object_revision: int,
         projection_timestamp: str,
         include_created_at: bool,
+        content_language: object = _UNSET_CONTENT_LANGUAGE,
     ) -> bool:
         row = conn.execute(
             "SELECT id, title, content, last_modified, client_id, version, deleted, "
-            "created_at, conversation_id, message_id FROM notes WHERE id = ?",
+            "created_at, conversation_id, message_id, content_language FROM notes WHERE id = ?",
             (note_id,),
         ).fetchone()
         if row is None:
@@ -470,6 +486,8 @@ class NoteStore:
             and row["message_id"] == message_id
             and self._timestamps_equal(row["last_modified"], projection_timestamp)
         )
+        if content_language is not _UNSET_CONTENT_LANGUAGE:
+            matches = matches and row["content_language"] == content_language
         if include_created_at:
             matches = matches and self._timestamps_equal(
                 row["created_at"],
@@ -721,19 +739,25 @@ class NoteStore:
         Returns:
             A ``(revision, sha256 payload hash)`` tuple for Studio lineage.
         """
-        payload = validate_notes_note_upsert_payload(
-            {
-                "title": note.get("title"),
-                "content": note.get("content"),
-                "conversation_id": note.get("conversation_id"),
-                "message_id": note.get("message_id"),
-            }
-        )
+        payload = complete_note_snapshot(note)
         encoded = json.dumps(
             payload, sort_keys=True, separators=(",", ":"), default=str
         ).encode("utf-8")
         payload_hash = f"sha256:{hashlib.sha256(encoded).hexdigest()}"
         return max(1, int(note.get("version") or 1)), payload_hash
+
+    @classmethod
+    def _matches_notes_note_hash(cls, note: dict[str, Any], value: str | None) -> bool:
+        """Recognize retained v1 provenance only for a null-language canonical row."""
+        if cls._notes_note_head(note)[1] == value:
+            return True
+        if note.get("content_language") is not None:
+            return False
+        payload = validate_notes_note_upsert_payload(
+            {key: note.get(key) for key in ("title", "content", "conversation_id", "message_id")}
+        )
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        return value == f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
     @staticmethod
     def _normalize_studio_compatibility_payload(
@@ -1037,13 +1061,12 @@ class NoteStore:
             if parent_row is None or bool(parent_row["deleted"]) != deleted:
                 _reject()
             parent = dict(parent_row)
-            parent_revision, parent_hash = self._notes_note_head(parent)
+            parent_revision, _ = self._notes_note_head(parent)
             if parsed.note_revision > parent_revision:
                 _reject()
             if parsed.note_revision == parent_revision and (
-                parsed.note_hash != parent_hash
-                or parsed.companion_content_hash
-                != self._normalized_text_hash(parent.get("content"))
+                not self._matches_notes_note_hash(parent, parsed.note_hash)
+                or parsed.companion_content_hash != self._normalized_text_hash(parent.get("content"))
             ):
                 _reject()
 
@@ -1055,7 +1078,7 @@ class NoteStore:
                 if source_row is None:
                     _reject()
                 source = dict(source_row)
-                source_revision, source_hash = self._notes_note_head(source)
+                source_revision, _ = self._notes_note_head(source)
                 accepted_source_revision = parsed.accepted_provenance.source_revision
                 if (
                     accepted_source_revision is None
@@ -1063,7 +1086,7 @@ class NoteStore:
                 ):
                     _reject()
                 if accepted_source_revision == source_revision:
-                    if parsed.accepted_provenance.source_hash != source_hash:
+                    if not self._matches_notes_note_hash(source, parsed.accepted_provenance.source_hash):
                         _reject()
                     if parsed.excerpt_snapshot is not None:
                         source_content = str(source.get("content") or "").replace(

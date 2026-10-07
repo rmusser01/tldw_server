@@ -17,7 +17,6 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
-    InputError,
     SchemaError,
 )
 from tldw_Server_API.app.core.Notes.organization_capture import (
@@ -190,11 +189,14 @@ class NotesInteropService:
         db = self._get_db(user_id)
         coordinator = active_coordinator(db, user_id=user_id)
         if coordinator is not None:
-            if content_language is not _LANGUAGE_UNSET:
-                raise InputError("Active Sync cannot publish note source language yet.")
             key = coordinator.request_fingerprint(
                 "notes-interop.note.create",
-                {"note_id": note_id, "title": title, "content": content},
+                {
+                    "note_id": note_id,
+                    "title": title,
+                    "content": content,
+                    **({"content_language": content_language} if content_language is not _LANGUAGE_UNSET else {}),
+                },
             )
             captured_id = note_id or stable_note_id("notes-interop", key)
             capture_note_upsert(
@@ -202,6 +204,7 @@ class NotesInteropService:
                 note_id=captured_id,
                 title=title,
                 content=content,
+                **({"content_language": content_language} if content_language is not _LANGUAGE_UNSET else {}),
                 source="notes-interop",
                 key=key,
             )
@@ -265,11 +268,10 @@ class NotesInteropService:
                 current = db.get_note_by_id(note_id)
                 if current is None:
                     return False
-                if "content_language" in update_data or current.get("content_language") is not None:
-                    raise InputError("Active Sync cannot publish note source language yet.")
                 capture_note_upsert(
                     coordinator,
                     note_id=note_id,
+                    content_language=update_data.get("content_language", current.get("content_language")),
                     title=str(update_data.get("title", current.get("title") or "")),
                     content=str(update_data.get("content", current.get("content") or "")),
                     conversation_id=current.get("conversation_id"),
@@ -306,11 +308,10 @@ class NotesInteropService:
             current = db.get_note_by_id(note_id)
             if current is None:
                 return False
-            if "content_language" in data or current.get("content_language") is not None:
-                raise InputError("Active Sync cannot publish note source language yet.")
             capture_note_upsert(
                 coordinator,
                 note_id=note_id,
+                content_language=data.get("content_language", current.get("content_language")),
                 title=str(data.get("title", current.get("title") or "")),
                 content=str(data.get("content", current.get("content") or "")),
                 conversation_id=current.get("conversation_id"),

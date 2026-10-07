@@ -208,15 +208,6 @@ def capture_server_origin_mutation_batch(
     )
     if trusted_notes_provenance_bootstrap_id is None:
         plan = expand_provenance_tombstone_steps(plan, store=service.store, dataset_id=dataset.dataset_id, existing=existing_group)
-    canonical_steps = tuple(
-        _canonical_step(step, source=source, user_id=user_id) for step in plan
-    )
-    guards = _normalize_guarded_mutations(
-        guarded_mutation=guarded_mutation,
-        guarded_mutations=guarded_mutations,
-    )
-    canonical_steps = _bind_guard_requirements(canonical_steps, ())
-    guarded_canonical_steps = _bind_guard_requirements(canonical_steps, guards)
     mutation_group_id = _mutation_group_id(
         dataset.dataset_id,
         source=source,
@@ -224,6 +215,23 @@ def capture_server_origin_mutation_batch(
     )
 
     existing = service.store.list_mutation_group(dataset.dataset_id, mutation_group_id)
+    canonical_steps = tuple(
+        _canonical_step(
+            step,
+            source=source,
+            user_id=user_id,
+            service=service,
+            dataset_id=dataset.dataset_id,
+            stored=existing[index] if index < len(existing) else None,
+        )
+        for index, step in enumerate(plan)
+    )
+    guards = _normalize_guarded_mutations(
+        guarded_mutation=guarded_mutation,
+        guarded_mutations=guarded_mutations,
+    )
+    canonical_steps = _bind_guard_requirements(canonical_steps, ())
+    guarded_canonical_steps = _bind_guard_requirements(canonical_steps, guards)
     if existing:
         expected_steps = (
             guarded_canonical_steps
@@ -1126,7 +1134,23 @@ def _canonical_step(
     *,
     source: str,
     user_id: str,
+    service: SyncV2Service,
+    dataset_id: str,
+    stored: SyncEnvelope | None,
 ) -> ServerOriginMutationStep:
+    if step.domain == "notes.note" and step.adapter_version == 2:
+        version = (
+            stored.adapter_version
+            if stored is not None
+            else service.notes_publication_version(dataset_id, step.object_id, step.payload)
+        )
+        if version == 1 and step.payload.get("content_language") is None:
+            step = replace(
+                step,
+                schema_version=1,
+                adapter_version=1,
+                payload={key: value for key, value in step.payload.items() if key != "content_language"},
+            )
     if step.object_revision is not None and (
         type(step.object_revision) is not int or step.object_revision < 1
     ):

@@ -9,7 +9,12 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-from ..models import SyncEnvelope, SyncObjectState, validate_notes_note_upsert_payload
+from ..models import (
+    SyncEnvelope,
+    SyncObjectState,
+    validate_notes_note_upsert_payload,
+    validate_notes_note_upsert_payload_v2,
+)
 from ..store import SyncV2Store
 from .base import MaterializationResult
 
@@ -157,7 +162,7 @@ class NotesMaterializer:
 
         object_hash = envelope.payload_hash or ""
         if envelope.operation == "upsert":
-            payload = _note_payload(envelope.payload)
+            payload = (validate_notes_note_upsert_payload_v2(envelope.payload) if envelope.adapter_version == 2 else _note_payload(envelope.payload))
             expected_product_version = _trusted_ingestion_expected_version(
                 envelope,
                 self.note_db,
@@ -186,6 +191,7 @@ class NotesMaterializer:
                 object_hash=object_hash,
                 expected_product_version=expected_product_version,
                 projection_timestamp=projection_timestamp,
+                **({"content_language": payload["content_language"]} if envelope.adapter_version == 2 else {}),
                 conn=conn,
             )
 

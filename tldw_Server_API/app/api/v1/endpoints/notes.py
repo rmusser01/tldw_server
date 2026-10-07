@@ -217,7 +217,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncNotesAdmissionError,
     SyncStoreError,
 )
-from tldw_Server_API.app.core.Sync.v2.models import SyncDomain
+from tldw_Server_API.app.core.Sync.v2.models import SyncDomain, complete_note_snapshot
 from tldw_Server_API.app.core.Sync.v2.notes_attachment_coordinator import (
     NotesAttachmentCoordinator,
     NotesAttachmentMutationPlan,
@@ -362,6 +362,14 @@ def _ensure_note_exists_or_404(db: CharactersRAGDB, note_id: str) -> None:
 
 
 def _note_sync_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, SyncStoreError) and "sync_pull_token_signing_unavailable" in str(exc):
+        return HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "sync_pull_token_signing_unavailable",
+                "message": "Configure SYNC_V2_PULL_TOKEN_SIGNING_SECRET to enable Notes snapshot version 2.",
+            },
+        )
     if isinstance(exc, SyncNotesAdmissionError):
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -529,26 +537,7 @@ def _note_keywords_sync_unsupported_error() -> HTTPException:
 
 
 def _note_payload_from_row(note: dict[str, Any]) -> dict[str, object]:
-    return {
-        "title": str(note.get("title") or ""),
-        "content": str(note.get("content") or ""),
-        "conversation_id": note.get("conversation_id"),
-        "message_id": note.get("message_id"),
-    }
-
-
-def _require_complete_note_language_write(
-    sync_service: SyncV2Service | None, *, supplied: bool = False, current: dict[str, Any] | None = None
-) -> None:
-    """Reject writes that the locked Notes v1 snapshot cannot publish."""
-    if sync_service is not None and (supplied or (current and current.get("content_language") is not None)):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error_code": "notes_content_language_sync_unsupported",
-                "message": "Active Sync does not yet support complete note language snapshots.",
-            },
-        )
+    return complete_note_snapshot(note)
 
 
 def _active_notes_sync_service(current_user: User) -> SyncV2Service | None:
@@ -2253,9 +2242,19 @@ async def notes_capabilities(
     current_user: User = Depends(get_request_user),
 ) -> dict[str, bool]:
     """The authenticated DB dependency completes migration before this route."""
-    supported = _active_notes_sync_service(current_user) is None
-    if supported:
-        supported = await _run_db_call(db.note_store.supports_content_language)
+    supported = await _run_db_call(db.note_store.supports_content_language)
+    sync_service = _active_notes_sync_service(current_user)
+    if sync_service is not None:
+        supported = (
+            supported
+            and sync_service.notes_v2_ready()
+            and sync_service.adapters.supports_version("notes.note", 2)
+            and all(
+                dataset.encryption_policy == "server_trusted_v1"
+                for dataset in sync_service.store.list_datasets_for_user(str(current_user.id))
+                if "notes.note" in dataset.domains
+            )
+        )
     return {"content_language": supported}
 
 
@@ -2294,7 +2293,6 @@ async def create_note(
             safe_title_log = safe_title_log[:30] + "..."
         logger.info(f"User (via DB instance client_id: {db.client_id}) creating note: Title='{safe_title_log}'")
         sync_service = _active_notes_sync_service(current_user)
-        _require_complete_note_language_write(sync_service, supplied=_field_supplied(note_in, "content_language"))
         idempotency_key = request.headers.get("Idempotency-Key")
         keywords_supplied = _field_supplied(note_in, "keywords")
         folders_supplied = _field_supplied(note_in, "folder_paths")
@@ -2336,13 +2334,13 @@ async def create_note(
         raw_note_fields: dict[str, object] = {
             "title": (note_in.title or ""),
             "content": note_in.content,
-            **({"content_language": note_in.content_language} if _field_supplied(note_in, "content_language") else {}),
             "conversation_id": _normalize_optional_id(note_in.conversation_id),
             "message_id": _normalize_optional_id(note_in.message_id),
             "auto_title": note_in.auto_title,
             "title_strategy": note_in.title_strategy,
             "title_max_len": note_in.title_max_len,
             "language": note_in.language,
+            **({"content_language": note_in.content_language} if _field_supplied(note_in, "content_language") else {}),
         }
         request_fingerprint: str | None = None
         if sync_service is None:
@@ -2417,9 +2415,9 @@ async def create_note(
             conversation_id = _normalize_optional_id(note_in.conversation_id)
             message_id = _normalize_optional_id(note_in.message_id)
         note_payload = {
+            "content_language": note_in.content_language,
             "title": effective_title,
             "content": note_in.content,
-            **({"content_language": note_in.content_language} if _field_supplied(note_in, "content_language") else {}),
             "conversation_id": conversation_id,
             "message_id": message_id,
         }
@@ -6764,11 +6762,6 @@ async def update_note(
                                 detail="Rate limit exceeded for notes.update",
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
         sync_service = _active_notes_sync_service(current_user)
-        _require_complete_note_language_write(
-            sync_service,
-            supplied="content_language" in raw_data,
-            current=_get_current_note() if sync_service is not None else None,
-        )
         coordinator = (
             NotesOrganizationCoordinator(
                 service=sync_service,
@@ -7081,11 +7074,6 @@ async def patch_note(
             )
 
         sync_service = _active_notes_sync_service(current_user)
-        _require_complete_note_language_write(
-            sync_service,
-            supplied="content_language" in raw_data,
-            current=_get_current_note() if sync_service is not None else None,
-        )
         coordinator = (
             NotesOrganizationCoordinator(
                 service=sync_service,
@@ -7429,7 +7417,6 @@ async def restore_note(
             f"User (DB client_id: {db.client_id}) restoring note: ID='{note_id}', Version={expected_version}")
 
         sync_service = _active_notes_sync_service(current_user)
-        _require_complete_note_language_write(sync_service, current=existing_note)
         if sync_service is not None:
             if not existing_note:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
@@ -7489,6 +7476,7 @@ async def restore_note(
             id=str(restored_note["id"]),
             title=restored_note.get("title", ""),
             content=restored_note.get("content", ""),
+            content_language=restored_note.get("content_language"),
             created_at=restored_note.get("created_at"),
             last_modified=restored_note.get("last_modified"),
             version=restored_note.get("version", 1),
@@ -7683,7 +7671,6 @@ async def bulk_create_notes(
 
     for item_index, item in enumerate(request.notes):
         try:
-            _require_complete_note_language_write(sync_service, supplied=_field_supplied(item, "content_language"))
             keywords_supplied = _field_supplied(item, "keywords")
             folders_supplied = _field_supplied(item, "folder_paths")
             kw_list = (item.normalized_keywords or []) if keywords_supplied else None
@@ -7736,6 +7723,11 @@ async def bulk_create_notes(
                         "title_strategy": item.title_strategy,
                         "title_max_len": item.title_max_len,
                         "language": item.language,
+                        **(
+                            {"content_language": item.content_language}
+                            if _field_supplied(item, "content_language")
+                            else {}
+                        ),
                     },
                     keywords=kw_list,
                     folder_paths=folder_paths,
@@ -7795,9 +7787,9 @@ async def bulk_create_notes(
                 message_id = _normalize_optional_id(item.message_id)
 
             note_payload = {
+                "content_language": item.content_language,
                 "title": effective_title,
                 "content": item.content,
-                **({"content_language": item.content_language} if _field_supplied(item, "content_language") else {}),
                 "conversation_id": conversation_id,
                 "message_id": message_id,
             }

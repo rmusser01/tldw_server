@@ -29,7 +29,9 @@ from .models import (
     SyncEnvelopeCreate,
     SyncObjectState,
     SyncOperation,
+    complete_note_snapshot,
     server_frontend_mutation_enabled_for_policy,
+    validate_notes_note_upsert_payload,
 )
 from .personal_context_ongoing_contract import PersonalContextAuthorityMetadata
 from .service import STRANDED_TOMBSTONE_RESOLUTION_NOTE, SyncV2Service
@@ -155,6 +157,7 @@ def capture_server_origin_mutation(
             parent_id=parent_id,
             stable_key=stable_key,
             routing_metadata=routing_metadata,
+            expected_product_version=expected_product_version,
         )
 
     try:
@@ -179,9 +182,12 @@ def _append_server_origin_mutation(
     parent_id: str | None,
     stable_key: str | None,
     routing_metadata: Mapping[str, object] | None,
+    expected_product_version: int | None,
 ) -> ServerOriginCaptureResult:
     """Append one server-origin envelope to ``dataset`` and require its projection."""
 
+    if domain == "notes.note" and operation == "upsert":
+        payload = complete_note_snapshot(payload)
     payload_hash, payload_size = canonical_payload_hash(payload)
     if domain == "notes.provenance":
         from .notes_provenance_contract import notes_provenance_object_hash
@@ -205,6 +211,12 @@ def _append_server_origin_mutation(
             accepted = _require_capture_applied(service, accepted)
             return ServerOriginCaptureResult(dataset=dataset, envelope=accepted)
 
+    note_version = (
+        service.notes_publication_version(dataset.dataset_id, object_id, payload) if domain == "notes.note" else 1
+    )
+    if domain == "notes.note" and note_version == 1:
+        payload.pop("content_language", None)
+        payload_hash, payload_size = canonical_payload_hash(payload)
     state = service.store.get_object_state(dataset.dataset_id, domain, object_id)
     object_revision = 1 if state is None else state.object_revision + 1
     now = service.clock() or None
@@ -235,7 +247,8 @@ def _append_server_origin_mutation(
         base_object_hash=state.object_hash if state is not None else None,
         object_revision=object_revision,
         parent_id=parent_id,
-        schema_version=1,
+        schema_version=note_version,
+        adapter_version=note_version,
         payload=dict(payload),
         payload_hash=payload_hash,
         payload_size_bytes=payload_size,
@@ -688,12 +701,7 @@ def capture_server_origin_note_restore(
         domain="notes.note",
         operation="upsert",
         object_id=object_id,
-        payload={
-            "title": str(note.get("title") or ""),
-            "content": str(note.get("content") or ""),
-            "conversation_id": note.get("conversation_id"),
-            "message_id": note.get("message_id"),
-        },
+        payload=complete_note_snapshot(note),
         source=source,
         routing_metadata={"restore_intent": True},
         expected_product_version=expected_version,
@@ -773,6 +781,9 @@ def _payload_matches_idempotent_replay(
 ) -> bool:
     if accepted.payload_hash == payload_hash:
         return True
+    if accepted.domain == "notes.note" and accepted.adapter_version == 1 and payload.get("content_language") is None:
+        legacy_payload = {key: value for key, value in payload.items() if key != "content_language"}
+        return validate_notes_note_upsert_payload(accepted.payload) == legacy_payload
     if accepted.domain != "chat.message" or accepted.operation != "append":
         return False
 

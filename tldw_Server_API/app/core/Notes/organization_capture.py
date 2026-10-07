@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.Sync.v2 import server_origin
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.models import complete_note_snapshot
 from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
     NotesOrganizationCoordinator,
     PlannedNotesMutation,
@@ -30,6 +31,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
 )
 
 _MAX_SERVER_ROUTING_METADATA_BYTES = 1_024
+_LANGUAGE_UNSET = object()
 
 
 def active_coordinator(
@@ -152,7 +154,9 @@ def plan_compound_note(
             domain="notes.note",
             operation="upsert",
             object_id=note_id,
-            payload=dict(note_payload),
+            payload=complete_note_snapshot(note_payload),
+            adapter_version=2,
+            schema_version=2,
             **parent_base,
             expected_product_version=expected_version,
             stable_key=server_origin_stable_key(
@@ -204,6 +208,7 @@ def capture_note_upsert(
     key: str | None = None,
     request_fingerprint: str | None = None,
     server_routing_metadata: Mapping[str, object] | None = None,
+    content_language: object = _LANGUAGE_UNSET,
 ) -> dict[str, object]:
     """Capture a note and its requested organization state as one batch."""
 
@@ -217,6 +222,8 @@ def capture_note_upsert(
         "folder_paths": list(folder_paths) if folder_paths is not None else None,
         "expected_version": expected_version,
     }
+    if content_language is not _LANGUAGE_UNSET:
+        fields["content_language"] = content_language
     fingerprint = request_fingerprint or coordinator.request_fingerprint("note.upsert", fields)
     capture_key = key or fingerprint
     replay = coordinator.replay_request_plan(
@@ -258,12 +265,21 @@ def capture_note_upsert(
             domain="notes.note",
             operation="upsert",
             object_id=note_id,
-            payload={
-                "title": title,
-                "content": content,
-                "conversation_id": conversation_id,
-                "message_id": message_id,
-            },
+            adapter_version=2,
+            schema_version=2,
+            payload=complete_note_snapshot(
+                {
+                    "content_language": (
+                        (existing or {}).get("content_language")
+                        if content_language is _LANGUAGE_UNSET
+                        else content_language
+                    ),
+                    "title": title,
+                    "content": content,
+                    "conversation_id": conversation_id,
+                    "message_id": message_id,
+                }
+            ),
             routing_metadata=routing_metadata,
             expected_product_version=expected_version,
             stable_key=capture_key,
@@ -401,6 +417,8 @@ def capture_note_tombstone(
                 ServerOriginMutationStep(
                     domain="notes.note",
                     operation="tombstone",
+                    adapter_version=2,
+                    schema_version=2,
                     object_id=note_id,
                     payload={},
                     stable_key=capture_key,

@@ -120,6 +120,7 @@ from .models import (
     blob_upload_expires_at,
     blob_upload_session_is_expired,
     client_private_server_frontend_limitation_warning,
+    complete_note_snapshot,
     normalize_supported_adapter_versions,
     normalize_sync_timestamp,
     normalize_sync_v2_requested_domains,
@@ -1399,6 +1400,26 @@ class SyncV2Service:
         self.personal_context_relay = personal_context_relay
         self._recovery_clock_ns = recovery_clock_ns
 
+    def notes_v2_ready(self) -> bool:
+        """Whether the existing signed versioned pull transport is configured."""
+        return bool(
+            (self.settings.pull_token_signing_secret or os.getenv("SYNC_V2_PULL_TOKEN_SIGNING_SECRET") or "").strip()
+        )
+
+    def notes_publication_version(
+        self,
+        dataset_id: str,
+        object_id: str,
+        payload: Mapping[str, object],
+    ) -> int:
+        """Keep safe legacy writes available when signed v2 transport is absent."""
+        if self.notes_v2_ready():
+            return 2
+        head = self.store.get_current_head(dataset_id, "notes.note", object_id)
+        if payload.get("content_language") is not None or (head is not None and head.adapter_version == 2):
+            raise SyncStoreError("sync_pull_token_signing_unavailable")
+        return 1
+
     @contextmanager
     def notes_admission_guard(
         self,
@@ -1419,7 +1440,7 @@ class SyncV2Service:
                 connection = product_scope.enter_context(note_db.transaction())
                 for item in sorted(notes, key=lambda item: item.object_id):
                     current = note_db.note_store.lock_note_for_sync_admission(connection, item.object_id)
-                    if current is not None and current["content_language"] is not None:
+                    if item.adapter_version == 1 and current is not None and current["content_language"] is not None:
                         raise SyncNotesAdmissionError("Notes v1 cannot publish a language-bearing note.")
                     expected = (expected_versions or {}).get(item.object_id)
                     if expected is not None and (current is None or current["version"] != expected):
@@ -2778,11 +2799,7 @@ class SyncV2Service:
             max_envelope_payload_bytes=self.settings.max_envelope_payload_bytes,
             max_attachment_bytes=self.settings.max_attachment_bytes,
             domain_schemas=sync_v2_advertised_domain_schemas(
-                (
-                    _sync_v2_internal_domain_schemas()
-                    if notes_task_ready
-                    else sync_v2_domain_schemas()
-                ),
+                (_sync_v2_internal_domain_schemas() if notes_task_ready else sync_v2_domain_schemas()),
                 advertised_domains=supported_domains,
             ),
             supported_adapter_versions=sync_v2_server_supported_adapter_versions(
@@ -2795,6 +2812,7 @@ class SyncV2Service:
                 supports_attachments=self.settings.supports_attachments,
                 notes_task_sync_ready=notes_task_ready,
                 personal_context_sync_ready=personal_context.available,
+                notes_v2_ready=self.notes_v2_ready(),
             ),
             quota=quota,
             supports_attachments=self.settings.supports_attachments,
@@ -4164,7 +4182,7 @@ class SyncV2Service:
                 )
                 if note_head is None or note_head.object_revision is None:
                     raise SyncStoreError("notes_task_projection_base_invalid")
-                note_wire = dict(note_head.payload)
+                note_wire = complete_note_snapshot(note_head.payload)
                 current_items = parse_note_checklists(
                     note_id=after.note_id,
                     note_version=int(note_head.object_revision),
@@ -4222,6 +4240,9 @@ class SyncV2Service:
                         base_revision=int(prior_head.object_revision or 0),
                         base_hash=str(prior_head.payload_hash or ""),
                     )
+                note_version = self.notes_publication_version(dataset.dataset_id, after.note_id, note_wire)
+                if note_version == 1:
+                    note_wire.pop("content_language", None)
                 note_hash, note_size = canonical_payload_hash(note_wire)
                 note_envelope_id = (
                     f"notes-task-note-client-{activity_id.replace('-', '')}"
@@ -4246,6 +4267,8 @@ class SyncV2Service:
                     dataset_id=dataset.dataset_id,
                     client_envelope_id=note_envelope_id,
                     domain="notes.note",
+                    adapter_version=note_version,
+                    schema_version=note_version,
                     operation="upsert",
                     object_id=after.note_id,
                     device_id=device.device_id,
@@ -4512,10 +4535,12 @@ class SyncV2Service:
                         outcome=note_outcome,
                     )
             try:
-                inserted = self.store.insert_envelopes_atomic(plan)
+                expected_versions = {plan[2].object_id: int(plan[2].base_object_revision)} if len(plan) == 3 else {}
+                with self.notes_admission_guard(plan, expected_versions=expected_versions) as admission_store:
+                    inserted = admission_store.insert_envelopes_atomic(plan)
             except SyncIdempotencyConflictError:
                 return self._task_client_idempotency_rejection(dataset, envelope)
-            except SyncHeadConflictError:
+            except (SyncHeadConflictError, SyncNotesAdmissionError):
                 outcome = AdapterConflict(
                     client_envelope_id=envelope.client_envelope_id,
                     domain="notes.task",
@@ -5371,6 +5396,7 @@ class SyncV2Service:
                         watermarks=relay_watermarks,
                     ),
                 )
+            self._require_notes_pull_version(dataset_id, device, selected_domains)
             if next_sequence != since_sequence:
                 self._update_cursors(
                     dataset_id,
@@ -5424,6 +5450,7 @@ class SyncV2Service:
             # re-request the same cursor forever. There is genuinely nothing more
             # deliverable until the conflict is resolved, so stop and let it re-poll.
             has_more = False
+        self._require_notes_pull_version(dataset_id, device, selected_domains)
         if raw_envelopes:
             self._update_cursors(
                 dataset_id,
@@ -7759,6 +7786,12 @@ class SyncV2Service:
         *,
         context: SyncAdapterContext | None = None,
     ) -> AdapterAccepted | AdapterRejected | AdapterConflict | AdapterDeferred:
+        if envelope.domain == "notes.note" and envelope.adapter_version == 2 and not self.notes_v2_ready():
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="sync_pull_token_signing_unavailable",
+                message="Configure SYNC_V2_PULL_TOKEN_SIGNING_SECRET to enable Notes snapshot version 2.",
+            )
         if envelope.adapter_version not in self.adapters.get(envelope.domain).supported_adapter_versions:
             return AdapterRejected(
                 client_envelope_id=envelope.client_envelope_id,
@@ -10547,6 +10580,7 @@ class SyncV2Service:
     ) -> SyncPullResult:
         """Pull a token-paginated page without advancing past hidden conflicts."""
 
+        self._pull_token_secret()  # Fail before scanning or advancing any cursor.
         version_set = self._pull_version_set(device)
         if cursor is None:
             watermarks: dict[tuple[SyncDomain, int], int] = {}
@@ -10646,6 +10680,7 @@ class SyncV2Service:
             )
             for stream in streams
         }
+        self._require_notes_pull_version(dataset.dataset_id, device, [domain for domain, _ in streams])
         for domain, adapter_version in streams:
             self.store.update_device_cursor(
                 SyncDeviceCursor(
@@ -10988,6 +11023,28 @@ class SyncV2Service:
         if resolver is not None:
             return resolver(user_id)
         raise SyncStoreError("personal_context_key_custody_unavailable")
+
+    def _require_notes_pull_version(
+        self,
+        dataset_id: str,
+        device: SyncDevice,
+        domains: Sequence[SyncDomain],
+    ) -> None:
+        # Check after scanning and before cursor writes. A later append is beyond
+        # this page's bounded watermark and will be detected on the next pull.
+        if (
+            "notes.note" in domains
+            and not _device_supports_adapter_version(device, "notes.note", 2)
+            and self.store.list_envelopes_after(
+                dataset_id,
+                0,
+                limit=1,
+                domains=["notes.note"],
+                adapter_versions=[2],
+                status="accepted",
+            )
+        ):
+            raise SyncStoreError("notes_snapshot_upgrade_required")
 
     def _update_cursors(
         self,

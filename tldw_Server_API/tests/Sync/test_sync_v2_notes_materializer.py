@@ -53,6 +53,7 @@ def sync_service(
         clock=lambda: "2026-05-23T18:12:00+00:00",
         id_factory=lambda prefix: f"{prefix}-generated",
         settings=SyncV2Settings(
+            pull_token_signing_secret="synthetic-f3-test-signing-key",
             supported_domains=["notes.note"],
             operations={"notes.note": ["upsert", "tombstone"]},
             server_trusted_encryption=_ready_encryption(),

@@ -4,6 +4,10 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 from tldw_Server_API.tests.Notes_NEW.integration import test_notes_api
+from tldw_Server_API.tests.Sync import test_sync_v2_note_language as language_tests
+from tldw_Server_API.tests.Sync import test_sync_v2_server_origin_capture as origin_tests
+
+origin = language_tests.origin
 
 
 @pytest.fixture
@@ -107,27 +111,27 @@ def test_api_language_roundtrip_omission_null_conflict_and_copy(client_with_note
     )
 
 
-def test_active_sync_rejects_language_and_language_bearing_body_before_storage(client_with_notes_db, monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import notes
-
-    client = client_with_notes_db
+def test_active_sync_publishes_language_and_language_bearing_body(origin, monkeypatch):
+    service, db = origin
+    client = origin_tests._notes_app(monkeypatch, chacha_db=db, sync_service=service)
     created = client.post("/api/v1/notes/", json={"title": "Config", "content": "a: 1", "content_language": "yaml"})
-    assert created.status_code == 201
+    assert created.status_code == 201, created.text
     before = created.json()
-    monkeypatch.setattr(notes, "_active_notes_sync_service", lambda user: object())
-    assert client.get("/api/v1/notes/capabilities").json()["content_language"] is False
-    for payload in (
-        {"content_language": None},
-        {"content_language": "json"},
-        {"content": "a: 2"},
-        {"title": "Changed"},
+    assert client.get("/api/v1/notes/capabilities").json()["content_language"] is True
+    for version, payload in enumerate(
+        (
+            {"content_language": None},
+            {"content_language": "json"},
+            {"content": "a: 2"},
+            {"title": "Changed"},
+        ),
+        1,
     ):
-        response = client.patch(f"/api/v1/notes/{before['id']}", json=payload, headers={"expected-version": "1"})
-        assert response.status_code == 409, response.text
-        assert response.json()["detail"]["error_code"] == "notes_content_language_sync_unsupported"
-    assert client.get(f"/api/v1/notes/{before['id']}").json() == before
-    response = client.post("/api/v1/notes/", json={"title": "Config", "content": "source", "content_language": None})
-    assert response.status_code == 409
+        response = client.patch(
+            f"/api/v1/notes/{before['id']}", json=payload, headers={"expected-version": str(version)}
+        )
+        assert response.status_code == 200, response.text
+    assert response.json()["content_language"] == "json"
 
 
 def test_current_backup_restores_language_and_source(db, tmp_path):
@@ -237,22 +241,20 @@ def test_postgres_real_route_serialization(pg_db, client_with_notes_db):
     test_api_language_roundtrip_omission_null_conflict_and_copy(client_with_notes_db)
 
 
-def test_legacy_sync_projection_rejects_language_bearing_snapshot(db):
+def test_legacy_sync_projection_preserves_language_bearing_snapshot(db):
     note_id = db.add_note(title="Config", content="source", content_language="yaml")
-    before = db.get_note_by_id(note_id)
-    with pytest.raises(InputError, match="v1 Sync"):
-        db.upsert_note_from_sync(
-            note_id=note_id,
-            title="Changed",
-            content="source",
-            conversation_id=None,
-            message_id=None,
-            sync_client_id="test",
-            object_revision=2,
-            object_hash="unused",
-            expected_product_version=1,
-        )
-    assert db.get_note_by_id(note_id) == before
+    db.upsert_note_from_sync(
+        note_id=note_id,
+        title="Changed",
+        content="source",
+        conversation_id=None,
+        message_id=None,
+        sync_client_id="test",
+        object_revision=2,
+        object_hash="unused",
+        expected_product_version=1,
+    )
+    assert db.get_note_by_id(note_id)["content_language"] == "yaml"
     ordinary = db.add_note(title="Ordinary", content="source")
     assert db.upsert_note_from_sync(
         note_id=ordinary,
@@ -268,19 +270,16 @@ def test_legacy_sync_projection_rejects_language_bearing_snapshot(db):
     assert db.get_note_by_id(ordinary)["title"] == "  Exact  "
 
 
-def test_language_bearing_restore_is_rejected_before_mutation(client_with_notes_db, monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import notes
-
-    client = client_with_notes_db
+def test_language_bearing_restore_publishes_complete_snapshot(origin, monkeypatch):
+    service, db = origin
+    client = origin_tests._notes_app(monkeypatch, chacha_db=db, sync_service=service)
     note = client.post(
         "/api/v1/notes/", json={"title": "Config", "content": "source", "content_language": "yaml"}
     ).json()
     assert client.delete(f"/api/v1/notes/{note['id']}", headers={"expected-version": "1"}).status_code == 204
-    monkeypatch.setattr(notes, "_active_notes_sync_service", lambda user: object())
     restored = client.post(f"/api/v1/notes/{note['id']}/restore", params={"expected_version": 2})
-    assert restored.status_code == 409, restored.text
-    assert restored.json()["detail"]["error_code"] == "notes_content_language_sync_unsupported"
-    assert client.get(f"/api/v1/notes/{note['id']}").status_code == 404
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["content_language"] == "yaml"
 
 
 def test_capability_route_requires_authentication(client_with_notes_db):
@@ -295,22 +294,17 @@ def test_capability_route_requires_authentication(client_with_notes_db):
         client.app.dependency_overrides[get_request_user] = override
 
 
-def test_interop_service_rejects_incomplete_active_sync_writes(db, tmp_path, monkeypatch):
+def test_interop_service_preserves_language_without_sync(db, tmp_path, monkeypatch):
     from tldw_Server_API.app.core.Notes import Notes_Library
 
     service = Notes_Library.NotesInteropService(tmp_path, "test")
     monkeypatch.setattr(service, "_get_db", lambda user: db)
-    monkeypatch.setattr(Notes_Library, "active_coordinator", lambda *args, **kwargs: object())
-    with pytest.raises(InputError, match="cannot publish"):
-        service.add_note("test", "Config", "source", content_language="yaml")
-    with pytest.raises(InputError, match="cannot publish"):
-        service.add_note("test", "Config", "source", content_language=None)
-    note_id = db.add_note(title="Config", content="source", content_language="yaml")
-    with pytest.raises(InputError, match="cannot publish"):
-        service.update_note("test", note_id, {"title": "Changed"}, 1)
-    with pytest.raises(InputError, match="cannot publish"):
-        service.update_note(user_id="test", note_id=note_id, content_language=None, expected_version=1)
-    assert db.get_note_by_id(note_id)["version"] == 1
+    monkeypatch.setattr(Notes_Library, "active_coordinator", lambda *args, **kwargs: None)
+    note_id = service.add_note("test", "Config", "source", content_language="yaml")
+    service.update_note("test", note_id, {"title": "Changed"}, 1)
+    assert db.get_note_by_id(note_id)["content_language"] == "yaml"
+    service.update_note(user_id="test", note_id=note_id, content_language=None, expected_version=2)
+    assert db.get_note_by_id(note_id)["content_language"] is None
 
 
 @pytest.mark.asyncio
@@ -383,3 +377,13 @@ def test_postgres_sync_admission_holds_product_lock(pg_db, tmp_path, existing):
         owner_db.close_all_connections()
         writer.close_all_connections()
         other_backend.get_pool().close_all()
+
+
+def test_postgres_complete_sync_snapshots(pg_db, tmp_path):
+    from tldw_Server_API.tests.Sync import test_sync_v2_note_language as language_tests
+    from tldw_Server_API.tests.Sync import test_sync_v2_notes_materializer as materializer_tests
+
+    store = materializer_tests.sync_store.__wrapped__(tmp_path)
+    service = materializer_tests.sync_service.__wrapped__(store, pg_db)
+    service = language_tests.service.__wrapped__(service)
+    language_tests.test_v1_upgrade_complete_source_language_reset_retry_and_restore(service, pg_db)

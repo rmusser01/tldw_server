@@ -202,7 +202,10 @@ def chacha_db(tmp_path: Path) -> CharactersRAGDB:
 @pytest.fixture()
 def sync_service(tmp_path: Path, chacha_db: CharactersRAGDB) -> SyncV2Service:
     registry = SyncAdapterRegistry(
-        [StaticSyncAdapter(domain=domain, supported_adapter_versions={1}) for domain in M1_SYNC_DOMAINS]
+        [
+            StaticSyncAdapter(domain=domain, supported_adapter_versions={1, 2} if domain == "notes.note" else {1})
+            for domain in M1_SYNC_DOMAINS
+        ]
     )
     service = SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db")),
@@ -215,6 +218,7 @@ def sync_service(tmp_path: Path, chacha_db: CharactersRAGDB) -> SyncV2Service:
         clock=lambda: "2026-05-23T18:12:00+00:00",
         id_factory=lambda prefix: f"{prefix}-generated",
         settings=SyncV2Settings(
+            pull_token_signing_secret="synthetic-f3-test-signing-key",
             supported_domains=list(M1_SYNC_DOMAINS),
             operations={domain: list(operations) for domain, operations in M1_SYNC_OPERATIONS.items()},
             server_trusted_encryption=_ready_encryption(),
@@ -231,6 +235,11 @@ def sync_service(tmp_path: Path, chacha_db: CharactersRAGDB) -> SyncV2Service:
         display_name="Offline laptop",
         client_type="chatbook",
         device_id="offline-device",
+        capabilities={
+            "supported_adapter_versions": {
+                domain: [1, 2] if domain == "notes.note" else [1] for domain in M1_SYNC_DOMAINS
+            }
+        },
     )
     return service
 
@@ -263,7 +272,7 @@ def test_note_create_appends_server_origin_envelope_before_projection_and_pulls(
         user_id="user-1",
         dataset_id=result.dataset.dataset_id,
         device_id="offline-device",
-        cursor="0",
+        cursor=None,
         domains=["notes.note"],
     )
     assert [item.client_envelope_id for item in pulled.envelopes] == [
@@ -486,7 +495,7 @@ def test_chat_conversation_and_message_server_origin_envelopes_are_materialized(
         user_id="user-1",
         dataset_id=conversation.dataset.dataset_id,
         device_id="offline-device",
-        cursor="0",
+        cursor=None,
         domains=["chat.conversation", "chat.message"],
     )
     assert [(item.domain, item.object_id) for item in pulled.envelopes] == [
@@ -606,7 +615,7 @@ def test_chat_message_idempotency_replays_when_only_payload_timestamp_drifts(
 def test_append_failure_prevents_server_projection(tmp_path: Path, chacha_db: CharactersRAGDB) -> None:
     service = SyncV2Service(
         store=_FailingInsertStore(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db")),
-        adapters=SyncAdapterRegistry([StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1})]),
+        adapters=SyncAdapterRegistry([StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})]),
         materializers={"notes.note": NotesMaterializer(chacha_db)},
         settings=SyncV2Settings(
             supported_domains=["notes.note"],
@@ -641,7 +650,7 @@ def test_materialization_failure_leaves_replayable_failed_envelope_and_profile_s
 ) -> None:
     service = SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db")),
-        adapters=SyncAdapterRegistry([StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1})]),
+        adapters=SyncAdapterRegistry([StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})]),
         materializers={"notes.note": _FailingApplyMaterializer()},
         clock=lambda: "2026-05-23T18:12:00+00:00",
         settings=SyncV2Settings(
@@ -691,9 +700,7 @@ def test_server_origin_capture_without_materializer_does_not_report_pending_succ
 ) -> None:
     service = SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db")),
-        adapters=SyncAdapterRegistry(
-            [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1})]
-        ),
+        adapters=SyncAdapterRegistry([StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})]),
         settings=SyncV2Settings(
             supported_domains=["notes.note"],
             operations={"notes.note": ["upsert", "tombstone"]},
@@ -735,9 +742,7 @@ def test_server_origin_capture_retries_legacy_nonapplied_idempotent_envelope(
     )
     service = SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db")),
-        adapters=SyncAdapterRegistry(
-            [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1})]
-        ),
+        adapters=SyncAdapterRegistry([StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})]),
         materializers=initial_materializers,
         settings=SyncV2Settings(
             supported_domains=["notes.note"],
@@ -780,7 +785,7 @@ def test_server_origin_capture_retries_legacy_nonapplied_idempotent_envelope(
 def test_materialization_conflict_reports_accepted_conflict_envelope(tmp_path: Path) -> None:
     service = SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db")),
-        adapters=SyncAdapterRegistry([StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1})]),
+        adapters=SyncAdapterRegistry([StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})]),
         materializers={"notes.note": _ConflictingApplyMaterializer()},
         settings=SyncV2Settings(
             supported_domains=["notes.note"],
@@ -889,18 +894,21 @@ def test_normal_notes_create_api_routes_personal_write_through_sync_when_active(
             "content": "Created through the normal Notes API.",
             "conversation_id": conversation_id,
             "message_id": message_id,
+            "content_language": None,
         },
         {
             "title": "API note renamed",
             "content": "Updated content.",
             "conversation_id": conversation_id,
             "message_id": message_id,
+            "content_language": None,
         },
         {
             "title": "API note renamed",
             "content": "Patched content.",
             "conversation_id": conversation_id,
             "message_id": message_id,
+            "content_language": None,
         },
     ]
     assert envelopes[3].payload == {
@@ -1147,6 +1155,7 @@ def test_active_sync_note_restore_appends_canonical_restore_intent_upsert(
     restore_envelope = envelopes[-1]
     assert restore_envelope.routing_metadata["restore_intent"] is True
     assert restore_envelope.payload == {
+        "content_language": None,
         "title": "Restore",
         "content": "Delete me.",
         "conversation_id": None,
@@ -1681,7 +1690,7 @@ def test_active_sync_chat_delete_tombstones_child_messages_before_conversation(
         user_id="user-1",
         dataset_id=dataset_id,
         device_id="offline-device",
-        cursor="0",
+        cursor=None,
         domains=["chat.message"],
     )
     assert [

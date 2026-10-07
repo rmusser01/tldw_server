@@ -409,15 +409,16 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
             ],
         },
         "notes.note": {
-            "schema_version": 1,
+            "schema_version": 2,
             "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
             "upsert": {
-                "required": ["title", "content"],
+                "required": ["title", "content", "conversation_id", "message_id", "content_language"],
                 "properties": {
                     "title": {"type": "string", "max_length": NOTES_NOTE_TITLE_MAX_CHARS},
                     "content": {"type": "string", "max_length": NOTES_NOTE_CONTENT_MAX_CHARS},
                     "conversation_id": {"type": ["string", "null"]},
                     "message_id": {"type": ["string", "null"]},
+                    "content_language": {"type": ["string", "null"], "min_length": 1, "max_length": 100},
                 },
                 "additional_properties": False,
             },
@@ -620,11 +621,8 @@ def sync_v2_server_supported_adapter_versions(
     return {
         domain: (
             []
-            if domain in PERSONAL_CONTEXT_SYNC_DOMAINS
-            and not personal_context_sync_ready
-            else [1, 2]
-            if domain == "attachment.ref"
-            else [1]
+            if domain in PERSONAL_CONTEXT_SYNC_DOMAINS and not personal_context_sync_ready
+            else [1, 2] if domain in {"attachment.ref", "notes.note"} else [1]
         )
         for domain in domains
     }
@@ -637,6 +635,7 @@ def sync_v2_dataset_writable_adapter_versions(
     supports_attachments: bool = False,
     notes_task_sync_ready: bool = False,
     personal_context_sync_ready: bool = False,
+    notes_v2_ready: bool = False,
 ) -> dict[SyncDomain, list[int]]:
     """Return versions writable under one authoritative dataset/settings gate."""
 
@@ -651,7 +650,15 @@ def sync_v2_dataset_writable_adapter_versions(
         if domain in PERSONAL_CONTEXT_SYNC_DOMAINS and not personal_context_sync_ready:
             continue
         if domain in enrolled and domain != "attachment.ref":
-            versions[domain] = [1]
+            versions[domain] = (
+                (
+                    ([1, 2] if notes_v2_ready else [1])
+                    if dataset.encryption_policy == DEFAULT_M1_ENCRYPTION_POLICY
+                    else []
+                )
+                if domain == "notes.note"
+                else [1]
+            )
     if sync_v2_attachment_ref_v2_is_writable(
         dataset,
         notes_attachment_sync_enabled=notes_attachment_sync_enabled,
@@ -833,6 +840,27 @@ def validate_notes_note_upsert_payload(
         "content": content,
         **backlinks,
     }
+
+
+def validate_notes_note_upsert_payload_v2(
+    payload: Mapping[str, object],
+) -> dict[str, str | None]:
+    """Validate a complete v2 snapshot without rewriting accepted source."""
+    required = {*NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS, "content_language"}
+    if set(payload) != required:
+        raise ValueError("notes.note v2 requires exactly the complete snapshot fields")
+    language = payload["content_language"]
+    if language is not None and (not isinstance(language, str) or not 1 <= len(language) <= 100):
+        raise ValueError("content_language must be null or a string of 1 to 100 characters")
+    value = validate_notes_note_upsert_payload({key: payload[key] for key in NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS})
+    return {**value, "content_language": language}
+
+
+def complete_note_snapshot(note: Mapping[str, object]) -> dict[str, str | None]:
+    """Build a current complete snapshot from canonical note fields."""
+    return validate_notes_note_upsert_payload_v2(
+        {key: note.get(key) for key in (*NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS, "content_language")}
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2240,6 +2268,8 @@ __all__ = [
     "blob_upload_session_is_expired",
     "sync_v2_domain_schemas",
     "validate_notes_note_upsert_payload",
+    "validate_notes_note_upsert_payload_v2",
+    "complete_note_snapshot",
 ]
 
 
