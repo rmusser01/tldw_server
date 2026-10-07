@@ -261,3 +261,21 @@ def test_declared_portable_container_refuses_discarded_records_before_batch_writ
     response = client.post("/api/v1/notes/import", json=body)
     assert response.status_code == 422, response.text
     assert client.get("/api/v1/notes/").json()["notes"] == []
+
+
+@pytest.mark.parametrize("wrapper", ["notes", "data", "items", "results"])
+@pytest.mark.parametrize("format", ["json", "portable_note"])
+def test_root_envelope_is_the_validated_and_executed_carrier(client_with_notes_db, wrapper, format):
+    client = client_with_notes_db
+    inner = portable(version="tldw.note.v99", title="Inner", content="unsupported inner source")
+    outer = portable("yaml", title="Outer", **{wrapper: [inner, inner]})
+    body = import_body(outer, format)
+    body["items"].insert(0, {"format": "json", "content": json.dumps({"title": "First", "content": "legacy"})})
+    response = client.post("/api/v1/notes/import", json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["created_count"] == 2
+    notes = client.get("/api/v1/notes/").json()["notes"]
+    assert {(note["title"], note["content"], note["content_language"]) for note in notes} == {
+        ("First", "legacy", None),
+        ("Outer", SOURCE, "yaml"),
+    }

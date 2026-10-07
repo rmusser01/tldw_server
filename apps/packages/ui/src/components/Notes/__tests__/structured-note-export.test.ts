@@ -24,6 +24,9 @@ describe('structured note export contracts', () => {
     ['text', 'txt'],
     [null, 'txt'],
     [' future/😀 ', 'txt'],
+    ['constructor', 'txt'],
+    ['toString', 'txt'],
+    ['__proto__', 'txt'],
   ])('preserves opaque mode %s and uses only supported source extensions', (mode, extension) => {
     const note = {
       id: 'n-1',

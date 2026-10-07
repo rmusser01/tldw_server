@@ -1293,6 +1293,7 @@ export const estimateDetectedNotesFromImportContent = (
     if (Array.isArray(parsed))
       return parsed.filter((entry) => entry && typeof entry === 'object').length;
     if (parsed && typeof parsed === 'object') {
+      if ('format_version' in parsed) return 1;
       for (const key of ['notes', 'data', 'items', 'results']) {
         const candidate = (parsed as Record<string, unknown>)[key];
         if (Array.isArray(candidate)) {

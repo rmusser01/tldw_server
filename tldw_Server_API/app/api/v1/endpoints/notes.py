@@ -1643,6 +1643,8 @@ def _extract_json_note_rows(payload: Any, *, portable: bool = False) -> list[dic
             raise ValueError("Invalid portable note container.")
         return [item for item in payload if isinstance(item, dict)]
     if isinstance(payload, dict):
+        if "format_version" in payload:
+            return [payload]
         for key in ("notes", "data", "items", "results"):
             candidate = payload.get(key)
             if isinstance(candidate, list):
@@ -3584,16 +3586,13 @@ async def import_notes(
                 headers={"Retry-After": str(meta.get("retry_after", 60))}
             )
 
-        for item in payload.items:
+        validated_rows: dict[int, list[dict[str, Any]]] = {}
+        for file_index, item in enumerate(payload.items):
             if item.format not in {"json", "portable_note"}:
                 continue
             try:
                 decoded = json.loads(item.content)
-                rows = (
-                    [decoded]
-                    if isinstance(decoded, dict) and "format_version" in decoded
-                    else _extract_json_note_rows(decoded, portable=item.format == "portable_note")
-                )
+                rows = _extract_json_note_rows(decoded, portable=item.format == "portable_note")
             except (json.JSONDecodeError, InputError):
                 if item.format == "portable_note":
                     raise HTTPException(status_code=422, detail="Invalid portable note contract.") from None
@@ -3611,6 +3610,7 @@ async def import_notes(
                             status_code=422,
                             detail="Unsupported or invalid portable note contract.",
                         ) from None
+            validated_rows[file_index] = rows
 
         files: list[NotesImportFileResult] = []
         totals = {
@@ -3645,8 +3645,9 @@ async def import_notes(
 
             try:
                 if item.format in {"json", "portable_note"}:
-                    raw_payload = json.loads(item.content)
-                    raw_rows = _extract_json_note_rows(raw_payload)
+                    raw_rows = validated_rows.get(file_index)
+                    if raw_rows is None:
+                        raw_rows = _extract_json_note_rows(json.loads(item.content))
                     file_result.detected_notes = len(raw_rows)
                     for row_index, row in enumerate(raw_rows, start=1):
                         try:

@@ -124,6 +124,38 @@ describe('source and portable import contracts', () => {
     expect(result.current.importModalOpen).toBe(true);
   });
 
+  it.each(['notes', 'data', 'items', 'results'])(
+    'previews the root envelope rather than its %s extra field',
+    async (wrapper) => {
+      const outer = {
+        format_version: 'tldw.note.v1',
+        title: 'Outer',
+        content: source,
+        content_language: 'yaml',
+        [wrapper]: [{ format_version: 'tldw.note.v99' }, { format_version: 'tldw.note.v99' }],
+      };
+      const serialized = JSON.stringify(outer);
+      const { result } = renderHook(() =>
+        useNotesImport({
+          isOnline: true,
+          listMode: 'active',
+          message,
+          t: (key) => key,
+          refetch: vi.fn(),
+        })
+      );
+      await act(async () => {
+        await result.current.prepareImportFiles([file('outer.json', serialized)]);
+      });
+      expect(result.current.pendingImportFiles[0]).toMatchObject({
+        format: 'portable_note',
+        content: serialized,
+        detectedNotes: 1,
+        parseError: null,
+      });
+    }
+  );
+
   it('blocks unreadable UTF-8 without substituting source', async () => {
     const { result } = renderHook(() =>
       useNotesImport({

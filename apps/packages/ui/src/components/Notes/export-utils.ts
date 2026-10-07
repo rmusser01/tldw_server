@@ -45,7 +45,8 @@ export const buildStructuredSource = (
     json: 'json',
     jsonl: 'jsonl',
   };
-  const extension = extensions[note.content_language ?? ''] ?? 'txt';
+  const language = note.content_language ?? '';
+  const extension = Object.hasOwn(extensions, language) ? extensions[language] : 'txt';
   const name = (note.title || `note-${note.id ?? 'new'}`).replace(/[^a-z0-9-_]+/gi, '-');
   return { filename: `${name}.${extension}`, text: note.content };
 };
