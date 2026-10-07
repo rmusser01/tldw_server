@@ -100,7 +100,7 @@ A loopback mock server serves a paced SSE stream of exactly 100 chunks
 on the real `useStoreMessageOption` store records marks/measures plus store,
 DOM-mutation and long-task counts.
 
-| Run | chunksServed | chunksApplied | storeNotifs | msgUpdates | domMutations | longTasks | ttftMs | streamPhaseMs | msPerChunk | minGapMs | maxGapMs | domNodes |
+| Run | chunksServed | chunksApplied | storeSubscriberNotifications | messageUpdateNotifications | domMutations | longTasks | ttftMs | streamPhaseMs | msPerChunk | minChunkGapMs | maxChunkGapMs | domNodeCount |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 1 | 100 | 15 | 19 | 16 | 83 | 0 | 134.0 | 1187.2 | 79.15 | 74.4 | 98.3 | 196 |
 | 2 | 100 | 15 | 19 | 16 | 81 | 0 | 96.5 | 1150.2 | 76.68 | 41.9 | 88.6 | 196 |
@@ -224,6 +224,17 @@ Generating static pages using 17 workers (154/154) in 209.8ms
 | Bundle-budget check | **ok** (pass) | — | — |
 | Static pages generated | 154 | — | — |
 
+**Budget-headroom warning (binding for W1+):** headroom against the frozen
+baseline is effectively zero — 6.6 KB / 1.1% on the shared `_app` budget and
+2.8 KB / 0.3% on the heaviest route — so ANY byte-adding batch (W1 adds
+memoization/virtualization code) can trip the hard `check-bundle-budget` gate
+inside `build:prod`/`build`, and a failure there may be unrelated to that
+batch's own success criteria. Byte-adding batches must run
+`bun run check:bundle-budget` before and after their change and fund or
+explicitly justify any budget increase. When the check is red, compare the
+emitted numbers against this table to distinguish inherited saturation from
+new growth introduced by the batch.
+
 Notes:
 
 - Turbopack prints **no per-route size table** in `next build`; the two
@@ -243,6 +254,9 @@ Per the W0 controller ruling, the three manual metrics below are
 be filled in by the batch that consumes them (W0's load-bearing baseline is
 the automated benches + build numbers above). Do not automate them with
 browser automation when filling; record human DevTools observations.
+Fill-in entry criteria: recorders must pin and record the exact Chrome
+version used (e.g. from `chrome://version`) when filling M1–M3, so the W4/W5
+before/after comparisons against these rows are like-for-like.
 
 ### M1. Sidepanel quick-ingest of a 10-item batch — HTTP request count — PENDING-MANUAL
 

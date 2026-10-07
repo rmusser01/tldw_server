@@ -1,7 +1,7 @@
 ---
 id: TASK-13520
 title: 'WebUI perf batch W0: baseline harness'
-status: In Progress
+status: Done
 created_date: 2026-10-07 04:13
 ---
 
@@ -72,15 +72,32 @@ WebUI/extension perf program stage 0 (index: Docs/Plans/2026-10-06-webui-perf-re
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+All three stages landed on `codex/webui-perf-w0-baseline`: commit `66c8a21c80`
+(streaming-render vitest bench), `e645ed7a23` (canned 100-chunk Playwright e2e
+perf spec), `736b1a32a6` (persistence micro-benches), and `2f2e3b6f3a`
+(freeze of `Docs/Reviews/PERF_BASELINE_WEBUI_2026_10.md`, the program's
+authoritative baseline). Headline baseline numbers now frozen in that doc:
+500 streamed chunks → 502 store notifications / 501 message-array updates
+(Family A); one trivial workspace `set()` = 31 JSON.stringify calls /
+~2.45 MB re-serialized (Family C1); request-history sidecar write
+~2.6 MB per request against a ~4.93 MB final history (Family C2); bundle
+budgets effectively saturated at 98.9% (shared `_app`, 6.6 KB headroom) and
+99.7% (heaviest route, 2.8 KB headroom) (Family D). Verification: three
+in-task reviews (one per stage) plus the final whole-branch review all
+approved with zero fix rounds inside the tasks; this final-review fix wave is
+doc/process edits only. Known follow-ups: the pre-existing
+`workspace.split-storage.test.ts` failure is recorded (not introduced by this
+batch); the shared mock-server helper should be extracted from the e2e spec
+before W1 reuses it; PENDING-MANUAL rows M1–M3 remain open by design, owned by
+W4 (M1/M2) and W5 (M3).
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
