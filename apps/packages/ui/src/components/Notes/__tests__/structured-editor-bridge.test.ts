@@ -19,6 +19,20 @@ function setup() {
   return { textarea, bridge, command, edit }
 }
 describe('guarded native formatting', () => {
+  it.each(['forward', 'backward', 'none'] as const)('preserves literal spaces and %s selection/caret', (direction) => {
+    const {textarea, bridge} = setup()
+    const source = '{"a":"x  y"}'
+    const replacement = '{\n  "a": "x  y"\n}'
+    const start = direction === 'none' ? 8 : 7
+    const end = direction === 'none' ? 8 : 9
+    textarea.value = source
+    textarea.setSelectionRange(start, end, direction)
+    bridge.captureRequest(createDocumentRequest({...request, text: source}))
+    expect(bridge.applyFormat({...result, replacement}, key, true)).toBe(true)
+    expect([textarea.selectionStart, textarea.selectionEnd, textarea.selectionDirection]).toEqual([start + 4, end + 4, direction])
+    expect(textarea.value.slice(textarea.selectionStart, textarea.selectionEnd)).toBe(direction === 'none' ? '' : '  ')
+    bridge.dispose()
+  })
   it('declines browsers without a native insert command', () => {
     const {bridge} = setup()
     Object.defineProperty(document, 'execCommand', { configurable: true, value: undefined })

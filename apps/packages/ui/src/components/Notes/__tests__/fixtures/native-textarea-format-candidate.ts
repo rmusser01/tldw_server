@@ -10,13 +10,18 @@ function mapOffset(source: string, replacement: string, offset: number): number 
   if (offset === source.length) return replacement.length
   let rank = 0
   for (let i = 0; i < offset; i++) if (!/\s/.test(source[i])) rank++
+  let target = replacement.length
   for (let i = 0; i < replacement.length; i++) {
     if (!/\s/.test(replacement[i])) {
-      if (rank === 0) return i
+      if (rank === 0) { target = i; break }
       rank--
     }
   }
-  return replacement.length
+  // Preserve distance to the next anchor within its preceding whitespace run.
+  let sourceEnd = offset, runStart = target
+  while (sourceEnd < source.length && /\s/.test(source[sourceEnd])) sourceEnd++
+  while (runStart > 0 && /\s/.test(replacement[runStart - 1])) runStart--
+  return target - Math.min(sourceEnd - offset, target - runStart)
 }
 
 export class TextAreaFormatBridge {
