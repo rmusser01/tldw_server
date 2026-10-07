@@ -1,3 +1,4 @@
+import { nativeCharacterPreflightMessage } from "./native-character-preflight"
 import { captureChatDraftSource } from "./chat-draft-transition"
 import type { GreetingSeed } from "@/utils/character-greetings"
 import {
@@ -4374,7 +4375,7 @@ export const useChatActions = ({
                   : t("somethingWentWrong")
               notification.error({
                 message: t("error"),
-                description: errorMessage
+                description: nativeCharacterPreflightMessage(e, t) ?? errorMessage
               })
               return chatSubmitFailed(errorMessage)
             }
@@ -4479,7 +4480,7 @@ export const useChatActions = ({
       if ((!continuationSource || continuationSource.isCurrent()) && !greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
         notification.error({
           message: t("error"),
-          description: errorMessage
+          description: nativeCharacterPreflightMessage(e, t) ?? errorMessage
         })
       }
       // If this turn still owns the shared controller (e.g. a pre-stream failure
@@ -4685,7 +4686,7 @@ export const useChatActions = ({
         e instanceof Error ? e.message : t("somethingWentWrong")
       notification.error({
         message: t("error"),
-        description: errorMessage
+        description: nativeCharacterPreflightMessage(e, t) ?? errorMessage
       })
     } finally {
       replyServicePromptSnapshot?.release()

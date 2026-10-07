@@ -1791,7 +1791,7 @@ it("native required client tools are explicitly gated rather than silently disca
   expect(h1.wire).not.toHaveBeenCalled()
   expect(options.notification.error).toHaveBeenCalledWith(
     expect.objectContaining({
-      description: "native_history_client_tools_unsupported"
+      description: "Client tools are not supported in saved character chat. Set tools to None before starting."
     })
   )
 })
@@ -3183,3 +3183,57 @@ it("an old rendered interrupted Retry does not report obsolete Compare validatio
   expect(mounted.dismiss).not.toHaveBeenCalled()
   expect(normalChatModeMock).not.toHaveBeenCalled()
 })
+
+
+it.each([false, true])(
+  "keeps actual unread scenes ahead of native creation and retains a stable failure code (greeting=%s)",
+  async (greeting) => {
+    const mounted = await mountedNativeOpening()
+    const { Storage } = await import("@plasmohq/storage")
+    const service = await vi.importActual<
+      typeof import("@/services/actor-settings")
+    >("@/services/actor-settings")
+    const reader = vi.mocked(
+      (await import("@/services/actor-settings")).getActorSettingsForChat
+    )
+    reader.mockImplementationOnce(service.getActorSettingsForChat)
+    const read = vi
+      .spyOn(Storage.prototype, "get")
+      .mockRejectedValueOnce(new Error("scene read unavailable"))
+    let outcome: unknown
+    await act(async () => {
+      outcome = await mounted.hook.result.current.onSubmit({
+        message: greeting ? "" : "Keep this exact input",
+        image: "",
+        ...(greeting
+          ? {
+              greetingSeed: {
+                greetingStrategy: "default" as const,
+                rawText: "Saved opening"
+              },
+              greetingIsCurrent: () => true
+            }
+          : {})
+      })
+    })
+    expect(outcome).toMatchObject({
+      status: "failed",
+      errorMessage: "actor_settings_unavailable"
+    })
+    if (!greeting)
+      expect(mounted.options.notification.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description:
+            "Scene settings could not be loaded. Existing chat setup was left unchanged."
+        })
+      )
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(h1.capture).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(mounted.options.setServerChatId).not.toHaveBeenCalled()
+    read.mockRestore()
+    mounted.hook.unmount()
+    mounted.selection.unmount()
+  }
+)

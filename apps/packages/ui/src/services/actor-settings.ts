@@ -1,5 +1,5 @@
-import { Storage } from "@plasmohq/storage"
 import { createSafeStorage } from "@/utils/safe-storage"
+import { requirePersistentStorage } from "@/utils/persistent-storage"
 import {
   ACTOR_SETTINGS_VERSION,
   ActorSettings,
@@ -34,7 +34,14 @@ export const resolveActorChatKey = (params: {
 const isValidActorAspect = (value: any): value is ActorAspect => {
   if (!value || typeof value !== "object") return false
 
-  const { id, key, target, name, source, value: aspectValue } = value as {
+  const {
+    id,
+    key,
+    target,
+    name,
+    source,
+    value: aspectValue
+  } = value as {
     id: unknown
     key: unknown
     target: unknown
@@ -184,6 +191,7 @@ const getActorSettingsForChatOrNull = async (params: {
   serverChatId: string | null
 }): Promise<ActorSettings | null> => {
   try {
+    requirePersistentStorage(storage)
     const chatKey = resolveActorChatKey(params)
     const key = getActorStorageKey(chatKey)
     const stored = await storage.get<ActorSettings | undefined>(key)
@@ -193,7 +201,7 @@ const getActorSettingsForChatOrNull = async (params: {
     return migrateSettings(stored)
   } catch (error) {
     console.error("Failed to load Actor settings", error)
-    return null
+    throw new Error("actor_settings_unavailable")
   }
 }
 
@@ -214,6 +222,7 @@ export const saveActorSettingsForChat = async (params: {
   settings: ActorSettings
 }): Promise<boolean> => {
   try {
+    requirePersistentStorage(storage)
     const chatKey = resolveActorChatKey(params)
     const key = getActorStorageKey(chatKey)
     const payload: ActorSettings = {
@@ -229,10 +238,12 @@ export const saveActorSettingsForChat = async (params: {
 }
 
 export const getActorProfileForCharacter = async (
-  characterId: string | number | null | undefined
+  characterId: string | number | null | undefined,
+  options?: { throwOnError?: boolean }
 ): Promise<ActorSettings | null> => {
   if (!characterId) return null
   try {
+    if (options?.throwOnError) requirePersistentStorage(storage)
     const key = getActorProfileStorageKey(characterId)
     const stored = await storage.get<ActorSettings | undefined>(key)
     if (!stored) {
@@ -241,6 +252,7 @@ export const getActorProfileForCharacter = async (
     return migrateSettings(stored)
   } catch (error) {
     console.error("Failed to load Actor profile for character", error)
+    if (options?.throwOnError) throw new Error("actor_settings_unavailable")
     return null
   }
 }
@@ -275,7 +287,9 @@ export const getActorSettingsForChatWithCharacterFallback = async (params: {
     return existing
   }
 
-  const profile = await getActorProfileForCharacter(characterId ?? null)
+  const profile = await getActorProfileForCharacter(characterId ?? null, {
+    throwOnError: true
+  })
   if (profile) {
     return profile
   }

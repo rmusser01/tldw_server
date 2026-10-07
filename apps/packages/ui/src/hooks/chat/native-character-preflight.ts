@@ -86,6 +86,10 @@ export const nativeCharacterPreflightMessage = (
   t: (key: string, fallback: string, options?: { setting: string }) => string
 ): string | null => {
   const code = error instanceof Error ? error.message : '';
+  if (code === 'actor_settings_unavailable') return t(
+    'playground:composer.sceneLoadError',
+    'Scene settings could not be loaded. Existing chat setup was left unchanged.'
+  );
   if (code.startsWith('native_history_setting_unsupported:')) {
     return t(
       'playground:composer.characterUnsupportedSetting',

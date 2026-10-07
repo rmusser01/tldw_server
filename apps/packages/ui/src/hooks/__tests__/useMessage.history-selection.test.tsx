@@ -1389,7 +1389,7 @@ it("native required client tools are explicitly gated rather than silently disca
   expect(h1.wire).not.toHaveBeenCalled()
   expect(mocks.notification.error).toHaveBeenCalledWith(
     expect.objectContaining({
-      description: "native_history_client_tools_unsupported"
+      description: "Client tools are not supported in saved character chat. Set tools to None before starting."
     })
   )
 })
@@ -2071,4 +2071,46 @@ describe("side-panel send gate (XP-08)", () => {
     })
     expect(gate).not.toHaveBeenCalled()
   })
+})
+
+
+it("keeps a failed actual scene read ahead of compact native admission and shows recovery guidance", async () => {
+  const { Storage } = await import("@plasmohq/storage")
+  const service = await vi.importActual<
+    typeof import("@/services/actor-settings")
+  >("@/services/actor-settings")
+  const reader = vi.mocked(
+    (await import("@/services/actor-settings")).getActorSettingsForChat
+  )
+  reader.mockImplementationOnce(service.getActorSettingsForChat)
+  const read = vi
+    .spyOn(Storage.prototype, "get")
+    .mockRejectedValueOnce(new Error("scene read unavailable"))
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  const { result } = renderHook(() => useMessage())
+  let outcome: unknown
+  await act(async () => {
+    outcome = await result.current.onSubmit({
+      message: "Keep this exact input",
+      image: ""
+    })
+  })
+  expect(outcome).toMatchObject({
+    status: "failed",
+    errorMessage: "actor_settings_unavailable"
+  })
+  expect(mocks.notification.error).toHaveBeenCalledWith(
+    expect.objectContaining({
+      description:
+        "Scene settings could not be loaded. Existing chat setup was left unchanged."
+    })
+  )
+  expect(h1.create).not.toHaveBeenCalled()
+  expect(h1.capture).not.toHaveBeenCalled()
+  expect(h1.append).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(mocks.storeState.setServerChatId).not.toHaveBeenCalled()
+  read.mockRestore()
 })

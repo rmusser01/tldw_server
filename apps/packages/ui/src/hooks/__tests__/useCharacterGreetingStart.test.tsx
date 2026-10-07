@@ -7,7 +7,7 @@ import { buildGreetingOptionsFromEntries, collectGreetingEntries } from "@/utils
 
 const option = buildGreetingOptionsFromEntries(collectGreetingEntries({ first_message: "  Raw {{user}}  " }))[0]
 const renderStart = (retain = vi.fn(async () => true)) => {
-  const submit = vi.fn(async () => ({ status: "submitted" as const }))
+  const submit = vi.fn(async (): Promise<import("../chat/chat-action-utils").ChatSubmitResult> => ({ status: "submitted" }))
   const preflight = vi.fn()
   const controller = { getCurrent: () => ({ status: "idle", owner: null }), fence: () => () => true } as unknown as import("../chat/useHistorySelection").HistorySelectionController
   const hook = renderHook(({ isConnectionReady }) => {
@@ -61,4 +61,18 @@ it("a held ACK never revives after disconnect and reconnect; a new explicit clic
   retain.mockResolvedValueOnce(true)
   await act(async () => { await hook.result.current.start(option, () => true) })
   expect(hook.submit).toHaveBeenCalledOnce()
+})
+
+it("shows scene-specific recovery for a stable failed scene-read outcome and keeps unsent input", async () => {
+  const hook = renderStart()
+  hook.submit.mockResolvedValueOnce({
+    status: "failed",
+    errorMessage: "actor_settings_unavailable"
+  })
+  await act(async () => {
+    await expect(hook.result.current.start(option, () => true)).rejects.toThrow(
+      "Scene settings could not be loaded"
+    )
+  })
+  expect(hook.result.current.form.getValues().message).toBe("UNSENT\nexact  ")
 })

@@ -4261,5 +4261,14 @@
   },
   "draftRecovery_retryAccountVerification": {
     "message": "Retry account verification"
+  },
+  "composer_sceneLoadError": {
+    "message": "Scene settings could not be loaded. Existing chat setup was left unchanged."
+  },
+  "composer_sceneSaveError": {
+    "message": "Scene settings could not be saved. Your edits are still here; retry Save."
+  },
+  "composer_sceneSourceUnavailable": {
+    "message": "Close this panel and check your account verification and selected chat before reopening scene settings."
   }
 }

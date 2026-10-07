@@ -7,6 +7,7 @@ import {
   chatSubmitSubmitted,
   createSelectedForkAction
 } from "@/hooks/chat/chat-action-utils";
+import { nativeCharacterPreflightMessage } from "./chat/native-character-preflight";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import { SidepanelSendGateContext } from "@/hooks/chat/sidepanel-send-gate";
@@ -2871,7 +2872,7 @@ export const useMessage = () => {
               } catch (error) {
                 if (!greetingSeed) notification.error({
                   message: t("error"),
-                  description: error instanceof Error ? error.message : "Native history completion failed"
+                  description: nativeCharacterPreflightMessage(error, t) ?? (error instanceof Error ? error.message : "Native history completion failed")
                 });
                 if (releaseNormalControllerIfOwned()) {
                   setAbortController(null);

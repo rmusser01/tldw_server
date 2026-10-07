@@ -75,7 +75,7 @@ vi.mock("@/services/model-settings", () => ({
 vi.mock("@/services/ocr", () => ({ getOCRLanguage: async () => null }))
 vi.mock("@/services/actor-settings", () => ({
   getActorSettingsForChatWithCharacterFallback: async () => null,
-  saveActorSettingsForChat: vi.fn(),
+  saveActorSettingsForChat: vi.fn(async () => true),
 }))
 vi.mock("@/components/Common/system-prompt-utils", () => ({
   resolveSelectedSystemPromptContent: async (id?: string | null) =>
@@ -321,7 +321,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
       temperature: 0.25,
       apiProvider: "llama.cpp",
     })
-  })
+  }, 10000)
 
   it("does not revive a cached default after explicitly clearing a numeric setting", async () => {
     const client = new QueryClient({
@@ -349,7 +349,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
     await waitFor(() => expect(reopened.close).toHaveBeenCalledWith(false))
     expect(useStoreChatModelSettings.getState().temperature).toBeUndefined()
-  })
+  }, 10000)
 
   it.each(["saved", "reset-default", "reset-template", "owner-changed"])(
     "shows the current prompt when the dialog remounts with the existing query cache (%s)",

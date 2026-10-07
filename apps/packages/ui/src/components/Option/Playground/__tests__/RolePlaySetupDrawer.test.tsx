@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useStoreMessageOption } from "@/store/option"
 import { useActorStore } from "@/store/actor"
+import { HistorySelectionContext, useHistorySelection } from "@/hooks/chat/useHistorySelection"
 import { createDefaultActorSettings, type ActorSettings } from "@/types/actor"
 import type { RolePlayState } from "../role-play-state"
 import { RolePlaySetupDrawer } from "../RolePlaySetupDrawer"
@@ -11,7 +12,8 @@ import { createStartupTemplateBundle } from "../startup-template-bundles"
 
 const actorSettingsMocks = vi.hoisted(() => ({
   getActorSettingsForChatWithCharacterFallback: vi.fn(),
-  saveActorSettingsForChat: vi.fn()
+  saveActorSettingsForChat: vi.fn(),
+  retries: [] as Array<() => void>
 }))
 
 vi.mock("@/services/actor-settings", () => ({
@@ -128,15 +130,16 @@ vi.mock("antd", () => ({
     onClick,
     htmlType,
     "aria-label": ariaLabel
-  }, ref) => (
-    <button
+  }, ref) => {
+    if (children === "Retry" && onClick) actorSettingsMocks.retries.push(onClick)
+    return (<button
       ref={ref}
       type={htmlType === "submit" ? "submit" : "button"}
       aria-label={ariaLabel}
       onClick={onClick}>
       {children}
-    </button>
-  )),
+    </button>)
+  }),
   Checkbox: ({
     checked,
     onChange,
@@ -315,6 +318,179 @@ describe("RolePlaySetupDrawer", () => {
     await screen.findByText(/1 detail/)
   })
 
+  it("retries a real shared scene read instead of replacing unread storage with defaults", async () => {
+    const { Storage } = await import("@plasmohq/storage")
+    const service = await vi.importActual<
+      typeof import("@/services/actor-settings")
+    >("@/services/actor-settings")
+    const read = vi
+      .spyOn(Storage.prototype, "get")
+      .mockRejectedValueOnce(new Error("read unavailable"))
+      .mockResolvedValue(activeScene())
+    actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockImplementation(
+      service.getActorSettingsForChatWithCharacterFallback
+    )
+    const apply = vi.fn()
+    renderDrawer({ onApply: apply })
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Scene settings could not be loaded"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    expect(apply).not.toHaveBeenCalled()
+    expect(actorSettingsMocks.saveActorSettingsForChat).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+    expect(await screen.findByLabelText("Scene notes")).toHaveValue(
+      "The room smells like ozone."
+    )
+    read.mockRestore()
+  })
+
+  it("reloads a held scene after actual same-ID H1 retirement", async () => {
+    const selection = renderHook(() => useHistorySelection())
+    let release!: (value: ActorSettings) => void
+    actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    const captureGuard = () => selection.result.current.fence()
+    const content = () => (
+      <HistorySelectionContext.Provider value={selection.result.current}>
+        <RolePlaySetupDrawer
+          open
+          beforeState={beforeState}
+          historyId="history-1"
+          serverChatId="server-1"
+          characterId="char-mira"
+          onApply={vi.fn()}
+          onClose={vi.fn()}
+          captureApplyGuard={captureGuard}
+        />
+      </HistorySelectionContext.Provider>
+    )
+    const view = render(content())
+    await waitFor(() =>
+      expect(
+        actorSettingsMocks.getActorSettingsForChatWithCharacterFallback
+      ).toHaveBeenCalledTimes(1)
+    )
+    act(() => {
+      selection.result.current.beginLoad()
+    })
+    view.rerender(content())
+    await waitFor(() =>
+      expect(
+        actorSettingsMocks.getActorSettingsForChatWithCharacterFallback
+      ).toHaveBeenCalledTimes(2)
+    )
+    await act(async () => release({ ...activeScene(), notes: "Retired scene." }))
+    await waitFor(() =>
+      expect(screen.getByLabelText("Scene notes")).toHaveValue(
+        "The room smells like ozone."
+      )
+    )
+  })
+
+  it("ignores a failed previous scene's Retry after another chat has unsaved setup", async () => {
+    actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockRejectedValueOnce(
+      new Error("unavailable")
+    )
+    const apply = vi.fn()
+    const props = {
+      open: true,
+      beforeState,
+      historyId: "history-1",
+      serverChatId: "server-1",
+      characterId: "char-mira",
+      onApply: apply,
+      onClose: vi.fn()
+    }
+    const view = render(<RolePlaySetupDrawer {...props} />)
+    await screen.findByRole("alert")
+    const oldRetry = actorSettingsMocks.retries.at(-1)!
+    view.rerender(
+      <RolePlaySetupDrawer
+        {...props}
+        historyId="history-2"
+        serverChatId="server-2"
+      />
+    )
+    await waitFor(() =>
+      expect(screen.getByLabelText("Scene notes")).toHaveValue(
+        "The room smells like ozone."
+      )
+    )
+    fireEvent.change(screen.getByLabelText("Scene notes"), {
+      target: { value: "Unsaved setup." }
+    })
+    const reads =
+      actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mock.calls
+        .length
+    await act(async () => oldRetry())
+    expect(
+      actorSettingsMocks.getActorSettingsForChatWithCharacterFallback
+    ).toHaveBeenCalledTimes(reads)
+    expect(screen.getByLabelText("Scene notes")).toHaveValue("Unsaved setup.")
+  })
+
+  it("clears the previous Apply failure when the next owner is unavailable", async () => {
+    actorSettingsMocks.saveActorSettingsForChat.mockResolvedValueOnce(false)
+    const props = {
+      open: true,
+      beforeState,
+      historyId: "history-1",
+      serverChatId: "server-1",
+      characterId: "char-mira",
+      onApply: async () => true,
+      onClose: vi.fn()
+    }
+    const view = render(<RolePlaySetupDrawer {...props} />)
+    await screen.findByText(/1 detail/)
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    await screen.findByText(
+      /Identity and behavior were applied, but scene settings could not be saved/
+    )
+    view.rerender(
+      <RolePlaySetupDrawer
+        {...props}
+        serverChatId="other-chat"
+        captureApplyGuard={() => () => false}
+      />
+    )
+    await waitFor(() =>
+      expect(
+        screen.queryByText(
+          /Identity and behavior were applied, but scene settings could not be saved/
+        )
+      ).not.toBeInTheDocument()
+    )
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Scene settings could not be loaded"
+    )
+    expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports an unavailable initiating owner without leaving the drawer loading", async () => {
+    renderDrawer({ captureApplyGuard: () => () => false })
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Scene settings could not be loaded"
+    )
+    expect(
+      screen.queryByText("Loading scene settings...")
+    ).not.toBeInTheDocument()
+    expect(
+      actorSettingsMocks.getActorSettingsForChatWithCharacterFallback
+    ).not.toHaveBeenCalled()
+    expect(actorSettingsMocks.saveActorSettingsForChat).not.toHaveBeenCalled()
+    expect(
+      screen.queryByRole("button", { name: "Retry" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/check your account verification and selected chat/i)
+    ).toBeInTheDocument()
+  })
+
   it("does not crash when stored actor settings omit aspects", async () => {
     actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockResolvedValueOnce(
       {
@@ -384,7 +560,8 @@ describe("RolePlaySetupDrawer", () => {
           isEnabled: false,
           notes: ""
         })
-      })
+      }),
+      expect.objectContaining({ isCurrent: expect.any(Function), onDestination: expect.any(Function) })
     )
     expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalledWith({
       historyId: "history-1",
@@ -416,7 +593,8 @@ describe("RolePlaySetupDrawer", () => {
           category: "roleplay"
         },
         generationPresetKey: "precise"
-      })
+      }),
+      expect.objectContaining({ isCurrent: expect.any(Function), onDestination: expect.any(Function) })
     )
   })
 
@@ -637,7 +815,8 @@ describe("RolePlaySetupDrawer", () => {
         })
       })
     )
-    expect(onApplySavedSetup).toHaveBeenCalledWith(savedSetup)
+    expect(onApplySavedSetup).toHaveBeenCalledWith(savedSetup,
+      expect.objectContaining({ isCurrent: expect.any(Function), onDestination: expect.any(Function) }))
   })
 
   it("saves the staged role-play setup metadata", async () => {

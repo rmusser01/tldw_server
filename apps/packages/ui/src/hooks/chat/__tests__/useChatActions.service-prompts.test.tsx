@@ -471,6 +471,51 @@ describe("useChatActions Compare service prompt snapshot", () => {
     },
   );
 
+  it.each([false, true])(
+    "does not dispatch normal or Compare modes after the actual scene reader fails (compare=%s)",
+    async (compare) => {
+      const { Storage } = await import("@plasmohq/storage");
+      const service = await vi.importActual<
+        typeof import("@/services/actor-settings")
+      >("@/services/actor-settings");
+      const reader = vi.mocked(
+        (await import("@/services/actor-settings")).getActorSettingsForChat
+      );
+      reader.mockImplementationOnce(service.getActorSettingsForChat);
+      const read = vi
+        .spyOn(Storage.prototype, "get")
+        .mockRejectedValueOnce(new Error("scene read unavailable"));
+      const options = {
+        ...createHookOptions({ webSearch: false }),
+        compareModeActive: compare
+      };
+      const { result } = renderHook(() =>
+        useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+      );
+      let outcome: unknown;
+      await act(async () => {
+        outcome = await result.current.onSubmit({
+          message: "Retained exact question",
+          image: ""
+        });
+      });
+      expect(outcome).toMatchObject({
+        status: "failed",
+        errorMessage: "actor_settings_unavailable"
+      });
+      expect(options.notification.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description:
+            "Scene settings could not be loaded. Existing chat setup was left unchanged."
+        })
+      );
+      expect(normalChatModeMock).not.toHaveBeenCalled();
+      expect(ragModeMock).not.toHaveBeenCalled();
+      expect(createChatMock).not.toHaveBeenCalled();
+      read.mockRestore();
+    }
+  );
+
   it("loads before shared side effects and gives every web-search branch the same snapshot", async () => {
     const options = createHookOptions();
     const { result } = renderHook(() =>
