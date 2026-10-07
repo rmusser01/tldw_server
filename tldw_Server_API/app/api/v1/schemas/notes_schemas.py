@@ -106,6 +106,9 @@ class NoteProvenanceRestore(BaseModel):
 
 
 class NoteBase(BaseModel):
+    content_language: str | None = Field(
+        None, min_length=1, max_length=100, description="Opaque source language; null clears the selection."
+    )
     title: str = Field(..., min_length=1, max_length=255, description="Title of the note")
     content: str = Field(..., min_length=1, max_length=5000000, description="Content of the note (max 5MB)")
     conversation_id: str | None = Field(None, description="Optional conversation ID backlink")
@@ -195,6 +198,9 @@ class NoteCreate(NoteBase, NoteProvenanceWrite):
 
 
 class NoteUpdate(NoteProvenanceWrite):
+    content_language: str | None = Field(
+        None, min_length=1, max_length=100, description="Opaque source language; null clears the selection."
+    )
     title: str | None = Field(None, min_length=1, max_length=255, description="New title for the note")
     content: str | None = Field(None, min_length=1, max_length=5000000, description="New content for the note (max 5MB)")
     conversation_id: str | None = Field(None, description="Optional conversation ID backlink")

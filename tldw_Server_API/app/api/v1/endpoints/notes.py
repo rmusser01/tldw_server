@@ -531,6 +531,20 @@ def _note_payload_from_row(note: dict[str, Any]) -> dict[str, object]:
     }
 
 
+def _require_complete_note_language_write(
+    sync_service: SyncV2Service | None, *, supplied: bool = False, current: dict[str, Any] | None = None
+) -> None:
+    """Reject writes that the locked Notes v1 snapshot cannot publish."""
+    if sync_service is not None and (supplied or (current and current.get("content_language") is not None)):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "notes_content_language_sync_unsupported",
+                "message": "Active Sync does not yet support complete note language snapshots.",
+            },
+        )
+
+
 def _active_notes_sync_service(current_user: User) -> SyncV2Service | None:
     return get_active_server_origin_sync_service_for_user(str(current_user.id))
 
@@ -2226,6 +2240,19 @@ async def notes_health() -> dict[str, Any]:
     health["components"]["storage"] = storage_info
     return health
 
+
+@router.get("/capabilities", dependencies=[Depends(require_expected_user)])
+async def notes_capabilities(
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> dict[str, bool]:
+    """The authenticated DB dependency completes migration before this route."""
+    supported = _active_notes_sync_service(current_user) is None
+    if supported:
+        supported = await _run_db_call(db.note_store.supports_content_language)
+    return {"content_language": supported}
+
+
 @router.post(
     "/",
     response_model=NoteResponse,
@@ -2261,6 +2288,7 @@ async def create_note(
             safe_title_log = safe_title_log[:30] + "..."
         logger.info(f"User (via DB instance client_id: {db.client_id}) creating note: Title='{safe_title_log}'")
         sync_service = _active_notes_sync_service(current_user)
+        _require_complete_note_language_write(sync_service, supplied=_field_supplied(note_in, "content_language"))
         idempotency_key = request.headers.get("Idempotency-Key")
         keywords_supplied = _field_supplied(note_in, "keywords")
         folders_supplied = _field_supplied(note_in, "folder_paths")
@@ -2300,8 +2328,9 @@ async def create_note(
             else None
         )
         raw_note_fields: dict[str, object] = {
-            "title": (note_in.title or "").strip(),
+            "title": (note_in.title or ""),
             "content": note_in.content,
+            **({"content_language": note_in.content_language} if _field_supplied(note_in, "content_language") else {}),
             "conversation_id": _normalize_optional_id(note_in.conversation_id),
             "message_id": _normalize_optional_id(note_in.message_id),
             "auto_title": note_in.auto_title,
@@ -2351,11 +2380,7 @@ async def create_note(
                 compound_replayed = True
 
         # Nondeterministic title work follows durable raw-request manifest lookup.
-        effective_title = (
-            str(compound_note["title"])
-            if compound_note is not None
-            else (note_in.title or "").strip()
-        )
+        effective_title = str(compound_note["title"]) if compound_note is not None else (note_in.title or "")
         if not effective_title:
             if getattr(note_in, "auto_title", False):
                 opts = _build_title_opts(note_in)
@@ -2388,6 +2413,7 @@ async def create_note(
         note_payload = {
             "title": effective_title,
             "content": note_in.content,
+            **({"content_language": note_in.content_language} if _field_supplied(note_in, "content_language") else {}),
             "conversation_id": conversation_id,
             "message_id": message_id,
         }
@@ -6694,6 +6720,8 @@ async def update_note(
     folder_paths = note_in.normalized_folder_paths if folders_supplied else None
     raw_data = note_in.model_dump(exclude_unset=True)
     update_data: dict[str, Any] = {}
+    if "content_language" in raw_data:
+        update_data["content_language"] = raw_data["content_language"]
     if "title" in raw_data and raw_data["title"] is not None:
         update_data["title"] = raw_data["title"]
     if "content" in raw_data and raw_data["content"] is not None:
@@ -6707,7 +6735,6 @@ async def update_note(
         if not stripped_title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="Title cannot be empty or whitespace.")
-        update_data["title"] = stripped_title
     if not update_data and not keywords_supplied and not folders_supplied and provenance is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided for update.")
     try:
@@ -6731,6 +6758,11 @@ async def update_note(
                                 detail="Rate limit exceeded for notes.update",
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
         sync_service = _active_notes_sync_service(current_user)
+        _require_complete_note_language_write(
+            sync_service,
+            supplied="content_language" in raw_data,
+            current=_get_current_note() if sync_service is not None else None,
+        )
         coordinator = (
             NotesOrganizationCoordinator(
                 service=sync_service,
@@ -6999,6 +7031,8 @@ async def patch_note(
     folder_paths = note_in.normalized_folder_paths if folders_supplied else None
     raw_data = note_in.model_dump(exclude_unset=True)
     update_data: dict[str, Any] = {}
+    if "content_language" in raw_data:
+        update_data["content_language"] = raw_data["content_language"]
     if "title" in raw_data and raw_data["title"] is not None:
         update_data["title"] = raw_data["title"]
     if "content" in raw_data and raw_data["content"] is not None:
@@ -7012,7 +7046,6 @@ async def patch_note(
         if not stripped_title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="Title cannot be empty or whitespace.")
-        update_data["title"] = stripped_title
     if not update_data and not keywords_supplied and not folders_supplied and provenance is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided for update.")
     try:
@@ -7040,6 +7073,11 @@ async def patch_note(
             )
 
         sync_service = _active_notes_sync_service(current_user)
+        _require_complete_note_language_write(
+            sync_service,
+            supplied="content_language" in raw_data,
+            current=_get_current_note() if sync_service is not None else None,
+        )
         coordinator = (
             NotesOrganizationCoordinator(
                 service=sync_service,
@@ -7381,6 +7419,7 @@ async def restore_note(
             f"User (DB client_id: {db.client_id}) restoring note: ID='{note_id}', Version={expected_version}")
 
         sync_service = _active_notes_sync_service(current_user)
+        _require_complete_note_language_write(sync_service, current=existing_note)
         if sync_service is not None:
             if not existing_note:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
@@ -7634,6 +7673,7 @@ async def bulk_create_notes(
 
     for item_index, item in enumerate(request.notes):
         try:
+            _require_complete_note_language_write(sync_service, supplied=_field_supplied(item, "content_language"))
             keywords_supplied = _field_supplied(item, "keywords")
             folders_supplied = _field_supplied(item, "folder_paths")
             kw_list = (item.normalized_keywords or []) if keywords_supplied else None
@@ -7677,8 +7717,9 @@ async def bulk_create_notes(
                     operation="note.bulk_create",
                     note_id=note_id,
                     note_fields={
-                        "title": (getattr(item, "title", None) or "").strip(),
+                        "title": (getattr(item, "title", None) or ""),
                         "content": item.content,
+                **({"content_language": item.content_language} if _field_supplied(item, "content_language") else {}),
                         "conversation_id": _normalize_optional_id(item.conversation_id),
                         "message_id": _normalize_optional_id(item.message_id),
                         "auto_title": item.auto_title,
@@ -7711,9 +7752,7 @@ async def bulk_create_notes(
                     compound_replayed = True
 
             effective_title = (
-                str(compound_note["title"])
-                if compound_note is not None
-                else (getattr(item, "title", None) or "").strip()
+                str(compound_note["title"]) if compound_note is not None else (getattr(item, "title", None) or "")
             )
             if not effective_title:
                 if getattr(item, "auto_title", False):
@@ -7748,6 +7787,7 @@ async def bulk_create_notes(
             note_payload = {
                 "title": effective_title,
                 "content": item.content,
+                **({"content_language": item.content_language} if _field_supplied(item, "content_language") else {}),
                 "conversation_id": conversation_id,
                 "message_id": message_id,
             }

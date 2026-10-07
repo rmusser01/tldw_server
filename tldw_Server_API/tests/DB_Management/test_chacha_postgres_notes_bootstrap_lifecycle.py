@@ -412,7 +412,16 @@ def test_v70_upgrade_retries_after_late_failure_without_publishing_readiness(
     legacy = replacement = None
     try:
         legacy = LegacySchema(tmp_path / "legacy.db", client_id="1", backend=backend)
-        note = legacy.add_note(title="Survives", content="Existing v70 content")
+        # Seed only v70 columns: today's writer requires later schema artifacts.
+        assert "content_language" not in {column["name"] for column in backend.get_table_info("notes")}
+        note = "historical-v70-note"
+        now = legacy._get_current_utc_timestamp_iso()
+        with legacy.transaction() as connection:
+            connection.execute(
+                "INSERT INTO notes(id, title, content, client_id, version, deleted, created_at, last_modified) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (note, "Survives", "Existing v70 content", "1", 1, False, now, now),
+            )
         legacy.close_connection()
         original_execute = backend.execute
 

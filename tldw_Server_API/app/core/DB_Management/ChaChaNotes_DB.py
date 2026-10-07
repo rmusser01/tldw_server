@@ -794,8 +794,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 78  # Knowledge provenance and durable receipts after upstream Chat migrations
-    _POSTGRES_SCHEMA_VERSION = 82
+    _CURRENT_SCHEMA_VERSION = 79  # Nullable note source language after provenance receipts
+    _POSTGRES_SCHEMA_VERSION = 83
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -8812,6 +8812,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (75, "_migrate_from_v75_to_v76"),
             (76, "_migrate_from_v76_to_v77"),
             (77, "_migrate_from_v77_to_v78"),
+            (78, "_migrate_from_v78_to_v79"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -18046,6 +18047,63 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 81:
             raise SchemaError("Knowledge provenance PostgreSQL migration failed version verification.")
 
+    _NOTE_CONTENT_LANGUAGE_SQLITE_TRIGGERS = """
+DROP TRIGGER IF EXISTS notes_sync_create;
+CREATE TRIGGER notes_sync_create
+AFTER INSERT ON notes BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('notes',NEW.id,'create',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'title',NEW.title,'content',NEW.content,'content_language',NEW.content_language,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+DROP TRIGGER IF EXISTS notes_sync_update;
+CREATE TRIGGER notes_sync_update
+AFTER UPDATE ON notes
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.title IS NOT NEW.title OR
+     OLD.content IS NOT NEW.content OR
+     OLD.content_language IS NOT NEW.content_language OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('notes',NEW.id,'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'title',NEW.title,'content',NEW.content,'content_language',NEW.content_language,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+DROP TRIGGER IF EXISTS notes_sync_undelete;
+CREATE TRIGGER notes_sync_undelete
+AFTER UPDATE ON notes
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('notes',NEW.id,'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'title',NEW.title,'content',NEW.content,'content_language',NEW.content_language,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+    """
+
+    def _migrate_from_v78_to_v79(self, conn: sqlite3.Connection) -> None:
+        """Add nullable source language to existing and fresh SQLite notes."""
+        if "content_language" not in {row["name"] for row in conn.execute("PRAGMA table_info(notes)")}:
+            conn.execute("ALTER TABLE notes ADD COLUMN content_language TEXT")
+        statement = ""
+        for line in self._NOTE_CONTENT_LANGUAGE_SQLITE_TRIGGERS.splitlines(keepends=True):
+            statement += line
+            if sqlite3.complete_statement(statement):
+                conn.execute(statement)
+                statement = ""
+        conn.execute(
+            "UPDATE db_schema_version SET version = 79 WHERE schema_name = ? AND version = 78", (self._SCHEMA_NAME,)
+        )
+
+    def _migrate_from_v82_to_v83_postgres(self, conn: Any) -> None:
+        """Add source language without changing the existing note payload."""
+        self.backend.execute("ALTER TABLE notes ADD COLUMN IF NOT EXISTS content_language TEXT", connection=conn)
+        self._set_schema_version_postgres(conn, 83)
+
     def _migrate_from_v73_to_v74(self, conn: sqlite3.Connection) -> None:
         """Install permanent startup receipts inside the registered SQLite migration."""
         from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
@@ -21353,6 +21411,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 78 and current_db_version == 77:
                         self._migrate_from_v77_to_v78(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 79 and current_db_version == 78:
+                        self._migrate_from_v78_to_v79(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21835,6 +21896,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 78 and current_db_version == 77:
                     self._migrate_from_v77_to_v78(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 79 and current_db_version == 78:
+                    self._migrate_from_v78_to_v79(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25696,7 +25760,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25733,6 +25797,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 82 and current_version < 82:
                     self._migrate_from_v81_to_v82_postgres(conn)
                     current_version = 82
+                if target_version >= 83 and current_version < 83:
+                    self._migrate_from_v82_to_v83_postgres(conn)
+                    current_version = 83
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -26198,6 +26265,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v81_to_v82_postgres(conn)
                 self._runtime_schema_version = 82
                 current_version = 82
+
+            if target_version >= 83 and current_version < 83:
+                self._migrate_from_v82_to_v83_postgres(conn)
+                self._runtime_schema_version = 83
+                current_version = 83
 
             if current_version < target_version:
                 logger.warning(
@@ -35552,7 +35624,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError as e:  # Catch custom errors like InputError
             logger.error(f"Application error during {operation} for {link_table}: {e}", exc_info=True)
             raise
-
 
     # Conversation <-> Keyword
     # Keyword/note link helper methods are delegated to extracted stores at module bottom.

@@ -54,6 +54,10 @@ class NoteStore:
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
 
+    def supports_content_language(self) -> bool:
+        """Report actual migrated column availability on the selected backend."""
+        return any(column["name"] == "content_language" for column in self._db.backend.get_table_info("notes"))
+
     def _deleted_value(self, deleted: bool) -> bool | int:
         """Return the backend-native value for a soft-delete flag."""
         return deleted if self._db.backend_type == BackendType.POSTGRESQL else int(deleted)
@@ -82,6 +86,12 @@ class NoteStore:
     # Note creation
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _validate_content_language(value: object) -> None:
+        """Preserve opaque future mode identifiers within a bounded field."""
+        if value is not None and (not isinstance(value, str) or not 1 <= len(value) <= 100):
+            raise InputError("content_language must be null or a string of 1 to 100 characters.")  # noqa: TRY003
+
     def add_note(
         self,
         title: str,
@@ -90,12 +100,14 @@ class NoteStore:
         conversation_id: str | None = None,
         message_id: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        content_language: str | None = None,
     ) -> str | None:
-        if not title or not title.strip():
-            raise InputError("Note title cannot be empty.")  # noqa: TRY003
+        if not isinstance(title, str) or not title.strip() or len(title) > 255:
+            raise InputError("Note title must be nonblank and at most 255 characters.")  # noqa: TRY003
         if content is None:  # Allow empty string for content
             raise InputError("Note content cannot be None.")  # noqa: TRY003
 
+        self._validate_content_language(content_language)
         final_note_id = note_id or self._db._generate_uuid()
         projection = parse_wikilinks(content, source_note_id=final_note_id)
         now = self._db._get_current_utc_timestamp_iso()
@@ -104,19 +116,37 @@ class NoteStore:
         normalized_message_id = self._db._normalize_nullable_text(message_id)
 
         query = """
-            INSERT INTO notes (id, title, content, last_modified, client_id, version, deleted, created_at, conversation_id, message_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO notes (id, title, content, last_modified, client_id, version, deleted, created_at, conversation_id, message_id, content_language)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         if self._db.backend_type == BackendType.POSTGRESQL:
             query += " ON CONFLICT (id) DO NOTHING"
             params = (
-                final_note_id, title.strip(), content, now, client_id_to_use, 1, False, now,
-                normalized_conversation_id, normalized_message_id
+                final_note_id,
+                title,
+                content,
+                now,
+                client_id_to_use,
+                1,
+                False,
+                now,
+                normalized_conversation_id,
+                normalized_message_id,
+                content_language,
             )
         else:
             params = (
-                final_note_id, title.strip(), content, now, client_id_to_use, 1, 0, now,
-                normalized_conversation_id, normalized_message_id
+                final_note_id,
+                title,
+                content,
+                now,
+                client_id_to_use,
+                1,
+                0,
+                now,
+                normalized_conversation_id,
+                normalized_message_id,
+                content_language,
             )
 
         try:
@@ -230,8 +260,9 @@ class NoteStore:
                 conversation_id = excluded.conversation_id,
                 message_id = excluded.message_id
         """
+        query += " WHERE notes.content_language IS NULL"
         if owner_params:
-            query += " WHERE notes.client_id = ?"
+            query += " AND notes.client_id = ?"
         insert_if_absent_query = """
             INSERT INTO notes (
                 id, title, content, last_modified, client_id, version, deleted,
@@ -258,9 +289,11 @@ class NoteStore:
                 self._db._require_selected_owner_row(transaction_conn, "messages", normalized_message_id, self._db.client_id)
                 self._db._require_selected_owner_row(transaction_conn, "conversations", normalized_conversation_id, self._db.client_id)
                 previous = transaction_conn.execute(
-                    f"SELECT title, content FROM notes WHERE id = ?{owner_clause}",  # nosec B608
+                    f"SELECT title, content, content_language FROM notes WHERE id = ?{owner_clause}",  # nosec B608
                     (normalized_note_id,) + owner_params,
                 ).fetchone()
+                if previous is not None and previous["content_language"] is not None:
+                    raise InputError("Notes v1 Sync cannot mutate a language-bearing note.")  # noqa: TRY003
                 if expected_product_version is None:
                     cursor = transaction_conn.execute(query, params + owner_params)
                     if cursor.rowcount == 0:
@@ -2168,7 +2201,7 @@ class NoteStore:
             current_note is not None
             and "title" in update_data
             and isinstance(update_data["title"], str)
-            and update_data["title"].strip() != current_note.get("title")
+            and update_data["title"] != current_note.get("title")
         )
         content_changed = current_note is not None and (
             ("content" in update_data and update_data["content"] != current_note.get("content"))
@@ -2180,12 +2213,18 @@ class NoteStore:
         fields_to_update_sql = []
         params_for_set_clause = []
 
-        allowed_to_update = ['title', 'content', 'conversation_id', 'message_id']
+        if "content_language" in update_data:
+            self._validate_content_language(update_data["content_language"])
+        if "title" in update_data:
+            title = update_data["title"]
+            if not isinstance(title, str) or not title.strip() or len(title) > 255:
+                raise InputError("Note title must be nonblank and at most 255 characters.")  # noqa: TRY003
+        allowed_to_update = ["title", "content", "conversation_id", "message_id", "content_language"]
         for key, value in update_data.items():
             if key in allowed_to_update:
                 if key == 'title' and isinstance(value, str):
                     fields_to_update_sql.append(f"{key} = ?")
-                    params_for_set_clause.append(value.strip())
+                    params_for_set_clause.append(value)
                 elif key in ('conversation_id', 'message_id'):
                     fields_to_update_sql.append(f"{key} = ?")
                     params_for_set_clause.append(self._db._normalize_nullable_text(value))
