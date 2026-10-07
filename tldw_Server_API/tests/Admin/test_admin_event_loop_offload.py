@@ -156,6 +156,7 @@ def test_system_ops_reads_offloaded(monkeypatch: pytest.MonkeyPatch):
         maintenance_resp = client.get("/api/v1/admin/maintenance")
         flags_resp = client.get("/api/v1/admin/feature-flags")
         incidents_resp = client.get("/api/v1/admin/incidents")
+        sla_resp = client.get("/api/v1/admin/incidents/metrics/sla")
         usage_resp = client.get("/api/v1/admin/api-keys/usage/top", params={"limit": 5})
 
     assert maintenance_resp.status_code == 200, maintenance_resp.text
@@ -164,6 +165,8 @@ def test_system_ops_reads_offloaded(monkeypatch: pytest.MonkeyPatch):
     assert flags_resp.json() == {"items": [], "total": 0}
     assert incidents_resp.status_code == 200, incidents_resp.text
     assert incidents_resp.json()["total"] == 0
+    assert sla_resp.status_code == 200, sla_resp.text
+    assert sla_resp.json()["total_incidents"] == 0
     assert usage_resp.status_code == 200, usage_resp.text
     assert usage_resp.json()["items"][0]["key_id"] == "key-1"
 
@@ -172,6 +175,12 @@ def test_system_ops_reads_offloaded(monkeypatch: pytest.MonkeyPatch):
     assert _fake_list_feature_flags in offloaded_funcs
     assert _fake_list_incidents in offloaded_funcs
     assert _fake_list_api_key_usage in offloaded_funcs
+
+    incident_calls = [call for call in calls if call[0] is _fake_list_incidents]
+    assert incident_calls == [
+        (_fake_list_incidents, (), {"status": None, "severity": None, "tag": None, "limit": 50, "offset": 0}),
+        (_fake_list_incidents, (), {"status": None, "severity": None, "tag": None, "limit": 10000, "offset": 0}),
+    ]
 
     usage_calls = [call for call in calls if call[0] is _fake_list_api_key_usage]
     assert usage_calls == [(_fake_list_api_key_usage, (), {"limit": 5})]

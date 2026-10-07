@@ -630,7 +630,8 @@ async def get_incident_sla_metrics(
 ) -> dict:
     """Compute SLA metrics across all incidents."""
     _require_platform_admin(principal)
-    incidents, _ = svc_list_incidents(
+    incidents, _ = await asyncio.to_thread(
+        svc_list_incidents,
         status=None,
         severity=None,
         tag=None,
