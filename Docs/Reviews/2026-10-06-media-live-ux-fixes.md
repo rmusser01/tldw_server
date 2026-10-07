@@ -2,7 +2,7 @@
 
 All four findings from [the live validation](2026-10-05-media-live-validation.md) are fixed and verified. This closes TASK-13504–13507. Native screen-reader speech and human participant comprehension remain unverified; this report does not claim a full usability study.
 
-Draft PR: [#3204](https://github.com/rmusser01/tldw_server/pull/3204).
+PR: [#3204](https://github.com/rmusser01/tldw_server/pull/3204).
 
 ## Source and implementation
 
@@ -66,10 +66,12 @@ The requester authorized the current-dev update and merge on 2026-10-06 PT. The 
 
 Four temporary dependency links and task-generated build/tracing directories were removed before publishing. No browser or test servers were started for this integration pass. Actual browser/API/model evidence above remains tied to its original revision; it was not rerun on this new base. Final landing requires all seven protected checks on the pushed head and confirmation that dev has not advanced. The requester-owned Change summary remains verbatim on the PR.
 
+Dev advanced while the protected checks were running because PR 3205 merged. A second conflict-free rebase updated this PR to `e3c345b76f2d93527488b2015b9c3a2649c1f981`; tested rebased source was `205e295139b9d88a4f0f59c9b5eb48358c16b539`. There is no changed-file overlap with the intervening Knowledge work, and all 26 application files in this PR remain identical to published head `034372df13c7faf161238165253dcdd5359380ec`. Shared API/client and extension capture changes were inspected for compatibility. Fresh validation on this base passed **18 files / 464 Media tests** (72.15 seconds), **46 email tests** (13.30 seconds), WebUI typecheck and both production builds. Chrome output was 49.53 MB (51.6 seconds); WebUI token sync and the **595.6 KB / 600 KB** shared budget passed using the same 8 GB local heap allowance. The final published head still requires seven protected checks and a fresh dev-tip check before merge. `final_dev_merge_validation` records this newer evidence separately from the earlier dated receipts.
+
 ## Cleanup and review gate
 
 The task browser and servers are stopped; ports 18881/18882/18883 have no listeners. Four task-only dependency symlinks, the standalone tracing copy and generated WebUI/extension build caches were removed. Test models remain in the temporary validation directory for reuse. The managed source worktree is retained for PR review.
 
 Original tracked status matches its before snapshot, and every earlier untracked entry remains present. Exact full porcelain bytes differ because another workstream added 157 files under its own `.venv-uat-py312-20261006`; those files and the unrelated open browser were left untouched. No checkout/reset/clean/staging operation targeted the original workspace. Git's existing loose-object warning was left alone.
 
-The completed task-specific implementation plan is removed per repository guidance. No implementation item remains open in TASK-13504–13507. The requester supplied a new human-owned `Change summary` for PR 3204; it was saved verbatim and verified against the PR body, satisfying [the repository policy](../superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md). The requester subsequently authorized updating and merging this PR. It will be marked ready for review after the current-dev verification above; landing remains subject to the seven protected checks on the pushed head. The integration assertion follow-up temporarily reused three dependency links; those links are removed before committing. No new test services or browser were started.
+The completed task-specific implementation plan is removed per repository guidance. No implementation item remains open in TASK-13504–13507. The requester supplied a new human-owned `Change summary` for PR 3204; it was saved verbatim and verified against the PR body, satisfying [the repository policy](../superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md). The requester subsequently authorized updating and merging this PR. It was marked ready for review after the current-dev verification above; landing remains subject to the seven protected checks on the pushed head. The integration assertion follow-up temporarily reused three dependency links; those links are removed before committing. No new test services or browser were started.

@@ -365,5 +365,46 @@
     "protected_checks_on_published_head": "pending",
     "human_summary": "provided_verbatim",
     "evidence_limit": "Browser/API/model and native accessibility evidence above was not rerun on this new dev base."
+  },
+  "final_dev_merge_validation": {
+    "checked_at": "2026-10-07T06:39:04.743972+00:00",
+    "dev_base": "e3c345b76f2d93527488b2015b9c3a2649c1f981",
+    "prior_published_head": "034372df13c7faf161238165253dcdd5359380ec",
+    "tested_rebased_source": "205e295139b9d88a4f0f59c9b5eb48358c16b539",
+    "rebase_conflicts": 0,
+    "application_file_overlap_with_intervening_dev_changes": [],
+    "application_files_unchanged_from_prior_published_head": 26,
+    "intervening_dev_changes": "PR 3205 Knowledge provenance and browser sidebar gesture fixes; reviewed shared API/client and capture boundaries.",
+    "media_tests": {
+      "files": 18,
+      "passed": 464,
+      "duration_seconds": 72.15,
+      "timeout_ms": 15000,
+      "log": "/private/tmp/media-pr3204-knowledge-base-ui-tests-20261006.log"
+    },
+    "email_tests": {
+      "passed": 46,
+      "duration_seconds": 13.3,
+      "log": "/private/tmp/media-pr3204-knowledge-base-email-tests-20261006.log"
+    },
+    "webui_typecheck_passed": true,
+    "webui_build": {
+      "passed": true,
+      "token_sync": "passed",
+      "shared_app_gzip_kb": 595.6,
+      "budget_gzip_kb": 600,
+      "heap_limit_mb": 8192,
+      "log": "/private/tmp/media-pr3204-knowledge-base-webui-build-20261006.log"
+    },
+    "chrome_build": {
+      "passed": true,
+      "duration_seconds": 51.6,
+      "output_mb": 49.53,
+      "log": "/private/tmp/media-pr3204-knowledge-base-chrome-build-20261006.log"
+    },
+    "merge_queue_mode": "unset",
+    "requester_authorized_update_and_merge": true,
+    "protected_checks_on_published_head": "pending",
+    "evidence_limit": "Live browser/API/native evidence retains its earlier revision boundary; these are fresh affected tests and production builds."
   }
 }
