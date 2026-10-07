@@ -326,7 +326,7 @@ describe("MediaIngestJobsPanel", () => {
     })
     expect(mocks.listMediaIngestJobs).not.toHaveBeenCalled()
   })
-  it.each(["Review 1 saved items", "Refresh import", "Resume import"])(
+  it.each(["Review 1 saved item", "Refresh import", "Resume import"])(
     "rejects retained %s after a replacement owner is verified before capture",
     async (action) => {
       store
@@ -485,7 +485,7 @@ describe("MediaIngestJobsPanel", () => {
     expect(
       mocks.listMediaIngestJobs.mock.calls.map(([request]) => request.batch_id)
     ).toEqual(["batch-123", "failed-file-batch", "retry-file-batch"])
-    fireEvent.click(screen.getByRole("button", { name: "Review 1 saved items" }))
+    fireEvent.click(screen.getByRole("button", { name: "Review 1 saved item" }))
     await waitFor(() =>
       expect(mocks.navigate).toHaveBeenCalledWith("/media-multi")
     )
@@ -511,7 +511,7 @@ describe("MediaIngestJobsPanel", () => {
         })
     )
     render(<MediaIngestJobsPanel />)
-    fireEvent.click(screen.getByRole("button", { name: "Review 1 saved items" }))
+    fireEvent.click(screen.getByRole("button", { name: "Review 1 saved item" }))
     await waitFor(() => expect(mocks.setSetting).toHaveBeenCalledTimes(1))
     act(() => {
       mocks.owner = "verified-B"

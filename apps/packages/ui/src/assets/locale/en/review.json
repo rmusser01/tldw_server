@@ -447,7 +447,7 @@
     "importLiveProgress": "{{done}} processing outcomes received",
     "resumeImport": "Resume import",
     "refreshImport": "Refresh import",
-    "reviewImportSaved": "Review {{count}} saved items",
+    "reviewImportSaved": "Review {count, plural, one {# saved item} other {# saved items}}",
     "importDiagnostics": "Optional diagnostics",
     "ingestJobsLoadError": "Unable to refresh this import. Try again.",
     "ingestReviewError": "Unable to open the saved review set. Try again.",

@@ -3,6 +3,7 @@ import type { MediaDateRange, MediaSortBy } from "@/components/Review/mediaSearc
 import type { ContentFilterProgress } from "@/components/Review/content-filtering-progress"
 import type { MediaMultiBatchExportFormat } from "@/components/Review/media-multi-batch-actions"
 import { extractMediaDetailContent } from "@/utils/media-detail-content"
+import { stripMediaMetadata } from "@/utils/media-metadata-display"
 
 // ── Domain types ────────────────────────────────────────────────
 export type MediaItem = {
@@ -15,6 +16,7 @@ export type MediaItem = {
 
 export type MediaDetail = {
   id: string | number
+  source?: { title?: string; type?: string; url?: string }
   title?: string
   type?: string
   created_at?: string
@@ -29,6 +31,9 @@ export type MediaDetail = {
 export const getContent = (d: MediaDetail): string => {
   return extractMediaDetailContent(d)
 }
+
+export const getReadingContent = (d: MediaDetail): string =>
+  stripMediaMetadata(getContent(d))
 
 export const idsEqual = (a: string | number, b: string | number): boolean =>
   String(a) === String(b)
