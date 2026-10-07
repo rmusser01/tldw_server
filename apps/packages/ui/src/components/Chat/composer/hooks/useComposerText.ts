@@ -86,6 +86,12 @@ export type ComposerPromptAssistMutation =
       attemptId: number
     }
 
+export type ComposerDraftOwnership = {
+  isCurrent: () => boolean
+  isOwnerCurrent: () => boolean
+  normalizeMessage: (message: string) => boolean
+}
+
 export interface UseComposerTextResult {
   creationRecovery: { active: ChatCreationRecovery | null; unavailable: boolean; copyInputRequired: boolean }
   retainCurrentDraft: () => Promise<boolean>
@@ -109,6 +115,8 @@ export interface UseComposerTextResult {
   markPromptAssistAttemptSaved: (attemptId: number, acknowledgedDelivery?: boolean) => void
   /** Most recently completed owner attempt, or null before the first completion. */
   promptAssistSavedAttemptId: number | null
+  /** Capture the verified owner and exact committed message/image revision. */
+  captureDraftOwnership: () => ComposerDraftOwnership
   /** Convenience setter for the message field. */
   setMessageValue: (value: string) => void
   /** Focuses the textarea (no-op on mobile to avoid unwanted keyboard pop-up). */
@@ -200,11 +208,25 @@ export function useComposerText(
     }
   }, [form.values.image])
   const previousMessageRef = React.useRef(form.values.message)
+  const draftValuesRef = React.useRef(form.values)
+  const draftRevisionRef = React.useRef(0)
   const nextPromptAssistAttemptIdRef = React.useRef(0)
   const pendingPromptAssistResetRef = React.useRef<{
     attemptId: number
     fromValue: string
   } | null>(null)
+  const formValues = form.values
+  const setFormMessage = form.setFieldValue
+
+  React.useLayoutEffect(() => {
+    if (
+      !Object.is(draftValuesRef.current.message, formValues.message) ||
+      !Object.is(draftValuesRef.current.image, formValues.image)
+    ) {
+      draftValuesRef.current = formValues
+      draftRevisionRef.current++
+    }
+  }, [formValues])
 
   React.useLayoutEffect(() => {
     if (Object.is(previousMessageRef.current, form.values.message)) return
@@ -298,6 +320,28 @@ export function useComposerText(
       restoreWithMetadata?.("", undefined)
     }
   })
+
+  const captureDraftOwnership = React.useCallback((): ComposerDraftOwnership => {
+    let revision = draftRevisionRef.current
+    const isOwnerCurrent = isCurrent
+    const valuesAreCurrent =
+      Object.is(draftValuesRef.current.message, formValues.message) &&
+      Object.is(draftValuesRef.current.image, formValues.image)
+    const isDraftCurrent = () =>
+      valuesAreCurrent && isOwnerCurrent() && draftRevisionRef.current === revision
+    return {
+      isCurrent: isDraftCurrent,
+      isOwnerCurrent,
+      normalizeMessage: (message) => {
+        if (!isDraftCurrent()) return false
+        if (Object.is(draftValuesRef.current.message, message)) return true
+        draftValuesRef.current = { ...draftValuesRef.current, message }
+        revision = ++draftRevisionRef.current
+        setFormMessage("message", message)
+        return true
+      }
+    }
+  }, [formValues, isCurrent, setFormMessage])
 
   const markPromptAssistAttemptSaved = React.useCallback(
     (attemptId: number, acknowledgedDelivery = false) => setSavedAttempt({ id: attemptId, acknowledgedDelivery }), []
@@ -634,6 +678,8 @@ export function useComposerText(
   const beginPromptAssistReset = React.useCallback(() => {
     flushDraft()
     const attemptId = ++nextPromptAssistAttemptIdRef.current
+    draftValuesRef.current = { message: "", image: "" }
+    draftRevisionRef.current++
     const current = useStoreMessageOption.getState()
     let originalMetadata: DraftMetadataObject | undefined
     try {
@@ -907,6 +953,7 @@ export function useComposerText(
     restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     promptAssistSavedAttemptId,
+    captureDraftOwnership,
     setMessageValue,
     textAreaFocus,
     captureCompletionGuard,

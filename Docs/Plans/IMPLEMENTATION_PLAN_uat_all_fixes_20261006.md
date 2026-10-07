@@ -832,7 +832,7 @@ ADR required: no; existing ADR049 ownership and recovery settlement apply. Human
 **Goal**: Qualified small patch committed with normal hooks and exact staged parity.
 **Success Criteria**: Independent actual/staged review clear, no new lint/security findings, unrelated Sync WIP retained.
 **Tests**: Scoped hooks, index/commit parity; actual43 remains separate.
-**Status**: In Progress
+**Status**: Complete
 
 
 ### Partial-retention causal RED and shared settlement ruling
@@ -860,3 +860,57 @@ Partial-retention candidate1 actual UI qualification: 15 passed/4 failed, natura
 ### Partial-retention final local qualification
 
 Interrupted Retry partial-retention candidate2 qualified locally. Complete affected interrupted module: UI19passed/60.722s and Web19passed/60.328s; three history/admission/normal-mode consumer modules111passed per configuration/UI4.083s/Web3.158s. Natural0/no deadline/no skips/source guards unchanged. Four causal loss cases now retain original on held preparation/provider503/Stop/two rejected owner writes; genuine acknowledged direct/keeper success retires exact captured operation IDs in original session scopes and preserves late records/local alternatives. Keeper-success status already covered by API client tracker; extra tracker not implemented. Web declared typecheck0/12.118s. UI initially3 NEW unknown fixture type errors; only existing HistoryTurnRecovery annotation/Object.values generic corrected. Exact old test6a6c... and current958ec... transpile to byte-identical JS685a1499bd2421112a16c7404cf1c0dc21dec3e0c4a28c1c82e517f3a4723eda; no behavioral/Web replay. Only failed UI check reran0/98.849s, unchanged600cap. Five touched TypeScript files parse0/lint0errors/no new warnings: hook23 and normal8 inherited; other3zero. Existing whole-file Prettier flags identical baseline/current on all5; no broad format rewrite. Old cursor assertion retargeted to actual selected row at nondestructive choose seam; no claim all90 original expect call texts identical. Scoped Bandit N/A TypeScript/prose-only. Final independent actual5source/newbody/caller review CLEAR, including previously missed destructive hook. Candidate1 failure retained honestly; candidate2 bounded correction of actual observed cause, no third behavioral candidate. Native result memory recovered/released, no proof/log files. Prepare normal exact7path staged review/hooks/local commit; publication, actual provider/browser/native A03 and all43 acceptance remain OPEN. Unrelated Sync WIP/approval hold and all retained STOPs preserved.
+
+## Composer Send draft ownership
+
+Interrupted Retry partial-retention repair committed locally as2b28961349fef01c8d93b754af39217d50cdd554, parent8a5dc12, exactly7files326insertions22deletions. Normal explicit scoped hooks0/1.522s; final independent staged review CLEAR. Committed binary patch byte-equal to reviewed index SHA25620fd44fc01c116c0a8e1546378ca3f5c18e521373f998122ee7a0083d5a6ce2b/48984bytes. Index empty; unrelated11tracked Sync/ADR WIP unchanged; normal Git packing warnings left untouched. Unpublished, no actual43 acceptance. All three partial-retention unit stages complete; broader owned plan remains open. Next distinct composer Send ownership unit starts read-only design/test planning: Playground awaits embedding/search/document preparation then clears/sends captured draft without message/account/view freshness; its OpenUI cleanup runs after awaited dispatch. Sidepanel shares analogous beforeSend/afterSend draft and attachment cleanup; ModelPlayground awaits onSubmit then unconditionally clears message. Trace every actual caller and existing draft-owner/revision/attempt/controller boundaries before choosing minimum shared correction. Do not infer a failed/submitted result is input admission proof or defer all clearing until generation ends; optimistic Send must stay usable and any failure restoration must not duplicate an already admitted user turn. Associated task established before any new composer source/test edits.
+
+ADR required: assess existing ADR049/050 ownership and draft protections first; no new architecture/API contract is proposed yet. Reuse useChatDraftOwner, useComposerText messageRevision/prompt-assist attempt, history controller fence, useComposerSubmit and existing document selection cancellation. Preserve queue acceptance, native first-create/own-follow transitions, image/compare/document payloads, and old-scoped persistence. No new store/protocol/dependency. A03/A12 draft/focus/context truth is separate from actual browser/provider acceptance.
+
+### Stage 1: Reproduce stale composer work
+**Goal**: Trace actual preparation/dispatch/cleanup across each current consumer and establish causal failures on unchanged source.
+**Success Criteria**: New draft or account/view/attachment change cannot be cleared or dispatched by an old attempt; failure handling retains truthful accepted-turn identity.
+**Tests**: Held preparation, draft ABA, navigation/account revocation, attachment replacement, duplicate Send, failed/skipped/rejected dispatch and late success with newer context, plus legitimate optimistic Send/queue controls as affected.
+**Status**: In Progress
+
+### Stage 2: Guard existing composer boundaries
+**Goal**: Minimal correction uses current owner/revision/attempt primitives at actual asynchronous boundaries.
+**Success Criteria**: Causal and affected UI/Web checks pass without lost drafts, duplicate admitted questions, or new context deletion.
+**Tests**: Red/green, touched shared composer/full-page/sidepanel/model consumers, configured types/lint/security as applicable; maximum3bounded attempts.
+**Status**: Not Started
+
+### Stage 3: Review and local commit
+**Goal**: Fresh actual/staged review and normal hooks qualify exact scoped commit.
+**Success Criteria**: Only qualified source and associated notes staged; unrelated Sync WIP and all runtime gates preserved.
+**Tests**: Actual/staged review, scoped hooks, index/commit parity; actual43 acceptance remains separate.
+**Status**: Not Started
+
+
+### Composer ownership first causal RED
+
+Composer Send ownership causal RED: 11 new real-hook/preparation cases failed on unchanged production at HEAD2b28961349, natural1/2.616s, no deadline/stderr and all guarded hashes unchanged. Stale replacement/ABA/image/account/idle-selection-epoch/history-ID/tab-context still dispatched old payload; duplicate preparation dispatched twice; submitted/failed/skipped response all invoked late stale OpenUI cleanup after immediate reset passed. Full nativeJSON19365characters recovered in owned memory and holder70026 released naturally; no proof/log files. Tests-only revised source6796e711... independently CLEAR with exact delegated form.onSubmit promises drained. Real document preparation/PDF algorithm held at bgUpload only; verified-scope resolver is an explicit boundary input, not auth-resolver qualification. Authorize first minimal Playground/shared composer candidate; Sidepanel/Model actual causal cases and all43 actual acceptance remain open. No admission/restoration protocol or status-as-admission inference.
+
+Implementation ruling: reuse the existing verified draft owner and live monotonic message/image version; pre-dispatch captured history/context/attachment state after actual awaits; one active preparation prevents duplicate Send. Keep immediate optimistic reset before provider wait, and protect late prompt/context callbacks against newer draft/owner/attempts; remove redundant late focus. Slash normalization must not invalidate its own capture. Queue acceptance remains unchanged. Existing provider status cannot prove whether input was accepted; the separate pre-admission rejection/draft-loss seam is not repaired by this unit. No new store/protocol/dependency, no actual runtime/browser/provider UAT claim. Sidepanel and Model require their own real-component regressions before source correction.
+
+### Composer candidate1 and sibling RED — 2026-10-07
+- Candidate1 original11 causal cases: UI11passed, natural0/2.828s, exact guards unchanged; source review NOT CLEAR for command-only normalization and identical new page-context instance cleanup. Prompt identity/content fence remains required.
+- Model Playground baseline3failed at immediate composer reset, natural1/2.698s; real component, provider callback held, all owned Promises drained. Minimal clear-before-await correction is next.
+- New slash/page/prompt controls must cover the review findings before candidate2. Actual Sidepanel validation and all43 workflow acceptance remain open; no admission proof inferred from generation result statuses.
+
+### Composer final candidate3 checks — 2026-10-07
+- Candidate3 document lock fix independently reviewed CLEAR in actual source; causal queue case1failed on candidate2 (1.880s), then new19pass in full affected UI run.
+- Full UI8files:96passed26failed,122total, natural1/15.746s. All26 failures are legacy Home cold-source fixture cases after global provider adaptation; fixture scope must preserve baseline legacy parent and use real provider for child Form. Existing169 expect AST calls across3modified tests intact.
+- Two new exhaustive-deps warnings require stable referenced-value/setter dependencies; no new behavior approach. Candidate3 production ceiling remains consumed.
+- Model UI3/Web3pass with held callback, format-only test typedAST equality; no native/provider admission claim. Sidepanel and all43 actual workflows stay open.
+
+
+### Composer fixture integration and current-source checks
+
+Composer current-source continuation: shared/new ownership UI49passed natural0/3.167s; Home first fixture correction23passed5failed/7.081s, second real-action context ferry corrected only the five ordinary casesUI5passed38excluded/5.206s. Existing100 OpenUI/169 total modified-test expect ASTs retained. Legacy source-flow actions/persistence stay outside provider while real child composer fence stays inside; not native acceptance. Final Web8 scope121passed1failed/9.283s, exact hashes intact, complete JSON+stderr recovered/released. Actual failure is inherited account-privacy storage spy lifecycle: UI restoreMocks=true; Web config does not restore spies, so the second tabScoped suite captures an already mocked Storage.prototype.get/set and recursively calls itself. No application cause inferred. Before edit, authorize minimal explicit vi.restoreAllMocks in this fixture afterEach using existing neighboring pattern, preserve all assertions and real storage algorithms; rerun only genuinely affected delayed-read/write lifecycle cases. UI configured types0/58.980s. Final ten-file parse0/no NEW lint, inherited warnings/style retained. New Playground test standard formatting has full emittedJS AST equality after redundant parentheses normalization; typedAST/JS byte equality NOT claimed. All43 actual acceptance, Sidepanel and Sync specific approval remain open.
+
+
+### Playground and Model composer local qualification
+
+Playground/shared and Model composer unit locally qualified within explicit scope: UI first8files96passed26failed/15.746s, current shared/newcase49passed/3.167s; Home firstcorrection23passed5failed then ONLYfive unresolved ordinary cases5passed/5.206s after real legacy parent-action/provider split. Web first8files121passed1failed/9.283s; OpenUI43/newownership19/all other returned scopes pass. Inherited storage-spy recursion corrected by explicit per-test restore; ONLYfour affected delayed-read/write lifecycle casesWeb4passed26excluded/1.995s, stderr empty. No single final122-case all-pass run claimed and no unchanged121-pass replay. Model separateUI3/Web3 held-callback checks pass. UI configuredtypes0/58.980s (before one-line test spy restoration), declaredWebtypes0/7.495s on final11-file source; no shims/config weakening. Eleven touchedTS parse0/notignored/lint0errors/noNEWmessages; original200 expect ASTs retained acrossfour modified fixtures (23+46+100+31), newtestsformatted, inherited wholefile style/warnings retained. ScopedBanditN/A TS/proseonly. Fresh actualsource reviewsCLEAR candidate3 and all final fixture/lint/format deltas; test lifecycle pre-existing early-assertion heldPromise cleanup gap remains, restoration does not claim it repaired. Complete result memory recovered/released, no proof files/runtime/model/provider/native acceptance. Production3-candidate ceiling consumed, no fourth behavior candidate. Prepare exact13paths (11TS+officialtask+ownedplan) normalhooks/freshstagedreview/localcommit; all43/Sidepanel/editor/Sync/canonical/publication/merge gates remain.
+
+The broader Composer Send unit stays open for Sidepanel. This scoped Playground/Model repair can be committed independently after normal hooks and fresh staged review; it does not complete the broader Stage 1/2/3 or any actual UAT workflow.

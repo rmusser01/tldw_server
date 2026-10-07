@@ -2640,6 +2640,7 @@ export const PlaygroundForm = ({
     restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     promptAssistSavedAttemptId,
+    captureDraftOwnership,
     typing,
     getSetupInputRevision,
     setMessageValue,
@@ -4346,6 +4347,7 @@ export const PlaygroundForm = ({
     [setMessages],
   );
 
+  const historySelection = useHistorySelectionContext();
   const { submitForm, submitFormRef, isPreparingDocuments } = usePlaygroundSubmit({
     historySelection,
     captureCompletionGuard,
@@ -4354,9 +4356,15 @@ export const PlaygroundForm = ({
     beginPromptAssistReset,
     restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
+    captureDraftOwnership,
+    captureHistorySelection: () => historySelection?.fence() ?? (() => false),
     isSending,
     isConnectionReady,
     webSearch,
+    chatMode,
+    systemPrompt,
+    selectedSystemPrompt,
+    systemPromptTemplateId: currentChatModelSettings.systemPromptTemplateId,
     compareModeActive,
     compareSelectedModels,
     selectedModel,
