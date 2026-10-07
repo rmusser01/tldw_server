@@ -114,6 +114,9 @@ Commits after the merges:
 | `01644d47ae` | X1: Retry answers the saved question, no second copy (section 13) |
 | `ee7b6e92e1` | X2: no rename offer after leaving /notes (section 13) |
 | `12ff96eae5` | X3: NE-01, a space typed during the first-save reload is kept (section 13) |
+| `6a0dfc988b` | Y1: stage38 Notes suite pins the notes authority scope (section 14) |
+| `5fdbce01ff` | Y2: XS-07, a rename made while a past chat opens is kept (section 14) |
+| `c86a9a0377` | Y3: CS-04, Send waits while a stopped reply's history view loads (section 14) |
 
 ## 2. Which PRs conflict with which
 
@@ -1208,3 +1211,93 @@ before.
   each time. The live backend writes `Databases/` (circuit breaker,
   governance) into the worktree root during the run; it was moved aside
   afterwards.
+
+## 14. CI fixes on PR #3203 (Y1 to Y3)
+
+The first CI run of the integration PR (#3203, head `91a35f4dea`) failed one
+required job and two of its own UX jobs. Line numbers are at `91a35f4dea`.
+
+### Y1. `frontend-unit-tests (3/8)`: stage38 pin test (`6a0dfc988b`)
+
+- **Cause: not a product regression.** "pins a note and reorders the visible
+  list with persistence" waited for the notes list, which never loaded: the
+  list query runs only once the notes authority scope resolves
+  (`useNotesListManagement.tsx:457`, `enabled: isOnline && authorityScope !==
+  null`), and the suite mocked no connection config or current user. It fails
+  on `dev` too: the ratchet's exact-base replay at `94854ca3db` failed the same
+  test (run 37461682033, job log lines 1612-1620). The ratchet called it a
+  regression because #3158 edits this test file, and a failure in a changed
+  test file always counts as new (`vitest_base_ratchet.py:1326`); its stack
+  line also moved (274 to 293).
+- **Fix.** The suite pins the scope like stage44 (`useCanonicalConnectionConfig`,
+  `tldwAuth.getCurrentUser`, `useNotesGraphAuthorityScope`).
+- **Evidence.** Without the pin: 4/5 on head, 3/4 on `dev`, the pin test
+  failing on both. With the pin: 5/5 on head and 4/4 on `dev`. Pinned notes
+  still sort first (`NotesManagerPage.tsx`, `sortNotesByPinnedIds`) and the pin
+  is saved.
+
+### Y2. E2E UX Regression: XS-07 Rename precondition (`5fdbce01ff`, belongs in #3152)
+
+- **Cause: a real race.** The spec opens a chat from search and renames it
+  right away; `openServerChatFromSearch` returns as soon as the chat's tab is
+  active, while `openServerChat` is still loading it. When the load finished,
+  `openServerChat` wrote the tab again from the copy it started with
+  (`sidepanel-chat.tsx:1657-1658`, label from `chat.title` at 1606,
+  `labelSource: "auto"`), over the rename, and linked the local copy under the
+  old title (1643). The CI backend log shows the rename's PUT succeeding at
+  12:24:18.741 while the open was still reading messages, then the open
+  finishing and reloading the chat; the tab kept the old title for 20 s.
+- **Fix.** When the open finishes, a label renamed meanwhile
+  (`labelSource: "manual"`) is kept, and the local copy takes that title.
+- **Evidence.** New test in `sidepanel-chat.open-server-chat-tabs.test.tsx`
+  holds the message read, renames from the header, then releases it. Before:
+  label "Title chat-2", `labelSource: "auto"`. After: kept, and the local copy
+  renamed. Sidepanel Vitest: 516/0 before, 517/0 after.
+
+### Y3. UX Smoke Gate: cockpit "streaming stop and selected-history regeneration gate" (`c86a9a0377`, belongs in #3163)
+
+- **Cause: a regression from #3163.** After Stop, `normalChatMode` keeps the
+  turn (`normalChatMode.ts:1160`), which moves the view to follow the question
+  (`history-turn-keep.ts:248`); the selection shows "Loading selected history"
+  after the turn is already idle. The spec stopped before the first token and
+  sent a follow-up in that window. `normalChatMode` refused it
+  (`normalChatMode.ts:771`): the draft was cleared, nothing was sent, and a raw
+  "history_selection_not_ready" toast appeared (visible in the failed
+  attempt's video). The retry passed. On `dev`, Stop only parks the turn and
+  the selection stays ready; the same gate passed with no flakes in the nine
+  most recent Frontend UX Gates runs of other PRs (for example 37560401472,
+  37558884924, 37489936108).
+- **Fix.** Send stays disabled while the history selection is loading, for any
+  chat (`PlaygroundForm.tsx:3366`), the gate CS-01 already used for a fresh
+  chat. Enter keeps the draft; Send enables once the view is ready.
+- **Evidence.** New harness test in
+  `Playground.interrupted-replies.integration.test.tsx` holds the selection
+  read after Stop and sends meanwhile. Before: the composer is emptied. After:
+  the draft stays, Send is disabled, and once the read is released the message
+  is sent and answered. Playground + `hooks/chat` + `hooks/chat-modes`:
+  1,572/45 before, 1,573/45 after, the same 45 failures (41
+  `Playground.cockpit-shell`, 3 `sticky-composer-layout`, 1
+  `useChatActions.saved-normal`).
+- Not done here: the side-panel composer has no such gate (not even CS-01's).
+
+### Results, Y1 to Y3 against `91a35f4dea`
+
+| Group | `91a35f4dea` | after Y1 to Y3 | New failures |
+|---|---|---|---|
+| `components/Notes` | 775 / 33 | 776 / 32 | none; stage38 passes |
+| Sidepanel + `routes/__tests__/sidepanel*` | 516 / 0 | 517 / 0 | none |
+| `Option/Playground`, `hooks/chat`, `hooks/chat-modes` | 1,572 / 45 | 1,573 / 45 | none |
+
+- The two `NotesManagerPage.stage26.backlink-labels` failures are on both
+  sides.
+- Typecheck: 0 errors. ESLint on the 5 changed files: 0 errors, the same
+  warning counts as at `91a35f4dea`.
+- Side-panel browser specs (`--grep "XS-0|XP-08"`), runs `xs07` and `xs07b`:
+  4 of 4 passed each time. The `Databases/` the live backend wrote into the
+  worktree root was moved aside after each run.
+- The cockpit real-server spec was not run locally (it needs the production
+  bundle, a backend and the mock OpenAI server, and only reaches this path
+  when Stop lands before the first token); the harness test covers the path.
+- Not caused by these PRs: the `media-ingestion-new-integration` pytest shard
+  failed on a teardown error in
+  `test_email_attachment_upload_13376.py` (media ingestion).
