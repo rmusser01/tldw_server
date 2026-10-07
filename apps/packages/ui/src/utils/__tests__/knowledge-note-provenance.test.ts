@@ -227,7 +227,7 @@ it("explicit capture references coexist with original references using strict v1
     expect.objectContaining({
       originalVersion: 9,
       snapshotMediaId: 71,
-      sourceType: "server_article"
+      sourceType: "web_capture"
     })
   ])
   expect(validateKnowledgeNoteProvenance(value)).toEqual(value)

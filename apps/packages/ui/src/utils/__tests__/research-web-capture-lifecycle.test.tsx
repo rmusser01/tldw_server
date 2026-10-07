@@ -138,7 +138,7 @@ beforeEach(() => {
   mocks.confirm.mockImplementation(async (body) => ({
     source: {
       id: `web-clipper:${body.clip_id}`,
-      media_id: 2,
+      media_id: mocks.save.mock.calls.length + 1,
       title: body.source_title,
       url: body.source_url,
       added_at: "2026-10-07T00:00:00Z",
@@ -151,7 +151,7 @@ beforeEach(() => {
       capturedAt: body.capture_metadata.web_capture_v1.captured_at,
       contentSha256: body.capture_metadata.web_capture_v1.content_sha256,
       refreshOf: body.capture_metadata.web_capture_v1.refresh_of,
-      mediaId: 2,
+      mediaId: mocks.save.mock.calls.length + 1,
       versionNumber: 9,
       versionUuid: "version-nine"
     }
@@ -308,17 +308,26 @@ it.each([true, false])(
       })
     act(() => first.result.current.open(previous))
     await act(async () => first.result.current.extract())
+    if (unchanged) expect(first.result.current.notice).toBe("Text unchanged")
     await act(async () => first.result.current.save())
     expect(useWorkspaceStore.getState().sources[1]).toEqual(previous)
-    if (unchanged) {
-      expect(first.result.current.notice).toBe("Text unchanged")
-      expect(mocks.save).toHaveBeenCalledTimes(1)
-    } else {
-      expect(mocks.save.mock.calls[1][0].clip_id).not.toBe(body.clip_id)
+    expect(mocks.save).toHaveBeenCalledTimes(2)
+    expect(mocks.save.mock.calls[1][0].clip_id).not.toBe(body.clip_id)
+    expect(
+      mocks.save.mock.calls[1][0].capture_metadata.web_capture_v1.refresh_of
+    ).toBe(body.clip_id)
+    expect(useWorkspaceStore.getState().sources).toHaveLength(3)
+    expect(useWorkspaceStore.getState().sources[2].mediaId).not.toBe(
+      previous.mediaId
+    )
+    expect(useWorkspaceStore.getState().sources[0]).toEqual(original)
+    expect(useWorkspaceStore.getState().sources[2].knowledgeQaEvidence).toEqual(
+      original.knowledgeQaEvidence
+    )
+    if (unchanged)
       expect(
-        mocks.save.mock.calls[1][0].capture_metadata.web_capture_v1.refresh_of
-      ).toBe(body.clip_id)
-      expect(useWorkspaceStore.getState().sources).toHaveLength(3)
-    }
+        mocks.save.mock.calls[1][0].capture_metadata.web_capture_v1
+          .content_sha256
+      ).toBe(body.capture_metadata.web_capture_v1.content_sha256)
   }
 )

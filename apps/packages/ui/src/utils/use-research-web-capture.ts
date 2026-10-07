@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { sha256Text } from "@/store/workspace-migration"
 import { useWorkspaceStore } from "@/store/workspace"
 import { mapServerSourceReviewFields } from "@/store/workspace-api"
 import { isWorkspaceSourceSelectable } from "@/store/workspace-source-status"
@@ -187,6 +188,12 @@ export function useResearchWebCapture(workspaceId: string | null) {
         text: article.content,
         capturedAt: new Date().toISOString()
       }
+      if (session.source.webCapture) {
+        const digest = await sha256Text(session.preview.text.trim())
+        assertCurrent(session)
+        if (digest === session.source.webCapture.contentSha256)
+          setNotice("Text unchanged")
+      }
       setPreview(session.preview)
     } catch (reason) {
       if (active.current === session)
@@ -222,7 +229,6 @@ export function useResearchWebCapture(workspaceId: string | null) {
           body.capture_metadata?.web_capture_v1?.content_sha256
         ) {
           setNotice("Text unchanged")
-          return
         }
         session.pending = {
           ownerScope: session.owner!,

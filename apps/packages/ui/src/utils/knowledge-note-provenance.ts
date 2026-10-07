@@ -392,7 +392,7 @@ export const appendCapturedNoteProvenance = (
         mediaId: pin.mediaId,
         title: source.title,
         type: source.type,
-        sourceType: "server_article",
+        sourceType: "web_capture",
         url: pin.requestedUrl,
         snapshotMediaId: pin.mediaId,
         originalVersion: pin.versionNumber,

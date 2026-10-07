@@ -36,6 +36,26 @@ export function WebArticleCaptureModal({
       </p>
       {text != null && (
         <>
+          <p>{t("sources.extractedSnapshot", "Extracted article snapshot")}</p>
+          <dl className="my-3 break-words">
+            <dt>{t("sources.captureTitle", "Extracted title")}</dt>
+            <dd>
+              {capture.pending?.body.source_title ?? capture.preview?.title}
+            </dd>
+            <dt>{t("sources.captureUrl", "Requested URL")}</dt>
+            <dd>
+              {capture.pending?.body.source_url ??
+                capture.source?.webCapture?.requestedUrl ??
+                capture.source?.url}
+            </dd>
+            <dt>{t("sources.captureTime", "Captured at")}</dt>
+            <dd>
+              {capture.pending?.body.capture_metadata?.web_capture_v1
+                ?.captured_at ?? capture.preview?.capturedAt}
+            </dd>
+            <dt>{t("sources.captureCharacters", "Characters")}</dt>
+            <dd>{text.length}</dd>
+          </dl>
           <Button
             onClick={() => setExpanded(!expanded)}
             aria-expanded={expanded}
@@ -85,7 +105,6 @@ export function WebArticleCaptureModal({
           <Button
             type="primary"
             loading={capture.busy}
-            disabled={Boolean(capture.notice)}
             onClick={() => void capture.save()}
           >
             {capture.pending

@@ -2245,15 +2245,35 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const withCurrentCaptureHeads = async (
     action: (
       options?: ScopedRequestOptions,
-      assertCurrent?: () => void
+      assertCurrent?: () => void,
+      controller?: AbortController
     ) => Promise<boolean>
   ): Promise<boolean> => {
-    const captures = sourceScopeSources.filter((source) => source.webCapture)
+    const captures = queryableSelectedSources.filter((source) => source.webCapture)
     if (!captures.length) return action()
     const controller = new AbortController()
     captureRequests.current.add(controller)
     let scope: Awaited<ReturnType<typeof loadServicePromptSnapshot>> | undefined
     const initial = useWorkspaceStore.getState()
+    const effectiveSelection = (
+      state: ReturnType<typeof useWorkspaceStore.getState>
+    ) => {
+      const ids = new Set([
+        ...state.selectedSourceIds,
+        ...collectSelectedFolderSourceIds(
+          state.selectedSourceFolderIds ?? [],
+          state.sourceFolders ?? [],
+          state.sourceFolderMemberships ?? []
+        )
+      ])
+      return JSON.stringify(
+        state.sources
+          .filter((source) => ids.has(source.id) && isQueryableWorkspaceSource(source, statusGuardrailsEnabled))
+          .map((source) => source.id)
+      )
+    }
+    const initialEffectiveSelection = effectiveSelection(initial)
+    const retire = () => controller.abort()
     const selection = JSON.stringify([
       initial.selectedSourceIds,
       initial.selectedSourceFolderIds
@@ -2264,6 +2284,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         controller.signal.aborted ||
         scope?.scopeSignal.aborted ||
         scope?.scopeInvalidatedSignal.aborted ||
+        effectiveSelection(current) !== initialEffectiveSelection ||
         current.workspaceId !== workspaceId ||
         current.workspaceChatReferenceId !== initial.workspaceChatReferenceId ||
         JSON.stringify([
@@ -2293,6 +2314,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     })
     try {
       scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      scope.scopeSignal.addEventListener("abort", retire, { once: true })
       assertCurrent()
       const options = {
         requestScope: scope.requestScope,
@@ -2314,7 +2336,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         }
         assertCurrent()
       }
-      return await action(options, assertCurrent)
+      return await action(options, assertCurrent, controller)
     } catch (reason) {
       if (!controller.signal.aborted)
         setSubmitError(
@@ -2324,6 +2346,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         )
       return false
     } finally {
+      scope?.scopeSignal.removeEventListener("abort", retire)
       scope?.release()
       stop()
       captureRequests.current.delete(controller)
@@ -2573,7 +2596,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
     setSubmitError(null)
     return withCurrentCaptureHeads(
-      async (options, assertCurrent = () => {}) => {
+      async (options, assertCurrent = () => {}, controller) => {
         try {
           const responsePresetInstruction = buildResponsePresetInstruction()
           const preparedMessage = await buildFullSourceContextPrompt(
@@ -2583,7 +2606,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             assertCurrent
           )
           if (options) {
-            for (const source of sourceScopeSources.filter(
+            for (const source of queryableSelectedSources.filter(
               (item) => item.webCapture
             )) {
               await assertWebCaptureHeadCurrent(source, workspaceId!, options)
@@ -2593,7 +2616,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           assertCurrent()
           const submitResult = await onSubmit({
             message: preparedMessage,
-            image: ""
+            image: "",
+            ...(controller ? { controller, assertCurrent } : {})
           })
           if (
             submitResult &&
@@ -3607,9 +3631,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                           msg.isBot && idx === messages.length - 1
                             ? () =>
                                 void withCurrentCaptureHeads(
-                                  async (_options, assertCurrent) => {
+                                  async (_options, assertCurrent, controller) => {
                                     assertCurrent?.()
-                                    await regenerateLastMessage()
+                                    await regenerateLastMessage({
+                                      controller,
+                                      assertCurrent
+                                    })
                                     return true
                                   }
                                 )

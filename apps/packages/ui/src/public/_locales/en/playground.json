@@ -3790,5 +3790,17 @@
   },
   "sources_textUnchanged": {
     "message": "Text unchanged"
+  },
+  "sources_captureTitle": {
+    "message": "Extracted title"
+  },
+  "sources_captureUrl": {
+    "message": "Requested URL"
+  },
+  "sources_captureTime": {
+    "message": "Captured at"
+  },
+  "sources_captureCharacters": {
+    "message": "Characters"
   }
 }

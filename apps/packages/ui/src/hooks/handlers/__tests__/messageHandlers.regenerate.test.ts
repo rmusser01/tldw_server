@@ -29,6 +29,27 @@ const buildHistory = (): ChatHistory => [
 ]
 
 describe("createRegenerateLastMessage", () => {
+  it("retirement during regenerate preparation prevents truncation and submission", async () => {
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => { release = resolve })
+    const onSubmit = vi.fn()
+    const setHistory = vi.fn()
+    const setMessages = vi.fn()
+    const regenerate = createRegenerateLastMessage({
+      allowOrdinaryRetry: true, validateBeforeSubmitFn: () => true,
+      history: buildHistory(), messages: buildMessages(), setHistory, setMessages, onSubmit,
+      beforeSubmit: async () => { await pending }
+    })
+    const controller = new AbortController()
+    const result = regenerate({ controller }).catch((error: Error) => error)
+    controller.abort()
+    release()
+    await result
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+    expect(setMessages).not.toHaveBeenCalled()
+  })
+
   it("rejects before truncation when selection exists but has no captured path", async () => {
     const setHistory = vi.fn()
     const setMessages = vi.fn()
@@ -110,8 +131,11 @@ describe("createRegenerateLastMessage", () => {
       onSubmit
     })
 
-    await regenerate()
+    const controller = new AbortController()
+    const assertCurrent = vi.fn()
+    await regenerate({ controller, assertCurrent })
 
+    expect(assertCurrent).toHaveBeenCalledTimes(2)
     expect(setHistory).toHaveBeenCalledWith([])
     expect(setMessages).toHaveBeenCalledWith([messages[0]])
     expect(onSubmit).toHaveBeenCalledTimes(1)
@@ -120,6 +144,8 @@ describe("createRegenerateLastMessage", () => {
         message: "Hello",
         image: "",
         isRegenerate: true,
+        controller,
+        assertCurrent,
         memory: [],
         messages: [messages[0]],
         messageType: undefined,

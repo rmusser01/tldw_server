@@ -64,6 +64,13 @@ const workspaceStoreState = {
     url?: string
     webCapture?: WebArticleCapturePin
   }>,
+  selectedSourceFolderIds: [] as string[],
+  sourceFolders: [] as Array<{
+    id: string
+    name: string
+    parentId: string | null
+  }>,
+  sourceFolderMemberships: [] as Array<{ folderId: string; sourceId: string }>,
   selectedSourceIds: [] as string[],
   getSelectedSources: () =>
     [] as Array<{
@@ -333,6 +340,9 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     workspaceStoreState.workspaceId = "workspace-a"
     workspaceStoreState.workspaceChatReferenceId = "workspace-a"
     workspaceStoreState.sources = []
+    workspaceStoreState.selectedSourceFolderIds = []
+    workspaceStoreState.sourceFolders = []
+    workspaceStoreState.sourceFolderMemberships = []
     workspaceStoreState.selectedSourceIds = []
     workspaceStoreState.getSelectedSources = () => []
     workspaceStoreState.getSelectedMediaIds = () => []
@@ -394,7 +404,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     mockCaptureHead.mockRejectedValue(
       new Error("Snapshot changed outside refresh")
     )
-    renderChatPane()
+    const view = renderChatPane()
     fireEvent.change(screen.getByPlaceholderText("Ask about your sources..."), {
       target: { value: "Explain" }
     })
@@ -405,6 +415,39 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       ).toBeGreaterThan(0)
     )
     expect(mockOnSubmit).not.toHaveBeenCalled()
+    expect(workspaceStoreState.setSourceStatusById).toHaveBeenCalledWith(
+      source.id,
+      "error",
+      "Snapshot changed outside refresh"
+    )
+    // The accepted refresh appends a new pin and preserves selected old evidence.
+    const fresh = {
+      ...source,
+      id: "fresh",
+      mediaId: 102,
+      webCapture: {
+        ...source.webCapture,
+        clipId: "fresh-clip",
+        mediaId: 102,
+        refreshOf: "clip"
+      }
+    }
+    workspaceStoreState.sources = [{ ...source, status: "error" }, fresh]
+    workspaceStoreState.selectedSourceIds = [source.id, fresh.id]
+    workspaceStoreState.getSelectedSources = () => workspaceStoreState.sources
+    mockCaptureHead.mockImplementation(async (item) => {
+      if (item.id === source.id)
+        throw new Error("Snapshot changed outside refresh")
+    })
+    view.unmount()
+    renderChatPane()
+    fireEvent.change(screen.getByPlaceholderText("Ask about your sources..."), {
+      target: { value: "Ask fresh capture" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalledOnce())
+    expect(mockSetRagMediaIds).toHaveBeenLastCalledWith([102])
+    expect(workspaceStoreState.sources[0].webCapture).toEqual(source.webCapture)
   })
 
   it("uses exact capture version text and rechecks before dispatch", async () => {
@@ -451,7 +494,9 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     await waitFor(() =>
       expect(mockOnSubmit).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: expect.stringContaining("exact captured body")
+          message: expect.stringContaining("exact captured body"),
+          controller: expect.any(AbortController),
+          assertCurrent: expect.any(Function)
         })
       )
     )
@@ -493,6 +538,57 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     })
     mockCaptureHead.mockImplementation(async () => {
       workspaceStoreState.sources = []
+    })
+    renderChatPane()
+    fireEvent.change(screen.getByPlaceholderText("Ask about your sources..."), {
+      target: { value: "Explain" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/Research source selection or account changed/)
+          .length
+      ).toBeGreaterThan(0)
+    )
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+  })
+
+  it("a capture moved out of a selected folder during head readback cannot dispatch", async () => {
+    const source = {
+      id: "capture",
+      mediaId: 101,
+      title: "Article",
+      type: "website" as const,
+      status: "ready" as const,
+      webCapture: {
+        clipId: "clip",
+        requestedUrl: "https://example.org",
+        capturedAt: "2026-10-07T00:00:00Z",
+        contentSha256: "hash",
+        refreshOf: null,
+        mediaId: 101,
+        versionNumber: 9,
+        versionUuid: "version"
+      }
+    }
+    workspaceStoreState.sources = [source]
+    workspaceStoreState.selectedSourceIds = []
+    workspaceStoreState.selectedSourceFolderIds = ["folder"]
+    workspaceStoreState.sourceFolders = [
+      { id: "folder", name: "Selected", parentId: null }
+    ]
+    workspaceStoreState.sourceFolderMemberships = [
+      { folderId: "folder", sourceId: source.id }
+    ]
+    workspaceStoreState.getSelectedSources = () => [source]
+    mockScope.mockResolvedValue({
+      requestScope: {},
+      scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: new AbortController().signal,
+      release: vi.fn()
+    })
+    mockCaptureHead.mockImplementation(async () => {
+      workspaceStoreState.sourceFolderMemberships = []
     })
     renderChatPane()
     fireEvent.change(screen.getByPlaceholderText("Ask about your sources..."), {

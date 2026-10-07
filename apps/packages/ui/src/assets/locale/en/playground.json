@@ -1388,6 +1388,10 @@
     "downloadFailed": "Download could not be prepared. Your draft is preserved."
   },
   "sources": {
+    "captureTitle": "Extracted title",
+    "captureUrl": "Requested URL",
+    "captureTime": "Captured at",
+    "captureCharacters": "Characters",
     "captureArticle": "Capture article",
     "saveCapture": "Save capture",
     "refreshCapture": "Refresh capture",
