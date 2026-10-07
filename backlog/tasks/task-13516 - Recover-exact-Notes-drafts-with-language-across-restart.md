@@ -1,7 +1,7 @@
 ---
 id: TASK-13516
 title: Recover exact Notes drafts with language across restart
-status: In Progress
+status: Done
 created_date: 2026-10-07 03:08
 dependencies:
 - TASK-13513
@@ -13,7 +13,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
-updated_date: 2026-10-07 09:51
+updated_date: 2026-10-07 09:57
 ---
 
 ## Description
@@ -30,7 +30,7 @@ Keep unsaved edits recoverable across navigation, rejected saves and process res
 - [x] #4 Storage/quota failures prevent discard-producing navigation and show a truthful error; existing storage ownership is reused without diagnostics persistence.
 - [x] #5 Targeted recovery/session tests cover profile isolation, logout, restart and actual copy/history owners touched by this change.
 - [x] #6 Relevant governing ADR is assessed/linked and repo-local completion notes name actual evidence and remaining limitations.
-- [ ] #7 Body-only edits during first legacy create or queue replay can subsequently save exact newer source against acknowledged identity/version without a spurious portable-language capability veto; explicit language mutations and ambiguous baselines remain protected.
+- [x] #7 Body-only edits during first legacy create or queue replay can subsequently save exact newer source against acknowledged identity/version without a spurious portable-language capability veto; explicit language mutations and ambiguous baselines remain protected.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -60,22 +60,19 @@ Ruling34 (progress.md and task-5-fix3-findings.md): use the existing complete so
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented coherent language-bearing recovery in the existing authority-scoped browser queue (v3), with matching source/revision cleanup, quota/authority fences and stable retained-error replay until Save/edit. Untouched fresh defaults carry narrowly validated provenance and retain ordinary legacy-create compatibility; explicit/null/future metadata remains capability-protected. Actual New/reset and duplicate handlers preserve loading ownership and known/unknown mode/provenance. Governing ADR065 amended before serialization. Evidence: final post-format structured/authority/actual-page trio53; whole frontend typecheck exit0 recorded; no introduced scoped ESLint, direct changed-region/test formatting evidence. Initial task review and two scoped rounds are clean. Inherited whole-file/static debt and baseline pin-order fixture limitation remain disclosed; no external live-server/OS-kill or downstream formatter adoption claim.
-Reopened for controller-identified post-ack legacy body-only compatibility qualification. Round2 reviewed implementation remains the baseline; no new fix verified yet.
-F5 fix round3: complete implicit-create acknowledgements now supply only their associated optional mode and created identity/version to newer body-only drafts in ordinary Save and queue replay; rekey consumes fresh proof and explicit language edits remain protected. Unknown-mode mutations also require exact source/identity/version acknowledgement under Ruling34, and malformed present language retains pending recovery. Governing ADR065 amended; existing helper/result owner reused. Deferred RED2 plus unknown-mode RED10 and malformed-present RED2 captured. Final targeted structured/authority/actual-page trio and whole frontend typecheck recorded in task-5-report.md; scoped immutable-base lint/format evidence has no new debt. In Progress for independent scoped review; no C or Monaco production changes or repeated tests.
-Pre-review fix3 boundary follow-up: canonical opaque language uses raw nonempty 1..100 Unicode code points, not trimmed text or JavaScript UTF-16 units. One existing-utils predicate now governs setter, queue restoration and acknowledgement. Whitespace and non-BMP modes retain exact values through deferred acknowledgement/rekey; 100 accepted and 101 refused. RED6 captured; final amended trio89 and whole W typecheck exit0; immutable S79e74a4 comparison has no introduced lint findings and changed-line formatting verified. In Progress for scoped review.
+Implemented coherent authority-scoped recovery in the existing v3 browser queue with exact source/revision cleanup and stable retained-error retry. Ordinary Save and queued legacy creation now bind complete acknowledgement language/identity/version to the preserved newer body; absent metadata stays unknown and explicit language intent remains protected. All mutation replies require matching complete source/identity/version before cleanup (Ruling34); portable capability/equality checks remain separate. The actual setter/queue/ack share raw nonempty1..100-codepoint language validation without normalization. Actual New/reset/duplicate ownership and quota/authority fences remain intact. Existing ADR065 governs. Final amended structured/authority/actual-page trio89 passes; whole frontend typecheck exit0 recorded; no introduced scoped lint debt and changed-region formatting verified. Three scoped rounds are clean. Inherited static/formatter debt and later live/OS-kill/editor release gates remain explicit; no new storage/runtime owner.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-In Progress: qualify/fix deferred legacy-create and queue-replay body-only follow-up behavior. Previous F5 controls remain reviewed; the new criterion is not complete.
+F5 complete after independent task review and three scoped fixes: exact recoverable drafts and source-bound legacy acknowledgements qualified by final89 and whole frontend typecheck exit0. ADR065/Rulings31-34 apply; inherited debt and downstream live qualification limits remain recorded.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
