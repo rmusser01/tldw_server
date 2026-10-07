@@ -4484,21 +4484,15 @@ export default defineBackground({
           return;
         }
         try {
-          await browser.tabs.sendMessage(
-            tabId,
-            {
-              type: "tldw:popup:open",
-              payload: {
-                selectionText: selection,
-                pageUrl: info.pageUrl || tab?.url || "",
-                pageTitle: tab?.title || "",
-                frameId: info.frameId,
-              },
+          await browser.tabs.sendMessage(tabId, {
+            type: "tldw:popup:open",
+            payload: {
+              selectionText: selection,
+              pageUrl: info.pageUrl || tab?.url || "",
+              pageTitle: tab?.title || "",
+              frameId: info.frameId,
             },
-            typeof info.frameId === "number"
-              ? { frameId: info.frameId }
-              : undefined,
-          );
+          });
         } catch (error) {
           logBackgroundError("contextual popup sendMessage", error);
           notify(

@@ -23,6 +23,9 @@ Priority order (highest leverage first, per the review):
 8. Asset work: subset 2.4MB TTF fonts to WOFF2 (both shells), slim `_locales` (11MB domain JSONs), narrow pdf.worker web_accessible_resources match.
 9. ResearchWorkspace ChatPane virtualization (PlaygroundChat already virtualized via VirtualChatTimeline); extract composer draft into a leaf component (R6); merge ResearchWorkspace dual 5s pollers.
 10. Decide fate of packages/voice-assistant-sdk (zero importers) — needs maintainer decision (roadmap?).
+11. Split tiny URL predicates from the heavy parse functions in `parser/{twitter,amazon,wiki}.ts` so consumers needn't duplicate host-regex guards around lazy imports (from the TASK-13511 implementation).
+12. Add a force-bypass for the 60s `getProvidersStatus` TTL cache after provider-settings saves.
+13. Fix the `@tldw/ui` package `exports` map subpaths — bun-run extension unit tests cannot resolve `@tldw/ui/...` imports today (pre-existing; 3 resolveApiPath test failures).
 
 NOTE: created manually because the backlog CLI installation was removed from this machine mid-session (binary and node_modules/backlog.md both vanished; `backlog task create` had also been crashing with "Maximum call stack size exceeded" before removal). Per AGENTS.md exception path.
 <!-- SECTION:DESCRIPTION:END -->
