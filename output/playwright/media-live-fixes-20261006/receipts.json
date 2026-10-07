@@ -296,5 +296,74 @@
     "human_change_summary": "provided_verbatim",
     "merged": false,
     "human_change_summary_verified_at": "2026-10-07T02:04:27.152543+00:00"
+  },
+  "current_dev_merge_validation": {
+    "checked_at": "2026-10-07T06:01:43.951342+00:00",
+    "dev_base": "005802bdb070fd68e087c4db3f831c33bef07c39",
+    "tested_rebased_source": "5a8ea9b4b0bb367745f7a17647c48fed1dd1ee1c",
+    "pre_rebase_head": "d5b853deb06565f7a656299a6bbab217fd1ede10",
+    "application_files_unchanged_from_pre_rebase": 26,
+    "rebase_conflicts": 0,
+    "media_tests": {
+      "files": 18,
+      "passed": 464,
+      "duration_seconds": 56.18,
+      "timeout_ms": 15000,
+      "log": "/private/tmp/media-pr3204-latest-dev-ui-tests-20261006.log"
+    },
+    "email_integration_tests": {
+      "files": 2,
+      "passed": 46,
+      "duration_seconds": 9.8,
+      "previously_failed_case_passed": true,
+      "fixture_fix_origin": "existing dev changes",
+      "log": "/private/tmp/media-pr3204-latest-dev-email-tests-20261006.log"
+    },
+    "webui_typecheck_passed": true,
+    "webui_lint": {
+      "errors": 0,
+      "baseline_warnings": 180
+    },
+    "chrome_build": {
+      "passed": true,
+      "duration_seconds": 48.4,
+      "output_mb": 49.5
+    },
+    "webui_build": {
+      "passed": true,
+      "token_sync": "passed",
+      "shared_app_gzip_kb": 595.6,
+      "budget_gzip_kb": 600,
+      "node": "26.0.0",
+      "heap_limit_mb": 8192,
+      "initial_default_heap_attempt": "failed at 4 GB with V8 heap exhaustion",
+      "source_or_config_change_for_heap": false,
+      "log": "/private/tmp/media-pr3204-latest-dev-webui-build-8gb-20261006.log"
+    },
+    "task_format_ratchet": {
+      "passed": 4,
+      "warnings": 4,
+      "log": "/private/tmp/media-pr3204-current-dev-task-ratchet-20261006.log"
+    },
+    "bandit": {
+      "findings": 0,
+      "typescript_parse_errors": 24,
+      "limitation": "Bandit cannot parse TypeScript; not a TypeScript security pass."
+    },
+    "cleanup": {
+      "dependency_links_removed": 4,
+      "generated_directories_removed": [
+        "apps/tldw-frontend/.next",
+        "apps/extension/.output",
+        "apps/extension/.wxt",
+        "Documents"
+      ],
+      "new_browser_or_servers_started": false
+    },
+    "merge_queue_mode": "unset",
+    "requester_authorized_current_dev_update_and_merge": true,
+    "protected_checks_on_published_head": "pending",
+    "human_summary": "provided_verbatim",
+    "evidence_limit": "Browser/API/model and native accessibility evidence above was not rerun on this new dev base."
   }
 }
