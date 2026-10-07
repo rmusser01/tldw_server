@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { ServicePromptTargetConfig } from "@/services/tldw/TldwApiClient"
 
 const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn()
@@ -20,6 +21,7 @@ import {
   setNoteTaskStatus,
   updateNoteTask
 } from "@/services/notes-tasks"
+import type { NoteTaskStatusUpdate } from "@/services/notes-tasks"
 
 describe("notes task API helpers", () => {
   beforeEach(() => {
@@ -142,5 +144,26 @@ describe("notes task API helpers", () => {
       method: "PATCH",
       body: { dismissed: true }
     })
+  })
+})
+
+describe("Notes checkbox original ownership", () => {
+  it("forwards the captured owner and signal without changing task or note CAS", async () => {
+    const controller = new AbortController()
+    const config: ServicePromptTargetConfig = {
+      serverUrl: "https://notes.example.test", authMode: "multi-user", expectedUserId: 1
+    }
+    const options = {
+      servicePromptConfig: config, abortSignal: controller.signal,
+      headers: { "X-TLDW-Expected-User-ID": "1" }
+    }
+    const updates: NoteTaskStatusUpdate[] = [
+      { task_id: "task-1", status: "done", expected_task_version: 5, expected_note_version: 2 }
+    ]
+    await setNoteTaskStatus(updates, options)
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith({
+      ...options, path: "/api/v1/notes/tasks/status", method: "POST", body: { updates }
+    })
+    expect(controller.signal.aborted).toBe(false)
   })
 })

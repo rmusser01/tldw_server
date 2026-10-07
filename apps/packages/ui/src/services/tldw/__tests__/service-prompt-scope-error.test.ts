@@ -97,7 +97,7 @@ describe("Service Prompt scope policy", () => {
     ["/api/v1/notes/search/extra", "GET", false],
     ["/api/v1/notes/private-note", "GET", true],
     ["/api/v1/notes/private-note", "PUT", true],
-    ["/api/v1/notes/", "GET", false],
+    ["/api/v1/notes/", "GET", true],
     ["/api/v1/notes/private-note", "DELETE", true],
     ["/api/v1/notes/private-note", "PATCH", false],
     ["/api/v1/notes/private-note/attachments", "POST", false],
@@ -434,4 +434,21 @@ it.each([
   ["/openapi%2ejson", "GET", false]
 ])("bounds captured schema discovery %s %s", (path, method, allowed) => {
   expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})
+
+describe("Notes checkbox original ownership", () => {
+  it.each([
+    ["/api/v1/notes/", "GET", true],
+    ["/api/v1/notes/?page=1&limit=20", "GET", true],
+    ["/api/v1/notes/tasks/status", "POST", true],
+    ["/api/v1/notes/tasks/status?source=checkbox", "POST", true],
+    ["/api/v1/notes/tasks/status", "GET", false],
+    ["/api/v1/notes/tasks/status", "PATCH", false],
+    ["/api/v1/notes/tasks/status/", "POST", false],
+    ["/api/v1/notes/tasks/status/other", "POST", false],
+    ["/api/v1/notes/tasks/status%2fother", "POST", false],
+    ["/api/v1/notes/tasks", "POST", false]
+  ])("bounds scoped checkbox %s %s to %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
 })

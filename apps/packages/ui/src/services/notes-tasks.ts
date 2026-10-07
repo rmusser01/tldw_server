@@ -198,9 +198,11 @@ export const updateNoteTask = async (
   })
 
 export const setNoteTaskStatus = async (
-  updates: NoteTaskStatusUpdate[]
+  updates: NoteTaskStatusUpdate[],
+  options?: NoteTaskRequestOptions
 ): Promise<{ tasks: NoteTask[] }> =>
   bgRequest<{ tasks: NoteTask[] }, AllowedPath, "POST">({
+    ...options,
     path: toAllowedPath("/api/v1/notes/tasks/status"),
     method: "POST",
     body: { updates }

@@ -1382,6 +1382,34 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     })
   }, [message, reloadNotes])
 
+  // Page and checklist mutations share the editor's existing owner and draft lifetimes.
+  const captureNoteMutation = React.useCallback(() => {
+    const epoch = authorityEpochRef.current
+    const scope = authorityScopeRef.current
+    const config = connectionConfigRef.current ? { ...connectionConfigRef.current } : null
+    let selection = noteSelectionEpochRef.current
+    let revision = editRevisionRef.current.revision
+    const dirtyRevision = dirtyRevisionRef.current
+    const isOwnerCurrent = () => authorityEpochRef.current === epoch && authorityScopeRef.current === scope
+    return {
+      scope, config,
+      get editRevision() { return revision },
+      isOwnerCurrent,
+      isEditorCurrent: () => isOwnerCurrent() && noteSelectionEpochRef.current === selection &&
+        editRevisionRef.current.revision === revision && dirtyRevisionRef.current === dirtyRevision,
+      acceptSavedDraft: () => {
+        if (isOwnerCurrent() && dirtyRevisionRef.current === dirtyRevision) {
+          selection = noteSelectionEpochRef.current
+          revision = editRevisionRef.current.revision
+        }
+      },
+      register: (controller: AbortController) => {
+        authorityRequestsRef.current.add(controller)
+        return () => { authorityRequestsRef.current.delete(controller) }
+      },
+    }
+  }, [])
+
   const toggleTaskCheckboxStatus = React.useCallback(
     async (payload: TaskChecklistTogglePayload) => {
       const task = payload.task
@@ -1399,7 +1427,27 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         return
       }
 
+      const operation = captureNoteMutation()
+      const controller = new AbortController()
+      const unregister = operation.register(controller)
+      const isCurrent = () => !controller.signal.aborted && operation.isEditorCurrent()
       try {
+        if (!operation.scope || !operation.config) return
+        const user = await tldwAuth.getCurrentUser()
+        if (!isCurrent()) return
+        if (!user?.is_active || user.id == null ||
+            createNotesGraphAuthorityScope(operation.config.serverUrl, user.id) !== operation.scope) return
+        const ownedRequest: NotesOwnedRequestOptions = {
+          servicePromptConfig: {
+            serverUrl: operation.config.serverUrl, authMode: operation.config.authMode,
+            authSource: operation.config.authSource, orgId: operation.config.orgId,
+            expectedUserId: user.id,
+            expectedSingleUserApiKeyScope: operation.config.authMode === 'single-user'
+              ? deriveSingleUserApiKeyCredentialScope('single-user', operation.config.apiKey) : undefined
+          },
+          abortSignal: controller.signal,
+          headers: { 'X-TLDW-Expected-User-ID': String(user.id) }
+        }
         await setNoteTaskStatus([
           {
             task_id: task.id,
@@ -1407,10 +1455,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             expected_task_version: task.version,
             expected_note_version: expectedNoteVersion
           }
-        ])
+        ], ownedRequest)
+        if (!isCurrent()) return
         setTaskConflictNotice(null)
-        await loadDetail(selectedId)
+        await loadDetail(selectedId, ownedRequest, operation.editRevision)
       } catch (error: any) {
+        if (!isCurrent()) return
         setTaskConflictNotice(
           t('option:notesSearch_taskConflictNotice', {
             defaultValue: 'Task changed on the server. Reload the note and try again.'
@@ -1421,9 +1471,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         } else {
           message.error(String(error?.message || '') || 'Task update failed')
         }
+      } finally {
+        controller.abort()
+        unregister()
       }
     },
     [
+      captureNoteMutation,
       handleVersionConflict,
       isVersionConflictError,
       loadDetail,
@@ -1948,6 +2002,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
               const current = await bgRequest<NotesWriteResponse & KnowledgeNoteHead>({ ...ownedSaveRequest, path: noteResourcePath(noteId), method: 'GET' })
               if (!isCurrent() || controller.signal.aborted) return (result = false)
               setOriginalMetadata(previous => ({ ...previous, ...knowledgeNoteHead(current) }))
+              const remoteVersion = toNoteVersion(current)
+              if (remoteVersion != null && baseVersion != null && remoteVersion > baseVersion) {
+                setRemoteVersionInfo({ version: remoteVersion, lastModified: toNoteLastModified(current) })
+              }
             } catch (error) {
               console.debug('[NotesManagerPage] History refresh after conflict failed:', error)
             }
@@ -2645,9 +2703,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   // not a modal at the next autosave (NS-N2, NS-03).
   React.useEffect(() => {
     if (!isDirty || remoteVersionInfo == null || selectedVersion == null) return
+    if (saveState.status === 'saving' || saveState.status === 'conflict') return
     if (remoteVersionInfo.version <= selectedVersion) return
     dispatchSave({ type: 'remote-changed' })
-  }, [dispatchSave, isDirty, remoteVersionInfo, selectedVersion])
+  }, [dispatchSave, isDirty, remoteVersionInfo, saveState.status, selectedVersion])
 
   // beforeunload: a full reload or tab close while edits are unsaved or saving.
   React.useEffect(() => {
@@ -2718,11 +2777,30 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (!isOnline || listMode !== 'active') return
     if (selectedId == null || selectedVersion == null) return
     if (saving) return
+    const operation = captureNoteMutation()
+    const controller = new AbortController()
+    const unregister = operation.register(controller)
+    const isCurrent = () => !controller.signal.aborted && operation.isEditorCurrent()
     try {
+      if (!operation.scope || !operation.config || !isCurrent()) return
+      const user = await tldwAuth.getCurrentUser()
+      if (!isCurrent()) return
+      if (!user?.is_active || user.id == null ||
+          createNotesGraphAuthorityScope(operation.config.serverUrl, user.id) !== operation.scope) return
       const detail = await bgRequest<any>({
         path: noteResourcePath(selectedId) as any,
-        method: 'GET' as any
+        method: 'GET' as any,
+        servicePromptConfig: {
+          serverUrl: operation.config.serverUrl, authMode: operation.config.authMode,
+          authSource: operation.config.authSource, orgId: operation.config.orgId,
+          expectedUserId: user.id,
+          expectedSingleUserApiKeyScope: operation.config.authMode === 'single-user'
+            ? deriveSingleUserApiKeyCredentialScope('single-user', operation.config.apiKey) : undefined
+        },
+        abortSignal: controller.signal,
+        headers: { 'X-TLDW-Expected-User-ID': String(user.id) }
       })
+      if (!isCurrent()) return
       const remoteVersion = toNoteVersion(detail)
       if (remoteVersion != null && remoteVersion > selectedVersion) {
         setRemoteVersionInfo({
@@ -2734,8 +2812,11 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       }
     } catch {
       // Ignore transient freshness-check failures.
+    } finally {
+      controller.abort()
+      unregister()
     }
-  }, [isOnline, listMode, saving, selectedId, selectedVersion])
+  }, [captureNoteMutation, isOnline, listMode, saving, selectedId, selectedVersion])
 
   React.useEffect(() => {
     if (listMode !== 'active') {
@@ -2748,7 +2829,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (cancelled) return
       await checkSelectedNoteFreshness()
     }
-    void runCheck()
     const intervalId = window.setInterval(() => {
       void runCheck()
     }, 30_000)
@@ -3262,32 +3342,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     toggleNotePinned,
     isVersionConflictError,
     handleVersionConflict,
-    // Page mutations share the editor's existing owner and draft lifetimes.
-    captureNoteMutation: React.useCallback(() => {
-      const epoch = authorityEpochRef.current
-      const scope = authorityScopeRef.current
-      const config = connectionConfigRef.current ? { ...connectionConfigRef.current } : null
-      let selection = noteSelectionEpochRef.current
-      let revision = editRevisionRef.current.revision
-      const dirtyRevision = dirtyRevisionRef.current
-      const isOwnerCurrent = () => authorityEpochRef.current === epoch && authorityScopeRef.current === scope
-      return {
-        scope, config,
-        get editRevision() { return revision },
-        isOwnerCurrent,
-        isEditorCurrent: () => isOwnerCurrent() && noteSelectionEpochRef.current === selection &&
-          editRevisionRef.current.revision === revision && dirtyRevisionRef.current === dirtyRevision,
-        acceptSavedDraft: () => {
-          if (isOwnerCurrent() && dirtyRevisionRef.current === dirtyRevision) {
-            selection = noteSelectionEpochRef.current
-            revision = editRevisionRef.current.revision
-          }
-        },
-        register: (controller: AbortController) => {
-          authorityRequestsRef.current.add(controller)
-          return () => { authorityRequestsRef.current.delete(controller) }
-        },
-      }
-    }, []),
+    captureNoteMutation,
   }
 }

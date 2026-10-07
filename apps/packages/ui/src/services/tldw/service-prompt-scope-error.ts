@@ -150,6 +150,7 @@ export const isServicePromptRequestPath = (
     /^\/api\/v1\/workspaces\/[^/]+\/sources(?:\/[^/]+\/preview)?$/.test(pathname)
   )) return true
   if (requestMethod === "GET" && (pathname === "/api/v1/notes/tasks/activity" || /^\/api\/v1\/notes\/[^/]+\/tasks$/.test(pathname))) return true
+  if (requestMethod === "POST" && pathname === "/api/v1/notes/tasks/status") return true
   if (/^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return ["GET", "PUT", "DELETE"].includes(requestMethod)
   if (/^\/api\/v1\/chat\/conversations\/[^/]+$/.test(pathname)) return ["GET", "PATCH"].includes(requestMethod)
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/share-links$/.test(pathname)) return requestMethod === "POST"
@@ -182,7 +183,7 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/notes\/(?:collections\/[0-9]+|conversations\/[^/]+)\/keywords$/.test(pathname)) return requestMethod === "GET"
   if (/^\/api\/v1\/notes\/(?:collections\/[0-9]+|conversations\/[^/]+)\/keywords\/[0-9]+$/.test(pathname)) return ["POST", "DELETE"].includes(requestMethod)
   if (requestMethod === "POST" && (/^\/api\/v1\/media\/[0-9]+\/restore$/.test(pathname) || /^\/api\/v1\/notes\/(?!tasks\/|collections\/|trash\/|purge\/|permanent\/|keywords\/|folders\/|moodboards\/|templates\/|import\/|export(?:\.csv)?\/|search\/)[^/]+\/(?:provenance\/)?restore$/.test(pathname))) return true
-  if (pathname === "/api/v1/notes/") return requestMethod === "POST"
+  if (pathname === "/api/v1/notes/") return ["GET", "POST"].includes(requestMethod)
   if (/^\/api\/v1\/notes\/[^/]+$/.test(pathname)) {
     return (
       ["GET", "PUT"].includes(requestMethod) || (requestMethod === "DELETE" && !/^\/api\/v1\/notes\/(?:tasks|collections|trash|purge|permanent|keywords|folders|moodboards|templates|import|export(?:\.csv)?|search)$/.test(pathname)))
