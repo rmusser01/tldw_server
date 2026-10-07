@@ -1372,21 +1372,34 @@ def test_credential_free_default_dependencies_disable_external_probes():
     )
 
 
-def test_credential_free_http_runtime_disables_environment_state(monkeypatch):
-    from tldw_Server_API.app.core.Security.egress import public_url_policy_scope
+def test_credential_free_http_runtime_delegates_environment_and_pinning_to_central_transport(monkeypatch):
+    from types import SimpleNamespace
+
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security import egress
     from tldw_Server_API.app.core.Web_Scraping.runtime import fetch as fetch_module
 
-    calls = []
+    clients = []
+    dispatches = []
 
-    def fetch(url, **kwargs):
-        calls.append(kwargs)
-        return {"url": url, "status": 200, "text": "article", "headers": {}}
+    def send(request):
+        dispatches.append((request.url.host, request.headers["Host"], request.extensions["sni_hostname"]))
+        return httpx.Response(200, stream=httpx.ByteStream(b"article"))
 
-    monkeypatch.setattr(fetch_module, "http_fetch", fetch)
-    with public_url_policy_scope():
-        result = fetch_module.DefaultFetchClient().fetch(FetchRequest(URL, max_response_bytes=50))
+    def create(**kwargs):
+        clients.append(kwargs)
+        return httpx.Client(transport=httpx.MockTransport(send), **kwargs)
+
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: ["93.184.216.34"])
+    monkeypatch.setattr(hc, "_resolve_httpx", lambda: SimpleNamespace(Client=create))
+    assert fetch_module.http_fetch is hc.fetch
+    with egress.public_url_policy_scope():
+        result = fetch_module.DefaultFetchClient().fetch(FetchRequest(URL, backend="httpx", max_response_bytes=50))
     assert result.text == "article"
-    assert calls[0]["trust_env"] is False
+    assert clients == [{"trust_env": False}]
+    assert dispatches == [("93.184.216.34", "example.com", "example.com")]
 
 
 @pytest.mark.asyncio

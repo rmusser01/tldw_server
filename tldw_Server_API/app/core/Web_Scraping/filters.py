@@ -9,6 +9,8 @@ from urllib.robotparser import RobotFileParser
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
 try:
     # Local HTTP client used across the project; enforces egress policy internally
     from tldw_Server_API.app.core.http_client import fetch as http_fetch
@@ -293,7 +295,7 @@ class RobotsFilter:
                 rp.parse(text.splitlines())
                 self._cache[host] = (rp, time.time())
                 return _RobotsFetchResult(parser=rp, status="ok")
-            except _WEB_FILTER_NONCRITICAL_EXCEPTIONS as e:  # pragma: no cover - network/parse errors fail open
+            except (EgressPolicyError, *_WEB_FILTER_NONCRITICAL_EXCEPTIONS) as e:  # network/parse errors
                 logger.debug(f"Robots fetch failed for host={host}: {e}")
                 self._cache[host] = (None, time.time())
                 return _RobotsFetchResult(parser=None, status="unreachable")
