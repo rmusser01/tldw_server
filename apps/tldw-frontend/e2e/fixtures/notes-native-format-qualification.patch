@@ -1,0 +1,54 @@
+diff --git a/apps/packages/ui/src/components/Notes/NotesEditorPane.tsx b/apps/packages/ui/src/components/Notes/NotesEditorPane.tsx
+index 0a357f74c2..e4e1e7beaa 100644
+--- a/apps/packages/ui/src/components/Notes/NotesEditorPane.tsx
++++ b/apps/packages/ui/src/components/Notes/NotesEditorPane.tsx
+@@ -1,4 +1,6 @@
+ import React from 'react'
++import { TextAreaFormatBridge } from './__tests__/fixtures/native-textarea-format-candidate'
++import { createDocumentRequest, createCheckResult, createFormatResult } from '@/services/document-editing/types'
+ import type { InputRef } from 'antd'
+ import { Input, Typography, Select, Button, Tooltip, Spin } from 'antd'
+ import {
+@@ -447,6 +449,24 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
+   })
+   const saveStatusRef = React.useRef<HTMLSpanElement | null>(null)
+   const saveStatusDescriptionId = saveIndicatorText ? NOTES_SAVE_STATUS_MESSAGE_ID : null
++  const qualificationBridge = React.useRef<TextAreaFormatBridge | null>(null)
++  React.useEffect(() => {
++    const element = (contentTextareaRef as React.RefObject<HTMLTextAreaElement>).current
++    if (!element) return
++    const bridge = new TextAreaFormatBridge(element, () => {})
++    qualificationBridge.current = bridge
++    return () => { bridge.dispose(); qualificationBridge.current = null }
++  }, [contentTextareaRef, selectedId, editorMode, editorInputMode])
++  const qualifyFormat = () => {
++    const element = (contentTextareaRef as React.RefObject<HTMLTextAreaElement>).current
++    const bridge = qualificationBridge.current
++    if (!element || !bridge) return
++    const key = { authority_id: 'qualification', document_id: String(selectedId), session_generation: 1, draft_revision: 1, language_revision: 1, request_id: 1 }
++    const request = createDocumentRequest({ key, text: element.value, language: 'json' })
++    bridge.captureRequest(request)
++    const check = createCheckResult(request, { state: 'checked', complete: true, diagnostics: [], truncated: false, format_allowed: true })
++    bridge.applyFormat(createFormatResult({ key, state: 'formatted', replacement: '{\n  "a": 1\n}', check }), key, !editorDisabled)
++  }
+   const contentDescribedBy = joinAriaIds(NOTES_EDITOR_CONTENT_HELP_ID, saveStatusDescriptionId)
+ 
+   React.useEffect(() => {
+@@ -1601,6 +1621,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
+                   />
+                 ) : (
+                   <>
++                    <Button onMouseDown={(event) => event.preventDefault()} onClick={qualifyFormat}>Format document</Button>
+                     <textarea
+                       ref={contentTextareaRef}
+                       className="w-full min-h-[220px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text resize-none leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus"
+@@ -1740,7 +1761,8 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
+                 />
+               ) : (
+                 <>
+-                  <textarea
++                  <Button onMouseDown={(event) => event.preventDefault()} onClick={qualifyFormat}>Format document</Button>
++                    <textarea
+                     ref={contentTextareaRef}
+                     className="w-full min-h-[280px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text resize-none leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus"
+                     value={content}
