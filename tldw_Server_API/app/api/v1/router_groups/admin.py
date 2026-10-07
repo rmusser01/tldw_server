@@ -59,11 +59,12 @@ def iter_admin_router_specs() -> Iterable[RouterSpec]:
             route_key="sandbox",
             default_stable=False,
         ),
-        # Billing endpoints
+        # Billing endpoints (admin billing dashboard; legacy public
+        # /api/v1/billing mount stays removed)
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.billing",
             log_name="billing",
-            prefix=f"{API_V1_PREFIX}",
+            prefix=f"{API_V1_PREFIX}/admin",
             tags=("billing",),
             route_key="billing",
         ),
