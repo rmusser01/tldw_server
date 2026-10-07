@@ -315,9 +315,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setContent(value)
     }
   }, [])
-  const [contentLanguage, setContentLanguageState] = React.useState<string | null | undefined>(undefined)
-  const markdownAllowed = contentLanguage !== undefined && (contentLanguage === null || contentLanguage === 'markdown')
-  const [loadingDetail, setLoadingDetail] = useNotesAuthorityState(authorityScope, false)
+  const [contentLanguage, setContentLanguageState] = React.useState<string | null | undefined>(
+    null
+  );
+  const [loadingDetail, setLoadingDetail] = useNotesAuthorityState(authorityScope, false);
+  const markdownAllowed =
+    !loadingDetail &&
+    contentLanguage !== undefined &&
+    (contentLanguage === null || contentLanguage === 'markdown');
   const [saving, setSaving] = React.useState(false)
   const [saveRecoveryNotice, setSaveRecoveryNotice] = React.useState<{kind: 'error'; message: string} | null>(null)
   // ---- save state machine (NS-01, NS-03, NS-N2, NS-05, NS-06) ----
@@ -547,6 +552,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (selectedId == null) return NOTES_OFFLINE_NEW_DRAFT_KEY
     return `note:${String(selectedId)}`
   }, [selectedId])
+  const currentOfflineDraftKeyRef = React.useRef(currentOfflineDraftKey);
+  currentOfflineDraftKeyRef.current = currentOfflineDraftKey;
 
   // Reads the latest editor snapshot from refs, so the unmount and pagehide
   // backstops and a chained leave flush never persist a stale render.
@@ -892,7 +899,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       rememberRecentNote(id, loadedTitle)
       const queuedDraft = offlineDraftQueueRef.current[`note:${String(id)}`]
       if (queuedDraft) {
-        applyOfflineDraftToEditor(queuedDraft.content_language === undefined && d?.content_language !== undefined ? { ...queuedDraft, content_language: d.content_language } : queuedDraft)
+        applyOfflineDraftToEditor(
+          queuedDraft.content_language === undefined &&
+            queuedDraft.baseVersion != null &&
+            queuedDraft.baseVersion === toNoteVersion(d) &&
+            d?.content_language !== undefined
+            ? { ...queuedDraft, content_language: d.content_language }
+            : queuedDraft
+        );
       }
       await refreshTaskStateForNote(id, ownedRequest)
       return isCurrent()
@@ -937,7 +951,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setSelectedId(null)
     setTitle('')
     setContent('')
-    setContentLanguageState(undefined)
+    setContentLanguageState(null);
     setEditorKeywords([])
     setOriginalMetadata(null)
     setSelectedStudioSummary(null)
@@ -1587,9 +1601,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         pendingRestore.request.path === `${noteResourcePath(noteId)}/provenance/restore`)
       const isCurrent = () => saveEpochRef.current === saveEpoch && authorityEpochRef.current === requestEpoch &&
         authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === requestNoteEpoch
-      if (!restoreProvenance && noteId == null && snapshot.contentLanguage === undefined && !snapshot.content.trim() && !snapshot.title.trim()) {
+      if (!restoreProvenance && noteId == null && snapshot.contentLanguage == null && !isDirtyRef.current && !snapshot.content.trim() && !snapshot.title.trim()) {
         if (showSuccessMessage) {
-          message.warning('Nothing to save')
+          message.warning('Nothing to save');
         }
         return false
       }
@@ -2013,6 +2027,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       contentLanguage,
       editorKeywords,
       handleVersionConflict,
+      isDirty,
       isVersionConflictError,
       isOnline,
       loadDetail,
@@ -2180,7 +2195,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     // The editor's own save in flight already carries the open note's draft.
     const editorDraftKey = savingInFlightRef.current ? offlineDraftKeyFor(selectedIdRef.current) : null
     const queuedEntries = Object.values(offlineDraftQueueRef.current)
-      .filter((entry) => entry.syncState !== 'conflict' && entry.content.length > 0 && entry.key !== editorDraftKey && (onlyKey == null || entry.key === onlyKey))
+      .filter((entry) => entry.syncState !== 'conflict' && entry.syncState !== 'error' && entry.content.length > 0 && entry.key !== editorDraftKey && (onlyKey == null || entry.key === onlyKey))
       .sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
     if (queuedEntries.length === 0) return
 
@@ -2854,10 +2869,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (!isDirty) return
     if (selectedId == null && !content.trim() && !title.trim() && editorKeywords.length === 0) return
     const timeoutId = window.setTimeout(() => {
+      const existing = offlineDraftQueueRef.current[currentOfflineDraftKey];
+      const keepError =
+        existing?.syncState === 'error' && existing.revision === editRevisionRef.current.revision;
       persistOfflineDraft({
-        syncState: offlineDraftQueueRef.current[currentOfflineDraftKey]?.syncState === 'conflict' ? 'conflict' : 'queued',
-        lastError: offlineDraftQueueRef.current[currentOfflineDraftKey]?.lastError ?? null
-      })
+        syncState: existing?.syncState === 'conflict' ? 'conflict' : keepError ? 'error' : 'queued',
+        lastError: existing?.lastError ?? null,
+      });
     }, 250)
     return () => {
       window.clearTimeout(timeoutId)

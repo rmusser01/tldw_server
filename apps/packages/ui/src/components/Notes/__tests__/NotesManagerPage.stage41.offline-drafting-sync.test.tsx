@@ -214,7 +214,7 @@ describe('NotesManagerPage stage 41 offline drafting and sync', () => {
     mockGetSetting.mockResolvedValue(null)
     mockClearSetting.mockResolvedValue(undefined)
 
-    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string; body?: Record<string, unknown> }) => {
       const path = String(request.path || '')
       const method = String(request.method || 'GET').toUpperCase()
 
@@ -225,9 +225,13 @@ describe('NotesManagerPage stage 41 offline drafting and sync', () => {
         }
       }
 
+      if (path === '/api/v1/notes/capabilities') return { content_language: true }
+
       if (path === '/api/v1/notes/' && method === 'POST') {
         return {
           id: 11,
+          content: request.body?.content,
+          content_language: request.body?.content_language ?? null,
           version: 1,
           last_modified: '2026-02-18T11:00:00.000Z'
         }
@@ -238,6 +242,7 @@ describe('NotesManagerPage stage 41 offline drafting and sync', () => {
           id: 11,
           title: 'Existing note',
           content: 'Server body',
+          content_language: null,
           metadata: { keywords: [] },
           version: mockRemoteVersion.value,
           last_modified: '2026-02-18T11:00:00.000Z'
@@ -247,6 +252,8 @@ describe('NotesManagerPage stage 41 offline drafting and sync', () => {
       if (path === '/api/v1/notes/11' && method === 'PUT') {
         return {
           id: 11,
+          content: request.body?.content,
+          content_language: request.body?.content_language ?? null,
           version: mockRemoteVersion.value + 1,
           last_modified: '2026-02-18T11:10:00.000Z'
         }

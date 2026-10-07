@@ -2,7 +2,10 @@ import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { normalizeOfflineDraftQueue } from '../notes-manager-utils';
+import {
+  normalizeOfflineDraftQueue,
+  NOTES_OFFLINE_DRAFT_QUEUE_STORAGE_KEY,
+} from '../notes-manager-utils';
 import { useNotesEditorState, type UseNotesEditorStateDeps } from '../hooks/useNotesEditorState';
 
 const mocks = vi.hoisted(() => ({
@@ -19,7 +22,9 @@ vi.mock('@/services/notes-tasks', () => ({
   setNoteTaskStatus: vi.fn(),
 }));
 vi.mock('@/services/tldw/TldwAuth', () => ({
-  tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 'alice', is_active: true })) },
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 'alice', is_active: true })),
+  },
 }));
 vi.mock('../hooks/useNotesGraphAuthorityScope', () => ({
   createNotesGraphAuthorityScope: (_origin: string, user: string) => user,
@@ -42,7 +47,9 @@ const deferred = <T,>() => {
 };
 
 const renderEditor = (isOnline = false) => {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   const deps: UseNotesEditorStateDeps = {
     authorityScope: 'alice',
     isOnline,
@@ -52,7 +59,11 @@ const renderEditor = (isOnline = false) => {
       apiKey: 'test-key',
     },
     isMobileViewport: false,
-    message: { error: mocks.error } as unknown as UseNotesEditorStateDeps['message'],
+    message: {
+      error: mocks.error,
+      success: vi.fn(),
+      warning: vi.fn(),
+    } as unknown as UseNotesEditorStateDeps['message'],
     confirmDanger: vi.fn(async () => true),
     queryClient,
     t: (key) => key,
@@ -73,12 +84,16 @@ const renderEditor = (isOnline = false) => {
     setKeywordSuggestionSelection: vi.fn(),
     editorDisabled: false,
   };
-  return renderHook(({ scope }) => useNotesEditorState({ ...deps, authorityScope: scope }), {
-    initialProps: { scope: 'alice' },
-    wrapper: ({ children }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    ),
-  });
+  return renderHook(
+    ({ scope, online }) =>
+      useNotesEditorState({ ...deps, authorityScope: scope, isOnline: online }),
+    {
+      initialProps: { scope: 'alice', online: isOnline },
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    }
+  );
 };
 
 describe('structured drafts', () => {
@@ -134,13 +149,25 @@ describe('structured drafts', () => {
   });
 
   it('does not derive WYSIWYG before language is known or for future modes', async () => {
+    const loading = deferred<unknown>();
+    mocks.request.mockReturnValueOnce(loading.promise);
     const view = renderEditor();
+    let pending!: Promise<boolean>;
     act(() => {
       view.result.current.setEditorInputMode('wysiwyg');
-      view.result.current.setContent('<>&');
+      pending = view.result.current.loadDetail('n');
     });
     expect(view.result.current.editorInputMode).toBe('markdown');
     expect(view.result.current.markdownAllowed).toBe(false);
+    await act(async () => {
+      loading.resolve({
+        id: 'n',
+        content: '<>&',
+        content_language: 'future-mode',
+        version: 1,
+      });
+      await pending;
+    });
     mocks.request.mockResolvedValue({
       id: 'n',
       title: 'Note',
@@ -187,7 +214,12 @@ describe('structured drafts', () => {
       view.result.current.setContent('new');
     });
     await act(async () => {
-      response.resolve({ id: 'n', content: 'old', content_language: 'yaml', version: 2 });
+      response.resolve({
+        id: 'n',
+        content: 'old',
+        content_language: 'yaml',
+        version: 2,
+      });
       await saving;
     });
     expect(view.result.current.contentLanguage).toBe('jsonl');
@@ -251,4 +283,224 @@ describe('structured drafts', () => {
       storage.mockRestore();
     }
   });
+  it('starts fresh offline notes in known default mode and resets to that mode', () => {
+    const view = renderEditor();
+    expect(view.result.current.contentLanguage).toBeNull();
+    expect(view.result.current.markdownAllowed).toBe(true);
+    act(() => {
+      view.result.current.setEditorInputMode('wysiwyg');
+    });
+    expect(view.result.current.editorInputMode).toBe('wysiwyg');
+    act(() => {
+      view.result.current.setContentLanguage('yaml');
+    });
+    act(() => {
+      view.result.current.resetEditor();
+    });
+    expect(view.result.current.contentLanguage).toBeNull();
+    expect(view.result.current.markdownAllowed).toBe(true);
+  });
+
+  it.each([1, 2])(
+    'only fills legacy language from its matching baseline (remote v%s)',
+    async (remoteVersion) => {
+      localStorage.setItem(
+        `${NOTES_OFFLINE_DRAFT_QUEUE_STORAGE_KEY}:alice`,
+        JSON.stringify({
+          'note:n': {
+            key: 'note:n',
+            noteId: 'n',
+            content: 'legacy <>&',
+            baseVersion: 1,
+          },
+        })
+      );
+      mocks.request.mockResolvedValue({
+        id: 'n',
+        content: 'remote',
+        content_language: 'yaml',
+        version: remoteVersion,
+      });
+      const view = renderEditor();
+      await act(async () => {
+        await view.result.current.loadDetail('n');
+      });
+      expect(view.result.current.content).toBe('legacy <>&');
+      expect(view.result.current.contentLanguage).toBe(remoteVersion === 1 ? 'yaml' : undefined);
+      expect(view.result.current.markdownAllowed).toBe(false);
+    }
+  );
+
+  it('does not persist newly selected note B into note A after a deferred queue reply', async () => {
+    const response = deferred<unknown>();
+    mocks.request.mockImplementation(({ method, path }) => {
+      if (path.endsWith('/capabilities')) return Promise.resolve({ content_language: true });
+      if (method === 'PUT') return response.promise;
+      return Promise.resolve(
+        path.includes('/b')
+          ? {
+              id: 'b',
+              title: 'B',
+              content: 'B source',
+              content_language: 'json',
+              version: 8,
+            }
+          : {
+              id: 'a',
+              title: 'A',
+              content: 'A source',
+              content_language: 'yaml',
+              version: 1,
+            }
+      );
+    });
+    const view = renderEditor();
+    await act(async () => {
+      await view.result.current.loadDetail('a');
+    });
+    act(() => {
+      view.result.current.setContent('A edit');
+      view.result.current.setIsDirty(true);
+    });
+    await act(async () => {
+      await view.result.current.saveNote({ showSuccessMessage: false });
+    });
+    view.rerender({ scope: 'alice', online: true });
+    await waitFor(() =>
+      expect(mocks.request.mock.calls.some(([arg]) => arg.method === 'PUT')).toBe(true)
+    );
+    await act(async () => {
+      await view.result.current.handleSelectNote('b');
+    });
+    await act(async () => {
+      response.resolve({
+        id: 'a',
+        content: 'A edit',
+        content_language: 'yaml',
+        version: 2,
+      });
+    });
+    expect(view.result.current.selectedId).toBe('b');
+    expect(view.result.current.content).toBe('B source');
+    expect(view.result.current.selectedVersion).toBe(8);
+    expect(view.result.current.offlineDraftQueue['note:a']).toBeUndefined();
+    expect(mocks.request.mock.calls.filter(([arg]) => arg.method === 'PUT')).toHaveLength(1);
+  });
+
+  it.each([null, 'n'])(
+    'excludes ordinary save while queued %s request is pending',
+    async (noteId) => {
+      const response = deferred<unknown>();
+      const method = noteId ? 'PUT' : 'POST';
+      mocks.request.mockImplementation(({ method: requestMethod, path }) => {
+        if (path.endsWith('/capabilities')) return Promise.resolve({ content_language: true });
+        if (requestMethod === method) return response.promise;
+        return Promise.resolve({
+          id: 'n',
+          title: 'Note',
+          content: 'source',
+          content_language: 'yaml',
+          version: 1,
+        });
+      });
+      const view = renderEditor();
+      if (noteId)
+        await act(async () => {
+          await view.result.current.loadDetail(noteId);
+        });
+      act(() => {
+        view.result.current.setContent('queued');
+        view.result.current.setContentLanguage('yaml');
+        view.result.current.setIsDirty(true);
+      });
+      await act(async () => {
+        await view.result.current.saveNote({ showSuccessMessage: false });
+      });
+      view.rerender({ scope: 'alice', online: true });
+      await waitFor(() =>
+        expect(mocks.request.mock.calls.filter(([arg]) => arg.method === method)).toHaveLength(1)
+      );
+      let ordinary!: Promise<boolean>;
+      act(() => {
+        ordinary = view.result.current.saveNote({ showSuccessMessage: false });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const count = mocks.request.mock.calls.filter(([arg]) => arg.method === method).length;
+      await act(async () => {
+        response.resolve({
+          id: 'n',
+          content: 'queued',
+          content_language: 'yaml',
+          version: 2,
+        });
+        await ordinary;
+      });
+      expect(count).toBe(1);
+    }
+  );
+  it.each(['save', 'edit'])(
+    'keeps an incompatible fresh default draft stable until %s retries',
+    async (retry) => {
+      let compatible = false;
+      let probes = 0;
+      mocks.request.mockImplementation(({ path, body }) => {
+        if (path.endsWith('/capabilities')) {
+          probes += 1;
+          return Promise.resolve(compatible ? { content_language: true } : {});
+        }
+        return Promise.resolve({
+          id: 'n',
+          title: 'New',
+          content: body?.content ?? 'default source',
+          content_language: null,
+          version: 1,
+        });
+      });
+      const view = renderEditor();
+      act(() => {
+        view.result.current.setContent('default source');
+        view.result.current.setIsDirty(true);
+      });
+      await act(async () => {
+        await view.result.current.saveNote({ showSuccessMessage: false });
+      });
+      view.rerender({ scope: 'alice', online: true });
+      await waitFor(() =>
+        expect(view.result.current.offlineDraftQueue['draft:new']?.syncState).toBe('error')
+      );
+      expect(probes).toBe(1);
+      view.rerender({ scope: 'alice', online: false });
+      view.rerender({ scope: 'alice', online: true });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      });
+      expect(probes).toBe(1);
+      expect(view.result.current.offlineDraftQueue['draft:new'].content_language).toBeNull();
+      expect(view.result.current.offlineDraftQueue['draft:new'].content).toBe('default source');
+      expect(view.result.current.offlineDraftQueue['draft:new'].lastError).toContain(
+        'Portable language is unavailable'
+      );
+      expect(mocks.request.mock.calls.some(([arg]) => arg.method === 'POST')).toBe(false);
+      compatible = true;
+      if (retry === 'save') {
+        await act(async () => {
+          expect(await view.result.current.saveNote({ showSuccessMessage: false })).toBe(true);
+        });
+      } else {
+        act(() => {
+          view.result.current.setContent('edited default source');
+          view.result.current.setIsDirty(true);
+        });
+        await waitFor(() =>
+          expect(mocks.request.mock.calls.filter(([arg]) => arg.method === 'POST')).toHaveLength(1)
+        );
+      }
+      expect(mocks.request.mock.calls.filter(([arg]) => arg.method === 'POST')).toHaveLength(1);
+    }
+  );
 });
