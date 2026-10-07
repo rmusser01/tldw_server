@@ -455,6 +455,14 @@ describe("side-panel tabs when opening a past chat (XS-01)", () => {
     seedTabs()
   })
 
+  it("loads a legacy saved tab without replaying its one-time insertion command", async () => {
+    const stored = io.data.get(storedKey) as { snapshotsById: Record<string, SidepanelChatSnapshot> }
+    stored.snapshotsById["tab-a"].selectedQuickPrompt = "old tab command"
+    render(<SidepanelChat />)
+    await screen.findByText("chat-1 answer")
+    expect(useStoreMessageOption.getState().selectedQuickPrompt).toBeNull()
+  })
+
   it("keeps the current tab's conversation while the opened chat loads, then opens it in its own tab", async () => {
     render(<SidepanelChat />)
     await screen.findByText("chat-1 answer")

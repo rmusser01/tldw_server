@@ -33,7 +33,7 @@ vi.mock("wxt/browser", () => ({
   }
 }))
 
-import { hasResumableSidepanelChat } from "../sidepanel-chat-resume"
+import { durableSidepanelTabs, hasResumableSidepanelChat, type SidepanelTabsState } from "../sidepanel-chat-resume"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import type { SidepanelChatSnapshot } from "@/store/sidepanel-chat-tabs"
 
@@ -302,4 +302,15 @@ describe("hasResumableSidepanelChat", () => {
 
     await expect(hasResumableSidepanelChat()).resolves.toBe(false)
   })
+})
+
+
+it.each([false, true])("does not durably retain an active insertion command in a saved tab (Temporary %s)", temporary => {
+  const saved = draftOnlyTabs(temporary)
+  const original = saved.snapshotsById["logical-draft"]
+  original.selectedQuickPrompt = "one-time command"
+  original.selectedSystemPrompt = "system context"
+  const durable = durableSidepanelTabs(saved as SidepanelTabsState, original.chatDraftHandle!.ownerHash)
+  expect({ quick: durable.snapshotsById["logical-draft"].selectedQuickPrompt, system: durable.snapshotsById["logical-draft"].selectedSystemPrompt, originalQuick: original.selectedQuickPrompt })
+    .toEqual({ quick: null, system: "system context", originalQuick: "one-time command" })
 })

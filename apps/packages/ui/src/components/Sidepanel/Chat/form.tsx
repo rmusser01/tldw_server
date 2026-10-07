@@ -52,7 +52,7 @@ import {
   UserCircle2
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
-import { getVariable } from "@/utils/select-variable"
+import { QuickPromptInsertionReview } from "@/components/Chat/composer/QuickPromptInsertionReview"
 import { useTldwStt } from "@/hooks/useTldwStt"
 import { useMicStream } from "@/hooks/useMicStream"
 import type { DictationModePreference } from "@/hooks/useDictationStrategy"
@@ -914,11 +914,11 @@ export const SidepanelForm = ({
   const handoffInputRevision = getHandoffInputRevision()
   const handoffSourceKey = JSON.stringify([draftOwnerKey, historyId, serverChatId, draftAddress, sourceDraftRevision, handoffInputRevision])
   const handoffSelectionIsCurrent = React.useMemo(() => greetingHistorySelection?.fence() ?? (() => true), [greetingHistorySelection])
-  const captureHandoffGuard = React.useCallback(() => {
+  const captureHandoffGuard = React.useCallback((includeInput = true) => {
     const expected = { chatDraftAddress: draftAddress, chatDraftRevision: sourceDraftRevision, historyId, serverChatId }
     return () => {
       const current = useStoreMessageOption.getState()
-      return isDraftOwnerCurrent() && handoffSelectionIsCurrent() && getHandoffInputRevision() === handoffInputRevision &&
+      return isDraftOwnerCurrent() && handoffSelectionIsCurrent() && (!includeInput || getHandoffInputRevision() === handoffInputRevision) &&
         current.chatDraftAddress === expected.chatDraftAddress && current.chatDraftRevision === expected.chatDraftRevision &&
         current.historyId === expected.historyId && current.serverChatId === expected.serverChatId
     }
@@ -2725,22 +2725,6 @@ export const SidepanelForm = ({
   // Browser-dictation transcript streaming is handled by `useComposerVoiceChat`
   // via its `onTranscript` callback above; no local effect needed here.
 
-  React.useEffect(() => {
-    if (selectedQuickPrompt) {
-      const word = getVariable(selectedQuickPrompt)
-      form.setFieldValue("message", selectedQuickPrompt)
-      if (word) {
-        textareaRef.current?.focus()
-        const interval = setTimeout(() => {
-          textareaRef.current?.setSelectionRange(word.start, word.end)
-          setSelectedQuickPrompt(null)
-        }, 100)
-        return () => {
-          clearInterval(interval)
-        }
-      }
-    }
-  }, [selectedQuickPrompt])
   const { starting: greetingStarting, isPreparing: isGreetingPreparing, start: startCharacterGreeting } = useCharacterGreetingStart({
     form, retainCurrentDraft, submit: submitMessageAction, controller: greetingHistorySelection, focusComposer: () => textareaRef.current?.focus(),
     ready: draftReady, isConnectionReady, busy: streaming,
@@ -2869,7 +2853,6 @@ export const SidepanelForm = ({
       setChatMode(item.snapshot.chatMode)
       setWebSearch(item.snapshot.webSearch)
       setSelectedSystemPrompt(item.snapshot.selectedSystemPrompt ?? "")
-      setSelectedQuickPrompt(item.snapshot.selectedQuickPrompt ?? "")
       if (
         item.snapshot.toolChoice === "auto" ||
         item.snapshot.toolChoice === "required" ||
@@ -2920,7 +2903,6 @@ export const SidepanelForm = ({
       sendMessage,
       setChatMode,
       setSelectedModel,
-      setSelectedQuickPrompt,
       setSelectedSystemPrompt,
       setToolChoice,
       setUseOCR,
@@ -3356,6 +3338,10 @@ export const SidepanelForm = ({
         ref={formContainerRef}
         className={`flex w-full min-w-0 flex-col items-center ${composerPadding}`}>
       <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={onFindConversations} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={onRecoverDraft} disabled={!draftReady} /></div>
+      <QuickPromptInsertionReview form={form} ready={draftReady}
+        destinationKey={JSON.stringify([draftOwnerKey, historyId, serverChatId, draftAddress, sourceDraftRevision])}
+        captureGuard={() => captureHandoffGuard(false)} textareaRef={textareaRef}
+        setMessageValue={(value) => form.setFieldValue("message", value)} />
       <ChatGreetingPicker selectedCharacter={storedCharacter} selectedCharacterMode={getAssistantSelectionMode(characterToAssistantSelection(storedCharacter))}
         messages={messages} historyId={historyId} serverChatId={serverChatId}
         ready={draftReady && !characterMeta?.isLoading && !temporaryChat && greetingHistorySelection?.getCurrent().status === "idle" && !greetingHistorySelection.getCurrent().owner}

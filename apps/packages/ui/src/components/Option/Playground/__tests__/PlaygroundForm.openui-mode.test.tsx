@@ -1217,6 +1217,24 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
 
   afterEach(() => { cleanup(); sourceFlow.enabled = false })
 
+  it("reviews one-time prompts in the actual Form and preserves exact text through Cancel and Append", async () => {
+    render(<SourceFlowHarness />)
+    const user = userEvent.setup()
+    const textarea = screen.getByTestId("composer-textarea")
+    await user.type(textarea, "Original draft")
+    act(() => { useStoreMessageOption.getState().setSelectedQuickPrompt("  Cancel this prompt  ") })
+    const cancel = await screen.findByRole("button", { name: "Cancel" })
+    expect(textarea).toHaveValue("Original draft")
+    await user.click(cancel)
+    expect(textarea).toHaveValue("Original draft")
+    expect(screen.queryByRole("button", { name: "Append" })).toBeNull()
+    act(() => { useStoreMessageOption.getState().setSelectedQuickPrompt("  Append this prompt  ") })
+    await user.click(await screen.findByRole("button", { name: "Append" }))
+    expect(textarea).toHaveValue("Original draft\n\n  Append this prompt  ")
+    expect(useStoreMessageOption.getState().selectedQuickPrompt).toBeNull()
+    expect(sourceFlow.stream).not.toHaveBeenCalled()
+  })
+
   const consume = async (payload: MediaChatHandoffPayload = rowanPayload) => {
     await deliverMediaHandoff(payload)
     await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Rowan.md\n\nSummarize this source."))

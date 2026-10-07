@@ -180,7 +180,11 @@ export type State = {
   selectedSystemPrompt: string | null
   setSelectedSystemPrompt: (selectedSystemPrompt: string) => void
   selectedQuickPrompt: string | null
-  setSelectedQuickPrompt: (selectedQuickPrompt: string) => void
+  quickPromptRevision: number
+  setSelectedQuickPrompt: (
+    selectedQuickPrompt: string | null | undefined,
+    options?: { expectedRevision?: number }
+  ) => boolean
   messageSteeringMode: MessageSteeringMode
   setMessageSteeringMode: (mode: MessageSteeringMode) => void
   messageSteeringForceNarrate: boolean

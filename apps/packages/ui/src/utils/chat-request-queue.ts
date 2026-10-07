@@ -78,7 +78,8 @@ export const buildQueuedRequest = (
     sourceContext: input.sourceContext ?? null,
     snapshot: {
       ...DEFAULT_SNAPSHOT,
-      ...(input.snapshot ?? {})
+      ...(input.snapshot ?? {}),
+      selectedQuickPrompt: null
     },
     status: input.status ?? "queued",
     blockedReason: input.blockedReason ?? null,

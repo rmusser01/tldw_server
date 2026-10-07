@@ -88,7 +88,6 @@ export interface UsePlaygroundQueueManagementDeps {
   setCompareMode: (value: boolean) => void
   setCompareSelectedModels: (models: string[]) => void
   setSelectedSystemPrompt: (value: string) => void
-  setSelectedQuickPrompt: (value: string | null) => void
   setToolChoice: (value: string) => void
   setUseOCR: (value: boolean) => void
   compareModelsSupportCapability: (
@@ -191,7 +190,6 @@ export function usePlaygroundQueueManagement(
     setCompareMode,
     setCompareSelectedModels,
     setSelectedSystemPrompt,
-    setSelectedQuickPrompt,
     setToolChoice,
     setUseOCR,
     compareModelsSupportCapability,
@@ -414,7 +412,6 @@ export function usePlaygroundQueueManagement(
       setCompareMode(item.snapshot.compareMode)
       setCompareSelectedModels(item.snapshot.compareSelectedModels)
       setSelectedSystemPrompt(item.snapshot.selectedSystemPrompt ?? "")
-      setSelectedQuickPrompt(item.snapshot.selectedQuickPrompt ?? "")
       if (
         item.snapshot.toolChoice === "auto" ||
         item.snapshot.toolChoice === "required" ||
@@ -500,7 +497,6 @@ export function usePlaygroundQueueManagement(
       setCompareSelectedModels,
       setLastSubmittedContext,
       setSelectedModel,
-      setSelectedQuickPrompt,
       setSelectedSystemPrompt,
       setToolChoice,
       setUseOCR,

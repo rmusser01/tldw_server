@@ -424,9 +424,6 @@ const buildHistorySnapshot = ({
 }: BuildHistorySnapshotParams): SidepanelChatSnapshot => {
   const lastUsedPrompt = historyInfo.last_used_prompt
   const nextSelectedSystemPrompt = lastUsedPrompt?.prompt_id ?? null
-  const nextSelectedQuickPrompt = lastUsedPrompt?.prompt_id
-    ? null
-    : lastUsedPrompt?.prompt_content ?? null
   const nextSelectedModel = historyInfo.model_id ?? selectedModel ?? null
 
   return {
@@ -438,7 +435,7 @@ const buildHistorySnapshot = ({
     toolChoice,
     selectedModel: nextSelectedModel,
     selectedSystemPrompt: nextSelectedSystemPrompt,
-    selectedQuickPrompt: nextSelectedQuickPrompt,
+    selectedQuickPrompt: null,
     temporaryChat: false,
     useOCR,
     serverChatId: historyInfo.server_chat_id ?? null,
@@ -591,7 +588,6 @@ const SidepanelChatContent = ({
     setMessages,
     selectedModel,
     setSelectedModel,
-    selectedQuickPrompt,
     setSelectedQuickPrompt,
     selectedSystemPrompt,
     setSelectedSystemPrompt,
@@ -933,7 +929,7 @@ const SidepanelChatContent = ({
       toolChoice,
       selectedModel: selectedModel ?? null,
       selectedSystemPrompt,
-      selectedQuickPrompt,
+      selectedQuickPrompt: null,
       temporaryChat,
       useOCR,
       serverChatId,
@@ -952,7 +948,7 @@ const SidepanelChatContent = ({
       chatDraftAddress: source.chatDraftAddress, history: source.history, messages: source.messages,
       chatMode: source.chatMode, historyId: source.historyId, webSearch: source.webSearch,
       toolChoice: source.toolChoice, selectedModel: source.selectedModel, selectedSystemPrompt: source.selectedSystemPrompt,
-      selectedQuickPrompt: source.selectedQuickPrompt, temporaryChat: source.temporaryChat,
+      selectedQuickPrompt: null, temporaryChat: source.temporaryChat,
       useOCR: source.useOCR, serverChatId: source.serverChatId, serverChatState: source.serverChatState,
       serverChatTopic: source.serverChatTopic, serverChatClusterId: source.serverChatClusterId,
       serverChatSource: source.serverChatSource, serverChatExternalRef: source.serverChatExternalRef,
@@ -984,7 +980,6 @@ const SidepanelChatContent = ({
     toolChoice,
     selectedModel,
     selectedSystemPrompt,
-    selectedQuickPrompt,
     temporaryChat,
     useOCR,
     serverChatId,
@@ -1051,7 +1046,7 @@ const SidepanelChatContent = ({
         setSelectedModel(snapshotModel)
       }
       setSelectedSystemPrompt(snapshot.selectedSystemPrompt ?? null)
-      setSelectedQuickPrompt(snapshot.selectedQuickPrompt ?? null)
+      setSelectedQuickPrompt(null)
       setTemporaryChat(snapshot.temporaryChat ?? false)
       setUseOCR(snapshot.useOCR ?? false)
       setServerChatId(snapshot.serverChatId ?? null)
@@ -1833,7 +1828,7 @@ const SidepanelChatContent = ({
           toolChoice,
           selectedModel: selectedModel ?? null,
           selectedSystemPrompt,
-          selectedQuickPrompt,
+          selectedQuickPrompt: null,
           temporaryChat: false,
           useOCR,
           serverChatId: chatId,
@@ -1892,8 +1887,7 @@ const SidepanelChatContent = ({
       openSnapshotTab,
       saveActiveTabSnapshot,
       selectedModel,
-      selectedQuickPrompt,
-      selectedSystemPrompt,
+        selectedSystemPrompt,
       setDropedFile,
       setIsLoading,
       stopStreamingRequest,

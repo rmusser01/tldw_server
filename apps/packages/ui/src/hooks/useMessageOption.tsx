@@ -470,8 +470,6 @@ export const useMessageOption = (
   usePromptPersistence({
     selectedSystemPrompt,
     setSelectedSystemPrompt,
-    selectedQuickPrompt,
-    setSelectedQuickPrompt,
   });
 
   useRagSettings({

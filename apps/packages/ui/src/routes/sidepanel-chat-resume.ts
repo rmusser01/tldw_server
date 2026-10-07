@@ -47,7 +47,7 @@ export const durableSidepanelTabs = (
     const fresh = handle?.address.kind === "fresh"
     const clearHistory = snapshot.temporaryChat || fresh
     snapshotsById[tab.id] = {
-      ...snapshot, chatDraftAddress: null, chatDraftHandle: handle,
+      ...snapshot, selectedQuickPrompt: null, chatDraftAddress: null, chatDraftHandle: handle,
       ...(clearHistory ? {
         history: [], messages: [], historyId: null, serverChatId: null, historySelectionReference: null,
         serverChatState: null, serverChatTopic: null, serverChatClusterId: null, serverChatSource: null, serverChatExternalRef: null

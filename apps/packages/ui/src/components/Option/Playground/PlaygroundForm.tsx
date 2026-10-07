@@ -169,7 +169,7 @@ import { resolveStartupSelectedModel } from "@/utils/model-startup-selection";
 import { trackOnboardingChatSubmitSuccess } from "@/utils/onboarding-ingestion-telemetry";
 import type { ChatModelUsability } from "@/utils/chat-model-availability";
 import { getProviderDisplayName } from "@/utils/provider-registry";
-import { getVariable } from "@/utils/select-variable";
+import { QuickPromptInsertionReview } from "@/components/Chat/composer/QuickPromptInsertionReview";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
@@ -3275,76 +3275,6 @@ export const PlaygroundForm = ({
   } = voiceChatHook;
   const { sendWhenEnter, setSendWhenEnter } = useWebUI();
 
-  React.useEffect(() => {
-    if (!selectedQuickPrompt) {
-      return;
-    }
-
-    const currentMessage = form.values.message || "";
-    const promptText = selectedQuickPrompt;
-
-    const applyOverwrite = () => {
-      const word = getVariable(promptText);
-      setMessageValue(promptText, { collapseLarge: true });
-      if (word) {
-        textareaRef.current?.focus();
-        const interval = setTimeout(() => {
-          textareaRef.current?.setSelectionRange(word.start, word.end);
-          setSelectedQuickPrompt(null);
-        }, 100);
-        return () => {
-          clearInterval(interval);
-        };
-      }
-      setSelectedQuickPrompt(null);
-      return;
-    };
-
-    const applyAppend = () => {
-      const next =
-        currentMessage.trim().length > 0
-          ? `${currentMessage}\n\n${promptText}`
-          : promptText;
-      setMessageValue(next, { collapseLarge: true });
-      setSelectedQuickPrompt(null);
-    };
-
-    if (!currentMessage.trim()) {
-      applyOverwrite();
-      return;
-    }
-
-    Modal.confirm({
-      title: t("option:promptInsert.confirmTitle", {
-        defaultValue: "Use prompt in chat?",
-      }),
-      content: t("option:promptInsert.confirmDescription", {
-        defaultValue:
-          "Your message already has text. Do you want to overwrite it with this prompt or append the prompt below it?",
-      }),
-      okText: t("option:promptInsert.overwrite", {
-        defaultValue: "Overwrite message",
-      }),
-      cancelText: t("option:promptInsert.append", {
-        defaultValue: "Append",
-      }),
-      closable: false,
-      maskClosable: false,
-      onOk: () => {
-        applyOverwrite();
-      },
-      onCancel: () => {
-        applyAppend();
-      },
-    });
-  }, [
-    selectedQuickPrompt,
-    form.values.message,
-    setMessageValue,
-    setSelectedQuickPrompt,
-    t,
-    textareaRef,
-  ]);
 
   const queryClient = useQueryClient();
   const invalidateServerChatHistory = React.useCallback(() => {
@@ -3521,7 +3451,6 @@ export const PlaygroundForm = ({
     setCompareMode,
     setCompareSelectedModels,
     setSelectedSystemPrompt,
-    setSelectedQuickPrompt,
     setToolChoice,
     setUseOCR,
     compareModelsSupportCapability,
@@ -5617,6 +5546,9 @@ export const PlaygroundForm = ({
                     />,
                   )
                 : null}
+              <QuickPromptInsertionReview form={form} ready={draftReady} destinationKey={handoffDestinationKey}
+                captureGuard={captureHandoffGuard} textareaRef={textareaRef}
+                setMessageValue={(value) => setMessageValue(value, { collapseLarge: true })} />
               {mediaHandoffConflict ? (
                 <div role="status" aria-label={t("mediaHandoff.conflictLabel", "Media handoff conflict")} className="mb-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text">
                   <p>{t("mediaHandoff.conflict", "Your composer already has a draft. Insert the media source, replace your draft, or cancel the import.")}</p>

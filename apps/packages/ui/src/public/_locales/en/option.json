@@ -6400,5 +6400,11 @@
   },
   "quickIngest_review_replacementDisabled": {
     "message": "Replacement disabled: existing saved sources are preserved."
+  },
+  "promptInsert_reviewDescription": {
+    "message": "Your draft remains here. Review this prompt, then overwrite your message, append it, or cancel."
+  },
+  "promptInsert_preview": {
+    "message": "Prompt preview"
   }
 }

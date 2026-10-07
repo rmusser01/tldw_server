@@ -37,6 +37,7 @@ const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
     isFirstMessage: true, isLoading: false, isProcessing: false, streaming: false,
     isEmbedding: false, isSearchingInternet: false,
     selectedKnowledge: null, selectedSystemPrompt: null, selectedQuickPrompt: null,
+    quickPromptRevision: state.quickPromptRevision + 1,
     documentContext: null, uploadedFiles: [], contextFiles: [], actionInfo: null,
     fileRetrievalEnabled: false, ragMediaIds: null, ragSources: [], ragPinnedResults: [],
     compareMode: false, compareSelectedModels: [], compareSelectionByCluster: {},

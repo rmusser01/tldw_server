@@ -46,7 +46,10 @@ beforeEach(() => {
   vi.spyOn(tldwClient, "initialize").mockResolvedValue(undefined)
   vi.spyOn(console, "warn").mockImplementation(() => undefined)
 })
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 
 const mountQuickTest = async () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })

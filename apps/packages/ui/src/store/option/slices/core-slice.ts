@@ -45,6 +45,7 @@ export const createCoreSlice: StoreSlice<
     | "selectedSystemPrompt"
     | "setSelectedSystemPrompt"
     | "selectedQuickPrompt"
+    | "quickPromptRevision"
     | "setSelectedQuickPrompt"
     | "messageSteeringMode"
     | "setMessageSteeringMode"
@@ -91,6 +92,7 @@ export const createCoreSlice: StoreSlice<
       if (state.chatDraftAddress && chatDraftAddressKey(state.chatDraftAddress) === destinationKey) return state
       const revision = state.chatDraftRevision + 1
       return { chatDraftAddress: address, chatDraftRevision: revision,
+        ...(state.chatDraftAddress && options.kind !== "bind" ? { selectedQuickPrompt: null, quickPromptRevision: state.quickPromptRevision + 1 } : {}),
         temporaryChat: address.kind === "fresh" && address.temporary,
         chatDraftTransition: { kind: options.kind ?? "switch", sourceAddress: state.chatDraftAddress, destinationKey, revision } }
     })
@@ -169,7 +171,16 @@ export const createCoreSlice: StoreSlice<
   setSelectedSystemPrompt: (selectedSystemPrompt) =>
     set({ selectedSystemPrompt }),
   selectedQuickPrompt: null,
-  setSelectedQuickPrompt: (selectedQuickPrompt) => set({ selectedQuickPrompt }),
+  quickPromptRevision: 0,
+  setSelectedQuickPrompt: (selectedQuickPrompt, options) => {
+    let accepted = false
+    set((state) => {
+      if (options?.expectedRevision !== undefined && options.expectedRevision !== state.quickPromptRevision) return state
+      accepted = true
+      return { selectedQuickPrompt: selectedQuickPrompt || null, quickPromptRevision: state.quickPromptRevision + 1 }
+    })
+    return accepted
+  },
   messageSteeringMode: "none",
   setMessageSteeringMode: (mode) => set({ messageSteeringMode: mode }),
   messageSteeringForceNarrate: false,
