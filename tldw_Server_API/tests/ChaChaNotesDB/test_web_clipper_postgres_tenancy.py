@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
+from tldw_Server_API.app.api.v1.endpoints.workspaces import get_source_preview
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseBackend,
     DatabaseError,
@@ -145,6 +149,162 @@ def test_postgres_web_clipper_same_clip_is_owner_isolated_by_rls(
                     """,
                     (owner_a, clip_id, "workspace-b", note_b),
                 )
+    finally:
+        db_a.close_connection()
+        db_b.close_connection()
+
+
+@pytest.mark.asyncio
+async def test_postgres_pinned_preview_foreign_workspace_denied_before_media_read(pg_restricted_backend):
+    db_a = CharactersRAGDB(db_path=":memory:", client_id="910001", backend=pg_restricted_backend)
+    db_b = CharactersRAGDB(db_path=":memory:", client_id="910002", backend=pg_restricted_backend)
+    workspace = f"foreign-{uuid4()}"
+    try:
+        db_b.upsert_workspace(workspace, "Foreign workspace")
+        assert db_b.get_workspace(workspace) is not None
+        assert db_a.get_workspace(workspace) is None
+
+        class UnreadableMedia:
+            def get_media_by_id(self, *_args, **_kwargs):
+                pytest.fail("foreign workspace must be rejected before Media read")
+
+            def get_document_version(self, *_args, **_kwargs):
+                pytest.fail("foreign workspace must be rejected before exact version read")
+
+        with pytest.raises(HTTPException) as error:
+            await get_source_preview(
+                workspace_id=workspace,
+                source_id="source",
+                max_chars=3000,
+                chunk_limit=3,
+                version_number=1,
+                db=db_a,
+                media_db=UnreadableMedia(),
+                jm=None,
+                current_user=SimpleNamespace(id=910001),
+            )
+        assert error.value.status_code == 404
+    finally:
+        db_a.close_connection()
+        db_b.close_connection()
+
+
+def test_postgres_capture_promotes_owned_source_and_retries(pg_restricted_backend, tmp_path):
+    from loguru import logger
+
+    from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+    from tldw_Server_API.app.core.WebClipper.schemas import WebClipperSaveRequest
+    from tldw_Server_API.app.core.WebClipper.service import WebClipperService
+
+    db = CharactersRAGDB(db_path=":memory:", client_id="910001", backend=pg_restricted_backend)
+    media = MediaDatabase(db_path=str(tmp_path / "capture-media.db"), client_id="910001")
+    diagnostics = []
+    sink = logger.add(
+        lambda message: (
+            diagnostics.append(message.record["extra"])
+            if "PostgreSQL query execution failed" in message.record["message"]
+            else None
+        )
+    )
+    workspace = f"owned-{uuid4()}"
+    clip = str(uuid4())
+    text = "accepted café article"
+    request = WebClipperSaveRequest(
+        clip_id=clip,
+        clip_type="article",
+        source_url="https://example.com/article",
+        source_title="Article",
+        destination_mode="workspace",
+        workspace={"workspace_id": workspace, "default_review_state": "needs_review"},
+        content={"full_extract": text},
+        capture_metadata={
+            "web_capture_v1": {
+                "mode": "server_article",
+                "requested_url": "https://example.com/article",
+                "captured_at": "2026-10-07T18:00:00Z",
+                "refresh_of": None,
+                "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            }
+        },
+    )
+    try:
+        db.upsert_workspace(workspace, "Owned capture")
+        service = WebClipperService(db=db, media_db=media, user_id=910001, promote_workspace_sources=True)
+        try:
+            first = service.save_clip(request)
+            retry = service.save_clip(request)
+        except DatabaseError:
+            pytest.fail(f"PostgreSQL capture write failed: {diagnostics}")
+        assert first.status == retry.status == "saved", (first.warnings, retry.warnings, diagnostics)
+        assert first.note.id == retry.note.id
+        sources = db.list_workspace_sources(workspace)
+        assert len(sources) == 1
+        assert sources[0]["id"] == f"web-clipper:{clip}"
+        assert sources[0]["selected"] is True
+    finally:
+        logger.remove(sink)
+        db.close_connection()
+        media.close_connection()
+
+
+def test_postgres_source_duplicate_retains_first_snapshot(pg_restricted_backend):
+    db = CharactersRAGDB(db_path=":memory:", client_id="910001", backend=pg_restricted_backend)
+    workspace = f"duplicate-{uuid4()}"
+    try:
+        db.upsert_workspace(workspace, "Duplicate sources")
+        first = db.add_workspace_source(
+            workspace, {"id": "same", "media_id": 1, "title": "First", "source_type": "web", "selected": False}
+        )
+        retry = db.add_workspace_source(
+            workspace, {"id": "same", "media_id": 2, "title": "Replacement", "source_type": "pdf", "selected": True}
+        )
+        assert retry == first
+        assert len(db.list_workspace_sources(workspace)) == 1
+    finally:
+        db.close_connection()
+
+
+def test_postgres_source_selection_uses_native_booleans_and_versions(pg_restricted_backend):
+    db = CharactersRAGDB(db_path=":memory:", client_id="910001", backend=pg_restricted_backend)
+    workspace = f"selection-{uuid4()}"
+    try:
+        db.upsert_workspace(workspace, "Select sources")
+        first = db.add_workspace_source(workspace, {"id": "a", "media_id": 1, "title": "A", "source_type": "web"})
+        second = db.add_workspace_source(
+            workspace, {"id": "b", "media_id": 2, "title": "B", "source_type": "web", "selected": False}
+        )
+        updated = db.update_workspace_source(workspace, "b", {"selected": True}, expected_version=second["version"])
+        assert updated["selected"] is True
+        db.update_workspace_source_selection(workspace, selected_ids=["a"])
+        rows = {row["id"]: row for row in db.list_workspace_sources(workspace)}
+        assert rows["a"]["selected"] is True
+        assert rows["a"]["version"] == first["version"] + 2
+        assert rows["b"]["selected"] is False
+        assert rows["b"]["version"] == updated["version"] + 1
+        db.update_workspace_source_selection(workspace, selected_ids=[])
+        assert all(row["selected"] is False for row in db.list_workspace_sources(workspace))
+    finally:
+        db.close_connection()
+
+
+def test_postgres_source_constraints_and_foreign_selection_remain_enforced(pg_restricted_backend):
+    db_a = CharactersRAGDB(db_path=":memory:", client_id="910001", backend=pg_restricted_backend)
+    db_b = CharactersRAGDB(db_path=":memory:", client_id="910002", backend=pg_restricted_backend)
+    workspace = f"constraints-{uuid4()}"
+    try:
+        db_a.upsert_workspace(workspace, "Owned source")
+        first = db_a.add_workspace_source(workspace, {"id": "a", "media_id": 1, "title": "A", "source_type": "web"})
+        with pytest.raises(DatabaseError):
+            db_a.add_workspace_source(workspace, {"id": "invalid", "media_id": 2, "title": None, "source_type": "web"})
+        with pytest.raises(DatabaseError):
+            db_a.add_workspace_source(
+                "nonexistent-workspace", {"id": "missing", "media_id": 2, "title": "B", "source_type": "web"}
+            )
+        with pytest.raises(DatabaseError):
+            db_b.add_workspace_source(workspace, {"id": "foreign", "media_id": 2, "title": "B", "source_type": "web"})
+        db_b.update_workspace_source_selection(workspace, selected_ids=[])
+        assert db_a.list_workspace_sources(workspace) == [first]
+        assert db_b.list_workspace_sources(workspace) == []
     finally:
         db_a.close_connection()
         db_b.close_connection()

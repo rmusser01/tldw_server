@@ -31356,7 +31356,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "INSERT INTO workspace_sources "
             "(id, workspace_id, media_id, title, source_type, url, position, selected, added_at, "
             "review_state, review_state_updated_at, reviewed_at, reviewed_by_user_id, version) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) "
+            "ON CONFLICT(workspace_id, id) DO NOTHING"
         )
         params = (
             source_id,
@@ -31366,7 +31367,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             data.get("source_type", ""),
             data.get("url"),
             data.get("position", 0),
-            1 if data.get("selected", True) else 0,
+            bool(data.get("selected", True)),
             now,
             review_transition["review_state"],
             review_transition["review_state_updated_at"],
@@ -31377,12 +31378,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             try:
                 conn.execute(query, params)
             except sqlite3.IntegrityError as exc:
-                existing = conn.execute(
-                    "SELECT * FROM workspace_sources WHERE workspace_id = ? AND id = ?",
-                    (workspace_id, source_id),
-                ).fetchone()
-                if existing is not None:
-                    return dict(existing)
                 raise ConflictError(  # noqa: TRY003
                     f"Workspace source '{source_id}' could not be added.",
                     entity="workspace_sources",
@@ -31778,14 +31773,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """
         with self.transaction() as conn:
             conn.execute(
-                "UPDATE workspace_sources SET selected = 0, version = version + 1 WHERE workspace_id = ?",
-                (workspace_id,),
+                "UPDATE workspace_sources SET selected = ?, version = version + 1 WHERE workspace_id = ?",
+                (False, workspace_id),
             )
             if selected_ids:
                 placeholders = ", ".join("?" for _ in selected_ids)
                 conn.execute(
-                    f"UPDATE workspace_sources SET selected = 1, version = version + 1 WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608
-                    (workspace_id, *selected_ids),
+                    f"UPDATE workspace_sources SET selected = ?, version = version + 1 WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608
+                    (True, workspace_id, *selected_ids),
                 )
 
     def reorder_workspace_sources(self, workspace_id: str, ordered_ids: list[str]) -> None:

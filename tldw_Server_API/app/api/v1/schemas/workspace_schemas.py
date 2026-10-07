@@ -1381,6 +1381,7 @@ class WorkspaceSourcePreviewSnippet(BaseModel):
 
 
 class WorkspaceSourcePreviewResponse(BaseModel):
+    document_version_number: int | None = Field(default=None, ge=1)
     workspace_id: str
     source_id: str
     media_id: int | None = None
