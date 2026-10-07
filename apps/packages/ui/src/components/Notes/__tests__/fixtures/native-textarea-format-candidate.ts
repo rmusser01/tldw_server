@@ -54,6 +54,12 @@ export class TextAreaFormatBridge {
     const direction = element.selectionDirection
     const top = element.scrollTop, left = element.scrollLeft
     const originalStart = element.selectionStart, originalEnd = element.selectionEnd
+    // I1 follow-up experiment: attempt a native group boundary on each side.
+    element.blur()
+    element.focus({ preventScroll: true })
+    if (this.disposed || this.request !== request || this.composing ||
+      !element.isConnected || element.readOnly || element.disabled ||
+      doc.activeElement !== element || element.value !== request.text) return false
     element.select()
     const applied = doc.execCommand('insertText', false, replacement)
     if (!applied || element.value !== replacement) {
@@ -63,6 +69,8 @@ export class TextAreaFormatBridge {
     }
     this.request = null
     this.onUserEdit(element.value)
+    element.blur()
+    element.focus({ preventScroll: true })
     element.setSelectionRange(start, end, direction)
     element.scrollTop = top; element.scrollLeft = left
     return true

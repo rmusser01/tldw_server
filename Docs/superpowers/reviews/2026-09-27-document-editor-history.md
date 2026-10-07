@@ -164,3 +164,45 @@ fails. It does not prove that every native boundary strategy is impossible. Such
 an experiment must preserve focus/IME and pass the same live trace; do not infer
 success from jsdom, state assignments, delays or a bare DOM editor. No such
 correction or Monaco adoption has been implemented.
+
+## Authorized single native-boundary follow-up — also failed
+
+Executed 2026-10-06 after the controller requested one smaller native correction
+before proposing widget replacement. The test-only candidate now retains this
+exact variant for reproduction; the preceding retained-focus candidate is in
+commit `f61e76ceb3`.
+
+After the original source/key/editability/composition/focus guards, the candidate
+synchronously calls `textarea.blur()` then `textarea.focus({preventScroll:true})`.
+It then rechecks the captured request object, current text, composition, disposal,
+attachment, focus and native readonly/disabled state before select-all/insertText.
+After the native edit and ordinary callback, it repeats blur/focus, then restores
+mapped selection/direction and scrolling. The actual toolbar still prevents its
+pointer focus transfer. No timer, artificial keypress, programmatic undo or
+additional snapshot stack was introduced.
+
+**WebKit26.0 still fails the first actual Meta+z:**
+
+```json
+{"browser":"26.0","A":"{\"a\":1}","B":"{\"a\":1} ","C":"{\n  \"a\": 1\n}","D":"{\n  \"a\": 1\n} ","undoD":"{\"a\":1}"}
+```
+
+The run reached the formatted state and passed the editor-focused assertion;
+failure was at the same Undo D → C assertion, not startup or admission.
+Command: the earlier opt-in command, restricted to `--project=notes-webkit`, with
+`--output=/private/tmp/i1-history/boundary`. Raw log:
+`/private/tmp/i1-history/browser-boundary.log`; failure video is beneath that
+boundary output directory. Six unit guard tests passed (1.78s); targeted tsc
+passed without output. These cannot override the live history failure.
+
+Per the one-experiment instruction, no further native variant or all-browser rerun
+was attempted after failure. The temporary NotesEditorPane patch was removed;
+Monaco remains unimplemented and unapproved. This supersedes the earlier statement
+that a synchronous blur/focus boundary was untested: **this exact boundary on both
+sides is now disproved by the controlled Notes trace**. Other native variations
+are not claimed impossible, but further exploration is outside this experiment.
+
+Same isolated data/env as above; restarted owned sessions backend14845,
+frontend60234 (processes32968 and33547). Both were stopped after recording evidence.
+Logs: backend-boundary.log, frontend-boundary.log, u-boundary.log under the same
+private evidence directory. No shared server or user note was touched.

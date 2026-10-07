@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-10-07 02:16'
-updated_date: '2026-10-07 02:47'
+updated_date: '2026-10-07 02:53'
 labels:
   - notes
   - structured-editing
@@ -44,15 +44,15 @@ Reason: native history qualification implements the approved reversible-edit rul
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-I1 browser adoption blocked: live production controlled Notes history passes Chromium145 and Firefox146 but WebKit26 first Undo returns initial A instead of formatted C, reproduced twice. Temporary product wiring removed; unqualified candidate retained only as opt-in failure fixture. Six guard tests and targeted TypeScript compilation pass. Evidence and revised-approval Monaco proposal: Docs/superpowers/reviews/2026-09-27-document-editor-history.md. ADR assessment: no new ADR; existing server ADR031 and approved cross-app ADR194 govern this qualification. Task remains In Progress; not all AC met.
+I1 browser adoption blocked: controlled Notes history passes Chromium145/Firefox146 but WebKit26 first Undo returns A instead of C. Original variant reproduced twice. One authorized synchronous blur/focus boundary on both sides of native insertText also fails exactly D -> A on WebKit; further experiments stopped. Product wiring removed; candidate retained only as opt-in failure fixture. Six guard tests and targeted tsc pass. Evidence/proposal: Docs/superpowers/reviews/2026-09-27-document-editor-history.md. No new ADR; existing ADR031/ADR194 govern. In Progress pending revised editor approval.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
