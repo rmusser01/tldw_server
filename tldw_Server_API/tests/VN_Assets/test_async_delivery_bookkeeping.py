@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequest, ImageGenResult
+from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig
 from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 from tldw_Server_API.tests.VN_Assets.test_cancelled_storage_handoff import ChargedStorage
 from tldw_Server_API.tests.VN_Assets.test_cancelled_storage_handoff import handoff as handoff
@@ -80,6 +81,11 @@ async def test_public_delivery_bookkeeping_drains_off_loop(
         repo=repo, jobs_manager=handoff.jobs, image_registry=FakeImageRegistry(adapter),
         backend_gate=FakeGenerationGate(), save_vn_asset_image=storage,
         generated_files_repo=storage,
+        # Select terminal failure persistence for the native thread/drain assertions.
+        worker_config=WorkerConfig(
+            domain=handoff.job["domain"], queue=handoff.job["queue"],
+            worker_id=handoff.job["worker_id"], retry_on_exception=False,
+        ),
     )
     loop = asyncio.get_running_loop()
     task = asyncio.create_task(worker.handle_generate_variant(handoff.payload, job=handoff.job))
