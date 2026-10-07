@@ -2,8 +2,8 @@
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 
 PAYLOAD = {"origin": "knowledge_qa", "trust_state": "cited_answer"}
 
@@ -290,3 +290,40 @@ def test_postgres_receipt_upgrade_reopen_and_rls(pg_restricted_backend):
                 "INSERT INTO notes_provenance_receipts(owner_user_id,request_key,request_fingerprint) VALUES (%s,%s,%s)",
                 ("alice", "foreign", "fp"),
             )
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("read_method", ["get", "read_receipt", "list_parent_notes"])
+@pytest.mark.parametrize("commit", [False, True], ids=["rollback", "commit"])
+def test_postgres_provenance_reads_preserve_caller_pending_writes(pg_database_config, read_method, commit):
+    """Pure history reads retain the caller's pending transaction and completion choice."""
+    database = CharactersRAGDB(
+        ":memory:", client_id="alice", backend=DatabaseBackendFactory.create_backend(pg_database_config)
+    )
+    try:
+        database.add_note("Note", "Body", note_id="own")
+        store = database.note_provenance_store
+        store.put("own", PAYLOAD, expected_version=0)
+        with database.transaction() as conn:
+            store.claim_receipt("request", "fingerprint", conn)
+            store.complete_receipt("request", "fingerprint", {"id": "own"}, conn)
+        raw = database._get_thread_connection()
+        database.execute_query("UPDATE notes SET title = ? WHERE id = ?", ("Pending title", "own"))
+
+        if read_method == "get":
+            assert store.get("own")["payload"] == PAYLOAD
+        elif read_method == "read_receipt":
+            assert store.read_receipt("request", "fingerprint") == {"id": "own"}
+        else:
+            assert store.list_parent_notes()[0]["title"] == "Pending title"
+
+        assert raw.info.transaction_status.name == "INTRANS"
+        assert database.backend.execute("SELECT title FROM notes WHERE id=%s", ("own",)).scalar == "Note"
+        if commit:
+            raw.commit()
+        else:
+            raw.rollback()
+        expected = "Pending title" if commit else "Note"
+        assert database.backend.execute("SELECT title FROM notes WHERE id=%s", ("own",)).scalar == expected
+    finally:
+        database.close_all_connections()

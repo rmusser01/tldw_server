@@ -60,7 +60,7 @@ class NoteProvenanceStore:
 
     def read_receipt(self, key: str, fingerprint: str, conn: Any = None) -> dict[str, Any] | None:
         """Replay the owner's immutable acknowledgment before mutable-head checks."""
-        with nullcontext(conn) if conn is not None else self._db.transaction() as connection:
+        with nullcontext(conn) if conn is not None else self._db.transaction(preserve_existing=True) as connection:
             row = connection.execute(
                 "SELECT request_fingerprint, response_json FROM notes_provenance_receipts WHERE owner_user_id = ? AND request_key = ?",
                 (self._db.owner_user_id, self._receipt_key(key)),
@@ -116,7 +116,7 @@ class NoteProvenanceStore:
 
     def get(self, note_id: str, include_deleted: bool = False, conn: Any = None) -> dict[str, Any] | None:
         """Read owned provenance, hiding deleted records and parents by default."""
-        with nullcontext(conn) if conn is not None else self._db.transaction() as connection:
+        with nullcontext(conn) if conn is not None else self._db.transaction(preserve_existing=True) as connection:
             parent = self._parent(note_id, connection)
             if parent is None or (parent["deleted"] and not include_deleted):
                 return None
@@ -127,7 +127,7 @@ class NoteProvenanceStore:
         """Page this owner's retained parents, including trash, in stable ID order."""
         if type(limit) is not int or not 1 <= limit <= 200:
             raise InputError("Knowledge provenance source page limit must be 1..200")
-        with self._db.transaction() as conn:
+        with self._db.transaction(preserve_existing=True) as conn:
             rows = conn.execute(
                 "SELECT * FROM notes WHERE client_id = ? AND id > ? ORDER BY id LIMIT ?",
                 (self._db.owner_user_id, after_note_id or "", limit),

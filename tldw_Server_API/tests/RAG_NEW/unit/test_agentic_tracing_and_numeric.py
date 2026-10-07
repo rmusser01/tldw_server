@@ -1,7 +1,7 @@
 import pytest
 
-from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
 import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as ac
+from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
 
 def _make_doc(doc_id: str, content: str, title: str = "Doc") -> Document:
@@ -75,10 +75,10 @@ async def test_agentic_hard_citations_and_numeric(monkeypatch):
         def __init__(self, *args, **kwargs):
             pass
         async def generate(self, *, query: str, context: str, prompt_template=None, max_tokens=None, temperature=None):  # noqa: ARG002
-            return {"answer": "We ran 42 experiments. The findings were consistent."}
+            return {"answer": "We observed 42 experiments with consistent results."}
 
-    import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as agentic_mod
-    monkeypatch.setattr(agentic_mod, "AnswerGenerator", FakeAnswerGenerator)
+    import tldw_Server_API.app.core.RAG.rag_service.generation as gen_mod
+    monkeypatch.setattr(gen_mod, "AnswerGenerator", FakeAnswerGenerator)
 
     res = await ac.agentic_rag_pipeline(
         query="How many experiments were run?",
@@ -96,6 +96,7 @@ async def test_agentic_hard_citations_and_numeric(monkeypatch):
     # Hard citations should be present
     hc = md.get("hard_citations")
     assert isinstance(hc, dict)
+    assert hc["coverage"] == 1.0
     # Numeric fidelity should show present token '42'
     nf = md.get("numeric_fidelity") or {}
     assert "present" in nf and any("42" in x for x in (nf.get("present") or []))
