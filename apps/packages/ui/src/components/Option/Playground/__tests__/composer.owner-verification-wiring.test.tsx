@@ -433,3 +433,46 @@ describe("actual composer owner verification adapters and deployed recovery boun
     },
   );
 });
+
+
+describe("actual WebUI sizing adapter", () => {
+  beforeEach(() => {
+    accountIO.resolve.mockImplementation(() => new Promise(() => {}));
+    useStoreMessageOption.getState().startNewChatDraft(false);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+  it("publishes its shared native ref callback while preserving display text and cap", () => {
+    const objectRef = React.createRef<HTMLTextAreaElement>();
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    function AdapterTextarea() {
+      const composer = useWebUiComposer(objectRef);
+      return (
+        <textarea
+          ref={composer.attachTextarea || objectRef}
+          {...composer.form.getInputProps("message")}
+          value={composer.messageDisplayValue}
+        />
+      );
+    }
+    render(<AdapterTextarea />);
+    const node = screen.getByRole("textbox") as HTMLTextAreaElement;
+    Object.defineProperty(node, "scrollHeight", {
+      configurable: true,
+      get: () => 240
+    });
+    fireEvent.change(node, { target: { value: "visible exact draft" } });
+    act(() => frames.splice(0).forEach((callback) => callback(0)));
+    expect(node.value).toBe("visible exact draft");
+    expect(node.style.height).toBe("120px");
+    expect(node.style.overflowY).toBe("scroll");
+    expect(objectRef.current).toBe(node);
+  });
+});

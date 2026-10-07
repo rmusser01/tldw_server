@@ -96,7 +96,7 @@ export const ModelPlaygroundChat: React.FC = () => {
 
   const { data: chatModels = EMPTY_CHAT_MODELS } = useChatModelCatalog(true)
 
-  useDynamicTextareaSize(textareaRef, message, 200)
+  const attachTextarea = useDynamicTextareaSize(textareaRef, message, 200)
 
   const blocks = React.useMemo(() => buildBlocks(messages), [messages])
 
@@ -448,7 +448,7 @@ export const ModelPlaygroundChat: React.FC = () => {
         {/* Message input */}
         <div className="flex items-end gap-3">
           <textarea
-            ref={textareaRef}
+            ref={attachTextarea}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}

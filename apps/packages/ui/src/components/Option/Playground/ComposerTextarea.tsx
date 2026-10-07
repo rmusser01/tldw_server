@@ -8,6 +8,7 @@ import { MentionsDropdown } from "./MentionsDropdown"
 
 export type ComposerTextareaProps = {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  attachTextarea?: React.RefCallback<HTMLTextAreaElement>
   value: string
   displayValue: string
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
@@ -50,6 +51,7 @@ export type ComposerTextareaProps = {
 
 export const ComposerTextarea = React.memo(function ComposerTextarea({
   textareaRef,
+  attachTextarea,
   value,
   displayValue,
   onChange,
@@ -120,7 +122,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
           }
         }}
         onFocus={onFocus}
-        ref={textareaRef}
+        ref={attachTextarea ?? textareaRef}
         className={`w-full resize-none bg-transparent text-base leading-6 text-text placeholder:text-text-muted/80 focus-within:outline-none focus:ring-0 focus-visible:ring-0 ring-0 border-0 ${isProMode ? "px-3 py-2.5" : "px-3 py-2"}`}
         onPaste={(e) => {
           try {

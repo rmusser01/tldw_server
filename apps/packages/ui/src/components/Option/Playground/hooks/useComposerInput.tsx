@@ -294,7 +294,11 @@ export function useComposerInput(deps: UseComposerInputDeps) {
   // --- Textarea sizing ---
   // Sized against `messageDisplayValue` (not the raw form value) so the
   // textarea shrinks when the paste-collapse overlay swaps in a short label.
-  useDynamicTextareaSize(textareaRef, messageDisplayValue, textareaMaxHeight);
+  const attachTextarea = useDynamicTextareaSize(
+    textareaRef,
+    messageDisplayValue,
+    textareaMaxHeight
+  );
 
   // --- Collapsed caret sync ---
   const syncCollapsedCaret = React.useCallback(
@@ -602,6 +606,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     setMessageValue,
     restoreMessageValue,
     messageDisplayValue,
+    attachTextarea,
     collapsedDisplayMeta,
     textAreaFocus,
     captureCompletionGuard: composerText.captureCompletionGuard,

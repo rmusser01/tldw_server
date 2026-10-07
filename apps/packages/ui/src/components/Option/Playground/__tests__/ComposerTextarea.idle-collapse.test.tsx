@@ -1,7 +1,8 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { ComposerTextarea } from "../ComposerTextarea"
+import useDynamicTextareaSize from "@/hooks/useDynamicTextareaSize"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -70,4 +71,53 @@ describe("ComposerTextarea native semantics", () => {
     expect(props.onCompositionStart).toHaveBeenCalledTimes(1)
     expect(props.onCompositionEnd).toHaveBeenCalledTimes(1)
   })
+})
+
+
+it("forwards the sizing callback to the native textarea and retains the focus object", () => {
+  const objectRef = React.createRef<HTMLTextAreaElement>()
+  const frames: FrameRequestCallback[] = []
+  const frame = vi
+    .spyOn(window, "requestAnimationFrame")
+    .mockImplementation((callback) => {
+      frames.push(callback)
+      return frames.length
+    })
+  const cancel = vi
+    .spyOn(window, "cancelAnimationFrame")
+    .mockImplementation(() => {})
+  function SizedTextarea() {
+    const attachTextarea = useDynamicTextareaSize(
+      objectRef,
+      "visible draft",
+      120
+    )
+    return (
+      <ComposerTextarea
+        {...createProps({
+          textareaRef: objectRef,
+          attachTextarea,
+          value: "visible draft",
+          displayValue: "visible draft"
+        })}
+      />
+    )
+  }
+  const view = render(<SizedTextarea />)
+  const node = screen.getByRole("textbox", {
+    name: "Message input"
+  }) as HTMLTextAreaElement
+  Object.defineProperty(node, "scrollHeight", {
+    configurable: true,
+    get: () => 64
+  })
+  act(() => frames.splice(0).forEach((callback) => callback(0)))
+  expect(node.style.height).toBe("64px")
+  expect(objectRef.current).toBe(node)
+  objectRef.current!.focus()
+  expect(document.activeElement).toBe(node)
+  view.unmount()
+  expect(objectRef.current).toBeNull()
+  frame.mockRestore()
+  cancel.mockRestore()
 })

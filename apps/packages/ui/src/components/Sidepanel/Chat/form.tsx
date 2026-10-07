@@ -2722,7 +2722,11 @@ export const SidepanelForm = ({
     }
   }, [dropedFile])
 
-  useDynamicTextareaSize(textareaRef, form.values.message, textareaMaxHeight)
+  const attachTextarea = useDynamicTextareaSize(
+    textareaRef,
+    form.values.message,
+    textareaMaxHeight
+  )
 
   // Browser-dictation transcript streaming is handled by `useComposerVoiceChat`
   // via its `onTranscript` callback above; no local effect needed here.
@@ -3525,7 +3529,7 @@ export const SidepanelForm = ({
                           <textarea
                             id="textarea-message"
                             onKeyDown={(e) => handleKeyDown(e)}
-                            ref={textareaRef}
+                            ref={attachTextarea}
                             data-testid="chat-input"
                             className="w-full resize-none border-0 bg-transparent px-3 py-2 text-body text-text placeholder:text-text-muted/80 focus-within:outline-none focus:ring-0 focus-visible:ring-0 ring-0 dark:ring-0"
                             aria-label={t("sidepanel:composer.messageAriaLabel", "Message input")}

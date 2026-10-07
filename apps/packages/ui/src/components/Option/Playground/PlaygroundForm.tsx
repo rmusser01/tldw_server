@@ -2179,6 +2179,7 @@ export const PlaygroundForm = ({
     setMessageValue,
     restoreMessageValue,
     messageDisplayValue,
+    attachTextarea,
     collapsedDisplayMeta,
     textAreaFocus,
     syncCollapsedCaret,
@@ -6326,6 +6327,7 @@ export const PlaygroundForm = ({
                                   "composer-textarea",
                                   <ComposerTextarea
                                     textareaRef={textareaRef}
+                                    attachTextarea={attachTextarea}
                                     value={form.values.message}
                                     displayValue={messageDisplayValue}
                                     onChange={handleTextareaChange}

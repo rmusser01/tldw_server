@@ -21,7 +21,11 @@ export const EditMessageForm = (props: Props) => {
       message: props.value
     }
   })
-  useDynamicTextareaSize(textareaRef, form.values.message, 300)
+  const attachTextarea = useDynamicTextareaSize(
+    textareaRef,
+    form.values.message,
+    300
+  )
 
   React.useEffect(() => {
     form.setFieldValue("message", props.value)
@@ -61,7 +65,7 @@ export const EditMessageForm = (props: Props) => {
         style={{ minHeight: "60px" }}
         tabIndex={0}
         placeholder={t("editMessage.placeholder")}
-        ref={textareaRef}
+        ref={attachTextarea}
         className="w-full bg-transparent text-body text-text placeholder:text-text-muted focus-within:outline-none focus:ring-0 focus-visible:ring-0 ring-0 border-0"
       />
       <div className="flex flex-wrap gap-2 mt-2">
