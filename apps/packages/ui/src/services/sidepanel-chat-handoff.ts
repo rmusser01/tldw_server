@@ -403,15 +403,19 @@ export const cleanupExpiredSidepanelChatHandoffs = async (): Promise<number> => 
 }
 
 export const createSidepanelChatHandoff = async (
-  input: CreateSidepanelChatHandoffInput
+  input: CreateSidepanelChatHandoffInput,
+  isCurrent: () => boolean = () => true
 ): Promise<SidepanelChatHandoffPackage> => {
+  if (!isCurrent()) throw new Error("Sidepanel chat handoff source changed.")
   await cleanupExpiredSidepanelChatHandoffs()
+  if (!isCurrent()) throw new Error("Sidepanel chat handoff source changed.")
   const now = Date.now()
   const pkg = buildPackage(input, now)
   const key = storageKey(pkg.id)
 
   try {
     await storage.set(key, pkg)
+    if (!isCurrent()) throw new Error("Sidepanel chat handoff source changed.")
   } catch (error) {
     await removeKeyQuietly(key)
     throw error
@@ -423,6 +427,11 @@ export const createSidepanelChatHandoff = async (
   } catch {
     await removeKeyQuietly(key)
     throw new Error("Sidepanel chat handoff could not be saved.")
+  }
+
+  if (!isCurrent()) {
+    await removeKeyQuietly(key)
+    throw new Error("Sidepanel chat handoff source changed.")
   }
 
   if (!saved || saved.id !== pkg.id) {

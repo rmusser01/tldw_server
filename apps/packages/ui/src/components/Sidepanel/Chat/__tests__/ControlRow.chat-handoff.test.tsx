@@ -1,7 +1,7 @@
 import React from "react"
 import { ConfigProvider, type PopoverProps } from "antd"
 import { readVisiblePageContextForHandoff } from "../sidepanel-chat-handoff-context"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ControlRow } from "../ControlRow"
 
@@ -244,6 +244,9 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 }))
 
 const defaultProps = () => ({
+  draftReady: true,
+  captureHandoffGuard: () => () => true,
+  handoffSourceKey: "owned-source-chat",
   selectedSystemPrompt: undefined,
   setSelectedSystemPrompt: vi.fn(),
   setSelectedQuickPrompt: vi.fn(),
@@ -276,6 +279,160 @@ describe("ControlRow sidepanel chat handoff", () => {
     vi.spyOn(window, "open").mockImplementation(() => null)
   })
 
+  it("does not offer copying before the owned source draft is restored", () => {
+    render(<ControlRow {...defaultProps()} draftReady={false} draftMessage="RESTORING" />)
+    expect(screen.getByRole("button", { name: "Copy draft & page references" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    expect(mocks.createSidepanelChatHandoff).not.toHaveBeenCalled()
+  })
+
+  it.each(["page read", "package write"])("does not open or announce a held %s after source ownership retires", async boundary => {
+    const held = createDeferred<unknown>()
+    let current = true
+    const props = { ...defaultProps(), draftMessage: "SOURCE DRAFT  ", captureHandoffGuard: () => () => current }
+    if (boundary === "package write") mocks.createSidepanelChatHandoff.mockReturnValueOnce(held.promise)
+    render(<ControlRow {...props} getVisiblePageContextForHandoff={boundary === "page read" ? () => held.promise : undefined} />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    current = false
+    await act(async () => held.resolve(boundary === "page read" ? { title: "Old private page", snippets: [] } : { id: "old-package", draft: { text: "SOURCE DRAFT  " } }))
+    expect(mocks.tabsCreate).not.toHaveBeenCalled()
+    expect(window.open).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("chat-handoff-feedback")).toBeNull()
+    if (boundary === "page read") expect(mocks.createSidepanelChatHandoff).not.toHaveBeenCalled()
+  })
+
+  it("allows a new source copy while the old page read is held and ignores the old result", async () => {
+    const held = createDeferred<unknown>()
+    let oldCurrent = true
+    const oldProps = { ...defaultProps(), draftMessage: "OLD TEXT", captureHandoffGuard: () => () => oldCurrent, getVisiblePageContextForHandoff: () => held.promise }
+    const view = render(<ControlRow {...oldProps} />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    oldCurrent = false
+    view.rerender(<ControlRow {...defaultProps()} handoffSourceKey="new-owner-and-chat" draftMessage="NEW TEXT" />)
+    expect(screen.getByRole("button", { name: "Copy draft & page references" })).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    await waitFor(() => expect(mocks.tabsCreate).toHaveBeenCalledOnce())
+    expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledWith(expect.objectContaining({ draftText: "NEW TEXT" }), expect.any(Function))
+    await act(async () => held.resolve({ title: "OLD PAGE", snippets: [] }))
+    expect(mocks.tabsCreate).toHaveBeenCalledOnce()
+    expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledOnce()
+    expect(screen.getByTestId("chat-handoff-feedback")).toHaveTextContent("Full chat page opened")
+  })
+
+  it("does not publish a late open failure after the source has changed", async () => {
+    const opened = createDeferred<unknown>()
+    mocks.tabsCreate.mockReturnValueOnce(opened.promise)
+    let current = true
+    render(<ControlRow {...defaultProps()} draftMessage="SOURCE" captureHandoffGuard={() => () => current} />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    await waitFor(() => expect(mocks.tabsCreate).toHaveBeenCalledOnce())
+    current = false
+    await act(async () => opened.reject(new Error("late failure")))
+    expect(window.open).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("chat-handoff-feedback")).toBeNull()
+  })
+
+  it("retires a held copy when source text changes without changing its chat", async () => {
+    const held = createDeferred<undefined>()
+    const props = { ...defaultProps(), getVisiblePageContextForHandoff: () => held.promise }
+    const view = render(<ControlRow {...props} draftMessage="BEFORE" />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    view.rerender(<ControlRow {...props} draftMessage="AFTER  " />)
+    expect(screen.getByRole("button", { name: "Copy draft & page references" })).toBeEnabled()
+    await act(async () => held.resolve(undefined))
+    expect(mocks.createSidepanelChatHandoff).not.toHaveBeenCalled()
+    expect(mocks.tabsCreate).not.toHaveBeenCalled()
+  })
+
+  it("does not open a held package after the source control unmounts", async () => {
+    const held = createDeferred<unknown>()
+    mocks.createSidepanelChatHandoff.mockReturnValueOnce(held.promise)
+    const view = render(<ControlRow {...defaultProps()} draftMessage="KEEP SOURCE" />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    await waitFor(() => expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledOnce())
+    view.unmount()
+    await act(async () => held.resolve({ id: "unpublished-copy", draft: { text: "KEEP SOURCE" } }))
+    expect(mocks.tabsCreate).not.toHaveBeenCalled()
+    expect(window.open).not.toHaveBeenCalled()
+    expect(mocks.consumeSidepanelChatHandoff).toHaveBeenCalledWith("unpublished-copy")
+  })
+
+  it("does not let an old completion unlock a new pending copy", async () => {
+    const oldRead = createDeferred<undefined>()
+    const newRead = createDeferred<undefined>()
+    let oldCurrent = true
+    const view = render(<ControlRow {...defaultProps()} draftMessage="OLD" captureHandoffGuard={() => () => oldCurrent} getVisiblePageContextForHandoff={() => oldRead.promise} />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    oldCurrent = false
+    view.rerender(<ControlRow {...defaultProps()} draftMessage="NEW" handoffSourceKey="new-owner" getVisiblePageContextForHandoff={() => newRead.promise} />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    await act(async () => oldRead.resolve(undefined))
+    expect(screen.getByRole("button", { name: "Copy draft & page references" })).toBeDisabled()
+    await act(async () => newRead.resolve(undefined))
+    await waitFor(() => expect(mocks.tabsCreate).toHaveBeenCalledOnce())
+    expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledWith(expect.objectContaining({ draftText: "NEW" }), expect.any(Function))
+  })
+
+  it("does not announce or refocus after an already issued open resolves for a retired source", async () => {
+    const opened = createDeferred<undefined>()
+    mocks.tabsCreate.mockReturnValueOnce(opened.promise)
+    let current = true
+    render(<ControlRow {...defaultProps()} draftMessage="SOURCE" captureHandoffGuard={() => () => current} />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    await waitFor(() => expect(mocks.tabsCreate).toHaveBeenCalledOnce())
+    const focus = vi.spyOn(HTMLElement.prototype, "focus")
+    current = false
+    await act(async () => opened.resolve(undefined))
+    expect(focus).not.toHaveBeenCalled()
+    expect(window.open).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("chat-handoff-feedback")).toBeNull()
+    focus.mockRestore()
+  })
+
+  it("refuses to start a copy from a retired rendered source", () => {
+    render(<ControlRow {...defaultProps()} draftMessage="OLD VISIBLE TEXT" captureHandoffGuard={() => () => false} />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    expect(mocks.createSidepanelChatHandoff).not.toHaveBeenCalled()
+    expect(mocks.tabsCreate).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("chat-handoff-feedback")).toBeNull()
+  })
+
+  it("allows a fresh copy after restoration readiness returns and ignores the held earlier read", async () => {
+    const oldRead = createDeferred<undefined>()
+    const getContext = vi.fn().mockReturnValueOnce(oldRead.promise).mockResolvedValue(undefined)
+    const props = { ...defaultProps(), draftMessage: "RETAINED SOURCE  ", getVisiblePageContextForHandoff: getContext }
+    const view = render(<ControlRow {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    view.rerender(<ControlRow {...props} draftReady={false} />)
+    expect(screen.getByRole("button", { name: "Copy draft & page references" })).toBeDisabled()
+    view.rerender(<ControlRow {...props} />)
+    expect(screen.getByRole("button", { name: "Copy draft & page references" })).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    await waitFor(() => expect(mocks.tabsCreate).toHaveBeenCalledOnce())
+    await act(async () => oldRead.resolve(undefined))
+    expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledOnce()
+    expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledWith(expect.objectContaining({ draftText: "RETAINED SOURCE  " }), expect.any(Function))
+  })
+
+  it("keeps one source copy usable through StrictMode effect replay", async () => {
+    render(<React.StrictMode><ControlRow {...defaultProps()} draftMessage="STRICT SOURCE" /></React.StrictMode>)
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    await waitFor(() => expect(mocks.tabsCreate).toHaveBeenCalledOnce())
+    expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledOnce()
+    expect(screen.getByTestId("chat-handoff-feedback")).toHaveTextContent("Full chat page opened")
+  })
+
+  it("keeps a current copy receipt after its capture callback rerenders", async () => {
+    const props = { ...defaultProps(), draftMessage: "SOURCE" }
+    const view = render(<ControlRow {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    await waitFor(() => expect(screen.getByTestId("chat-handoff-feedback")).toHaveTextContent("Full chat page opened"))
+    view.rerender(<ControlRow {...props} captureHandoffGuard={() => () => true} />)
+    expect(screen.getByTestId("chat-handoff-feedback")).toHaveTextContent("Full chat page opened")
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft & page references" }))
+    await waitFor(() => expect(mocks.tabsCreate).toHaveBeenCalledTimes(2))
+  })
+
   it("names the bounded copy destination and its carried-state limits", () => {
     render(<ControlRow {...defaultProps()} draftMessage="draft text" />)
     const copy = screen.getByRole("button", { name: "Copy draft & page references" })
@@ -291,7 +448,7 @@ describe("ControlRow sidepanel chat handoff", () => {
     expect(feedback).toHaveTextContent("Your source draft remains here")
     expect(feedback).not.toHaveTextContent(/Imported/i)
     expect(feedback.closest('[data-testid="mock-popover-content"]')).toBeNull()
-    expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledWith(expect.objectContaining({ draftText: "Original source draft  " }))
+    expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledWith(expect.objectContaining({ draftText: "Original source draft  " }), expect.any(Function))
   })
 
   it("copies within the current WebUI origin independently of its configured callback", async () => {
@@ -323,7 +480,7 @@ describe("ControlRow sidepanel chat handoff", () => {
       getVisiblePageContextForHandoff={() => readVisiblePageContextForHandoff([{ title: "Research note" }], true, readTabs)} />)
     fireEvent.click(screen.getByTestId("chat-continue-in-webui"))
     expect(await screen.findByTestId("chat-handoff-feedback")).toHaveTextContent("partial copy")
-    expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledWith(expect.objectContaining({ pageContext: expect.objectContaining({ truncated: true }) }))
+    expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledWith(expect.objectContaining({ pageContext: expect.objectContaining({ truncated: true }) }), expect.any(Function))
     expect(readTabs).toHaveBeenCalledTimes(1)
   })
 
@@ -375,7 +532,7 @@ describe("ControlRow sidepanel chat handoff", () => {
         routeIntent: {
           path: "/chat"
         }
-      })
+      }, expect.any(Function))
     })
     expect(mocks.buildSidepanelChatHandoffRoute).toHaveBeenCalledWith(
       "/chat",
@@ -452,7 +609,7 @@ describe("ControlRow sidepanel chat handoff", () => {
           mode: "character",
           characterId: "char-review"
         }
-      })
+      }, expect.any(Function))
     })
     expect(mocks.buildSidepanelChatHandoffRoute).toHaveBeenCalledWith(
       "/chat?mode=character&characterId=char-review",
@@ -501,7 +658,7 @@ describe("ControlRow sidepanel chat handoff", () => {
       routeIntent: {
         path: "/chat"
       }
-    })
+    }, expect.any(Function))
   })
 
   it("shows a disabled Continue in WebUI action when no draft or context exists", () => {
@@ -570,6 +727,6 @@ describe("ControlRow sidepanel chat handoff", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not open the full chat page. Your source draft remains here."
     )
-    expect(mocks.consumeSidepanelChatHandoff).toHaveBeenCalledWith("handoff-123")
+    expect(mocks.consumeSidepanelChatHandoff).toHaveBeenCalledWith("handoff-123", expect.any(Function))
   })
 })

@@ -219,6 +219,25 @@ describe("sidepanel chat handoff storage service", () => {
     expect(storageState.remove).toHaveBeenCalledTimes(1)
   })
 
+  it.each(["cleanup", "write", "read-back"])("does not publish a copied package after its source retires during %s", async boundary => {
+    let finish!: () => void
+    let entered!: () => void
+    const reached = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { finish = resolve })
+    if (boundary === "cleanup") storageState.getAll.mockImplementationOnce(async () => { entered(); await held; return {} })
+    if (boundary === "write") storageState.set.mockImplementationOnce(async (key, value) => { entered(); await held; storageState.store.set(key, value) })
+    if (boundary === "read-back") storageState.get.mockImplementationOnce(async key => { entered(); await held; return storageState.store.get(key) })
+    let current = true
+    const creation = createSidepanelChatHandoff({ draftText: "PRIVATE SOURCE TEXT" }, () => current)
+    const outcome = expect(creation).rejects.toThrow("source changed")
+    await reached
+    current = false
+    finish()
+    await outcome
+    expect(storageState.store.size).toBe(0)
+    if (boundary === "cleanup") expect(storageState.set).not.toHaveBeenCalled()
+  })
+
   it("propagates storage read errors only for callers requesting a retryable read", async () => {
     storageState.get.mockRejectedValueOnce(new Error("read failed"))
     await expect(readSidepanelChatHandoff("handoff-existing")).resolves.toBeNull()

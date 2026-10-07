@@ -231,6 +231,9 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 }))
 
 const defaultProps = () => ({
+  draftReady: true,
+  handoffSourceKey: "owned-source-chat",
+  captureHandoffGuard: () => () => true,
   selectedModel: "gpt-4o",
   currentProvider: "openai",
   promptAssistContextKey: "local:history-7",

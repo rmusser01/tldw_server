@@ -271,6 +271,9 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 }))
 
 const defaultProps = () => ({
+  draftReady: true,
+  handoffSourceKey: "owned-source-chat",
+  captureHandoffGuard: () => () => true,
   selectedSystemPrompt: undefined,
   setSelectedSystemPrompt: vi.fn(),
   setSelectedQuickPrompt: vi.fn(),

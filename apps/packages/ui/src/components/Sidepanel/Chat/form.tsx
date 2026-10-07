@@ -372,6 +372,7 @@ export const SidepanelForm = ({
     : COMPOSER_CONSTANTS.TEXTAREA_MIN_HEIGHT_CASUAL
   const storageKey = draftKey || STORAGE_KEYS.SIDEPANEL_CHAT_DRAFT
   const draftAddress = useStoreMessageOption(state => state.chatDraftAddress)
+  const sourceDraftRevision = useStoreMessageOption(state => state.chatDraftRevision)
   const draftTransition = useStoreMessageOption(state => state.chatDraftTransition)
   React.useLayoutEffect(() => {
     if (!useStoreMessageOption.getState().chatDraftAddress) useStoreMessageOption.getState().startNewChatDraft()
@@ -391,6 +392,8 @@ export const SidepanelForm = ({
     textAreaFocus: promptAssistReturnFocus,
     draftSaved,
     draftReady,
+    draftOwnerKey,
+    isDraftOwnerCurrent,
     retainCurrentDraft,
     clearDraft,
     creationRecovery,
@@ -929,6 +932,19 @@ export const SidepanelForm = ({
   const pageContextActive = chatMode === "rag" && chatWithWebsiteEmbedding
 
   const greetingHistorySelection = useHistorySelectionContext()
+  const getHandoffInputRevision = form.getRevision
+  const handoffInputRevision = getHandoffInputRevision()
+  const handoffSourceKey = JSON.stringify([draftOwnerKey, historyId, serverChatId, draftAddress, sourceDraftRevision, handoffInputRevision])
+  const handoffSelectionIsCurrent = React.useMemo(() => greetingHistorySelection?.fence() ?? (() => true), [greetingHistorySelection])
+  const captureHandoffGuard = React.useCallback(() => {
+    const expected = { chatDraftAddress: draftAddress, chatDraftRevision: sourceDraftRevision, historyId, serverChatId }
+    return () => {
+      const current = useStoreMessageOption.getState()
+      return isDraftOwnerCurrent() && handoffSelectionIsCurrent() && getHandoffInputRevision() === handoffInputRevision &&
+        current.chatDraftAddress === expected.chatDraftAddress && current.chatDraftRevision === expected.chatDraftRevision &&
+        current.historyId === expected.historyId && current.serverChatId === expected.serverChatId
+    }
+  }, [handoffSelectionIsCurrent, isDraftOwnerCurrent, getHandoffInputRevision, handoffInputRevision, draftAddress, sourceDraftRevision, historyId, serverChatId])
   const trackedSelectionPendingRef = React.useRef<{
     isCurrent: () => boolean
   } | null>(null)
@@ -3700,6 +3716,9 @@ export const SidepanelForm = ({
                               chatLoopStatus={chatLoopState.status}
                               pendingApprovalsCount={chatLoopState.pendingApprovals.length}
                               runningToolCount={chatLoopState.inflightToolCallIds.length}
+                              draftReady={draftReady}
+                              handoffSourceKey={handoffSourceKey}
+                              captureHandoffGuard={captureHandoffGuard}
                               draftMessage={form.values.message}
                               hasVisiblePageContextForHandoff={
                                 pageContextActive || selectedDocuments.length > 0

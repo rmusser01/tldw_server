@@ -84,6 +84,9 @@ interface ControlRowProps {
   chatLoopStatus?: "idle" | "running" | "complete" | "error" | "cancelled"
   pendingApprovalsCount?: number
   runningToolCount?: number
+  draftReady: boolean
+  handoffSourceKey: string
+  captureHandoffGuard: () => () => boolean
   draftMessage?: string
   hasVisiblePageContextForHandoff?: boolean
   getVisiblePageContextForHandoff?: () =>
@@ -125,6 +128,9 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   chatLoopStatus = "idle",
   pendingApprovalsCount = 0,
   runningToolCount = 0,
+  draftReady,
+  handoffSourceKey,
+  captureHandoffGuard,
   draftMessage = "",
   hasVisiblePageContextForHandoff = false,
   getVisiblePageContextForHandoff,
@@ -140,7 +146,8 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     tone: "info" | "warning" | "error"
     message: string
   } | null>(null)
-  const copyDraftPendingRef = React.useRef(false)
+  const copyDraftMountedRef = React.useRef(false)
+  const copyDraftPendingRef = React.useRef<{ pending: boolean; isCurrent: () => boolean } | null>(null)
   const [copyDraftPending, setCopyDraftPending] =
     React.useState(false)
   const updateScopedChatModelSetting = useStoreChatModelSettings(
@@ -458,9 +465,24 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const draftText = draftMessage ?? ""
   const hasDraftForHandoff = draftText.trim().length > 0
   const copyDraftEnabled =
-    hasDraftForHandoff || hasVisiblePageContextForHandoff
+    draftReady && (hasDraftForHandoff || hasVisiblePageContextForHandoff)
   const copyDraftButtonDisabled =
     !copyDraftEnabled || copyDraftPending
+  const copySourceRef = React.useRef({ draftReady, handoffSourceKey, draftText, fullAppChatPath, hasVisiblePageContextForHandoff, getVisiblePageContextForHandoff })
+  copySourceRef.current = { draftReady, handoffSourceKey, draftText, fullAppChatPath, hasVisiblePageContextForHandoff, getVisiblePageContextForHandoff }
+  React.useLayoutEffect(() => {
+    copyDraftMountedRef.current = true
+    return () => {
+      copyDraftMountedRef.current = false
+      copyDraftPendingRef.current = null
+    }
+  }, [])
+  React.useLayoutEffect(() => {
+    if (copyDraftPendingRef.current?.isCurrent()) return
+    copyDraftPendingRef.current = null
+    setCopyDraftPending(false)
+    setHandoffFeedback(null)
+  }, [draftReady, handoffSourceKey, draftText, fullAppChatPath, hasVisiblePageContextForHandoff, getVisiblePageContextForHandoff, captureHandoffGuard])
   const activeCharacterIdForRouteIntent =
     selectedAssistant?.kind === "character"
       ? String(selectedAssistant.id ?? "").trim()
@@ -506,13 +528,16 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     requestAnimationFrame(() => moreBtnRef.current?.focus())
   }
 
-  const openFullAppPath = React.useCallback(async (routePath: string) => {
+  const openFullAppPath = React.useCallback(async (routePath: string, isCurrent: () => boolean = () => true) => {
+    if (!isCurrent()) return false
     const path = `/options.html#${routePath}`
     const restoreFocus = () => {
+      if (!isCurrent()) return
       setMoreOpen(false)
-      requestAnimationFrame(() => moreBtnRef.current?.focus())
+      moreBtnRef.current?.focus()
     }
     const openFallback = (url: string) => {
+      if (!isCurrent()) return false
       const opened = window.open(url, "_blank")
       if (opened) {
         restoreFocus()
@@ -527,7 +552,9 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
       if (url) {
         if (browser.tabs?.create) {
           try {
+            if (!isCurrent()) return false
             await browser.tabs.create({ url })
+            if (!isCurrent()) return false
             restoreFocus()
             return true
           } catch {
@@ -567,8 +594,18 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     )
 
   const copyDraftToFullPage = async () => {
-    if (!copyDraftEnabled || copyDraftPendingRef.current) return
-    copyDraftPendingRef.current = true
+    if (!copyDraftEnabled || copyDraftPendingRef.current?.pending) return
+    const sourceIsCurrent = captureHandoffGuard()
+    const expected = copySourceRef.current
+    const attempt: { pending: boolean; isCurrent: () => boolean } = { pending: true, isCurrent: () => {
+      const current = copySourceRef.current
+      return copyDraftMountedRef.current && copyDraftPendingRef.current === attempt && sourceIsCurrent() && current.draftReady &&
+        current.handoffSourceKey === expected.handoffSourceKey && current.draftText === expected.draftText &&
+        current.fullAppChatPath === expected.fullAppChatPath && current.hasVisiblePageContextForHandoff === expected.hasVisiblePageContextForHandoff &&
+        current.getVisiblePageContextForHandoff === expected.getVisiblePageContextForHandoff
+    } }
+    copyDraftPendingRef.current = attempt
+    if (!attempt.isCurrent()) { copyDraftPendingRef.current = null; return }
     setCopyDraftPending(true)
     setHandoffFeedback(null)
 
@@ -580,6 +617,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         pageContext = undefined
       }
 
+      if (!attempt.isCurrent()) return
       if (!hasDraftForHandoff && !pageContextHasVisibleContent(pageContext)) {
         setHandoffFeedback({
           tone: "warning",
@@ -601,11 +639,18 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           draftText,
           pageContext,
           routeIntent
-        })
-        const handoffPath = buildSidepanelChatHandoffRoute(fullAppChatPath, pkg.id)
-        const opened = await openFullAppPath(handoffPath)
-        if (!opened) {
+        }, attempt.isCurrent)
+        if (!attempt.isCurrent()) {
+          // This unique copy has not been opened or published to a destination.
           await consumeSidepanelChatHandoff(pkg.id).catch(() => undefined)
+          return
+        }
+        const handoffPath = buildSidepanelChatHandoffRoute(fullAppChatPath, pkg.id)
+        const opened = await openFullAppPath(handoffPath, attempt.isCurrent)
+        if (!attempt.isCurrent()) return
+        if (!opened) {
+          await consumeSidepanelChatHandoff(pkg.id, attempt.isCurrent).catch(() => undefined)
+          if (!attempt.isCurrent()) return
           setHandoffFeedback({
             tone: "error",
             message: t(
@@ -625,6 +670,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           })
         }
       } catch {
+        if (!attempt.isCurrent()) return
         setHandoffFeedback({
           tone: "error",
           message: t(
@@ -634,8 +680,10 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         })
       }
     } finally {
-      copyDraftPendingRef.current = false
-      setCopyDraftPending(false)
+      if (copyDraftPendingRef.current === attempt) {
+        attempt.pending = false
+        if (copyDraftMountedRef.current) setCopyDraftPending(false)
+      }
     }
   }
 
