@@ -23,6 +23,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+import { clearCapabilityProbeCacheForTests } from "@/services/tldw/capability-probe"
 import RateLimitingPage from "../RateLimitingPage"
 
 const fetchMock = vi.fn()
@@ -39,6 +40,9 @@ const expectDesignSystemAlertForText = async (text: string) => {
 describe("RateLimitingPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // The shared capability probe caches the openapi spec per server URL at
+    // module scope; reset it so each test's fetch mock owns its own answer.
+    clearCapabilityProbeCacheForTests()
 
     if (!window.matchMedia) {
       Object.defineProperty(window, "matchMedia", {

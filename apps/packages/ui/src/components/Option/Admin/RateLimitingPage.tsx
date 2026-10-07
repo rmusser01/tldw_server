@@ -15,6 +15,7 @@ import {
 } from "./admin-error-utils"
 import { Alert } from "@/components/ui/primitives"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { serverSupportsPath } from "@/services/tldw/capability-probe"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 const ADMIN_RATE_LIMITS_PATH = "/api/v1/admin/rate-limits"
@@ -41,7 +42,6 @@ const RateLimitingPage: React.FC = () => {
   const [rateLimitsError, setRateLimitsError] = useState<string | null>(null)
 
   const initialLoadRef = useRef(false)
-  const rateLimitsSupportedRef = useRef<boolean | null>(null)
 
   const markAdminGuardFromError = useCallback((err: any) => {
     const guardState = deriveAdminGuardFromError(err)
@@ -87,26 +87,10 @@ const RateLimitingPage: React.FC = () => {
     setRateLimitsLoading(true)
     setRateLimitsError(null)
     try {
-      if (rateLimitsSupportedRef.current == null) {
-        const serverUrl = connectionConfig?.serverUrl?.trim()
-        if (serverUrl) {
-          try {
-            const response = await fetch(`${serverUrl}/openapi.json`)
-            if (response.ok) {
-              const spec = await response.json()
-              const paths =
-                spec && typeof spec === "object" && spec.paths && typeof spec.paths === "object"
-                  ? (spec.paths as Record<string, unknown>)
-                  : null
-              rateLimitsSupportedRef.current = Boolean(paths && ADMIN_RATE_LIMITS_PATH in paths)
-            }
-          } catch {
-            rateLimitsSupportedRef.current = null
-          }
-        }
-      }
-
-      if (rateLimitsSupportedRef.current === false) {
+      // Shared capability probe (session-cached openapi.json) instead of a
+      // per-mount spec fetch.
+      const serverUrl = connectionConfig?.serverUrl?.trim()
+      if (serverUrl && !(await serverSupportsPath(serverUrl, ADMIN_RATE_LIMITS_PATH))) {
         setRateLimits([])
         setRateLimitsError(ADMIN_RATE_LIMITS_UNAVAILABLE_MESSAGE)
         return
@@ -118,7 +102,6 @@ const RateLimitingPage: React.FC = () => {
       // This endpoint may not exist yet; handle gracefully
       const status = err?.status ?? err?.response?.status
       if (status === 404 || status === 405) {
-        rateLimitsSupportedRef.current = false
         setRateLimits([])
         setRateLimitsError(ADMIN_RATE_LIMITS_UNAVAILABLE_MESSAGE)
       } else {

@@ -2,6 +2,7 @@
 
 import React from "react"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -28,6 +29,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+import { clearCapabilityProbeCacheForTests } from "@/services/tldw/capability-probe"
 import BillingDashboardPage, { aggregateStorageSummary } from "../BillingDashboardPage"
 
 const fetchMock = vi.fn()
@@ -46,6 +48,9 @@ const expectDesignSystemAlertForTitle = async (titleText: string) => {
 describe("BillingDashboardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // The capability probe caches the openapi spec per server URL at module
+    // scope; reset it so each test's fetch mock owns its own spec answer.
+    clearCapabilityProbeCacheForTests()
 
     mocks.useCanonicalConnectionConfig.mockReturnValue({
       config: {
@@ -57,7 +62,7 @@ describe("BillingDashboardPage", () => {
     })
   })
 
-  it("shows an unsupported-state message without calling billing endpoints when the route is absent", async () => {
+  it("downgrades the billing content in place when the route is absent, without reaching the lazy tabs", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -71,9 +76,90 @@ describe("BillingDashboardPage", () => {
       "Not available on this server"
     )
     expect(alert).toHaveTextContent("Billing endpoints are not enabled here.")
-    expect(mocks.getBillingOverview).not.toHaveBeenCalled()
+    // The page chrome (tabs) survives the downgrade - only the tab content
+    // is swapped for the notice.
+    expect(screen.getAllByRole("tab")).toHaveLength(3)
+    // Tabs render immediately, so the Overview tab fires exactly one
+    // speculative load before the probe downgrades it...
+    expect(mocks.getBillingOverview).toHaveBeenCalledTimes(1)
+    // ...while the lazy Subscriptions/Events tabs never mount at all.
     expect(mocks.listAllSubscriptions).not.toHaveBeenCalled()
     expect(mocks.listBillingEvents).not.toHaveBeenCalled()
+  })
+
+  it("renders the tabs before the capability probe resolves", async () => {
+    let resolveProbe!: (spec: { ok: boolean; json: () => Promise<unknown> }) => void
+    fetchMock.mockImplementation(() => new Promise((resolve) => { resolveProbe = resolve }))
+    mocks.getBillingOverview.mockResolvedValue({
+      mrr: 0,
+      active_subscriptions: 0,
+      canceled_subscriptions: 0,
+      past_due_subscriptions: 0
+    })
+    mocks.getStorageQuotaSummary.mockResolvedValue({
+      total_quotas: 0,
+      items: []
+    })
+
+    render(<BillingDashboardPage />)
+
+    // Tabs (and their data surface) render immediately - the openapi.json
+    // probe must never hold the first render in a full-page skeleton.
+    // Skeletons inside the tab content (Statistic loading) are fine; a
+    // page-level skeleton outside .ant-tabs is the old render gate.
+    expect(screen.getAllByRole("tab")).toHaveLength(3)
+    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument()
+    const skeletonsOutsideTabs = Array.from(
+      document.querySelectorAll(".ant-skeleton")
+    ).filter((el) => !el.closest(".ant-tabs"))
+    expect(skeletonsOutsideTabs).toHaveLength(0)
+
+    resolveProbe({
+      ok: true,
+      json: async () => ({
+        paths: {
+          "/api/v1/admin/billing/overview": {}
+        }
+      })
+    })
+    expect(await screen.findByText("Quota Records")).toBeInTheDocument()
+  })
+
+  it("reads the {items, total} envelope for subscriptions and events (legacy fallbacks kept)", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        paths: {
+          "/api/v1/admin/billing/overview": {}
+        }
+      })
+    })
+    mocks.getBillingOverview.mockResolvedValue({
+      mrr: 0,
+      active_subscriptions: 0,
+      canceled_subscriptions: 0,
+      past_due_subscriptions: 0
+    })
+    mocks.getStorageQuotaSummary.mockResolvedValue({ total_quotas: 0, items: [] })
+    mocks.listAllSubscriptions.mockResolvedValue({
+      items: [{ user_id: 7, username: "ada", plan_id: "pro", status: "active", created_at: "2026-01-01T00:00:00Z" }],
+      total: 1
+    })
+    mocks.listBillingEvents.mockResolvedValue({
+      items: [{ id: 42, event_type: "subscription.created", user_id: 7, amount: 5, description: "pro plan", created_at: "2026-01-01T00:00:00Z" }],
+      total: 1
+    })
+
+    render(<BillingDashboardPage />)
+
+    // Overview tab is default-active; switch to Subscriptions.
+    await screen.findByText("Quota Records")
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("tab", { name: "Subscriptions" }))
+    expect(await screen.findByText("ada")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("tab", { name: "Billing Events" }))
+    expect(await screen.findByText("subscription.created")).toBeInTheDocument()
   })
 
   it("aggregates the storage summary from the real {total_quotas, items} envelope", async () => {
