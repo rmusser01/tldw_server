@@ -71,7 +71,9 @@ export const createSaveMessageOnSuccess = (
       }
       return historyId
     } else {
-      setHistoryId("temp")
+      const setHistoryIdTarget =
+        typeof e?.setHistoryId === "function" ? e.setHistoryId : setHistoryId
+      setHistoryIdTarget("temp")
       return null
     }
   }

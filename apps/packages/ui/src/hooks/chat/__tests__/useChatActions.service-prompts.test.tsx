@@ -1,14 +1,22 @@
 // @vitest-environment jsdom
 import React from "react";
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useChatActions } from "../useChatActions";
+import {
+  HistorySelectionContext,
+  useHistorySelection,
+} from "../useHistorySelection";
+import { useStoreMessageOption } from "@/store/option";
+import type { ChatHistory, Message } from "@/store/option";
 
 const {
   addChatMessageMock,
   events,
   createChatMock,
+  continueChatModeMock,
+  continuationStoreBoundary,
   documentChatModeMock,
   generateTitleMock,
   loadServicePromptSnapshotMock,
@@ -24,11 +32,17 @@ const {
   setLastUsedPromptMock,
   tabChatModeMock,
   updateCreatedAtMock,
+  updateMessageMock,
   updatePageTitleMock,
 } = vi.hoisted(() => ({
   addChatMessageMock: vi.fn(),
   events: [] as string[],
   createChatMock: vi.fn(),
+  continueChatModeMock:
+    vi.fn<
+      typeof import("@/hooks/chat-modes/continueChatMode").continueChatMode
+    >(),
+  continuationStoreBoundary: { actual: false, actualSave: false },
   documentChatModeMock: vi.fn(),
   generateTitleMock: vi.fn(),
   loadServicePromptSnapshotMock: vi.fn(),
@@ -37,8 +51,10 @@ const {
   releaseSnapshotMock: vi.fn(),
   rollbackScopedComparePersistenceMock: vi.fn(async () => undefined),
   runChatPersistenceTransactionMock: vi.fn(
-    async (_signal: AbortSignal | undefined, operation: () => Promise<unknown>) =>
-      operation(),
+    async (
+      _signal: AbortSignal | undefined,
+      operation: () => Promise<unknown>,
+    ) => operation(),
   ),
   saveHistoryMock: vi.fn(),
   saveMessageMock: vi.fn(),
@@ -47,6 +63,7 @@ const {
   setLastUsedPromptMock: vi.fn(async () => undefined),
   tabChatModeMock: vi.fn(),
   updateCreatedAtMock: vi.fn(async () => undefined),
+  updateMessageMock: vi.fn(async () => undefined),
   updatePageTitleMock: vi.fn(),
 }));
 
@@ -59,7 +76,7 @@ vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
 }));
 
 vi.mock("@/hooks/chat-modes/continueChatMode", () => ({
-  continueChatMode: vi.fn(),
+  continueChatMode: continueChatModeMock,
 }));
 
 vi.mock("@/hooks/chat-modes/ragMode", () => ({
@@ -74,15 +91,23 @@ vi.mock("@/hooks/chat-modes/documentChatMode", () => ({
   documentChatMode: documentChatModeMock,
 }));
 
-vi.mock("@/hooks/utils/messageHelpers", () => ({
-  validateBeforeSubmit: vi.fn(() => true),
-  createSaveMessageOnSuccess: vi.fn(
-    () => async (): Promise<string | null> => "history-compare",
-  ),
-  createSaveMessageOnError: vi.fn(
-    () => async (): Promise<string | null> => "history-compare",
-  ),
-}));
+vi.mock("@/hooks/utils/messageHelpers", async (original) => {
+  const actual =
+    await original<typeof import("@/hooks/utils/messageHelpers")>();
+  return {
+    ...actual,
+    validateBeforeSubmit: vi.fn(() => true),
+    createSaveMessageOnSuccess: vi.fn(
+      (...args: Parameters<typeof actual.createSaveMessageOnSuccess>) =>
+        continuationStoreBoundary.actualSave
+          ? actual.createSaveMessageOnSuccess(...args)
+          : async (): Promise<string | null> => "history-compare",
+    ),
+    createSaveMessageOnError: vi.fn(
+      () => async (): Promise<string | null> => "history-compare",
+    ),
+  };
+});
 
 vi.mock("@/hooks/handlers/messageHandlers", () => ({
   createRegenerateLastMessage: vi.fn(() => vi.fn()),
@@ -96,7 +121,7 @@ vi.mock("@/db/dexie/helpers", () => ({
   saveHistory: saveHistoryMock,
   saveMessage: saveMessageMock,
   updateHistory: vi.fn(),
-  updateMessage: vi.fn(),
+  updateMessage: updateMessageMock,
   updateMessageMedia: vi.fn(async () => null),
   removeMessageByIndex: vi.fn(),
   formatToChatHistory: vi.fn((items: unknown) => items),
@@ -159,11 +184,21 @@ vi.mock("@plasmohq/storage/hook", () => ({
   },
 }));
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: {
-    getState: () => ({ selectedModel: "model-a" as string | null }),
-  },
-}));
+vi.mock("@/store/option", async (original) => {
+  const actual = await original<typeof import("@/store/option")>();
+  return {
+    ...actual,
+    useStoreMessageOption: Object.assign(actual.useStoreMessageOption, {
+      getState: (() => {
+        const readActual = actual.useStoreMessageOption.getState;
+        return () =>
+          continuationStoreBoundary.actual
+            ? readActual()
+            : { selectedModel: "model-a" as string | null };
+      })(),
+    }),
+  };
+});
 
 vi.mock("@/services/tldw/server-capabilities", () => ({
   getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false })),
@@ -226,7 +261,9 @@ const snapshot = Object.freeze({
           }),
         ]),
       }),
-      parts: Object.freeze({ template: "Context: {context}\nQuestion: {question}" }),
+      parts: Object.freeze({
+        template: "Context: {context}\nQuestion: {question}",
+      }),
       source: "packaged" as const,
       revision: null,
     }),
@@ -403,15 +440,36 @@ describe("useChatActions Compare service prompt snapshot", () => {
     });
   });
 
-  it.each([false, true])("stamps a new persisted Compare with its captured owner (webSearch=%s)", async webSearch => {
-    const options = createHookOptions({ webSearch });
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]));
-    await act(async () => { await result.current.onSubmit({ message: "Compare my private question", image: "" }); });
-    expect(saveHistoryMock).toHaveBeenCalledWith(
-      expect.any(String), false, "web-ui", undefined, undefined, snapshot.requestScope,
-    );
-    expect(normalChatModeMock.mock.calls.every(call => call[6].servicePromptSnapshot === snapshot)).toBe(true);
-  });
+  it.each([false, true])(
+    "stamps a new persisted Compare with its captured owner (webSearch=%s)",
+    async (webSearch) => {
+      const options = createHookOptions({ webSearch });
+      const { result } = renderHook(() =>
+        useChatActions(
+          options as unknown as Parameters<typeof useChatActions>[0],
+        ),
+      );
+      await act(async () => {
+        await result.current.onSubmit({
+          message: "Compare my private question",
+          image: "",
+        });
+      });
+      expect(saveHistoryMock).toHaveBeenCalledWith(
+        expect.any(String),
+        false,
+        "web-ui",
+        undefined,
+        undefined,
+        snapshot.requestScope,
+      );
+      expect(
+        normalChatModeMock.mock.calls.every(
+          (call) => call[6].servicePromptSnapshot === snapshot,
+        ),
+      ).toBe(true);
+    },
+  );
 
   it("loads before shared side effects and gives every web-search branch the same snapshot", async () => {
     const options = createHookOptions();
@@ -547,7 +605,9 @@ describe("useChatActions Compare service prompt snapshot", () => {
     normalChatModeMock.mockImplementation(async (...args: unknown[]) => {
       const params = args[6] as {
         selectedModel: string;
-        saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>;
+        saveMessageOnSuccess: (
+          payload: Record<string, unknown>,
+        ) => Promise<string | null>;
       };
       await params.saveMessageOnSuccess({
         historyId: "history-compare",
@@ -633,37 +693,77 @@ describe("useChatActions Compare service prompt snapshot", () => {
 
   it("does not publish old Compare branches or rollback over a replacement account", async () => {
     const owner = new AbortController();
-    loadServicePromptSnapshotMock.mockResolvedValueOnce({ ...snapshot, scopeSignal: owner.signal, scopeInvalidatedSignal: owner.signal });
+    loadServicePromptSnapshotMock.mockResolvedValueOnce({
+      ...snapshot,
+      scopeSignal: owner.signal,
+      scopeInvalidatedSignal: owner.signal,
+    });
     let finish!: () => void;
-    const held = new Promise<void>(resolve => { finish = resolve; });
-    const aliceMessages = [{ id: "alice-private", role: "user", message: "Alice private transcript", isBot: false, sources: [] }];
-    const aliceHistory = [{ role: "user", content: "Alice private transcript" }];
+    const held = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const aliceMessages = [
+      {
+        id: "alice-private",
+        role: "user",
+        message: "Alice private transcript",
+        isBot: false,
+        sources: [],
+      },
+    ];
+    const aliceHistory = [
+      { role: "user", content: "Alice private transcript" },
+    ];
     let currentMessages: unknown = aliceMessages;
     let currentHistory: unknown = aliceHistory;
     const options = {
-      ...createHookOptions({ webSearch: false }), messages: aliceMessages, history: aliceHistory,
-      setMessages: vi.fn((next: unknown) => { currentMessages = next; }),
-      setHistory: vi.fn((next: unknown) => { currentHistory = next; })
+      ...createHookOptions({ webSearch: false }),
+      messages: aliceMessages,
+      history: aliceHistory,
+      setMessages: vi.fn((next: unknown) => {
+        currentMessages = next;
+      }),
+      setHistory: vi.fn((next: unknown) => {
+        currentHistory = next;
+      }),
     };
     normalChatModeMock.mockImplementation(async (...args: unknown[]) => {
-      const params = args[6] as { setMessages: (next: unknown) => void; setHistory: (next: unknown) => void };
+      const params = args[6] as {
+        setMessages: (next: unknown) => void;
+        setHistory: (next: unknown) => void;
+      };
       await held;
       params.setMessages(aliceMessages);
       params.setHistory(aliceHistory);
       return { status: "skipped", reason: "Request scope changed" };
     });
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]));
+    const { result } = renderHook(() =>
+      useChatActions(
+        options as unknown as Parameters<typeof useChatActions>[0],
+      ),
+    );
     let submission!: ReturnType<typeof result.current.onSubmit>;
-    act(() => { submission = result.current.onSubmit({ message: "Compare this", image: "" }); });
+    act(() => {
+      submission = result.current.onSubmit({
+        message: "Compare this",
+        image: "",
+      });
+    });
     await waitFor(() => expect(normalChatModeMock).toHaveBeenCalledTimes(2));
     const bobMessages = [{ message: "Bob replacement transcript" }];
-    const bobHistory = [{ role: "user", content: "Bob replacement transcript" }];
+    const bobHistory = [
+      { role: "user", content: "Bob replacement transcript" },
+    ];
     currentMessages = bobMessages;
     currentHistory = bobHistory;
     options.setAbortController.mockClear();
     options.setIsProcessing.mockClear();
     options.setStreaming.mockClear();
-    await act(async () => { owner.abort(); finish(); await submission; });
+    await act(async () => {
+      owner.abort();
+      finish();
+      await submission;
+    });
     expect(currentMessages).toBe(bobMessages);
     expect(currentHistory).toBe(bobHistory);
     expect(options.setAbortController).not.toHaveBeenCalled();
@@ -676,7 +776,9 @@ describe("useChatActions Compare service prompt snapshot", () => {
     normalChatModeMock.mockImplementation(async (...args: unknown[]) => {
       const params = args[6] as {
         selectedModel: string;
-        saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>;
+        saveMessageOnSuccess: (
+          payload: Record<string, unknown>,
+        ) => Promise<string | null>;
       };
       await params.saveMessageOnSuccess({
         historyId: "history-existing",
@@ -698,7 +800,9 @@ describe("useChatActions Compare service prompt snapshot", () => {
     });
     const options = createHookOptions({ historyId: "history-existing" });
     const { result } = renderHook(() =>
-      useChatActions(options as unknown as Parameters<typeof useChatActions>[0]),
+      useChatActions(
+        options as unknown as Parameters<typeof useChatActions>[0],
+      ),
     );
 
     await act(async () => {
@@ -731,7 +835,9 @@ describe("useChatActions Compare service prompt snapshot", () => {
     normalChatModeMock.mockImplementation(async (...args: unknown[]) => {
       const params = args[6] as {
         selectedModel: string;
-        saveMessageOnError: (payload: Record<string, unknown>) => Promise<string | null>;
+        saveMessageOnError: (
+          payload: Record<string, unknown>,
+        ) => Promise<string | null>;
       };
       controller.abort();
       await params.saveMessageOnError({
@@ -743,7 +849,9 @@ describe("useChatActions Compare service prompt snapshot", () => {
     });
     const options = createHookOptions({ historyId: "history-existing" });
     const { result } = renderHook(() =>
-      useChatActions(options as unknown as Parameters<typeof useChatActions>[0]),
+      useChatActions(
+        options as unknown as Parameters<typeof useChatActions>[0],
+      ),
     );
 
     await act(async () => {
@@ -949,7 +1057,10 @@ describe("useChatActions Compare service prompt snapshot", () => {
       async (_ids: unknown, { signal }: { signal: AbortSignal }) =>
         rejectWhenAborted(signal),
     );
-    addChatMessageMock.mockResolvedValueOnce({ id: "user-server-1", version: 1 });
+    addChatMessageMock.mockResolvedValueOnce({
+      id: "user-server-1",
+      version: 1,
+    });
     streamCharacterChatCompletionMock.mockImplementationOnce(
       async function* () {
         yield await Promise.reject(createAbortError());
@@ -1052,53 +1163,58 @@ describe("useChatActions Compare service prompt snapshot", () => {
       modeMock: normalChatModeMock,
       webSearch: true,
     },
-  ])("gates $label history work on prompt preflight", async ({
-    options: optionOverrides,
-    submit,
-    ids,
-    modeMock,
-    webSearch: caseWebSearch = false,
-  }) => {
-    loadServicePromptSnapshotMock.mockRejectedValueOnce(
-      new Error("Workflow prompts are unavailable"),
-    );
-    const options = {
-      ...createHookOptions({
-        webSearch: caseWebSearch,
-        serverChatId: "server-chat-7",
-      }),
-      compareModeActive: false,
-      compareSelectedModels: [],
-      ...optionOverrides,
-    };
-    const { result } = renderHook(() =>
-      useChatActions(options as unknown as Parameters<typeof useChatActions>[0]),
-    );
-    options.setMessages.mockClear();
-    options.setHistory.mockClear();
+  ])(
+    "gates $label history work on prompt preflight",
+    async ({
+      options: optionOverrides,
+      submit,
+      ids,
+      modeMock,
+      webSearch: caseWebSearch = false,
+    }) => {
+      loadServicePromptSnapshotMock.mockRejectedValueOnce(
+        new Error("Workflow prompts are unavailable"),
+      );
+      const options = {
+        ...createHookOptions({
+          webSearch: caseWebSearch,
+          serverChatId: "server-chat-7",
+        }),
+        compareModeActive: false,
+        compareSelectedModels: [],
+        ...optionOverrides,
+      };
+      const { result } = renderHook(() =>
+        useChatActions(
+          options as unknown as Parameters<typeof useChatActions>[0],
+        ),
+      );
+      options.setMessages.mockClear();
+      options.setHistory.mockClear();
 
-    await act(async () => {
-      await result.current.onSubmit({
-        message: "Prompt-gated turn",
-        image: "",
-        ...submit,
+      await act(async () => {
+        await result.current.onSubmit({
+          message: "Prompt-gated turn",
+          image: "",
+          ...submit,
+        });
       });
-    });
 
-    expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith(ids, {
-      signal: expect.any(AbortSignal),
-    });
-    expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled();
-    expect(options.setMessages).not.toHaveBeenCalled();
-    expect(options.setHistory).not.toHaveBeenCalled();
-    expect(saveHistoryMock).not.toHaveBeenCalled();
-    expect(saveMessageMock).not.toHaveBeenCalled();
-    expect(modeMock).not.toHaveBeenCalled();
-    expect(options.notification.error).toHaveBeenCalledWith({
-      message: "error",
-      description: "Workflow prompts are unavailable",
-    });
-  });
+      expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith(ids, {
+        signal: expect.any(AbortSignal),
+      });
+      expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled();
+      expect(options.setMessages).not.toHaveBeenCalled();
+      expect(options.setHistory).not.toHaveBeenCalled();
+      expect(saveHistoryMock).not.toHaveBeenCalled();
+      expect(saveMessageMock).not.toHaveBeenCalled();
+      expect(modeMock).not.toHaveBeenCalled();
+      expect(options.notification.error).toHaveBeenCalledWith({
+        message: "error",
+        description: "Workflow prompts are unavailable",
+      });
+    },
+  );
 
   it("treats Stop during per-model prompt preflight as cancellation without an error notification", async () => {
     loadServicePromptSnapshotMock.mockImplementationOnce(
@@ -1183,41 +1299,42 @@ describe("useChatActions Compare service prompt snapshot", () => {
       ids: ["chat.web_search.answer"],
       modeMock: normalChatModeMock,
     },
-  ])("gates per-model $label replies on prompt preflight", async ({
-    options: optionOverrides,
-    ids,
-    modeMock,
-  }) => {
-    loadServicePromptSnapshotMock.mockRejectedValueOnce(
-      new Error("Workflow prompts are unavailable"),
-    );
-    const options = {
-      ...createHookOptions({
-        webSearch: false,
-        serverChatId: "server-chat-7",
-      }),
-      ...optionOverrides,
-    };
-    const { result } = renderHook(() =>
-      useChatActions(options as unknown as Parameters<typeof useChatActions>[0]),
-    );
+  ])(
+    "gates per-model $label replies on prompt preflight",
+    async ({ options: optionOverrides, ids, modeMock }) => {
+      loadServicePromptSnapshotMock.mockRejectedValueOnce(
+        new Error("Workflow prompts are unavailable"),
+      );
+      const options = {
+        ...createHookOptions({
+          webSearch: false,
+          serverChatId: "server-chat-7",
+        }),
+        ...optionOverrides,
+      };
+      const { result } = renderHook(() =>
+        useChatActions(
+          options as unknown as Parameters<typeof useChatActions>[0],
+        ),
+      );
 
-    await act(async () => {
-      await result.current.sendPerModelReply({
-        clusterId: "cluster-1",
-        modelId: "model-a",
-        message: "Follow up",
+      await act(async () => {
+        await result.current.sendPerModelReply({
+          clusterId: "cluster-1",
+          modelId: "model-a",
+          message: "Follow up",
+        });
       });
-    });
 
-    expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith(ids, {
-      signal: expect.any(AbortSignal),
-    });
-    expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled();
-    expect(saveHistoryMock).not.toHaveBeenCalled();
-    expect(saveMessageMock).not.toHaveBeenCalled();
-    expect(modeMock).not.toHaveBeenCalled();
-  });
+      expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith(ids, {
+        signal: expect.any(AbortSignal),
+      });
+      expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled();
+      expect(saveHistoryMock).not.toHaveBeenCalled();
+      expect(saveMessageMock).not.toHaveBeenCalled();
+      expect(modeMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("gates server-backed Compare history creation on the exact turn signal", async () => {
     const pendingSnapshot = deferred<typeof snapshot>();
@@ -1397,7 +1514,10 @@ describe("useChatActions Compare service prompt snapshot", () => {
       await result.current.onSubmit({ message: "Compare this", image: "" });
     });
 
-    expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith([], expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith(
+      [],
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(options.ensureServerChatHistoryId.mock.calls[0][3]).toBe(snapshot);
     expect(releaseSnapshotMock).toHaveBeenCalledTimes(1);
     expect(options.ensureServerChatHistoryId).toHaveBeenCalledTimes(1);
@@ -1433,9 +1553,14 @@ describe("useChatActions Compare service prompt snapshot", () => {
     });
 
     expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith(
-      [], expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      [],
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
-    expect(normalChatModeMock.mock.calls.every(call => call[6].servicePromptSnapshot === snapshot)).toBe(true);
+    expect(
+      normalChatModeMock.mock.calls.every(
+        (call) => call[6].servicePromptSnapshot === snapshot,
+      ),
+    ).toBe(true);
 
     vi.clearAllMocks();
     events.length = 0;
@@ -1492,5 +1617,538 @@ describe("useChatActions Compare service prompt snapshot", () => {
 
     expect(tabChatModeMock).toHaveBeenCalledTimes(1);
     expect(tabChatModeMock.mock.calls[0]?.[2]).toEqual(storedTabs);
+  });
+});
+
+// These tests exercise the actual useChatActions continuation branch, live
+// option core/account watcher and H1 controller. Mode execution, service scope,
+// database persistence and unrelated UI services remain declared I/O doubles;
+// late mode emissions model a response already in flight, not native transport.
+describe("useChatActions owned continuation prompt publication", () => {
+  const originalMessages: Message[] = [
+    {
+      id: "source-answer",
+      name: "Assistant",
+      isBot: true,
+      message: "Existing answer.",
+    },
+  ];
+  const originalHistory: ChatHistory = [
+    { role: "assistant", content: "Existing answer." },
+  ];
+  const continuedMessages: Message[] = [
+    {
+      ...originalMessages[0],
+      message: "Existing answer. A suggested next question?",
+    },
+  ];
+  const continuedHistory: ChatHistory = [
+    {
+      role: "assistant",
+      content: continuedMessages[0].message,
+    },
+  ];
+  const replacementMessages: Message[] = [
+    {
+      id: "replacement-answer",
+      name: "Assistant",
+      isBot: true,
+      message: "Replacement source answer.",
+    },
+  ];
+  const replacementHistory: ChatHistory = [
+    {
+      role: "assistant",
+      content: "Replacement source answer.",
+    },
+  ];
+
+  const mountContinuation = (persistAfterGate = false) => {
+    const gate = deferred<void>();
+    let pipeline: Parameters<typeof continueChatModeMock>[3] | undefined;
+    let controller: ReturnType<typeof useHistorySelection> | undefined;
+    continueChatModeMock.mockImplementation(
+      async (_messages, _history, _signal, params) => {
+        pipeline = params;
+        params.setMessages(structuredClone(continuedMessages));
+        params.setHistory(structuredClone(continuedHistory));
+        await gate.promise;
+        if (persistAfterGate) {
+          await params.saveMessageOnSuccess({
+            historyId: params.historyId,
+            setHistoryId: params.setHistoryId,
+            selectedModel: params.selectedModel,
+            modelId: params.selectedModel,
+            image: "",
+            assistantMessageId: "source-answer",
+            isRegenerate: false,
+            message: "",
+            fullText: continuedMessages[0].message,
+            source: [],
+            reasoning_time_taken: 0,
+            isContinue: true,
+            saveToDb: false,
+          });
+          params.setStreaming(false);
+          params.setIsProcessing(false);
+          params.setAbortController(null);
+        }
+        return { status: "submitted" };
+      },
+    );
+    const core = useStoreMessageOption.getState();
+    const messages = vi.fn(core.setMessages);
+    const history = vi.fn(core.setHistory);
+    const quick = vi.fn(core.setSelectedQuickPrompt);
+    const historyId = vi.fn(core.setHistoryId);
+    const options = createHookOptions({
+      webSearch: false,
+      historyId: "history-source",
+    });
+    const Wrapper = ({ children }: { children: React.ReactNode }) => {
+      const selection = useHistorySelection();
+      React.useLayoutEffect(() => {
+        controller = selection;
+      }, [selection]);
+      return (
+        <HistorySelectionContext.Provider value={selection}>
+          {children}
+        </HistorySelectionContext.Provider>
+      );
+    };
+    const view = renderHook(
+      () => {
+        const state = useStoreMessageOption();
+        return useChatActions({
+          ...options,
+          messages: state.messages,
+          history: state.history,
+          historyId: state.historyId,
+          serverChatId: state.serverChatId,
+          temporaryChat: state.temporaryChat,
+          selectedModel: state.selectedModel,
+          setMessages: messages,
+          setHistory: history,
+          setHistoryId: historyId,
+          setServerChatId: state.setServerChatId,
+          setSelectedQuickPrompt: quick,
+          compareModeActive: false,
+          compareSelectedModels: [],
+        } as unknown as Parameters<typeof useChatActions>[0]);
+      },
+      { wrapper: Wrapper },
+    );
+    return {
+      ...view,
+      gate,
+      messages,
+      history,
+      quick,
+      historyId,
+      streaming: options.setStreaming,
+      processing: options.setIsProcessing,
+      abortController: options.setAbortController,
+      get controller() {
+        return controller!;
+      },
+      get pipeline() {
+        return pipeline!;
+      },
+    };
+  };
+  const start = async (view: ReturnType<typeof mountContinuation>) => {
+    let pending!: ReturnType<typeof view.result.current.onSubmit>;
+    act(() => {
+      pending = view.result.current.onSubmit({
+        message: "",
+        image: "",
+        isContinue: true,
+        continueOutputTarget: "composer_input",
+        messageSteeringOverride: {
+          mode: "impersonate_user",
+          forceNarrate: false,
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(continueChatModeMock).toHaveBeenCalledOnce();
+      expect(useStoreMessageOption.getState().messages).toEqual(
+        continuedMessages,
+      );
+    });
+    view.messages.mockClear();
+    view.history.mockClear();
+    view.quick.mockClear();
+    return { pending };
+  };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    continuationStoreBoundary.actual = true;
+    continuationStoreBoundary.actualSave = false;
+    const core = useStoreMessageOption.getState();
+    core.startNewChatDraft(false);
+    core.setChatDraftAddress({
+      kind: "local",
+      id: "history-source",
+      profileId: "profile-test",
+    });
+    useStoreMessageOption.setState({
+      historyId: "history-source",
+      serverChatId: null,
+      temporaryChat: false,
+      messages: structuredClone(originalMessages),
+      history: structuredClone(originalHistory),
+      selectedModel: "model-a",
+      selectedQuickPrompt: null,
+      quickPromptRevision: 0,
+      compareMode: false,
+      compareSelectedModels: [],
+      streaming: false,
+      isProcessing: false,
+    });
+    loadServicePromptSnapshotMock.mockResolvedValue({
+      ...snapshot,
+      scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: new AbortController().signal,
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    continuationStoreBoundary.actual = false;
+    continuationStoreBoundary.actualSave = false;
+  });
+
+  it("publishes the current continuation once and restores its original transcript", async () => {
+    const view = mountContinuation();
+    const { pending } = await start(view);
+    await act(async () => {
+      view.gate.resolve();
+      await pending;
+    });
+    expect(view.quick).toHaveBeenCalledOnce();
+    expect(useStoreMessageOption.getState().selectedQuickPrompt).toBe(
+      "A suggested next question?",
+    );
+    expect(useStoreMessageOption.getState().messages).toEqual(originalMessages);
+    expect(useStoreMessageOption.getState().history).toEqual(originalHistory);
+    expect(updateMessageMock).toHaveBeenCalledWith(
+      "history-source",
+      "source-answer",
+      "Existing answer.",
+    );
+  });
+
+  it.each([false, true])(
+    "keeps actual temporary-success UI publication with its source (retired=%s)",
+    async (retired) => {
+      continuationStoreBoundary.actualSave = true;
+      const core = useStoreMessageOption.getState();
+      core.startNewChatDraft(true);
+      core.setHistoryId("temp");
+      const view = mountContinuation(true);
+      const { pending } = await start(view);
+      view.historyId.mockClear();
+      if (retired) {
+        act(() => {
+          const current = useStoreMessageOption.getState();
+          current.startNewChatDraft(false);
+          current.setHistoryId(null);
+          current.setMessages(structuredClone(replacementMessages));
+          current.setHistory(structuredClone(replacementHistory));
+        });
+      }
+      // The actual temporary helper is composed here; its persistence policy
+      // remains no-write, while supplied UI setters retain source ownership.
+      await act(async () => {
+        view.gate.resolve();
+        await pending;
+      });
+      if (retired) {
+        expect(view.historyId).not.toHaveBeenCalled();
+        expect(useStoreMessageOption.getState().historyId).toBeNull();
+        expect(useStoreMessageOption.getState().temporaryChat).toBe(false);
+        expect(useStoreMessageOption.getState().messages).toEqual(
+          replacementMessages,
+        );
+        expect(view.quick).not.toHaveBeenCalled();
+      } else {
+        expect(view.historyId).toHaveBeenCalledExactlyOnceWith("temp");
+        expect(useStoreMessageOption.getState().historyId).toBe("temp");
+        expect(useStoreMessageOption.getState().temporaryChat).toBe(true);
+        expect(view.quick).toHaveBeenCalledExactlyOnceWith(
+          "A suggested next question?",
+        );
+        expect(useStoreMessageOption.getState().messages).toEqual(
+          originalMessages,
+        );
+      }
+      expect(saveHistoryMock).not.toHaveBeenCalled();
+      expect(saveMessageMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([false, true])(
+    "permits only its own temporary null-to-temp bind and cleanup (retired=%s)",
+    async (retired) => {
+      continuationStoreBoundary.actualSave = true;
+      const core = useStoreMessageOption.getState();
+      core.startNewChatDraft(true);
+      core.setHistoryId(null);
+      const view = mountContinuation(true);
+      const { pending } = await start(view);
+      const sourceAddress = useStoreMessageOption.getState().chatDraftAddress;
+      view.historyId.mockClear();
+      view.streaming.mockClear();
+      view.processing.mockClear();
+      view.abortController.mockClear();
+      if (retired) {
+        act(() => {
+          const current = useStoreMessageOption.getState();
+          current.startNewChatDraft(false);
+          current.setHistoryId(null);
+          current.setMessages(structuredClone(replacementMessages));
+          current.setHistory(structuredClone(replacementHistory));
+        });
+      }
+      await act(async () => {
+        view.gate.resolve();
+        await pending;
+      });
+      if (retired) {
+        expect(view.historyId).not.toHaveBeenCalled();
+        expect(view.quick).not.toHaveBeenCalled();
+        expect(view.streaming).not.toHaveBeenCalled();
+        expect(view.processing).not.toHaveBeenCalled();
+        expect(view.abortController).not.toHaveBeenCalled();
+        expect(useStoreMessageOption.getState().historyId).toBeNull();
+        expect(useStoreMessageOption.getState().messages).toEqual(
+          replacementMessages,
+        );
+      } else {
+        expect(view.historyId).toHaveBeenCalledExactlyOnceWith("temp");
+        expect(useStoreMessageOption.getState().chatDraftAddress).toBe(
+          sourceAddress,
+        );
+        expect(view.quick).toHaveBeenCalledExactlyOnceWith(
+          "A suggested next question?",
+        );
+        expect(view.streaming).toHaveBeenCalledExactlyOnceWith(false);
+        expect(view.processing).toHaveBeenCalledExactlyOnceWith(false);
+        expect(view.abortController).toHaveBeenCalledExactlyOnceWith(null);
+        expect(useStoreMessageOption.getState().messages).toEqual(
+          originalMessages,
+        );
+        expect(useStoreMessageOption.getState().historyId).toBe("temp");
+      }
+      expect(saveHistoryMock).not.toHaveBeenCalled();
+      expect(saveMessageMock).not.toHaveBeenCalled();
+      expect(updateMessageMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not roll back after a synchronous core subscriber replaces its published command", async () => {
+    const view = mountContinuation();
+    const { pending } = await start(view);
+    let intervened = false;
+    const stop = useStoreMessageOption.subscribe((state) => {
+      if (
+        !intervened &&
+        state.selectedQuickPrompt === "A suggested next question?"
+      ) {
+        intervened = true;
+        state.setSelectedQuickPrompt("Newer synchronous command");
+      }
+    });
+    try {
+      await act(async () => {
+        view.gate.resolve();
+        await pending;
+      });
+      expect(intervened).toBe(true);
+      expect(useStoreMessageOption.getState().selectedQuickPrompt).toBe(
+        "Newer synchronous command",
+      );
+      expect(view.messages).not.toHaveBeenCalled();
+      expect(view.history).not.toHaveBeenCalled();
+      expect(updateMessageMock).not.toHaveBeenCalled();
+      expect(useStoreMessageOption.getState().messages).toEqual(
+        continuedMessages,
+      );
+      expect(useStoreMessageOption.getState().history).toEqual(
+        continuedHistory,
+      );
+    } finally {
+      stop();
+    }
+  });
+
+  it("refuses a retained continuation callback after same-source H1 departure and return", async () => {
+    const view = mountContinuation();
+    const submit = view.result.current.onSubmit;
+    const source = useStoreMessageOption.getState();
+    let pending!: ReturnType<typeof submit>;
+    act(() => {
+      view.controller.beginLoad();
+      view.controller.reset();
+      // Invoke the rendered callback before React commits a replacement one.
+      pending = submit({
+        message: "",
+        image: "",
+        isContinue: true,
+        continueOutputTarget: "composer_input",
+      });
+    });
+    await act(async () => {
+      view.gate.resolve();
+      await pending;
+    });
+    expect(useStoreMessageOption.getState().chatDraftAddress).toBe(
+      source.chatDraftAddress,
+    );
+    expect(useStoreMessageOption.getState().chatDraftRevision).toBe(
+      source.chatDraftRevision,
+    );
+    expect(continueChatModeMock).not.toHaveBeenCalled();
+    expect(view.quick).not.toHaveBeenCalled();
+    expect(useStoreMessageOption.getState().messages).toEqual(originalMessages);
+    expect(useStoreMessageOption.getState().history).toEqual(originalHistory);
+  });
+
+  it("does not restore old history if its rollback messages synchronously replace the source", async () => {
+    const view = mountContinuation();
+    const { pending } = await start(view);
+    let intervened = false;
+    const stop = useStoreMessageOption.subscribe((state) => {
+      if (!intervened && state.messages[0]?.message === "Existing answer.") {
+        intervened = true;
+        state.startNewChatDraft(false);
+        state.setMessages(structuredClone(replacementMessages));
+        state.setHistory(structuredClone(replacementHistory));
+      }
+    });
+    try {
+      await act(async () => {
+        view.gate.resolve();
+        await pending;
+      });
+      expect(intervened).toBe(true);
+      expect(useStoreMessageOption.getState().messages).toEqual(
+        replacementMessages,
+      );
+      expect(view.history).not.toHaveBeenCalled();
+      expect(useStoreMessageOption.getState().history).toEqual(
+        replacementHistory,
+      );
+      expect(updateMessageMock).not.toHaveBeenCalled();
+    } finally {
+      stop();
+    }
+  });
+
+  it.each(["New", "account", "H1"] as const)(
+    "refuses pipeline UI writes and final prompt/rollback after %s retires the source",
+    async (boundary) => {
+      const view = mountContinuation();
+      const { pending } = await start(view);
+      const before = useStoreMessageOption.getState();
+      act(() => {
+        if (boundary === "New") before.startNewChatDraft(false);
+        else if (boundary === "account")
+          window.dispatchEvent(new Event("tldw:auth-principal-changed"));
+        else view.controller.beginLoad();
+        useStoreMessageOption.setState({
+          messages: structuredClone(replacementMessages),
+          history: structuredClone(replacementHistory),
+        });
+      });
+      if (boundary !== "H1")
+        expect(
+          useStoreMessageOption.getState().chatDraftRevision,
+        ).toBeGreaterThan(before.chatDraftRevision);
+      try {
+        act(() => {
+          view.pipeline.setMessages(structuredClone(continuedMessages));
+          view.pipeline.setHistory(structuredClone(continuedHistory));
+        });
+        expect(useStoreMessageOption.getState().messages).toEqual(
+          replacementMessages,
+        );
+        expect(useStoreMessageOption.getState().history).toEqual(
+          replacementHistory,
+        );
+      } finally {
+        await act(async () => {
+          view.gate.resolve();
+          await pending;
+        });
+      }
+      expect(view.quick).not.toHaveBeenCalled();
+      expect(updateMessageMock).not.toHaveBeenCalled();
+      expect(useStoreMessageOption.getState().messages).toEqual(
+        replacementMessages,
+      );
+      expect(useStoreMessageOption.getState().history).toEqual(
+        replacementHistory,
+      );
+    },
+  );
+
+  it.each(["New", "account", "H1"] as const)(
+    "refuses final command publication and transcript rollback after %s with no late stream emission",
+    async (boundary) => {
+      const view = mountContinuation();
+      const { pending } = await start(view);
+      act(() => {
+        const core = useStoreMessageOption.getState();
+        if (boundary === "New") core.startNewChatDraft(false);
+        else if (boundary === "account")
+          window.dispatchEvent(new Event("tldw:auth-principal-changed"));
+        else view.controller.beginLoad();
+        useStoreMessageOption.setState({
+          messages: structuredClone(replacementMessages),
+          history: structuredClone(replacementHistory),
+        });
+      });
+      // The held mode simply settles here. This isolates post-submit publication
+      // and rollback from the separate late-setter regressions above.
+      await act(async () => {
+        view.gate.resolve();
+        await pending;
+      });
+      expect(view.quick).not.toHaveBeenCalled();
+      expect(view.messages).not.toHaveBeenCalled();
+      expect(view.history).not.toHaveBeenCalled();
+      expect(updateMessageMock).not.toHaveBeenCalled();
+      expect(useStoreMessageOption.getState().messages).toEqual(
+        replacementMessages,
+      );
+      expect(useStoreMessageOption.getState().history).toEqual(
+        replacementHistory,
+      );
+    },
+  );
+
+  it("does not overwrite a newer command or roll back its current transcript after command ABA", async () => {
+    const view = mountContinuation();
+    const { pending } = await start(view);
+    act(() => {
+      const core = useStoreMessageOption.getState();
+      core.setSelectedQuickPrompt("newer explicit command");
+      core.setSelectedQuickPrompt("intermediate command");
+      core.setSelectedQuickPrompt("newer explicit command");
+    });
+    await act(async () => {
+      view.gate.resolve();
+      await pending;
+    });
+    expect(view.quick).not.toHaveBeenCalled();
+    expect(updateMessageMock).not.toHaveBeenCalled();
+    expect(useStoreMessageOption.getState().selectedQuickPrompt).toBe(
+      "newer explicit command",
+    );
+    expect(useStoreMessageOption.getState().messages).toEqual(
+      continuedMessages,
+    );
+    expect(useStoreMessageOption.getState().history).toEqual(continuedHistory);
   });
 });

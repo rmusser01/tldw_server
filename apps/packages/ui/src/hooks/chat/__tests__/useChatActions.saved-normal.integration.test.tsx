@@ -1173,15 +1173,30 @@ describe("saved normal Chat pipeline with autosave", () => {
     view.unmount()
   })
 
-  it("preserves the selected provider in source-grounded generation options", async () => {
+  it("uses the selected provider once for source-grounded completion and retrieves evidence only", async () => {
     mocks.realProviderResolution = true
+    const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+    mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+    mocks.getModels.mockResolvedValue([{ id: "shared-model", provider: "custom_openai_api", capabilities: [] }])
+    mocks.streamMessage.mockImplementation(async function* (_messages, options, onChunk) {
+      const id = options.conversationId || "source-chat"
+      if (!mocks.serverRows.has(id)) mocks.serverRows.set(id, [])
+      const rows = mocks.serverRows.get(id)!
+      rows.push({ id: "source-user", role: "user", content: "Use this source" },
+        { id: "source-answer", role: "assistant", content: "Source answer" })
+      onChunk({ tldw_conversation_id: id, tldw_user_message_id: "source-user", tldw_message_id: "source-answer" })
+      yield "Source answer"
+    })
     mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Evidence", metadata: {} }] })
     const view = renderWorkspace(false, false, { ragMediaIds: [42], fileRetrievalEnabled: true, ragEnableGeneration: true })
-    act(() => useStoreMessageOption.setState({ selectedModel: "custom-openai-api:shared-model" }))
+    act(() => useStoreMessageOption.getState().setSelectedModel("custom-openai-api:shared-model"))
     await act(async () => { await view.result.current.actions.onSubmit({ message: "Use this source", image: "" }) })
-    expect(mocks.ragSearch).toHaveBeenCalledWith("Use this source", expect.objectContaining({
-      generation_model: "shared-model", generation_provider: "custom-openai-api"
-    }))
+    expect(mocks.ragSearch).toHaveBeenCalledWith("Use this source", expect.objectContaining({ enable_generation: false }))
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_model")
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_provider")
+    expect(mocks.streamMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.streamMessage.mock.calls[0][1]).toMatchObject({ model: "shared-model", apiProvider: "custom-openai-api" })
+    expect(view.result.current.state.messages.at(-1)?.message).toBe("Source answer")
     view.unmount()
   })
 

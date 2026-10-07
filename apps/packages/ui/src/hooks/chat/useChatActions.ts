@@ -1,3 +1,4 @@
+import { captureChatDraftSource } from "./chat-draft-transition"
 import type { GreetingSeed } from "@/utils/character-greetings"
 import {
   captureLocalMutationOwner,
@@ -605,6 +606,13 @@ export const useChatActions = ({
   setVisualIdentityManualExpressionOverride
 }: UseChatActionsOptions) => {
   const historySelection = useHistorySelectionContext()
+  const renderedDraftRevision = useStoreMessageOption.getState().chatDraftRevision
+  const renderedContinuationFence = historySelection?.fence()
+  const actionsMountedRef = React.useRef(false)
+  React.useLayoutEffect(() => {
+    actionsMountedRef.current = true
+    return () => { actionsMountedRef.current = false }
+  }, [])
   const latestChatContext = React.useRef({ historyId, serverChatId, temporaryChat })
   latestChatContext.current = { historyId, serverChatId, temporaryChat }
   const readCurrentChatContext = React.useCallback(() => {
@@ -970,7 +978,8 @@ export const useChatActions = ({
   )
 
   const saveMessageOnSuccess = async (
-    payload?: SaveMessagePayload
+    payload?: SaveMessagePayload,
+    sourceIsCurrent: () => boolean = () => true
   ): Promise<string | null> => {
     if (payload?.historyTurn) return baseSaveMessageOnSuccess(payload)
     const scopeSignal = payload?.scopeSignal
@@ -993,6 +1002,7 @@ export const useChatActions = ({
           setHistoryId:
             payload.setHistoryId ??
             ((id: string) => {
+              if (!sourceIsCurrent()) return
               setHistoryId(
                 id,
                 payloadConversationId || serverChatId
@@ -1006,7 +1016,7 @@ export const useChatActions = ({
       throwIfScopeChanged()
       const key = await baseSaveMessageOnSuccess(payloadForLocalPersistence)
       throwIfScopeChanged()
-      if (!payload?.historyId && key) {
+      if (!payload?.historyId && key && sourceIsCurrent()) {
         markCompareHistoryCreated(key)
       }
       return key
@@ -1294,7 +1304,7 @@ export const useChatActions = ({
     }
 
     if (scopeSignal) historyKey = await persistLocally()
-    if (payload?.saveToDb && payloadConversationId && !serverChatId && !compareModeActive) {
+    if (sourceIsCurrent() && payload?.saveToDb && payloadConversationId && !serverChatId && !compareModeActive) {
       throwIfScopeChanged()
       // Creation may already have published this ID during the current turn.
       // Re-selecting it clears the resolved metadata in the server-chat store.
@@ -1309,7 +1319,9 @@ export const useChatActions = ({
   const buildChatModeParams = async (
     overrides: ChatModeOverrides = {},
     snapshot?: ServicePromptSnapshot,
-    selectionSource?: Parameters<typeof normalChatMode>[6]["selectionSource"]
+    selectionSource?: Parameters<typeof normalChatMode>[6]["selectionSource"],
+    sourceIsCurrent?: () => boolean,
+    onHistoryIdPublished?: (id: string | null) => void
   ) => {
     const hasHistoryOverride = Object.prototype.hasOwnProperty.call(
       overrides,
@@ -1401,30 +1413,33 @@ export const useChatActions = ({
       messageSteeringPrompts: resolvedMessageSteeringPrompts,
       ...overrides
     }
-    // A mode may attempt rollback after its owner has signed out. Neither that
-    // rollback nor its final cleanup may publish into the replacement account.
+    // Retired account or conversation results cannot publish into the replacement UI.
+    const uiIsCurrent = () => !snapshot?.scopeInvalidatedSignal.aborted && (sourceIsCurrent?.() ?? true)
     return {
       ...params,
+      saveMessageOnSuccess: sourceIsCurrent ? (data: SaveMessagePayload) => saveMessageOnSuccess(data, sourceIsCurrent) : params.saveMessageOnSuccess,
       setMessages: (next: Parameters<typeof setMessages>[0]) => {
-        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setMessages(next)
+        if (uiIsCurrent()) params.setMessages(next)
       },
       setHistory: (next: Parameters<typeof setHistory>[0]) => {
-        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setHistory(next)
+        if (uiIsCurrent()) params.setHistory(next)
       },
       setHistoryId: (...args: Parameters<typeof setHistoryId>) => {
-        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setHistoryId(...args)
+        if (!uiIsCurrent()) return
+        params.setHistoryId(...args)
+        onHistoryIdPublished?.(args[0])
       },
       setIsProcessing: (next: boolean) => {
-        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setIsProcessing(next)
+        if (uiIsCurrent()) params.setIsProcessing(next)
       },
       setStreaming: (next: boolean) => {
-        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setStreaming(next)
+        if (uiIsCurrent()) params.setStreaming(next)
       },
       setAbortController: (next: Parameters<typeof setAbortController>[0]) => {
-        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setAbortController(next)
+        if (uiIsCurrent()) params.setAbortController(next)
       },
       releaseAbortControllerIfOwned: (turnSignal: AbortSignal) =>
-        !snapshot?.scopeInvalidatedSignal.aborted && params.releaseAbortControllerIfOwned(turnSignal)
+        uiIsCurrent() && params.releaseAbortControllerIfOwned(turnSignal)
     }
   }
 
@@ -3324,6 +3339,13 @@ export const useChatActions = ({
       serverChatId: serverChatIdOverride || serverChatId
     })
     const historyOriginIsCurrent = historySelection?.fence()
+    let temporaryContinuationBound = false
+    const continuationSource = isContinue ? captureChatDraftSource(() => actionsMountedRef.current &&
+      useStoreMessageOption.getState().chatDraftRevision === renderedDraftRevision &&
+      (renderedContinuationFence?.() ?? true),
+      (current, original) => current === original ||
+        (temporaryContinuationBound && original === null && current === "temp")) : null
+    if (continuationSource && !continuationSource.isCurrent()) return chatSubmitSkipped("Conversation changed")
     const lastVisibleMessage = messages.at(-1)
     if (isContinue && lastVisibleMessage && getLocalRagDiagnosticUser(messages, lastVisibleMessage)) {
       // A local grounding diagnostic has no generated answer to continue.
@@ -3591,7 +3613,12 @@ export const useChatActions = ({
           userMetadataExtra: turnUserMetadataExtra
         },
         turnServicePromptSnapshot ?? compareServicePromptSnapshot,
-        normalSelectionSource
+        normalSelectionSource,
+        continuationSource?.isCurrent,
+        isContinue && temporaryChat ? (id) => {
+          // Only this current pipeline may acknowledge its own temporary sentinel.
+          if (id === "temp") temporaryContinuationBound = true
+        } : undefined
       )
       const baseMessages = chatHistory || messages
       const baseHistory = memory || history
@@ -3616,6 +3643,7 @@ export const useChatActions = ({
       }
 
       if (isContinue) {
+        if (!continuationSource?.isCurrent()) return chatSubmitSkipped("Conversation changed")
         const continueMessages = chatHistory || messages
         const continueHistory = memory || history
         const continueTargetMessage =
@@ -3635,7 +3663,8 @@ export const useChatActions = ({
 
         const shouldApplyComposerRollback =
           continueResult.status === "submitted" &&
-          continueOutputTarget === "composer_input"
+          continueOutputTarget === "composer_input" &&
+          continuationSource.isQuickPromptCurrent()
 
         if (shouldApplyComposerRollback) {
           const currentMessages = messagesRef.current
@@ -3648,11 +3677,16 @@ export const useChatActions = ({
             priorAssistantText
           )
 
+          const publicationRevision = useStoreMessageOption.getState().quickPromptRevision
           setSelectedQuickPrompt(continuationDraft)
+          const published = useStoreMessageOption.getState()
+          if (!continuationSource.isCurrent() ||
+            published.quickPromptRevision !== publicationRevision + 1 ||
+            published.selectedQuickPrompt !== continuationDraft) return toChatSubmitResult(continueResult)
 
           if (continueTargetMessage?.id) {
             const targetId = continueTargetMessage.id
-            setMessages((prev) =>
+            chatModeParams.setMessages((prev) =>
               prev.map((entry) =>
                 entry.id === targetId
                   ? updateActiveVariant(entry, { message: priorAssistantText })
@@ -3660,7 +3694,7 @@ export const useChatActions = ({
               )
             )
           } else {
-            setMessages((prev) => {
+            chatModeParams.setMessages((prev) => {
               if (prev.length === 0) return prev
               const next = [...prev]
               const lastIndex = next.length - 1
@@ -3671,7 +3705,8 @@ export const useChatActions = ({
             })
           }
 
-          setHistory(priorHistorySnapshot)
+          chatModeParams.setHistory(priorHistorySnapshot)
+          if (!continuationSource.isCurrent()) return toChatSubmitResult(continueResult)
 
           const resolvedHistoryId =
             typeof chatModeParams.historyId === "string" &&
@@ -4441,7 +4476,7 @@ export const useChatActions = ({
         signal.aborted &&
         isAbortLikeError(e) &&
         !isRequestConfigScopeChangedError(e)
-      if (!greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
+      if ((!continuationSource || continuationSource.isCurrent()) && !greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
         notification.error({
           message: t("error"),
           description: errorMessage
@@ -4449,7 +4484,7 @@ export const useChatActions = ({
       }
       // If this turn still owns the shared controller (e.g. a pre-stream failure
       // before any chat mode ran), release it so the UI is not left streaming.
-      if (releaseAbortControllerIfOwned(signal)) {
+      if ((!continuationSource || continuationSource.isCurrent()) && releaseAbortControllerIfOwned(signal)) {
         setAbortController(null)
         setIsProcessing(false)
         setStreaming(false)
@@ -4469,7 +4504,7 @@ export const useChatActions = ({
           clearReplyTarget()
         }
       }
-      if (steeringApplied) {
+      if (steeringApplied && (!continuationSource || continuationSource.isCurrent())) {
         clearMessageSteering()
       }
     }

@@ -1,6 +1,6 @@
 import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils";
 import { HistorySelectionProvider, useHistorySelectionContext, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection";
-import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition";
+import { captureChatDraftLoad, captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview";
 import { formatSelectedHistory } from "@/db/dexie/helpers";
 import { loadServicePromptSnapshot } from "@/services/service-prompts";
@@ -351,6 +351,14 @@ export const Playground = () => {
 
 const PlaygroundContent = () => {
   const historySelection = useHistorySelectionContext()!;
+  const researchDraftRevision = useStoreMessageOption(state => state.chatDraftRevision);
+  const renderedResearchFence = historySelection.fence();
+  const followUpMountedRef = React.useRef(false);
+  const followUpAttemptRef = React.useRef<object | null>(null);
+  React.useLayoutEffect(() => {
+    followUpMountedRef.current = true;
+    return () => { followUpMountedRef.current = false; followUpAttemptRef.current = null; };
+  }, []);
   const drop = React.useRef<HTMLDivElement>(null);
   const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null);
   const artifactsEdgeExpandRef = React.useRef<HTMLButtonElement>(null);
@@ -1444,10 +1452,19 @@ const PlaygroundContent = () => {
 
   const handlePrepareResearchFollowUp = React.useCallback(
     async (target: ResearchFollowUpTarget) => {
+      const attempt = {};
+      followUpAttemptRef.current = attempt;
+      const source = captureChatDraftSource(() => followUpMountedRef.current &&
+        followUpAttemptRef.current === attempt && renderedResearchFence() &&
+        useStoreMessageOption.getState().chatDraftRevision === researchDraftRevision &&
+        routeLocationKeyRef.current === routeLocationKey);
+      if (!source.isQuickPromptCurrent()) return;
       if (attachedResearchContext?.run_id !== target.run_id) {
         try {
           await tldwClient.initialize().catch(() => null);
+          if (!source.isQuickPromptCurrent()) return;
           const bundle = await tldwClient.getResearchBundle(target.run_id);
+          if (!source.isQuickPromptCurrent()) return;
           handleAttachResearchContext(
             deriveAttachedResearchContext(bundle, target.run_id, target.query),
           );
@@ -1456,11 +1473,14 @@ const PlaygroundContent = () => {
         }
       }
 
-      setSelectedQuickPrompt(buildResearchFollowUpPrompt(target.query));
+      if (source.isQuickPromptCurrent()) setSelectedQuickPrompt(buildResearchFollowUpPrompt(target.query));
     },
     [
       attachedResearchContext?.run_id,
       handleAttachResearchContext,
+      renderedResearchFence,
+      researchDraftRevision,
+      routeLocationKey,
       setSelectedQuickPrompt,
     ],
   );

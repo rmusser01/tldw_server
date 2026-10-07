@@ -30,6 +30,9 @@ import {
   revalidatePromptCapabilities
 } from "@/services/prompts-api"
 import { useRecipePersistenceOwner } from "@/hooks/useRecipePersistenceOwner"
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { useStoreMessageOption } from "@/store/option"
 import {
   getServerPromptDetail,
   isServerPromptLibraryUnconfiguredError,
@@ -78,6 +81,7 @@ type Props = {
 type ServerPromptSelection = {
   key: string
   status: "loading" | "error"
+  isCurrent: () => boolean
 }
 
 const serverPromptMenuKey = (prompt: ServerPromptBrief) =>
@@ -117,7 +121,20 @@ export const PromptSelect: React.FC<Props> = ({
   const { t } = useTranslation("option")
   const [menuDensity] = useStorage("menuDensity", "comfortable")
   const [searchText, setSearchText] = useState("")
-  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const historySelection = useHistorySelectionContext()
+  const renderedHistoryFence = historySelection?.fence()
+  const draftRevision = useStoreMessageOption(state => state.chatDraftRevision)
+  const quickPromptRevision = useStoreMessageOption(state => state.quickPromptRevision)
+  const [serverPromptSelection, setServerPromptSelection] =
+    useState<ServerPromptSelection | null>(null)
+  const serverPromptSelectionRef = useRef<ServerPromptSelection | null>(null)
+  const dropdownRevisionRef = useRef(0)
+  const [dropdownOpen, setDropdownOpenState] = useState(false)
+  const setDropdownOpen = React.useCallback((open: boolean) => {
+    dropdownRevisionRef.current += 1
+    if (!open) serverPromptSelectionRef.current = null
+    setDropdownOpenState(open)
+  }, [])
   const [editorOpen, setEditorOpen] = useState(false)
   const disclosureOpen = dropdownOpen || editorOpen
   useEffect(() => { onOpenChange?.(disclosureOpen) }, [disclosureOpen, onOpenChange])
@@ -175,6 +192,12 @@ export const PromptSelect: React.FC<Props> = ({
     editorLifecycleKeyRef.current = editorLifecycleKey
     editorLookupEpochRef.current += 1
   }
+
+  const serverSelectionIsCurrent = serverPromptSelection?.isCurrent() ?? true
+  React.useLayoutEffect(() => {
+    serverPromptSelectionRef.current = null
+    setServerPromptSelection(null)
+  }, [draftRevision, quickPromptRevision, editorLifecycleKey, normalizedPromptAssistAuthorizationRevision, serverSelectionIsCurrent])
 
   const { data: promptCapabilities } = useQuery({
     queryKey: [
@@ -346,12 +369,12 @@ export const PromptSelect: React.FC<Props> = ({
     editorInputRef.current?.focus()
   }, [editorOpen, recipeMode, promptAssist.state.status])
 
-  const restorePromptSelectFocus = React.useCallback(() => {
+  const restorePromptSelectFocus = React.useCallback((isCurrent: () => boolean = () => true) => {
     const returnFocusSelector =
       returnFocusSelectorRef.current ?? "[data-testid='chat-prompt-select']"
     returnFocusSelectorRef.current = null
 
-    scheduleFocusFirstVisibleElement(returnFocusSelector)
+    scheduleFocusFirstVisibleElement(returnFocusSelector, undefined, isCurrent)
   }, [])
 
   const {
@@ -407,6 +430,8 @@ export const PromptSelect: React.FC<Props> = ({
   )
 
   const handlePromptChange = React.useCallback((value?: string) => {
+    serverPromptSelectionRef.current = null
+    setServerPromptSelection(null)
     if (!value) {
       setSelectedSystemPrompt(undefined)
       setSelectedQuickPrompt(undefined)
@@ -471,9 +496,6 @@ export const PromptSelect: React.FC<Props> = ({
     "Couldn't load this prompt from the server. Select it to retry."
   )
 
-  const [serverPromptSelection, setServerPromptSelection] =
-    useState<ServerPromptSelection | null>(null)
-  const serverPromptSelectionRef = useRef<string | null>(null)
   // antd closes the dropdown after any menu click; server actions keep it open
   // so their loading and error feedback stays visible.
   const keepMenuOpenRef = useRef(false)
@@ -489,13 +511,21 @@ export const PromptSelect: React.FC<Props> = ({
   // pipeline resolves), quick prompts by their text.
   const applyServerPrompt = React.useCallback(
     async (serverPrompt: ServerPromptBrief) => {
+      const state = useStoreMessageOption.getState()
+      if (state.chatDraftRevision !== draftRevision || state.quickPromptRevision !== quickPromptRevision) return
       const selectionKey = serverPromptMenuKey(serverPrompt)
-      if (serverPromptSelectionRef.current === selectionKey) return
-      serverPromptSelectionRef.current = selectionKey
-      setServerPromptSelection({ key: selectionKey, status: "loading" })
-      const isCurrent = () =>
-        editorMountedRef.current &&
-        serverPromptSelectionRef.current === selectionKey
+      if (serverPromptSelectionRef.current?.key === selectionKey) return
+      const lookupEpoch = editorLookupEpochRef.current
+      const source = captureChatDraftSource(() => editorMountedRef.current && (renderedHistoryFence?.() ?? true))
+      if (!source.isCurrent()) return
+      const attempt: ServerPromptSelection = {
+        key: selectionKey, status: "loading", isCurrent: source.isQuickPromptCurrent
+      }
+      serverPromptSelectionRef.current = attempt
+      setServerPromptSelection(attempt)
+      const isCurrent = () => source.isQuickPromptCurrent() &&
+        editorLookupEpochRef.current === lookupEpoch && serverPromptSelectionRef.current === attempt
+      const focusOwner = document.activeElement
       try {
         const detail = await getServerPromptDetail(serverPrompt.id)
         const application = resolveServerPromptApplication(detail)
@@ -513,23 +543,40 @@ export const PromptSelect: React.FC<Props> = ({
           })
           if (!isCurrent()) return
           setSelectedSystemPrompt(localCopy.id)
+          if (!source.isQuickPromptCurrent()) return
         } else {
           setSelectedSystemPrompt(undefined)
+          if (!source.isQuickPromptCurrent() || serverPromptSelectionRef.current !== attempt) return
+          const publicationRevision = useStoreMessageOption.getState().quickPromptRevision
           setSelectedQuickPrompt(application.content)
+          const published = useStoreMessageOption.getState()
+          if (!source.isCurrent() || published.quickPromptRevision !== publicationRevision + 1 ||
+            published.selectedQuickPrompt !== application.content) return
         }
+        if (!source.isCurrent() || serverPromptSelectionRef.current !== attempt) return
+        const publishedRevision = useStoreMessageOption.getState().quickPromptRevision
         serverPromptSelectionRef.current = null
         setServerPromptSelection(null)
         setDropdownOpen(false)
-        restorePromptSelectFocus()
+        const closedRevision = dropdownRevisionRef.current
+        restorePromptSelectFocus(() => source.isCurrent() &&
+          useStoreMessageOption.getState().quickPromptRevision === publishedRevision &&
+          dropdownRevisionRef.current === closedRevision &&
+          (document.activeElement === focusOwner ||
+            (document.activeElement === document.body && !focusOwner?.isConnected)))
       } catch {
         if (!isCurrent()) return
         serverPromptSelectionRef.current = null
-        setServerPromptSelection({ key: selectionKey, status: "error" })
+        setServerPromptSelection({ ...attempt, status: "error" })
       }
     },
     [
+      draftRevision,
+      quickPromptRevision,
+      renderedHistoryFence,
       recipeQueryClient,
       restorePromptSelectFocus,
+      setDropdownOpen,
       setSelectedQuickPrompt,
       setSelectedSystemPrompt
     ]
@@ -564,7 +611,7 @@ export const PromptSelect: React.FC<Props> = ({
     setEditorDraft(resolved.effectiveContent)
     setEditorOverrideActive(resolved.overrideActive)
     setEditorLoading(false)
-  }, [promptAssist, selectedSystemPrompt, systemPrompt])
+  }, [promptAssist, selectedSystemPrompt, systemPrompt, setDropdownOpen])
 
   const handleEditorSave = React.useCallback(() => {
     const nextValue = normalizeSystemPromptOverrideValue({
@@ -1021,7 +1068,7 @@ export const PromptSelect: React.FC<Props> = ({
     return () => {
       window.removeEventListener(OPEN_PROMPT_SELECT_EVENT, handleOpenPromptSelect)
     }
-  }, [])
+  }, [setDropdownOpen])
 
   useEffect(() => {
     if (!dropdownOpen) {
@@ -1072,7 +1119,7 @@ export const PromptSelect: React.FC<Props> = ({
       window.removeEventListener("keydown", handleEscape)
       window.removeEventListener("keyup", handleEscape)
     }
-  }, [dropdownOpen, restorePromptSelectFocus])
+  }, [dropdownOpen, restorePromptSelectFocus, setDropdownOpen])
 
   const triggerLabel = promptsLoading
     ? promptLoadingLabel

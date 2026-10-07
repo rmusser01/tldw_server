@@ -1,17 +1,17 @@
-import { useStoreMessageOption } from '@/store/option';
-import type { HistoryLoadReceipt } from './useHistorySelection';
+import { useStoreMessageOption } from "@/store/option";
+import type { HistoryLoadReceipt } from "./useHistorySelection";
 import {
   isChatDraftAddress,
   type ChatDraftAddress,
   type ChatDraftTransition,
-} from '@/utils/chat-draft-address';
+} from "@/utils/chat-draft-address";
 
 export const chatDraftAddressForReceipt = ({
   owner,
   view,
 }: HistoryLoadReceipt): ChatDraftAddress | null => {
   if (
-    owner.kind === 'unavailable' ||
+    owner.kind === "unavailable" ||
     owner.validate_lease?.() === false ||
     view.conversation_id !== owner.conversation_id ||
     !view.owner_key ||
@@ -19,21 +19,25 @@ export const chatDraftAddressForReceipt = ({
   )
     return null;
   const address: ChatDraftAddress =
-    owner.kind === 'local'
-      ? { kind: 'local', id: owner.conversation_id, profileId: owner.profile_id }
+    owner.kind === "local"
+      ? {
+          kind: "local",
+          id: owner.conversation_id,
+          profileId: owner.profile_id,
+        }
       : {
-          kind: 'native',
+          kind: "native",
           id: owner.conversation_id,
           ownerKey: view.owner_key,
-          scope: owner.scope ?? { type: 'global' },
+          scope: owner.scope ?? { type: "global" },
         };
   return isChatDraftAddress(address) ? address : null;
 };
 
 /** Capture the source before loading; a qualified H1 result locates the private draft. */
 export const captureChatDraftLoad = (
-  kind: ChatDraftTransition['kind'],
-  isCurrent: () => boolean = () => true
+  kind: ChatDraftTransition["kind"],
+  isCurrent: () => boolean = () => true,
 ) => {
   const source = useStoreMessageOption.getState();
   const expectedRevision = source.chatDraftRevision;
@@ -53,7 +57,7 @@ export const captureChatDraftLoad = (
     if (committed || !current()) return false;
     const address = chatDraftAddressForReceipt(receipt);
     if (!address) return false;
-    if (kind === 'bind' && !sourceAddress) return false;
+    if (kind === "bind" && !sourceAddress) return false;
     committed = useStoreMessageOption
       .getState()
       .setChatDraftAddress(address, { kind, expectedRevision, sourceAddress });
@@ -65,4 +69,32 @@ export const captureChatDraftLoad = (
     return committed;
   };
   return Object.assign(accept, { isCurrent: current });
+};
+
+/** Retain the original conversation and command intent through asynchronous preparation. */
+export const captureChatDraftSource = (
+  isCurrent: () => boolean = () => true,
+  isHistoryIdCurrent: (
+    current: string | null,
+    original: string | null,
+  ) => boolean = (current, original) => current === original,
+) => {
+  const source = useStoreMessageOption.getState();
+  const current = () => {
+    const state = useStoreMessageOption.getState();
+    return (
+      isCurrent() &&
+      state.chatDraftRevision === source.chatDraftRevision &&
+      state.chatDraftAddress === source.chatDraftAddress &&
+      isHistoryIdCurrent(state.historyId, source.historyId) &&
+      state.serverChatId === source.serverChatId
+    );
+  };
+  return {
+    isCurrent: current,
+    isQuickPromptCurrent: () =>
+      current() &&
+      useStoreMessageOption.getState().quickPromptRevision ===
+        source.quickPromptRevision,
+  };
 };

@@ -18,6 +18,7 @@ import {
   type FakeServerPrompt
 } from "@/services/__tests__/server-prompts-api-fixture"
 import { PromptSelect } from "../PromptSelect"
+import { useStoreMessageOption } from "@/store/option"
 
 const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn(),
@@ -158,7 +159,8 @@ const renderPromptSelect = () => {
     systemPrompt: "",
     setSystemPrompt: vi.fn(),
     setSelectedSystemPrompt: vi.fn(),
-    setSelectedQuickPrompt: vi.fn()
+    setSelectedQuickPrompt: vi.fn((prompt: string | undefined) =>
+      useStoreMessageOption.getState().setSelectedQuickPrompt(prompt ?? null))
   }
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>

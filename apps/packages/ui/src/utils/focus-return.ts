@@ -1,5 +1,8 @@
 const isFocusableElement = (element: HTMLElement): boolean => {
-  if ("disabled" in element && Boolean((element as HTMLButtonElement).disabled)) {
+  if (
+    "disabled" in element &&
+    Boolean((element as HTMLButtonElement).disabled)
+  ) {
     return false;
   }
   return true;
@@ -26,9 +29,7 @@ const isHiddenBySelfOrAncestor = (element: HTMLElement): boolean => {
   return false;
 };
 
-export const normalizeFocusSelector = (
-  selector: unknown,
-): string | null => {
+export const normalizeFocusSelector = (selector: unknown): string | null => {
   if (typeof selector !== "string") return null;
   const trimmedSelector = selector.trim();
   return trimmedSelector.length > 0 ? trimmedSelector : null;
@@ -76,9 +77,10 @@ export const focusFirstVisibleElement = (
 export const scheduleFocusFirstVisibleElement = (
   selector: string,
   root?: ParentNode,
+  isCurrent: () => boolean = () => true,
 ): void => {
   const focusTarget = () => {
-    focusFirstVisibleElement(selector, root);
+    if (isCurrent()) focusFirstVisibleElement(selector, root);
   };
 
   if (typeof window !== "undefined" && window.requestAnimationFrame) {
