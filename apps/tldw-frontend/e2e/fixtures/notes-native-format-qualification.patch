@@ -9,7 +9,7 @@ index 0a357f74c2..e4e1e7beaa 100644
  import type { InputRef } from 'antd'
  import { Input, Typography, Select, Button, Tooltip, Spin } from 'antd'
  import {
-@@ -447,6 +449,24 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
+@@ -447,4 +449,22 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
    })
    const saveStatusRef = React.useRef<HTMLSpanElement | null>(null)
    const saveStatusDescriptionId = saveIndicatorText ? NOTES_SAVE_STATUS_MESSAGE_ID : null
@@ -32,8 +32,6 @@ index 0a357f74c2..e4e1e7beaa 100644
 +    bridge.applyFormat(createFormatResult({ key, state: 'formatted', replacement: '{\n  "a": 1\n}', check }), key, !editorDisabled)
 +  }
    const contentDescribedBy = joinAriaIds(NOTES_EDITOR_CONTENT_HELP_ID, saveStatusDescriptionId)
- 
-   React.useEffect(() => {
 @@ -1601,6 +1621,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                    />
                  ) : (
