@@ -979,7 +979,7 @@ describe("Playground coordinator integration", () => {
         // The accepted retry branch already exists on the server; later reads
         // must return that branch rather than the fixed parent fixture.
         tldwClientState.getChat.mockImplementation(async (id: string) => ({ id, title: "Robot chat", scope_type: "global", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat" }))
-        setFixtureTranscript("saved-cedar", [{ id: "question", role: "user", content: "Question", version: 1 }, { id: "answer", role: "assistant", content: "Recovered answer", version: 1 }])
+        setFixtureTranscript("robot", [{ id: "question", role: "user", content: "Question", version: 1 }, { id: "answer", role: "assistant", content: "Recovered answer", version: 1 }])
         window.dispatchEvent(new CustomEvent(CHAT_ROUTE_REPLACEMENT_EVENT, {
           detail: {
             href: window.location.href,

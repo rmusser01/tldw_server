@@ -240,7 +240,7 @@ export type State = {
   setRagPinnedResults: (results: RagPinnedResult[]) => void
   // Server-backed character chat id
   serverChatId: string | null
-  setServerChatId: (id: string | null) => void
+  setServerChatId: (id: string | null, options?: { preserveTemporaryChat?: boolean }) => void
   serverChatRoleplaySetup: import("@/services/tldw/roleplay-resume").SavedRoleplayPresentation | null
   setServerChatRoleplaySetup: (setup: import("@/services/tldw/roleplay-resume").SavedRoleplayPresentation | null) => void
   serverChatTitle: string | null
