@@ -909,7 +909,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   it.each(["success", "failure", "owner transition", "session replacement", "unmount"])("keeps the sidebar results until tab creation settles with %s", async (outcome) => {
     window.history.replaceState({}, "", "/sidepanel.html")
     mocks.useActualResultsStep = true
-    const opening = deferred<object>();
+    const opening = deferred<Record<string, never>>()
     mocks.createTab.mockReturnValueOnce(opening.promise)
     const onClose = vi.fn()
     useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed", results: [{ id: "saved", status: "ok", type: "pdf", mediaId: 18 }] })

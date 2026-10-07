@@ -146,7 +146,7 @@ beforeEach(async () => {
   const background = (await import("@/entries/background")).default
   background.main()
 })
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers() })
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers() })
 
 describe("domain cache extension message authority", () => {
   it.each(["before dispatch", "pending response"])("rejects refresh-session invalidation with a %s", async timing => {
