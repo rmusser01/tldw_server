@@ -5,13 +5,13 @@ status: In Progress
 assignee:
 - '@codex'
 created_date: 2026-10-07 02:16
-updated_date: 2026-10-07 09:15
+updated_date: 2026-10-07 09:32
 labels:
 - notes
 - structured-editing
 dependencies: []
 documentation:
-- /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editors.md
+- /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
 ---
 
 ## Description
@@ -43,19 +43,13 @@ Monaco qualification approved by human option1 on 2026-10-07. ADR required: yes;
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-I1 browser adoption blocked: controlled Notes history passes Chromium145/Firefox146 but WebKit26 first Undo returns A instead of C. Original variant reproduced twice. One authorized synchronous blur/focus boundary on both sides of native insertText also fails exactly D -> A on WebKit; further experiments stopped. Product wiring removed; candidate retained only as opt-in failure fixture. Six guard tests and targeted tsc pass. Evidence/proposal: Docs/superpowers/reviews/2026-09-27-document-editor-history.md. No new ADR; existing ADR031/ADR194 govern. In Progress pending revised editor approval.
-2026-10-07 I1 Monaco candidate: retained test-only bridge/React host, removable actual Notes patch, local installed assets preparation and real-page browser/extension asset fixtures. Native LF/CRLF A/B/C/D history and mounted source/key/focus/editability/conflict/disposal controls pass 36 checks across Chromium/Firefox/WebKit; strengthened viewport passes 3. BOM/mixed/lone-CR original source is refused read-only. Web/extension resolver units 2+2 pass; final whole frontend tsc passes with 12GB heap after observed default-heap OOM; extension compiler/build and actual MV3 local asset/CSP smoke pass. Synthetic composition is not OS IME; extension Notes/history, prior-consumer loader ordering and Next standalone packaging remain unqualified. Temporary product wiring/public assets removed. Existing textarea remains unqualified. ADR065 experiment extension and Docs/superpowers/reviews/2026-09-27-document-editor-history.md contain reproduction, failures, scope and self-review. Keep In Progress/no AC closure pending controller review.
+Installed Monaco test-only candidate independently approved for exact LF/CRLF native history and guarded source editing: 36 all-browser controls plus 3 strengthened viewport controls, units2+2, frontend typecheck exit0 with12GB heap and actual MV3 local-assets/CSP smoke. Temporary product wiring/assets removed; Markdown ownership retained. BOM/mixed/lone-CR sources are refused read-only. Existing textarea remains unqualified. ADR194(C)/ADR065(S) apply. Overall I1 remains In Progress: I3 owns shared loader ordering, production packaging and refresh/currentness; I5 owns real OS IME/accessibility/narrow-layout release evidence. Missing attachment paths and unbaselined warning/heap limits are retained for final review. See durable editor-history report and scoped review/scope-resolution artifacts.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Candidate qualification independently approved; overall I1 remains In Progress until explicit production/IME/accessibility gates are verified. Native LF/CRLF history and source preservation are evidenced; no production formatter adoption claim.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
