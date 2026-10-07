@@ -12,7 +12,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const controller = new AbortController();
     timeoutId = setTimeout(() => controller.abort(), 2000);
-    const response = await fetch(buildApiUrlForRequest(request, '/health'), {
+    const response = await fetch(new URL('/health', buildApiUrlForRequest(request)).toString(), {
       method: 'GET',
       cache: 'no-store',
       signal: controller.signal,

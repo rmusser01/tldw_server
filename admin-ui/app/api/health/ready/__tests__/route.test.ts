@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const originalRealBackendMode = process.env.TLDW_ADMIN_E2E_REAL_BACKEND;
 const originalSingleUserApiUrl = process.env.TLDW_ADMIN_E2E_SINGLE_USER_API_URL;
+const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
 function restoreEnv(name: string, value: string | undefined): void {
   if (value === undefined) {
@@ -36,6 +37,7 @@ describe('GET /api/health/ready', () => {
     vi.unstubAllGlobals();
     restoreEnv('TLDW_ADMIN_E2E_REAL_BACKEND', originalRealBackendMode);
     restoreEnv('TLDW_ADMIN_E2E_SINGLE_USER_API_URL', originalSingleUserApiUrl);
+    restoreEnv('NEXT_PUBLIC_API_URL', originalApiUrl);
   });
 
   it('returns 200 ready when backend is reachable', async () => {
@@ -100,8 +102,28 @@ describe('GET /api/health/ready', () => {
     await GET(request);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:9102/api/v1/health',
+      'http://127.0.0.1:9102/health',
       expect.objectContaining({ method: 'GET', cache: 'no-store' }),
     );
+  });
+
+  it('remains ready when versioned health requires authentication', async () => {
+    process.env.TLDW_ADMIN_E2E_REAL_BACKEND = 'false';
+    process.env.NEXT_PUBLIC_API_URL = 'https://backend.internal:8443';
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => ({
+      ok: url === 'https://backend.internal:8443/health',
+      status: url === 'https://backend.internal:8443/health' ? 200 : 401,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { GET } = await import('../route');
+
+    const response = await GET(request);
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://backend.internal:8443/health',
+      expect.objectContaining({ method: 'GET', cache: 'no-store', signal: expect.any(AbortSignal) }),
+    );
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty('headers');
   });
 });
