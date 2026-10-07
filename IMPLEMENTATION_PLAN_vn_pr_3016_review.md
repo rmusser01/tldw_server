@@ -9,7 +9,8 @@ Docs/Design/2026-10-02-vn-pr-3067-review-tests.md.
 The latest direct human instruction authorizes rebasing PR3016 onto latest dev,
 addressing all PR findings/comments and normal gated merge. The previously
 presented Task69 four-source-fix and two CI-test-double designs are now approved
-for execution under original TASK-13369. Local merge-preserving rebase onto
+for execution under original TASK-13369 (historical approval; current tracking:
+TASK-13518). Local merge-preserving rebase onto
 actualdev4c4f197 completed at2f3d3e09c0. At that checkpoint all production/test/configuration bytes
 matched the preserved current-dev union tree c3342dca64; only this plan drifted
 while replaying historical merges, and its qualified checkpoint text is restored
