@@ -1,6 +1,6 @@
 # Explicit Research web capture and refresh implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development to execute the five tasks below sequentially, with a fresh implementer, a task review and a final whole-branch review.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development to execute the six tasks below sequentially, with a fresh implementer, a task review and a final whole-branch review.
 
 **Goal:** Complete TASK-13530.1: explicitly preview, accept and refresh public article snapshots in the shared Research UI while retaining original evidence.
 
@@ -37,7 +37,7 @@
 **Goal:** Governed, nonpersisting and unambiguous public extraction.
 **Success Criteria:** Conflicting options rejected; credentials absent on every path; denied/empty/oversized extraction cannot appear successful.
 **Tests:** Scraper orchestration/model/browser/outbound-policy and Media endpoint tests.
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 1: Credential-free extraction profile
 
@@ -52,8 +52,8 @@
 - Existing `IngestWebContentRequest` adds `credential_free: bool = False`; HTTP route unchanged.
 - Public preview success preserves `status/results` envelope; one successful result contains nonempty trimmed `content`, `title`, `url`, `extraction_successful: true`, UTC `ingested_at`. Failure preserves a bounded stable `error` and `extraction_successful: false`, with envelope `status` not success. Ordinary callers remain compatible.
 
-- [ ] Read all scraper callers and guard/preflight/browser paths, endpoint RBAC/media-create patterns and owning tests. Run unchanged scoped tests and record baseline qualification.
-- [ ] Add failing tests for profile validation, configured arbitrary headers/cookies removal, canonical negotiation headers, probes/redirect/private-target/browser fallback denial, no analysis/monitoring, and bounded failure/size results.
+- [x] Read all scraper callers and guard/preflight/browser paths, endpoint RBAC/media-create patterns and owning tests. Run unchanged scoped tests and record baseline qualification.
+- [x] Add failing tests for profile validation, configured arbitrary headers/cookies removal, canonical negotiation headers, probes/redirect/private-target/browser fallback denial, no analysis/monitoring, and bounded failure/size results.
 
 ```python
 request = IngestWebContentRequest(
@@ -63,16 +63,16 @@ request = IngestWebContentRequest(
 # New profile must propagate to the scraper and preserve its safe denial result.
 ```
 
-- [ ] Run focused tests RED; record command and failure proving the new behavior is absent.
-- [ ] Implement the profile using existing immutable ArticlePlan and plan_modifier before admission; regenerate canonical browser headers and clear cookies/browser custom_cookies. Thread strict request-scoped public guards into all concrete targets; reuse central egress, never a parallel network stack. Keep normal routes and injected test seams compatible.
-- [ ] Add shared Media-create RBAC/rate-limit/expected-owner dependencies; make unused token header optional/deprecated. Skip preview monitoring but preserve usage/governance. Validate profile options, disable analysis/extraction and bound empty/oversized/failure results; UTC timestamps.
-- [ ] Run focused then owning suites GREEN; format/lint/Bandit touched code, manual pre-commit changed files, self-review and commit with TASK-13530.1. Write report with RED/GREEN commands, counts, qualifications and exact changed files.
+- [x] Run focused tests RED; record command and failure proving the new behavior is absent.
+- [x] Implement the profile using existing immutable ArticlePlan and plan_modifier before admission; regenerate canonical browser headers and clear cookies/browser custom_cookies. Thread strict request-scoped public guards into all concrete targets; reuse central egress, never a parallel network stack. Keep normal routes and injected test seams compatible.
+- [x] Add shared Media-create RBAC/rate-limit/expected-owner dependencies; make unused token header optional/deprecated. Skip preview monitoring but preserve usage/governance. Validate profile options, disable analysis/extraction and bound empty/oversized/failure results; UTC timestamps.
+- [x] Run focused then owning suites GREEN; format/lint/Bandit touched code, manual pre-commit changed files, self-review and commit with TASK-13530.1. Write report with RED/GREEN commands, counts, qualifications and exact changed files.
 
 ## Stage 2: Canonical accepted snapshot contracts
 **Goal:** Save verified capture descriptors and preview exact historical versions.
 **Success Criteria:** Mismatched capture text rejected; old active version remains previewable without current chunks; unavailable pin cannot resolve latest.
 **Tests:** WebClipper service/API/Sync/tenancy, Workspace preview/core/API and Media versions.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 2: Descriptor validation and pinned source preview
 
@@ -144,7 +144,7 @@ const confirmed = await confirmWebCaptureAcceptance(body, options, assertCurrent
 ### Task 4: Integrate capture and refresh in Research
 
 **Files:**
-- Modify shared `components/Option/ResearchWorkspace/SourcesPane/index.tsx`, `ResearchWorkspace/index.tsx` and owning tests.
+- Modify shared `components/Option/ResearchWorkspace/SourcesPane/index.tsx`, `ResearchWorkspace/index.tsx`, `ResearchWorkspace/ChatPane/index.tsx` (the actual scoped Ask submit/full-source path) and owning tests.
 - Create focused `SourcesPane/WebArticleCaptureModal.tsx` and `utils/use-research-web-capture.ts` only to keep the large existing components manageable.
 - Modify existing Workspace store/checkpoints, `workspace-server-restore.ts`, research prefill/import/export/provenance utilities only as required for capture pins and immutable pending body recovery. Preserve strict Notes v1.
 - Update English shared locale source strings and regenerate existing locale artifacts normally.
@@ -162,10 +162,31 @@ assertCurrent()
 ```
 
 - [ ] Read all shared Ask entry points and exact owner/workspace/checkpoint/restore/export paths; preserve each existing reference and manual selection.
+- [ ] Repair the pre-existing SourcesPane.stage2 test fixture using the complete current source-list-view defaults: baseline has 33 passed and one TypeError from omitted lifecycleStateFilters at source-list-view.ts:157. Preserve assertions and production filter contract.
 - [ ] Write RED tests for explicit capture network boundary, preview cancel, full accepted text/extra Note disclosure, save-confirm sequencing, changed/unchanged refresh identity preservation, frozen partial retry, rapid duplicates, manual selection during readback, source deletion, origin/account/workspace switch, component retirement, reopen/export pin retention, stale-head Ask exclusion and original evidence coexistence.
 - [ ] Implement focused accessible modal/hook and shared SourcesPane actions with Task3 helpers. Freeze pending acceptance before mutation and retain recoverable readback failures. Confirm before adding/selecting; do not overwrite intervening manual selection. Persist under original owner before retired response is discarded.
 - [ ] Wire exact version preview and source provenance using existing Notes v1 fields when a later sourced Note explicitly references capture; keep original references alongside and do not restore removed provenance implicitly.
 - [ ] Run focused then owning suites GREEN, both client typechecks, scoped lint/locales/hooks/self-review and commit. Report every Ask call site covered and any qualified historical-RAG limitations.
+
+### Task 5: Clarify Notes editing-state wording and qualify panel analysis
+
+**Associated task:** TASK-13512 (already In Progress).
+
+**Files:** Shared `components/Notes/hooks/useNotesEditorState.tsx`, English Notes locale strings and owning AI-assist/backlink/source-history tests. Existing extension chat integration tests and report only unless a reproducible root cause requires a minimal shared fix.
+
+**Interfaces:** No new API, capture metadata field, Notes provenance wire change or inferred capture tag. The editor's `editProvenance` describes editing mode/last AI assist; an unknown origin cannot be called “Typed manually.” Authoritative Knowledge history/chat backlink labels remain governed by their existing contracts.
+
+```typescript
+// No authoritative source history: report actual editor state, not inferred authorship.
+t('option:notesSearch.editingManual', { defaultValue: 'Editing: Manual' })
+// An actual recorded AI-assist event can name its action/time without changing source origin.
+t('option:notesSearch.latestAssistPrefix', { defaultValue: 'Latest AI assist' })
+```
+
+- [ ] Record this refinement in TASK13512 with backlog-py before code edits. Read actual editor state/history/backlink branches and owning tests.
+- [ ] Add/run RED tests that a reopened captured/ordinary unknown-origin Note does not claim manual authorship, while recorded assist and authoritative Knowledge/chat source history retain correct independent meaning. Use existing current fixtures and assertions.
+- [ ] Implement the minimal truthful wording above rather than adding an origin lookup/store based on editable tags. Run Notes AI-assist, backlink and source-history suites GREEN; scoped lint/types/hooks/self-review, commit with TASK13512 and report exact evidence.
+- [ ] In the integrated CDP run, investigate the previously qualified direct-panel Stream completion failed using actual request status/cause and current built artifact. If reproducible, trace all callers, write RED regression and implement a minimal shared root fix only within existing chat contracts, then verify/review. If native launch evidence cannot be obtained with CDP, document the qualification; never fake onClicked or claim a renderer handoff proves native launch.
 
 ## Stage 5: Integrated verification and accurate tracking
 **Goal:** Reviewable feature evidence and honest remaining followups.
@@ -173,7 +194,7 @@ assertCurrent()
 **Tests:** Integrated backend/sharedUI tests, builds, OpenAPI drift, lint, Bandit, pre-commit, CDP workflows.
 **Status:** Not Started
 
-### Task 5: Verify and reconcile workstream
+### Task 6: Verify and reconcile workstream
 
 **Files:**
 - Create `Docs/Reviews/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.md` and sanitized owning artifacts only.
