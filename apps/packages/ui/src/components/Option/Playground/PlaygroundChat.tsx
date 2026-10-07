@@ -148,6 +148,28 @@ const buildBlocks = (messages: TimelineMessageShape[]): TimelineBlock[] => {
   return blocks
 }
 
+// Stable empty-array fallback so `images={message.images || EMPTY_IMAGES}`
+// keeps prop identity stable for memoized rows without images.
+const EMPTY_IMAGES: string[] = []
+
+/**
+ * Get-or-create a cached per-row handler. Handlers are keyed by message id
+ * and read the latest state through refs at invocation time, so
+ * PlaygroundMessage's memo comparator sees identical callbacks across
+ * renders while still acting on the current conversation state.
+ */
+const getStableRowHandler = <T extends (...args: never[]) => unknown>(
+  cache: React.MutableRefObject<Map<string, unknown>>,
+  key: string,
+  factory: () => T
+): T => {
+  const existing = cache.current.get(key) as T | undefined
+  if (existing) return existing
+  const handler = factory()
+  cache.current.set(key, handler)
+  return handler
+}
+
 export const PlaygroundChat = ({
   scrollParentRef,
   navigationRef,
@@ -494,6 +516,35 @@ export const PlaygroundChat = ({
       }
     },
     [getMessageResearchHandoffState, handleAttachResearchRun, onPrepareResearchFollowUp]
+  )
+  // Per-row researchActions cache keyed by message id: the actions derive
+  // solely from metadataExtra (plus follow-up availability), so rows keep a
+  // stable object identity across renders and the memoized PlaygroundMessage
+  // rows skip re-rendering while unrelated state churns.
+  const researchActionsCacheRef = React.useRef(
+    new Map<string, { metadataExtra: Record<string, unknown> | undefined; followUpAvailable: boolean; actions: MessageResearchActions | undefined }>()
+  )
+  React.useEffect(() => {
+    researchActionsCacheRef.current.clear()
+  }, [conversationInstanceId])
+  const getRowResearchActions = React.useCallback(
+    (messageId: string | undefined, metadataExtra: Record<string, unknown> | undefined) => {
+      const followUpAvailable = Boolean(onPrepareResearchFollowUp)
+      const cache = researchActionsCacheRef.current
+      const key = messageId ?? ""
+      const cached = cache.get(key)
+      if (
+        cached &&
+        cached.metadataExtra === metadataExtra &&
+        cached.followUpAvailable === followUpAvailable
+      ) {
+        return cached.actions
+      }
+      const actions = buildMessageResearchActions(metadataExtra)
+      cache.set(key, { metadataExtra, followUpAvailable, actions })
+      return actions
+    },
+    [buildMessageResearchActions, onPrepareResearchFollowUp]
   )
   const showSelectedServerChatLoadFailure =
     messages.length === 0 &&
@@ -1126,6 +1177,25 @@ export const PlaygroundChat = ({
     },
     [messages]
   )
+  // Previous user message per index, precomputed in one forward pass so row
+  // rendering is O(1) per row instead of an O(n) backward scan per row
+  // (getPreviousUserMessage above stays for the compare-cluster child API).
+  const previousUserMessageByIndex = React.useMemo(() => {
+    const map = new Map<number, (typeof messages)[number] | null>()
+    let previous: (typeof messages)[number] | null = null
+    for (let i = 0; i < messages.length; i++) {
+      map.set(i, previous)
+      const candidate = messages[i]
+      if (
+        candidate &&
+        !candidate.isBot &&
+        !isImageGenerationMessageType(resolveTimelineMessageType(candidate))
+      ) {
+        previous = candidate
+      }
+    }
+    return map
+  }, [messages])
   const modelMetaById = React.useMemo(() => {
     const map = new Map<string, { label: string; provider: string }>()
     const models = (chatModels as any[]) || []
@@ -1199,6 +1269,132 @@ export const PlaygroundChat = ({
       )
     },
     [historySelection, messages, setMessages]
+  )
+
+  // Latest row-handler mirror: the destructured handlers are recreated every
+  // render (they close over the latest `messages`), so rows receive stable
+  // wrappers that dispatch through this ref. This keeps PlaygroundMessage's
+  // memo comparator effective during streaming flushes.
+  const messagesRef = React.useRef(messages)
+  messagesRef.current = messages
+  const latestRowHandlers = React.useRef({
+    editMessage,
+    deleteMessage,
+    toggleMessagePinned,
+    createChatBranch,
+    handleVariantSwipe,
+    regenerateLastMessage,
+    stopStreamingRequest,
+    handleRegenerateGeneratedImage
+  })
+  latestRowHandlers.current = {
+    editMessage,
+    deleteMessage,
+    toggleMessagePinned,
+    createChatBranch,
+    handleVariantSwipe,
+    regenerateLastMessage,
+    stopStreamingRequest,
+    handleRegenerateGeneratedImage
+  }
+  const handleRegenerateRow = React.useCallback(
+    (...args: Parameters<typeof regenerateLastMessage>) => {
+      latestRowHandlers.current.regenerateLastMessage(...args)
+    },
+    []
+  )
+  const handleStopStreamingRow = React.useCallback(
+    (...args: Parameters<typeof stopStreamingRequest>) => {
+      latestRowHandlers.current.stopStreamingRequest(...args)
+    },
+    []
+  )
+  const handleRegenerateImageRow = React.useCallback(
+    (
+      payload: Parameters<typeof handleRegenerateGeneratedImage>[0]
+    ) => {
+      void latestRowHandlers.current.handleRegenerateGeneratedImage(payload)
+    },
+    []
+  )
+  // Per-row handler cache keyed by message id; cleared when the conversation
+  // instance changes so it cannot grow unbounded across conversations.
+  const rowHandlerCache = React.useRef(new Map<string, unknown>())
+  React.useEffect(() => {
+    rowHandlerCache.current.clear()
+  }, [conversationInstanceId])
+  const getRowEditSubmitHandler = React.useCallback(
+    (messageId: string | undefined) =>
+      getStableRowHandler(
+        rowHandlerCache,
+        `edit:${messageId ?? ""}`,
+        () => (value: string, isSend: boolean) => {
+          const index = messagesRef.current.findIndex(
+            (row) => row.id === messageId
+          )
+          const row = index >= 0 ? messagesRef.current[index] : null
+          if (!row) return
+          void latestRowHandlers.current.editMessage(
+            index,
+            value,
+            !row.isBot,
+            isSend
+          )
+        }
+      ),
+    []
+  )
+  const getRowDeleteHandler = React.useCallback(
+    (messageId: string | undefined) =>
+      getStableRowHandler(
+        rowHandlerCache,
+        `delete:${messageId ?? ""}`,
+        () => () => {
+          const index = messagesRef.current.findIndex(
+            (row) => row.id === messageId
+          )
+          if (index < 0) return
+          void latestRowHandlers.current.deleteMessage(index)
+        }
+      ),
+    []
+  )
+  const getRowTogglePinnedHandler = React.useCallback(
+    (messageId: string | undefined) =>
+      getStableRowHandler(
+        rowHandlerCache,
+        `pin:${messageId ?? ""}`,
+        () => () => {
+          const index = messagesRef.current.findIndex(
+            (row) => row.id === messageId
+          )
+          if (index < 0) return
+          void latestRowHandlers.current.toggleMessagePinned(index)
+        }
+      ),
+    []
+  )
+  const getRowNewBranchHandler = React.useCallback(
+    (messageId: string | undefined) =>
+      getStableRowHandler(
+        rowHandlerCache,
+        `branch:${messageId ?? ""}`,
+        () => () => {
+          void latestRowHandlers.current.createChatBranch(messageId ?? "")
+        }
+      ),
+    []
+  )
+  const getRowSwipeHandler = React.useCallback(
+    (messageId: string | undefined, direction: "prev" | "next") =>
+      getStableRowHandler(
+        rowHandlerCache,
+        `swipe:${direction}:${messageId ?? ""}`,
+        () => () => {
+          latestRowHandlers.current.handleVariantSwipe(messageId, direction)
+        }
+      ),
+    []
   )
 
   return (
@@ -1396,7 +1592,8 @@ export const PlaygroundChat = ({
         <VirtualChatTimeline key={`${historySelection?.view?.owner_key ?? ""}:${historySelection?.view?.conversation_id ?? historyId ?? ""}`} blocks={blocks} getKey={blockKey} messageBlocks={messageBlocks} scrollParentRef={scrollParentRef} navigationRef={navigationRef} renderBlock={(block, blockIndex) => {
           if (block.kind === "single") {
             const message = messages[block.index]
-            const previousUserMessage = getPreviousUserMessage(block.index)
+            const previousUserMessage =
+              previousUserMessageByIndex.get(block.index) ?? null
             const resolvedMessageType = resolveMessageType(message, block.index)
             const isImageGenerationAssistantEvent =
               resolvedMessageType === IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE
@@ -1406,13 +1603,11 @@ export const PlaygroundChat = ({
                 message={message.message}
                 name={message.name}
                 role={message.role}
-                images={message.images || []}
+                images={message.images || EMPTY_IMAGES}
                 currentMessageIndex={block.index}
                 totalMessages={messages.length}
-                onRegenerate={regenerateLastMessage}
-                onRegenerateImage={(payload) => {
-                  void handleRegenerateGeneratedImage(payload)
-                }}
+                onRegenerate={handleRegenerateRow}
+                onRegenerateImage={handleRegenerateImageRow}
                 onDeleteImage={handleDeleteGeneratedImage}
                 onSelectImageVariant={handleSelectGeneratedImageVariant}
                 onKeepImageVariant={handleKeepGeneratedImageVariant}
@@ -1421,18 +1616,10 @@ export const PlaygroundChat = ({
                 isProcessing={isProcessing}
                 isSearchingInternet={isSearchingInternet}
                 sources={message.sources}
-                onEditFormSubmit={(value, isSend) => {
-                  editMessage(block.index, value, !message.isBot, isSend)
-                }}
-                onDeleteMessage={() => {
-                  deleteMessage(block.index)
-                }}
-                onTogglePinned={() => {
-                  void toggleMessagePinned(block.index)
-                }}
-                onNewBranch={() => {
-                  void createChatBranch(message.id ?? "")
-                }}
+                onEditFormSubmit={getRowEditSubmitHandler(message.id)}
+                onDeleteMessage={getRowDeleteHandler(message.id)}
+                onTogglePinned={getRowTogglePinnedHandler(message.id)}
+                onNewBranch={getRowNewBranchHandler(message.id)}
                 isTTSEnabled={ttsEnabled}
                 generationInfo={message?.generationInfo}
                 toolCalls={message?.toolCalls}
@@ -1444,7 +1631,7 @@ export const PlaygroundChat = ({
                 modelName={message?.modelName}
                 createdAt={message?.createdAt}
                 temporaryChat={temporaryChat}
-                onStopStreaming={stopStreamingRequest}
+                onStopStreaming={handleStopStreamingRow}
                 onContinue={runContinue}
                 onRunSteeredContinue={runSteeredContinue}
                 documents={message?.documents}
@@ -1456,7 +1643,7 @@ export const PlaygroundChat = ({
                 metadataExtra={message.metadataExtra}
                 dynamicUISurface="web-chat"
                 onDynamicUIAction={resolvedDynamicUIAction}
-                researchActions={buildMessageResearchActions(message.metadataExtra)}
+                researchActions={getRowResearchActions(message.id, message.metadataExtra)}
                 discoSkillComment={message.discoSkillComment}
                 historyId={stableHistoryId ?? undefined}
                 conversationInstanceId={conversationInstanceId}
@@ -1483,8 +1670,8 @@ export const PlaygroundChat = ({
                 message_type={resolvedMessageType}
                 variants={message.variants}
                 activeVariantIndex={message.activeVariantIndex}
-                onSwipePrev={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleVariantSwipe(message.id, "prev")}
-                onSwipeNext={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleVariantSwipe(message.id, "next")}
+                onSwipePrev={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : getRowSwipeHandler(message.id, "prev")}
+                onSwipeNext={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : getRowSwipeHandler(message.id, "next")}
                 messageSteeringMode={messageSteeringMode}
                 onMessageSteeringModeChange={setMessageSteeringMode}
                 messageSteeringForceNarrate={messageSteeringForceNarrate}

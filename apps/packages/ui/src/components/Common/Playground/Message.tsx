@@ -340,7 +340,62 @@ export type MessageResearchActions = {
   onFollowUp?: () => void
 }
 
-export const PlaygroundMessage = (props: Props) => {
+/**
+ * Structural comparison for `researchActions`: render sites rebuild this
+ * object per render (PlaygroundChat memoizes it, PlaygroundCompareCluster
+ * builds it inline). The callbacks only capture the research run id/query,
+ * so comparing the visible shape plus callback presence is sufficient for
+ * memoization without defeating re-renders when the actions really change.
+ */
+const isEquivalentResearchActions = (
+  prev: MessageResearchActions | undefined,
+  next: MessageResearchActions | undefined
+): boolean => {
+  if (prev === next) return true
+  if (!prev || !next) return false
+  return (
+    prev.reasonLabel === next.reasonLabel &&
+    prev.primaryLink?.href === next.primaryLink?.href &&
+    prev.primaryLink?.label === next.primaryLink?.label &&
+    Boolean(prev.onUseInChat) === Boolean(next.onUseInChat) &&
+    Boolean(prev.onFollowUp) === Boolean(next.onFollowUp)
+  )
+}
+
+/**
+ * Memo comparator for PlaygroundMessage rows.
+ *
+ * Default shallow equality plus one tolerance: `researchActions` is compared
+ * structurally (see isEquivalentResearchActions). Every other prop — message
+ * text, streaming/processing flags, identity fields, callbacks — must be
+ * referentially equal, so a streaming flush that only replaces the streaming
+ * row's entry re-renders exactly that row. Render sites must therefore pass
+ * stable callbacks and per-row derived objects (see PlaygroundChat.tsx and
+ * Sidepanel/Chat/body.tsx).
+ */
+const arePlaygroundMessagePropsEqual = (prev: Props, next: Props): boolean => {
+  const prevKeys = Object.keys(prev)
+  const nextKeys = Object.keys(next)
+  if (prevKeys.length !== nextKeys.length) return false
+  for (const key of prevKeys) {
+    const prevValue = prev[key as keyof Props]
+    const nextValue = next[key as keyof Props]
+    if (Object.is(prevValue, nextValue)) continue
+    if (
+      key === "researchActions" &&
+      isEquivalentResearchActions(
+        prevValue as MessageResearchActions | undefined,
+        nextValue as MessageResearchActions | undefined
+      )
+    ) {
+      continue
+    }
+    return false
+  }
+  return true
+}
+
+const PlaygroundMessageImpl = (props: Props) => {
   const articleRef = useRef<HTMLElement | null>(null)
   const [isBtnPressed, setIsBtnPressed] = React.useState(false)
   const [editPresentation, setEditPresentation] = React.useState<"flat" | "bubble" | null>(null)
@@ -3144,3 +3199,13 @@ export const PlaygroundMessage = (props: Props) => {
     </article>
   )
 }
+
+/**
+ * Memoized message row. Completed rows only re-render when their own props
+ * change (message content/identity, streaming flags, toggles, callbacks);
+ * see arePlaygroundMessagePropsEqual for the exact contract.
+ */
+export const PlaygroundMessage = React.memo(
+  PlaygroundMessageImpl,
+  arePlaygroundMessagePropsEqual
+)
