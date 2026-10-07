@@ -113,6 +113,7 @@ def plan_compound_note(
     expected_provenance_version: int | None = None,
     expected_note_version: int = 0,
     restore: bool = False,
+    expected_version: int | None = None,
 ) -> PlannedNotesMutation:
     """Build one request-bound note-and-organization mutation plan."""
 
@@ -153,6 +154,7 @@ def plan_compound_note(
             object_id=note_id,
             payload=dict(note_payload),
             **parent_base,
+            expected_product_version=expected_version,
             stable_key=server_origin_stable_key(
                 source="notes-api",
                 domain="notes.note",
@@ -263,6 +265,7 @@ def capture_note_upsert(
                 "message_id": message_id,
             },
             routing_metadata=routing_metadata,
+            expected_product_version=expected_version,
             stable_key=capture_key,
         ),
         keywords=keywords,

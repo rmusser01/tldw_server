@@ -10,6 +10,7 @@ import inspect
 import json
 import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from time import monotonic_ns
@@ -48,6 +49,7 @@ from .errors import (
     SyncInvalidDomainError,
     SyncMaterializationBusyError,
     SyncMaterializationPredecessorError,
+    SyncNotesAdmissionError,
     SyncStoreError,
 )
 from .materializers import MaterializationResult, SyncMaterializer
@@ -1396,6 +1398,33 @@ class SyncV2Service:
         )
         self.personal_context_relay = personal_context_relay
         self._recovery_clock_ns = recovery_clock_ns
+
+    @contextmanager
+    def notes_admission_guard(
+        self,
+        envelopes: Sequence[SyncEnvelopeCreate],
+        *,
+        expected_versions: Mapping[str, int] | None = None,
+    ) -> Iterator[SyncV2Store]:
+        """Linearize Notes admission at append, in Sync-before-product lock order."""
+        notes = [item for item in envelopes if item.domain == "notes.note" and item.operation == "upsert"]
+        note_db = getattr(self.materializers.get("notes.note"), "note_db", None)
+        if not notes or note_db is None:
+            yield self.store
+            return
+        # Enter the product scope after Sync, but release it after Sync commits.
+        # This read-only scope does not encompass subsequent materialization.
+        with ExitStack() as product_scope:
+            with self.store.materialization_guard(notes, require_predecessors=False) as guarded:
+                connection = product_scope.enter_context(note_db.transaction())
+                for item in sorted(notes, key=lambda item: item.object_id):
+                    current = note_db.note_store.lock_note_for_sync_admission(connection, item.object_id)
+                    if current is not None and current["content_language"] is not None:
+                        raise SyncNotesAdmissionError("Notes v1 cannot publish a language-bearing note.")
+                    expected = (expected_versions or {}).get(item.object_id)
+                    if expected is not None and (current is None or current["version"] != expected):
+                        raise SyncNotesAdmissionError("Note version changed before Sync admission.")
+                yield guarded
 
     def shred_authorized_personal_context_history(
         self,
@@ -5017,7 +5046,17 @@ class SyncV2Service:
                 continue
 
             try:
-                inserted = self.store.insert_envelope(storage_envelope)
+                with self.notes_admission_guard([storage_envelope]) as admission_store:
+                    inserted = admission_store.insert_envelope(storage_envelope)
+            except SyncNotesAdmissionError as exc:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code=exc.error_code,
+                        message=str(exc),
+                    )
+                )
+                continue
             except SyncInvalidDomainError:
                 rejected.append(
                     SyncPushRejected(

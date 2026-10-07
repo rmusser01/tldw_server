@@ -1981,3 +1981,189 @@ def test_active_sync_message_edit_is_rejected_before_direct_write(
     assert edit_response.status_code == 400
     assert edit_response.json()["detail"]["error_code"] == "sync_v2_message_edit_not_supported"
     assert chacha_db.get_message_by_id(message_id)["content"] == "Original."
+
+
+@pytest.mark.parametrize("method", ["put", "patch"])
+@pytest.mark.parametrize("change", [{"content_language": "yaml"}, {"title": "Concurrent"}])
+def test_note_capture_rechecks_language_before_durable_append(
+    method: str,
+    change: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    """A canonical write after route preflight must not leave a lossy envelope."""
+    client = _notes_app(monkeypatch, chacha_db=chacha_db, sync_service=sync_service)
+    created = client.post(
+        "/api/v1/notes/",
+        json={"id": "language-race", "title": "Config", "content": "original"},
+    )
+    assert created.status_code == 201, created.text
+    # Establish that the same legacy null-language update path succeeds.
+    control = client.put(
+        "/api/v1/notes/language-race",
+        json={"title": "Control"},
+        headers={"expected-version": "1"},
+    )
+    assert control.status_code == 200, control.text
+    dataset = sync_service.store.list_datasets_for_user("user-1")[0]
+    before = sync_service.store.list_envelopes_after(dataset.dataset_id, 0, limit=100)
+    original_capture = notes_endpoint.capture_server_origin_mutation
+    writer = CharactersRAGDB(chacha_db.db_path_str, client_id="user-1")
+
+    def interleave(*args, **kwargs):
+        writer.update_note("language-race", change, expected_version=2)
+        return original_capture(*args, **kwargs)
+
+    monkeypatch.setattr(notes_endpoint, "capture_server_origin_mutation", interleave)
+    try:
+        rejected = getattr(client, method)(
+            "/api/v1/notes/language-race",
+            json={"title": "Must not persist"},
+            headers={"expected-version": "2"},
+        )
+        assert rejected.status_code == 409
+        current = writer.get_note_by_id("language-race")
+        assert (current["title"], current["content_language"], current["version"]) == (
+            change.get("title", "Control"),
+            change.get("content_language"),
+            3,
+        )
+        assert sync_service.store.list_envelopes_after(dataset.dataset_id, 0, limit=100) == before
+    finally:
+        writer.close_connection()
+
+
+@pytest.mark.parametrize("capture_path", ["batch", "inbound"])
+def test_notes_admission_gate_covers_batch_and_inbound(
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+    capture_path: str,
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.server_origin import canonical_payload_hash
+    from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+        ServerOriginMutationStep,
+        capture_server_origin_mutation_batch,
+    )
+
+    initial = capture_server_origin_mutation(
+        sync_service,
+        user_id="user-1",
+        domain="notes.note",
+        operation="upsert",
+        object_id="admission-note",
+        payload={"title": "Config", "content": "original"},
+        source="server_api",
+    ).envelope
+
+    def submit(title: str, key: str):
+        payload = {"title": title, "content": "original"}
+        if capture_path == "batch":
+            return capture_server_origin_mutation_batch(
+                service=sync_service,
+                user_id="user-1",
+                source="server_api",
+                idempotency_key=key,
+                steps=[
+                    ServerOriginMutationStep(
+                        domain="notes.note", operation="upsert", object_id="admission-note", payload=payload
+                    )
+                ],
+            )
+        head = sync_service.store.get_current_head(initial.dataset_id, "notes.note", "admission-note")
+        payload_hash, payload_size = canonical_payload_hash(payload)
+        return sync_service.push(
+            user_id="user-1",
+            dataset_id=initial.dataset_id,
+            device_id="offline-device",
+            envelopes=[
+                SyncEnvelopeCreate(
+                    dataset_id=initial.dataset_id,
+                    client_envelope_id=key,
+                    domain="notes.note",
+                    operation="upsert",
+                    object_id="admission-note",
+                    device_id="offline-device",
+                    payload=payload,
+                    payload_hash=payload_hash,
+                    payload_size_bytes=payload_size,
+                    base_server_cursor=head.server_cursor,
+                    base_object_revision=head.object_revision,
+                    base_object_hash=head.payload_hash,
+                    object_revision=head.object_revision + 1,
+                )
+            ],
+        )
+
+    control = submit("Control", "null-language-control")
+    if capture_path == "inbound":
+        assert control.accepted and not control.rejected
+    assert chacha_db.get_note_by_id("admission-note")["title"] == "Control"
+    chacha_db.update_note("admission-note", {"content_language": "yaml"}, expected_version=2)
+    before = sync_service.store.list_envelopes_after(initial.dataset_id, 0, limit=100)
+    if capture_path == "batch":
+        with pytest.raises(SyncStoreError):
+            submit("Must not persist", "language-batch")
+    else:
+        result = submit("Must not persist", "language-inbound")
+        assert result.rejected and not result.accepted
+        assert result.rejected[0].error_code == "notes_sync_admission_rejected"
+    current = chacha_db.get_note_by_id("admission-note")
+    assert (current["title"], current["content_language"], current["version"]) == ("Control", "yaml", 3)
+    assert sync_service.store.list_envelopes_after(initial.dataset_id, 0, limit=100) == before
+
+
+def test_notes_admission_preserves_durable_batch_failure_and_applied_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+        ServerOriginMutationStep,
+        capture_server_origin_mutation_batch,
+    )
+
+    for note_id in ("prefix-note", "failed-note"):
+        capture_server_origin_mutation(
+            sync_service,
+            user_id="user-1",
+            domain="notes.note",
+            operation="upsert",
+            object_id=note_id,
+            payload={"title": "Before", "content": "source"},
+            source="server_api",
+        )
+    sync_service.materializers["notes.note"] = NotesMaterializer(chacha_db)
+    materializer_type = NotesMaterializer
+    apply = materializer_type.apply
+
+    def fail_second(self, envelope, *, store):
+        if envelope.object_id == "failed-note":
+            raise RuntimeError("synthetic projection failure")
+        return apply(self, envelope, store=store)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(materializer_type, "apply", fail_second)
+        with pytest.raises(SyncStoreError):
+            capture_server_origin_mutation_batch(
+                service=sync_service,
+                user_id="user-1",
+                source="server_api",
+                idempotency_key="durable-prefix",
+                steps=[
+                    ServerOriginMutationStep(
+                        domain="notes.note",
+                        operation="upsert",
+                        object_id=note_id,
+                        payload={"title": "After", "content": "source"},
+                        expected_product_version=1,
+                    )
+                    for note_id in ("prefix-note", "failed-note")
+                ],
+            )
+    assert chacha_db.get_note_by_id("prefix-note")["title"] == "After"
+    assert chacha_db.get_note_by_id("failed-note")["title"] == "Before"
+    dataset = sync_service.store.list_datasets_for_user("user-1")[0]
+    envelopes = sync_service.store.list_envelopes_after(dataset.dataset_id, 0, limit=100)
+    assert len(envelopes) == 4
+    assert [item.apply_status for item in envelopes[-2:]] == ["applied", "failed"]

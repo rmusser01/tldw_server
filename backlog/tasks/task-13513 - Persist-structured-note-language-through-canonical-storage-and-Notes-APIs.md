@@ -10,7 +10,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-foundations.md
-updated_date: 2026-10-07 03:40
+updated_date: 2026-10-07 04:05
 ---
 
 ## Description
@@ -49,6 +49,7 @@ Persisted nullable opaque content_language through canonical rows, ordinary APIs
 Verified genuine absent-column C73→74/S74→75/PG78→79 upgrades and old/current SQLite backup restoration. Required C feature/scope/client96 passed, targeted scaffold/atomicity/v7396 passed, corrected census6 passed. S required initial new/API45 passed; final SQLite feature26 passed. Owned PostgreSQL required run96 passed/one historical fixture seed incompatibility; corrected historical SQL and final storage/routes/upgrade/lifecycle rerun4 passed. Final explicit-null interop regression1 passed. Existing historical C failures were reproduced at immutable base and are documented separately, not presented as green.
 
 Legacy static comparison introduces no Ruff findings (C1690 inherited; S0); touched server Bandit0; new files clean and changed-line formatter debt preserved. Generated API types via existing generator; frontend typecheck passed. Source bound is null or1..100 opaque characters, no normalization. Canonical backup support remains SQLite-only; fetched-record copy is proven, UI copy/history propagation remains its later owner. Full commands/results, actual files, baseline controls and limitations: .superpowers/sdd/2026-09-27-structured-document-editing/task-2-report.md in the Chatbook programme checkout. Remains In Progress for independent review; no push/merge.
+F2 review round1: the cached language/version preflight could reject materialization only after an incomplete envelope had already been appended. ADR065 now records admission linearization at durable append. Ordinary, batch and inbound accepted-note capture share Sync→product locking, reread language and supplied expected versions, and commit Sync before releasing the read-only Notes lock. Existing materialization/replay remains outside; no distributed atomic-commit claim. PostgreSQL uses row locks and a short table write fence only for absent rows. The private expected-version condition is not serialized or hashed into locked v1 payloads. Detailed RED/GREEN and static evidence are appended to the programme task-2-report.md. Required original capture/batch selection69 passed; PUT/PATCH race + batch/inbound controls6 passed; real two-step failure retains applied prefix and durable failed envelope1 passed; owned PostgreSQL existing/absent-row lock controls2 passed. Keep In Progress for fresh review.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

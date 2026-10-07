@@ -63,3 +63,26 @@ can expand the bound if real identifiers need it. Existing null-language clients
 continue to work. Active Sync temporarily limits metadata-bearing note writes
 until the new negotiated contracts are complete. UI duplicate/history adapters,
 portable archives, parser and worker qualification remain their owning tasks.
+
+## Admission concurrency clarification (F2 review, 2026-10-06)
+
+The complete-write decision linearizes at durable Sync append. Use the existing
+Sync dataset transaction first, then the canonical Notes transaction/row lock;
+re-read language and any supplied expected product version under that lock.
+Commit the Sync append while the read-only Notes lock remains held, then release
+it before existing materialization. Batch append may join the caller's existing
+Sync connection, matching single-envelope insertion. Ordinary, batch and inbound
+capture share this admission rule. A rejected admission stores no envelope.
+
+A canonical change after durable append is a later write. Existing replayable
+materialization failures and independently committed product steps remain intact.
+This is not a general atomic commit across the two databases. Extending a product
+transaction across batch materialization would change those commit/replay
+semantics and is explicitly outside this clarification. Neither another unlocked
+preflight nor a product-before-Sync lock order meets the contract.
+
+PostgreSQL existing-row admission uses FOR UPDATE. An absent row requires a short
+Notes table write fence followed by a fresh read so a same-ID INSERT cannot slip
+through; only that absent-row path briefly serializes other Notes writes. SQLite
+already supplies its database write fence. The expected product version is a
+process-local admission condition and never changes v1 payloads or hashes.

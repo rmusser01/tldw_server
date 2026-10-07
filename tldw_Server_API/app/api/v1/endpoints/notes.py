@@ -214,6 +214,7 @@ from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     resolve_service_prompt,
 )
 from tldw_Server_API.app.core.Sync.v2.errors import (
+    SyncNotesAdmissionError,
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.models import SyncDomain
@@ -361,6 +362,11 @@ def _ensure_note_exists_or_404(db: CharactersRAGDB, note_id: str) -> None:
 
 
 def _note_sync_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, SyncNotesAdmissionError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error_code": exc.error_code, "message": str(exc)},
+        )
     if isinstance(exc, SyncStoreError) and str(exc).startswith(("notes_provenance_", "notes_note_")):
         return HTTPException(
             status_code=409,
@@ -6890,6 +6896,7 @@ async def update_note(
                 coordinator,
                 note_id=note_id,
                 note_payload=_note_payload_from_row(projected_note),
+                expected_version=expected_version,
                 keywords=(kw_list or []) if keywords_supplied else None,
                 folder_paths=(folder_paths or []) if folders_supplied else None,
                 request_key=request_key,
@@ -6927,6 +6934,7 @@ async def update_note(
                         operation="upsert",
                         object_id=note_id,
                         payload=_note_payload_from_row(projected_note),
+                        expected_product_version=expected_version,
                         source="server_api",
                     )
                 except Exception as sync_exc:
@@ -7186,6 +7194,7 @@ async def patch_note(
                 coordinator,
                 note_id=note_id,
                 note_payload=payload,
+                expected_version=expected_version,
                 keywords=(kw_list or []) if keywords_supplied else None,
                 folder_paths=(folder_paths or []) if folders_supplied else None,
                 request_key=request_key,
@@ -7223,6 +7232,7 @@ async def patch_note(
                         operation="upsert",
                         object_id=note_id,
                         payload=payload,
+                        expected_product_version=expected_version,
                         source="server_api",
                     )
                 except Exception as sync_exc:

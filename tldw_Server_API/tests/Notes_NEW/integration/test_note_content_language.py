@@ -326,3 +326,60 @@ async def test_capability_does_not_claim_unmigrated_storage(tmp_path, monkeypatc
         assert await notes.notes_capabilities(db=old, current_user=SimpleNamespace(id=1)) == {"content_language": False}
     finally:
         old.close_connection()
+
+
+@pytest.mark.parametrize("existing", [True, False])
+def test_postgres_sync_admission_holds_product_lock(pg_db, tmp_path, existing):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from loguru import logger
+
+    from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+    from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate
+    from tldw_Server_API.tests.Sync import test_sync_v2_server_origin_capture as capture_tests
+
+    owner_db = CharactersRAGDB(str(tmp_path / "pg-owner.db"), client_id="user-1", backend=pg_db.backend)
+    service = capture_tests.sync_service.__wrapped__(tmp_path, owner_db)
+    note_id = owner_db.add_note(title="Config", content="source") if existing else "new-admission-note"
+    dataset = service.store.list_datasets_for_user("user-1")[0]
+    candidate = SyncEnvelopeCreate(
+        dataset_id=dataset.dataset_id,
+        client_envelope_id="pg-admission-lock",
+        domain="notes.note",
+        operation="upsert",
+        object_id=note_id,
+        payload={"title": "Config", "content": "source"},
+    )
+    other_backend = DatabaseBackendFactory.create_backend(pg_db.backend.config)
+    writer = CharactersRAGDB(str(tmp_path / "pg-writer.db"), client_id="user-1", backend=other_backend)
+
+    def write_language():
+        if existing:
+            writer.update_note(note_id, {"content_language": "yaml"}, expected_version=1)
+        else:
+            writer.add_note(title="Config", content="source", note_id=note_id, content_language="yaml")
+
+    def competing_write():
+        sqlstates = []
+        sink = logger.add(lambda message: sqlstates.append(message.record["extra"].get("sqlstate")))
+        try:
+            with writer.transaction() as connection:
+                connection.execute("SET LOCAL lock_timeout = '100ms'")
+                write_language()
+        except CharactersRAGDBError:
+            return "55P03" in sqlstates
+        finally:
+            logger.remove(sink)
+        return False
+
+    try:
+        with service.notes_admission_guard([candidate], expected_versions={note_id: 1} if existing else {}):
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                assert executor.submit(competing_write).result(timeout=5)
+        write_language()
+        assert writer.get_note_by_id(note_id)["content_language"] == "yaml"
+    finally:
+        owner_db.close_all_connections()
+        writer.close_all_connections()
+        other_backend.get_pool().close_all()

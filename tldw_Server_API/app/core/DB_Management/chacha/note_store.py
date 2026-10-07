@@ -58,6 +58,21 @@ class NoteStore:
         """Report actual migrated column availability on the selected backend."""
         return any(column["name"] == "content_language" for column in self._db.backend.get_table_info("notes"))
 
+    def lock_note_for_sync_admission(self, connection: Any, note_id: str) -> dict[str, Any] | None:
+        """Read the authoritative note under the caller's product write lock."""
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        lock_clause = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+        query = f"SELECT version, content_language FROM notes WHERE id = ?{owner_clause}{lock_clause}"  # nosec B608
+        row = connection.execute(query, (note_id,) + owner_params).fetchone()
+        if row is None and self._db.backend_type == BackendType.POSTGRESQL:
+            # No row exists to lock. Fence concurrent INSERTs, then re-read after
+            # any writer that committed before the table lock was acquired.
+            # ponytail: absent-row admission temporarily serializes all Notes writes;
+            # per-ID locks can replace this only when every canonical writer participates.
+            connection.execute("LOCK TABLE notes IN SHARE ROW EXCLUSIVE MODE")
+            row = connection.execute(query, (note_id,) + owner_params).fetchone()
+        return dict(row) if row is not None else None
+
     def _deleted_value(self, deleted: bool) -> bool | int:
         """Return the backend-native value for a soft-delete flag."""
         return deleted if self._db.backend_type == BackendType.POSTGRESQL else int(deleted)

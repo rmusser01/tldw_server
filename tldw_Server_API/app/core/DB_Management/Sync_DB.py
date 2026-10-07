@@ -8305,6 +8305,7 @@ class SyncDatabase:
         self,
         envelopes: Sequence[SyncEnvelopeCreate],
         *,
+        connection: Any | None = None,
         trusted_notes_organization_bootstrap_id: str | None = None,
         trusted_notes_task_bootstrap_id: str | None = None,
         trusted_notes_task_coordinator: bool = False,
@@ -8327,7 +8328,7 @@ class SyncDatabase:
             raise SyncStoreError("Atomic Sync append requires mutation group metadata")
 
         try:
-            with self.backend.transaction() as conn:
+            with self.backend.transaction(connection) as conn:
                 for envelope in plan:
                     if (
                         envelope.domain in {"notes.task", "notes.task_activity"}

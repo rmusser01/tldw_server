@@ -126,6 +126,7 @@ def capture_server_origin_mutation(
     parent_id: str | None = None,
     stable_key: str | None = None,
     routing_metadata: Mapping[str, object] | None = None,
+    expected_product_version: int | None = None,
 ) -> ServerOriginCaptureResult:
     """Append and materialize one trusted server-origin Sync v2 mutation.
 
@@ -255,7 +256,9 @@ def _append_server_origin_mutation(
     if not isinstance(outcome, AdapterAccepted):
         raise SyncStoreError("Sync server-origin mutation was not accepted")
 
-    inserted = service.store.insert_envelope(envelope)
+    expected_versions = {} if expected_product_version is None else {object_id: expected_product_version}
+    with service.notes_admission_guard([envelope], expected_versions=expected_versions) as admission_store:
+        inserted = admission_store.insert_envelope(envelope)
     inserted = _require_capture_applied(service, inserted)
     return ServerOriginCaptureResult(dataset=dataset, envelope=inserted)
 
@@ -693,6 +696,7 @@ def capture_server_origin_note_restore(
         },
         source=source,
         routing_metadata={"restore_intent": True},
+        expected_product_version=expected_version,
     )
 
 
