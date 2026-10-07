@@ -158,3 +158,30 @@ def test_fail_job_without_quarantine_keeps_retrying(tmp_path, monkeypatch, quara
         )
     stored = jm.get_job(int(job["id"])) or {}
     assert (stored["status"], stored["retry_count"], stored["failure_streak_count"]) == (expected_status, 2, 2)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "configured, backoff, first_failure_quarantined",
+    [
+        (None, 0, False),
+        ("1", 0, True),
+        ("1", 10, True),
+        ("2", 10, False),
+    ],
+)
+def test_retry_quarantine_cutoff_preserves_sqlite_test_policy(
+    tmp_path,
+    monkeypatch,
+    configured,
+    backoff,
+    first_failure_quarantined,
+):
+    """The shared cutoff preserves immediate-retry and explicit-setting behavior."""
+    monkeypatch.setenv("TEST_MODE", "true")
+    if configured is None:
+        monkeypatch.delenv("JOBS_QUARANTINE_THRESHOLD", raising=False)
+    else:
+        monkeypatch.setenv("JOBS_QUARANTINE_THRESHOLD", configured)
+    manager = JobManager(db_path=tmp_path / "cutoff.db")
+    assert (manager.retry_quarantine_threshold(backoff_seconds=backoff) <= 1) is first_failure_quarantined  # nosec B101 - pytest regression assertion.

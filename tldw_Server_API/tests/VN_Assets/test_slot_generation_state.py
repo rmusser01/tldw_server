@@ -7,6 +7,7 @@ import json
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,7 +22,11 @@ from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.VN_Assets.concurrency import BackendGenerationLease
-from tldw_Server_API.app.core.VN_Assets.jobs import create_generate_variant_job, vn_asset_generation_jobs_queue
+from tldw_Server_API.app.core.VN_Assets.jobs import (
+    create_generate_variant_job,
+    vn_asset_generation_jobs_queue,
+    vn_asset_jobs_queue,
+)
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 from tldw_Server_API.tests.VN_Assets.test_generation_jobs import (
@@ -1938,7 +1943,7 @@ async def test_backend_busy_preserves_retry_and_stable_reservation(
     batch = _batch(service, pack)
     job = None
     if jobs_delivery:
-        job = fake_jobs.create_job(job_type="vn_asset_generate_variant", owner_user_id="1")
+        job = fake_jobs.create_job(job_type="vn_asset_generate_variant", owner_user_id="1", max_retries=1)
         job.update(status="processing", lease_id="first-lease", leased_until="2099-01-01 00:00:00")
 
     class BusyGate(FakeGenerationGate):
@@ -1972,3 +1977,117 @@ async def test_backend_busy_preserves_retry_and_stable_reservation(
     result = await worker.handle_generate_variant(payload, job=dict(job) if job else None)
     assert result["item_id"] == outcome["item_id"]
     assert service.repo.get_batch(batch)["completed_count"] == 1
+
+
+@pytest.fixture
+def v1_retry_jobs(tmp_path: Path) -> JobManager:
+    """Use real SQLite Jobs; the PostgreSQL module replaces this fixture only."""
+    return JobManager(db_path=tmp_path / "v1-retry-budget.db")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    ["ordinary-transient", "typed-exhausted", "nonretryable", "quarantined", "retries-disabled"],
+)
+async def test_v1_outcome_follows_real_sdk_retry_budget(
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+    v1_retry_jobs: JobManager,
+    failure: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real SDK disposition leaves retryable work active and final failures retryable by the user."""
+    pack = pack_with_slots
+    slot_id = pack.slots[0].id
+    jobs = v1_retry_jobs
+    real_service = VNAssetPackService(service.repo.db, owner_user_id=1, jobs_manager=jobs)
+    batch_id = _batch(real_service, pack)
+    if failure == "quarantined":
+        monkeypatch.setenv("JOBS_QUARANTINE_THRESHOLD", "1")
+
+    class RetryAdapter(FakeImageAdapter):
+        """Fail external image generation while keeping the real Jobs/recipe lifecycle."""
+
+        healthy = False
+        calls = 0
+
+        def generate(self, request: Any) -> Any:
+            self.calls += 1
+            if not self.healthy:
+                if failure in {"ordinary-transient", "quarantined", "retries-disabled"} and self.calls == 1:
+                    raise RuntimeError("transient adapter failure")
+                if failure != "ordinary-transient":
+                    raise VNAssetGenerationError("adapter failure", retryable=failure == "typed-exhausted")
+            return super().generate(request)
+
+    adapter = RetryAdapter()
+    config = WorkerConfig(
+        domain="vn_assets",
+        queue=vn_asset_generation_jobs_queue(),
+        worker_id="v1-budget-sdk",
+        lease_seconds=120,
+        retry_backoff_seconds=10 if failure == "quarantined" else 0,
+        retry_on_exception=failure != "retries-disabled",
+    )
+    worker = VNAssetGenerationWorker(
+        repo=service.repo,
+        jobs_manager=jobs,
+        worker_config=config,
+        image_registry=FakeImageRegistry(adapter),
+        backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=RecordingVNSaver(),
+        generated_files_repo=EmptyGeneratedFiles(),
+    )
+    errors: list[Exception] = []
+
+    async def run_one(queue: str) -> None:
+        """Deliver once through normal acquire, handler, SDK finalization and lease cleanup."""
+        sdk = WorkerSDK(jobs, replace(config, queue=queue))
+
+        async def handle(acquired: dict[str, Any]) -> dict[str, Any]:
+            try:
+                return await worker.handle_job_async(acquired)
+            except Exception as exc:
+                errors.append(exc)
+                raise
+            finally:
+                sdk.stop()
+
+        await asyncio.wait_for(sdk.run(handler=handle, owner_user_id="1"), timeout=5)
+
+    await run_one(vn_asset_jobs_queue())
+    child = jobs.list_jobs(domain="vn_assets", queue=vn_asset_generation_jobs_queue(), owner_user_id="1")[0]
+    assert child["max_retries"] == 1  # nosec B101 - pytest regression assertion.
+    await run_one(vn_asset_generation_jobs_queue())
+    assert len(errors) == 1  # nosec B101 - pytest regression assertion.
+    if failure not in {"nonretryable", "quarantined", "retries-disabled"}:
+        child = jobs.get_job(int(child["id"]))
+        assert (child["status"], child["retry_count"]) == ("queued", 1)  # nosec B101 - pytest regression assertion.
+        assert service.repo.get_variant_outcome(batch_id, slot_id, 0)["outcome_status"] == "planned"  # nosec B101 - pytest regression assertion.
+        assert service.repo.get_batch(batch_id)["status"] != "failed"  # nosec B101 - pytest regression assertion.
+        await run_one(vn_asset_generation_jobs_queue())
+
+    child = jobs.get_job(int(child["id"]))
+    outcome = service.repo.get_variant_outcome(batch_id, slot_id, 0)
+    batch = service.repo.get_batch(batch_id)
+    slot = service.repo.get_slot(slot_id)
+    if failure == "ordinary-transient":
+        assert child["status"] == "completed"  # nosec B101 - pytest regression assertion.
+        assert outcome["outcome_status"] == "completed"  # nosec B101 - pytest regression assertion.
+        assert (batch["completed_count"], batch["failed_count"], batch["status"]) == (1, 0, "completed")  # nosec B101 - pytest regression assertion.
+        assert slot["status"] == "reviewing"  # nosec B101 - pytest regression assertion.
+        assert adapter.calls == 2  # nosec B101 - pytest regression assertion.
+    else:
+        assert child["status"] == ("quarantined" if failure == "quarantined" else "failed")  # nosec B101 - pytest regression assertion.
+        assert outcome["outcome_status"] == "failed"  # nosec B101 - pytest regression assertion.
+        assert (batch["completed_count"], batch["failed_count"], batch["status"]) == (0, 1, "failed")  # nosec B101 - pytest regression assertion.
+        assert (slot["status"], slot["last_failed_batch_id"]) == ("failed", batch_id)  # nosec B101 - pytest regression assertion.
+        retry = real_service.retry_slot(pack.id, slot_id, user_id=1)
+        assert retry.batch_id != batch_id  # nosec B101 - pytest regression assertion.
+        adapter.healthy = True
+        await run_one(vn_asset_jobs_queue())
+        await run_one(vn_asset_generation_jobs_queue())
+        assert service.repo.get_variant_outcome(retry.batch_id, slot_id, 0)["outcome_status"] == "completed"  # nosec B101 - pytest regression assertion.
+        assert service.repo.get_batch(retry.batch_id)["status"] == "completed"  # nosec B101 - pytest regression assertion.
+        assert service.repo.get_variant_outcome(batch_id, slot_id, 0)["outcome_status"] == "failed"  # nosec B101 - pytest regression assertion.

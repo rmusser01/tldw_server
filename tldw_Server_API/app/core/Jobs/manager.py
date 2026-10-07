@@ -8178,6 +8178,18 @@ class JobManager:
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 conn.close()
 
+    def retry_quarantine_threshold(self, *, backoff_seconds: int) -> int:
+        """Return fail_job's quarantine cutoff, retaining backend test-mode policy.
+
+        This reads the operation-time setting; it does not change a job or lease.
+        Invalid configured values propagate as they do in failure finalization.
+        """
+        raw = os.getenv("JOBS_QUARANTINE_THRESHOLD")
+        threshold = int(raw or "2")
+        if _is_test_mode() and int(backoff_seconds) <= 0 and (self.backend == "postgres" or raw is None):
+            return max(threshold, 10**9)
+        return threshold
+
     def fail_job(
         self,
         job_id: int,
@@ -8280,12 +8292,7 @@ class JobManager:
                                     if _outbox and delay < 3:
                                         delay = 3
                             # Poison message quarantine check: increment failure_streak_* and quarantine if threshold reached
-                            base_thresh = int(os.getenv("JOBS_QUARANTINE_THRESHOLD", "2") or "2")
-                            # In TEST_MODE with zero backoff (unit-style retry loops), avoid quarantining to allow timeline growth
-                            if test_mode and int(backoff_seconds) <= 0:
-                                thresh = max(base_thresh, 10**9)
-                            else:
-                                thresh = base_thresh
+                            thresh = self.retry_quarantine_threshold(backoff_seconds=backoff_seconds)
                             if not quarantine:
                                 thresh = 10**9
                             # Update retry path with failure streak bookkeeping
@@ -8863,8 +8870,7 @@ class JobManager:
                             else secrets.randbelow(max(1, exp_backoff // 4) + 1)
                         )
                         delay = exp_backoff + jitter
-                        base_thresh = int(os.getenv("JOBS_QUARANTINE_THRESHOLD", "2") or "2")
-                        thresh = base_thresh
+                        thresh = self.retry_quarantine_threshold(backoff_seconds=backoff_seconds)
                         if test_mode:
                             _outbox = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
                             if not _outbox and exp_backoff <= 1:
@@ -8875,12 +8881,6 @@ class JobManager:
                             except _JOB_NONCRITICAL_EXCEPTIONS:
                                 if _outbox and delay < 3:
                                     delay = 3
-                            if test_mode and int(backoff_seconds) <= 0:
-                                # Respect explicit threshold in tests; otherwise, avoid quarantining to allow timeline growth
-                                if os.getenv("JOBS_QUARANTINE_THRESHOLD") is None:
-                                    thresh = max(base_thresh, 10**9)
-                                else:
-                                    thresh = base_thresh
                         if not quarantine:
                             thresh = 10**9
                         # SQLite retry path with failure streak bookkeeping
