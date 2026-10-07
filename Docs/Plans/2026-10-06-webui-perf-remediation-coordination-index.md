@@ -21,12 +21,19 @@ confirmed ~63 findings across five systemic patterns:
    heavy parse when a selection clip needs none of it; full-text DOM rewrites
    per stream chunk; per-byte base64.
 
-Scope: **`apps/**` only** (WebUI + extension). `tldw_Server_API/**` is owned by
-the backend program — see
+Scope: **`apps/**` only** (WebUI + extension), with one carve-out: the
+**admin WebUI** (`admin-ui/**` and admin-facing pages — Monitoring, RBAC
+matrix, billing views, Llamacpp settings panels) is owned by the sibling
+admin-webui program (plans A–C; review:
+`Docs/Reviews/ADMIN_WEBUI_PERF_REVIEW_2026_10_06.md`). `tldw_Server_API/**` is
+owned by the backend program — see
 [2026-10-06-perf-remediation-coordination-index.md](2026-10-06-perf-remediation-coordination-index.md)
-(TASK-13511, batches 0–7). The two programs are complementary: several WebUI
+(TASK-13511, batches 0–7). The programs are complementary: several WebUI
 findings (server-side batch/aggregation endpoints) land as backend requests and
-are cross-referenced below rather than duplicated.
+are cross-referenced below rather than duplicated. Potential shared-file area
+with the admin program: `apps/packages/ui/src/components/Common/Settings/**`
+(their Plan C Llamacpp hoist-down vs this program's W4 Stage 6) — different
+files, but re-check `git status` before each stage per the collision rules.
 
 All finding locations were verified against `dev` @ `7ba48f251e` (2026-10-06).
 Line numbers drift; each plan cites a grep anchor alongside line numbers.
