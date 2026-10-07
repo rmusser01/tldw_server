@@ -672,7 +672,7 @@ export type MoodboardSummary = {
   last_modified?: string
 }
 export type NotebookFilterOption = NotesNotebookSetting
-export type ImportFormat = 'json' | 'markdown'
+export type ImportFormat = 'json' | 'markdown' | 'portable_note' | 'source'
 export type ImportDuplicateStrategy = 'skip' | 'overwrite' | 'create_copy'
 export type PendingImportFile = {
   fileName: string
@@ -1245,31 +1245,67 @@ export const unwrapListsFromBlocks = (root: HTMLElement): void => {
   }
 }
 
-export const detectImportFormatFromFileName = (fileName: string): ImportFormat => {
-  const lower = fileName.toLowerCase()
-  if (lower.endsWith('.json')) return 'json'
-  return 'markdown'
-}
+export const detectImportFormatFromFileName = (
+  fileName: string,
+  sourceMode = false
+): ImportFormat => {
+  if (sourceMode) return 'source';
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith('.json')) return 'json';
+  if (/\.(jsonl|yaml|yml|txt|text)$/.test(lower)) return 'source';
+  return 'markdown';
+};
 
-export const estimateDetectedNotesFromImportContent = (format: ImportFormat, content: string): number => {
-  if (format === 'markdown') return 1
+export const detectDeclaredPortableImport = (
+  format: ImportFormat,
+  content: string
+): ImportFormat => {
+  if (format !== 'json') return format;
   try {
-    const parsed = JSON.parse(content)
-    if (Array.isArray(parsed)) return parsed.filter((entry) => entry && typeof entry === 'object').length
+    const parsed: unknown = JSON.parse(content);
+    const records = Array.isArray(parsed)
+      ? parsed
+      : [
+          parsed,
+          ...['notes', 'data', 'items', 'results'].flatMap((key) => {
+            const rows =
+              parsed && typeof parsed === 'object'
+                ? (parsed as Record<string, unknown>)[key]
+                : null;
+            return Array.isArray(rows) ? rows : [];
+          }),
+        ];
+    if (records.some((row) => row && typeof row === 'object' && 'format_version' in row))
+      return 'portable_note';
+  } catch {
+    /* The existing preview reports invalid containers. */
+  }
+  return format;
+};
+
+export const estimateDetectedNotesFromImportContent = (
+  format: ImportFormat,
+  content: string
+): number => {
+  if (format === 'markdown' || format === 'source') return content.length > 0 ? 1 : 0;
+  try {
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed))
+      return parsed.filter((entry) => entry && typeof entry === 'object').length;
     if (parsed && typeof parsed === 'object') {
       for (const key of ['notes', 'data', 'items', 'results']) {
-        const candidate = (parsed as Record<string, unknown>)[key]
+        const candidate = (parsed as Record<string, unknown>)[key];
         if (Array.isArray(candidate)) {
-          return candidate.filter((entry) => entry && typeof entry === 'object').length
+          return candidate.filter((entry) => entry && typeof entry === 'object').length;
         }
       }
-      return 1
+      return 1;
     }
   } catch {
-    return 0
+    return 0;
   }
-  return 0
-}
+  return 0;
+};
 
 export const NOTE_SORT_API_PARAMS: Record<
   NotesSortOption,

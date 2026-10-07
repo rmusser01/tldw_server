@@ -1,6 +1,7 @@
 import { retainKnowledgeNoteProvenance, type KnowledgeNoteHead } from "@/utils/knowledge-note-provenance"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
+import { isValidNoteLanguage } from './notes-manager-utils';
 import type {
   NoteStudioDocument,
   NoteStudioPayload,
@@ -11,11 +12,14 @@ import type {
 } from "./notes-studio-types"
 
 export type SingleNoteExportData = KnowledgeNoteHead & {
-  id?: string | number | null
-  title: string
-  content: string
-  keywords: string[]
-}
+  id?: string | number | null;
+  title: string;
+  content: string;
+  keywords: string[];
+  content_language?: string | null;
+  updated_at?: string;
+  created_at?: string;
+};
 
 export interface StudioPrintLabels {
   untitledNote: string
@@ -27,7 +31,45 @@ export interface StudioPrintLabels {
 }
 
 export type SingleNoteCopyMode = "content" | "markdown"
-export type SingleNoteExportFormat = "md" | "json" | "print"
+export type SingleNoteExportFormat = 'md' | 'json' | 'print' | 'source';
+
+export const PORTABLE_NOTE_FORMAT_VERSION = 'tldw.note.v1';
+
+export const buildStructuredSource = (
+  note: SingleNoteExportData
+): { filename: string; text: string } => {
+  const extensions: Record<string, string> = {
+    text: 'txt',
+    markdown: 'md',
+    yaml: 'yaml',
+    json: 'json',
+    jsonl: 'jsonl',
+  };
+  const extension = extensions[note.content_language ?? ''] ?? 'txt';
+  const name = (note.title || `note-${note.id ?? 'new'}`).replace(/[^a-z0-9-_]+/gi, '-');
+  return { filename: `${name}.${extension}`, text: note.content };
+};
+
+export const buildPortableNote = (note: SingleNoteExportData): string => {
+  if (typeof note.title !== 'string' || typeof note.content !== 'string')
+    throw new Error('Portable export requires complete source records');
+  if (!isValidNoteLanguage(note.content_language))
+    throw new Error('Portable export requires known language metadata');
+  return JSON.stringify(
+    {
+      format_version: PORTABLE_NOTE_FORMAT_VERSION,
+      id: note.id ?? null,
+      title: note.title,
+      content: note.content,
+      content_language: note.content_language,
+      keywords: note.keywords,
+      ...(note.created_at !== undefined ? { created_at: note.created_at } : {}),
+      ...(note.updated_at !== undefined ? { updated_at: note.updated_at } : {}),
+    },
+    null,
+    2
+  );
+};
 
 const normalizeKeywords = (keywords: string[]) =>
   keywords

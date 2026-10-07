@@ -8,10 +8,12 @@ import type {
 } from '../notes-manager-types'
 import {
   extractKeywords,
+  isValidNoteLanguage,
 } from '../notes-manager-utils'
 import {
   buildSingleNoteCopyText,
-  buildSingleNoteJson,
+  buildPortableNote,
+  buildStructuredSource,
   buildSingleNoteMarkdown,
   buildSingleNotePrintableHtml,
   buildStudioPrintableHtml,
@@ -58,7 +60,9 @@ const toExportNote = (n: any): NoteListItem => ({
   id: n?.id,
   title: n?.title,
   content: retainKnowledgeNoteProvenance(String(n?.content || ""), n),
-  updated_at: n?.updated_at,
+  content_language: n?.content_language,
+  created_at: n?.created_at,
+  updated_at: n?.updated_at ?? n?.last_modified,
   keywords: extractKeywords(n)
 })
 
@@ -86,6 +90,7 @@ export interface UseNotesExportDeps {
   selectedId: string | number | null
   title: string
   content: string
+  contentLanguage?: string | null
   editorKeywords: string[]
   selectedStudioState?: NoteStudioState | null
   studioPaperSize?: NotesStudioPaperSize
@@ -108,6 +113,7 @@ export function useNotesExport(deps: UseNotesExportDeps) {
     title,
     content: editorContent,
     originalMetadata,
+    contentLanguage,
     editorKeywords,
     selectedStudioState = null,
     studioPaperSize,
@@ -179,7 +185,7 @@ export function useNotesExport(deps: UseNotesExportDeps) {
         method: 'GET' as any,
         abortSignal: signal
       })
-      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : [])
+      const items = Array.isArray(res?.notes) ? res.notes : Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : [])
       return { items, total: readReportedTotal(res) }
     }
 
@@ -364,7 +370,25 @@ export function useNotesExport(deps: UseNotesExportDeps) {
       const { arr } = gathered
       if (!arr.length) { message.info('No notes to export'); return }
       maybeWarnExportLimits(gathered)
-      const blob = new Blob([JSON.stringify(arr, null, 2)], { type: 'application/json;charset=utf-8' })
+      const blob = new Blob(
+        [
+          JSON.stringify(
+            arr.map((note) =>
+              JSON.parse(
+                buildPortableNote({
+                  ...note,
+                  title: note.title ?? '',
+                  content: note.content!,
+                  keywords: note.keywords ?? [],
+                })
+              )
+            ),
+            null,
+            2
+          ),
+        ],
+        { type: 'application/json;charset=utf-8' }
+      );
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -500,49 +524,73 @@ export function useNotesExport(deps: UseNotesExportDeps) {
     )
   }, [content, editorKeywords, message, selectedId, selectedStudioState, studioPaperSize, title])
 
-  const exportSelected = React.useCallback((format: SingleNoteExportFormat = 'md') => {
-    if (format === 'print') {
-      printSelected()
-      return
-    }
-    const name = (title || `note-${selectedId ?? 'new'}`).replace(/[^a-z0-9-_]+/gi, '-')
-    const fileContent =
-      format === 'json'
-        ? buildSingleNoteJson({
-            id: selectedId,
-            title,
-            content,
-            keywords: editorKeywords
-          })
-        : buildSingleNoteMarkdown({
-            id: selectedId,
-            title,
-            content,
-            keywords: editorKeywords
-          })
-    const blob = new Blob([fileContent], {
-      type:
-        format === 'json'
-          ? 'application/json;charset=utf-8'
-          : 'text/markdown;charset=utf-8'
-    })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${name}.${format === 'json' ? 'json' : 'md'}`
-    a.click()
-    URL.revokeObjectURL(url)
-    const sizeDisplay = formatFileSize(blob.size)
-    message.success(
-      translateMessage(
-        t,
-        'option:notesSearch.exportNoteSuccess',
-        'Exported ({{size}})',
-        { size: sizeDisplay }
-      )
-    )
-  }, [content, editorKeywords, message, printSelected, selectedId, t, title])
-
+  const exportSelected = React.useCallback(
+    (
+      format: SingleNoteExportFormat = contentLanguage === null || contentLanguage === 'markdown'
+        ? 'md'
+        : 'json'
+    ) => {
+      if (format === 'print') {
+        printSelected();
+        return;
+      }
+      if (format === 'json' && !isValidNoteLanguage(contentLanguage)) {
+        message.error('Portable export requires known language metadata');
+        return;
+      }
+      if (format === 'md' && contentLanguage !== null && contentLanguage !== 'markdown') {
+        message.error('Markdown export requires a Markdown note');
+        return;
+      }
+      const source = buildStructuredSource({
+        id: selectedId,
+        title,
+        content,
+        keywords: editorKeywords,
+        content_language: contentLanguage,
+      });
+      const name = (title || `note-${selectedId ?? 'new'}`).replace(/[^a-z0-9-_]+/gi, '-');
+      const fileContent =
+        format === 'source'
+          ? source.text
+          : format === 'json'
+            ? buildPortableNote({
+                id: selectedId,
+                title,
+                content,
+                keywords: editorKeywords,
+                content_language: contentLanguage,
+              })
+            : buildSingleNoteMarkdown({
+                id: selectedId,
+                title,
+                content,
+                keywords: editorKeywords,
+              });
+      const blob = new Blob([fileContent], {
+        type:
+          format === 'json'
+            ? 'application/json;charset=utf-8'
+            : format === 'source'
+              ? 'text/plain;charset=utf-8'
+              : 'text/markdown;charset=utf-8',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download =
+        format === 'source' ? source.filename : `${name}.${format === 'json' ? 'json' : 'md'}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      const sizeDisplay = formatFileSize(blob.size);
+      message.success(
+        translateMessage(t, 'option:notesSearch.exportNoteSuccess', 'Exported ({{size}})', {
+          size: sizeDisplay,
+        })
+      );
+    },
+    [content, contentLanguage, editorKeywords, message, printSelected, selectedId, t, title]
+  );
   const copySelected = React.useCallback(async (mode: SingleNoteCopyMode = 'content') => {
     const payload = buildSingleNoteCopyText(
       {

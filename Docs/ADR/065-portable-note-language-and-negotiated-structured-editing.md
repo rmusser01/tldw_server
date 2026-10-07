@@ -198,3 +198,22 @@ Opaque language validation uses raw nonempty strings of at most100 Unicode code
 points, matching the canonical Python/schema contract. Whitespace is not trimmed
 and non-BMP characters are not counted twice by browser setter, queue or reply
 validation. Missing metadata remains distinct from malformed present metadata.
+
+### Portable source and note import contracts (F6, Rulings 35/36)
+
+The complete portable note marker is `format_version: "tldw.note.v1"`; title and
+content are strings and `content_language` is required, including explicit null.
+Unknown baseline language cannot be exported as portable metadata. Source remains
+a string; document values are never parsed to manufacture a note body.
+The existing import discriminator adds `portable_note` and `source`, so older
+import schemas refuse declared contracts before mutation. Validate versioned
+batches before any writes; retain legacy JSON/Markdown imports. Explicit source
+filename extensions supply mode. Filename-less source uses `Imported source`
+and omits language, making no portable-mode promise. Empty or storage-rejected
+bodies fail explicitly without title substitution. Omitted legacy updates preserve
+stored mode; explicit null resets it. Existing compound capture and request
+fingerprints bind the complete source/language pair and optimistic product version.
+
+New Chatbook Notes archives use verified 4.0 and identity-based JSON carriers,
+including null-language Notes and Canvas when present; readers 1.0–3.0 remain
+available. No new transport, store, capability provider or import service.

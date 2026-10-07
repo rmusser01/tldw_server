@@ -34,6 +34,7 @@ from fastapi import (
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from loguru import logger
+from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RateLimiter,
@@ -116,6 +117,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NotesImportResponse,
     NotesListResponse,
     NoteUpdate,
+    PortableNoteImport,
     TitleSuggestRequest,
     TitleSuggestResponse,
     WikilinkIdResolution,
@@ -1634,14 +1636,17 @@ def _fallback_title_from_filename(file_name: str | None) -> str | None:
     return stem[:255] if stem else None
 
 
-def _extract_json_note_rows(payload: Any) -> list[dict[str, Any]]:
+def _extract_json_note_rows(payload: Any, *, portable: bool = False) -> list[dict[str, Any]]:
     if isinstance(payload, list):
+        declared_portable = portable or any(isinstance(item, dict) and "format_version" in item for item in payload)
+        if declared_portable and (not payload or not all(isinstance(item, dict) for item in payload)):
+            raise ValueError("Invalid portable note container.")
         return [item for item in payload if isinstance(item, dict)]
     if isinstance(payload, dict):
         for key in ("notes", "data", "items", "results"):
             candidate = payload.get(key)
             if isinstance(candidate, list):
-                return [item for item in candidate if isinstance(item, dict)]
+                return _extract_json_note_rows(candidate, portable=portable)
         if any(key in payload for key in ("title", "content", "id", "metadata", "keywords")):
             return [payload]
     raise InputError(  # noqa: TRY003
@@ -1649,15 +1654,22 @@ def _extract_json_note_rows(payload: Any) -> list[dict[str, Any]]:
     )
 
 
-def _normalize_import_note_row(row: dict[str, Any], fallback_title: str | None = None) -> dict[str, Any]:
+def _normalize_import_note_row(
+    row: dict[str, Any], fallback_title: str | None = None, *, portable: bool = False
+) -> dict[str, Any]:
     raw_id = row.get("id")
     note_id = str(raw_id).strip() if raw_id is not None else None
     if note_id == "":
         note_id = None
 
-    title = _normalize_keyword_text(row.get("title"))
-    raw_content = row.get("content")
-    content = "" if raw_content is None else str(raw_content)
+    title = row.get("title") if portable else _normalize_keyword_text(row.get("title"))
+    content = row.get("content")
+    if not isinstance(content, str) or not content:
+        raise InputError("Imported source must contain nonempty string content.")
+    if "content_language" in row:
+        language = row["content_language"]
+        if language is not None and (not isinstance(language, str) or not 1 <= len(language) <= 100):
+            raise InputError("Invalid imported content_language.")
 
     metadata = row.get("metadata")
     metadata_keywords = metadata.get("keywords") if isinstance(metadata, dict) else None
@@ -1671,8 +1683,6 @@ def _normalize_import_note_row(row: dict[str, Any], fallback_title: str | None =
         title = first_line[:255] if first_line else None
     if not title:
         raise InputError("Imported note is missing a title and usable content.")  # noqa: TRY003
-    if not content:
-        content = title
 
     provenance = row.get("knowledge_provenance")
     provenance = (
@@ -1692,6 +1702,7 @@ def _normalize_import_note_row(row: dict[str, Any], fallback_title: str | None =
         "content": content,
         "keywords": keywords,
         "keywords_provided": keywords_provided,
+        **({"content_language": row["content_language"]} if "content_language" in row else {}),
     }
 
 
@@ -3573,6 +3584,34 @@ async def import_notes(
                 headers={"Retry-After": str(meta.get("retry_after", 60))}
             )
 
+        for item in payload.items:
+            if item.format not in {"json", "portable_note"}:
+                continue
+            try:
+                decoded = json.loads(item.content)
+                rows = (
+                    [decoded]
+                    if isinstance(decoded, dict) and "format_version" in decoded
+                    else _extract_json_note_rows(decoded, portable=item.format == "portable_note")
+                )
+            except (json.JSONDecodeError, InputError):
+                if item.format == "portable_note":
+                    raise HTTPException(status_code=422, detail="Invalid portable note contract.") from None
+                continue
+            except ValueError:
+                raise HTTPException(status_code=422, detail="Invalid portable note contract.") from None
+            for row in rows:
+                if item.format == "portable_note" or "format_version" in row:
+                    try:
+                        PortableNoteImport.model_validate(row)
+                        if not row["title"].strip():
+                            raise ValueError("Empty portable title")
+                    except (ValidationError, ValueError):
+                        raise HTTPException(
+                            status_code=422,
+                            detail="Unsupported or invalid portable note contract.",
+                        ) from None
+
         files: list[NotesImportFileResult] = []
         totals = {
             "detected_notes": 0,
@@ -3605,16 +3644,48 @@ async def import_notes(
             parsed_notes: list[dict[str, Any]] = []
 
             try:
-                if item.format == "json":
+                if item.format in {"json", "portable_note"}:
                     raw_payload = json.loads(item.content)
                     raw_rows = _extract_json_note_rows(raw_payload)
                     file_result.detected_notes = len(raw_rows)
                     for row_index, row in enumerate(raw_rows, start=1):
                         try:
-                            parsed_notes.append(_normalize_import_note_row(row, fallback_title=fallback_title))
+                            parsed_notes.append(
+                                _normalize_import_note_row(
+                                    row,
+                                    fallback_title=fallback_title,
+                                    portable="format_version" in row,
+                                )
+                            )
                         except _NOTES_NONCRITICAL_EXCEPTIONS as row_err:
                             file_result.failed_count += 1
                             file_result.errors.append(f"Row {row_index}: {row_err}")
+                elif item.format == "source":
+                    source_row: dict[str, Any] = {
+                        "title": "Imported source",
+                        "content": item.content,
+                    }
+                    if item.file_name:
+                        filename = Path(item.file_name.replace("\\", "/")).name
+                        extension = Path(filename).suffix.lower()
+                        modes = {
+                            ".json": "json",
+                            ".jsonl": "jsonl",
+                            ".yaml": "yaml",
+                            ".yml": "yaml",
+                            ".md": "markdown",
+                            ".markdown": "markdown",
+                            ".txt": "text",
+                            ".text": "text",
+                        }
+                        if extension not in modes:
+                            raise InputError("Unsupported source filename extension.")
+                        source_row["title"] = Path(filename).stem
+                        source_row["content_language"] = modes[extension]
+                    if not source_row["title"].strip() or len(source_row["title"]) > 255:
+                        raise InputError("Invalid source filename title.")
+                    file_result.detected_notes = 1
+                    parsed_notes = [_normalize_import_note_row(source_row, portable=True)]
                 else:
                     file_result.detected_notes = 1
                     parsed_notes = [_parse_markdown_import_note(item.content, fallback_title=fallback_title)]
@@ -3644,6 +3715,11 @@ async def import_notes(
                         "content": parsed_note["content"],
                         "conversation_id": None,
                         "message_id": None,
+                        **(
+                            {"content_language": parsed_note["content_language"]}
+                            if "content_language" in parsed_note
+                            else {}
+                        ),
                     }
                     request_fingerprint = None
                     local_receipt_key = request_key if request.headers.get("Idempotency-Key", "").strip() else None
@@ -3723,6 +3799,11 @@ async def import_notes(
                         update_patch = {
                             "title": parsed_note["title"],
                             "content": parsed_note["content"],
+                            **(
+                                {"content_language": parsed_note["content_language"]}
+                                if "content_language" in parsed_note
+                                else {}
+                            ),
                         }
                         if coordinator is not None:
                             projected_note = dict(existing_note)
@@ -3740,6 +3821,7 @@ async def import_notes(
                                 provenance=provenance,
                                 expected_provenance_version=provenance_version,
                                 expected_note_version=int(existing_note["version"]),
+                                expected_version=int(existing_note["version"]),
                             )
                             overwrite_result = _capture_notes_organization_plan(
                                 coordinator,

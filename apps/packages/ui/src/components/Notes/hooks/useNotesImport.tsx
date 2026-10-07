@@ -5,9 +5,11 @@ import type {
   ImportDuplicateStrategy,
   PendingImportFile,
   NotesImportResponsePayload,
+  ImportFormat,
 } from '../notes-manager-types'
 import {
   detectImportFormatFromFileName,
+  detectDeclaredPortableImport,
   estimateDetectedNotesFromImportContent,
 } from '../notes-manager-utils'
 
@@ -47,34 +49,51 @@ export function useNotesImport(deps: UseNotesImportDeps) {
     importInputRef.current?.click()
   }, [isOnline, listMode])
 
+  const prepareImportFiles = React.useCallback(
+    async (selectedFiles: File[], sourceMode = false) => {
+      const loaded = await Promise.all(
+        selectedFiles.map(async (file): Promise<PendingImportFile> => {
+          const initialFormat = detectImportFormatFromFileName(file.name, sourceMode);
+          try {
+            // File.text() consumes a UTF-8 BOM; decode source bytes without removing it.
+            const content = new TextDecoder('utf-8', {
+              fatal: true,
+              ignoreBOM: initialFormat === 'source',
+            }).decode(await file.arrayBuffer());
+            const format: ImportFormat = detectDeclaredPortableImport(initialFormat, content);
+            const detectedNotes = estimateDetectedNotesFromImportContent(format, content);
+            const parseError =
+              detectedNotes === 0
+                ? format === 'json'
+                  ? 'Could not parse notes from this JSON file.'
+                  : 'Could not read notes from this file.'
+                : null;
+            return { fileName: file.name, format, content, detectedNotes, parseError };
+          } catch {
+            return {
+              fileName: file.name,
+              format: initialFormat,
+              content: '',
+              detectedNotes: 0,
+              parseError: 'Could not read UTF-8 source from this file.',
+            };
+          }
+        })
+      );
+      setPendingImportFiles(loaded);
+      setImportModalOpen(true);
+    },
+    []
+  );
   const handleImportInputChange = React.useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const selectedFiles = Array.from(event.target.files || [])
       if (selectedFiles.length === 0) {
         return
       }
-      const loaded = await Promise.all(
-        selectedFiles.map(async (file): Promise<PendingImportFile> => {
-          const content = await file.text()
-          const format = detectImportFormatFromFileName(file.name)
-          const detectedNotes = estimateDetectedNotesFromImportContent(format, content)
-          const parseError =
-            format === 'json' && detectedNotes === 0
-              ? 'Could not parse notes from this JSON file.'
-              : null
-          return {
-            fileName: file.name,
-            format,
-            content,
-            detectedNotes,
-            parseError
-          }
-        })
-      )
-      setPendingImportFiles(loaded)
-      setImportModalOpen(true)
+      await prepareImportFiles(selectedFiles)
     },
-    []
+    [prepareImportFiles]
   )
 
   const closeImportModal = React.useCallback(() => {
@@ -96,7 +115,6 @@ export function useNotesImport(deps: UseNotesImportDeps) {
       return
     }
     const importItems = pendingImportFiles
-      .filter((entry) => entry.content.trim().length > 0)
       .map((entry) => ({
         file_name: entry.fileName,
         format: entry.format,
@@ -156,6 +174,7 @@ export function useNotesImport(deps: UseNotesImportDeps) {
     importInputRef,
     openImportPicker,
     handleImportInputChange,
+    prepareImportFiles,
     closeImportModal,
     confirmImport,
   }

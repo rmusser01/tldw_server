@@ -671,9 +671,20 @@ class NotesExportRequest(BaseModel):
     format: Literal['json', 'csv'] = Field(default='json', description="Use /export.csv for CSV exports.")
 
 
+class PortableNoteImport(NoteBase):
+    """Complete versioned source envelope; content is never a document value."""
+
+    format_version: Literal["tldw.note.v1"]
+    content_language: str | None = Field(..., min_length=1, max_length=100)
+    id: str | None = None
+    keywords: list[str] | None = None
+
+
 class NotesImportItem(BaseModel):
     file_name: str | None = Field(default=None, description="Optional source file name.")
-    format: Literal["json", "markdown"] = Field(..., description="Import format for this item.")
+    format: Literal["json", "markdown", "portable_note", "source"] = Field(
+        ..., description="Import format for this item."
+    )
     content: str = Field(..., min_length=1, max_length=5_000_000, description="Raw file content.")
 
 
@@ -689,7 +700,7 @@ class NotesImportRequest(BaseModel):
 
 class NotesImportFileResult(BaseModel):
     file_name: str | None = None
-    source_format: Literal["json", "markdown"]
+    source_format: Literal["json", "markdown", "portable_note", "source"]
     detected_notes: int = 0
     created_count: int = 0
     updated_count: int = 0

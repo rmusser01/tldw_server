@@ -870,6 +870,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     title: ed.title,
     content: ed.content,
     originalMetadata: ed.originalMetadata,
+    contentLanguage: ed.contentLanguage,
     editorKeywords: kw.editorKeywords,
     selectedStudioState: effectiveStudioState,
     studioPaperSize: selectedStudioPaperSize,
