@@ -310,6 +310,25 @@ describe("sidepanel chat handoff storage service", () => {
     )
   })
 
+  it("does not consume a copy when its destination retires during the storage read", async () => {
+    const pkg = buildStoredPackage()
+    storageState.store.set(storageKey(pkg.id), pkg)
+    let finish!: (value: SidepanelChatHandoffPackage) => void
+    storageState.get.mockImplementationOnce(() => new Promise<SidepanelChatHandoffPackage>(resolve => { finish = resolve }))
+    let current = true
+    const consumption = consumeSidepanelChatHandoff(pkg.id, () => current)
+    current = false
+    finish(pkg)
+    await expect(consumption).resolves.toBeNull()
+    expect(storageState.store.get(storageKey(pkg.id))).toEqual(pkg)
+    expect(storageState.remove).not.toHaveBeenCalled()
+  })
+
+  it("does not start a consume read for an already retired destination", async () => {
+    await expect(consumeSidepanelChatHandoff("retired", () => false)).resolves.toBeNull()
+    expect(storageState.get).not.toHaveBeenCalled()
+  })
+
   it("consumes a package exactly once", async () => {
     const pkg = await createSidepanelChatHandoff({
       draftText: "consume this once"

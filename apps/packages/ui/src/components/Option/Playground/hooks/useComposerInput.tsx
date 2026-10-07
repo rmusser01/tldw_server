@@ -629,5 +629,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     copyRetainedDraft: composerText.copyRetainedDraft,
     draftSaved,
     draftReady,
+    draftOwnerKey: composerText.draftOwnerKey,
+    isDraftOwnerCurrent: composerText.isDraftOwnerCurrent,
   };
 }

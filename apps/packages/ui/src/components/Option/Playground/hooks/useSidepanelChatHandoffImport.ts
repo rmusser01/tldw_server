@@ -22,6 +22,9 @@ export type SidepanelChatHandoffConflict = {
 }
 
 type UseSidepanelChatHandoffImportDeps = {
+  ready: boolean
+  destinationKey: string
+  captureGuard: () => () => boolean
   draftValue: string
   getDraftRevision: () => number
   setMessageValue: SetMessageValue
@@ -36,6 +39,9 @@ const appendImportedDraft = (currentDraft: string, importedDraft: string) => {
 }
 
 export function useSidepanelChatHandoffImport({
+  ready,
+  destinationKey,
+  captureGuard,
   draftValue,
   getDraftRevision,
   setMessageValue,
@@ -50,20 +56,36 @@ export function useSidepanelChatHandoffImport({
     React.useState<SidepanelChatHandoffConflict | null>(null)
   const [importPending, setImportPending] = React.useState(false)
   const [conflictFeedback, setConflictFeedback] = React.useState<string | null>(null)
-  const pendingChoiceRef = React.useRef<{ location: typeof location; draft: string; revision: number } | null>(null)
+  const pendingChoiceRef = React.useRef<{ location: typeof location; draft: string; revision: number; isOwned: () => boolean } | null>(null)
   const locationRef = React.useRef(location)
   locationRef.current = location
   const draftValueRef = React.useRef(draftValue)
   draftValueRef.current = draftValue
-  const handledHandoffIdsRef = React.useRef(new Set<string>())
+  const handledHandoffIdsRef = React.useRef(new Map<string, { destinationKey: string; settled: boolean; review: boolean }>())
+  const conflictOwnerRef = React.useRef<{ conflict: SidepanelChatHandoffConflict; isOwned: () => boolean } | null>(null)
+  const readyRef = React.useRef(ready)
+  readyRef.current = ready
 
-  React.useLayoutEffect(() => {
+  const retireConflict = React.useCallback(() => {
+    const conflictId = conflictOwnerRef.current?.conflict.handoff.id
+    const retired = conflictId ? handledHandoffIdsRef.current.get(conflictId) : undefined
+    if (retired) { retired.settled = false; retired.review = true }
     pendingChoiceRef.current = null
+    conflictOwnerRef.current = null
     setImportPending(false)
     setConflict(null)
     setConflictFeedback(null)
-    return () => { pendingChoiceRef.current = null }
-  }, [location.key, location.pathname, location.search, location.hash])
+  }, [])
+
+  React.useLayoutEffect(() => {
+    retireConflict()
+    setImportedContext(null)
+  }, [destinationKey, ready, retireConflict])
+
+  React.useLayoutEffect(() => {
+    retireConflict()
+    return retireConflict
+  }, [location, retireConflict])
 
   const cleanRouteHandoff = React.useCallback(() => {
     const params = new URLSearchParams(location.search)
@@ -93,72 +115,87 @@ export function useSidepanelChatHandoffImport({
     })
   }, [notificationApi, t])
 
-  const consumeQuietly = React.useCallback((handoffId: string) => {
-    void consumeSidepanelChatHandoff(handoffId).catch(() => undefined)
+  const consumeQuietly = React.useCallback((handoffId: string, isOwned: () => boolean) => {
+    void consumeSidepanelChatHandoff(handoffId, isOwned).catch(() => undefined)
   }, [])
 
   const applyImportedHandoff = React.useCallback(
     (
       handoff: SidepanelChatHandoffPackage,
       nextDraft: string,
-      options?: { consume?: boolean },
+      options: { isOwned: () => boolean },
     ) => {
+      if (!readyRef.current || !options.isOwned()) return
       setMessageValue(nextDraft, { collapseLarge: true })
       setImportedContext(handoff.pageContext ?? null)
       setConflict(null)
+      conflictOwnerRef.current = null
       cleanRouteHandoff()
-      handledHandoffIdsRef.current.add(handoff.id)
-      if (options?.consume !== false) {
-        queueMicrotask(() => consumeQuietly(handoff.id))
-      }
+      handledHandoffIdsRef.current.set(handoff.id, { destinationKey, settled: true, review: false })
+      queueMicrotask(() => {
+        if (options.isOwned()) consumeQuietly(handoff.id, options.isOwned)
+      })
     },
-    [cleanRouteHandoff, consumeQuietly, setMessageValue],
+    [cleanRouteHandoff, consumeQuietly, destinationKey, setMessageValue],
   )
 
   React.useEffect(() => {
     const params = new URLSearchParams(location.search)
     const handoffId = params.get("handoff")
-    if (!handoffId || handledHandoffIdsRef.current.has(handoffId)) return
+    const previous = handoffId ? handledHandoffIdsRef.current.get(handoffId) : undefined
+    if (!ready || location.pathname !== "/chat" || !handoffId || (previous?.destinationKey === destinationKey && previous.settled && (!conflictOwnerRef.current || conflictOwnerRef.current.isOwned()))) return
+    const isOwned = captureGuard()
+    if (!isOwned()) return
+    if (conflictOwnerRef.current && !conflictOwnerRef.current.isOwned()) retireConflict()
+    const attempt = { destinationKey, settled: false, review: previous?.review === true || (previous !== undefined && previous.destinationKey !== destinationKey) }
+    handledHandoffIdsRef.current.set(handoffId, attempt)
 
     let cancelled = false
 
     void (async () => {
       const handoff = await readSidepanelChatHandoff(handoffId)
-      if (cancelled) return
+      if (cancelled || handledHandoffIdsRef.current.get(handoffId) !== attempt || !readyRef.current || !isOwned()) return
+      attempt.settled = true
 
       if (!handoff) {
-        handledHandoffIdsRef.current.add(handoffId)
         setConflict(null)
         showInvalidFeedback()
         cleanRouteHandoff()
         return
       }
 
-      if (draftValueRef.current.length > 0) {
-        handledHandoffIdsRef.current.add(handoff.id)
-        setConflict({ handoff })
+      if (attempt.review || draftValueRef.current.length > 0) {
+        attempt.review = true
+        const nextConflict = { handoff }
+        conflictOwnerRef.current = { conflict: nextConflict, isOwned }
+        setConflict(nextConflict)
         return
       }
 
-      applyImportedHandoff(handoff, handoff.draft.text)
+      applyImportedHandoff(handoff, handoff.draft.text, { isOwned })
     })()
 
     return () => {
       cancelled = true
     }
-  }, [applyImportedHandoff, cleanRouteHandoff, location.search, showInvalidFeedback])
+  }, [applyImportedHandoff, captureGuard, cleanRouteHandoff, destinationKey, location, ready, retireConflict, showInvalidFeedback])
 
   const removeImportedContext = React.useCallback(() => {
     setImportedContext(null)
   }, [])
 
+  const isConflictCurrent = React.useCallback(() => readyRef.current && conflict !== null &&
+    conflictOwnerRef.current?.conflict === conflict && conflictOwnerRef.current.isOwned() &&
+    new URLSearchParams(locationRef.current.search).get("handoff") === conflict.handoff.id, [conflict])
+
   const acceptHandoffDraft = React.useCallback(async (action: "insert" | "replace") => {
-    if (!conflict || pendingChoiceRef.current) return
-    const attempt = { location: locationRef.current, draft: draftValueRef.current, revision: getDraftRevision() }
+    if (!isConflictCurrent() || !conflict || pendingChoiceRef.current) return
+    const attempt = { location: locationRef.current, draft: draftValueRef.current, revision: getDraftRevision(), isOwned: captureGuard() }
+    if (!attempt.isOwned()) return
     pendingChoiceRef.current = attempt
     setImportPending(true)
     setConflictFeedback(null)
-    const isCurrent = () => pendingChoiceRef.current === attempt &&
+    const isCurrent = () => readyRef.current && attempt.isOwned() && pendingChoiceRef.current === attempt &&
       locationRef.current.key === attempt.location.key &&
       locationRef.current.pathname === attempt.location.pathname &&
       locationRef.current.search === attempt.location.search &&
@@ -182,7 +219,7 @@ export function useSidepanelChatHandoffImport({
       }
       applyImportedHandoff(handoff, action === "insert"
         ? appendImportedDraft(draftValueRef.current, handoff.draft.text)
-        : handoff.draft.text)
+        : handoff.draft.text, { isOwned: attempt.isOwned })
     } catch {
       if (isCurrent()) setConflictFeedback(t(
         "playground:sidepanelHandoff.readFailed",
@@ -194,7 +231,7 @@ export function useSidepanelChatHandoffImport({
         setImportPending(false)
       }
     }
-  }, [applyImportedHandoff, cleanRouteHandoff, conflict, getDraftRevision, showInvalidFeedback, t])
+  }, [applyImportedHandoff, captureGuard, cleanRouteHandoff, conflict, getDraftRevision, isConflictCurrent, showInvalidFeedback, t])
 
   const insertHandoffDraft = React.useCallback(
     () => acceptHandoffDraft("insert"), [acceptHandoffDraft],
@@ -204,15 +241,17 @@ export function useSidepanelChatHandoffImport({
   )
 
   const cancelHandoffImport = React.useCallback(() => {
-    if (!conflict) return
+    if (!isConflictCurrent() || !conflict) return
+    const isOwned = conflictOwnerRef.current!.isOwned
+    conflictOwnerRef.current = null
     pendingChoiceRef.current = null
     setImportPending(false)
     setConflictFeedback(null)
     setConflict(null)
     cleanRouteHandoff()
-    handledHandoffIdsRef.current.add(conflict.handoff.id)
-    consumeQuietly(conflict.handoff.id)
-  }, [cleanRouteHandoff, conflict, consumeQuietly])
+    handledHandoffIdsRef.current.set(conflict.handoff.id, { destinationKey, settled: true, review: false })
+    consumeQuietly(conflict.handoff.id, isOwned)
+  }, [cleanRouteHandoff, conflict, consumeQuietly, destinationKey, isConflictCurrent])
 
   return {
     importedContext,

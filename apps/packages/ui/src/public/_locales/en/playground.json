@@ -4093,5 +4093,11 @@
   },
   "composer_modelsDiscoveryFailedDetail": {
     "message": "Your character selection and draft are kept. Retry checking models before sending."
+  },
+  "sidepanelHandoff_conflictDescription": {
+    "message": "Review the copied draft below. Insert it, replace your current draft, or cancel the import."
+  },
+  "sidepanelHandoff_copiedDraft": {
+    "message": "Copied draft"
   }
 }

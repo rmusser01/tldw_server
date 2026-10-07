@@ -1517,6 +1517,8 @@
     "checkingCopy": "Checking the copy…",
     "draftChanged": "Your draft changed while the copy was checked. Review it, then choose Insert or Replace again.",
     "readFailed": "The copy could not be checked. Your draft remains here. Try Insert or Replace again.",
-    "unavailableCopyDescription": "The copy expired or could not be read. Your destination draft remains here. Copy again from the sidepanel to try again."
+    "unavailableCopyDescription": "The copy expired or could not be read. Your destination draft remains here. Copy again from the sidepanel to try again.",
+    "conflictDescription": "Review the copied draft below. Insert it, replace your current draft, or cancel the import.",
+    "copiedDraft": "Copied draft"
   }
 }

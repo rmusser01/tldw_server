@@ -2,9 +2,14 @@ import React from "react"
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { COMPOSER_CONSTANTS } from "@/config/ui-constants"
+import { MemoryRouter } from "react-router-dom"
+import { useSidepanelChatHandoffImport } from "../../../Option/Playground/hooks/useSidepanelChatHandoffImport"
+import type { SidepanelChatHandoffPackage } from "@/services/sidepanel-chat-handoff"
 import { Storage } from "@plasmohq/storage"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
+const handoffIO = vi.hoisted(() => ({ read: vi.fn(), consume: vi.fn() }))
+vi.mock("@/services/sidepanel-chat-handoff", () => ({ readSidepanelChatHandoff: handoffIO.read, consumeSidepanelChatHandoff: handoffIO.consume }))
 const authority = vi.hoisted(() => ({ user: "alice" as string | null, org: null as number | null, error: null as unknown }))
 vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
 vi.mock("@/services/service-prompts", async (importOriginal) => ({
@@ -238,6 +243,78 @@ describe.each([false, true])("composer account ownership using the real draft re
     await switchTo("alice")
     await settle()
     expect(view.result.current.form.values.message).toBe("ALICE PENDING WRITE")
+  })
+})
+
+
+describe("copied drafts use the actual composer restoration and account watcher", () => {
+  const copy: SidepanelChatHandoffPackage = {
+    id: "owned-copy", source: "sidepanel-chat", createdAt: "2026-10-06T00:00:00Z", expiresAt: "2026-10-06T00:10:00Z",
+    draft: { text: "COPIED TEXT  " }, pageContext: { title: "Copied page", snippets: [] }
+  }
+  const mount = () => renderHook(() => {
+    const text = useComposerText({ draftKey, textareaRef: React.useRef<HTMLTextAreaElement>(null) })
+    const captureGuard = React.useCallback(() => text.isDraftOwnerCurrent, [text.isDraftOwnerCurrent])
+    const handoff = useSidepanelChatHandoffImport({ ready: text.draftReady, destinationKey: text.draftOwnerKey ?? "unresolved",
+      captureGuard, draftValue: text.form.values.message, getDraftRevision: text.form.getRevision, setMessageValue: text.setMessageValue,
+      t: (_key, fallback) => typeof fallback === "string" ? fallback : _key })
+    return { text, handoff }
+  }, { wrapper: ({ children }) => <MemoryRouter initialEntries={["/chat?handoff=owned-copy"]}>{children}</MemoryRouter> })
+  beforeEach(() => {
+    vi.useFakeTimers(); localStorage.clear(); sessionStorage.clear(); authority.user = "alice"; authority.org = null; authority.error = null
+    handoffIO.read.mockReset().mockResolvedValue(copy); handoffIO.consume.mockReset().mockResolvedValue(copy)
+  })
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
+
+  it("waits for a held durable draft restore and offers Insert without changing either text", async () => {
+    const seed = renderHook(() => useComposerText({ draftKey, textareaRef: React.createRef<HTMLTextAreaElement>() }))
+    await settle()
+    act(() => seed.result.current.setMessageValue("RESTORED DESTINATION  "))
+    await settle()
+    const key = ownerRecordKeys()[0]
+    seed.unmount()
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const original = Storage.prototype.get
+    vi.spyOn(Storage.prototype, "get").mockImplementation(async function<T>(this: Storage, candidate: string): Promise<T | undefined> {
+      const value = await original.call(this, candidate) as T | undefined
+      if (candidate === key) await held
+      return value
+    })
+    const view = mount()
+    await settle()
+    expect(view.result.current.text.draftReady).toBe(false)
+    expect(handoffIO.read).not.toHaveBeenCalled()
+    await act(async () => { release() })
+    await settle()
+    expect(view.result.current.text.form.values.message).toBe("RESTORED DESTINATION  ")
+    expect(view.result.current.handoff.conflict?.handoff.draft.text).toBe("COPIED TEXT  ")
+    expect(handoffIO.consume).not.toHaveBeenCalled()
+  })
+
+  it.each(["initial", "choice"])("retires a held %s read through the real synchronous account event", async mode => {
+    let finish!: (value: SidepanelChatHandoffPackage) => void
+    const pending = new Promise<SidepanelChatHandoffPackage>(resolve => { finish = resolve })
+    if (mode === "initial") handoffIO.read.mockReturnValueOnce(pending)
+    else {
+      const seed = renderHook(() => useComposerText({ draftKey, textareaRef: React.createRef<HTMLTextAreaElement>() }))
+      await settle(); act(() => seed.result.current.setMessageValue("ALICE DESTINATION  ")); await settle(); seed.unmount()
+    }
+    const view = mount()
+    await settle()
+    if (mode === "choice") {
+      expect(view.result.current.handoff.conflict).not.toBeNull()
+      handoffIO.read.mockReturnValueOnce(pending)
+      act(() => { void view.result.current.handoff.replaceWithHandoffDraft() })
+    }
+    await switchTo("bob")
+    await settle()
+    act(() => view.result.current.text.setMessageValue("BOB CURRENT  "))
+    await act(async () => { finish(copy) })
+    await settle()
+    expect(view.result.current.text.form.values.message).toBe("BOB CURRENT  ")
+    expect(view.result.current.handoff.importedContext).toBeNull()
+    expect(handoffIO.consume).not.toHaveBeenCalled()
   })
 })
 

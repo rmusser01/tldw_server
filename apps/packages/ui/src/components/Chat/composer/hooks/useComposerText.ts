@@ -114,6 +114,8 @@ export interface UseComposerTextResult {
   draftSaved: boolean
   /** Whether this owner's saved draft has finished restoring. */
   draftReady: boolean
+  draftOwnerKey: string | null
+  isDraftOwnerCurrent: () => boolean
   /** Clear current persistence; pass the acknowledged attempt for delayed sends. */
   clearDraft: (attemptId?: number) => void
   /** Computed max height actually applied to the textarea. Surfaced for tests. */
@@ -739,6 +741,8 @@ export function useComposerText(
     textAreaFocus,
     draftSaved,
     draftReady,
+    draftOwnerKey: ownerKey,
+    isDraftOwnerCurrent: isCurrent,
     clearDraft,
     textareaMaxHeight
   }

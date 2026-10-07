@@ -457,10 +457,12 @@ export const readSidepanelChatHandoff = async (
 }
 
 export const consumeSidepanelChatHandoff = async (
-  id: string
+  id: string,
+  isCurrent: () => boolean = () => true
 ): Promise<SidepanelChatHandoffPackage | null> => {
+  if (!isCurrent()) return null
   const pkg = await readSidepanelChatHandoff(id)
-  if (!pkg) return null
+  if (!pkg || !isCurrent()) return null
 
   await storage.remove(storageKey(id))
   return pkg

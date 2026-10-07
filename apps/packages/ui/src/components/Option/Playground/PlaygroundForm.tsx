@@ -2194,6 +2194,8 @@ export const PlaygroundForm = ({
     wrapComposerProfile,
     draftSaved,
     draftReady,
+    draftOwnerKey,
+    isDraftOwnerCurrent,
     retainCurrentDraft,
     creationRecovery,
     reviewCreatedChat,
@@ -2262,6 +2264,19 @@ export const PlaygroundForm = ({
     return useStoreMessageOption.getState().setChatDraftAddress(draft.handle.address);
   };
 
+  const receiverDraftAddress = useStoreMessageOption(state => state.chatDraftAddress);
+  const receiverDraftRevision = useStoreMessageOption(state => state.chatDraftRevision);
+  const handoffDestinationKey = JSON.stringify([draftOwnerKey, historyId, serverChatId, receiverDraftAddress, receiverDraftRevision]);
+  const captureHandoffGuard = React.useCallback(() => {
+    const selectionIsCurrent = historySelection?.fence() ?? (() => true);
+    const expected = useStoreMessageOption.getState();
+    return () => {
+      const current = useStoreMessageOption.getState();
+      return assistantActionMountedRef.current && isDraftOwnerCurrent() && selectionIsCurrent() &&
+        current.chatDraftAddress === expected.chatDraftAddress && current.chatDraftRevision === expected.chatDraftRevision &&
+        current.historyId === expected.historyId && current.serverChatId === expected.serverChatId;
+    };
+  }, [historySelection, isDraftOwnerCurrent]);
   const hasDraft = (form.values.message || "").trim().length > 0;
   const {
     importedContext: importedSidepanelContext,
@@ -2273,6 +2288,9 @@ export const PlaygroundForm = ({
     replaceWithHandoffDraft,
     cancelHandoffImport,
   } = useSidepanelChatHandoffImport({
+    ready: draftReady,
+    destinationKey: handoffDestinationKey,
+    captureGuard: captureHandoffGuard,
     draftValue: form.values.message || "",
     getDraftRevision: form.getRevision,
     setMessageValue,
@@ -5577,9 +5595,13 @@ export const PlaygroundForm = ({
                       <div className="text-text-muted">
                         {t(
                           "playground:sidepanelHandoff.conflictDescription",
-                          "Your composer already has a draft. Insert the sidepanel draft, replace yours, or cancel the import.",
+                          "Review the copied draft below. Insert it, replace your current draft, or cancel the import.",
                         )}
                       </div>
+                    </div>
+                    <div className="basis-full min-w-0">
+                      <p className="font-medium">{t("playground:sidepanelHandoff.copiedDraft", "Copied draft")}</p>
+                      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans text-sm text-text">{sidepanelHandoffConflict.handoff.draft.text}</pre>
                     </div>
                     {(sidepanelImportPending || sidepanelImportFeedback) ? (
                       <p role="status" className="basis-full text-text-muted">
