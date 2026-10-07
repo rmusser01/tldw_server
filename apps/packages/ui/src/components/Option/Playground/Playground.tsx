@@ -741,6 +741,7 @@ const PlaygroundContent = () => {
         serverChatId: null as string | null,
         researchReturnRunId: null as string | null,
         sidepanelHandoff: null,
+        sidepanelHandoffUrl: null,
       };
     }
     const params = new URLSearchParams(window.location.search);
@@ -755,6 +756,7 @@ const PlaygroundContent = () => {
       serverChatId: returnServerChatId,
       researchReturnRunId,
       sidepanelHandoff,
+      sidepanelHandoffUrl: window.location.href,
     };
   }, []);
   const returnHistoryIdFromSettings = settingsReturnContext.historyId;
@@ -762,6 +764,7 @@ const PlaygroundContent = () => {
   const returnResearchRunIdFromSettings =
     settingsReturnContext.researchReturnRunId;
   const sidepanelChatHandoff = settingsReturnContext.sidepanelHandoff;
+  const sidepanelHandoffUrl = settingsReturnContext.sidepanelHandoffUrl;
   const shouldRestorePersistedSessionOnInit =
     shouldRestorePersistedPlaygroundSession({
       hasPersistedSession,
@@ -2158,26 +2161,21 @@ const PlaygroundContent = () => {
         setFileRetrievalEnabled(sidepanelChatHandoff.fileRetrievalEnabled);
       }
 
-      if (sidepanelChatHandoff.draft?.trim()) {
-        requestAnimationFrame(() => {
-          window.dispatchEvent(
-            new CustomEvent("tldw:set-composer-message", {
-              detail: {
-                message: sidepanelChatHandoff.draft,
-                ifEmptyOnly: true,
-              },
-            }),
-          );
-        });
-      }
+      // The actual hydrated composer owns draft review and matching route cleanup.
+      if (typeof sidepanelChatHandoff.draft === "string") return;
 
-      if (typeof window !== "undefined") {
+      if (!cancelled && typeof window !== "undefined" && sidepanelHandoffUrl) {
+        const sourceUrl = new URL(sidepanelHandoffUrl);
+        const sourceHash = new URLSearchParams(sourceUrl.hash.slice(1));
         const url = new URL(window.location.href);
-        url.searchParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
-        const hashParams = new URLSearchParams(
-          url.hash.startsWith("#") ? url.hash.slice(1) : url.hash,
-        );
-        hashParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
+        const hashParams = new URLSearchParams(url.hash.slice(1));
+        if (sourceHash.has(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM)) {
+          if (hashParams.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM) !== sourceHash.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM)) return;
+          hashParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
+        } else {
+          if (hashParams.has(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM) || url.searchParams.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM) !== sourceUrl.searchParams.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM)) return;
+          url.searchParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
+        }
         const nextQuery = url.searchParams.toString();
         const nextHash = hashParams.toString();
         const nextPath = `${url.pathname}${nextQuery ? `?${nextQuery}` : ""}${nextHash ? `#${nextHash}` : ""}`;
@@ -2208,6 +2206,7 @@ const PlaygroundContent = () => {
     setUseOCR,
     setWebSearch,
     sidepanelChatHandoff,
+    sidepanelHandoffUrl,
     temporaryChat,
     toolChoice,
     useOCR,

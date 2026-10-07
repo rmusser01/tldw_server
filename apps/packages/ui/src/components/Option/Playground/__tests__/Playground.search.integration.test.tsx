@@ -3,6 +3,8 @@ import React from "react"
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { useSimpleForm } from "@/hooks/useSimpleForm"
+import { useSidepanelChatHandoffImport } from "../hooks/useSidepanelChatHandoffImport"
 import { useHistorySelection, useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import { useStoreMessageOption } from "@/store/option"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
@@ -196,9 +198,18 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
-  PlaygroundForm: () => <div data-testid="playground-form" />
-}))
+const fragmentComposer = vi.hoisted(() => ({ enabled: false, ready: false }))
+// Actual import hook/form state; the large surrounding Form UI is an explicit boundary.
+vi.mock("@/components/Option/Playground/PlaygroundForm", () => {
+  const Composer = () => {
+    const form = useSimpleForm({ initialValues: { message: "RESTORED DESTINATION  " } })
+    const imported = useSidepanelChatHandoffImport({ ready: fragmentComposer.ready, destinationKey: "owned-destination", captureGuard: () => () => true,
+      draftValue: form.values.message, getDraftRevision: form.getRevision, setMessageValue: value => form.setFieldValue("message", value), t: (_key, fallback) => fallback })
+    return <div data-testid="playground-form"><textarea aria-label="Fragment composer" value={form.values.message} readOnly />
+      {imported.conflict ? <div role="status" aria-label="Fragment review"><pre>{imported.conflict.handoff.draft.text}</pre><button onClick={imported.replaceWithHandoffDraft}>Accept fragment draft</button></div> : null}</div>
+  }
+  return { PlaygroundForm: () => fragmentComposer.enabled ? <Composer /> : <div data-testid="playground-form" /> }
+})
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
   PlaygroundChat: React.forwardRef(function MockPlaygroundChat(
@@ -373,19 +384,26 @@ vi.mock("react-router-dom", async () => {
   return {
     ...actual,
     useNavigate: () => routerState.navigate,
-    useLocation: () => routerState.hashRouter && window.location.hash.startsWith("#/") ? { ...(() => { const route = new URL(window.location.hash.slice(1), window.location.origin); return { pathname: route.pathname, search: route.search, hash: route.hash } })(), state: null, key: "hash-location" } : ({
-      pathname: window.location.pathname || "/chat",
-      search: window.location.search || "",
-      hash: window.location.hash || "",
-      state: null,
-      key: "test-location"
-    })
+    useLocation: () => {
+      const href = window.location.href
+      const hashRouter = routerState.hashRouter
+      return React.useMemo(() => {
+        const current = new URL(href)
+        if (hashRouter && current.hash.startsWith("#/")) {
+          const route = new URL(current.hash.slice(1), current.origin)
+          return { pathname: route.pathname, search: route.search, hash: route.hash, state: null, key: "hash-location" }
+        }
+        return { pathname: current.pathname || "/chat", search: current.search, hash: current.hash, state: null, key: "test-location" }
+      }, [href, hashRouter])
+    }
   }
 })
 
 describe("Playground thread search integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    fragmentComposer.enabled = false
+    fragmentComposer.ready = false
     h1.confirm.mockClear()
     h1.enabled = false
     forkPresentation.controller = null
@@ -740,7 +758,7 @@ describe("Playground thread search integration", () => {
 
     render(<Playground />)
 
-    await waitFor(() => expect(window.location.hash).toBe(""))
+    await waitFor(() => expect(messageOptionState.value.setFileRetrievalEnabled).toHaveBeenCalledWith(true))
     expect(loadLocalConversationMock).not.toHaveBeenCalled()
     expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalledWith("server-handoff")
     expect(screen.getByTestId("sidepanel-handoff-history-unconfirmed")).toHaveTextContent("History was not transferred")
@@ -762,18 +780,22 @@ describe("Playground thread search integration", () => {
     expect(
       messageOptionState.value.setFileRetrievalEnabled
     ).toHaveBeenCalledWith(true)
-    expect(window.location.hash).toBe("")
+    expect(window.location.hash).toContain(`handoff=${encodedHandoff}`)
   })
 
   it("does not let an unavailable foreign local reference block its transferable draft", async () => {
     loadLocalConversationMock.mockResolvedValueOnce(false)
+    fragmentComposer.enabled = true
+    fragmentComposer.ready = true
     const draftReceived = vi.fn()
     window.addEventListener("tldw:set-composer-message", draftReceived)
     const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), historyId: "foreign-local-id", serverChatId: "unqualified-server-id", draft: "TRANSFERABLE DRAFT" })
     window.history.replaceState(null, "", `/chat#handoff=${encoded}`)
     try {
       render(<Playground />)
-      await waitFor(() => expect(draftReceived.mock.calls.some(([event]) => (event as CustomEvent).detail?.message === "TRANSFERABLE DRAFT")).toBe(true))
+      await screen.findByRole("status", { name: "Fragment review" })
+      expect(screen.getByRole("status", { name: "Fragment review" }).querySelector("pre")?.textContent).toBe("TRANSFERABLE DRAFT")
+      expect(draftReceived.mock.calls.some(([event]) => (event as CustomEvent).detail?.message === "TRANSFERABLE DRAFT")).toBe(false)
       expect(loadLocalConversationMock).not.toHaveBeenCalled()
       expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalledWith("unqualified-server-id")
       expect(messageOptionState.value.historyId).toBe("history-1")
@@ -783,6 +805,50 @@ describe("Playground thread search integration", () => {
       window.removeEventListener("tldw:set-composer-message", draftReceived)
       loadLocalConversationMock.mockReset().mockResolvedValue(undefined)
     }
+  })
+
+  it("offers the actual hydrated draft review while settings change and document loading stays held", async () => {
+    fragmentComposer.enabled = true
+    let release!: (value: { payload: object }) => void
+    tldwClientState.getDocumentUploadDraft.mockReturnValueOnce(new Promise(resolve => { release = resolve }))
+    const copied = "  {{user}}\n\tREVIEW NOW  "
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft: copied, selectedModel: "different-model", chatDocumentDraftId: "held-document" })
+    window.history.replaceState(null, "", `/chat#handoff=${encoded}`)
+    const events = vi.fn()
+    window.addEventListener("tldw:set-composer-message", events)
+    try {
+      const view = render(<Playground />)
+      await waitFor(() => expect(tldwClientState.getDocumentUploadDraft).toHaveBeenCalledWith("held-document"))
+      expect(screen.queryByRole("status", { name: "Fragment review" })).not.toBeInTheDocument()
+      messageOptionState.value.selectedModel = "different-model"
+      fragmentComposer.ready = true
+      view.rerender(<Playground />)
+      await screen.findByRole("status", { name: "Fragment review" })
+      expect(screen.getByRole("status", { name: "Fragment review" }).querySelector("pre")?.textContent).toBe(copied)
+      expect(screen.getByLabelText("Fragment composer")).toHaveValue("RESTORED DESTINATION  ")
+      expect(window.location.hash).toContain(`handoff=${encoded}`)
+      await act(async () => { release({ payload: {} }) })
+      expect(events.mock.calls.some(([event]) => (event as CustomEvent).detail?.message === copied)).toBe(false)
+      expect(screen.getByLabelText("Fragment composer")).toHaveValue("RESTORED DESTINATION  ")
+    } finally { window.removeEventListener("tldw:set-composer-message", events) }
+  })
+
+  it("does not let old document-only work erase a replacement draft token", async () => {
+    fragmentComposer.enabled = true
+    fragmentComposer.ready = true
+    let release!: (value: { payload: object }) => void
+    tldwClientState.getDocumentUploadDraft.mockReturnValueOnce(new Promise(resolve => { release = resolve }))
+    const old = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), chatDocumentDraftId: "held-old-document" })
+    window.history.replaceState(null, "", `/chat#handoff=${old}`)
+    const view = render(<Playground />)
+    await waitFor(() => expect(tldwClientState.getDocumentUploadDraft).toHaveBeenCalledWith("held-old-document"))
+    const incoming = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft: "NEW COPY  " })
+    window.history.replaceState(null, "", `/chat?keep=query#handoff=${incoming}&keep=hash`)
+    view.rerender(<Playground />)
+    await screen.findByRole("status", { name: "Fragment review" })
+    await act(async () => { release({ payload: {} }) })
+    expect(window.location.hash).toContain(`handoff=${incoming}`)
+    expect(screen.getByLabelText("Fragment composer")).toHaveValue("RESTORED DESTINATION  ")
   })
 
   it("imports sidepanel document draft files into chat attachments", async () => {

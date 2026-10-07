@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { COMPOSER_CONSTANTS } from "@/config/ui-constants"
 import { MemoryRouter } from "react-router-dom"
 import { useSidepanelChatHandoffImport } from "../../../Option/Playground/hooks/useSidepanelChatHandoffImport"
+import { encodeSidepanelChatWebUiHandoff, SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import type { SidepanelChatHandoffPackage } from "@/services/sidepanel-chat-handoff"
 import { Storage } from "@plasmohq/storage"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
@@ -252,21 +253,25 @@ describe("copied drafts use the actual composer restoration and account watcher"
     id: "owned-copy", source: "sidepanel-chat", createdAt: "2026-10-06T00:00:00Z", expiresAt: "2026-10-06T00:10:00Z",
     draft: { text: "COPIED TEXT  " }, pageContext: { title: "Copied page", snippets: [] }
   }
-  const mount = () => renderHook(() => {
+  const fragmentEntry = (query = false) => {
+    const token = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft: copy.draft.text })
+    return query ? `/chat?handoff=${token}` : `/chat#handoff=${token}`
+  }
+  const mount = (entry = "/chat?handoff=owned-copy") => renderHook(() => {
     const text = useComposerText({ draftKey, textareaRef: React.useRef<HTMLTextAreaElement>(null) })
     const captureGuard = React.useCallback(() => text.isDraftOwnerCurrent, [text.isDraftOwnerCurrent])
     const handoff = useSidepanelChatHandoffImport({ ready: text.draftReady, destinationKey: text.draftOwnerKey ?? "unresolved",
       captureGuard, draftValue: text.form.values.message, getDraftRevision: text.form.getRevision, setMessageValue: text.setMessageValue,
       t: (_key, fallback) => typeof fallback === "string" ? fallback : _key })
     return { text, handoff }
-  }, { wrapper: ({ children }) => <MemoryRouter initialEntries={["/chat?handoff=owned-copy"]}>{children}</MemoryRouter> })
+  }, { wrapper: ({ children }) => <MemoryRouter initialEntries={[entry]}>{children}</MemoryRouter> })
   beforeEach(() => {
     vi.useFakeTimers(); localStorage.clear(); sessionStorage.clear(); authority.user = "alice"; authority.org = null; authority.error = null
     handoffIO.read.mockReset().mockResolvedValue(copy); handoffIO.consume.mockReset().mockResolvedValue(copy)
   })
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
 
-  it("waits for a held durable draft restore and offers Insert without changing either text", async () => {
+  it.each(["local", "fragment", "encoded query"])("waits for actual cold durable restoration before reviewing a %s copy", async transport => {
     const seed = renderHook(() => useComposerText({ draftKey, textareaRef: React.createRef<HTMLTextAreaElement>() }))
     await settle()
     act(() => seed.result.current.setMessageValue("RESTORED DESTINATION  "))
@@ -281,7 +286,7 @@ describe("copied drafts use the actual composer restoration and account watcher"
       if (candidate === key) await held
       return value
     })
-    const view = mount()
+    const view = mount(transport === "local" ? undefined : fragmentEntry(transport === "encoded query"))
     await settle()
     expect(view.result.current.text.draftReady).toBe(false)
     expect(handoffIO.read).not.toHaveBeenCalled()
@@ -289,6 +294,30 @@ describe("copied drafts use the actual composer restoration and account watcher"
     await settle()
     expect(view.result.current.text.form.values.message).toBe("RESTORED DESTINATION  ")
     expect(view.result.current.handoff.conflict?.handoff.draft.text).toBe("COPIED TEXT  ")
+    expect(handoffIO.consume).not.toHaveBeenCalled()
+  })
+
+  it("retires yielded fragment choices through the real synchronous account watcher", async () => {
+    const view = mount(fragmentEntry())
+    await settle()
+    expect(view.result.current.text.draftReady).toBe(true)
+    expect(view.result.current.handoff.conflict?.handoff.draft.text).toBe(copy.draft.text)
+    const cancel = view.result.current.handoff.cancelHandoffImport
+    let pending!: Promise<void>
+    act(() => {
+      pending = view.result.current.handoff.replaceWithHandoffDraft()
+      authority.user = null
+      window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } }))
+    })
+    await switchTo("bob")
+    await settle()
+    act(() => view.result.current.text.setMessageValue("BOB CURRENT  "))
+    await act(async () => { await pending; cancel() })
+    await settle()
+    expect(view.result.current.text.form.values.message).toBe("BOB CURRENT  ")
+    expect(view.result.current.handoff.importedContext).toBeNull()
+    expect(view.result.current.handoff.conflict?.handoff.draft.text).toBe(copy.draft.text)
+    expect(handoffIO.read).not.toHaveBeenCalled()
     expect(handoffIO.consume).not.toHaveBeenCalled()
   })
 

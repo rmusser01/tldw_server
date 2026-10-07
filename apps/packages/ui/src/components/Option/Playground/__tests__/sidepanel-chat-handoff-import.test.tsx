@@ -8,8 +8,9 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { encodeSidepanelChatWebUiHandoff, SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, SIDEPANEL_CHAT_WEBUI_HANDOFF_MAX_AGE_MS } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { SidepanelImportedContextBanner } from "../SidepanelImportedContextBanner"
 import { usePlaygroundQueueManagement } from "../hooks/usePlaygroundQueueManagement"
@@ -134,7 +135,7 @@ const LocationProbe = ({
     onChange?.(location)
   }, [location, onChange])
 
-  return <><div data-testid="location-search">{location.search}</div><div data-testid="location-path">{location.pathname}</div><div data-testid="location-key">{location.key}</div></>
+  return <><div data-testid="location-search">{location.search}</div><div data-testid="location-path">{location.pathname}</div><div data-testid="location-key">{location.key}</div><div data-testid="location-hash">{location.hash}</div></>
 }
 
 const HookHarness = ({
@@ -144,7 +145,9 @@ const HookHarness = ({
   onLocationChange,
   ownerCurrent,
   onImportChange,
+  replacementEntry,
 }: {
+  replacementEntry?: string
   initialDraft?: string
   ready?: boolean
   destination?: string
@@ -177,6 +180,7 @@ const HookHarness = ({
   return (
     <div>
       <LocationProbe onChange={onLocationChange} />
+      {replacementEntry ? <button type="button" onClick={() => navigate(replacementEntry)}>New fragment route</button> : null}
       <button type="button" onClick={() => navigate("/chat?handoff=handoff-1")}>Reopen copy route</button>
       <button type="button" onClick={() => { setDraft("OTHER VIEW DRAFT  "); navigate("/other") }}>Leave chat</button>
       <button type="button" onClick={() => { setDraft("TRANSIENT EDIT"); setDraft(draft) }}>Edit then Undo</button>
@@ -193,6 +197,7 @@ const HookHarness = ({
       ) : null}
       {handoffImport.conflict ? (
         <div role="status" aria-label="Sidepanel handoff conflict">
+          <pre data-testid="copied-draft">{handoffImport.conflict.handoff.draft.text}</pre>
           {handoffImport.importPending ? <p>Checking copy</p> : null}
           {handoffImport.conflictFeedback ? <p>{handoffImport.conflictFeedback}</p> : null}
           <button type="button" disabled={handoffImport.importPending} onClick={handoffImport.insertHandoffDraft}>
@@ -315,6 +320,150 @@ describe("sidepanel chat handoff import", () => {
     submitHarnessSendMessage.mockResolvedValue(null)
     serviceMocks.readSidepanelChatHandoff.mockResolvedValue(buildPackage())
     serviceMocks.consumeSidepanelChatHandoff.mockResolvedValue(buildPackage())
+  })
+
+  afterEach(() => { vi.useRealTimers() })
+
+  const fragmentRoute = (draft: string, route: "hash" | "query" = "hash") => {
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft })
+    return route === "hash" ? `/chat?keep=query#handoff=${encoded}&keep=hash` : `/chat?keep=query&handoff=${encoded}#keep=hash`
+  }
+
+  it.each(["hash", "query"] as const)("waits for hydration and explicit review of exact %s draft", async route => {
+    const text = "  {{user}}\n\tFROM SIDEPANEL  "
+    const entry = fragmentRoute(text, route)
+    const tree = (ready: boolean) => <MemoryRouter initialEntries={[entry]}><HookHarness ready={ready} /></MemoryRouter>
+    const view = render(tree(false))
+    await act(async () => {})
+    expect(screen.queryByRole("button", { name: "Replace" })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Composer"), { target: { value: "RESTORED DESTINATION  " } })
+    view.rerender(tree(true))
+    await screen.findByRole("button", { name: "Replace" })
+    expect(screen.getByTestId("copied-draft").textContent).toBe(text)
+    expect(screen.getByLabelText("Composer")).toHaveValue("RESTORED DESTINATION  ")
+    expect(serviceMocks.readSidepanelChatHandoff).not.toHaveBeenCalled()
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Insert" }))
+    await waitFor(() => expect(screen.getByLabelText("Composer")).toHaveValue(`RESTORED DESTINATION  \n\n${text}`))
+    expect(screen.getByTestId("location-search")).toHaveTextContent("?keep=query")
+    expect(screen.getByTestId("location-hash")).toHaveTextContent("#keep=hash")
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+  })
+
+  it.each(["RAW TEXT", " \n\t ", ""])("requires review even for empty destination and exact draft %j", async text => {
+    renderWithRoute(<HookHarness />, fragmentRoute(text))
+    await screen.findByRole("button", { name: "Replace" })
+    expect(screen.getByLabelText("Composer")).toHaveValue("")
+    expect(screen.getByTestId("copied-draft").textContent).toBe(text)
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }))
+    await waitFor(() => expect(screen.getByTestId("location-hash")).toHaveTextContent("#keep=hash"))
+    expect(screen.getByLabelText("Composer")).toHaveValue(text)
+    expect(serviceMocks.readSidepanelChatHandoff).not.toHaveBeenCalled()
+  })
+
+  it("cancels fragment review without modifying either draft or consuming local storage", async () => {
+    renderWithRoute(<HookHarness initialDraft="KEEP  " />, fragmentRoute("COPIED  "))
+    await screen.findByRole("button", { name: "Cancel" })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.getByLabelText("Composer")).toHaveValue("KEEP  ")
+    expect(screen.getByTestId("location-hash")).toHaveTextContent("#keep=hash")
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+  })
+
+  it("rechecks expiry before replacing a destination draft", async () => {
+    const now = Date.now()
+    const time = vi.spyOn(Date, "now").mockReturnValue(now)
+    try {
+      renderWithRoute(<HookHarness initialDraft="KEEP  " />, fragmentRoute("COPIED  "))
+      await screen.findByRole("button", { name: "Replace" })
+      time.mockReturnValue(now + SIDEPANEL_CHAT_WEBUI_HANDOFF_MAX_AGE_MS + 1)
+      fireEvent.click(screen.getByRole("button", { name: "Replace" }))
+      await waitFor(() => expect(notificationApi.warning).toHaveBeenCalledOnce())
+      expect(screen.getByLabelText("Composer")).toHaveValue("KEEP  ")
+      expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+    } finally { time.mockRestore() }
+  })
+
+  it.each(["owner", "route", "destination"])("retires old fragment choices after %s changes", async boundary => {
+    let current = true
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    const entry = fragmentRoute("COPIED  ")
+    const ownerCurrent = () => current
+    const tree = (destination = "chat-A") => <MemoryRouter initialEntries={[entry]}><HookHarness initialDraft="KEEP  " destination={destination} ownerCurrent={ownerCurrent} onImportChange={value => { displayed = value }} /></MemoryRouter>
+    const view = render(tree())
+    await screen.findByRole("button", { name: "Replace" })
+    const replace = displayed.replaceWithHandoffDraft
+    const cancel = displayed.cancelHandoffImport
+    if (boundary === "owner") current = false
+    else if (boundary === "route") fireEvent.click(screen.getByRole("button", { name: "Leave chat" }))
+    else view.rerender(tree("chat-B"))
+    const before = (screen.getByLabelText("Composer") as HTMLTextAreaElement).value
+    await act(async () => { await replace(); cancel() })
+    expect(screen.getByLabelText("Composer")).toHaveValue(before)
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+    if (boundary !== "route") expect(screen.getByTestId("location-hash")).toHaveTextContent("handoff=")
+  })
+
+  it.each(["expired", "invalid timestamp"])("rejects an initially %s encoded query without treating it as local storage", async mode => {
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: mode === "expired" ? Date.now() - SIDEPANEL_CHAT_WEBUI_HANDOFF_MAX_AGE_MS - 1 : "bad" as unknown as number, draft: "REJECT  " })
+    renderWithRoute(<HookHarness initialDraft="KEEP  " />, `/chat?handoff=${encoded}&keep=query#keep=hash`)
+    await waitFor(() => expect(notificationApi.warning).toHaveBeenCalledOnce())
+    expect(screen.getByLabelText("Composer")).toHaveValue("KEEP  ")
+    expect(serviceMocks.readSidepanelChatHandoff).not.toHaveBeenCalled()
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+  })
+
+  it("keeps a newer input revision when the fragment choice yields", async () => {
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    renderWithRoute(<HookHarness initialDraft="KEEP  " onImportChange={value => { displayed = value }} />, fragmentRoute("COPIED  "))
+    await screen.findByRole("button", { name: "Replace" })
+    let pending!: Promise<void>
+    act(() => { pending = displayed.replaceWithHandoffDraft() })
+    fireEvent.change(screen.getByLabelText("Composer"), { target: { value: "NEW INPUT  " } })
+    await act(async () => { await pending })
+    expect(screen.getByLabelText("Composer")).toHaveValue("NEW INPUT  ")
+    expect(screen.getByText(/Your draft changed while/)).toBeInTheDocument()
+    expect(screen.getByTestId("location-hash")).toHaveTextContent("handoff=")
+  })
+
+  it("does not apply or erase a replacement fragment route through a yielded old choice", async () => {
+    let displayed!: ReturnType<typeof useSidepanelChatHandoffImport>
+    const replacement = fragmentRoute("NEW COPY  ")
+    renderWithRoute(<HookHarness initialDraft="KEEP  " replacementEntry={replacement} onImportChange={value => { displayed = value }} />, fragmentRoute("OLD COPY  "))
+    await screen.findByRole("button", { name: "Replace" })
+    let pending!: Promise<void>
+    act(() => { pending = displayed.replaceWithHandoffDraft() })
+    fireEvent.click(screen.getByRole("button", { name: "New fragment route" }))
+    await act(async () => { await pending })
+    await waitFor(() => expect(screen.getByTestId("copied-draft").textContent).toBe("NEW COPY  "))
+    expect(screen.getByLabelText("Composer")).toHaveValue("KEEP  ")
+    expect(screen.getByTestId("location-hash").textContent).toBe(replacement.slice(replacement.indexOf("#")))
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+  })
+
+  it("gives a fragment draft precedence without touching a different query handoff", async () => {
+    const entry = fragmentRoute("FRAGMENT COPY  ").replace("?keep=query", "?keep=query&handoff=local-copy")
+    renderWithRoute(<HookHarness initialDraft="KEEP  " />, entry)
+    await screen.findByRole("button", { name: "Replace" })
+    expect(screen.getByTestId("copied-draft").textContent).toBe("FRAGMENT COPY  ")
+    expect(serviceMocks.readSidepanelChatHandoff).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }))
+    await waitFor(() => expect(screen.getByLabelText("Composer")).toHaveValue("FRAGMENT COPY  "))
+    expect(screen.getByTestId("location-search")).toHaveTextContent("handoff=local-copy")
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+  })
+
+  it.each(["Cancel", "Replace"])("requires review of a query copy revealed after fragment %s leaves an empty draft", async action => {
+    const entry = fragmentRoute("").replace("?keep=query", "?keep=query&handoff=local-copy")
+    renderWithRoute(<HookHarness />, entry)
+    await screen.findByRole("button", { name: action })
+    expect(serviceMocks.readSidepanelChatHandoff).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: action }))
+    await waitFor(() => expect(serviceMocks.readSidepanelChatHandoff).toHaveBeenCalledWith("local-copy", expect.anything()))
+    await screen.findByRole("button", { name: "Replace" })
+    expect(screen.getByLabelText("Composer")).toHaveValue("")
+    expect(serviceMocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+    expect(screen.getByTestId("location-search")).toHaveTextContent("handoff=local-copy")
   })
 
   it.each(["StrictMode", "callback rerender"])("does not strand a held initial copy after %s", async mode => {
