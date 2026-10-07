@@ -719,7 +719,7 @@ Task: TASK-13260.278.18.83.45. Persona unit committed locally df8529f85ac95583cd
 **Goal**: Independently reviewed exact scoped patch committed with normal hooks.
 **Success Criteria**: No source/guard weakening, no new static findings; all broader UAT gates remain open.
 **Tests**: Actual and staged source review, normal scoped hooks and commit-patch parity.
-**Status**: In Progress
+**Status**: Complete
 
 ### E2E causal RED verified
 
@@ -732,3 +732,29 @@ E2E repair scope includes one existing frozen-trigger expectation in test_licens
 ### E2E affected qualification complete
 
 Corrected E2E routing qualification COMPLETE locally: first full configured three affected CI modules produced 174 passed, 33 warnings, 14.21s pytest/16.314736333s outer, natural exit 0/no deadline/no skips, supported Python3.12.13/pytest9.1.1, unchanged guarded hashes and normal plugins at 600 outer/300 case. Complete native outputs retained/recovered/released in memory, no proof/log file or repeat. Independent six-path actual-source review CLEAR, every changed hunk/new test body and relevant routing/admission consumers covered; corrected direct-trigger digest ed6145852137a858e8003ea1d94921d840276dac56af311a357a2655a30bf272 independently reconstructed. Config semantic equality proves only the two added route patterns; both docs differ solely five to six and remain byte-identical. Python compile passes; admission Ruff lint/format clear; workflow-contract Ruff I001 and wholefile format flag identical to baseline. Scoped primary-static Bandit1.9.3 baseline/current retains exactly27 admission and232 workflow test signatures, zero errors/no new/removed findings after one narrow explained B101 annotation on only the new pytest assert; no production Python changed. A first oversized operator scan output was truncated and not accepted; compact same-scope comparison recovered exact results without repo/report files. actionlint unavailable on existing PATH, no install or actionlint qualification claimed. Scoped normal hooks and final staged review/local commit next. This is local CI routing qualification only; no GitHub queue/platform execution, hosted tests, browser/native or actual43 acceptance, and Sync-specific approval remains pending.
+
+## Saved-set three-item specified coverage
+
+E2E routing unit committed locally c2b22246aafb2404786acb6fd07818bda0d24102, parentdf8529, exactly8paths81insertions4deletions; committed binary patch byte-identical to independently reviewed index113216889ee38a61a622a90c12616ca413e3b1a87c5d8f91040200f0e4d5a306. Normal scoped hooks passed2.067339625s and final staged review CLEAR; no publication. Next reviewable test-only coverage correction: WizardResultsStep.navigation.test.tsx currently verifies exact accessible Results review labels and saved-ID handoff for counts1/2, while existing TASK-13507 AC2 requests1/3. Add one separate literal three-item case with label Review these 3 saved items and exact callbackIDs[42,43,44], preserving original1/2 test and every original function/assertion. Use existing real component/shared harness/helper. Ruling: this is an uncovered specified positive case, not a demonstrated production defect; no fabricated causal RED or production edit. First full affected navigation file in normal existing UI and WebUI configurations, exact hashes, scoped existing ESLint/static checks, independent actual/staged review and normal local commit. BanditN/A TS-only; no unchanged Python scans/typecheck/build/runtime/browser replay. Do not read/recover foreign receipts/assets or adopt historical UAT claims. Only this new source/test qualification may be reported; all43 actual workflows remain open, automationPAUSED and Sync-specific approvalpending.
+
+### Stage 1: Preserve existing cases and add specified three-item check
+**Goal**: One separate literal case verifies the real saved-set button and exactly three IDs.
+**Success Criteria**: Existing one/two cases and production are unchanged.
+**Tests**: Actual component with current harness and literal three-item accessible name/IDs.
+**Status**: Complete
+
+### Stage 2: Qualify both existing client configurations
+**Goal**: Complete affected navigation module passes UI and WebUI configurations.
+**Success Criteria**: Existing tests remain; no new lint issues or test/mock weakening.
+**Tests**: Full module twice, parse/lint and source preservation.
+**Status**: Complete
+
+### Stage 3: Review and local commit
+**Goal**: Independently reviewed scoped patch with normal hooks committed locally.
+**Success Criteria**: Exact patch parity, unrelated Sync WIP preserved, no live UAT claim.
+**Tests**: Actual/staged review and normal scoped hooks.
+**Status**: In Progress
+
+### Specified three-item module qualification
+
+Specified three-item Results coverage COMPLETE locally: separate literal test, exactly9insertions0deletions, every original line byte-identical and actual component/fixtures/mocks unchanged. First full navigation module UI30passed1.852066250s outer and WebUI30passed1.663324916s outer, natural0/no deadline/no skips/no pending at normal existing Node20.19.5/Vitest4.0.18/configured workers and600outer. Complete native JSON recovered/released in memory, stderr empty, exact source/fixture/config hashes unchanged. This verifies mocked translation fallback accessible role/name Review these 3 saved items and exact saved-ID callback[42,43,44]; not actual ICU/shipped translation/native/browser/UAT acceptance. TypeScript parse passes. Official ESLint sees file (not ignored), baseline/current0errors19identical inherited no-explicit-any warnings; inherited Next pages-discovery diagnostic remains, no new finding. TS-only BanditN/A, no unchanged Python/typecheck/build/runtime replay. Independent source/test spec+quality review CLEAR. Normal scoped hooks/final staged review/local commit next; all43 real workflow acceptance and Sync-specific approval remain open.

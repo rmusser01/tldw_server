@@ -74,6 +74,15 @@ describe("WizardResultsStep navigation buttons", () => {
     expect(onReviewSavedItems).toHaveBeenCalledWith(count === 1 ? [42] : [42, 43])
   })
 
+  it("labels and opens exactly 3 saved items", () => {
+    setSinglePdfResult({ mediaId: 42, persisted: true })
+    wizardHarness.results = Array.from({ length: 3 }, (_, index) => ({ ...wizardHarness.results[0], id: `saved-${index}`, mediaId: 42 + index }))
+    const onReviewSavedItems = vi.fn()
+    render(<WizardResultsStep onClose={vi.fn()} onReviewSavedItems={onReviewSavedItems} />)
+    fireEvent.click(screen.getByRole("button", { name: "Review these 3 saved items" }))
+    expect(onReviewSavedItems).toHaveBeenCalledWith([42, 43, 44])
+  })
+
   it("shows saved warnings separately from clean success while keeping source navigation", () => {
     setSinglePdfResult({ warning: "Analysis failed for chunk 1" })
     const onOpenMedia = vi.fn()
