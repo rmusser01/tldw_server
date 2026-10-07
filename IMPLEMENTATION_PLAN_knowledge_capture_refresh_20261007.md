@@ -105,7 +105,7 @@ assert all(item["kind"] != "chunk" for item in preview["snippets"])
 **Goal:** Small shared client and acceptance helpers retain immutable identity and resolve real version pins.
 **Success Criteria:** Same pending body retries; exact version/digest readback gates confirmation; requests stay owner-bound and abortable.
 **Tests:** Shared client and narrow capture helper tests.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 3: Scoped clients and capture acceptance helpers
 
@@ -117,11 +117,11 @@ assert all(item["kind"] != "chunk" for item in preview["snippets"])
 **Interfaces (new functions defined by this task):**
 - `tldwMedia.extractPublicArticle(url: string, options?: ScopedRequestOptions): Promise<PublicArticleExtractionResponse>` calls `/media/ingest-web-content` with correct one-URL individual credential-free disabled-analysis/chunking body; never change ordinary `processUrl` callers silently.
 - `getWebClipStatus(clipId, options?: ScopedRequestOptions)`, `getWorkspaceSources(workspaceId, options?: ScopedRequestOptions)`, `getWorkspaceSourcePreview(workspaceId, sourceId, params?, options?: ScopedRequestOptions)` extend existing methods; preview params adds `version_number`.
-- Existing Media domain adds typed scoped `listMediaDocumentVersions(mediaId, options?)` and `getMediaDocumentVersion(mediaId, versionNumber, options?)` using exact current version API shapes; return types come from Task2's report and generated schema.
+- Existing Media domain adds typed scoped `listMediaDocumentVersions(mediaId, options?)` and `getMediaDocumentVersion(mediaId, versionNumber, options?)` using exact current version API shapes; shared handwritten DTOs follow the existing domain pattern and are verified against Task2's report and regenerated canonical schema, without importing ignored WebUI-only generated files.
 - New `WebArticleCapturePin` in `types/workspace.ts`: `clipId`, `requestedUrl`, `capturedAt`, `contentSha256`, `refreshOf: string | null`, `mediaId`, `versionNumber`, `versionUuid`; optional `WorkspaceSource.webCapture` retains it.
 - `prepareWebCaptureAcceptance(input: {url: string; title: string; text: string; capturedAt: string; workspaceId: string; refreshOf?: string | null}): Promise<WebClipperSaveRequest>` produces frozen trimmed body with fresh UUID, validated URL/time/hash, destination workspace, needs_review and enhancements off. No owner credential stored in body.
 - `confirmWebCaptureAcceptance(body: WebClipperSaveRequest, options: ScopedRequestOptions, assertCurrent: () => void): Promise<{source: WorkspaceSourceApiResponse; pin: WebArticleCapturePin}>` verifies exact source ID `web-clipper:<UUID>`, URL/workspace/media, active version descriptor/hash/full text and version UUID. Throws on partial/unconfirmed state; never guesses version1 or uses Note revision.
-- `assertWebCaptureHeadCurrent(source: WorkspaceSource, options: ScopedRequestOptions): Promise<void>` checks membership and latest owned active version matches stored pin before scoped Ask. No historical-version RAG promise.
+- `assertWebCaptureHeadCurrent(source: WorkspaceSource, workspaceId: string, options: ScopedRequestOptions): Promise<void>` checks membership and latest owned active version matches stored pin before scoped Ask. No historical-version RAG promise.
 
 ```typescript
 const body = await prepareWebCaptureAcceptance({
@@ -132,15 +132,15 @@ const confirmed = await confirmWebCaptureAcceptance(body, options, assertCurrent
 // Persist confirmed.pin and the immutable body in the existing owner-bound recovery path.
 ```
 
-- [ ] Read actual background proxy scope and Media version API; use exact schema types and standard Web Crypto. Do not add an abstraction layer or retry framework.
-- [ ] Add RED behavioral tests for no extraction until called, abort/scope forwarding, trimmed/full/oversized extraction, immutable acceptance/UUID, descriptor/hash match, Note-vs-Media versions, partial/lost-response exact retry, wrong workspace/URL/owner/media, deleted pin and changed head.
-- [ ] Implement and run GREEN; regenerate OpenAPI checked artifacts using repo scripts and verify drift; shared scoped lint/typechecks/hooks/self-review and commit. Report exact exported signatures/types for Task4.
+- [x] Read actual background proxy scope and Media version API; use exact schema types and standard Web Crypto. Do not add an abstraction layer or retry framework.
+- [x] Add RED behavioral tests for no extraction until called, abort/scope forwarding, trimmed/full/oversized extraction, immutable acceptance/UUID, descriptor/hash match, Note-vs-Media versions, partial/lost-response exact retry, wrong workspace/URL/owner/media, deleted pin and changed head.
+- [x] Implement and run GREEN; regenerate OpenAPI checked artifacts using repo scripts and verify drift; shared scoped lint/typechecks/hooks/self-review and commit. Report exact exported signatures/types for Task4.
 
 ## Stage 4: Shared Research workflow and evidence retention
 **Goal:** Users can preview/save/refresh/retry captures and Ask only on a current owned snapshot.
 **Success Criteria:** Explicit UI actions, honest extraction/version labels, no accidental save, retained original evidence and safe retirement/recovery.
 **Tests:** SourcesPane and capture workflow, prefill/provenance/import/export/restore tests.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 4: Integrate capture and refresh in Research
 
@@ -157,7 +157,7 @@ const confirmed = await confirmWebCaptureAcceptance(body, options, assertCurrent
 - Saved labels are `Extracted article snapshot`, capture time and `Source snapshot: Media version N`; prior web results `Retrieved excerpt`. Refresh creates a new source; unchanged digest shows `Text unchanged`. Changed current head shows `Snapshot changed outside refresh` and cannot participate in Ask.
 
 ```typescript
-await assertWebCaptureHeadCurrent(source, options)
+await assertWebCaptureHeadCurrent(source, workspaceId, options)
 assertCurrent()
 // Continue the existing scoped Ask only after this owned-head check succeeds.
 ```
