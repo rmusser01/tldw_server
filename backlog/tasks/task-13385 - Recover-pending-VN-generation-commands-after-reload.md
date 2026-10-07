@@ -4,7 +4,7 @@ title: Recover pending VN generation commands after reload
 status: Done
 assignee: []
 created_date: 2026-09-27 15:25
-updated_date: 2026-09-29 01:25
+updated_date: 2026-10-07 02:02
 labels:
 - vn-assets
 - frontend
@@ -16,7 +16,6 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/3028
 documentation:
 - Docs/Design/VN_PENDING_COMMAND_RECOVERY.md
-- Docs/Plans/IMPLEMENTATION_PLAN_vn_command_recovery_pr_review.md
 priority: high
 ---
 
@@ -115,8 +114,8 @@ FINAL fresh qualification of conflict-free rebase onto devbd2ae757d274e7eda3edb4
 2026-09-28T03:55Z: Current 7ee1cd4bf5b306ff417ca7889da3554018f678c1 Qodo FIRST full reassessment completed in Deep mode (sticky updated 03:51:33, explicit update 5863015836 at 03:51:37), with zero bugs and one scoped rule finding 4118397636: URL normalization, three invalid server cases and an unverified principal are combined in one test. The original 29-test journal suite passed before edits (1.09s total, 13ms test time). Split those existing scenarios into independent normalization, it.each invalid URL cases and principal rejection tests; this is test hygiene, NOT a new runtime defect or invented red evidence. CodeRabbit current first full review is still pending, but valid minor tracking finding 4118400067 asks for spaces and shorter sentences in the latest final summary. Correct only the AI-owned current final summary through official task_edit, retaining all historical notes and exactly one final-summary end marker. Clean tracked local and owned remote 7ee and latest dev de7f453593dbb40f069a4666fd562fc5f3622817 were verified unchanged before edits. No runtime, design, backend, auth, CI, dependency, environment or unrelated task changes. New publication will require complete changed-head full reviews and exact-head CI before normal merge; task and review stages remain In Progress.
 2026-09-28T03:59Z FINAL scoped review cleanup: Qodo 4118397636 is addressed with independent URL-normalization and principal-rejection tests plus it.each invalid URLs. The original 29 journal tests passed before edits (1.09s total), so this is test isolation, not new runtime-bug red evidence. All 33 journal tests pass in 0.788s (11ms test time); all 240 VN/fetch/shared-auth tests pass in 53.78s (44.39s test time), 11 files, one worker, no skipped tests or changed limits. Typecheck, both scoped ESLint commands, diff and runtime/design/backend/CI equality against published 7ee pass. Fresh Python VN Bandit /tmp/bandit_vn3028_test_scope_cleanup.json reports zero findings or file errors over 9068 lines; it does not scan TypeScript. Shared environment, config, dependency policy, preview and intentional local artifacts remain untouched. CodeRabbit 4118400067 is addressed by rewriting only the current AI-owned final summary with spaces and shorter paragraphs, retaining all historical notes and one final-summary end marker. After the initial tracking snapshot, CodeRabbit's trigger was verified explicitly full-finished at 03:54:59 (5862971038), sticky 03:54:49 with both full7ee source/covered IDs and kind reviewed, Low merge risk and this minor non-blocking tracking comment. Its Moderate architecture inference repeats the existing server partial-failure/idempotency limit; current Risk & Rollback already acknowledges original-key replay is not exactly-once and UI/storage rollback does not cancel accepted Jobs. Qodo exact7ee full Deep result completed at 03:51:33/explicit 5863015836 at 03:51:37 with zero bugs and one now-addressed test rule. No additional inline findings appeared by 03:59. This three-file test/tracking cleanup will be normal-pushed from owned 7ee after fresh head/dev checks; changed-head complete reviews and exact-head gates remain required before verified normal merge. The fresh 393-test backend result on unchanged dev DE7 remains applicable; it was not unnecessarily rerun.
 2026-10-06 follow-up: verified PR3028 remains merged normally at 97da6c2dfec239b5739eed4116469f1fb5db7ed5. Documentation-only PR3060 is refreshed onto current dev 17c47c49d857a2a1fd1e58602b704213760a4a85 while preserving every historical implementation note. Remove only its completed owned plan, moved by dev to Docs/Plans/IMPLEMENTATION_PLAN_vn_command_recovery_pr_review.md. Runtime/configuration/CI remain identical to dev. The existing requester summary exception applies only to PR3060. PR3067 is separately closed as superseded by merged PR3016, without another code merge or summary bypass.
+2026-10-06 independent review follow-up: removed the current documentation metadata link to the retired command-recovery review plan. Historical plan references and all earlier implementation notes remain intact.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
