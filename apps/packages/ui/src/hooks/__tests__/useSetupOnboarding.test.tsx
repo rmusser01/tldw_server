@@ -187,7 +187,7 @@ describe("useSetupOnboarding", () => {
 
   it("loads first-run MCP tools catalog into state", async () => {
     const { tldwClient } = await import("@/services/tldw/TldwApiClient")
-    const catalog = {
+    const catalog: Awaited<ReturnType<typeof tldwClient.getMcpToolsCatalog>> = {
       catalog_version: "2026-07-04",
       confirmation_version: "v1",
       packs: [
@@ -226,7 +226,7 @@ describe("useSetupOnboarding", () => {
 
   it("refreshes first-run state after applying MCP tools", async () => {
     const { tldwClient } = await import("@/services/tldw/TldwApiClient")
-    const response = {
+    const response: Awaited<ReturnType<typeof tldwClient.applyMcpTools>> = {
       status: "applied",
       profile_id: 7,
       assignment_id: 9,
@@ -259,7 +259,7 @@ describe("useSetupOnboarding", () => {
 
   it("refreshes first-run state after validating MCP tools", async () => {
     const { tldwClient } = await import("@/services/tldw/TldwApiClient")
-    const response = {
+    const response: Awaited<ReturnType<typeof tldwClient.validateMcpTools>> = {
       status: "validated",
       validation_state: "built_in_passed",
       profile_id: 7,

@@ -119,7 +119,7 @@ describe("Settings auth-mode changes through the actual Form", () => {
   }
 
   const closeConfirmation = async (action: "Cancel" | "Change mode") => {
-    fireEvent.click(screen.getByRole("button", { name: action, exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: action }))
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Change authentication mode?" })).not.toBeInTheDocument(), { timeout: 3000 })
   }
 

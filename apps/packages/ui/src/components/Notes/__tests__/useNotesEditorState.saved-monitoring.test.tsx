@@ -1,6 +1,7 @@
 import type { BgRequestInit } from "@/services/background-proxy"
 import React from 'react'
 import { Modal } from 'antd'
+import type { TldwConfig } from '@/services/tldw/TldwApiClient'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => ({
     warning: vi.fn(),
     info: vi.fn()
   },
-  config: {} as Record<string, unknown>,
+  config: { serverUrl: "", authMode: "multi-user" } as TldwConfig,
   userId: 7,
   watchers: new Set<Record<string, () => void>>()
 }))
@@ -107,7 +108,7 @@ const renderEditor = (isOnline = true, refetch = async () => undefined, onNoteRe
     authorityScope: authority(),
     onNoteRenamed,
     connectionConfig:
-      mocks.config as UseNotesEditorStateDeps['connectionConfig'],
+      mocks.config,
     isOnline,
     isMobileViewport: false,
     message: mocks.messages as unknown as UseNotesEditorStateDeps['message'],
@@ -138,7 +139,7 @@ const renderEditor = (isOnline = true, refetch = async () => undefined, onNoteRe
         ...deps,
         authorityScope: scope,
         connectionConfig:
-          mocks.config as UseNotesEditorStateDeps['connectionConfig'],
+          mocks.config,
         isOnline: online,
         editorKeywords: keywords,
         setEditorKeywords: setKeywords

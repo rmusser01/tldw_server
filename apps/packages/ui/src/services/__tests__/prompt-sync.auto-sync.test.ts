@@ -849,7 +849,7 @@ describe("prompt-sync auto-sync defaults", () => {
 
       const { resolveConflict } = await importPromptSync()
       const result = await resolveConflict(
-        String(original.id, input),
+        String(original.id),
         "keep_both"
       )
 

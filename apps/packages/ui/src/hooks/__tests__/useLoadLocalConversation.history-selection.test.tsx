@@ -69,7 +69,7 @@ it("does not install an older conversation after a new navigation finishes", asy
     )
     return { rows, load }
   })
-  let pending!: Promise<void>
+  let pending!: ReturnType<typeof result.current.load>
   act(() => {
     pending = result.current.load("old")
   })

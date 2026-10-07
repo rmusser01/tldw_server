@@ -1,3 +1,4 @@
+import type { MessageHistory } from "@/db/dexie/types"
 import React from "react"
 import i18n from "i18next"
 import { ConfigProvider, notification } from "antd"
@@ -21,6 +22,7 @@ import { useServerChatHistoryId } from "../useServerChatHistoryId"
 import { useActorStore } from "@/store/actor"
 import type { ChatScope } from "@/types/chat-scope"
 import { usePlaygroundPersistence } from "@/components/Option/Playground/hooks/usePlaygroundPersistence"
+import type { Message } from "@/store/option"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { reconcileServerChatMessages, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
@@ -281,12 +283,14 @@ const deferred = <T,>() => {
 }
 
 const createHookOptions = () => ({
-  t: (_key: string, fallback?: string) => fallback || _key,
+  t: ((_key: string, fallback?: string) => fallback || _key) as Parameters<typeof useChatActions>[0]["t"],
   notification: {
     error: mocks.notifyError,
     warning: vi.fn(),
     info: vi.fn(),
-    success: vi.fn()
+    success: vi.fn(),
+    open: vi.fn(),
+    destroy: vi.fn()
   },
   abortController: null,
   setAbortController: vi.fn(),
@@ -441,7 +445,7 @@ const renderWorkspace = (realNotifications = false, withLoader = false, options:
         ensureServerChatHistoryId: mocks.ensureHistory,
         selectedCharacter: null,
         selectedAssistant: null
-      } as Parameters<typeof useChatActions>[0])
+      })
       const persistence = usePlaygroundPersistence({
         ...state,
         isConnectionReady: ready,
@@ -1058,7 +1062,7 @@ describe("saved normal Chat pipeline with autosave", () => {
   })
 
   it("UAT103 deleting a local diagnostic does not remove equal genuine prompt text", async () => {
-    const generationInfo = { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
+    const generationInfo = { mode: "rag" as const, grounded: false, reason: "selected_source_retrieval_failed" }
     const messages = [
       { id: "diagnostic-user", isBot: false, name: "You", message: "Repeated question", sources: [], generationInfo },
       { id: "diagnostic-answer", isBot: true, name: "Assistant", message: "Repeated answer", sources: [], generationInfo, parentMessageId: "diagnostic-user" },
@@ -1093,11 +1097,11 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.realPersistence = true
     const { formatToMessage, formatToChatHistory } = await import("@/db/dexie/helpers")
     const generationInfo = { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
-    const rows = [
-      { id: "diagnostic-user", role: "user", content: "Repeated question", history_id: "local", images: [], generationInfo, createdAt: 1 },
-      { id: "diagnostic-answer", role: "assistant", content: "Repeated answer", history_id: "local", images: [], generationInfo, parent_message_id: "diagnostic-user", createdAt: 2 },
-      { id: "real-user", role: "user", content: "Repeated question", history_id: "local", images: [], createdAt: 3 },
-      { id: "real-answer", role: "assistant", content: "Repeated answer", history_id: "local", images: [], parent_message_id: "real-user", createdAt: 4 }
+    const rows: MessageHistory = [
+      { name: undefined, id: "diagnostic-user", role: "user", content: "Repeated question", history_id: "local", images: [], generationInfo, createdAt: 1 },
+      { name: undefined, id: "diagnostic-answer", role: "assistant", content: "Repeated answer", history_id: "local", images: [], generationInfo, parent_message_id: "diagnostic-user", createdAt: 2 },
+      { name: undefined, id: "real-user", role: "user", content: "Repeated question", history_id: "local", images: [], createdAt: 3 },
+      { name: undefined, id: "real-answer", role: "assistant", content: "Repeated answer", history_id: "local", images: [], parent_message_id: "real-user", createdAt: 4 }
     ]
     mocks.rows.push(...rows)
     mocks.removeMessageById.mockImplementationOnce(async (historyId, id) => {
@@ -1398,6 +1402,7 @@ describe("saved normal Chat pipeline with autosave", () => {
     expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty(
       "generation_provider"
     )
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_prompt")
     expect(mocks.streamMessage).toHaveBeenCalledTimes(1)
     expect(mocks.streamMessage.mock.calls[0][1]).toMatchObject({
       apiProvider: "custom-openai-api",
@@ -1988,7 +1993,7 @@ describe("saved normal Chat pipeline with autosave", () => {
     expect(local.map(row => row.serverMessageId)).toEqual(["user-1", "assistant-1", "user-3", "assistant-3"])
     const remote = mocks.serverRows.get("chat-1")!.map(row => ({
       id: row.id!, serverMessageId: row.id!, message: row.content,
-      isBot: row.role !== "user", role: row.role, name: "", sources: []
+      isBot: row.role !== "user", role: row.role as Message["role"], name: "", sources: []
     }))
     expect(reconcileServerChatMessages(local, remote)).toHaveLength(5)
     const draft = { id: "unsent", message: "Same question", isBot: false, name: "You", sources: [] }
@@ -2010,7 +2015,7 @@ describe("saved normal Chat pipeline with autosave", () => {
     let pending!: Promise<unknown>
     act(() => { pending = result.current.actions.onSubmit({ message: "Old question", image: "" }) })
     await waitFor(() => expect(mocks.streamMessage).toHaveBeenCalled())
-    const draft = { id: "new-draft", isBot: false, name: "You", message: "New draft" }
+    const draft = { id: "new-draft", isBot: false, name: "You", message: "New draft", sources: [] }
     await act(async () => {
       replaceAuthority("synthetic-b")
       if (destination === "A") replaceAuthority("synthetic-a")

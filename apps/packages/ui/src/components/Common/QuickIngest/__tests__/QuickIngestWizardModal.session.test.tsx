@@ -627,7 +627,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.bgUpload.mockRejectedValueOnce(new Error("Network error")).mockResolvedValue({ batch_id: "second-retry", jobs: [{ id: 99 }] })
     mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result: { status: "Success", media_id: 99 } } })
     useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "partial_failure",
-      conferenceBatchMetadata: { collectionName: "Original conference" },
+      conferenceBatchMetadata: { collectionName: "Original conference", sharedTags: [] },
       queueItems: [{ id: "talk-failed", kind: "url", url: "https://source.test/talk.mp4", detectedType: "video", icon: "Film", fileSize: 0, validation: { valid: true }, conferenceOverride: { title: "Original talk", selected: true } }],
       results: [{ id: "saved", status: "ok", type: "video", mediaId: 7 }, { id: "talk-failed", status: "error", type: "video", error: "Network error", collectionItemId: "81", retryAttempt: 2 }],
       tracking: { mode: "webui-direct", sessionId: "old-session", collectionId: "7", plannedItemIds: ["81"], jobIds: [77], durableMode: "durable_collection", startedAt: 1 },
@@ -773,7 +773,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       presetConfig: { ...resolvePresetMap().quick, common: { perform_analysis: false, perform_chunking: false, overwrite_existing: false }, storeRemote: true, reviewBeforeStorage: false, typeDefaults: { audio: { language: "fr", diarize: true } } },
       queueItems: [
         { id: "saved", kind: "url", url: "https://source.test/saved.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true } },
-        { id: "failed", kind: "url", url: "https://source.test/failed.mp3", detectedType: "audio", icon: "Music", fileSize: 0, validation: { valid: true }, conferenceOverride: { title: "Original title", tags: ["original"] } },
+        { id: "failed", kind: "url", url: "https://source.test/failed.mp3", detectedType: "audio", icon: "Music", fileSize: 0, validation: { valid: true }, conferenceOverride: { title: "Original title", tags: ["original"], selected: undefined } },
       ],
       results: [{ id: "saved", status: "ok", type: "pdf", title: "Already saved", mediaId: 77, persisted: true }, { id: "failed", status: "error", type: "audio", url: "https://source.test/failed.mp3", error: "Network error" }],
     })
@@ -801,7 +801,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       : {})
     useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "partial_failure",
       presetConfig: { ...resolvePresetMap().quick, common: { perform_analysis: false, perform_chunking: false, overwrite_existing: false }, storeRemote: true },
-      conferenceBatchMetadata: { collectionName: "Original conference" },
+      conferenceBatchMetadata: { collectionName: "Original conference", sharedTags: [] },
       queueItems: [{ id: "talk-failed", kind: "url", url: "https://source.test/talk.mp4", detectedType: "video", icon: "Film", fileSize: 0, validation: { valid: true }, conferenceOverride: { title: "Talk title", selected: true } }],
       results: [{ id: "talk-failed", status: "error", type: "video", url: "https://source.test/talk.mp4", error: "Network error", collectionItemId: "81", retryAttempt: 2 }],
       tracking: { mode: "webui-direct", collectionId: "7", durableMode: "durable_collection", startedAt: 1 },
@@ -1923,7 +1923,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       if (via === "processing button") {
         await userEvent.click(minimizeButton)
       } else {
-        await userEvent.click(screen.getByRole("button", { name: "Close", exact: true }))
+        await userEvent.click(screen.getByRole("button", { name: "Close" }))
         const { Modal } = await import("antd")
         const options = vi.mocked(Modal.confirm).mock.calls.at(-1)?.[0]
         await act(async () => { await options?.onOk?.() })

@@ -142,7 +142,10 @@ describe("TldwApiClient captured request scope", () => {
     mocks.bgRequest.mockResolvedValue([])
 
     const baseClient = new TldwApiClientBase()
-    vi.spyOn(baseClient, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
+    vi.spyOn(baseClient, "resolveApiPath").mockImplementation(async (_key, paths) => {
+      if (!paths[0]?.startsWith("/")) throw new Error("Expected a relative API path fixture")
+      return `/${paths[0].slice(1)}` as const
+    })
     await TldwApiClientBase.prototype.listCharacters.call(baseClient, { limit: 5 })
 
     expect(mocks.bgRequest.mock.calls[0]?.[0]).toMatchObject({
@@ -151,7 +154,10 @@ describe("TldwApiClient captured request scope", () => {
     })
 
     const domainClient = new TldwApiClientBase()
-    vi.spyOn(domainClient, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
+    vi.spyOn(domainClient, "resolveApiPath").mockImplementation(async (_key, paths) => {
+      if (!paths[0]?.startsWith("/")) throw new Error("Expected a relative API path fixture")
+      return `/${paths[0].slice(1)}` as const
+    })
     await characterMethods.listCharacters.call(domainClient, { limit: 5 })
 
     expect(mocks.bgRequest.mock.calls[1]?.[0]).toMatchObject({

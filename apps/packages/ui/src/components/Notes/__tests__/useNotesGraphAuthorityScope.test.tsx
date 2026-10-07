@@ -4,6 +4,7 @@ import { createHash } from "node:crypto"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { useNotesGraphAuthorityScope } from "../hooks/useNotesGraphAuthorityScope"
 
 const mocks = vi.hoisted(() => ({
@@ -16,8 +17,8 @@ vi.mock("@/services/tldw/TldwAuth", () => ({
 
 const config = (
   serverUrl: string,
-  overrides: Record<string, unknown> = {}
-) => ({
+  overrides: Partial<TldwConfig> = {}
+): TldwConfig => ({
   serverUrl,
   authMode: "multi-user" as const,
   ...overrides

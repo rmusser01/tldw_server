@@ -355,7 +355,7 @@ describe("GenerateTab question plan controls", () => {
   }, 20000);
 
   it("submits a 5-option MCQ row with the question plan payload", async () => {
-    const mutateAsync = vi.fn(async () => ({
+    const mutateAsync = vi.fn(async (_params: Parameters<ReturnType<typeof useGenerateQuizMutation>["mutateAsync"]>[0]) => ({
       quiz: { id: 1, name: "Generated Quiz" },
       questions: Array.from({ length: 10 }, (_, index) => ({ id: index + 1 })),
     }));

@@ -513,7 +513,7 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
     const toolbar = screen.getByTestId('media-bulk-toolbar')
     expect(toolbar).toHaveTextContent('2 selected')
     expect(screen.getByTestId('inspector-filter-controls').contains(toolbar)).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: 'Content', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Content' }))
     fireEvent.click(screen.getByRole('button', { name: 'Back to results' }))
     expect(toolbar).toHaveTextContent('2 selected')
     expect(screen.getByText('Review a batch')).toBeInTheDocument()

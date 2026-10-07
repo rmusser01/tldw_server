@@ -810,9 +810,9 @@ describe("Playground coordinator integration", () => {
     await selectedAssistantStorage.set("playgroundChatWorkflowMode", "character")
     useStoreMessageOption.setState({ ...useStoreMessageOption.getInitialState(), selectedModel: "test-model", temporaryChat: false,
       serverChatId: "alice-character", serverChatMetaLoaded: true, serverChatCharacterId: 4, serverChatAssistantKind: "character",
-      messages: [{ id: "alice-private", isBot: true, message: "Alice private answer", sources: [] }]
+      messages: [{ id: "alice-private", isBot: true, name: undefined, message: "Alice private answer", sources: [] }]
     }, true)
-    useMessageOptionMock.mockImplementation(() => ({ ...messageOptionState.value, ...useStoreMessageOption(), selectedAssistant: null }))
+    useMessageOptionMock.mockImplementation(() => ({ ...messageOptionState.value, ...useStoreMessageOption(state => state), selectedAssistant: null }))
     const view = render(<><Playground /><OrdinarySend /></>)
     try {
       act(() => {

@@ -1805,8 +1805,8 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
 
   it("discards a Sidepanel turn when its prompt scope changes during final persistence", async () => {
     let resolveSave!: () => void
-    const pendingSave = new Promise<void>((resolve) => {
-      resolveSave = resolve
+    const pendingSave = new Promise<string | undefined>((resolve) => {
+      resolveSave = () => resolve(undefined)
     })
     mocks.saveMessageOnSuccess.mockReturnValueOnce(pendingSave)
     const scopeController = new AbortController()
@@ -1854,8 +1854,8 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
 
   it("does not duplicate a completed Sidepanel turn when Stop fires during final persistence", async () => {
     let resolveSave!: () => void
-    const pendingSave = new Promise<void>((resolve) => {
-      resolveSave = resolve
+    const pendingSave = new Promise<string | undefined>((resolve) => {
+      resolveSave = () => resolve(undefined)
     })
     mocks.saveMessageOnSuccess.mockReturnValueOnce(pendingSave)
     const userController = new AbortController()

@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   cookieSessionApproval: null as boolean | null,
   getRuntimeSingleUserApiKeyOverride: vi.fn(),
   storageGet: vi.fn(async () => null),
-  storageSet: vi.fn(async () => undefined),
+  storageSet: vi.fn(async (_key: string, _value: unknown) => undefined),
   storageValue: null as unknown,
   storageWatchers: new Set<
     (change: { oldValue?: unknown; newValue?: unknown }) => void

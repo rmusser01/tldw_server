@@ -310,10 +310,11 @@ describe("usePlaygroundSessionPersistence", () => {
 
   it("waits for the assistant account before restoring a saved conversation", async () => {
     mocks.assistantLoading = true
-    usePlaygroundSessionStore.getState().saveSession({
+    const legacySession = {
       historyId: null, serverChatId: "saved-chat", serverChatTitle: "Saved",
-      chatMode: "normal", scopeKey: "global"
-    })
+      chatMode: "normal" as const, scopeKey: "global"
+    }
+    usePlaygroundSessionStore.getState().saveSession(legacySession)
     const view = renderHook(() => usePlaygroundSessionPersistence())
     await act(async () => { await Promise.resolve() })
     expect(view.result.current.sessionScopeReady).toBe(false)

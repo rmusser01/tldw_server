@@ -10,7 +10,7 @@ import { MemoryRouter } from "react-router-dom"
 import userEvent from "@testing-library/user-event"
 import React from "react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
-import type { WorkspaceSourceSavedViewResponse } from "@/services/tldw/domains/workspace-api"
+import type { WorkspaceSourceSavedViewResponse, WorkspaceSourceSavedViewValidResponse } from "@/services/tldw/domains/workspace-api"
 import type { WorkspaceSourceSavedViewStateV1 } from "@/types/workspace-source-saved-view"
 import { ResearchWorkspace } from "../index"
 
@@ -96,8 +96,8 @@ const wireState = (
 
 const validView = (
   workspaceId: string,
-  overrides: Partial<WorkspaceSourceSavedViewResponse> = {}
-): WorkspaceSourceSavedViewResponse => ({
+  overrides: Partial<WorkspaceSourceSavedViewValidResponse> = {}
+): WorkspaceSourceSavedViewValidResponse => ({
   id: `${workspaceId}-view-${savedViewHarness.nextId}`,
   workspace_id: workspaceId,
   name: "Current filters",
@@ -560,7 +560,7 @@ describe("ResearchWorkspace source list view state", () => {
         const existing = savedViewHarness.rows.find(
           (view) => view.workspace_id === workspaceId && view.id === viewId
         )
-        if (!existing) throw new Error("Saved view not found")
+        if (!existing || !existing.valid) throw new Error("Valid saved view not found")
         const updated = validView(workspaceId, {
           ...existing,
           name: body.name ?? existing.name,

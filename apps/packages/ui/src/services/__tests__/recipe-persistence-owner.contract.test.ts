@@ -1,3 +1,4 @@
+import Dexie from "dexie"
 import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
 import {
   canApplyRecipe,
@@ -831,7 +832,7 @@ describe("real sync stack through direct and extension authorities", () => {
       let localCommitHeld = false
       const update = vi
         .spyOn(db.prompts, "update")
-        .mockImplementation(async (...args) => {
+        .mockImplementation((...args) => Dexie.Promise.resolve().then(async () => {
           const fields = args[1] as Record<string, unknown>
           if (
             !localCommitHeld &&
@@ -844,7 +845,7 @@ describe("real sync stack through direct and extension authorities", () => {
             await held
           }
           return originalUpdate(...args)
-        })
+        }))
       let putCount = 0
       vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
         if (init.method === "PUT") {

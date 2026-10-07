@@ -879,8 +879,8 @@ describe('MediaReviewPage active reading context', () => {
     await screen.findByText("Content 3")
     const footer = screen.getByTestId("media-review-status-bar")
     expect(footer).toHaveTextContent("Previewing 3 of 40")
-    for (let id = 1; id <= 40; id++) selectItemByCheckbox(`Item ${id}`)
-    fireEvent.click(screen.getByRole("button", { name: "Review selected (40)" }))
+    fireEvent.keyDown(document.body, { key: 'a', ctrlKey: true })
+    fireEvent.click(within(screen.getByTestId("media-review-selection-count").parentElement!).getByRole("button", { name: "Review selected (40)" }))
     await waitFor(() =>
       expect(
         screen.getByTestId("media-review-reading-context")
@@ -1059,6 +1059,8 @@ describe('MediaReviewPage active reading context', () => {
           .mockResolvedValue("retained-token")
         const mutations = new Map<string, ReturnType<typeof vi.fn>>()
         const scroll = vi.fn()
+        const card = document.createElement("div")
+        card.scrollIntoView = scroll
         const { result, rerender } = renderHook(() => {
           const state = useMediaReviewState(React.useRef(null))
           const guardedState = {
@@ -1067,7 +1069,7 @@ describe('MediaReviewPage active reading context', () => {
             allResults: mediaItems,
             visibleIds: [7, 8],
             viewerItems: [{ id: 7 }],
-            cardRefs: { current: { "7": { scrollIntoView: scroll } } }
+            cardRefs: { current: { "7": card } }
           } as typeof state
           for (const key of Object.keys(state).filter((key) =>
             key.startsWith("set")

@@ -428,7 +428,7 @@ describe("PlaygroundMessage error recovery integration", () => {
     { message: "<think>Working", isStreaming: true },
     { message: "<think>Working</think>Final answer" },
     { message: "<think>Working</think>", role: "user" as const, isBot: false },
-    { message: "<think>Working</think>", toolCalls: [{ id: "tool", name: "lookup", args: {} }] }
+    { message: "<think>Working</think>", toolCalls: [{ id: "tool", type: "function" as const, function: { name: "lookup", arguments: "{}" } }] }
   ])("does not label active or usable output as missing final: %j", overrides => {
     render(<PlaygroundMessage {...baseProps} {...overrides} />)
     expect(screen.queryByText(/No final answer/)).not.toBeInTheDocument()
@@ -885,7 +885,7 @@ it.each([false, true])(
     parentChat.messages = [...parentChat.messages].reverse()
     view.rerender(<PlaygroundChat />)
     expect(screen.getByRole("textbox")).toBe(editor)
-    await user.click(screen.getByRole("button", { name: "save", exact: true }))
+    await user.click(screen.getByRole("button", { name: "save" }))
     expect(submitted).toEqual([
       { id: "retained", value: "retained unsaved draft", send: false }
     ])
@@ -903,7 +903,7 @@ it.each([false, true])(
     view.rerender(<PlaygroundChat />)
     expect(screen.getByRole("textbox")).toBe(cancelEditor)
     await user.click(
-      screen.getByRole("button", { name: "cancel", exact: true })
+      screen.getByRole("button", { name: "cancel" })
     )
     expect(submitted).toHaveLength(1)
     expect(screen.queryByRole("textbox")).toBeNull()

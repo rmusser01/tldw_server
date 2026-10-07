@@ -554,7 +554,9 @@ describe("SourceViewControls", () => {
     })
     expect(screen.getAllByRole("button", { name: "Retry with latest version" })).toHaveLength(1)
     retry.focus()
-    expect(dialog).toContainElement(document.activeElement)
+    const focused = document.activeElement
+    if (!(focused instanceof HTMLElement)) throw new Error("Expected a focused HTML control")
+    expect(dialog).toContainElement(focused)
     await user.keyboard("{Enter}")
     expect(retryVersionConflict).toHaveBeenCalledTimes(1)
     expect(replaceView).toHaveBeenCalledTimes(1)
@@ -1019,6 +1021,10 @@ describe("SourceViewControls", () => {
     expect(name).toHaveValue("Corrected view")
     expect(within(dialog).getByRole("button", { name: "Save" })).toBeEnabled()
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Save source view" })).not.toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Save source view" })).toHaveFocus()
+    })
 
     await user.click(screen.getByRole("button", { name: "Save source view" }))
     const reopened = await screen.findByRole("dialog", { name: "Save source view" })
@@ -1030,6 +1036,10 @@ describe("SourceViewControls", () => {
     await user.type(reopenedName, "Reopened view")
     expect(within(reopened).getByRole("button", { name: "Save" })).toBeEnabled()
     await user.click(within(reopened).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Save source view" })).not.toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Save source view" })).toHaveFocus()
+    })
 
     await user.click(screen.getByRole("button", { name: "Source views" }))
     await openSavedViewCommands(user, "My PDFs")

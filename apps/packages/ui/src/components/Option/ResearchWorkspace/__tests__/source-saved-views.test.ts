@@ -281,7 +281,7 @@ describe("source saved view V1 contract", () => {
     })
 
     expect(serialized.ok).toBe(false)
-    if (serialized.ok) return
+    if (serialized.ok === true) return
     expect(serialized.issues.map((issue) => issue.field)).toEqual(
       expect.arrayContaining(["dateFrom", "fileSizeMin", "durationMax"])
     )

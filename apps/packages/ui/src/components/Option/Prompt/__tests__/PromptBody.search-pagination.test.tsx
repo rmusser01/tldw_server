@@ -1,4 +1,5 @@
 import React from "react"
+import type { Prompt } from "@/db/dexie/types"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -72,6 +73,7 @@ const mocks = vi.hoisted(() => ({
         success: boolean
         syncStatus: string
         error?: string
+        failureKind?: string
       }
   ),
   pushToStudio: vi.fn(async (): Promise<PromptSyncMockResult> => ({ success: true })),
@@ -507,7 +509,7 @@ const renderPromptBody = (
   }
 }
 
-const savedRecipeRecord = (overrides: Record<string, unknown> = {}) => ({
+const savedRecipeRecord = (overrides: Partial<Prompt> = {}): Prompt => ({
   id: "recipe-system",
   name: "Clear task recipe",
   title: "Clear task recipe",

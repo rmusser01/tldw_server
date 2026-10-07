@@ -21,7 +21,7 @@ vi.mock('@/services/tldw/TldwApiClient', () => ({ tldwClient: {} }))
 vi.mock('@/services/settings/registry', async original => ({
   ...await original<typeof import('@/services/settings/registry')>(), setSetting: vi.fn(), clearSetting: vi.fn()
 }))
-const items = [1, 2].map(id => ({ id, kind: 'media', title: `Private ${id}`, keywords: ['private'], meta: { type: 'video' } } as MediaResultItem))
+const items = [1, 2].map(id => ({ id, kind: 'media', title: `Private ${id}`, keywords: ['private'], meta: { type: 'video' }, raw: null } as MediaResultItem))
 const wrapper = ({ children }: React.PropsWithChildren) => <MemoryRouter>{children}</MemoryRouter>
 const mount = (ownerScope: string | null = 'account-a') => {
   const feedback = { error: vi.fn(), warning: vi.fn(), success: vi.fn() }
@@ -106,8 +106,12 @@ describe('media selection authority', () => {
     act(() => view.rerender({ owner: 'account-a', rows: mixed ? [items[0], note] : [note] }))
     act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.handleSelectAllVisibleItems() })
     vi.mocked(bgRequest).mockResolvedValue({ version: 7 })
-    let recovery!: Awaited<ReturnType<typeof view.result.current.handleBulkDelete>>
-    await act(async () => { recovery = await view.result.current.handleBulkDelete() })
+    let recovery!: Exclude<Awaited<ReturnType<typeof view.result.current.handleBulkDelete>>, void>
+    await act(async () => {
+      const recovered = await view.result.current.handleBulkDelete()
+      if (!recovered) throw new Error("Expected a bulk trash recovery fixture")
+      recovery = recovered
+    })
     expect(recovery).toMatchObject({ noteCount: 1, mediaCount: mixed ? 1 : 0 })
     vi.mocked(bgRequest).mockClear()
     await act(async () => expect(await recovery!.restoreNotes()).toBe(0))
@@ -121,8 +125,12 @@ describe('media selection authority', () => {
     act(() => view.rerender({ owner: 'account-a', rows: items.map(item => ({ ...item, kind: 'note' as const })) }))
     act(() => { view.result.current.setBulkSelectionMode(true); view.result.current.handleSelectAllVisibleItems() })
     vi.mocked(bgRequest).mockResolvedValue({ version: 7 })
-    let recovery!: Awaited<ReturnType<typeof view.result.current.handleBulkDelete>>
-    await act(async () => { recovery = await view.result.current.handleBulkDelete() })
+    let recovery!: Exclude<Awaited<ReturnType<typeof view.result.current.handleBulkDelete>>, void>
+    await act(async () => {
+      const recovered = await view.result.current.handleBulkDelete()
+      if (!recovered) throw new Error("Expected a bulk trash recovery fixture")
+      recovery = recovered
+    })
     vi.mocked(bgRequest).mockClear().mockImplementation(async request => {
       if (request.path === '/api/v1/notes/2/restore?expected_version=8') throw new Error('Conflict')
       return {}
@@ -136,7 +144,11 @@ describe('media selection authority', () => {
     // Keep a second original-owner callback with a still-deleted Note.
     act(() => view.result.current.handleSelectAllVisibleItems())
     vi.mocked(bgRequest).mockResolvedValue({ version: 11 })
-    await act(async () => { recovery = await view.result.current.handleBulkDelete() })
+    await act(async () => {
+      const recovered = await view.result.current.handleBulkDelete()
+      if (!recovered) throw new Error("Expected a bulk trash recovery fixture")
+      recovery = recovered
+    })
     vi.mocked(bgRequest).mockClear()
     mocks.authority = 'verified-b'
     await act(async () => recovery!.restoreNotes())
@@ -236,7 +248,7 @@ describe('media selection authority', () => {
     const view = mount(); select(view)
     let resolve!: (value: unknown) => void
     vi.mocked(bgRequest).mockImplementationOnce(() => new Promise(done => { resolve = done }))
-    let pending!: Promise<void>
+    let pending!: ReturnType<typeof view.result.current.handleBulkDelete>
     act(() => { pending = action === 'delete' ? view.result.current.handleBulkDelete() : view.result.current.handleBulkAddKeywords() })
     await waitFor(() => expect(resolve).toBeTypeOf('function'))
     act(() => window.dispatchEvent(new CustomEvent('tldw:auth-principal-changed')))

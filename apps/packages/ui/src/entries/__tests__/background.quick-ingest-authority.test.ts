@@ -577,7 +577,7 @@ describe("native Quick Ingest worker ownership", () => {
   })
 
   it.each([false, true])("resumes saved worker jobs only for their exact stored authority (foreign=%s)", async (foreign) => {
-    const fetcher = vi.fn(async () => json({ status: "completed", result: { media_id: 7 } })); vi.stubGlobal("fetch", fetcher)
+    const fetcher = vi.fn<typeof fetch>(async () => json({ status: "completed", result: { media_id: 7 } })); vi.stubGlobal("fetch", fetcher)
     // A fresh worker hydrates only metadata, never raw credentials.
     harness.listeners.clear(); harness.changes.clear()
     harness.saved = { "tldw:backgroundSessionStateV1": {

@@ -369,6 +369,51 @@ describe("background effective extension auth", () => {
     expect(storageState.persistent.get("tldwConfig")).toEqual(config)
   })
 
+  it("preserves a rejected scoped refresh with a malformed matching org ID without invalidating credentials", async () => {
+    const config = {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user",
+      authSource: "manual",
+      orgId: "7",
+      accessToken: jwtForUser(42),
+      refreshToken: "expired-refresh"
+    }
+    storageState.persistent.set("tldwConfig", config)
+    storageState.persistent.delete("tldwCookieSessionConfig")
+    const persistentBefore = new Map(storageState.persistent)
+    const sessionBefore = new Map(storageState.session)
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
+      new Response("unauthorized", { status: 401 })
+    )
+    vi.stubGlobal("fetch", fetchSpy)
+
+    await expect(sendRuntimeMessage({
+      type: "tldw:request",
+      payload: {
+        path: "/api/v1/service-prompts/chat.rag.answer",
+        method: "GET",
+        servicePromptConfig: {
+          serverUrl: config.serverUrl,
+          authMode: "multi-user",
+          authSource: "manual",
+          orgId: "7",
+          expectedUserId: 42
+        }
+      }
+    })).resolves.toMatchObject({
+      ok: false,
+      status: 401,
+      error: "Session expired. Please log in again."
+    })
+    expect(fetchSpy.mock.calls.map(([input]) => new URL(String(input)).pathname)).toEqual([
+      "/api/v1/service-prompts/chat.rag.answer",
+      "/api/v1/auth/refresh"
+    ])
+    expect(storageState.persistent).toEqual(persistentBefore)
+    expect(storageState.session).toEqual(sessionBefore)
+    expect(storageState.set).not.toHaveBeenCalled()
+  })
+
   it("invalidates a rejected scoped worker refresh in shared effective credentials", async () => {
     const config = {
       serverUrl: "https://api.example.test", authMode: "multi-user", authSource: "manual",
@@ -392,7 +437,7 @@ describe("background effective extension auth", () => {
   })
 
   it("authenticates ordinary worker requests with session credentials", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -447,7 +492,7 @@ describe("background effective extension auth", () => {
   })
 
   it("rejects a same-target single-user API-key change before worker dispatch", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ id: "wrong-account-write" }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -479,7 +524,7 @@ describe("background effective extension auth", () => {
   })
 
   it("uses the current worker credential after the configured target matches", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -514,7 +559,7 @@ describe("background effective extension auth", () => {
       authSource: "manual",
       accessToken: "current-account-token"
     })
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -1032,7 +1077,7 @@ describe("background effective extension auth", () => {
     "/api/v1/rag/search",
     "/api/v1/research/websearch"
   ])("allows a checked target for the exact worker route %s", async (path) => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -1095,7 +1140,7 @@ describe("background effective extension auth", () => {
   })
 
   it("authenticates worker uploads with session credentials", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -1128,7 +1173,7 @@ describe("background effective extension auth", () => {
       refreshToken: "refresh-token"
     })
     storageState.persistent.delete("tldwCookieSessionConfig")
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -1218,7 +1263,7 @@ describe("background effective extension auth", () => {
   })
 
   it("preserves an expected-user rejection from a scoped worker upload", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({
         detail: {
           code: "request_config_scope_changed",
@@ -1323,7 +1368,7 @@ describe("background effective extension auth", () => {
   })
 
   it("cleans up a completed cancelable worker request", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -1354,7 +1399,7 @@ describe("background effective extension auth", () => {
   })
 
   it("authenticates worker HTTP streams with session credentials", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
         status: 200,
         headers: { "content-type": "text/event-stream" }
@@ -1581,7 +1626,7 @@ describe("background effective extension auth", () => {
       accessToken: "current-account-token",
       refreshToken: "refresh-token"
     })
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response("data: [DONE]\n\n", {
         status: 200,
         headers: { "content-type": "text/event-stream" }

@@ -1,3 +1,4 @@
+import Dexie from "dexie"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const calls = vi.hoisted(() => ({
   capture: vi.fn(),
@@ -95,10 +96,11 @@ it.each(["capture", "confirm", "admit", "settle"] as const)(
     }
     const read = vi.spyOn(db.userSettings, "get").mockRejectedValue(new Error("private_read_started"))
     // Use the real local transaction callback; only pause its storage boundary.
-    vi.spyOn(db, "transaction").mockImplementationOnce(async (_mode, _tables, run) => {
+    vi.spyOn(db, "transaction").mockImplementationOnce((_mode, _tables, run) => Dexie.Promise.resolve().then(async () => {
       current = false
-      return (run as (tx: { abort(): void }) => Promise<never>)({ abort() {} })
-    })
+      if (typeof run !== "function") throw new Error("Expected transaction scope fixture")
+      return Reflect.apply(run, undefined, [{ abort() {} }])
+    }))
     const scope = { profile_id: "profile", client_session_id: "session" }
     const intent = {
       version: 1 as const,
