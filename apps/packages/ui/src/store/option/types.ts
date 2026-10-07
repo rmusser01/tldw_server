@@ -161,7 +161,12 @@ export type State = {
   isProcessing: boolean
   setIsProcessing: (isProcessing: boolean) => void
   selectedModel: string | null
-  setSelectedModel: (selectedModel: string | null) => void
+  selectedModelStorageHandled: boolean
+  selectedModelRevision: number
+  setSelectedModel: (
+    selectedModel: string | null,
+    options?: { storageHandled?: boolean }
+  ) => void
   chatMode: "normal" | "rag" | "vision"
   setChatMode: (chatMode: "normal" | "rag" | "vision") => void
   isEmbedding: boolean

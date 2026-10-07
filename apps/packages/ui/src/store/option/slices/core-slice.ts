@@ -29,6 +29,8 @@ export const createCoreSlice: StoreSlice<
     | "isProcessing"
     | "setIsProcessing"
     | "selectedModel"
+    | "selectedModelStorageHandled"
+    | "selectedModelRevision"
     | "setSelectedModel"
     | "chatMode"
     | "setChatMode"
@@ -145,7 +147,14 @@ export const createCoreSlice: StoreSlice<
   setSpeechToTextLanguage: (language) =>
     set({ speechToTextLanguage: language }),
   selectedModel: null,
-  setSelectedModel: (selectedModel) => set({ selectedModel }),
+  selectedModelStorageHandled: false,
+  selectedModelRevision: 0,
+  setSelectedModel: (selectedModel, options) =>
+    set((state) => ({
+      selectedModel,
+      selectedModelStorageHandled: options?.storageHandled === true,
+      selectedModelRevision: state.selectedModelRevision + 1
+    })),
   chatMode: "normal",
   setChatMode: (chatMode) => set({ chatMode }),
   isEmbedding: false,

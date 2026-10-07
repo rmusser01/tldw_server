@@ -1,5 +1,9 @@
 import React from "react"
 import { useLocation, useNavigate } from "react-router-dom"
+import { useStoreMessageOption, type State } from "@/store/option"
+import { fetchChatModels } from "@/services/tldw-server"
+import { buildChatModelUsability } from "@/utils/chat-model-availability"
+import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils"
 
 import {
   consumeSidepanelChatHandoff,
@@ -10,9 +14,29 @@ import {
 
 import { decodeSidepanelChatWebUiHandoff, isEncodedSidepanelChatWebUiHandoff } from "@/services/tldw/sidepanel-chat-webui-handoff"
 
+const literalOptionKeys = [
+  "selectedModel",
+  "chatMode",
+  "webSearch",
+  "toolChoice",
+  "useOCR"
+] as const
+type LiteralOptions = Partial<Pick<State, (typeof literalOptionKeys)[number]>>
+type LiteralOptionControls = {
+  current: Pick<State, (typeof literalOptionKeys)[number]>
+  setSelectedModel: (model: string | null) => void | Promise<void>
+  setChatMode: State["setChatMode"]
+  setWebSearch: State["setWebSearch"]
+  setToolChoice: State["setToolChoice"]
+  setUseOCR: State["setUseOCR"]
+  canApply?: () => boolean
+}
+
 type HandoffRoute = { id: string; field: "search" | "hash"; webUi: boolean }
 type HandoffDraft = Pick<SidepanelChatHandoffPackage, "id" | "draft" | "pageContext"> & {
   hasText?: boolean
+  literalOptions?: LiteralOptions
+  unsupportedSettings?: boolean
   skippedParts?: Array<"settings" | "history" | "attachments">
 }
 
@@ -35,7 +59,9 @@ const readHandoffDraft = async (route: HandoffRoute, strict = false): Promise<Ha
   if (has(["selectedModel", "selectedSystemPrompt", "selectedQuickPrompt", "chatMode", "webSearch", "toolChoice", "temporaryChat", "useOCR"])) skippedParts.push("settings")
   if (has(["historyId", "serverChatId", "title"])) skippedParts.push("history")
   if (has(["chatDocumentDraftId", "ragMediaIds", "fileRetrievalEnabled"])) skippedParts.push("attachments")
-  return { id: route.id, draft: { text: payload.draft ?? "" }, hasText: typeof payload.draft === "string", skippedParts }
+  const literalOptions = Object.fromEntries(literalOptionKeys.filter(key => Object.prototype.hasOwnProperty.call(payload, key)).map(key => [key, payload[key]])) as LiteralOptions
+  return { id: route.id, draft: { text: payload.draft ?? "" }, hasText: typeof payload.draft === "string", skippedParts,
+    literalOptions, unsupportedSettings: has(["selectedSystemPrompt", "selectedQuickPrompt", "temporaryChat"]) }
 }
 
 type SetMessageValue = (
@@ -54,6 +80,7 @@ export type SidepanelChatHandoffConflict = {
 
 type UseSidepanelChatHandoffImportDeps = {
   ready: boolean
+  literalOptions?: LiteralOptionControls
   destinationKey: string
   captureGuard: () => () => boolean
   draftValue: string
@@ -71,6 +98,7 @@ const appendImportedDraft = (currentDraft: string, importedDraft: string) => {
 
 export function useSidepanelChatHandoffImport({
   ready,
+  literalOptions,
   destinationKey,
   captureGuard,
   draftValue,
@@ -85,17 +113,66 @@ export function useSidepanelChatHandoffImport({
     React.useState<SidepanelChatHandoffPageContext | null>(null)
   const [conflict, setConflict] =
     React.useState<SidepanelChatHandoffConflict | null>(null)
+  const [includeLiteralOptions, setIncludeOptions] = React.useState(false)
+  const consentRevision = React.useRef(0)
+  const includeOptionsRef = React.useRef(false)
+  const renderedConsentRevision = consentRevision.current
+  const optionRevision = React.useRef(0)
+  const renderedOptionRevision = optionRevision.current
   const [importPending, setImportPending] = React.useState(false)
-  const [conflictFeedback, setConflictFeedback] = React.useState<string | null>(null)
-  const [importReceipt, setImportReceipt] = React.useState<{ description: string } | null>(null)
-  const skippedFeedbackFor = React.useCallback((handoff: HandoffDraft) => {
-    if (!handoff.skippedParts?.length) return null
-    const labels = handoff.skippedParts.map(part => part === "settings"
-      ? t("playground:sidepanelHandoff.skippedSettings", "Settings")
-      : part === "history" ? t("playground:sidepanelHandoff.skippedHistory", "Conversation history")
-        : t("playground:sidepanelHandoff.skippedAttachments", "Attachments and retrieval sources"))
-    return `${t("playground:sidepanelHandoff.notImported", "Not imported")}: ${labels.join(", ")}. ${t("playground:sidepanelHandoff.chooseHere", "Choose these in the destination chat.")}`
-  }, [t])
+  const [conflictFeedback, setConflictFeedback] = React.useState<string | null>(
+    null
+  )
+  const [importReceipt, setImportReceipt] = React.useState<{
+    description: string
+    modelPending?: boolean
+  } | null>(null)
+  React.useLayoutEffect(
+    () =>
+      useStoreMessageOption.subscribe((current, previous) => {
+        if (
+          current.selectedModelRevision === previous.selectedModelRevision &&
+          !literalOptionKeys.some((key) => current[key] !== previous[key])
+        ) return
+        optionRevision.current += 1
+        setImportReceipt((receipt) => (receipt?.modelPending ? null : receipt))
+      }),
+    []
+  )
+  const skippedFeedbackFor = React.useCallback(
+    (handoff: HandoffDraft, optionsApplied = false) => {
+      if (!handoff.skippedParts?.length) return null
+      const labels = handoff.skippedParts
+        .filter(
+          (part) =>
+            part !== "settings" ||
+            !optionsApplied ||
+            handoff.unsupportedSettings
+        )
+        .map((part) =>
+          part === "settings"
+            ? optionsApplied
+              ? t(
+                  "playground:sidepanelHandoff.skippedCommandsPrivacy",
+                  "Prompts and chat privacy"
+                )
+              : t("playground:sidepanelHandoff.skippedSettings", "Settings")
+            : part === "history"
+              ? t(
+                  "playground:sidepanelHandoff.skippedHistory",
+                  "Conversation history"
+                )
+              : t(
+                  "playground:sidepanelHandoff.skippedAttachments",
+                  "Attachments and retrieval sources"
+                )
+        )
+      if (!labels.length) return null
+      return `${t("playground:sidepanelHandoff.notImported", "Not imported")}: ${labels.join(", ")}. ${t("playground:sidepanelHandoff.chooseHere", "Choose these in the destination chat.")}`
+    },
+    [t]
+  )
+
   const pendingChoiceRef = React.useRef<{ location: typeof location; draft: string; revision: number; isOwned: () => boolean } | null>(null)
   const previousLocationRef = React.useRef(location)
   const locationRef = React.useRef(location)
@@ -116,6 +193,9 @@ export function useSidepanelChatHandoffImport({
     setImportPending(false)
     setConflict(null)
     setConflictFeedback(null)
+    includeOptionsRef.current = false
+    consentRevision.current += 1
+    setIncludeOptions(false)
   }, [])
 
   React.useLayoutEffect(() => {
@@ -176,21 +256,72 @@ export function useSidepanelChatHandoffImport({
       handoff: HandoffDraft,
       route: HandoffRoute,
       nextDraft: string,
-      options: { isOwned: () => boolean },
+      options: {
+        isOwned: () => boolean
+        settingsApplied?: boolean
+        modelPersisting?: boolean
+        optionsOnly?: boolean
+      }
     ) => {
-      if (handoff.hasText === false || !readyRef.current || !options.isOwned() || !matchesHandoffRoute(locationRef.current, route)) return
-      setMessageValue(nextDraft, { collapseLarge: true })
-      setImportedContext(handoff.pageContext ?? null)
-      setImportReceipt({ description: [t("playground:sidepanelHandoff.draftImported", "Draft text imported."), skippedFeedbackFor(handoff)].filter(Boolean).join(" ") })
+      if (
+        !readyRef.current ||
+        !options.isOwned() ||
+        !matchesHandoffRoute(locationRef.current, route)
+      )
+        return
+      if (handoff.hasText !== false && !options.optionsOnly) {
+        setMessageValue(nextDraft, { collapseLarge: true })
+        setImportedContext(handoff.pageContext ?? null)
+      }
+      const receipt = {
+        modelPending: options.modelPersisting,
+        description: [
+          handoff.hasText !== false && !options.optionsOnly
+            ? t(
+                "playground:sidepanelHandoff.draftImported",
+                "Draft text imported."
+              )
+            : null,
+          options.settingsApplied
+            ? t(
+                "playground:sidepanelHandoff.settingsApplied",
+                "Supported settings applied here."
+              )
+            : null,
+          options.modelPersisting
+            ? t(
+                "playground:sidepanelHandoff.modelSaving",
+                "Saving the model preference…"
+              )
+            : null,
+          skippedFeedbackFor(handoff, options.settingsApplied)
+        ]
+          .filter(Boolean)
+          .join(" ")
+      }
+      setImportReceipt(receipt)
       setConflict(null)
       conflictOwnerRef.current = null
       cleanRouteHandoff(route)
-      handledHandoffIdsRef.current.set(handoff.id, { destinationKey, settled: true, review: false })
-      queueMicrotask(() => {
-        if (!route.webUi && options.isOwned()) consumeQuietly(handoff.id, options.isOwned)
+      handledHandoffIdsRef.current.set(handoff.id, {
+        destinationKey,
+        settled: true,
+        review: false
       })
+      queueMicrotask(() => {
+        if (!route.webUi && options.isOwned())
+          consumeQuietly(handoff.id, options.isOwned)
+      })
+      return receipt
     },
-    [cleanRouteHandoff, consumeQuietly, destinationKey, setMessageValue, skippedFeedbackFor, t],
+    [
+      cleanRouteHandoff,
+      consumeQuietly,
+      destinationKey,
+      setMessageValue,
+      skippedFeedbackFor,
+      t
+    ]
   )
 
   React.useEffect(() => {
@@ -243,50 +374,303 @@ export function useSidepanelChatHandoffImport({
     conflictOwnerRef.current?.conflict === conflict && conflictOwnerRef.current.isOwned() &&
     matchesHandoffRoute(locationRef.current, conflict.route), [conflict])
 
-  const acceptHandoffDraft = React.useCallback(async (action: "insert" | "replace") => {
-    if (!isConflictCurrent() || !conflict || conflict.handoff.hasText === false || pendingChoiceRef.current) return
-    const attempt = { location: locationRef.current, draft: draftValueRef.current, revision: getDraftRevision(), isOwned: captureGuard() }
-    if (!attempt.isOwned()) return
-    pendingChoiceRef.current = attempt
-    setImportPending(true)
-    setConflictFeedback(null)
-    const isCurrent = () => readyRef.current && attempt.isOwned() && pendingChoiceRef.current === attempt &&
-      locationRef.current.key === attempt.location.key &&
-      locationRef.current.pathname === attempt.location.pathname &&
-      locationRef.current.search === attempt.location.search &&
-      locationRef.current.hash === attempt.location.hash &&
-      matchesHandoffRoute(locationRef.current, conflict.route)
-    try {
-      const handoff = await readHandoffDraft(conflict.route, true)
-      if (!isCurrent()) return
-      if (!handoff) {
-        setConflict(null)
-        showInvalidFeedback()
-        cleanRouteHandoff(conflict.route)
+  const setIncludeLiteralOptions = React.useCallback(
+    (include: boolean) => {
+      if (
+        !isConflictCurrent() ||
+        pendingChoiceRef.current ||
+        renderedConsentRevision !== consentRevision.current
+      )
         return
-      }
-      if (getDraftRevision() !== attempt.revision || draftValueRef.current !== attempt.draft) {
-        setConflictFeedback(t(
-          "playground:sidepanelHandoff.draftChanged",
-          "Your draft changed while the copy was checked. Review it, then choose Insert or Replace again.",
-        ))
+      if (includeOptionsRef.current === include) return
+      includeOptionsRef.current = include
+      consentRevision.current += 1
+      setIncludeOptions(include)
+    },
+    [isConflictCurrent, renderedConsentRevision]
+  )
+  const optionLabels = {
+    selectedModel: t(
+      "playground:sidepanelHandoff.optionModel",
+      "Model and provider"
+    ),
+    chatMode: t("playground:sidepanelHandoff.optionMode", "Chat mode"),
+    webSearch: t("playground:sidepanelHandoff.optionWebSearch", "Web search"),
+    toolChoice: t("playground:sidepanelHandoff.optionTools", "Tool choice"),
+    useOCR: t("playground:sidepanelHandoff.optionOCR", "OCR")
+  }
+  const literalOptionsReview =
+    literalOptions && conflict?.handoff.literalOptions
+      ? literalOptionKeys
+          .filter((key) =>
+            Object.prototype.hasOwnProperty.call(
+              conflict.handoff.literalOptions,
+              key
+            )
+          )
+          .map((key) => ({
+            key,
+            label: optionLabels[key],
+            current: literalOptions.current[key],
+            copied: conflict.handoff.literalOptions![key]
+          }))
+      : []
+
+  const acceptHandoffDraft = React.useCallback(
+    async (action: "insert" | "replace" | "options") => {
+      if (
+        !isConflictCurrent() ||
+        !conflict ||
+        pendingChoiceRef.current ||
+        (action !== "options" && conflict.handoff.hasText === false) ||
+        (action === "options" &&
+          (!includeLiteralOptions || !literalOptionsReview.length))
+      )
         return
+      if (renderedConsentRevision !== consentRevision.current) return
+      const applyOptions =
+        includeLiteralOptions && Boolean(literalOptionsReview.length)
+      const attempt = {
+        location: locationRef.current,
+        draft: draftValueRef.current,
+        revision: getDraftRevision(),
+        optionsRevision: renderedOptionRevision,
+        isOwned: captureGuard()
       }
-      applyImportedHandoff(handoff, conflict.route, action === "insert"
-        ? appendImportedDraft(draftValueRef.current, handoff.draft.text)
-        : handoff.draft.text, { isOwned: attempt.isOwned })
-    } catch {
-      if (isCurrent()) setConflictFeedback(t(
-        "playground:sidepanelHandoff.readFailed",
-        "The copy could not be checked. Your draft remains here. Try Insert or Replace again.",
-      ))
-    } finally {
-      if (pendingChoiceRef.current === attempt) {
-        pendingChoiceRef.current = null
-        setImportPending(false)
+      if (!attempt.isOwned()) return
+      pendingChoiceRef.current = attempt
+      setImportPending(true)
+      setConflictFeedback(null)
+      const isCurrent = () =>
+        readyRef.current &&
+        attempt.isOwned() &&
+        pendingChoiceRef.current === attempt &&
+        locationRef.current.key === attempt.location.key &&
+        locationRef.current.pathname === attempt.location.pathname &&
+        locationRef.current.search === attempt.location.search &&
+        locationRef.current.hash === attempt.location.hash &&
+        matchesHandoffRoute(locationRef.current, conflict.route)
+      try {
+        const handoff = await readHandoffDraft(conflict.route, true)
+        if (!isCurrent()) return
+        if (!handoff) {
+          setConflict(null)
+          showInvalidFeedback()
+          cleanRouteHandoff(conflict.route)
+          return
+        }
+        const unchanged = () =>
+          getDraftRevision() === attempt.revision &&
+          draftValueRef.current === attempt.draft &&
+          (!applyOptions || optionRevision.current === attempt.optionsRevision)
+        const showChanged = () =>
+          setConflictFeedback(
+            t(
+              applyOptions
+                ? "playground:sidepanelHandoff.destinationChanged"
+                : "playground:sidepanelHandoff.draftChanged",
+              applyOptions
+                ? "Your draft or settings changed while the copy was checked. Review them, then choose again."
+                : "Your draft changed while the copy was checked. Review it, then choose Insert or Replace again."
+            )
+          )
+        if (!unchanged()) {
+          showChanged()
+          return
+        }
+        let modelChoice: string | undefined
+        if (applyOptions) {
+          if (!literalOptions || literalOptions.canApply?.() === false) {
+            setConflictFeedback(
+              t(
+                "playground:sidepanelHandoff.settingsUnavailable",
+                "Wait for this conversation to finish loading, or uncheck settings to import text only."
+              )
+            )
+            return
+          }
+          if (
+            Object.prototype.hasOwnProperty.call(
+              handoff.literalOptions,
+              "selectedModel"
+            )
+          ) {
+            const models = await fetchChatModels({ requireFresh: true })
+            if (!isCurrent()) return
+            if (!unchanged()) {
+              showChanged()
+              return
+            }
+            const choice = resolveModelSelectorSelection(
+              models,
+              handoff.literalOptions!.selectedModel
+            )
+            if (
+              !choice.model ||
+              !choice.key ||
+              !choice.provider ||
+              !buildChatModelUsability({
+                selectedModel: choice.key,
+                availableModels: models
+              }).canSend
+            ) {
+              setConflictFeedback(
+                t(
+                  "playground:sidepanelHandoff.modelUnavailable",
+                  "The copied model and provider could not be verified. Choose them here, or uncheck settings to import text only."
+                )
+              )
+              return
+            }
+            modelChoice = choice.key
+          }
+        }
+        if (!isCurrent()) return
+        if (!unchanged()) {
+          showChanged()
+          return
+        }
+        if (applyOptions && literalOptions?.canApply?.() === false) {
+          setConflictFeedback(
+            t(
+              "playground:sidepanelHandoff.settingsUnavailable",
+              "Wait for this conversation to finish loading, or uncheck settings to import text only."
+            )
+          )
+          return
+        }
+        if (
+          conflict.route.webUi &&
+          !decodeSidepanelChatWebUiHandoff(conflict.route.id)
+        ) {
+          setConflict(null)
+          showInvalidFeedback()
+          cleanRouteHandoff(conflict.route)
+          return
+        }
+        let modelPersistence: Promise<void> | undefined
+        if (applyOptions && literalOptions) {
+          const values = handoff.literalOptions!
+          if (values.chatMode !== undefined)
+            literalOptions.setChatMode(values.chatMode)
+          if (values.webSearch !== undefined)
+            literalOptions.setWebSearch(values.webSearch)
+          if (values.toolChoice !== undefined)
+            literalOptions.setToolChoice(values.toolChoice)
+          if (values.useOCR !== undefined)
+            literalOptions.setUseOCR(values.useOCR)
+          if (modelChoice !== undefined) {
+            try {
+              modelPersistence = Promise.resolve(
+                literalOptions.setSelectedModel(modelChoice)
+              )
+            } catch (error) {
+              modelPersistence = Promise.reject(error)
+            }
+          }
+        }
+        const committedOptionRevision = optionRevision.current
+        const receipt = applyImportedHandoff(
+          handoff,
+          conflict.route,
+          action === "insert"
+            ? appendImportedDraft(draftValueRef.current, handoff.draft.text)
+            : handoff.draft.text,
+          {
+            isOwned: attempt.isOwned,
+            settingsApplied: applyOptions,
+            modelPersisting: Boolean(modelPersistence),
+            optionsOnly: action === "options"
+          }
+        )
+        if (modelPersistence) {
+          try {
+            await modelPersistence
+            if (
+              receipt &&
+              attempt.isOwned() &&
+              optionRevision.current === committedOptionRevision
+            )
+              setImportReceipt((current) =>
+                current === receipt
+                  ? {
+                      description: receipt.description.replace(
+                        t(
+                          "playground:sidepanelHandoff.modelSaving",
+                          "Saving the model preference…"
+                        ),
+                        t(
+                          "playground:sidepanelHandoff.modelSaved",
+                          "Model preference saved."
+                        )
+                      )
+                    }
+                  : current
+              )
+          } catch {
+            if (
+              receipt &&
+              attempt.isOwned() &&
+              optionRevision.current === committedOptionRevision
+            )
+              setImportReceipt((current) =>
+                current === receipt
+                  ? {
+                      description: receipt.description.replace(
+                        t(
+                          "playground:sidepanelHandoff.modelSaving",
+                          "Saving the model preference…"
+                        ),
+                        t(
+                          "playground:sidepanelHandoff.modelSaveFailed",
+                          "The model preference could not be saved. Select the model again to retry saving."
+                        )
+                      )
+                    }
+                  : current
+              )
+          }
+        }
+      } catch {
+        if (isCurrent())
+          setConflictFeedback(
+            t(
+              applyOptions
+                ? "playground:sidepanelHandoff.optionsCheckFailed"
+                : "playground:sidepanelHandoff.readFailed",
+              applyOptions
+                ? "The copied settings could not be checked. Your draft and settings remain here. Try again, or uncheck settings to import text only."
+                : "The copy could not be checked. Your draft remains here. Try Insert or Replace again."
+            )
+          )
+      } finally {
+        if (pendingChoiceRef.current === attempt) {
+          pendingChoiceRef.current = null
+          setImportPending(false)
+        }
       }
-    }
-  }, [applyImportedHandoff, captureGuard, cleanRouteHandoff, conflict, getDraftRevision, isConflictCurrent, showInvalidFeedback, t])
+    },
+    [
+      applyImportedHandoff,
+      captureGuard,
+      cleanRouteHandoff,
+      conflict,
+      getDraftRevision,
+      isConflictCurrent,
+      showInvalidFeedback,
+      t,
+      includeLiteralOptions,
+      literalOptions,
+      literalOptionsReview.length,
+      renderedOptionRevision,
+      renderedConsentRevision
+    ]
+  )
+
+  const applyHandoffOptions = React.useCallback(
+    () => acceptHandoffDraft("options"),
+    [acceptHandoffDraft]
+  )
 
   const insertHandoffDraft = React.useCallback(
     () => acceptHandoffDraft("insert"), [acceptHandoffDraft],
@@ -313,9 +697,13 @@ export function useSidepanelChatHandoffImport({
   }, [importReceipt])
 
   return {
+    literalOptionsReview,
+    includeLiteralOptions,
+    setIncludeLiteralOptions,
+    applyHandoffOptions,
     importReceipt,
     dismissImportReceipt,
-    skippedFeedback: conflict ? skippedFeedbackFor(conflict.handoff) : null,
+    skippedFeedback: conflict ? skippedFeedbackFor(conflict.handoff, includeLiteralOptions && literalOptionsReview.length > 0) : null,
     importedContext,
     removeImportedContext,
     conflict,

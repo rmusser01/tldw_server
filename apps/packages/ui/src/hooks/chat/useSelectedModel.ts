@@ -29,6 +29,9 @@ export const normalizeSelectedModel = (
  */
 export const useSelectedModel = () => {
   const selectedModelFromStore = useStoreMessageOption((s) => s.selectedModel);
+  const selectedModelStorageHandled = useStoreMessageOption(
+    (s) => s.selectedModelStorageHandled,
+  );
   const setSelectedModelInStore = useStoreMessageOption(
     (s) => s.setSelectedModel,
   );
@@ -40,9 +43,11 @@ export const useSelectedModel = () => {
 
   const selectedModel = React.useMemo(
     () =>
-      normalizeSelectedModel(selectedModelFromStore) ??
-      normalizeSelectedModel(storedSelectedModel),
-    [selectedModelFromStore, storedSelectedModel],
+      selectedModelStorageHandled
+        ? normalizeSelectedModel(selectedModelFromStore)
+        : (normalizeSelectedModel(selectedModelFromStore) ??
+          normalizeSelectedModel(storedSelectedModel)),
+    [selectedModelFromStore, storedSelectedModel, selectedModelStorageHandled],
   );
 
   const setSelectedModel = React.useCallback(
@@ -57,7 +62,7 @@ export const useSelectedModel = () => {
           ? nextOrUpdater(selectedModel)
           : nextOrUpdater;
       const normalized = normalizeSelectedModel(resolved);
-      setSelectedModelInStore(normalized);
+      setSelectedModelInStore(normalized, { storageHandled: true });
       return setStoredSelectedModel(normalized);
     },
     [selectedModel, setSelectedModelInStore, setStoredSelectedModel],
@@ -66,26 +71,30 @@ export const useSelectedModel = () => {
   // Sync effect: hydrate store from storage or push store to storage
   React.useEffect(() => {
     if (selectedModelStorageMeta.isLoading) return;
-    // Another mounted owner may have committed since this render.
+    // All mounted owners share one write claim, published before storage I/O.
+    // Keep it after failure; a later selection can explicitly claim a new write.
+    const current = useStoreMessageOption.getState();
     if (
-      useStoreMessageOption.getState().selectedModel !== selectedModelFromStore
+      current.selectedModel !== selectedModelFromStore ||
+      current.selectedModelStorageHandled
     )
       return;
     const normalizedStoreModel = normalizeSelectedModel(selectedModelFromStore);
     const normalizedStoredModel = normalizeSelectedModel(storedSelectedModel);
-
     if (!normalizedStoreModel && normalizedStoredModel) {
       setSelectedModelInStore(normalizedStoredModel);
       return;
     }
 
     if (normalizedStoreModel !== normalizedStoredModel) {
+      setSelectedModelInStore(normalizedStoreModel, { storageHandled: true });
       // Explicit writes return their rejection to the caller. Hydration sync is
       // best effort and must not create an unhandled background rejection.
       void setStoredSelectedModel(normalizedStoreModel).catch(() => undefined);
     }
   }, [
     selectedModelFromStore,
+    selectedModelStorageHandled,
     setSelectedModelInStore,
     setStoredSelectedModel,
     storedSelectedModel,

@@ -4159,5 +4159,71 @@
   },
   "imageGeneration_referenceImageSelectionUnavailable": {
     "message": "The selected reference image could not be verified. Retry loading reference images or clear the selection before generating."
+  },
+  "sidepanelHandoff_optionModel": {
+    "message": "Model and provider"
+  },
+  "sidepanelHandoff_optionMode": {
+    "message": "Chat mode"
+  },
+  "sidepanelHandoff_optionWebSearch": {
+    "message": "Web search"
+  },
+  "sidepanelHandoff_optionTools": {
+    "message": "Tool choice"
+  },
+  "sidepanelHandoff_optionOCR": {
+    "message": "OCR"
+  },
+  "sidepanelHandoff_copiedSettings": {
+    "message": "Copied settings"
+  },
+  "sidepanelHandoff_setting": {
+    "message": "Setting"
+  },
+  "sidepanelHandoff_currentValue": {
+    "message": "Current"
+  },
+  "sidepanelHandoff_copiedValue": {
+    "message": "Copied"
+  },
+  "sidepanelHandoff_applySupportedSettings": {
+    "message": "Apply supported settings"
+  },
+  "sidepanelHandoff_applySettings": {
+    "message": "Apply settings"
+  },
+  "sidepanelHandoff_settingsIntent": {
+    "message": "These preferences do not copy prompts, chat privacy, attachments or retrieval sources. Availability is checked when sending."
+  },
+  "sidepanelHandoff_settingsOnlyDescription": {
+    "message": "Your draft remains here. Review the copied settings below, apply them if wanted, or dismiss this copy."
+  },
+  "sidepanelHandoff_skippedCommandsPrivacy": {
+    "message": "Prompts and chat privacy"
+  },
+  "sidepanelHandoff_settingsApplied": {
+    "message": "Supported settings applied here."
+  },
+  "sidepanelHandoff_modelSaving": {
+    "message": "Saving the model preference…"
+  },
+  "sidepanelHandoff_modelSaved": {
+    "message": "Model preference saved."
+  },
+  "sidepanelHandoff_modelSaveFailed": {
+    "message": "The model preference could not be saved. Select the model again to retry saving."
+  },
+  "sidepanelHandoff_destinationChanged": {
+    "message": "Your draft or settings changed while the copy was checked. Review them, then choose again."
+  },
+  "sidepanelHandoff_settingsUnavailable": {
+    "message": "Wait for this conversation to finish loading, or uncheck settings to import text only."
+  },
+  "sidepanelHandoff_modelUnavailable": {
+    "message": "The copied model and provider could not be verified. Choose them here, or uncheck settings to import text only."
+  },
+  "sidepanelHandoff_optionsCheckFailed": {
+    "message": "The copied settings could not be checked. Your draft and settings remain here. Try again, or uncheck settings to import text only."
   }
 }

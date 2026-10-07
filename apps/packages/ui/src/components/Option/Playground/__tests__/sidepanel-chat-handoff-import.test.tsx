@@ -36,6 +36,8 @@ const serviceMocks = vi.hoisted(() => ({
 const storageMocks = vi.hoisted(() => ({ get: vi.fn(), remove: vi.fn() }))
 vi.mock("@/utils/safe-storage", () => ({ createSafeStorage: () => storageMocks }))
 vi.mock("@/services/sidepanel-chat-handoff", () => serviceMocks)
+// Model selector parsing is real; the catalog/client I/O is outside this fixture.
+vi.mock("@/services/tldw", () => ({ tldwModels: {}, tldwClient: {} }))
 
 vi.mock("~/services/tldw-server", () => ({
   defaultEmbeddingModelForRag: vi.fn(async () => "embedding-model"),
@@ -75,17 +77,9 @@ vi.mock("@/hooks/chat/chat-action-utils", () => ({
   throwIfChatSubmitUnsuccessful: vi.fn(),
 }))
 
-vi.mock("lucide-react", () => {
+vi.mock("lucide-react", async importOriginal => {
   const Icon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props} />
-  return new Proxy(
-    { X: Icon },
-    {
-      get: (target, prop) => {
-        if (prop === "then") return undefined
-        return prop in target ? target[prop as keyof typeof target] : Icon
-      },
-    },
-  )
+  return { ...await importOriginal<typeof import("lucide-react")>(), X: Icon }
 })
 
 const importedPageContext: SidepanelChatHandoffPageContext = {

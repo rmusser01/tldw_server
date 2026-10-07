@@ -5,6 +5,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { encodeSidepanelChatWebUiHandoff, SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
 import * as mediaHandoff from "@/services/tldw/media-chat-handoff"
 import type { MediaChatHandoffPayload } from "@/services/tldw/media-chat-handoff"
@@ -18,7 +19,7 @@ import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { TldwApiClientCore } from "@/services/tldw/TldwApiClient"
-const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, search: "", draftReady: true, get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
+const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, search: "", draftReady: true, models: vi.fn(async () => [{ model: "tldw:gpt-4o-mini", provider: "openai", is_configured: true, provider_is_configured: true }]), get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
 vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => handoff.scope }))
 
 // These cases keep the Form, submit hook, action router, session restore, RAG
@@ -551,10 +552,13 @@ vi.mock("react-router-dom", () => ({
       {children}
     </a>
   ),
-  useLocation: () => ({ pathname: "/chat", search: React.useSyncExternalStore(
-    callback => { window.addEventListener("popstate", callback); return () => window.removeEventListener("popstate", callback) },
-    () => handoff.search
-  ), hash: "" }),
+  useLocation: () => {
+    const search = React.useSyncExternalStore(
+      callback => { window.addEventListener("popstate", callback); return () => window.removeEventListener("popstate", callback) },
+      () => handoff.search
+    )
+    return React.useMemo(() => ({ pathname: "/chat", search, hash: "", key: search }), [search])
+  },
   useNavigate: () => (route: string | { search?: string }) => {
     handoff.search = typeof route === "string" ? route.slice(route.indexOf("?")) : route.search || ""
     window.dispatchEvent(new PopStateEvent("popstate"))
@@ -584,7 +588,7 @@ vi.mock("@/db/dexie/helpers", async () => ({
 
 vi.mock("@/services/tldw-server", () => ({
   defaultEmbeddingModelForRag: vi.fn(async () => "embedding"),
-  fetchChatModels: vi.fn(async () => []),
+  fetchChatModels: handoff.models,
   fetchImageModels: vi.fn(async () => []),
   systemPromptForNonRagOption: async () => ""
 }))
@@ -842,6 +846,8 @@ vi.mock("../hooks", async () => {
     useComposerInput: () => {
       const form = useSimpleForm({initialValues:{message:"",image:""}})
       const values = form.values
+      const renderedOwner = handoff.scope
+      const isDraftOwnerCurrent = React.useMemo(() => () => handoff.scope === renderedOwner, [renderedOwner])
 
       return {
         form,
@@ -875,6 +881,8 @@ vi.mock("../hooks", async () => {
         wrapComposerProfile: (_label: string, node: React.ReactNode) => node,
         draftSaved: false,
         draftReady: handoff.draftReady,
+        draftOwnerKey: renderedOwner,
+        isDraftOwnerCurrent,
         selectedQuickPrompt: null,
         setSelectedQuickPrompt: vi.fn()
       }
@@ -1551,6 +1559,31 @@ describe("PlaygroundForm OpenUI mode", () => {
     useMilestoneStore.getState().resetMilestones()
     messageOptionState.value = createMessageOptionState()
   })
+
+  it("reviews current/copied passive settings in the actual Form and applies them only with consent", async () => {
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(),
+      draft: "EXACT COPIED TEXT  ", selectedModel: "openai:gpt-4o-mini", chatMode: "vision", webSearch: true, toolChoice: "required", useOCR: true,
+      selectedQuickPrompt: "Do not trigger a second insertion", selectedSystemPrompt: "foreign-prompt", temporaryChat: true });
+    handoff.search = "?handoff=" + encoded;
+    render(<PlaygroundForm droppedFiles={[]} />);
+    const consent = await screen.findByRole("checkbox", { name: "Apply supported settings" });
+    expect(consent).not.toBeChecked();
+    expect(screen.getByRole("table", { name: "Copied settings" })).toHaveTextContent("deepseek-chat");
+    expect(screen.getByRole("table", { name: "Copied settings" })).toHaveTextContent("openai:gpt-4o-mini");
+    expect(messageOptionState.value.setSelectedModel).not.toHaveBeenCalled();
+    await userEvent.setup().click(consent);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Replace current draft" }));
+    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("EXACT COPIED TEXT  "));
+    expect(handoff.models).toHaveBeenCalledWith(expect.objectContaining({ requireFresh: true }));
+    expect(messageOptionState.value.setSelectedModel).toHaveBeenCalledWith("openai:gpt-4o-mini");
+    expect(messageOptionState.value.setChatMode).toHaveBeenCalledWith("vision");
+    expect(messageOptionState.value.setWebSearch).toHaveBeenCalledWith(true);
+    expect(messageOptionState.value.setToolChoice).toHaveBeenCalledWith("required");
+    expect(messageOptionState.value.setUseOCR).toHaveBeenCalledWith(true);
+    expect(messageOptionState.value.setSelectedQuickPrompt).not.toHaveBeenCalledWith("Do not trigger a second insertion");
+    expect(messageOptionState.value.setSelectedSystemPrompt).not.toHaveBeenCalledWith("foreign-prompt");
+    expect(messageOptionState.value.setTemporaryChat).not.toHaveBeenCalledWith(true);
+  });
 
   it("ignores legacy unowned shared handoffs instead of assigning them to the current tab", async () => {
     handoff.scope = null

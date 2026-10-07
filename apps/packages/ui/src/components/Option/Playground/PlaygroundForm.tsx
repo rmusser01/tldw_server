@@ -2290,6 +2290,10 @@ export const PlaygroundForm = ({
     skippedFeedback: sidepanelSkippedFeedback,
     importReceipt: sidepanelImportReceipt,
     dismissImportReceipt: dismissSidepanelImportReceipt,
+    literalOptionsReview: sidepanelOptionReview,
+    includeLiteralOptions: includeSidepanelOptions,
+    setIncludeLiteralOptions: setIncludeSidepanelOptions,
+    applyHandoffOptions: applySidepanelOptions,
     insertHandoffDraft,
     replaceWithHandoffDraft,
     cancelHandoffImport,
@@ -2299,6 +2303,11 @@ export const PlaygroundForm = ({
     captureGuard: captureHandoffGuard,
     draftValue: form.values.message || "",
     getDraftRevision: form.getRevision,
+    literalOptions: {
+      current: { selectedModel, chatMode, webSearch, toolChoice, useOCR },
+      setSelectedModel, setChatMode, setWebSearch, setToolChoice, setUseOCR,
+      canApply: () => historySelection?.settingsMode(serverChatId) !== "pending",
+    },
     setMessageValue,
     notificationApi,
     t,
@@ -5637,8 +5646,8 @@ export const PlaygroundForm = ({
                       </div>
                       <div className="text-text-muted">
                         {t(
-                          sidepanelHandoffConflict.handoff.hasText === false ? "playground:sidepanelHandoff.noTextDescription" : "playground:sidepanelHandoff.conflictDescription",
-                          sidepanelHandoffConflict.handoff.hasText === false ? "Your draft remains here. Dismiss this copy, then choose the settings or attachments you need." : "Review the copied draft below. Insert it, replace your current draft, or cancel the import.",
+                          sidepanelHandoffConflict.handoff.hasText === false ? sidepanelOptionReview.length > 0 ? "playground:sidepanelHandoff.settingsOnlyDescription" : "playground:sidepanelHandoff.noTextDescription" : "playground:sidepanelHandoff.conflictDescription",
+                          sidepanelHandoffConflict.handoff.hasText === false ? sidepanelOptionReview.length > 0 ? "Your draft remains here. Review the copied settings below, apply them if wanted, or dismiss this copy." : "Your draft remains here. Dismiss this copy, then choose the settings or attachments you need." : "Review the copied draft below. Insert it, replace your current draft, or cancel the import.",
                         )}
                       </div>
                     </div>
@@ -5646,6 +5655,69 @@ export const PlaygroundForm = ({
                       <p className="font-medium">{t("playground:sidepanelHandoff.copiedDraft", "Copied draft")}</p>
                       <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans text-sm text-text">{sidepanelHandoffConflict.handoff.draft.text}</pre>
                     </div> : null}
+                    {sidepanelOptionReview.length > 0 ? (
+                      <div className="basis-full min-w-0 space-y-2">
+                        <table
+                          aria-label={t(
+                            "playground:sidepanelHandoff.copiedSettings",
+                            "Copied settings"
+                          )}
+                          className="w-full table-fixed text-left"
+                        >
+                          <thead>
+                            <tr>
+                              <th scope="col">
+                                {t("playground:sidepanelHandoff.setting", "Setting")}
+                              </th>
+                              <th scope="col">
+                                {t("playground:sidepanelHandoff.currentValue", "Current")}
+                              </th>
+                              <th scope="col">
+                                {t("playground:sidepanelHandoff.copiedValue", "Copied")}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sidepanelOptionReview.map((row) => (
+                              <tr key={row.key}>
+                                <th scope="row" className="py-1 pr-2 font-normal">
+                                  {row.label}
+                                </th>
+                                {[row.current, row.copied].map((value, index) => (
+                                  <td key={index} className="break-words py-1 pr-2">
+                                    {typeof value === "boolean"
+                                      ? value
+                                        ? t("common:on", "On")
+                                        : t("common:off", "Off")
+                                      : (value ?? t("common:none", "None"))}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <label className="flex min-h-11 items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={includeSidepanelOptions}
+                            disabled={sidepanelImportPending}
+                            onChange={(event) =>
+                              setIncludeSidepanelOptions(event.target.checked)
+                            }
+                          />
+                          {t(
+                            "playground:sidepanelHandoff.applySupportedSettings",
+                            "Apply supported settings"
+                          )}
+                        </label>
+                        <p className="text-text-muted">
+                          {t(
+                            "playground:sidepanelHandoff.settingsIntent",
+                            "These preferences do not copy prompts, chat privacy, attachments or retrieval sources. Availability is checked when sending."
+                          )}
+                        </p>
+                      </div>
+                    ) : null}
                     {sidepanelSkippedFeedback ? <p className="basis-full text-text-muted">{sidepanelSkippedFeedback}</p> : null}
                     {(sidepanelImportPending || sidepanelImportFeedback) ? (
                       <p role="status" className="basis-full text-text-muted">
@@ -5681,6 +5753,11 @@ export const PlaygroundForm = ({
                         )}
                       </button>
                       </> : null}
+                      {sidepanelHandoffConflict.handoff.hasText === false && sidepanelOptionReview.length > 0 ? <button
+                        type="button" onClick={applySidepanelOptions} disabled={sidepanelImportPending || !includeSidepanelOptions}
+                        className="min-h-11 rounded border border-border bg-surface px-3 py-1 text-xs text-text focus-visible:ring-2 focus-visible:ring-focus">
+                        {t("playground:sidepanelHandoff.applySettings", "Apply settings")}
+                      </button> : null}
                       <button
                         type="button"
                         onClick={cancelHandoffImport}
