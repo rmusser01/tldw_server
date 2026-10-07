@@ -1539,6 +1539,8 @@
   },
   "imageGeneration": {
     "settingsLoadFailedTitle": "Image settings unavailable",
-    "settingsLoadFailedBody": "Could not load saved image settings. Your current settings were kept."
+    "settingsLoadFailedBody": "Could not load saved image settings. Your current settings were kept.",
+    "referenceImagesFailed": "Could not load reference images. Retry, or clear the selection to continue without one.",
+    "referenceImageSelectionUnavailable": "The selected reference image could not be verified. Retry loading reference images or clear the selection before generating."
   }
 }

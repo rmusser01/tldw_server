@@ -109,6 +109,7 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "POST" && pathname === "/api/v1/media/bulk/keyword-update") return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/metadata$/.test(pathname)) return true
   if (requestMethod === "POST" && /^\/api\/v1\/media\/[0-9]+\/reprocess$/.test(pathname)) return true
+  if (pathname === "/api/v1/files/reference-images") return requestMethod === "GET"
   if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"

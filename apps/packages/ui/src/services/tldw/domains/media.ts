@@ -449,9 +449,10 @@ export const mediaMethods = {
   },
 
   async listReferenceImageCandidates(
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<ReferenceImageListResponse> {
     const response = await bgRequest<any>({
+      ...requestScopeFields(options?.requestScope),
       path: "/api/v1/files/reference-images" as AllowedPath,
       method: "GET",
       abortSignal: options?.signal

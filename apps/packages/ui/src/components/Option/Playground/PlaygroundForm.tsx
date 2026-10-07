@@ -4160,6 +4160,8 @@ export const PlaygroundForm = ({
     currentApiProvider: currentChatModelSettings.apiProvider,
     formMessage: form.values.message || "",
     sendMessage,
+    draftOwnerKey,
+    isDraftOwnerCurrent,
     captureCompletionGuard,
     textAreaFocus,
     notificationApi,
@@ -4200,6 +4202,8 @@ export const PlaygroundForm = ({
     setImageGenerateSyncPolicy,
     referenceImageCandidates,
     referenceImageCandidatesLoading,
+    referenceImageCandidatesFailed,
+    retryReferenceImageCandidates,
     imagePromptContextBreakdown,
     imagePromptRefineSubmitting,
     imagePromptRefineBaseline,
@@ -6885,6 +6889,8 @@ export const PlaygroundForm = ({
               onReferenceFileIdChange={setImageGenerateReferenceFileId}
               referenceImageCandidates={referenceImageCandidates}
               referenceImageCandidatesLoading={referenceImageCandidatesLoading}
+              referenceImageCandidatesFailed={referenceImageCandidatesFailed}
+              onRetryReferenceImages={retryReferenceImageCandidates}
               submitting={imageGenerateSubmitting}
               onSubmit={submitImageGenerateModal}
               t={t}

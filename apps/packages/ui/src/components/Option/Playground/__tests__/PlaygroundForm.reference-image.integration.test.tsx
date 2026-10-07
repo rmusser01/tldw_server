@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PlaygroundImageGenModal } from "../PlaygroundImageGenModal"
 import { usePlaygroundImageGen } from "../hooks/usePlaygroundImageGen"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 
 const referenceImageCandidates = [
   {
@@ -23,6 +24,16 @@ const referenceImageCandidates = [
 ]
 
 const listReferenceImageCandidatesMock = vi.hoisted(() => vi.fn())
+const referenceOwnerScope = { config: { serverUrl: "https://references.test", authMode: "multi-user" as const, authSource: "manual" as const }, userId: "reference-fixture" }
+const referenceOwnerIsCurrent = () => true
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: vi.fn(async (_ids: unknown, options?: { signal?: AbortSignal }) => ({
+    requestScope: referenceOwnerScope, scopeKey: "declared-surface-scope", capability: "unchecked", definitions: {},
+    scopeSignal: options?.signal ?? new AbortController().signal,
+    scopeInvalidatedSignal: new AbortController().signal, release: vi.fn()
+  }))
+}))
+
 
 vi.mock("antd", () => {
   const InputComponent = ({
@@ -260,6 +271,8 @@ describe("PlaygroundImageGenModal reference image picker", () => {
     const { result } = renderHook(
       () =>
         usePlaygroundImageGen({
+          draftOwnerKey: chatDraftOwnerKey(referenceOwnerScope),
+          isDraftOwnerCurrent: referenceOwnerIsCurrent,
           imageBackendDefaultTrimmed: "",
           imageBackendOptions: [],
           imageEventSyncChatMode: "off",

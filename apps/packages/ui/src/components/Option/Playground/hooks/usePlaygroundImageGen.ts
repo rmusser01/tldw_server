@@ -1,5 +1,6 @@
 import React from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import {
   getImageBackendConfigs,
   normalizeImageBackendConfig,
@@ -58,6 +59,8 @@ export interface UsePlaygroundImageGenDeps {
   currentApiProvider: string | undefined
   formMessage: string
   sendMessage: (payload: Record<string, any>) => Promise<ChatSubmitResult | void>
+  draftOwnerKey: string | null
+  isDraftOwnerCurrent: () => boolean
   captureCompletionGuard?: (forFocus?: boolean) => () => boolean
   textAreaFocus: () => void
   notificationApi: {
@@ -86,12 +89,16 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
     currentApiProvider,
     formMessage,
     sendMessage,
+    draftOwnerKey,
+    isDraftOwnerCurrent,
     captureCompletionGuard,
     textAreaFocus,
     notificationApi,
     t,
     setToolsPopoverOpen
   } = deps
+
+  const queryClient = useQueryClient()
 
   // ---- state ----
   const [imageGenerateModalOpen, setImageGenerateModalOpen] = React.useState(false)
@@ -123,8 +130,10 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
   const [imageGenerateModel, setImageGenerateModel] = React.useState("")
   const [imageGenerateExtraParams, setImageGenerateExtraParams] =
     React.useState("")
-  const [imageGenerateReferenceFileId, setImageGenerateReferenceFileId] =
-    React.useState<number | undefined>(undefined)
+  const [referenceImageSelection, setReferenceImageSelection] = React.useState<{
+    fileId: number
+    isCurrent: () => boolean
+  } | null>(null)
   const [imageGenerateSyncPolicy, setImageGenerateSyncPolicy] =
     React.useState<ImageGenerationEventSyncPolicy>("inherit")
   const [imagePromptContextBreakdown, setImagePromptContextBreakdown] =
@@ -190,14 +199,164 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
   }, [imageBackendOptions])
 
   const imageGenerateBusy = imageGenerateSubmitting || imagePromptRefineSubmitting
+  const referenceImageQueryKey = React.useMemo(
+    () => ["reference-image-candidates", draftOwnerKey],
+    [draftOwnerKey]
+  )
   const referenceImageCandidatesQuery = useQuery({
-    queryKey: ["reference-image-candidates"],
-    queryFn: async () => (await tldwClient.listReferenceImageCandidates()).items,
-    enabled: imageGenerateModalOpen,
-    staleTime: 60_000
+    queryKey: referenceImageQueryKey,
+    queryFn: async ({ signal }) => {
+      let snapshot: ServicePromptSnapshot | null = null
+      const isCurrent = () =>
+        Boolean(draftOwnerKey) &&
+        isDraftOwnerCurrent() &&
+        !signal.aborted &&
+        !snapshot?.scopeSignal.aborted
+      const assertCurrent = () => {
+        if (!isCurrent()) throw createServicePromptScopeChangedError()
+      }
+      try {
+        assertCurrent()
+        snapshot = await loadServicePromptSnapshot([], { signal })
+        assertCurrent()
+        if (chatDraftOwnerKey(snapshot.requestScope) !== draftOwnerKey)
+          throw createServicePromptScopeChangedError()
+        const result = await tldwClient.listReferenceImageCandidates({
+          requestScope: snapshot.requestScope,
+          signal: snapshot.scopeSignal
+        })
+        assertCurrent()
+        return { items: result.items, isCurrent }
+      } finally {
+        snapshot?.release()
+      }
+    },
+    enabled:
+      imageGenerateModalOpen && Boolean(draftOwnerKey) && isDraftOwnerCurrent(),
+    retry: false,
+    staleTime: 0
   })
-  const referenceImageCandidates = referenceImageCandidatesQuery.data ?? []
-  const referenceImageCandidatesLoading = referenceImageCandidatesQuery.isLoading
+  const refetchReferenceImages = referenceImageCandidatesQuery.refetch
+  type ReferenceImageCatalog = NonNullable<
+    typeof referenceImageCandidatesQuery.data
+  >
+  const previousReferenceOwner = React.useRef({
+    key: draftOwnerKey,
+    isCurrent: isDraftOwnerCurrent
+  })
+  React.useEffect(() => {
+    const previous = previousReferenceOwner.current
+    previousReferenceOwner.current = {
+      key: draftOwnerKey,
+      isCurrent: isDraftOwnerCurrent
+    }
+    if (
+      previous.key !== draftOwnerKey ||
+      previous.isCurrent === isDraftOwnerCurrent
+    )
+      return
+    const revision = modalRevision.current
+    void queryClient
+      .cancelQueries({ queryKey: referenceImageQueryKey, exact: true })
+      .then(() => {
+        if (
+          imageGenerateModalOpen &&
+          modalRevision.current === revision &&
+          isDraftOwnerCurrent()
+        ) {
+          void refetchReferenceImages()
+        }
+      })
+  }, [
+    draftOwnerKey,
+    isDraftOwnerCurrent,
+    imageGenerateModalOpen,
+    queryClient,
+    referenceImageQueryKey,
+    refetchReferenceImages
+  ])
+  const referenceImageCatalogVerified =
+    referenceImageCandidatesQuery.isSuccess &&
+    referenceImageCandidatesQuery.fetchStatus === "idle" &&
+    isDraftOwnerCurrent() &&
+    referenceImageCandidatesQuery.data?.isCurrent()
+  const referenceImageCandidates = referenceImageCatalogVerified
+    ? referenceImageCandidatesQuery.data!.items
+    : []
+  const referenceImageCandidatesLoading =
+    imageGenerateModalOpen &&
+    (!draftOwnerKey ||
+      !isDraftOwnerCurrent() ||
+      referenceImageCandidatesQuery.isFetching)
+  const referenceImageCandidatesFailed =
+    imageGenerateModalOpen &&
+    isDraftOwnerCurrent() &&
+    (referenceImageCandidatesQuery.isError ||
+      referenceImageCandidatesQuery.fetchStatus === "paused")
+  const readVerifiedReferenceImages = React.useCallback(() => {
+    const state = queryClient.getQueryState<ReferenceImageCatalog>(
+      referenceImageQueryKey
+    )
+    return draftOwnerKey &&
+      isDraftOwnerCurrent() &&
+      state?.status === "success" &&
+      state.fetchStatus === "idle" &&
+      state.data?.isCurrent()
+      ? state.data.items
+      : null
+  }, [queryClient, referenceImageQueryKey, draftOwnerKey, isDraftOwnerCurrent])
+  const renderedReferenceModalRevision = modalRevision.current
+  const renderedReferenceSourceIsCurrent = React.useMemo(
+    () => captureCompletionGuard?.() ?? isDraftOwnerCurrent,
+    [captureCompletionGuard, isDraftOwnerCurrent]
+  )
+  const setImageGenerateReferenceFileId = React.useCallback(
+    (fileId: number | undefined) => {
+      const isCurrent = () =>
+        imageGenerateModalOpen &&
+        modalRevision.current === renderedReferenceModalRevision &&
+        isDraftOwnerCurrent() &&
+        renderedReferenceSourceIsCurrent()
+      if (!isCurrent()) return
+      if (fileId === undefined) {
+        setReferenceImageSelection(null)
+        return
+      }
+      if (
+        !readVerifiedReferenceImages()?.some(
+          (candidate) => candidate.file_id === fileId
+        )
+      )
+        return
+      setReferenceImageSelection({ fileId, isCurrent })
+    },
+    [
+      imageGenerateModalOpen,
+      renderedReferenceModalRevision,
+      isDraftOwnerCurrent,
+      renderedReferenceSourceIsCurrent,
+      readVerifiedReferenceImages
+    ]
+  )
+  const imageGenerateReferenceFileId = referenceImageSelection?.isCurrent()
+    ? referenceImageSelection.fileId
+    : undefined
+  const retryReferenceImageCandidates = React.useCallback(async () => {
+    if (
+      !imageGenerateModalOpen ||
+      modalRevision.current !== renderedReferenceModalRevision ||
+      !isDraftOwnerCurrent() ||
+      !renderedReferenceSourceIsCurrent()
+    )
+      return
+    await refetchReferenceImages()
+  }, [
+    imageGenerateModalOpen,
+    renderedReferenceModalRevision,
+    isDraftOwnerCurrent,
+    renderedReferenceSourceIsCurrent,
+    refetchReferenceImages
+  ])
 
   const imageEventSyncBaselineMode = React.useMemo(
     () =>
@@ -303,7 +462,7 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
     setToolsPopoverOpen(false)
     setImagePromptContextBreakdown([])
     clearImagePromptRefineState()
-    setImageGenerateReferenceFileId(undefined)
+    setReferenceImageSelection(null)
     setImageGenerateSyncPolicy("inherit")
     const defaultBackend =
       imageBackendDefaultTrimmed ||
@@ -327,7 +486,6 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
     imageBackendDefaultTrimmed,
     imageGenerateBackendOptions,
     imageGeneratePrompt,
-    setImageGenerateReferenceFileId,
     setToolsPopoverOpen
   ])
 
@@ -337,7 +495,7 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
     setImageGenerateSubmitting(false)
     setImagePromptRefineSubmitting(false)
     clearImagePromptRefineState()
-    setImageGenerateReferenceFileId(undefined)
+    setReferenceImageSelection(null)
     setImageGenerateModalOpen(false)
   }, [clearImagePromptRefineState])
 
@@ -613,16 +771,31 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
       return
     }
 
+    const referenceFileId = referenceImageSelection?.isCurrent()
+      ? referenceImageSelection.fileId
+      : undefined
+    if (
+      referenceFileId !== undefined &&
+      !readVerifiedReferenceImages()?.some(
+        (candidate) => candidate.file_id === referenceFileId
+      )
+    ) {
+      notificationApi.error({
+        message: t("error", { defaultValue: "Error" }),
+        description: t(
+          "playground:imageGeneration.referenceImageSelectionUnavailable",
+          "The selected reference image could not be verified. Retry loading reference images or clear the selection before generating."
+        )
+      })
+      return
+    }
+
     const request: Partial<ImageGenerationRequestSnapshot> = {
       prompt,
       backend,
       format: imageGenerateFormat,
       negativePrompt: imageGenerateNegativePrompt.trim() || undefined,
-      referenceFileId:
-        typeof imageGenerateReferenceFileId === "number" &&
-        Number.isFinite(imageGenerateReferenceFileId)
-          ? imageGenerateReferenceFileId
-          : undefined,
+      referenceFileId,
       width:
         typeof imageGenerateWidth === "number" && Number.isFinite(imageGenerateWidth)
           ? imageGenerateWidth
@@ -698,7 +871,8 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
     imageGeneratePromptMode,
     imageGenerateSyncPolicy,
     imageGeneratePrompt,
-    imageGenerateReferenceFileId,
+    referenceImageSelection,
+    readVerifiedReferenceImages,
     imageGenerateSampler,
     imageGenerateSeed,
     imageGenerateSteps,
@@ -738,6 +912,8 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
     setImageGenerateSyncPolicy,
     referenceImageCandidates,
     referenceImageCandidatesLoading,
+    referenceImageCandidatesFailed,
+    retryReferenceImageCandidates,
     imagePromptContextBreakdown,
     imagePromptRefineSubmitting,
     imagePromptRefineBaseline,

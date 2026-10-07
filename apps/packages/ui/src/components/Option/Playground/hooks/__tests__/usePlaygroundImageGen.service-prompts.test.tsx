@@ -23,7 +23,8 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [], isLoading: false })
+  useQuery: () => ({ data: [], isLoading: false, refetch: vi.fn() }),
+  useQueryClient: () => ({ getQueryState: vi.fn(), cancelQueries: vi.fn(async () => {}) })
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -89,7 +90,10 @@ const servicePromptSnapshot = (includeDefinition = true) => ({
   release: mocks.releaseSnapshot
 })
 
+const referenceOwnerIsCurrent = () => true
 const baseDeps = () => ({
+  draftOwnerKey: "declared-fixture-account",
+  isDraftOwnerCurrent: referenceOwnerIsCurrent,
   imageBackendDefaultTrimmed: "local-sd",
   imageBackendOptions: [{ value: "local-sd", label: "Local SD" }],
   imageEventSyncChatMode: "off" as const,
