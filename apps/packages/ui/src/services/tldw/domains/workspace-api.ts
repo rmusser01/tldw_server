@@ -1,3 +1,5 @@
+import type { ScopedRequestOptions } from "../TldwApiClient"
+import { requestScopeFields } from "./service-prompts"
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "../client-utils"
 import { appendPathQuery } from "../path-utils"
@@ -465,6 +467,7 @@ export interface WorkspaceSourcePreviewSnippet {
 }
 
 export interface WorkspaceSourcePreviewResponse {
+  document_version_number?: number | null
   workspace_id: string
   source_id: string
   media_id: number | null
@@ -1679,11 +1682,14 @@ export const workspaceApiMethods = {
   },
 
   async getWorkspaceSources(
-    workspaceId: string
+    workspaceId: string,
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceSourceApiResponse[]> {
     return await bgRequest<WorkspaceSourceApiResponse[]>({
       path: workspacePath(workspaceId, "/sources"),
-      method: "GET"
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   },
 
@@ -1794,7 +1800,9 @@ export const workspaceApiMethods = {
     params?: {
       max_chars?: number
       chunk_limit?: number
-    }
+      version_number?: number
+    },
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceSourcePreviewResponse> {
     const query = buildQuery(params)
     const encodedSourceId = encodeWorkspacePathSegment(sourceId, "sourceId")
@@ -1803,7 +1811,9 @@ export const workspaceApiMethods = {
         workspacePath(workspaceId, `/sources/${encodedSourceId}/preview`),
         query
       ),
-      method: "GET"
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   },
 

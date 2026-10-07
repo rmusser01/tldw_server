@@ -68,7 +68,19 @@ export interface WorkspaceSourceStatusDetails {
   job?: WorkspaceSourceJobStatus | null
 }
 
+export interface WebArticleCapturePin {
+  clipId: string
+  requestedUrl: string
+  capturedAt: string
+  contentSha256: string
+  refreshOf: string | null
+  mediaId: number
+  versionNumber: number
+  versionUuid: string
+}
+
 export interface WorkspaceSource {
+  webCapture?: WebArticleCapturePin
   id: string
   mediaId: number // Server-side media ID
   knowledgeQaEvidence?: KnowledgeNoteEvidence
