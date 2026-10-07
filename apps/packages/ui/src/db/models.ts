@@ -29,65 +29,240 @@ export const generateID = () => {
     return r.toString(16)
   })
 }
+
+/**
+ * Model records live under a `model:` key prefix so reads can be scoped to
+ * exactly the catalog instead of dumping ALL of chrome.storage.local. The
+ * index key tracks the record ids; it is backfilled once from legacy
+ * unprefixed records so existing persisted data keeps working.
+ */
+const MODEL_KEY_PREFIX = "model:"
+const MODEL_INDEX_KEY = "__tldwModelDbIndexV1"
+
+const toStorageKey = (id: string) => `${MODEL_KEY_PREFIX}${id}`
+
+const isLegacyModelRecord = (key: string, value: unknown): value is Model => {
+  if (!value || typeof value !== "object") return false
+  const record = value as Partial<Model> & { id?: unknown }
+  return (
+    record.id === key &&
+    typeof record.model_id === "string" &&
+    typeof record.provider_id === "string"
+  )
+}
+
+const readIndex = async (
+  db: chrome.storage.StorageArea
+): Promise<{ ids: string[]; migrated: boolean } | null> => {
+  return new Promise((resolve, reject) => {
+    db.get(MODEL_INDEX_KEY, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError)
+        return
+      }
+      const raw = (result as Record<string, unknown>)[MODEL_INDEX_KEY]
+      if (Array.isArray(raw)) {
+        resolve({
+          ids: raw.filter((id): id is string => typeof id === "string"),
+          migrated: true
+        })
+        return
+      }
+      resolve(null)
+    })
+  })
+}
+
+const writeIndex = async (
+  db: chrome.storage.StorageArea,
+  ids: string[]
+): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    db.set({ [MODEL_INDEX_KEY]: ids }, () => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError)
+      } else {
+        resolve()
+      }
+    })
+  })
+}
+
+const migrateLegacyRecords = async (
+  db: chrome.storage.StorageArea
+): Promise<string[]> => {
+  // One-time full read: move legacy unprefixed model records under the
+  // `model:` prefix and seed the index. Later reads never use get(null).
+  const everything = await new Promise<Record<string, unknown>>(
+    (resolve, reject) => {
+      db.get(null, (result) => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError)
+        } else {
+          resolve(result as Record<string, unknown>)
+        }
+      })
+    }
+  )
+
+  const legacy: Model[] = []
+  for (const [key, value] of Object.entries(everything)) {
+    if (key.startsWith(MODEL_KEY_PREFIX) || key === MODEL_INDEX_KEY) continue
+    if (isLegacyModelRecord(key, value)) {
+      legacy.push(value)
+    }
+  }
+
+  const existing: Model[] = []
+  for (const [key, value] of Object.entries(everything)) {
+    if (!key.startsWith(MODEL_KEY_PREFIX)) continue
+    if (value && typeof value === "object" && typeof (value as Model).id === "string") {
+      existing.push(value as Model)
+    }
+  }
+
+  const byId = new Map<string, Model>()
+  for (const record of [...existing, ...legacy]) {
+    byId.set(record.id, record)
+  }
+  const ids = Array.from(byId.keys())
+
+  const writes: Record<string, unknown> = { [MODEL_INDEX_KEY]: ids }
+  const legacyKeys: string[] = []
+  for (const [id, record] of byId) {
+    writes[toStorageKey(id)] = record
+    if (!existing.some((candidate) => candidate.id === id)) {
+      legacyKeys.push(id)
+    }
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    db.set(writes, () => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError)
+      } else {
+        resolve()
+      }
+    })
+  })
+  if (legacyKeys.length > 0) {
+    await new Promise<void>((resolve, reject) => {
+      db.remove(legacyKeys, () => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError)
+        } else {
+          resolve()
+        }
+      })
+    })
+  }
+  return ids
+}
+
 export class ModelDb {
   db: chrome.storage.StorageArea
+  private indexIds: string[] | null = null
 
   constructor() {
     this.db = chrome.storage.local
   }
 
-  getAll = async (): Promise<Model[]> => {
-    return new Promise((resolve, reject) => {
-      this.db.get(null, (result) => {
+  private ensureIndex = async (): Promise<string[]> => {
+    if (this.indexIds) return this.indexIds
+    const stored = await readIndex(this.db).catch(() => null)
+    this.indexIds =
+      stored?.ids ?? (await migrateLegacyRecords(this.db).catch(() => []))
+    return this.indexIds
+  }
+
+  private persistRecords = async (
+    records: Model[],
+    options?: { removeIds?: string[]; nextIndexIds?: string[] }
+  ): Promise<void> => {
+    const current = await this.ensureIndex()
+    const indexSet = new Set(options?.nextIndexIds ?? current)
+    for (const record of records) {
+      indexSet.add(record.id)
+    }
+    for (const removedId of options?.removeIds ?? []) {
+      indexSet.delete(removedId)
+    }
+    const ids = Array.from(indexSet)
+    const writes: Record<string, unknown> = {
+      [MODEL_INDEX_KEY]: ids,
+      ...Object.fromEntries(records.map((record) => [toStorageKey(record.id), record]))
+    }
+    await new Promise<void>((resolve, reject) => {
+      this.db.set(writes, () => {
         if (chrome.runtime.lastError) {
           reject(chrome.runtime.lastError)
         } else {
-          const data = Object.keys(result).map((key) => result[key])
-          resolve(data)
+          resolve()
+        }
+      })
+    })
+    this.indexIds = ids
+  }
+
+  getAll = async (): Promise<Model[]> => {
+    const ids = await this.ensureIndex()
+    if (ids.length === 0) return []
+    return new Promise((resolve, reject) => {
+      this.db.get(ids.map(toStorageKey), (result) => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError)
+        } else {
+          const items = result as Record<string, Model>
+          resolve(
+            ids
+              .map((id) => items[toStorageKey(id)])
+              .filter((item): item is Model => Boolean(item))
+          )
         }
       })
     })
   }
 
   create = async (model: Model): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      this.db.set({ [model.id]: model }, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve()
-        }
-      })
-    })
+    await this.createMany([model])
   }
 
-  getById = async (id: string): Promise<Model> => {
+  /** Batched write: all records plus the index update land in ONE set(). */
+  createMany = async (models: Model[]): Promise<void> => {
+    if (models.length === 0) return
+    await this.persistRecords(models)
+  }
+
+  getById = async (id: string): Promise<Model | undefined> => {
+    await this.ensureIndex()
     return new Promise((resolve, reject) => {
-      this.db.get(id, (result) => {
+      this.db.get(toStorageKey(id), (result) => {
         if (chrome.runtime.lastError) {
           reject(chrome.runtime.lastError)
         } else {
-          resolve(result[id])
+          resolve((result as Record<string, Model>)[toStorageKey(id)])
         }
       })
     })
   }
 
   update = async (model: Model): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      this.db.set({ [model.id]: model }, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve()
-        }
-      })
-    })
+    await this.persistRecords([model])
   }
 
   delete = async (id: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      this.db.remove(id, () => {
+    await this.deleteMany([id])
+  }
+
+  /** Batched delete: one remove() for the records plus one index write. */
+  deleteMany = async (ids: string[]): Promise<void> => {
+    if (ids.length === 0) return
+    const current = await this.ensureIndex()
+    const removed = new Set(ids)
+    await new Promise<void>((resolve, reject) => {
+      // Also drop legacy unprefixed keys if any somehow remain.
+      const keys = ids.flatMap((id) => [toStorageKey(id), id])
+      this.db.remove(keys, () => {
         if (chrome.runtime.lastError) {
           reject(chrome.runtime.lastError)
         } else {
@@ -95,11 +270,18 @@ export class ModelDb {
         }
       })
     })
+    const nextIndexIds = current.filter((candidate) => !removed.has(candidate))
+    if (nextIndexIds.length !== current.length) {
+      await writeIndex(this.db, nextIndexIds).catch(() => undefined)
+    }
+    this.indexIds = nextIndexIds
   }
 
   deleteAll = async (): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      this.db.clear(() => {
+    const ids = await this.ensureIndex()
+    const keys = [...ids.map(toStorageKey), ...ids, MODEL_INDEX_KEY]
+    await new Promise<void>((resolve, reject) => {
+      this.db.remove(keys, () => {
         if (chrome.runtime.lastError) {
           reject(chrome.runtime.lastError)
         } else {
@@ -107,6 +289,7 @@ export class ModelDb {
         }
       })
     })
+    this.indexIds = []
   }
 }
 
@@ -130,15 +313,13 @@ export const createManyModels = async (
     }
   })
 
-  for (const model of models) {
-    const isExist = await isLookupExist(model.lookup)
-
-    if (isExist) {
-      continue
-    }
-
-    await db.create(model)
-  }
+  const existing = await db.getAll()
+  const existingLookups = new Set(
+    existing.map((entry) => entry?.lookup).filter(Boolean)
+  )
+  const missing = models.filter((model) => !existingLookups.has(model.lookup))
+  if (missing.length === 0) return
+  await db.createMany(missing)
 }
 
 export const createModelFB = async (model: Model): Promise<boolean> => {
@@ -263,24 +444,18 @@ export const deleteAllModelsByProviderId = async (provider_id: string) => {
   const modelsToDelete = models.filter(
     (model) => model.provider_id === provider_id
   )
-  for (const model of modelsToDelete) {
-    await db.delete(model.id)
-  }
+  await db.deleteMany(modelsToDelete.map((model) => model.id))
 }
 
 export const bulkAddModelsFB = async (models: Model[]) => {
-  // delete all exist models
   const db = new ModelDb()
+  // delete all exist models
   const modelsToDelete = (await db.getAll()).filter(
     (model) => model?.db_type === "openai_model"
   )
-  for (const model of modelsToDelete) {
-    await db.delete(model.id)
-  }
+  await db.deleteMany(modelsToDelete.map((model) => model.id))
   // add new models
-  for (const model of models) {
-    await db.create(model)
-  }
+  await db.createMany(models)
 }
 
 export const isLookupExist = async (lookup: string) => {

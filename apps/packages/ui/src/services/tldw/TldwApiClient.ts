@@ -1691,6 +1691,53 @@ const stopWatchingDomainCacheAccount = watchChatAccountChanges(invalidated => {
 const domainCacheHot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
 domainCacheHot?.dispose(stopWatchingDomainCacheAccount)
 
+type TldwProvidersStatus = {
+  providers: Array<{
+    name: string
+    configured: boolean
+    requires_api_key: boolean
+    key_hint?: string | null
+    key_source?: string | null
+  }>
+  any_configured: boolean
+}
+
+// getProvidersStatus is mounted-on by 12+ components independently; this
+// module-level TTL cache + in-flight dedup (mirroring the apiSend pattern)
+// collapses the resulting burst into one request per TTL window.
+const PROVIDERS_STATUS_CACHE_TTL_MS = 60_000
+let providersStatusCache: { at: number; value: TldwProvidersStatus } | null = null
+let providersStatusInFlight: Promise<TldwProvidersStatus> | null = null
+
+const getProvidersStatusCached = async (): Promise<TldwProvidersStatus> => {
+  const now = Date.now()
+  if (
+    providersStatusCache &&
+    now - providersStatusCache.at < PROVIDERS_STATUS_CACHE_TTL_MS
+  ) {
+    return providersStatusCache.value
+  }
+  if (providersStatusInFlight) {
+    return providersStatusInFlight
+  }
+  const request = (async () => {
+    try {
+      const value = (await bgRequest<any>({
+        path: '/api/v1/config/providers',
+        method: 'GET'
+      })) as TldwProvidersStatus
+      providersStatusCache = { at: Date.now(), value }
+      return value
+    } finally {
+      if (providersStatusInFlight === request) {
+        providersStatusInFlight = null
+      }
+    }
+  })()
+  providersStatusInFlight = request
+  return request
+}
+
 export class TldwApiClientBase {
   private storage: Storage
   private sessionStorage: Storage
@@ -2907,6 +2954,8 @@ export class TldwApiClientBase {
   /**
    * Check which LLM providers are configured on the server.
    * Returns `{ providers: [...], any_configured: boolean }`.
+   * Served from a short module-level TTL cache with in-flight dedup, since
+   * a dozen-plus components request it independently on mount.
    */
   async getProvidersStatus(): Promise<{
     providers: Array<{
@@ -2918,7 +2967,7 @@ export class TldwApiClientBase {
     }>
     any_configured: boolean
   }> {
-    return await bgRequest<any>({ path: '/api/v1/config/providers', method: 'GET' })
+    return await getProvidersStatusCached()
   }
 
   async getModelsMetadata(options?: {

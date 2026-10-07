@@ -1,10 +1,3 @@
-import { defaultExtractContent } from "@/parser/default"
-import {
-  isTweet,
-  isTwitterTimeline,
-  parseTweet,
-  parseTwitterTimeline
-} from "@/parser/twitter"
 import { isGoogleDocs, parseGoogleDocs } from "@/parser/google-docs"
 import { cleanUnwantedUnicode } from "@/utils/clean"
 import { isChromiumTarget, isFirefoxTarget } from "@/config/platform"
@@ -87,23 +80,31 @@ export const getDataFromCurrentTab = async () => {
       type: "pdf"
     }
   }
-  if (isTwitterTimeline(url)) {
-    const data = parseTwitterTimeline(content)
-    return {
-      url,
-      content: data,
-      type: "html",
-      pdf: []
+  // Twitter parsing pulls cheerio into its module; load it only when the
+  // URL could actually be a tweet/timeline so ordinary pages never pay for
+  // it in the eagerly loaded sidepanel chunk.
+  if (/twitter\.com|x\.com/.test(url)) {
+    const { isTwitterTimeline, isTweet, parseTwitterTimeline, parseTweet } =
+      await import("@/parser/twitter")
+    if (isTwitterTimeline(url)) {
+      const data = parseTwitterTimeline(content)
+      return {
+        url,
+        content: data,
+        type: "html",
+        pdf: []
+      }
+    } else if (isTweet(url)) {
+      const data = parseTweet(content)
+      return {
+        url,
+        content: data,
+        type: "html",
+        pdf: []
+      }
     }
-  } else if (isTweet(url)) {
-    const data = parseTweet(content)
-    return {
-      url,
-      content: data,
-      type: "html",
-      pdf: []
-    }
-  } else if (isGoogleDocs(url)) {
+  }
+  if (isGoogleDocs(url)) {
     const data = await parseGoogleDocs()
     if (data) {
       return {
@@ -114,6 +115,9 @@ export const getDataFromCurrentTab = async () => {
       }
     }
   }
+  // Loaded lazily so cheerio/Readability/Turndown stay out of the eagerly
+  // loaded sidepanel chunk (real split chunk in ESM builds).
+  const { defaultExtractContent } = await import("@/parser/default")
   const data = defaultExtractContent(content)
   return { url, content: data, type, pdf: [] }
 }
