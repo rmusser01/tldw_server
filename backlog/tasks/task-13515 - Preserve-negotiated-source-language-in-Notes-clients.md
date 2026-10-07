@@ -70,3 +70,5 @@ Browser ownership/cache correction: U/src/services/tldw/domains/collections.ts o
 ## Implementation Notes
 
 Implemented negotiated complete language snapshots, authenticated publication guards and exact omission/null preservation. Existing local mutation/outbox owners retain unsupported intent; scoped immutable origin proof prevents cross-account drain. Fresh probes and scoped mirror/current-authority injection are documented corrections under ADR194/065. Verification and limitations: task-4-report.md in the controller SDD directory. Status remains In Progress pending independent review.
+
+Fix round1: remove duplicated base createNote implementation; existing collections mixin is the single owner through declaration merging/Object.assign. Browser25tests and final whole frontend typecheck pass. Explicit W ESLint config from U supports scoped syntax/rules with no introduced diagnostics against immutable fix base; W-only Next pages rule emits applicability notice. Inherited formatter debt unchanged. Task remains In Progress for independent review.
