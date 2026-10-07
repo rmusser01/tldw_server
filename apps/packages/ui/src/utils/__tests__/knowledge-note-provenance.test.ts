@@ -61,7 +61,12 @@ it("hides only recognized provenance while preserving user comments and text", (
 })
 
 it("keeps malformed provenance-like user comments when saving recognized original provenance", () => {
-  expect(retainKnowledgeNoteProvenance("Body\n<!-- tldw-knowledge:v1:invalid -->", original)).toContain("<!-- tldw-knowledge:v1:invalid -->")
+  expect(
+    retainKnowledgeNoteProvenance(
+      "Body\n<!-- tldw-knowledge:v1:invalid -->",
+      original,
+    ),
+  ).toContain("<!-- tldw-knowledge:v1:invalid -->")
 })
 
 it.each([
@@ -98,3 +103,88 @@ it.each([
     expect(provenance !== null).toBe(valid)
   },
 )
+
+it.each([4, 0, -1, 1.5, "4"])(
+  "retains only valid original note revisions (%j)",
+  (originalVersion) => {
+    const provenance = validateKnowledgeNoteProvenance({
+      origin: "knowledge_qa",
+      research: {
+        workspace_id: "workspace-a",
+        import_id: "import-a",
+        sources: [
+          {
+            mediaId: 101,
+            evidence: {
+              importId: "import-a",
+              threadId: null,
+              snapshot: true,
+              sources: [
+                {
+                  originalId: "note-uuid",
+                  originalVersion,
+                  excerpt: "Retrieved evidence",
+                  mediaId: null,
+                  title: "Field note",
+                  type: "text",
+                  sourceType: "notes",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    })
+    if (originalVersion !== 4) expect(provenance).toBeNull()
+    else
+      expect(provenance?.research?.sources[0].evidence.sources[0]).toEqual(
+        expect.objectContaining({ originalVersion: 4 }),
+      )
+  },
+)
+
+const active = {
+  knowledge_provenance_state: "active",
+  knowledge_provenance_version: 3,
+  knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+  knowledge_provenance: original,
+}
+it("uses canonical history over a changed portable marker", () => {
+  const text = retainKnowledgeNoteProvenance(marker({ origin: "reviewed_sources" }), active)
+  expect(readKnowledgeNoteProvenance(text)).toEqual(original)
+})
+it("suppresses a removed history marker even if nested metadata still retains it", () => {
+  expect(retainKnowledgeNoteProvenance(marker(original), {
+    ...active, knowledge_provenance_state: "deleted", knowledge_provenance: null,
+    metadata: { knowledge_provenance: original },
+  })).toBe("")
+})
+it("does not replace a malformed active head with editable marker evidence", () => {
+  expect(readKnowledgeNoteProvenance(retainKnowledgeNoteProvenance(marker(original), {
+    ...active, knowledge_provenance: { origin: "invalid" },
+  }))).toBeNull()
+})
+it.each([undefined, "unsupported", "future-state"])("keeps portable compatibility for %s", state => {
+  expect(readKnowledgeNoteProvenance(retainKnowledgeNoteProvenance(marker(original), {
+    knowledge_provenance_state: state,
+  }))).toEqual(original)
+})
+it("retains direct question, reasons, nullable scope and original excerpts exactly", () => {
+  const value = { ...original, question: "What happened?", trust_reason_codes: ["missing_citations"],
+    scope: { collection_id: null, keyword_filter: "" }, sources: [{
+      originalId: "note-a", mediaId: null, title: "Note", type: "text", sourceType: "notes",
+      excerpt: "original excerpt", url: "", originalVersion: null,
+    }] }
+  expect(validateKnowledgeNoteProvenance(value)).toEqual(value)
+})
+it.each([
+  { ...original, arbitrary: "forbidden" },
+  { ...original, scope: { unknown: true } },
+  { ...original, sources: [{ originalId: null, mediaId: null, title: "T", type: "text", sourceType: null, excerpt: "", secret: "no" }] },
+  { ...original, thread_id: "😀".repeat(257) },
+  { ...original, scope: { sources: null } },
+  { ...original, question: "\ud800" },
+  { ...original, sources: Array.from({ length: 12 }, () => ({ originalId: null, mediaId: null, title: "T", type: "text", sourceType: null, excerpt: "😀".repeat(45000) })) },
+])("rejects strict or portable contract violation", value => {
+  expect(validateKnowledgeNoteProvenance(value)).toBeNull()
+})

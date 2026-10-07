@@ -285,28 +285,28 @@ export const launchWebClipperFromContextMenu = async (
   const tabsApi = (browser as any)?.tabs;
   let clipDraft = fallbackDraft;
 
-  if (tab?.id != null && typeof tabsApi?.sendMessage === "function") {
-    try {
-      const response = await tabsApi.sendMessage(tab.id, {
-        type: "capture-web-clipper",
-        requestedType,
-        pageUrl,
-        pageTitle: pageTitle || pageUrl,
-        selectionText: selectionText || undefined,
-      });
-      const normalized = normalizePendingClipDraft(response);
-      if (normalized) {
-        clipDraft = normalized;
-      }
-    } catch (error) {
-      logBackgroundError("request web clipper capture", error);
-    }
-  }
-
   const title =
     browser.i18n.getMessage("contextSaveToClipper") || "Save to Clipper";
   try {
+    // Chrome requires sidebar opening to begin in the original menu gesture.
     await ensureSidepanelOpen(tab?.id ?? undefined);
+    if (tab?.id != null && typeof tabsApi?.sendMessage === "function") {
+      try {
+        const response = await tabsApi.sendMessage(tab.id, {
+          type: "capture-web-clipper",
+          requestedType,
+          pageUrl,
+          pageTitle: pageTitle || pageUrl,
+          selectionText: selectionText || undefined,
+        });
+        const normalized = normalizePendingClipDraft(response);
+        if (normalized) {
+          clipDraft = normalized;
+        }
+      } catch (error) {
+        logBackgroundError("request web clipper capture", error);
+      }
+    }
     await sendBackgroundRuntimeMessage(
       {
         from: "background",
@@ -982,7 +982,9 @@ export default defineBackground({
       type: string,
       payload?: Record<string, unknown>,
     ) => {
-      ensureSidepanelOpen(tabId);
+      void ensureSidepanelOpen(tabId).catch((error) =>
+        logBackgroundError("open sidebar", error),
+      );
       try {
         await browser.runtime.sendMessage({
           from: "background",
@@ -1191,7 +1193,9 @@ export default defineBackground({
           bodyParts.join("\n\n") ||
           "Request completed. Open Media or the sidebar to view results.";
 
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
         try {
           await browser.runtime.sendMessage({
             from: "background",
@@ -3812,7 +3816,9 @@ export default defineBackground({
       if (message.type === "sidepanel") {
         try {
           const tabId = sender?.tab?.id ?? undefined;
-          ensureSidepanelOpen(tabId);
+          void ensureSidepanelOpen(tabId).catch((error) =>
+            logBackgroundError("open sidebar", error),
+          );
         } catch (error) {
           logBackgroundError("ensure sidepanel open", error);
         }
@@ -4143,13 +4149,17 @@ export default defineBackground({
       if (actionIconClick === "webui") {
         openOptionsTab();
       } else {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
       }
     });
 
     browser.contextMenus.onClicked.addListener(async (info, tab) => {
       if (info.menuItemId === "open-side-panel-pa") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
       } else if (info.menuItemId === "open-web-ui-pa") {
         openOptionsTab();
       } else if (info.menuItemId === transcribeMenuId.transcribe) {
@@ -4173,10 +4183,12 @@ export default defineBackground({
           browser.i18n.getMessage("contextSaveToNotesOpeningSidebar") ||
           "Opening sidebar to save note…";
         notify(title, openingMessage);
+        const opening = Promise.allSettled([ensureSidepanelOpen(tab?.id)]);
         setTimeout(
           async () => {
             try {
-              await ensureSidepanelOpen(tab.id!);
+              const [result] = await opening;
+              if (result.status === "rejected") throw result.reason;
               await browser.runtime.sendMessage({
                 from: "background",
                 type: "save-to-notes",
@@ -4214,10 +4226,12 @@ export default defineBackground({
           browser.i18n.getMessage("contextSaveToCompanionOpeningSidebar") ||
           "Opening sidebar to save selection to companion...";
         notify(title, openingMessage);
+        const opening = Promise.allSettled([ensureSidepanelOpen(tab?.id)]);
         setTimeout(
           async () => {
             try {
-              await ensureSidepanelOpen(tab?.id);
+              const [result] = await opening;
+              if (result.status === "rejected") throw result.reason;
               const captureId =
                 typeof globalThis.crypto?.randomUUID === "function"
                   ? globalThis.crypto.randomUUID()
@@ -4261,10 +4275,12 @@ export default defineBackground({
           browser.i18n.getMessage("contextSidebarOpening") ||
           "Opening sidebar...";
         notify(title, openingMessage);
+        const opening = Promise.allSettled([ensureSidepanelOpen(tab?.id)]);
         setTimeout(
           async () => {
             try {
-              await ensureSidepanelOpen(tab?.id);
+              const [result] = await opening;
+              if (result.status === "rejected") throw result.reason;
               await browser.runtime.sendMessage({
                 from: "background",
                 type: "narrate-selection",
@@ -4323,7 +4339,9 @@ export default defineBackground({
           notify("tldw_server", "Failed to process page");
         }
       } else if (info.menuItemId === "summarize-pa") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
         // this is a bad method hope somone can fix it :)
         setTimeout(
           async () => {
@@ -4336,7 +4354,9 @@ export default defineBackground({
           isCopilotRunning ? 0 : 5000,
         );
       } else if (info.menuItemId === "rephrase-pa") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
         setTimeout(
           async () => {
             await browser.runtime.sendMessage({
@@ -4348,7 +4368,9 @@ export default defineBackground({
           isCopilotRunning ? 0 : 5000,
         );
       } else if (info.menuItemId === "translate-pg") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
 
         setTimeout(
           async () => {
@@ -4361,7 +4383,9 @@ export default defineBackground({
           isCopilotRunning ? 0 : 5000,
         );
       } else if (info.menuItemId === "explain-pa") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
 
         setTimeout(
           async () => {
@@ -4374,7 +4398,9 @@ export default defineBackground({
           isCopilotRunning ? 0 : 5000,
         );
       } else if (info.menuItemId === "custom-pg") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
 
         setTimeout(
           async () => {

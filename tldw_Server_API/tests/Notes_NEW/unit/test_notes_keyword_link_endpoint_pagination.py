@@ -46,6 +46,7 @@ class _KeywordLinkDB:
 
 class _NotesForKeywordDB:
     client_id = "test-client"
+    owner_user_id = "test-client"
 
     def get_keyword_by_id(self, keyword_id: int) -> dict[str, object]:
         assert keyword_id == 7

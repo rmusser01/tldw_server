@@ -78,8 +78,12 @@ def _expected_version(db: CharactersRAGDB) -> int:
 
 
 def test_this_migration_is_the_version_after_the_create_fingerprint() -> None:
-    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == PREVIOUS_SQLITE_VERSION + 1
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == PREVIOUS_POSTGRES_VERSION + 1
+    database = object.__new__(CharactersRAGDB)
+    step = database._sqlite_linear_migration_steps()[PREVIOUS_SQLITE_VERSION]
+    assert step.__func__ is CharactersRAGDB._migrate_from_v75_to_v76
+    assert callable(CharactersRAGDB._migrate_from_v79_to_v80_postgres)
+    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= PREVIOUS_SQLITE_VERSION + 1
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= PREVIOUS_POSTGRES_VERSION + 1
 
 
 def test_upgrade_clears_the_placeholder_and_leaves_every_other_chat_alone(

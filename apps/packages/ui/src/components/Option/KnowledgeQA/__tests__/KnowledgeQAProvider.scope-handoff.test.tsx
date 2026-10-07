@@ -339,3 +339,14 @@ it("keeps service availability separate when personal counts fail", async () => 
   )
   expect(qa.sourceHealth.error).toBeNull()
 })
+
+it('retains the answered question when the editable search input changes', async () => {
+  mount()
+  await waitFor(() => expect(qa.settings.enable_web_fallback).toBe(false))
+  act(() => qa.setQuery('Question one'))
+  await act(async () => { await qa.search() })
+  expect(qa.answer).toBe('Old answer')
+  act(() => qa.setQuery('Question two, not searched'))
+  expect(qa.resultQuery).toBe('Question one')
+  expect(qa.query).toBe('Question two, not searched')
+})

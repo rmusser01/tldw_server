@@ -1,7 +1,4 @@
-import type {
-  KnowledgeQaScope,
-  WorkspaceKnowledgeQaPrefillSource,
-} from "@/utils/research-workspace-prefill"
+import type { KnowledgeNoteHead, KnowledgeNoteEvidence } from "@/utils/knowledge-note-provenance"
 /**
  * Workspace Types
  * Types for the NotebookLM-style three-pane research interface
@@ -74,16 +71,7 @@ export interface WorkspaceSourceStatusDetails {
 export interface WorkspaceSource {
   id: string
   mediaId: number // Server-side media ID
-  knowledgeQaEvidence?: {
-    importId: string
-    threadId: string | null
-    sources: WorkspaceKnowledgeQaPrefillSource[]
-    trustState?: string | null
-    trustReasonCodes?: string[]
-    evidenceOrigin?: string | null
-    scope?: KnowledgeQaScope
-    snapshot: boolean
-  }
+  knowledgeQaEvidence?: KnowledgeNoteEvidence
   title: string
   type: WorkspaceSourceType
   status?: WorkspaceSourceStatus
@@ -631,7 +619,7 @@ export const DEFAULT_AUDIO_SETTINGS: AudioGenerationSettings = {
 // Workspace Note Types (for Quick Notes feature)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface WorkspaceNote {
+export interface WorkspaceNote extends KnowledgeNoteHead {
   id?: string | number // Canonical Notes UUID or legacy workspace note ID
   title: string
   content: string

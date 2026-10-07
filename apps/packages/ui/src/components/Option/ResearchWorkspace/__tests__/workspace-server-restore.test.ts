@@ -324,3 +324,30 @@ describe("migrated Research Workspace restoration", () => {
     },
   );
 });
+
+it.each(["active", "deleted"])("resolves exact owned %s history after a lightweight search", async state => {
+  const history = { origin: "knowledge_qa", research: { workspace_id: "original", import_id: "import-a", sources: [] } }
+  boundary.request.mockImplementation(async ({ path }: { path: string }) => {
+    if (path.endsWith("/context")) return context()
+    if (path.endsWith("/notes")) return [{ id: 1, workspace_id: "original", title: "Legacy", content: `Legacy body\n\n<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`, keywords_json: "[]", version: 1 }]
+    if (path.includes("/notes/search/")) return { notes: [{ id: "canonical-note", title: "Research" }] }
+    if (path === "/api/v1/notes/canonical-note") return { id: "canonical-note", title: "Research", content: `Edited body\n\n<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`, version: 8,
+      keywords: ["workspace:original"], knowledge_provenance_state: state,
+      knowledge_provenance_version: 4, knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+      knowledge_provenance: state === "active" ? history : null,
+    }
+    return []
+  })
+  await expect(restore()).resolves.toBe(true)
+  expect(boundary.request).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/notes/canonical-note", servicePromptConfig: expect.objectContaining({ serverUrl: "https://original.test" }) }))
+  if (state === "active") expect(useWorkspaceStore.getState().currentNote).toMatchObject({ id: "canonical-note", knowledge_provenance_version: 4 })
+  else {
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({ id: "canonical-note", content: "Edited body", knowledge_provenance_state: "deleted", knowledge_provenance_version: 4 })
+    expect(useWorkspaceStore.getState().sources[0].knowledgeQaEvidence).toBeUndefined()
+    expect(useWorkspaceStore.getState().notes).toBe("Edited body")
+  }
+})
+it("allows only an owned explicit source-history restore route", () => {
+  expect(isServicePromptRequestPath("/api/v1/notes/owned/provenance/restore", "POST")).toBe(true)
+  expect(isServicePromptRequestPath("/api/v1/notes/owned%2Fforeign/provenance/restore", "POST")).toBe(false)
+})
