@@ -390,3 +390,93 @@ def test_retry_retains_legacy_optional_field_shape_and_hash(origin):
     assert result.envelope.payload_hash == legacy.payload_hash
     assert result.envelope.adapter_version == 1
     assert db.get_note_by_id("legacy-retry")["version"] == 1
+
+
+@pytest.mark.parametrize("signer", [False, True])
+def test_modern_reader_receives_safe_v1_with_runtime_negotiation(service, monkeypatch, signer):
+    monkeypatch.delenv("SYNC_V2_PULL_TOKEN_SIGNING_SECRET", raising=False)
+    service.settings = replace(service.settings, pull_token_signing_secret="synthetic-fix-key" if signer else None)
+    assert push(service, snapshot(service, None, version=1)).accepted
+    assert service.capabilities().supported_adapter_versions["notes.note"] == ([1, 2] if signer else [1])
+    result = service.pull(user_id="user-1", dataset_id="dataset-1", device_id="device-1", include_own_changes=True)
+    assert len(result.envelopes) == 1
+    assert result.envelopes[0].adapter_version == 1
+    assert result.envelopes[0].payload["content"] == '\ufeff{\r\n "x":1e2\r\n}\r\n'
+
+
+@pytest.mark.parametrize("interleave, versions", [(False, [1, 2]), (True, [1, 2]), (False, [2])])
+def test_missing_signer_never_filters_v2_for_modern_reader(service, monkeypatch, interleave, versions):
+    assert push(service, snapshot(service, None, version=1)).accepted
+    candidate = snapshot(service, "json")
+    if not interleave:
+        assert push(service, candidate).accepted
+    service.register_device(
+        user_id="user-1",
+        device_id="modern-reader",
+        display_name="Modern",
+        client_type="chatbook",
+        capabilities={"supported_adapter_versions": {"notes.note": versions}},
+    )
+    monkeypatch.delenv("SYNC_V2_PULL_TOKEN_SIGNING_SECRET", raising=False)
+    service.settings = replace(service.settings, pull_token_signing_secret=None)
+    if interleave:
+        scan = service._scan_pull_page
+
+        def scan_then_append(**kwargs):
+            page = scan(**kwargs)
+            # Another already-admitted writer becomes visible after the scan.
+            service.store.insert_envelope(candidate)
+            return page
+
+        monkeypatch.setattr(service, "_scan_pull_page", scan_then_append)
+    before = service.store.get_device_cursor("dataset-1", "modern-reader", "notes.note")
+    response = _client_for_service(service).get(
+        "/api/v1/sync/pull", params={"dataset_id": "dataset-1", "device_id": "modern-reader"}
+    )
+    assert service.store.get_current_head("dataset-1", "notes.note", "note-1").adapter_version == 2
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"]["error_code"] == "sync_pull_token_signing_unavailable"
+    assert service.store.get_device_cursor("dataset-1", "modern-reader", "notes.note") == before
+
+
+@pytest.mark.parametrize("caller_version", [None, 1])
+def test_preserved_language_binds_cached_row_version(tmp_path, monkeypatch, caller_version):
+    from tldw_Server_API.app.core.Notes.organization_capture import capture_note_upsert
+    from tldw_Server_API.app.core.Sync.v2.errors import SyncNotesAdmissionError
+    from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import NotesOrganizationPreflightError
+
+    db, store, sync = build_ready_notes_sync_stack(tmp_path)
+    sync.settings = replace(sync.settings, pull_token_signing_secret="synthetic-fix-key")
+    coordinator = NotesOrganizationCoordinator(service=sync, note_db=db, user_id="user-1")
+    capture_note_upsert(
+        coordinator,
+        note_id="cached",
+        title="Config",
+        content="source",
+        content_language="json",
+        source="test",
+        key="create",
+    )
+    before = store.list_envelopes_after(coordinator.require_ready().dataset_id, 0, limit=100)
+    capture = coordinator.capture
+
+    def interleave(self, **kwargs):
+        db.update_note("cached", {"content_language": "yaml"}, expected_version=1)
+        return capture(**kwargs)
+
+    monkeypatch.setattr(NotesOrganizationCoordinator, "capture", interleave)
+    with pytest.raises(NotesOrganizationPreflightError) as exc:
+        capture_note_upsert(
+            coordinator,
+            note_id="cached",
+            title="Config",
+            content="later",
+            expected_version=caller_version,
+            source="test",
+            key="update",
+        )
+    assert isinstance(exc.value.__cause__, SyncNotesAdmissionError)
+    assert store.list_envelopes_after(coordinator.require_ready().dataset_id, 0, limit=100) == before
+    assert db.get_note_by_id("cached")["content_language"] == "yaml"
+    assert db.get_note_by_id("cached")["content"] == "source"
+    db.close_connection()

@@ -281,7 +281,11 @@ def capture_note_upsert(
                 }
             ),
             routing_metadata=routing_metadata,
-            expected_product_version=expected_version,
+            expected_product_version=(
+                int(existing["version"])
+                if expected_version is None and existing is not None and content_language is _LANGUAGE_UNSET
+                else expected_version
+            ),
             stable_key=capture_key,
         ),
         keywords=keywords,

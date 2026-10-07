@@ -2050,7 +2050,7 @@ def test_capabilities_advertise_supported_and_writable_adapter_versions_separate
 
     assert capabilities.supported_adapter_versions["attachment.ref"] == [1, 2]
     assert capabilities.writable_adapter_versions["attachment.ref"] == []
-    assert capabilities.supported_adapter_versions["notes.note"] == [1, 2]
+    assert capabilities.supported_adapter_versions["notes.note"] == [1]
     assert capabilities.writable_adapter_versions["notes.note"] == []
 
 

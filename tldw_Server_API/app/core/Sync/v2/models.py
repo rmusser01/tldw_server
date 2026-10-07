@@ -611,6 +611,7 @@ def sync_v2_server_supported_adapter_versions(
     *,
     notes_task_sync_ready: bool = False,
     personal_context_sync_ready: bool = False,
+    notes_v2_ready: bool = False,
 ) -> dict[SyncDomain, list[int]]:
     """Return bounded server-supported versions independently of writability."""
 
@@ -622,7 +623,7 @@ def sync_v2_server_supported_adapter_versions(
         domain: (
             []
             if domain in PERSONAL_CONTEXT_SYNC_DOMAINS and not personal_context_sync_ready
-            else [1, 2] if domain in {"attachment.ref", "notes.note"} else [1]
+            else [1, 2] if domain == "attachment.ref" or (domain == "notes.note" and notes_v2_ready) else [1]
         )
         for domain in domains
     }

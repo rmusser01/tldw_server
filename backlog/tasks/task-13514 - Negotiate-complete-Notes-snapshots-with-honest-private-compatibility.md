@@ -12,7 +12,7 @@ labels:
 - structured-editing
 documentation:
 - Docs/ADR/065-portable-note-language-and-negotiated-structured-editing.md
-updated_date: 2026-10-07 04:51
+updated_date: 2026-10-07 05:03
 ---
 
 ## Description
@@ -49,6 +49,7 @@ Execution correction: captured S has no legacy encrypted notes domain/API ingres
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented clear notes.note (2,2) complete source/language snapshots, locked v1, signer readiness, safe v1 preservation, actionable old-peer refusal, shared producer capture and atomic derived-task admission. Preserved unavailable private transport, durable conflict/retry behavior and qualified old Studio provenance. ADR065 documents boundaries. Final selection: 306 passed and one overly broad assertion; corrected task file 11 passed; healthy/race pair 2 passed. Real PostgreSQL/API focused 4 passed; earlier affected language file 32 passed. Ruff base1/current0 and Bandit0/0; generator and frontend whole typecheck passed. Warnings and inherited Black debt documented in task-3-report.md. Remains In Progress pending controller review; no full suite.
+F3 review fix round1: runtime reader capabilities/stream negotiation now respect existing signer readiness while bounded post-scan checks refuse inaccessible v2 history with503 and no cursor advance. Omitted language binds the cached canonical row version when caller omits expected_version; explicit versions and create semantics retained. RED2 failed/4 passed; language GREEN33 passed; covering models/materializer/capture/batch/language278 passed; final key-loss/readiness/cached-row7 passed. Ruff and Bandit0/0 against dc463933; no formatter debt increase; generator/typecheck passed unchanged fingerprint. Exact commands, warnings and setup correction appended to task-3-report.md. In Progress pending scoped re-review.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

@@ -125,3 +125,15 @@ v1 hash of the same owner-bound current row only when language is null and exist
 revision/content/deletion checks still hold. Sidecar canonical/result hashes remain
 mandatory. Known Sync heads retain strict versioned lineage. Historical migration
 hashes and persisted accepted provenance are never rewritten.
+
+### F3 review clarification
+
+Read negotiation also uses signing readiness: without the key a modern client
+can still consume safe v1 Notes through the existing unsigned path. Version 2
+is absent from runtime reader capabilities/stream selection until ready. The
+bounded post-scan history check still refuses inaccessible v2 data with HTTP 503
+for modern readers (HTTP 409 for old readers), before cursor writes; it never
+filters that history as successful delivery. Preserved language in shared
+capture is conditioned on the version of the canonical row actually read even
+when the caller omitted its optimistic version. This remains a process-local
+admission condition; absent-row creation and wire/hash shapes are unchanged.

@@ -2805,6 +2805,7 @@ class SyncV2Service:
             supported_adapter_versions=sync_v2_server_supported_adapter_versions(
                 notes_task_sync_ready=notes_task_ready,
                 personal_context_sync_ready=personal_context_transport_ready,
+                notes_v2_ready=self.notes_v2_ready(),
             ),
             writable_adapter_versions=sync_v2_dataset_writable_adapter_versions(
                 dataset,
@@ -10412,6 +10413,8 @@ class SyncV2Service:
             for version in version_set.get(domain, ())
         ]
         if domains and not streams:
+            if "notes.note" in domains and _device_supports_adapter_version(device, "notes.note", 2):
+                self._pull_token_secret()
             raise SyncStoreError("sync_device_adapter_version_not_supported")
         if len(streams) > SYNC_PULL_TOKEN_MAX_STREAMS:
             raise SyncStoreError("sync_pull_token_too_large")
@@ -10434,6 +10437,7 @@ class SyncV2Service:
                 for version in versions
                 if self.adapters.has_domain(domain)
                 and self.adapters.supports_version(domain, version)
+                and (domain != "notes.note" or version != 2 or self.notes_v2_ready())
             ]
             for domain, versions in advertised.items()
         }
@@ -11034,7 +11038,7 @@ class SyncV2Service:
         # this page's bounded watermark and will be detected on the next pull.
         if (
             "notes.note" in domains
-            and not _device_supports_adapter_version(device, "notes.note", 2)
+            and (not _device_supports_adapter_version(device, "notes.note", 2) or not self.notes_v2_ready())
             and self.store.list_envelopes_after(
                 dataset_id,
                 0,
@@ -11044,6 +11048,8 @@ class SyncV2Service:
                 status="accepted",
             )
         ):
+            if _device_supports_adapter_version(device, "notes.note", 2):
+                raise SyncStoreError("sync_pull_token_signing_unavailable")
             raise SyncStoreError("notes_snapshot_upgrade_required")
 
     def _update_cursors(
