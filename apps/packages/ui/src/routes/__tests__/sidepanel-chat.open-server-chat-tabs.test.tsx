@@ -606,6 +606,44 @@ describe("side-panel header rename (XS-07)", () => {
     expect(io.updateHistory).not.toHaveBeenCalled()
   })
 
+  it("keeps a rename made while the chat is still opening", async () => {
+    render(<SidepanelChat />)
+    await screen.findByText("chat-1 answer")
+    const { gate, release } = held()
+    io.server.mockImplementationOnce(async (chatId: string) => {
+      await gate
+      return serverMessages(chatId)
+    })
+    fireEvent.click(await screen.findByRole("button", { name: "Open chat-2" }))
+    await waitFor(() => expect(io.server).toHaveBeenCalledWith("chat-2", expect.anything(), expect.anything()))
+    const openingId = tabHolding("chat-2")[0].id
+
+    // Renamed before the chat finished opening: the server chat is renamed,
+    // and the tab has no local copy yet.
+    fireEvent.click(screen.getByRole("button", { name: "Rename from header" }))
+    await waitFor(() =>
+      expect(useSidepanelChatTabsStore.getState().tabs.find((tab) => tab.id === openingId)?.label).toBe(
+        "Renamed in header"
+      )
+    )
+    expect(io.updateChat).toHaveBeenCalledWith("chat-2", { title: "Renamed in header" }, expect.anything())
+
+    await act(async () => {
+      release()
+    })
+    await waitFor(() =>
+      expect(useSidepanelChatTabsStore.getState().tabs.find((tab) => tab.id === openingId)?.historyId).toBe(
+        "local-chat-2"
+      )
+    )
+    await act(async () => {})
+
+    // Finishing the open kept the new name, on the tab and on its local copy.
+    const opened = useSidepanelChatTabsStore.getState().tabs.find((tab) => tab.id === openingId)
+    expect(opened).toMatchObject({ label: "Renamed in header", labelSource: "manual" })
+    expect(io.updateHistory).toHaveBeenCalledWith("local-chat-2", "Renamed in header")
+  })
+
   it("gives the header the active chat's full title to edit", async () => {
     const fullTitle = "Quarterly planning review for the northern region sales team"
     io.getChat.mockResolvedValue({ id: "chat-1", title: fullTitle })

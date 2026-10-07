@@ -13,7 +13,8 @@ import {
   getTitleById,
   getRecentChatFromCopilot,
   generateID,
-  getFullChatData
+  getFullChatData,
+  updateHistory
 } from "@/db/dexie/helpers"
 import { getDesignSystemState } from "@/design-system"
 import useBackgroundMessage from "@/hooks/useBackgroundMessage"
@@ -1653,11 +1654,32 @@ const SidepanelChatContent = ({
           serverChatLatestSeenId: latestSeenServerMessageRef.current
         }
 
+        // A rename made while the chat was opening has already renamed the
+        // server chat (XS-07). Keep that name rather than the title the open
+        // started from, and give it to the local copy: the rename ran before
+        // the tab had one, and the copy was linked under the old title.
+        const openingTab = useSidepanelChatTabsStore
+          .getState()
+          .tabs.find((item) => item.id === tab.id)
+        const renamedTitle =
+          openingTab?.labelSource === "manual" ? openingTab.label : null
         pendingOpenTabIdRef.current = null
         openSnapshotTab(
-          { ...tab, historyId: localHistoryId, updatedAt: Date.now() },
+          {
+            ...tab,
+            ...(renamedTitle
+              ? { label: renamedTitle, labelSource: "manual" as const }
+              : {}),
+            historyId: localHistoryId,
+            updatedAt: Date.now()
+          },
           snapshot
         )
+        if (renamedTitle && localHistoryId) {
+          void updateHistory(localHistoryId, renamedTitle).catch((error) => {
+            console.warn("[sidepanel] Could not rename the local copy of a chat", error)
+          })
+        }
         opened = true
       } catch (err: any) {
         if (!current()) return
