@@ -45,7 +45,7 @@ describe("PlaygroundEmpty – disconnected state", () => {
 
     expect(
       within(shell).getByText(
-        "Experiment with different models, prompts, and knowledge sources here.",
+        "Choose a model, then write your first message below.",
       ),
     ).toBeInTheDocument();
     expect(

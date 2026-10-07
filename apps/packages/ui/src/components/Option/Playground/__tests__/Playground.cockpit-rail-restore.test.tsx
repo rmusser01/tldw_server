@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { COCKPIT_LEFT_RESTORE_WRAPPER_CLASS } from "@/components/Layouts/chat-rail-positioning";
@@ -201,7 +201,7 @@ describe("Playground cockpit rail restore tabs", () => {
     expect(onRightRailVisibleChange).toHaveBeenCalledWith(true);
   });
 
-  it("keeps mobile restore tabs available when cockpit rails are hidden", () => {
+  it("keeps mobile disclosures available when cockpit rails are hidden", () => {
     const { onLeftRailVisibleChange, onRightRailVisibleChange } = renderShell({
       leftRailVisible: false,
       rightRailVisible: false,
@@ -210,26 +210,26 @@ describe("Playground cockpit rail restore tabs", () => {
     const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
     expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
 
-    const contextTab = screen.getByRole("tab", {
-      name: /restore context sidechannel/i,
+    const contextButton = within(mobileRails).getByRole("button", {
+      name: "Context",
     });
-    const runtimeTab = screen.getByRole("tab", {
-      name: /restore runtime sidechannel/i,
+    const runtimeButton = within(mobileRails).getByRole("button", {
+      name: "Runtime",
     });
     const contextPanel = document.getElementById(
-      contextTab.getAttribute("aria-controls") ?? "",
+      contextButton.getAttribute("aria-controls") ?? "",
     );
     const runtimePanel = document.getElementById(
-      runtimeTab.getAttribute("aria-controls") ?? "",
+      runtimeButton.getAttribute("aria-controls") ?? "",
     );
 
-    expect(contextPanel).toHaveAttribute("role", "tabpanel");
+    expect(contextPanel).toHaveAttribute("aria-labelledby", contextButton.id);
     expect(contextPanel).not.toBeVisible();
-    expect(runtimePanel).toHaveAttribute("role", "tabpanel");
+    expect(runtimePanel).toHaveAttribute("aria-labelledby", runtimeButton.id);
     expect(runtimePanel).not.toBeVisible();
 
-    fireEvent.click(contextTab);
-    fireEvent.click(runtimeTab);
+    fireEvent.click(contextButton);
+    fireEvent.click(runtimeButton);
 
     expect(onLeftRailVisibleChange).toHaveBeenCalledWith(true);
     expect(onRightRailVisibleChange).toHaveBeenCalledWith(true);

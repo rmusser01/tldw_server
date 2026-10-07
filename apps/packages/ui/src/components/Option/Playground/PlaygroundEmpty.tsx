@@ -131,23 +131,22 @@ export const PlaygroundEmpty = () => {
     [dispatchStarter, handleOpenDeepResearch, t],
   );
 
-  const description = demoEnabled ? (
-    t("playground:empty.demoDescription", {
-      defaultValue:
-        "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later.",
-    })
-  ) : (
-    t("playground:empty.description", {
-      defaultValue:
-        "Experiment with different models, prompts, and knowledge sources here.",
-    })
-  );
+  const description = demoEnabled
+    ? t("playground:empty.demoDescription", {
+        defaultValue:
+          "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later.",
+      })
+    : t("playground:empty.description", {
+        defaultValue: "Choose a model, then write your first message below.",
+      });
 
   return (
-    <div className="mx-auto mt-10 max-w-5xl px-4">
+    <div className="mx-auto mt-1 max-w-5xl px-0 sm:mt-10 sm:px-4">
       <EmptyState
         data-testid="playground-empty-shell"
         icon={MessageSquarePlus}
+        iconClassName="h-6 w-6 text-text-subtle sm:h-10 sm:w-10"
+        iconWrapperClassName="p-2 sm:p-4"
         title={t("playground:empty.title", {
           defaultValue: "Start a new chat",
         })}
@@ -164,7 +163,7 @@ export const PlaygroundEmpty = () => {
         }}
         variant="card"
         size="lg"
-        className="max-w-4xl rounded-[28px] p-5 text-sm sm:p-7"
+        className="max-w-4xl rounded-[28px] !p-2 text-sm [&>div]:space-y-2 sm:!p-7 sm:[&>div]:space-y-3"
       >
         <div className="flex flex-col gap-6">
           <div className="border-t border-border/60 pt-5">

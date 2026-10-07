@@ -1143,7 +1143,7 @@ export const PlaygroundChat = ({
 
   return (
     <>
-      <div className="relative flex w-full flex-col items-center pt-8 pb-4">
+      <div className="relative flex w-full flex-col items-center pt-1 pb-4 sm:pt-8">
         {showSelectedServerChatLoadFailure ? (
           <div className="mt-32 w-full px-6">
             <div className="mx-auto max-w-xl rounded-xl border border-destructive/30 bg-destructive/5 px-5 py-4 text-center text-sm text-text">
@@ -1151,9 +1151,9 @@ export const PlaygroundChat = ({
             </div>
           </div>
         ) : showEmptyStarterRegion && (
-          <div className="mt-4 w-full">
+          <div className="mt-1 w-full sm:mt-4">
             {chatModelsFailed && (
-              <div role="alert" className="mx-auto mb-4 max-w-xl rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 text-center text-sm text-text">
+              <div role="alert" className="mx-auto mb-2 max-w-xl rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-center text-sm text-text sm:mb-4 sm:px-5 sm:py-4">
                 <p>{t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")}</p>
                 <button type="button" className="underline" onClick={() => { void refetchChatModels() }}>
                   {t("playground:characterChatReadiness.model.retryAction", "Try again")}

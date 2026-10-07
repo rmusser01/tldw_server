@@ -240,7 +240,7 @@
     "message": "Start a new chat"
   },
   "empty_description": {
-    "message": "Experiment with different models, prompts, and knowledge sources here."
+    "message": "Choose a model, then write your first message below."
   },
   "empty_demoDescription": {
     "message": "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later to save chats, ingest media, and use Knowledge search."

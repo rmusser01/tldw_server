@@ -384,16 +384,18 @@ vi.mock("../Knowledge/utils/unsupported-types", () => ({
   otherUnsupportedTypes: [],
 }));
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (
-    selector?: (state: {
-      compareParentByHistory: Record<string, never>;
-    }) => unknown,
-  ) =>
-    typeof selector === "function"
-      ? selector({ compareParentByHistory: {} })
-      : { compareParentByHistory: {} },
-}));
+// The selected option/action fixture remains an I/O boundary; synchronous
+// route guards and render selectors must read the same current selection.
+vi.mock("@/store/option", () => {
+  const getState = () => ({
+    ...messageOptionState.value,
+    compareParentByHistory: {} as Record<string, never>,
+  });
+  const useOptions = (
+    selector?: (state: ReturnType<typeof getState>) => unknown,
+  ) => (typeof selector === "function" ? selector(getState()) : getState());
+  return { useStoreMessageOption: Object.assign(useOptions, { getState }) };
+});
 
 vi.mock("@/store/artifacts", () => ({
   useArtifactsStore: (
@@ -494,6 +496,19 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
+// Mount the deployed shared catalog hook against a real query client. The
+// global no-provider fallback represents unknown discovery and never runs IO.
+const renderPlayground = () => {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  return render(<Playground />, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+};
+
 describe("Playground cockpit controls", () => {
   beforeEach(() => {
     forkSettings.controller = null; forkSettings.mode = "ordinary"; forkSettings.current = true; forkSettings.update.mockReset(); forkSettings.update.mockResolvedValue({});
@@ -577,7 +592,7 @@ describe("Playground cockpit controls", () => {
     sessionPersistenceState.value.clearPersistedSession = vi.fn();
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
     chatSettingsState.applyChatSettingsPatch.mockClear();
-    tldwServerState.fetchChatModels.mockClear();
+    tldwServerState.fetchChatModels.mockReset();
     tldwServerState.fetchChatModels.mockResolvedValue([
       {
         model: "openai:gpt-4.1-mini",
@@ -587,7 +602,7 @@ describe("Playground cockpit controls", () => {
       },
     ]);
     tldwClientState.initialize.mockClear();
-    tldwClientState.getProvidersStatus.mockClear();
+    tldwClientState.getProvidersStatus.mockReset();
     tldwClientState.getProvidersStatus.mockResolvedValue({
       providers: [
         {
@@ -690,7 +705,7 @@ describe("Playground cockpit controls", () => {
     window.addEventListener(SET_TEMPORARY_CHAT_EVENT, setTemporaryChat);
 
     try {
-      render(<Playground />);
+      renderPlayground();
 
       const leftRail = await screen.findByTestId("playground-cockpit-left-rail");
       const contextRail = within(leftRail).getByTestId("playground-context-rail");
@@ -905,7 +920,7 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
 
-    render(<Playground />);
+    renderPlayground();
 
     const contextRail = within(
       await screen.findByTestId("playground-cockpit-left-rail"),
@@ -926,7 +941,7 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.selectedSystemPrompt = "prompt-missing";
 
     try {
-      render(<Playground />);
+      renderPlayground();
 
       const contextRail = within(
         await screen.findByTestId("playground-cockpit-left-rail"),
@@ -957,7 +972,7 @@ describe("Playground cockpit controls", () => {
       { id: "knowledge-2", title: "Protocol notes" },
     ];
 
-    render(<Playground />);
+    renderPlayground();
 
     const contextRail = within(
       await screen.findByTestId("playground-cockpit-left-rail"),
@@ -1027,7 +1042,7 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.serverChatLoadState = "failed";
     messageOptionState.value.serverChatLoadError = "Conversation no longer exists";
 
-    render(<Playground />);
+    renderPlayground();
 
     const contextRail = within(
       await screen.findByTestId("playground-cockpit-left-rail"),
@@ -1055,7 +1070,7 @@ describe("Playground cockpit controls", () => {
     window.addEventListener(OPEN_MCP_SETTINGS_EVENT, openMcpSettings);
 
     try {
-      render(<Playground />);
+      renderPlayground();
 
       const runtimeInspector = within(
         await screen.findByTestId("playground-cockpit-right-rail"),
@@ -1100,7 +1115,7 @@ describe("Playground cockpit controls", () => {
     };
     messageOptionState.value.serverChatPersonaMemoryMode = "read_write";
 
-    render(<Playground />);
+    renderPlayground();
 
     const runtimeInspector = within(
       await screen.findByTestId("playground-cockpit-right-rail"),
@@ -1128,7 +1143,7 @@ describe("Playground cockpit controls", () => {
     window.addEventListener(OPEN_ASSISTANT_SELECT_EVENT, openAssistantSelect);
 
     try {
-      render(<Playground />);
+      renderPlayground();
 
       const runtimeInspector = within(
         await screen.findByTestId("playground-cockpit-right-rail"),
@@ -1172,7 +1187,7 @@ describe("Playground cockpit controls", () => {
     window.addEventListener(OPEN_ASSISTANT_SELECT_EVENT, openAssistantSelect);
 
     try {
-      render(<Playground />);
+      renderPlayground();
 
       const runtimeInspector = within(
         await screen.findByTestId("playground-cockpit-right-rail"),
@@ -1208,7 +1223,7 @@ describe("Playground cockpit controls", () => {
     window.addEventListener(OPEN_ASSISTANT_SELECT_EVENT, openAssistantSelect);
 
     try {
-      render(<Playground />);
+      renderPlayground();
 
       const runtimeInspector = within(
         await screen.findByTestId("playground-cockpit-right-rail"),
@@ -1247,7 +1262,7 @@ describe("Playground cockpit controls", () => {
       name: "Legacy Character",
     };
 
-    const { rerender } = render(<Playground />);
+    const { rerender } = renderPlayground();
 
     const runtimeInspector = within(
       await screen.findByTestId("playground-cockpit-right-rail"),
@@ -1312,7 +1327,7 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.serverChatPersonaMemoryMode = null;
     messageOptionState.value.serverChatMetaLoaded = true;
 
-    render(<Playground />);
+    renderPlayground();
 
     const runtimeInspector = within(
       await screen.findByTestId("playground-cockpit-right-rail"),
@@ -1364,7 +1379,7 @@ describe("Playground cockpit controls", () => {
     } as any;
     messageOptionState.value.selectedCharacter = null;
 
-    render(<Playground />);
+    renderPlayground();
 
     const runtimeInspector = within(
       await screen.findByTestId("playground-cockpit-right-rail"),
@@ -1397,7 +1412,7 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.selectedCharacter = null;
     let finish!: () => void;
     forkSettings.update.mockImplementation(() => new Promise((resolve, reject) => { finish = () => outcome === "failed" ? reject(new Error("lost response")) : resolve({}); }));
-    render(<Playground />);
+    renderPlayground();
     const inspector = within(await screen.findByTestId("playground-cockpit-right-rail")).getByTestId("playground-runtime-inspector");
     fireEvent.click(within(inspector).getByRole("button", {name: "Clear assistant"}));
     if (outcome !== "pending") {
@@ -1424,7 +1439,7 @@ describe("Playground cockpit controls", () => {
     const actual = renderHook(() => useHistorySelection());
     await act(async () => {await actual.result.current.open({kind: "native", owner_key: "owner", conversation_id: "legacy", validate_lease: () => true} as any)});
     forkSettings.controller = actual.result.current;
-    render(<Playground />);
+    renderPlayground();
     const inspector = within(await screen.findByTestId("playground-cockpit-right-rail")).getByTestId("playground-runtime-inspector");
     fireEvent.click(within(inspector).getByRole("button", {name: "Clear assistant"}));
     await waitFor(() => expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null));
@@ -1435,7 +1450,7 @@ describe("Playground cockpit controls", () => {
   it("does not render cockpit control rails in focus mode", async () => {
     storageState.values.set("playgroundChatLayoutMode", "focus");
 
-    render(<Playground />);
+    renderPlayground();
 
     expect(
       await screen.findByTestId("playground-cockpit-shell"),
@@ -1479,7 +1494,7 @@ describe("Playground cockpit controls", () => {
   it("wires ready-state runtime regenerate to the shared chat handler", async () => {
     messageOptionState.value.streaming = false;
 
-    render(<Playground />);
+    renderPlayground();
 
     const runtimeInspector = within(
       await screen.findByTestId("playground-cockpit-right-rail"),
@@ -1516,7 +1531,7 @@ describe("Playground cockpit controls", () => {
     });
     forkSettings.controller = selection.result.current;
 
-    render(<Playground />);
+    renderPlayground();
 
     const inspector = within(
       await screen.findByTestId("playground-cockpit-right-rail"),
@@ -1533,7 +1548,7 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
 
-    render(<Playground />);
+    renderPlayground();
 
     await screen.findByTestId("playground-cockpit-shell");
     act(() => {
@@ -1547,7 +1562,9 @@ describe("Playground cockpit controls", () => {
     const runtimeInspector = within(
       screen.getByTestId("playground-cockpit-right-rail"),
     ).getByTestId("playground-runtime-inspector");
-    expect(within(runtimeInspector).getByText("Degraded")).toBeInTheDocument();
+    expect(
+      await within(runtimeInspector).findByText("Degraded"),
+    ).toBeInTheDocument();
     expect(
       within(runtimeInspector).getByText("Degraded: chacha_notes"),
     ).toBeInTheDocument();
@@ -1561,7 +1578,7 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
 
-    render(<Playground />);
+    renderPlayground();
 
     await screen.findByTestId("playground-cockpit-shell");
     act(() => {
@@ -1587,7 +1604,7 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
 
-    render(<Playground />);
+    renderPlayground();
 
     await screen.findByTestId("playground-cockpit-shell");
     act(() => {
@@ -1623,16 +1640,18 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.selectedModel = "tldw:gpt-4o";
     modelSettingsState.value.apiProvider = undefined;
     modelSettingsState.value.activeSettingsScope = "tldw:gpt-4o";
-    tldwServerState.fetchChatModels.mockResolvedValueOnce([
+    tldwServerState.fetchChatModels.mockResolvedValue([
       {
         id: "gpt-4o",
         model: "tldw:gpt-4o",
         name: "GPT-4o",
         provider: "openai",
         type: "chat",
+        is_configured: false,
+        provider_is_configured: false,
       },
     ]);
-    tldwClientState.getProvidersStatus.mockResolvedValueOnce({
+    tldwClientState.getProvidersStatus.mockResolvedValue({
       providers: [
         {
           name: "openai",
@@ -1643,27 +1662,32 @@ describe("Playground cockpit controls", () => {
       any_configured: false,
     });
 
-    render(<Playground />);
+    renderPlayground();
 
     const leftRail = await screen.findByTestId("playground-cockpit-left-rail");
     expect(leftRail).toBeInTheDocument();
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
-    expect(
-      within(leftRail).getByRole("button", { name: "Expand Prompt" }),
-    ).toHaveAttribute("aria-expanded", "false");
-    const rightRail = await screen.findByTestId("playground-cockpit-right-rail");
-    expect(
-      within(rightRail).getByRole("button", { name: "Expand Assistant" }),
-    ).toHaveAttribute("aria-expanded", "false");
+    const rightRail = await screen.findByTestId(
+      "playground-cockpit-right-rail",
+    );
 
-    const runtimeInspector = within(
-      rightRail,
-    ).getByTestId("playground-runtime-inspector");
+    const runtimeInspector = within(rightRail).getByTestId(
+      "playground-runtime-inspector",
+    );
 
     await waitFor(() => {
       expect(within(runtimeInspector).getByText("Error")).toBeInTheDocument();
     });
     expect(runtimeInspector).toHaveTextContent("Provider setup needed");
+    expect(tldwServerState.fetchChatModels).toHaveBeenCalledWith({
+      requireFresh: true,
+    });
+    expect(
+      within(leftRail).getByRole("button", { name: "Expand Prompt" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(rightRail).getByRole("button", { name: "Expand Assistant" }),
+    ).toHaveAttribute("aria-expanded", "false");
 
     expect(
       screen.queryByRole("status", { name: "Chat status" }),
@@ -1675,7 +1699,7 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
 
-    render(<Playground />);
+    renderPlayground();
 
     await screen.findByTestId("playground-cockpit-shell");
     act(() => {
@@ -1689,33 +1713,67 @@ describe("Playground cockpit controls", () => {
     const runtimeInspector = within(
       screen.getByTestId("playground-cockpit-right-rail"),
     ).getByTestId("playground-runtime-inspector");
-    expect(within(runtimeInspector).getByText("Degraded")).toBeInTheDocument();
+    expect(
+      await within(runtimeInspector).findByText("Degraded"),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("status", { name: "Chat status" }),
     ).not.toBeInTheDocument();
   });
 
-  it("exposes mobile rail visibility state on collapse controls", () => {
+  it("exposes actual mobile disclosure state while close preserves desktop preferences and the draft", () => {
+    const onLeftRailVisibleChange = vi.fn();
+    const onRightRailVisibleChange = vi.fn();
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
+        onLeftRailVisibleChange={onLeftRailVisibleChange}
+        onRightRailVisibleChange={onRightRailVisibleChange}
         leftRail={<div>Context panel</div>}
         rightRail={<div>Runtime panel</div>}
       >
-        <div>Chat area</div>
+        <textarea aria-label="Mobile message" defaultValue="Retained message" />
       </PlaygroundCockpitShell>,
     );
 
-    const contextToggle = screen.getByRole("button", {
-      name: "Hide context rail",
-    });
-    const runtimeToggle = screen.getByRole("button", {
-      name: "Hide runtime rail",
-    });
+    const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
+    const rails = within(mobileRails);
+    const context = rails.getByRole("button", { name: "Context" });
+    const runtime = rails.getByRole("button", { name: "Runtime" });
+    const draft = screen.getByRole("textbox", { name: "Mobile message" });
+    expect(rails.getAllByRole("button")).toHaveLength(2);
+    expect(context).toHaveAttribute("aria-expanded", "true");
+    expect(runtime).toHaveAttribute("aria-expanded", "false");
+    for (const button of [context, runtime]) {
+      const panel = document.getElementById(
+        button.getAttribute("aria-controls") ?? "",
+      );
+      expect(panel).toHaveAttribute("aria-labelledby", button.id);
+      expect(button).not.toHaveAttribute("aria-pressed");
+    }
+    expect(rails.getByRole("region", { name: "Context" })).toBeVisible();
 
-    expect(contextToggle).toHaveAttribute("aria-pressed", "true");
-    expect(contextToggle).toHaveAttribute("aria-controls");
-    expect(runtimeToggle).toHaveAttribute("aria-pressed", "true");
-    expect(runtimeToggle).toHaveAttribute("aria-controls");
+    fireEvent.click(context);
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
+    expect(context).toHaveAttribute("aria-expanded", "false");
+    expect(runtime).toHaveAttribute("aria-expanded", "false");
+    expect(rails.queryAllByRole("region")).toHaveLength(0);
+
+    fireEvent.click(runtime);
+    expect(rails.getByRole("region", { name: "Runtime" })).toBeVisible();
+    expect(runtime).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(runtime);
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
+    expect(runtime).toHaveAttribute("aria-expanded", "false");
+    expect(onLeftRailVisibleChange).not.toHaveBeenCalled();
+    expect(onRightRailVisibleChange).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("complementary", { name: "Chat cockpit context" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("complementary", { name: "Chat cockpit runtime" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Mobile message" })).toBe(draft);
+    expect(draft).toHaveValue("Retained message");
   });
 });
