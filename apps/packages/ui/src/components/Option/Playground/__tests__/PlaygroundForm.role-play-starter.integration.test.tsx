@@ -553,14 +553,17 @@ vi.mock("~/hooks/useMessageOption", () => ({
   }
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: Object.assign((selector: (state: any) => unknown) =>
-    selector({
-      ...playgroundFormMessageOptionState.value,
-      setRagMediaIds: vi.fn(),
-      setRagPinnedResults: vi.fn()
-    }), { getState: () => playgroundFormMessageOptionState.value })
-}))
+vi.mock('@/store/option', () => ({
+  useStoreMessageOption: Object.assign(
+    (selector: (state: any) => unknown) =>
+      selector({
+        ...playgroundFormMessageOptionState.value,
+        setRagMediaIds: vi.fn(),
+        setRagPinnedResults: vi.fn(),
+      }),
+    { getState: () => playgroundFormMessageOptionState.value, subscribe: vi.fn(() => () => {}) }
+  ),
+}));
 
 vi.mock("@/store/model", async importOriginal => {
   const actual = await importOriginal<typeof import("@/store/model")>()
@@ -1504,45 +1507,117 @@ describe("PlaygroundForm role-play starter", () => {
     expect(reset).not.toHaveBeenCalled()
   })
 
-  it.each(["card:source", "card:history", "card:account", "card:choice", "card:tools", "retention:text ABA", "identity:settings", "identity:account"])("retires held fresh entry at %s", async boundary => {
-    const { source, reset } = prepareNativeSource()
-    const address = source.chatDraftAddress
-    let finish!: () => void
-    if (boundary.startsWith("card")) nativeSetupFixture.getCharacter.mockReturnValueOnce(new Promise(resolve => {
-      finish = () => resolve({ id: "route-card", name: "Route Card" })
-    }))
+  it.each([
+    'card:source',
+    'card:history',
+    'card:account',
+    'card:choice',
+    'card:tools',
+    'card:connection hydration',
+    'card:catalog hydration',
+    'card:source hydration',
+    'retention:text ABA',
+    'identity:settings',
+    'identity:account',
+  ])('retires held fresh entry at %s', async (boundary) => {
+    const { source, reset } = prepareNativeSource();
+    const address = source.chatDraftAddress;
+    let finish!: () => void;
+    if (boundary.startsWith('card'))
+      nativeSetupFixture.getCharacter.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = () => resolve({ id: 'route-card', name: 'Route Card' });
+        })
+      );
     else {
-      const pending = new Promise<boolean>(resolve => { finish = () => resolve(true) })
-      if (boundary.startsWith("retention")) nativeSetupFixture.retain.mockReturnValueOnce(pending)
-      else selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(pending)
+      const pending = new Promise<boolean>((resolve) => {
+        finish = () => resolve(true);
+      });
+      if (boundary.startsWith('retention')) nativeSetupFixture.retain.mockReturnValueOnce(pending);
+      else selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(pending);
     }
-    let apply!: ApplyCharacterRoute
-    const register = (next: ApplyCharacterRoute | null) => { if (next) apply = next }
-    const user = userEvent.setup()
-    const view = render(<PlaygroundForm droppedFiles={[]} onCharacterRouteApplyReady={register} />)
-    await user.type(screen.getByTestId("composer-textarea"), "Held source  ")
-    await waitFor(() => expect(apply).toBeTypeOf("function"))
-    let result!: Promise<unknown>
-    act(() => { result = apply("route-card", () => true) })
-    const barrier = boundary.startsWith("card") ? nativeSetupFixture.getCharacter : boundary.startsWith("retention") ? nativeSetupFixture.retain : selectedAssistantMock.setSelectedAssistant
-    await waitFor(() => expect(barrier).toHaveBeenCalledOnce())
-    if (boundary === "card:source") { source.chatDraftAddress = { ...address, id: "newer-draft" }; source.chatDraftRevision++ }
-    if (boundary === "card:history") { nativeSetupFixture.controller!.reset(); reset.mockClear() }
-    if (boundary.endsWith("account")) nativeSetupFixture.ownerCurrent = false
-    if (boundary === "card:choice") { nativeSetupFixture.assistantRevision++; act(() => selectedAssistantMock.externalMirror?.({ kind: "character", id: "newer", name: "Newer", metadata: { selectionMode: "tracked" } })) }
-    if (boundary === "card:tools") nativeSetupFixture.tools = { tools: [{}] }
-    if (boundary === "identity:settings") nativeSetupFixture.settings = { ...nativeSetupFixture.settings!, topK: 20 }
-    if (boundary === "retention:text ABA") { await user.clear(screen.getByTestId("composer-textarea")); await user.type(screen.getByTestId("composer-textarea"), "Held source  ") }
-    const destination = source.chatDraftAddress
-    await act(async () => { finish(); expect(await result).toBe("retired") })
-    expect(source.chatDraftAddress).toBe(destination)
-    expect(reset).not.toHaveBeenCalled()
-    expect(source.setHistoryId).not.toHaveBeenCalled()
-    expect(source.setMessages).not.toHaveBeenCalled()
-    expect(screen.getByTestId("composer-textarea")).toHaveValue("Held source  ")
-    expect(onSubmitMock).not.toHaveBeenCalled()
-    view.unmount()
-  })
+    let apply!: ApplyCharacterRoute;
+    const register = (next: ApplyCharacterRoute | null) => {
+      if (next) apply = next;
+    };
+    const user = userEvent.setup();
+    const view = render(<PlaygroundForm droppedFiles={[]} onCharacterRouteApplyReady={register} />);
+    await user.type(screen.getByTestId('composer-textarea'), 'Held source  ');
+    await waitFor(() => expect(apply).toBeTypeOf('function'));
+    let result!: Promise<unknown>;
+    act(() => {
+      result = apply('route-card', () => true);
+    });
+    const barrier = boundary.startsWith('card')
+      ? nativeSetupFixture.getCharacter
+      : boundary.startsWith('retention')
+        ? nativeSetupFixture.retain
+        : selectedAssistantMock.setSelectedAssistant;
+    await waitFor(() => expect(barrier).toHaveBeenCalledOnce());
+    if (boundary === 'card:source') {
+      source.chatDraftAddress = { ...address, id: 'newer-draft' };
+      source.chatDraftRevision++;
+    }
+    if (boundary === 'card:history') {
+      nativeSetupFixture.controller!.reset();
+      reset.mockClear();
+    }
+    if (boundary.endsWith('account')) nativeSetupFixture.ownerCurrent = false;
+    if (boundary === 'card:choice') {
+      nativeSetupFixture.assistantRevision++;
+      act(() =>
+        selectedAssistantMock.externalMirror?.({
+          kind: 'character',
+          id: 'newer',
+          name: 'Newer',
+          metadata: { selectionMode: 'tracked' },
+        })
+      );
+    }
+    if (boundary === 'card:tools') nativeSetupFixture.tools = { tools: [{}] };
+    if (boundary === 'card:connection hydration') {
+      playgroundFormConnectionState.phase = 'connecting';
+      view.rerender(<PlaygroundForm droppedFiles={[]} onCharacterRouteApplyReady={register} />);
+      playgroundFormConnectionState.phase = 'connected';
+      view.rerender(<PlaygroundForm droppedFiles={[]} onCharacterRouteApplyReady={register} />);
+    }
+    if (boundary === 'card:catalog hydration') {
+      nativeSetupFixture.models = [...nativeSetupFixture.models];
+      view.rerender(<PlaygroundForm droppedFiles={[]} onCharacterRouteApplyReady={register} />);
+    }
+    if (boundary === 'card:source hydration') {
+      source.history = [...source.history];
+      source.messages = [...source.messages];
+      view.rerender(<PlaygroundForm droppedFiles={[]} onCharacterRouteApplyReady={register} />);
+    }
+    if (boundary === 'identity:settings')
+      nativeSetupFixture.settings = { ...nativeSetupFixture.settings!, topK: 20 };
+    if (boundary === 'retention:text ABA') {
+      await user.clear(screen.getByTestId('composer-textarea'));
+      await user.type(screen.getByTestId('composer-textarea'), 'Held source  ');
+    }
+    const destination = source.chatDraftAddress;
+    await act(async () => {
+      finish();
+      expect(await result).toBe('retired');
+    });
+    expect(source.chatDraftAddress).toBe(destination);
+    expect(reset).not.toHaveBeenCalled();
+    expect(source.setHistoryId).not.toHaveBeenCalled();
+    expect(source.setMessages).not.toHaveBeenCalled();
+    expect(screen.getByTestId('composer-textarea')).toHaveValue('Held source  ');
+    expect(onSubmitMock).not.toHaveBeenCalled();
+    if (boundary.endsWith('hydration')) {
+      await act(async () => expect(await apply('route-card', () => true)).toBe('applied'));
+      expect(reset).toHaveBeenCalledOnce();
+      expect(nativeSetupFixture.retain).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ content: 'Held source  ' })
+      );
+      expect(onSubmitMock).not.toHaveBeenCalled();
+    }
+    view.unmount();
+  });
 
   it("retains exact source via real draft persistence before accepting a fresh route", async () => {
     const { source, reset } = prepareNativeSource()

@@ -446,6 +446,38 @@ const PlaygroundContent = () => {
   const isMobileViewport = useMobile();
   const isDesktopViewport = useDesktop();
   const location = useLocation();
+  const [retiredRouteLocation, setRetiredRouteLocation] = React.useState<string | null>(null);
+  const retiredRouteLocationRef = React.useRef<string | null>(null);
+  const routeLocationKey = [location.pathname, location.search, location.hash, location.key].join(
+    '|'
+  );
+  const routeLocationKeyRef = React.useRef(routeLocationKey);
+  routeLocationKeyRef.current = routeLocationKey;
+  const retiredAmbientCharacterIntentRef = React.useRef(false);
+  const rawRouteCharacterIntent = React.useMemo(
+    () =>
+      getCharacterChatRouteIntentFromLocation(
+        location.search ?? '',
+        location.hash ?? '',
+        retiredAmbientCharacterIntentRef
+      ),
+    [location.hash, location.key, location.search]
+  );
+  const routeCharacterIntent =
+    retiredRouteLocation === routeLocationKey ? null : rawRouteCharacterIntent;
+  React.useEffect(() => {
+    if (retiredRouteLocationRef.current !== routeLocationKey) {
+      retiredRouteLocationRef.current = null;
+      setRetiredRouteLocation(null);
+    }
+  }, [routeLocationKey]);
+  const routeCharacterIntentSignature = React.useMemo(() => {
+    if (!routeCharacterIntent) return null;
+    return [routeCharacterIntent.chatId ?? '', routeCharacterIntent.characterId ?? ''].join('|');
+  }, [routeCharacterIntent?.chatId, routeCharacterIntent?.characterId]);
+  const routeCharacterIntentChatId = routeCharacterIntent?.chatId ?? null;
+  const routeCharacterIntentId = routeCharacterIntent?.characterId ?? null;
+  const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
   const defaultChatLayoutMode: PlaygroundCockpitMode = isMobileViewport
     ? "focus"
     : "cockpit";
@@ -527,7 +559,10 @@ const PlaygroundContent = () => {
     setServerChatAssistantId,
     setServerChatPersonaMemoryMode,
     setServerChatMetaLoaded,
-  } = useMessageOption({ hydrateServerChat: true });
+  } = useMessageOption({
+    // Do not reload the prior conversation while preparing a fresh card command.
+    hydrateServerChat: !routeCharacterIntentId || Boolean(routeCharacterIntentChatId),
+  });
   // CS-04 (#3104): replies that ended early or finished off-screen stay in
   // the transcript; the review panel leaves out the ones shown or handled.
   const hideKeptHistoryTurn = useKeepInterruptedHistoryTurns({
@@ -686,43 +721,7 @@ const PlaygroundContent = () => {
     !stableHistoryId &&
     !serverChatId &&
     !composerHasDraft;
-  const [retiredRouteLocation, setRetiredRouteLocation] = React.useState<string | null>(null);
-  const retiredRouteLocationRef = React.useRef<string | null>(null);
-  const routeLocationKey = [location.pathname, location.search, location.hash, location.key].join("|");
-  const routeLocationKeyRef = React.useRef(routeLocationKey);
-  routeLocationKeyRef.current = routeLocationKey;
   React.useEffect(() => () => { routeCharacterIntentRequestRef.current++; }, []);
-  const retiredAmbientCharacterIntentRef = React.useRef(false);
-  const rawRouteCharacterIntent = React.useMemo(
-    () =>
-      getCharacterChatRouteIntentFromLocation(
-        location.search ?? "",
-        location.hash ?? "",
-        retiredAmbientCharacterIntentRef,
-      ),
-    [location.hash, location.key, location.search],
-  );
-  const routeCharacterIntent = retiredRouteLocation === routeLocationKey
-    ? null : rawRouteCharacterIntent;
-  React.useEffect(() => {
-    if (retiredRouteLocationRef.current !== routeLocationKey) {
-      retiredRouteLocationRef.current = null;
-      setRetiredRouteLocation(null);
-    }
-  }, [routeLocationKey]);
-  const routeCharacterIntentSignature = React.useMemo(() => {
-    if (!routeCharacterIntent) return null;
-    return [
-      routeCharacterIntent.chatId ?? "",
-      routeCharacterIntent.characterId ?? "",
-    ].join("|");
-  }, [
-    routeCharacterIntent?.chatId,
-    routeCharacterIntent?.characterId,
-  ]);
-  const routeCharacterIntentChatId = routeCharacterIntent?.chatId ?? null;
-  const routeCharacterIntentId = routeCharacterIntent?.characterId ?? null;
-  const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
   const {
     restoreSession,
     clearPersistedSession,
@@ -1019,55 +1018,85 @@ const PlaygroundContent = () => {
 
   React.useEffect(() => {
     if (retiredRouteLocationRef.current === routeLocationKey || !applyCharacterRoute) return;
-    if (assistantSelectionMeta?.isLoading || !routeCharacterIntentId || routeCharacterIntentChatId) return;
-    if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId ||
-      routeCharacterIntentInFlightRef.current === routeCharacterIntentId || routeCharacterRecovery) return;
+    if (
+      assistantSelectionMeta?.isLoading ||
+      chatModelsFetching ||
+      !routeCharacterIntentId ||
+      routeCharacterIntentChatId
+    )
+      return;
+    if (
+      routeCharacterIntentAppliedRef.current === routeCharacterIntentId ||
+      routeCharacterIntentInFlightRef.current === routeCharacterIntentId ||
+      routeCharacterRecovery
+    )
+      return;
     const requestId = ++routeCharacterIntentRequestRef.current;
     routeCharacterIntentInFlightRef.current = routeCharacterIntentId;
     const ownerIsCurrent = assistantSelectionMeta?.isCurrent ?? (() => true);
     const sourceHref = window.location.href;
-    const isCurrent = () => ownerIsCurrent() && routeCharacterIntentRequestRef.current === requestId &&
-      window.location.href === sourceHref && routeLocationKeyRef.current === routeLocationKey && retiredRouteLocationRef.current !== routeLocationKey;
-    const consumeIntent = (retired = false) => {
+    const isCurrent = () =>
+      ownerIsCurrent() &&
+      routeCharacterIntentRequestRef.current === requestId &&
+      window.location.href === sourceHref &&
+      routeLocationKeyRef.current === routeLocationKey &&
+      retiredRouteLocationRef.current !== routeLocationKey;
+    const consumeIntent = () => {
       const search = location.search || window.location.search;
       const hash = location.hash || window.location.hash;
       const hasSearchIntent = Boolean(getCharacterChatRouteIntent(search));
-      const consumeSearch = (query: string) => {
-        const next = updateCharacterChatRouteSearch(query, null);
-        if (!retired) return next;
-        const params = new URLSearchParams(next);
-        params.delete("mode");
-        return params.size ? "?" + params.toString() : "";
-      };
-      const hashQuery = hash.indexOf("?");
-      navigate({ pathname: location.pathname,
-        search: hasSearchIntent ? consumeSearch(search) : search,
-        hash: hasSearchIntent ? hash : hash.slice(0, hashQuery < 0 ? hash.length : hashQuery) + consumeSearch(extractHashSearch(hash)),
-      }, { replace: true });
+      const consumeSearch = (query: string) => updateCharacterChatRouteSearch(query, null);
+      const hashQuery = hash.indexOf('?');
+      navigate(
+        {
+          pathname: location.pathname,
+          search: hasSearchIntent ? consumeSearch(search) : search,
+          hash: hasSearchIntent
+            ? hash
+            : hash.slice(0, hashQuery < 0 ? hash.length : hashQuery) +
+              consumeSearch(extractHashSearch(hash)),
+        },
+        { replace: true }
+      );
     };
-    void applyCharacterRoute(routeCharacterIntentId, isCurrent).then(outcome => {
-      if (!isCurrent()) return;
-      if (outcome === "applied" || outcome === "retired") {
-        routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
-        if (outcome === "retired") {
-          retiredRouteLocationRef.current = routeLocationKey;
-          setRetiredRouteLocation(routeLocationKey);
-          setCharacterModeIntentActive(false);
-          void setChatWorkflowMode(activeCharacterSelection ? "character" : "standard");
-        }
-        setRouteCharacterRecovery(null);
-        // A fresh URL is a command; consume it so reload restores the accepted draft.
-        consumeIntent(outcome === "retired");
-      } else setRouteCharacterRecovery({ id: routeCharacterIntentId,
-        reason: outcome === "failed" ? "setup-failed" : outcome });
-    }).catch(() => {
-      if (isCurrent()) setRouteCharacterRecovery({ id: routeCharacterIntentId, reason: "load-error" });
-    }).finally(() => {
-      if (routeCharacterIntentRequestRef.current === requestId) routeCharacterIntentInFlightRef.current = null;
-    });
-  }, [activeCharacterSelection, applyCharacterRoute, assistantSelectionMeta?.isCurrent, assistantSelectionMeta?.isLoading, location.hash,
-    location.pathname, location.search, navigate, routeCharacterIntentChatId, routeCharacterIntentId,
-    routeCharacterIntentSignature, routeCharacterRecovery, routeCharacterRetryToken, routeLocationKey, setChatWorkflowMode]);
+    void applyCharacterRoute(routeCharacterIntentId, isCurrent)
+      .then((outcome) => {
+        if (!isCurrent()) return;
+        if (outcome === 'applied') {
+          routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
+          setRouteCharacterRecovery(null);
+          // A fresh URL is a command; consume it so reload restores the accepted draft.
+          consumeIntent();
+        } else
+          setRouteCharacterRecovery({
+            id: routeCharacterIntentId,
+            reason: outcome === 'failed' || outcome === 'retired' ? 'setup-failed' : outcome,
+          });
+      })
+      .catch(() => {
+        if (isCurrent())
+          setRouteCharacterRecovery({ id: routeCharacterIntentId, reason: 'load-error' });
+      })
+      .finally(() => {
+        if (routeCharacterIntentRequestRef.current === requestId)
+          routeCharacterIntentInFlightRef.current = null;
+      });
+  }, [
+    applyCharacterRoute,
+    assistantSelectionMeta?.isCurrent,
+    assistantSelectionMeta?.isLoading,
+    chatModelsFetching,
+    location.hash,
+    location.pathname,
+    location.search,
+    navigate,
+    routeCharacterIntentChatId,
+    routeCharacterIntentId,
+    routeCharacterIntentSignature,
+    routeCharacterRecovery,
+    routeCharacterRetryToken,
+    routeLocationKey,
+  ]);
 
   React.useEffect(() => {
     if (!routeCharacterIntentId) {

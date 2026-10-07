@@ -94,12 +94,19 @@ const setStorageAssistant = async (selection: AssistantSelection | null) => {
   useStoreMessageOption.setState({ testAssistant: selection } as Partial<SelectionTestState>)
 }
 const setTestAssistant = async (selection: AssistantSelection | null) => { await realLoader.setSelection?.(selection) }
-const useRealServerConversation = () => {
+const useRealServerConversation = ({
+  hydrateServerChat = true,
+}: { hydrateServerChat?: boolean } = {}) => {
   const clearChat = useClearChat()
   const store = useStoreMessageOption() as SelectionTestState
   const [assistant, setAssistant, assistantSelectionMeta] = useSelectedAssistant()
   realLoader.setSelection = setAssistant
-  useServerChatLoader({ ensureServerChatHistoryId: ensureTestHistory, notification: loaderNotification, t: loaderTranslation })
+  useServerChatLoader({
+    enabled: hydrateServerChat,
+    ensureServerChatHistoryId: ensureTestHistory,
+    notification: loaderNotification,
+    t: loaderTranslation,
+  });
   const resolved = resolveEffectiveAssistantState({
     tracked: { assistantKind: store.serverChatAssistantKind, assistantId: store.serverChatAssistantId, characterId: store.serverChatCharacterId },
     draftSelection: assistant
@@ -1287,6 +1294,79 @@ describe("Playground coordinator integration", () => {
   })
 
 
+  it('keeps the prior saved source stable while a fresh card read is pending', async () => {
+    realLoader.enabled = realLoader.webStorage = realLoader.route = true;
+    localStorage.clear();
+    tldwClientState.captureHistorySelection.mockClear();
+    useMessageOptionMock.mockImplementation(useRealServerConversation);
+    window.history.replaceState({}, '', '/chat?mode=character&characterId=4');
+    const messages = [{ id: 'ordinary-local', message: 'Keep my saved conversation', isBot: false }];
+    const history = [{ role: 'user', content: 'Keep my saved conversation' }];
+    useStoreMessageOption.setState({
+      serverChatId: 'ordinary',
+      historyId: null,
+      messages,
+      history,
+      serverChatMetaLoaded: true,
+      serverChatCharacterId: null,
+      serverChatAssistantKind: null,
+      serverChatAssistantId: null,
+      temporaryChat: false,
+      isLoading: false,
+      streaming: false,
+      isProcessing: false,
+    });
+    tldwClientState.getChat.mockResolvedValue({
+      id: 'ordinary',
+      title: 'Ordinary saved chat',
+      source: 'webui-chat',
+      scope_type: 'global',
+    });
+    tldwClientState.listChatMessages.mockResolvedValue([
+      { id: 'ordinary-server', role: 'user', content: 'Keep my saved conversation', version: 1 },
+    ]);
+    let release!: (card: { id: string; name: string }) => void;
+    const pending = new Promise<{ id: string; name: string }>((resolve) => {
+      release = resolve;
+    });
+    tldwClientState.getCharacter.mockReturnValueOnce(pending);
+    let commits = 0;
+    const onRender = () => {
+      if (++commits > 60) throw new Error('Fresh character startup did not settle');
+    };
+    const view = render(
+      <RouteTestBoundary>
+        <React.Profiler id="fresh-character-startup" onRender={onRender}>
+          <Playground />
+        </React.Profiler>
+      </RouteTestBoundary>
+    );
+    try {
+      await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalledOnce());
+      // Run beyond the real loader's 200ms debounce while the card read is held.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      });
+      expect(tldwClientState.captureHistorySelection).not.toHaveBeenCalled();
+      expect(tldwClientState.listChatMessages).not.toHaveBeenCalled();
+      expect(useStoreMessageOption.getState().messages).toBe(messages);
+      expect(useStoreMessageOption.getState().history).toBe(history);
+      expect(useStoreMessageOption.getState().serverChatId).toBe('ordinary');
+      expect(window.location.search).toBe('?mode=character&characterId=4');
+      await act(async () => {
+        release({ id: '4', name: 'Mira' });
+        await pending;
+      });
+      await waitFor(() => expect(window.location.search).toBe('?mode=character'));
+      expect(useStoreMessageOption.getState().serverChatId).toBeNull();
+      expect(tldwClientState.getCharacter).toHaveBeenCalledOnce();
+      expect(await getOwnedAssistant()).toMatchObject({ id: '4', name: 'Mira' });
+    } finally {
+      release({ id: '4', name: 'Mira' });
+      view.unmount();
+      localStorage.clear();
+    }
+  });
   it.each(["history", "cold"])("uses canonical ordinary workflow after %s load despite a persisted Character preference", async entry => {
     realLoader.enabled = realLoader.webStorage = true
     useMessageOptionMock.mockImplementation(useRealServerConversation)

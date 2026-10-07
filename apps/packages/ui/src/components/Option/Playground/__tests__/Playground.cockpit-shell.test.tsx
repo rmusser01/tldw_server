@@ -983,14 +983,67 @@ describe("Playground cockpit shell", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("removes character mode when a retired proposal leaves an ordinary source", async () => {
-    window.history.replaceState({}, "", "/chat?mode=character&characterId=char-route&keep=1")
-    routeApplyOutcome.value = "retired"
-    render(<Playground />)
-    await waitFor(() => expect(routerNavigateState.navigate).toHaveBeenCalledWith(expect.objectContaining({ search: "?keep=1" }), { replace: true }))
-    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
-    expect(messageOptionState.value.setMessages).not.toHaveBeenCalled()
-  })
+  it('keeps a current unapplied character route and lets Retry accept it', async () => {
+    window.history.replaceState({}, '', '/chat?mode=character&characterId=char-route&keep=1');
+    messageOptionState.value.serverChatId = 'ordinary-source';
+    messageOptionState.value.historyId = 'ordinary-history';
+    routeApplyOutcome.value = 'retired';
+    render(<Playground />);
+    const status = await screen.findByRole('status', { name: 'Character Chat setup status' });
+    expect(status).toHaveTextContent('Character setup was not applied');
+    expect(routerNavigateState.navigate).not.toHaveBeenCalled();
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
+    expect(messageOptionState.value.setMessages).not.toHaveBeenCalled();
+    expect(messageOptionState.value.serverChatId).toBe('ordinary-source');
+    routeApplyOutcome.value = null;
+    fireEvent.click(within(status).getByRole('button', { name: 'Retry', exact: true }));
+    await waitFor(() =>
+      expect(routerNavigateState.navigate).toHaveBeenCalledWith(
+        expect.objectContaining({ search: '?mode=character&keep=1' }),
+        { replace: true }
+      )
+    );
+    expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(2);
+    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledOnce();
+  });
+
+  it('waits for the initial model catalog before applying a fresh character route', async () => {
+    window.history.replaceState({}, '', '/chat?mode=character&characterId=char-route');
+    let finish!: (models: Awaited<ReturnType<typeof tldwServerState.fetchChatModels>>) => void;
+    tldwServerState.fetchChatModels.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    render(<Playground />);
+    try {
+      await waitFor(() => expect(tldwServerState.fetchChatModels).toHaveBeenCalledOnce());
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+      expect(messageOptionState.value.setMessages).not.toHaveBeenCalled();
+      expect(routerNavigateState.navigate).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        finish([
+          {
+            model: 'openai:gpt-4.1-mini',
+            provider: 'openai',
+            is_configured: true,
+            provider_is_configured: true,
+          },
+        ]);
+      });
+    }
+    await waitFor(() =>
+      expect(routerNavigateState.navigate).toHaveBeenCalledWith(
+        expect.objectContaining({ search: '?mode=character' }),
+        { replace: true }
+      )
+    );
+    expect(tldwClientState.getCharacter).toHaveBeenCalledOnce();
+  });
 
   it("keeps an accepted fresh command consumed after the router commits", async () => {
     window.history.replaceState({}, "", "/chat?mode=character&characterId=char-route")
