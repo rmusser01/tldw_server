@@ -8,6 +8,7 @@ from typing import Any, Protocol
 
 from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.http_client import fetch as http_fetch
+from tldw_Server_API.app.core.Security.egress import public_url_policy_active
 
 from .requests import FetchRequest
 from .responses import FetchResponse
@@ -58,6 +59,7 @@ class DefaultFetchClient:
                 impersonate=request.impersonate,
                 proxies=_mutable_proxies(request.proxies),
                 max_response_bytes=request.max_response_bytes,
+                **({"trust_env": False} if public_url_policy_active() else {}),
             )
             fallback_backend = request.backend
         elif request.backend == "curl":

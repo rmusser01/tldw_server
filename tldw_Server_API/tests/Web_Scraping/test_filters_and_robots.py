@@ -1,13 +1,12 @@
-import asyncio
 from types import SimpleNamespace
 
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping.filters import (
-    DomainFilter,
     ContentTypeFilter,
-    URLPatternFilter,
+    DomainFilter,
     RobotsFilter,
+    URLPatternFilter,
 )
 
 
@@ -72,3 +71,64 @@ async def test_robots_filter_reports_egress_error_when_policy_evaluation_fails(m
 
     assert result.allowed is False
     assert result.status == "egress_error"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_public_robots_redirect_denied_before_network(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security import egress
+    from tldw_Server_API.app.core.Web_Scraping import filters
+    from tldw_Server_API.tests.http_client.test_http_client_simple_response_limits import (
+        _StreamingHTTPXClient,
+        _StreamingResponse,
+    )
+
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
+    monkeypatch.setenv("HTTP_ALLOW_CROSS_HOST_REDIRECTS", "true")
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: ["93.184.216.34"])
+    _StreamingHTTPXClient.instances = []
+    _StreamingHTTPXClient.responses = [
+        _StreamingResponse(
+            "https://example.com/robots.txt",
+            [],
+            status_code=302,
+            headers={"Location": "https://user:secret@127.0.0.1/robots.txt"},
+        )
+    ]
+    monkeypatch.setattr(hc, "_resolve_httpx", lambda: SimpleNamespace(Client=_StreamingHTTPXClient))
+    monkeypatch.setattr(filters, "http_fetch", hc.fetch)
+    with egress.public_url_policy_scope():
+        result = await RobotsFilter(user_agent="test", credential_free=True).check(
+            "https://example.com/article", fail_open=False
+        )
+    assert result.allowed is False
+    assert len(_StreamingHTTPXClient.instances) == 1
+    assert [call["url"] for call in _StreamingHTTPXClient.instances[0].stream_calls] == [
+        "https://example.com/robots.txt"
+    ]
+    assert _StreamingHTTPXClient.instances[0].stream_calls[0]["cookies"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_public_robots_uses_fresh_bounded_cookie_free_negotiation(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping import filters
+
+    calls = []
+
+    def fetch(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"status": 200, "text": "User-agent: *\nAllow: /\n"}
+
+    monkeypatch.setattr(filters, "http_fetch", fetch)
+    result = await RobotsFilter(user_agent="test", credential_free=True).check(
+        "https://example.com/article", skip_egress_check=True, fail_open=False
+    )
+    assert result.allowed is True
+    assert calls[0][0] == ("https://example.com/robots.txt",)
+    assert calls[0][1]["trust_env"] is False
+    assert calls[0][1]["max_response_bytes"] == 1_000_000
+    assert "cookies" not in calls[0][1]
+    assert "method" not in calls[0][1]
+    assert calls[0][1]["headers"]["Accept-Language"] == "en-US,en;q=0.9"
